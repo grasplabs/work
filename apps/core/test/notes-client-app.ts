@@ -1,4 +1,4 @@
-import type { Id, OperationReference, ReferenceKind } from "@grasp-os/sdk";
+import type { Id, FunctionReference, ReferenceKind } from "@grasp-os/sdk";
 
 import type { Release } from "../src/app-releases.ts";
 import { appDefinition, withoutDefinition } from "./app-definitions.ts";
@@ -242,7 +242,7 @@ export const referenceTo = <
 >(
   release: Release,
   path: string
-): OperationReference<Args, Return, Kind, "public", Progress> => {
+): FunctionReference<Kind, "public", Args, Return, Progress> => {
   const operation = release.app.operations[path];
   if (operation === undefined) {
     throw new Error(`The release has no ${path}`);
@@ -254,7 +254,7 @@ export const referenceTo = <
   // SAFETY: each caller names the kind, arguments, return and progress the
   // release declares.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return data as OperationReference<Args, Return, Kind, "public", Progress>;
+  return data as FunctionReference<Kind, "public", Args, Return, Progress>;
 };
 
 /** The App's `api`, as its pages import it from `@server/_generated/api`. */

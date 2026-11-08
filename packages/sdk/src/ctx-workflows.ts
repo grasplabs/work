@@ -20,11 +20,13 @@ type GrantedEvent<Grants extends Grant> = WorkflowEventReference<
 >;
 
 /**
- * `ctx.notify`: stages the event `event` (one of a workflow among
+ * `ctx.sendEvent`: stages the event `event` (one of a workflow among
  * `Grants`) for run `runId` of its workflow, with `data` as that event
  * declares it, never inferred from the call.
  */
-export type Notify<Grants extends Grant> = <Event extends GrantedEvent<Grants>>(
+export type SendEvent<Grants extends Grant> = <
+  Event extends GrantedEvent<Grants>,
+>(
   event: Event,
   notification: {
     readonly runId: string;

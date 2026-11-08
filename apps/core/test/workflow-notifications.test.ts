@@ -14,7 +14,7 @@ import {
   registerApp,
 } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { FunctionChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import {
   releaseFormatVersion,
@@ -135,7 +135,10 @@ const markDone = mutation({
   returns: v.string(),
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("jobs", { jobId: args.jobId });
-    ctx.notify(jobEvents, { runId: args.runId, data: { jobId: args.jobId } });
+    ctx.sendEvent(jobEvents, {
+      runId: args.runId,
+      data: { jobId: args.jobId },
+    });
     return id;
   },
 });
@@ -146,7 +149,7 @@ const markThenFail = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.db.insert("jobs", { jobId: "job-1" });
-    ctx.notify(jobEvents, { runId: args.runId, data: { jobId: "job-1" } });
+    ctx.sendEvent(jobEvents, { runId: args.runId, data: { jobId: "job-1" } });
     throw new AppError("desk.refused", "Not now.");
   },
 });
@@ -194,7 +197,7 @@ const codeOf = (error: unknown): string =>
  * isolate could, and answer what the host said: the event as `jobEvents`
  * names it, but for what `args` changes.
  */
-const runner: Runner = async (path, args, channel: OperationChannel) => {
+const runner: Runner = async (path, args, channel: FunctionChannel) => {
   if (path === "jobs.rawNotify" || path === "jobs.undeclared") {
     const asked = z
       .object({

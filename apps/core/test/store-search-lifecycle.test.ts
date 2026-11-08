@@ -1,8 +1,11 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import type { SchemaDefinition } from "@grasp-os/sdk";
-import { databaseReader } from "@grasp-os/sdk/database";
-import type { PaginationResult } from "@grasp-os/sdk/database";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import {
+  databaseReader,
+  manifestText,
+  schemaManifest,
+} from "@grasp-os/sdk/host";
+import type { PaginationResult } from "@grasp-os/sdk/server";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { StoreFields } from "@grasp-os/shared/stores";

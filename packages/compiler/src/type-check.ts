@@ -121,14 +121,13 @@ export const serverTarget = (
 /**
  * How an App's server code is type-checked: the
  * generated modules by their aliases, and by name the SDK's modules it
- * and they import: its root, the server constructors, the database's
- * types the constructors name, and nothing else.
+ * and they import: its root, the server constructors and their types,
+ * and nothing else.
  */
 export const appCodeTarget = serverTarget(
   generatedModules,
   new Set([
     ...serverSdkImports,
-    "@grasp-os/sdk/database",
     // Its tests' (app-code.ts): what the source checks give tests alone.
     "@grasp-os/sdk/testing",
   ])

@@ -3,7 +3,7 @@ import {
   paginationResultValidator,
   v,
 } from "@grasp-os/sdk";
-import type { Infer, InferInput, OperationReference } from "@grasp-os/sdk";
+import type { Infer, InferInput, FunctionReference } from "@grasp-os/sdk";
 import { GraspClient } from "@grasp-os/sdk/client";
 import { GraspProvider } from "@grasp-os/sdk/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
@@ -37,10 +37,11 @@ const args = v.object({
 
 const page = paginationResultValidator(person);
 
-const listPeople: OperationReference<
+const listPeople: FunctionReference<
+  "query",
+  "public",
   InferInput<typeof args>,
-  Infer<typeof page>,
-  "query"
+  Infer<typeof page>
 > = { name: "people.list", returns: page.descriptor };
 
 const people = [

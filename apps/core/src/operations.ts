@@ -21,8 +21,8 @@ import {
   schemaFromDescriptor,
   schemaHash,
 } from "@grasp-os/sdk/host";
-import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
-import type { MutationStart, OperationChannel } from "@grasp-os/sdk/runner";
+import type { AppManifest, FunctionManifest } from "@grasp-os/sdk/host";
+import type { MutationStart, FunctionChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import type { AuditActor } from "@grasp-os/shared/audit";
@@ -318,7 +318,7 @@ export interface Invocation {
   readonly workflows?: WorkflowStarts;
   /**
    * How core stages a mutation's notifications of the App's workflow runs
-   * (`ctx.notify`, workflow-notifications.ts), for this call; none staged
+   * (`ctx.sendEvent`, workflow-notifications.ts), for this call; none staged
    * without it, as for starts (`workflows`).
    */
   readonly notifications?: WorkflowNotifications;
@@ -396,7 +396,7 @@ type SensitiveTally = Map<string, SensitiveRead>;
 
 /** Counts what `operation`'s read answered of sensitive tables into `tally`. */
 const tallied =
-  (tally: SensitiveTally, operation: OperationManifest) =>
+  (tally: SensitiveTally, operation: FunctionManifest) =>
   (sensitive: Readonly<Record<string, number>>): void => {
     for (const [table, rows] of Object.entries(sensitive)) {
       const key = JSON.stringify([operation.path, table]);
@@ -484,7 +484,7 @@ const undeclaredUse = (run: Run, alias: unknown): RefusedUse["use"] => ({
 export type Runner = (
   path: string,
   args: Json,
-  channel: OperationChannel,
+  channel: FunctionChannel,
   /**
    * Aborted once the host stops waiting for the run (its deadline): a
    * runner that can end the run then does, and frees what it held (an
@@ -512,7 +512,7 @@ export interface HostedApp {
 }
 
 /** A function as its caller names it: its public path and kind. */
-export interface OperationReference {
+export interface FunctionReference {
   readonly path: string;
   readonly kind: string;
 }
@@ -587,7 +587,7 @@ interface CheckedTable {
 }
 
 /** A descriptor as the manifest holds it. */
-type ValueDescriptorLike = OperationManifest["args"];
+type ValueDescriptorLike = FunctionManifest["args"];
 
 /** What the host derives from a manifest once. */
 interface Compiled {
@@ -762,9 +762,9 @@ const fromApp = <Answer>(work: () => Answer): Answer => {
  */
 const publicOperation = (
   manifest: AppManifest,
-  reference: OperationReference,
+  reference: FunctionReference,
   streaming: boolean
-): OperationManifest => {
+): FunctionManifest => {
   const { path, kind } = reference;
   const operation =
     typeof path === "string" && Object.hasOwn(manifest.operations, path)
@@ -793,7 +793,7 @@ const publicOperation = (
  */
 const admittedArgs = (
   compiled: Compiled,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   args: unknown
 ): Json => {
   const read = jsonWithin(args, operationInputMaxBytes);
@@ -831,7 +831,7 @@ const admittedArgs = (
  */
 const checkedReturn = (
   compiled: Compiled,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   value: unknown
 ): Json => {
   const read = fromApp(() => jsonWithin(value, operationResultMaxBytes));
@@ -886,7 +886,7 @@ const checkedReturn = (
  */
 const checkedProgress = (
   compiled: Compiled,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   value: unknown
 ): Json => {
   const read = jsonWithin(value, streamProgressMaxBytes);
@@ -1268,7 +1268,7 @@ const payloadOf = (
  */
 const mayUse = (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   table: string,
   use: "read" | "write"
 ): boolean => {
@@ -1287,7 +1287,7 @@ const mayUse = (
  */
 const readFor = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   reader: StoreReader,
   request: unknown
 ): Promise<unknown> => {
@@ -1407,7 +1407,7 @@ const carriedWithin = (
 /** A new staging of a mutation's writes, at `stagedAt`. */
 const stagingFor = (
   compiled: Compiled,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   stagedAt: number
 ): Staging => {
   const writes: StagedWrites["writes"] = [];
@@ -1999,7 +1999,7 @@ const requireNotCancelled = (run: Run): void => {
 
 const resourceCall = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   request: { alias: unknown; method: unknown; args: unknown },
   key: readonly string[]
 ): Promise<Json> => {
@@ -2089,7 +2089,7 @@ const resourceCall = async (
  */
 const workflowStart = (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   request: { alias: unknown; method: unknown; args: unknown }
 ): { alias: string; input: Json } => {
   const { alias, method } = request;
@@ -2204,7 +2204,7 @@ const startFailure = (error: unknown, requestId: string): Error => {
  */
 const startCall = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   request: { alias: unknown; method: unknown; args: unknown },
   key: readonly string[],
   /** Runs the start itself as an effect under way (`runAction`). */
@@ -2291,7 +2291,7 @@ const notifyPeopleCall = async (
 /**
  * The notification `operation`, a mutation, asks for under workflow
  * `alias` with `args` (`[event, runId, data, type, fingerprint]`, the
- * runner's `ctx.notify` with the generated reference it names), if the
+ * runner's `ctx.sendEvent` with the generated reference it names), if the
  * App declares the workflow: the event as the reference names it (which
  * core resolves against the release it runs, and refuses unless it is
  * exactly that event of the bound workflow), the run and the data.
@@ -2299,7 +2299,7 @@ const notifyPeopleCall = async (
  */
 const workflowNotification = (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   request: { alias: unknown; args: unknown }
 ): { workflow: string; event: ListedEvent; runId: Json; data: Json } => {
   const args = jsonOf(request.args);
@@ -2818,7 +2818,7 @@ export const useEvidenceWaitMs = 2000;
  */
 const keepEvidence = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   error: unknown
 ): Promise<void> => {
   const refused =
@@ -2872,7 +2872,7 @@ const keepEvidence = async (
  */
 const keepingEvidence = (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   capabilities: Capabilities
 ): Capabilities => {
   const keeping =
@@ -2911,7 +2911,7 @@ const keepingEvidence = (
  */
 const runHandler = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   args: Json,
   capabilities: Capabilities,
   stale?: () => Promise<boolean>,
@@ -3057,7 +3057,7 @@ const runHandler = async (
  */
 const stagedQuery = async (
   run: Run,
-  callee: OperationManifest,
+  callee: FunctionManifest,
   args: Json,
   reader: StoreReader,
   spend: () => void,
@@ -3139,7 +3139,7 @@ const forCaller = (error: unknown, run: Run): Error => {
  */
 const startNested = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   request: { kind: unknown; path: unknown; args: unknown },
   within:
     | {
@@ -3229,7 +3229,7 @@ const nestedCall = async (
 /** Runs a query: its reads one state of the store (`readConsistently`). */
 const runQuery = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   args: Json
 ): Promise<Json> => {
   const { invocation, compiled } = run;
@@ -3272,7 +3272,7 @@ const resourcesDeclaring = (
  */
 const runMutation = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   args: Json,
   key: readonly string[],
   inputHash: string
@@ -3558,7 +3558,7 @@ const runMutation = async (
  */
 const emitProgress = async (
   compiled: Compiled,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   sink: ProgressSink,
   {
     emitted,
@@ -3591,7 +3591,7 @@ const emitProgress = async (
  */
 const runAction = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   args: Json,
   key: readonly string[],
   inputHash: string
@@ -3747,7 +3747,7 @@ const submittedHash = async (input: unknown, admitted: Json): Promise<string> =>
  */
 const execute = async (
   run: Run,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   args: Json,
   key: readonly string[],
   submitted: unknown
@@ -3788,7 +3788,7 @@ const admitFiles = async (
   app: HostedApp,
   compiled: Compiled,
   invocation: Invocation,
-  operation: OperationManifest,
+  operation: FunctionManifest,
   args: Json
 ): Promise<void> => {
   const held = valueFiles(operation.args, args);
@@ -3836,7 +3836,7 @@ const tellDraft = (invocation: Invocation, told: Told): void => {
 const answer = async (
   app: HostedApp,
   asked: Invocation,
-  reference: OperationReference,
+  reference: FunctionReference,
   args: unknown,
   options: CallOptions,
   sensitive: SensitiveTally
@@ -3934,7 +3934,7 @@ const answer = async (
 export const callOperation = async (
   app: HostedApp,
   asked: Invocation,
-  reference: OperationReference,
+  reference: FunctionReference,
   args: unknown,
   options: CallOptions = {}
 ): Promise<OperationResult> => {

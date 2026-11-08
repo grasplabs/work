@@ -111,7 +111,7 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
     (kind: ReferenceKind) =>
     async (reference: unknown, args: unknown): Promise<never> =>
       // SAFETY: the host checked the value against the function's
-      // contract (its `returns`), which `ReturnOf` types.
+      // contract (its `returns`), which `FunctionReturn` types.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       unwrapped(
         await session.call(name, requestFor(reference, kind, args))
@@ -121,7 +121,7 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
     mutation: call("mutation"),
     action: call("action"),
     // SAFETY: what core pushes was checked against the query's contract
-    // (its `returns`), which `ReturnOf` types.
+    // (its `returns`), which `FunctionReturn` types.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     subscribe: (async (reference: unknown, args: unknown) =>
       await followed(run, name, reference, args)) as TestPrincipal["subscribe"],

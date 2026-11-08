@@ -4,13 +4,13 @@ import type {
   MutationReference,
   SubmitOptions,
 } from "../client-core.ts";
-import type { ReturnOf } from "../function-references.ts";
+import type { FunctionReturn } from "../function-references.ts";
 import { useClient } from "./provider.ts";
 
 /** A mutation or action as a function: its arguments, then its options. */
 type OperationCallable<Reference> = (
   ...args: CallArguments<Reference, SubmitOptions>
-) => Promise<ReturnOf<Reference>>;
+) => Promise<FunctionReturn<Reference>>;
 
 /**
  * The mutation `reference` names, as a stable function: each call is one

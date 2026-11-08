@@ -7,7 +7,7 @@ import type { FunctionKind } from "./server-function.ts";
  * What the host hands the runner for one invocation: methods only, so it
  * can be an RPC stub, and it stops working once the invocation ends.
  */
-export interface OperationChannel {
+export interface FunctionChannel {
   /** One read of the App's store. */
   readonly read: (request: ReadRequest) => Promise<unknown>;
   /** One staged write: a mutation's only. Answers an insert's minted ID. */

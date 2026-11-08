@@ -1,5 +1,5 @@
 import type {
-  AnyOperationReference,
+  AnyFunctionReference,
   argsType,
   returnType,
 } from "./function-references.ts";
@@ -30,7 +30,7 @@ export interface WorkflowReference<
   Wait = WorkflowWait,
   Events = Readonly<Record<string, WorkflowEventReference>>,
   Decisions = Readonly<Record<string, WorkflowDecisionReference>>,
-  Queries = Readonly<Record<string, AnyOperationReference>>,
+  Queries = Readonly<Record<string, AnyFunctionReference>>,
 > {
   readonly kind: "workflow";
   readonly visibility: "public";

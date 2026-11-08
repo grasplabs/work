@@ -9,7 +9,7 @@ import type {
   AppParts,
   AppPermissions,
   GrantsOf,
-  OperationManifest,
+  FunctionManifest,
 } from "./app-types.ts";
 import { deepFreeze, refuser } from "./declaration.ts";
 import type { AppPermission } from "./permission-types.ts";
@@ -56,7 +56,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 //   that kind, under an alias no other of the App's permissions has;
 // - the top-level path segments `workflows` and `people` are the
 //   platform's, so no function registers under them;
-// - migrations (migration.ts) are `migration` declarations,
+// - migrations (migration.ts) are `defineMigration` declarations,
 //   each named once, one a table, of a table the schema has, whose
 //   `output` declares exactly that table's fields.
 //
@@ -154,7 +154,7 @@ export const registerApp = (parts: AppParts): App => {
     exportedFunctions(parts.modules)
   );
 
-  const operations: Record<string, OperationManifest> = {};
+  const operations: Record<string, FunctionManifest> = {};
   for (const [path, fn] of functions) {
     Object.defineProperty(operations, path, {
       enumerable: true,

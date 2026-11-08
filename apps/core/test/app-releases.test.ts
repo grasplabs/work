@@ -1991,11 +1991,11 @@ const errorsOf = (built: object): string[] =>
 
 /** Types a page may name that its values may not: only `{ v }` is the SDK root's. */
 const pageTypes =
-  'import type { ReturnOf } from "@grasp-os/sdk";\nimport type { ReactNode } from "react";\nexport type Shown = ReturnOf<never> | ReactNode;';
+  'import type { FunctionReturn } from "@grasp-os/sdk";\nimport type { ReactNode } from "react";\nexport type Shown = FunctionReturn<never> | ReactNode;';
 
 /** Types other App code may name from a module its values may not reach. */
 const codeTypes =
-  'import type { Doc } from "@grasp-os/sdk/database";\nexport type Stored = Doc<never>;';
+  'import type { Doc } from "@grasp-os/sdk/server";\nexport type Stored = Doc<never>;';
 
 /** Each kind of App file, the build that reads it, and what it holds besides. */
 const targets = {
@@ -2322,7 +2322,7 @@ export const Route = createFileRoute("/")({ component: Notes });
         `export type R = typeof import("${up}node_modules/@grasp-os/sdk/src/page-runtime.ts");`,
         'import type * as C from "/node_modules/@grasp-os/sdk/src/client-core.ts";',
         `import type { serverModule } from "${up}node_modules/@grasp-os/sdk/src/server.ts";`,
-        `import type { Doc } from "${up}node_modules/@grasp-os/sdk/src/database.ts";`,
+        `import type { Doc } from "${up}node_modules/@grasp-os/sdk/src/query-types.ts";`,
         "export type Reached = typeof C | typeof serverModule | Doc<never>;",
       ].join("\n");
       const page =

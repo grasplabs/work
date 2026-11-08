@@ -23,7 +23,7 @@ import {
   issueDetails,
   receiptLinkOf,
 } from "./client-error.ts";
-import type { ArgsOf, ReturnOf } from "./function-references.ts";
+import type { FunctionArgs, FunctionReturn } from "./function-references.ts";
 import { settlesSubmission } from "./refusals.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -187,9 +187,11 @@ export interface GraspForm<Values, Result> {
 /** An operation-bound form's options. */
 export interface OperationFormOptions<Reference> {
   /** The editable input, as the operation takes it. */
-  readonly defaultValues: ArgsOf<Reference>;
+  readonly defaultValues: FunctionArgs<Reference>;
   /** After a confirmed outcome, with the operation's declared result. */
-  readonly onSuccess?: (result: ReturnOf<Reference>) => void | Promise<void>;
+  readonly onSuccess?: (
+    result: FunctionReturn<Reference>
+  ) => void | Promise<void>;
   /** Back to `defaultValues` after a confirmed outcome. Off by default. */
   readonly resetOnSuccess?: boolean;
 }

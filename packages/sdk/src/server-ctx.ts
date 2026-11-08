@@ -1,7 +1,17 @@
-import type { Grant, Notify, RunHandle, Workflows } from "./ctx-workflows.ts";
+import type {
+  Grant,
+  RunHandle,
+  SendEvent,
+  Workflows,
+} from "./ctx-workflows.ts";
 import type { DatabaseReader } from "./database-reader.ts";
 import type { DatabaseWriter } from "./database-writer.ts";
-import type { ArgsOf, ReturnOf, SingleAnswer } from "./function-references.ts";
+import type {
+  Callable,
+  FunctionArgs,
+  FunctionReturn,
+  SingleAnswer,
+} from "./function-references.ts";
 import type { PeopleDirectory, User } from "./people.ts";
 import type {
   AiClient,
@@ -17,7 +27,7 @@ import type {
   GraspPermission,
   GuestsPermission,
 } from "./permission-types.ts";
-import type { AnyTables, FunctionReference } from "./server-function.ts";
+import type { AnyTables } from "./server-function.ts";
 
 /**
  * What App code tells people (`ctx.notifyPeople`): a notification in
@@ -58,25 +68,25 @@ type NotifyPeople<Told> = (
  * `ctx.runQuery`: one of the App's queries, public or internal, by its
  * reference (`api.…`, `internal.…`), with its arguments.
  */
-type RunQuery = <Reference extends FunctionReference<"query">>(
+type RunQuery = <Reference extends Callable<"query">>(
   reference: Reference,
-  args: ArgsOf<Reference>
-) => Promise<ReturnOf<Reference>>;
+  args: FunctionArgs<Reference>
+) => Promise<FunctionReturn<Reference>>;
 
 /** `ctx.runMutation`: one of the App's mutations. */
-type RunMutation = <Reference extends FunctionReference<"mutation">>(
+type RunMutation = <Reference extends Callable<"mutation">>(
   reference: Reference,
-  args: ArgsOf<Reference>
-) => Promise<ReturnOf<Reference>>;
+  args: FunctionArgs<Reference>
+) => Promise<FunctionReturn<Reference>>;
 
 /**
  * `ctx.runAction`: one of the App's actions that answers once. A
  * streaming one isn't callable here: its progress has no one to go to.
  */
-type RunAction = <Reference extends FunctionReference<"action">>(
+type RunAction = <Reference extends Callable<"action">>(
   reference: SingleAnswer<Reference>,
-  args: ArgsOf<Reference>
-) => Promise<ReturnOf<Reference>>;
+  args: FunctionArgs<Reference>
+) => Promise<FunctionReturn<Reference>>;
 
 /** `Value` under `Key`, or nothing at all when it is `never`. */
 type Present<Key extends string, Value> = [Value] extends [never]
@@ -169,21 +179,21 @@ export interface MutationCtx<
    * from the store's outbox exactly once. Whom it reaches, and the App's
    * hourly limit, are decided as it is sent: one past the limit then is
    * dropped, and audited. A mutation that fails, is rolled back or is
-   * superseded tells nobody. Not `ctx.notify`, which sends a workflow's
+   * superseded tells nobody. Not `ctx.sendEvent`, which sends a workflow's
    * run an event.
    */
   readonly notifyPeople: NotifyPeople<void>;
   /**
-   * Notifies run `runId` of one of the App's workflows with one of its
+   * Sends run `runId` of one of the App's workflows one of its
    * events: staged with the mutation's writes, in the
    * same transaction, and delivered to the run's inbox from the store's
    * outbox after the commit, once. The host checks the run, the data and
    * the App's grant to send as the mutation runs, and fails the mutation
    * if any doesn't hold; a mutation that fails, is rolled back or is
-   * superseded notifies nothing. Its success is the local commit, never
+   * superseded sends nothing. Its success is the local commit, never
    * the run taking the event, which the host checks again as it delivers.
    */
-  readonly notify: Notify<Grants>;
+  readonly sendEvent: SendEvent<Grants>;
 }
 
 /**

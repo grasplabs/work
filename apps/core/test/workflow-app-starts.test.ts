@@ -13,7 +13,7 @@ import {
   schemaHash,
 } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { FunctionChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import {
   releaseFormatVersion,
@@ -296,7 +296,7 @@ const codeOf = (error: unknown): string =>
  */
 const runnerFor =
   (alias: string): Runner =>
-  async (path, args, channel: OperationChannel) => {
+  async (path, args, channel: FunctionChannel) => {
     if (path === "requests.plainAction" || path === "requests.plainMutation") {
       return await channel.resource(alias, "start", [{ who: "Rogue" }]).then(
         () => "started",

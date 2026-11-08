@@ -1,4 +1,4 @@
-import type { OperationReference } from "@grasp-os/sdk";
+import type { FunctionReference } from "@grasp-os/sdk";
 import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
 import { usePaginatedQuery, useRetryFailed } from "@grasp-os/sdk/react";
 import type { PageItemOf, PaginatedArgsOf } from "@grasp-os/sdk/react";
@@ -96,7 +96,7 @@ export type { DataGridText } from "../internal/data-grid-text.ts";
 //   place, with Try again, and the search and filters stay usable.
 
 /** A query a grid reads its records with: one that answers pages. */
-type AnyQuery = OperationReference<unknown, unknown, "query">;
+type AnyQuery = FunctionReference<"query">;
 
 /** Which way a sorted column runs. */
 export type SortDirection = "asc" | "desc";

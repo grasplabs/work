@@ -145,10 +145,10 @@ const migrationSource = (
     prelude = "",
     fixtures = '[{ row: { title: "Fixture" } }]',
   } = {}
-): string => `import { migration, v } from "@grasp-os/sdk";
+): string => `import { defineMigration, v } from "@grasp-os/sdk";
 import { noteFields } from "../../values.ts";
 ${prelude}
-export default migration({
+export default defineMigration({
   name: ${JSON.stringify(name)},
   fromSchema: ${JSON.stringify(fromSchema)},
   toSchema: ${JSON.stringify(toSchema)},

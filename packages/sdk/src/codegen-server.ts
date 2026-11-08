@@ -6,7 +6,7 @@ import { banner } from "./codegen-render.ts";
  * before anything is generated from the App's manifest.
  */
 export const dataModelSource = `${banner}import type { Id as SdkId } from "@grasp-os/sdk";
-import type { Doc as SdkDoc } from "@grasp-os/sdk/database";
+import type { Doc as SdkDoc } from "@grasp-os/sdk/server";
 
 import type schema from "../schema.ts";
 

@@ -68,11 +68,11 @@ export interface Callable<
  * slightly off before core answers with its issues. Its visibility, what
  * it takes, answers and streams are its types.
  */
-export type OperationReference<
-  Args,
-  Return,
+export type FunctionReference<
   Kind extends ReferenceKind,
   Vis extends ReferenceVisibility = "public",
+  Args = unknown,
+  Return = unknown,
   Progress = never,
 > = Callable<Kind, Vis, Args, Return, Progress> &
   (Kind extends "query" ? QueryFields : SubmissionFields<Kind>);
@@ -130,16 +130,16 @@ export type SingleAnswer<Reference> = Reference &
   (true extends IsStreaming<Reference> ? never : unknown);
 
 /** Any generated function reference: a single answer's or a stream's. */
-export type AnyOperationReference = OperationReference<
-  unknown,
-  unknown,
+export type AnyFunctionReference = FunctionReference<
   ReferenceKind,
   ReferenceVisibility,
+  unknown,
+  unknown,
   unknown
 >;
 
 /** The arguments a caller passes to `Reference`. */
-export type ArgsOf<Reference> =
+export type FunctionArgs<Reference> =
   Reference extends Callable<
     ReferenceKind,
     ReferenceVisibility,
@@ -151,7 +151,7 @@ export type ArgsOf<Reference> =
     : never;
 
 /** What `Reference` returns. */
-export type ReturnOf<Reference> =
+export type FunctionReturn<Reference> =
   Reference extends Callable<
     ReferenceKind,
     ReferenceVisibility,

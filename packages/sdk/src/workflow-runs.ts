@@ -1,3 +1,4 @@
+import type { ErrorCategory } from "./client-error.ts";
 import type { argsType } from "./function-references.ts";
 import type { PaginationResult } from "./query-reads.ts";
 import type { JsonValue } from "./value-descriptor.ts";
@@ -15,16 +16,6 @@ export interface RunHandle {
   readonly manifestHash: string;
 }
 
-/** Who classifies a failure as what. */
-export type AppErrorCategory =
-  | "source"
-  | "contract"
-  | "domain"
-  | "authorization"
-  | "operational"
-  | "uncertain"
-  | "safety";
-
 /**
  * A failure as the host answers it, sanitized: its code to branch on, its
  * message for people, its category, whether trying again may help, the
@@ -34,7 +25,7 @@ export type AppErrorCategory =
 export interface AppErrorPayload {
   readonly code: string;
   readonly message: string;
-  readonly category: AppErrorCategory;
+  readonly category: ErrorCategory;
   readonly retryable: boolean;
   readonly requestId: string | null;
   readonly details?: JsonValue;

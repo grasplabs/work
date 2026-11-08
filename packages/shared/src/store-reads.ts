@@ -9,7 +9,7 @@ import {
 
 // A read of a business store, as it crosses from App code to the store's
 // host: a record by ID, or a query's descriptor, which the SDK's query
-// builder (sdk/src/database.ts) makes and the host executes. A descriptor
+// builder (sdk/src/database-reader.ts) makes and the host executes. A descriptor
 // is data and nothing else: names as the App's schema gives them, values,
 // and the terminal asked for. It never holds SQL, a table's or an index's
 // physical ID, an owner or a role: the host resolves names through the

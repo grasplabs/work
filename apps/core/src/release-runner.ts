@@ -3,7 +3,7 @@ import {
   kitModuleName,
   serverEntryPath,
 } from "@grasp-os/compiler";
-import type { MutationStart, OperationChannel } from "@grasp-os/sdk/runner";
+import type { MutationStart, FunctionChannel } from "@grasp-os/sdk/runner";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { whenAborted } from "@grasp-os/shared/deadline";
@@ -306,7 +306,7 @@ interface ArrivingChannel {
 class IsolateChannel extends IsolateChannelTarget {
   readonly #channel: ArrivingChannel;
 
-  constructor(channel: OperationChannel) {
+  constructor(channel: FunctionChannel) {
     super();
     // SAFETY: the channel copies and checks every argument as it arrives
     // (operation-channel.ts), whatever its declared types say.

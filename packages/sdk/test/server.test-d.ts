@@ -10,8 +10,8 @@ import { AppError, defineApp, permission } from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
 import type {
   ActionCtx,
-  ArgsOf,
-  FunctionReference,
+  FunctionArgs,
+  FunctionReturn,
   MutationCtx,
   NotifyReceipt,
   PeopleNotification,
@@ -146,7 +146,7 @@ const remove = mutation({
 void [list, update, remove];
 
 // A caller may leave out a defaulted argument; the handler always has it.
-expectTypeOf<ArgsOf<typeof create>>().toEqualTypeOf<{
+expectTypeOf<FunctionArgs<typeof create>>().toEqualTypeOf<{
   title: string;
   body?: string | undefined;
 }>();
@@ -175,17 +175,17 @@ action({
 });
 
 // Without `returns`, the handler's answer is the return, of every kind.
-expectTypeOf(query({ args: {}, handler: () => ({ count: 1 }) })).toExtend<
-  FunctionReference<"query", "public", Record<never, never>, { count: number }>
->();
-expectTypeOf(
-  mutation({ args: {}, handler: async () => await Promise.resolve("saved") })
-).toExtend<
-  FunctionReference<"mutation", "public", Record<never, never>, string>
->();
-expectTypeOf(action({ args: {}, handler: () => 1 })).toExtend<
-  FunctionReference<"action", "public", Record<never, never>, number>
->();
+const counted = query({ args: {}, handler: () => ({ count: 1 }) });
+expectTypeOf<FunctionReturn<typeof counted>>().toEqualTypeOf<{
+  count: number;
+}>();
+const saved = mutation({
+  args: {},
+  handler: async () => await Promise.resolve("saved"),
+});
+expectTypeOf<FunctionReturn<typeof saved>>().toEqualTypeOf<string>();
+const tallied = action({ args: {}, handler: () => 1 });
+expectTypeOf<FunctionReturn<typeof tallied>>().toEqualTypeOf<number>();
 // There is no `input`/`output` form.
 // @ts-expect-error -- `input` is superseded by `args`
 query({ input: {}, returns: v.null(), handler: () => null });
@@ -277,7 +277,7 @@ mutation({
     expectTypeOf(ctx).not.toHaveProperty("runAction");
     expectTypeOf(ctx).not.toHaveProperty("data");
     // @ts-expect-error -- an event of a workflow the App doesn't declare
-    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+    ctx.sendEvent(workflows.summarizeNote.events.styleChosen, {
       runId: "run-1",
       data: { style: "short" },
     });
@@ -457,46 +457,49 @@ expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("workflows");
 // @ts-expect-error -- the schema has no such table
 doc("missing");
 
-// `ctx.notify` (spec 10.7.4): a mutation's only, for an event of one of
+// `ctx.sendEvent` (spec 10.7.4): a mutation's only, for an event of one of
 // the App's workflows, its data inferred from the reference and never
 // from the call, and answering nothing (it stages; the commit delivers).
 granted.mutation({
   args: { runId: v.string() },
   returns: v.null(),
   handler: (ctx, args) => {
-    expectTypeOf(ctx.notify).returns.toBeVoid();
-    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+    expectTypeOf(ctx.sendEvent).returns.toBeVoid();
+    ctx.sendEvent(workflows.summarizeNote.events.styleChosen, {
       runId: args.runId,
       data: { style: "short" },
     });
-    ctx.notify(workflows.summarizeNote.events.noteEdited, {
+    ctx.sendEvent(workflows.summarizeNote.events.noteEdited, {
       runId: args.runId,
       data: { noteId },
     });
-    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+    ctx.sendEvent(workflows.summarizeNote.events.styleChosen, {
       runId: args.runId,
       // @ts-expect-error -- a value outside the event's enum
       data: { style: "medium" },
     });
-    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+    ctx.sendEvent(workflows.summarizeNote.events.styleChosen, {
       runId: args.runId,
       // @ts-expect-error -- the other event's data: never inferred from the call
       data: { noteId },
     });
-    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+    ctx.sendEvent(workflows.summarizeNote.events.styleChosen, {
       runId: args.runId,
       // @ts-expect-error -- data typed as nothing in particular
       data: anything,
     });
     // @ts-expect-error -- an event of a workflow the App doesn't declare
-    ctx.notify(workflows.archiveNotes.events.confirmed, {
+    ctx.sendEvent(workflows.archiveNotes.events.confirmed, {
       runId: args.runId,
       data: { confirmed: true },
     });
     // @ts-expect-error -- an event's name, not its reference
-    ctx.notify("styleChosen", { runId: args.runId, data: { style: "short" } });
+    ctx.sendEvent("styleChosen", {
+      runId: args.runId,
+      data: { style: "short" },
+    });
     // @ts-expect-error -- a run's ID is required
-    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+    ctx.sendEvent(workflows.summarizeNote.events.styleChosen, {
       data: { style: "short" },
     });
     return null;

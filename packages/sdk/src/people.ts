@@ -1,5 +1,5 @@
-import type { OperationManifest } from "./app-types.ts";
-import type { OperationReference } from "./function-references.ts";
+import type { FunctionManifest } from "./app-types.ts";
+import type { FunctionReference } from "./function-references.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";
@@ -129,7 +129,7 @@ export const isPeopleOperationName = (
   typeof read === "string" && Object.hasOwn(contracts, read);
 
 /** Read `read`, as an App's public query is described. */
-const described = (read: PeopleOperationName): OperationManifest =>
+const described = (read: PeopleOperationName): FunctionManifest =>
   Object.freeze({
     path: `people.${read}`,
     kind: "query",
@@ -141,7 +141,7 @@ const described = (read: PeopleOperationName): OperationManifest =>
 
 /** Each read, as an App's public query is described. */
 export const peopleOperations: Readonly<
-  Record<PeopleOperationName, OperationManifest>
+  Record<PeopleOperationName, FunctionManifest>
 > = Object.freeze({
   user: described("user"),
   find: described("find"),
@@ -150,10 +150,11 @@ export const peopleOperations: Readonly<
 });
 
 /** The reference a page reads `Name` through. */
-type PeopleReference<Name extends PeopleOperationName> = OperationReference<
+type PeopleReference<Name extends PeopleOperationName> = FunctionReference<
+  "query",
+  "public",
   InferInput<(typeof contracts)[Name]["args"]>,
-  Infer<(typeof contracts)[Name]["returns"]>,
-  "query"
+  Infer<(typeof contracts)[Name]["returns"]>
 >;
 
 /** The reference to read `read`. */

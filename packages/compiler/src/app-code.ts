@@ -465,7 +465,6 @@ const serverSpecifiers: ReadonlySet<string> = new Set([
   "@grasp-os/sdk/host",
   "@grasp-os/sdk/definition",
   "@grasp-os/sdk/runner",
-  "@grasp-os/sdk/database",
 ]);
 
 /**

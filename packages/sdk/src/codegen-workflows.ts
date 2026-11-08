@@ -1,4 +1,4 @@
-import type { OperationManifest } from "./app-types.ts";
+import type { FunctionManifest } from "./app-types.ts";
 import { sortedListens } from "./bound-workflows.ts";
 import type {
   BoundWorkflow,
@@ -92,7 +92,7 @@ const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
   };
   const typed: Record<
     WorkflowQueryName,
-    (operation: OperationManifest) => string
+    (operation: FunctionManifest) => string
   > = {
     runs: referenceTypeOf,
     history: referenceTypeOf,
@@ -103,14 +103,14 @@ const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
             `WorkflowDecisionInboxItem<${JSON.stringify(name)}, ${valueOf(name)}>`
         )
         .join(" | ");
-      return `OperationReference<${valueTypeOf(operation.args, "input")}, WorkflowQueryPage<${items}>, "query">`;
+      return `FunctionReference<"query", "public", ${valueTypeOf(operation.args, "input")}, WorkflowQueryPage<${items}>>`;
     },
     decision: (operation) => {
       const details = keys.map((name) => {
         const context = workflow.decisions[name]?.context;
         return `WorkflowDecisionDetail<${JSON.stringify(name)}, ${valueOf(name)}, ${context === undefined ? "never" : valueTypeOf(context, "output")}>`;
       });
-      return `OperationReference<${valueTypeOf(operation.args, "input")}, ${[...details, "null"].join(" | ")}, "query">`;
+      return `FunctionReference<"query", "public", ${valueTypeOf(operation.args, "input")}, ${[...details, "null"].join(" | ")}>`;
     },
   };
   return Object.entries(operations)

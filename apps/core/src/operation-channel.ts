@@ -1,4 +1,4 @@
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { FunctionChannel } from "@grasp-os/sdk/runner";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
 import { isAppErrorCode } from "@grasp-os/shared/function-limits";
@@ -158,7 +158,7 @@ const ChannelTarget = boundedRpcTarget({
   size: commitMaxInputBytes,
 });
 
-class Channel extends ChannelTarget implements OperationChannel {
+class Channel extends ChannelTarget implements FunctionChannel {
   readonly #capabilities: ChannelCapabilities;
   readonly #state: ChannelState;
 
@@ -264,7 +264,7 @@ class Channel extends ChannelTarget implements OperationChannel {
 /** A channel, as the host that made it holds it. */
 export interface OpenChannel {
   /** What App code is handed. */
-  readonly channel: OperationChannel;
+  readonly channel: FunctionChannel;
   /** Ends the channel: every later use is `function.ended`. */
   readonly end: () => void;
   /**

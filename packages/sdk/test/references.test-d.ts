@@ -8,12 +8,12 @@
 import { expectTypeOf } from "vite-plus/test";
 
 import type {
-  AnyOperationReference,
-  ArgsOf,
+  AnyFunctionReference,
+  FunctionArgs,
   Id,
-  OperationReference,
+  FunctionReference,
   ProgressOf,
-  ReturnOf,
+  FunctionReturn,
 } from "../src/index.ts";
 import type { ValueDescriptor } from "../src/value-descriptor.ts";
 import type { workflows } from "./notes/server/_generated/api.ts";
@@ -32,60 +32,52 @@ import type {
 // What a browser's call signatures look like: one public reference of the
 // right kind, with its arguments, answering its return. The real hooks
 // come with the client SDK; these hold the reference types to them.
-declare const query: <
-  Reference extends OperationReference<unknown, unknown, "query">,
->(
+declare const query: <Reference extends FunctionReference<"query">>(
   reference: Reference,
-  args: ArgsOf<Reference>
-) => Promise<ReturnOf<Reference>>;
-declare const mutation: <
-  Reference extends OperationReference<unknown, unknown, "mutation">,
->(
+  args: FunctionArgs<Reference>
+) => Promise<FunctionReturn<Reference>>;
+declare const mutation: <Reference extends FunctionReference<"mutation">>(
   reference: Reference,
-  args: ArgsOf<Reference>
-) => Promise<ReturnOf<Reference>>;
-declare const action: <
-  Reference extends OperationReference<unknown, unknown, "action">,
->(
+  args: FunctionArgs<Reference>
+) => Promise<FunctionReturn<Reference>>;
+declare const action: <Reference extends FunctionReference<"action">>(
   reference: Reference,
-  args: ArgsOf<Reference>
-) => Promise<ReturnOf<Reference>>;
+  args: FunctionArgs<Reference>
+) => Promise<FunctionReturn<Reference>>;
 /** A single answer only: a streaming reference has its own entry. */
-declare const single: (
-  reference: OperationReference<unknown, unknown, "action">
-) => void;
+declare const single: (reference: FunctionReference<"action">) => void;
 declare const noteId: Id<"notes">;
 
 // Each reference's arguments and return are exactly its definition's.
-expectTypeOf<ArgsOf<typeof api.notes.create>>().toEqualTypeOf<
-  ArgsOf<typeof create>
+expectTypeOf<FunctionArgs<typeof api.notes.create>>().toEqualTypeOf<
+  FunctionArgs<typeof create>
 >();
-expectTypeOf<ReturnOf<typeof api.notes.create>>().toEqualTypeOf<
-  ReturnOf<typeof create>
+expectTypeOf<FunctionReturn<typeof api.notes.create>>().toEqualTypeOf<
+  FunctionReturn<typeof create>
 >();
-expectTypeOf<ArgsOf<typeof api.notes.list>>().toEqualTypeOf<
-  ArgsOf<typeof list>
+expectTypeOf<FunctionArgs<typeof api.notes.list>>().toEqualTypeOf<
+  FunctionArgs<typeof list>
 >();
-expectTypeOf<ReturnOf<typeof api.notes.list>>().toEqualTypeOf<
-  ReturnOf<typeof list>
+expectTypeOf<FunctionReturn<typeof api.notes.list>>().toEqualTypeOf<
+  FunctionReturn<typeof list>
 >();
-expectTypeOf<ReturnOf<typeof api.notes.get>>().toEqualTypeOf<
-  ReturnOf<typeof get>
+expectTypeOf<FunctionReturn<typeof api.notes.get>>().toEqualTypeOf<
+  FunctionReturn<typeof get>
 >();
-expectTypeOf<ArgsOf<typeof api.notes.update>>().toEqualTypeOf<
-  ArgsOf<typeof update>
+expectTypeOf<FunctionArgs<typeof api.notes.update>>().toEqualTypeOf<
+  FunctionArgs<typeof update>
 >();
-expectTypeOf<ReturnOf<typeof api.notes.update>>().toEqualTypeOf<
-  ReturnOf<typeof update>
+expectTypeOf<FunctionReturn<typeof api.notes.update>>().toEqualTypeOf<
+  FunctionReturn<typeof update>
 >();
-expectTypeOf<ArgsOf<typeof api.notes.remove>>().toEqualTypeOf<
-  ArgsOf<typeof remove>
+expectTypeOf<FunctionArgs<typeof api.notes.remove>>().toEqualTypeOf<
+  FunctionArgs<typeof remove>
 >();
-expectTypeOf<ReturnOf<typeof api.notes.tally>>().toEqualTypeOf<
-  ReturnOf<typeof tally>
+expectTypeOf<FunctionReturn<typeof api.notes.tally>>().toEqualTypeOf<
+  FunctionReturn<typeof tally>
 >();
-expectTypeOf<ArgsOf<typeof api.notes.exportAll>>().toEqualTypeOf<
-  ArgsOf<typeof exportAll>
+expectTypeOf<FunctionArgs<typeof api.notes.exportAll>>().toEqualTypeOf<
+  FunctionArgs<typeof exportAll>
 >();
 
 // A mutation's and an action's reference always holds its kind, which
@@ -120,10 +112,10 @@ expectTypeOf(
   mutation(api.notes.create, { title: "Launch" })
 ).resolves.toEqualTypeOf<Id<"notes">>();
 expectTypeOf(query(api.notes.get, { id: noteId })).resolves.toEqualTypeOf<
-  ReturnOf<typeof get>
+  FunctionReturn<typeof get>
 >();
 expectTypeOf(query(api.notes.list, { pagination: {} })).resolves.toEqualTypeOf<
-  ReturnOf<typeof list>
+  FunctionReturn<typeof list>
 >();
 expectTypeOf(action(api.notes.tally, {})).resolves.toEqualTypeOf<number>();
 
@@ -168,7 +160,7 @@ expectTypeOf<keyof typeof workflows>().toEqualTypeOf<
 >();
 
 // Any reference takes a single answer's and a stream's alike.
-const anyReferences: readonly AnyOperationReference[] = [
+const anyReferences: readonly AnyFunctionReference[] = [
   api.notes.create,
   api.notes.exportAll,
   internal.notes.count,

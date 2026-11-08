@@ -24,7 +24,7 @@ const symbolicTree = "symbolic()";
  */
 /** The SDK's type the stand-in trees name, imported as a type. */
 const standInImport =
-  'import type { OperationReference } from "@grasp-os/sdk";\n';
+  'import type { FunctionReference } from "@grasp-os/sdk";\n';
 
 /**
  * The stand-in trees' type: at every path, a reference that takes and
@@ -36,7 +36,7 @@ const standInImport =
  * it passes for a reference of every kind.
  */
 const standInTree = `
-type StandIn = OperationReference<any, any, any, any, any> & { readonly kind: any; readonly args: any } & { readonly [name: string]: StandIn };
+type StandIn = FunctionReference<any, any, any, any, any> & { readonly kind: any; readonly args: any } & { readonly [name: string]: StandIn };
 `;
 
 export const symbolicModules = (): Record<string, string> => {

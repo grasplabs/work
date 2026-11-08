@@ -1815,7 +1815,7 @@ const buildDeclaration = `/**
  * their Grasp notifications, which open the App; only members who can open the App are told
  * (anyone else is skipped), at most 50 people a send and 200 notifications
  * an App an hour, a title of 120 characters and a body of 1000. A
- * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
+ * mutation's \`ctx.sendEvent(event, ...)\` is a workflow run's event, not
  * this. A visitor's call can't tell anyone. For the rest, read Grasp's
  * docs (\`searchDocs\`, \`readDocs\`).
  *

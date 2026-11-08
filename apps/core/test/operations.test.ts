@@ -10,7 +10,7 @@ import {
 import type { Id } from "@grasp-os/sdk";
 import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { FunctionChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import type { AppId } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
@@ -483,7 +483,7 @@ const failureOf = (result: OperationResult) => {
 
 /** A runner that does `misuse` with its channel, then answers null. */
 const misusing = (
-  misuse: (channel: OperationChannel) => Promise<unknown>
+  misuse: (channel: FunctionChannel) => Promise<unknown>
 ): Runner => {
   const run: Runner = async (_path, _args, channel) => {
     await misuse(channel);
@@ -1331,7 +1331,7 @@ describe("App code misusing its channel", () => {
 
   it("can't use a channel after its call ended", async () => {
     const fixture = await notes();
-    let kept: OperationChannel | undefined;
+    let kept: FunctionChannel | undefined;
     await call(
       fixture,
       fixture.owner,

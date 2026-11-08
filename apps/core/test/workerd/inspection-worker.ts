@@ -5,9 +5,9 @@ import {
 } from "@grasp-os/compiler";
 import {
   defineApp,
+  defineMigration,
   defineSchema,
   defineTable,
-  migration,
   v,
 } from "@grasp-os/sdk";
 import { inspectApp, registerApp } from "@grasp-os/sdk/host";
@@ -111,7 +111,7 @@ const notesManifest = (() => {
     }),
     modules: {},
     migrations: [
-      migration({
+      defineMigration({
         name: "m",
         table: "notes",
         fromSchema: "a".repeat(64),

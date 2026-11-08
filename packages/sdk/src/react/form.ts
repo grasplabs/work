@@ -8,7 +8,7 @@ import type {
   OperationFormOptions,
   SchemaFormOptions,
 } from "../form.ts";
-import type { ArgsOf, ReturnOf } from "../function-references.ts";
+import type { FunctionArgs, FunctionReturn } from "../function-references.ts";
 import { useClient } from "./provider.ts";
 
 /** `useForm`'s two ways in, each typed by what it binds. */
@@ -16,7 +16,7 @@ interface UseForm {
   <Reference extends MutationReference | ActionReference>(
     reference: Reference,
     options: OperationFormOptions<Reference>
-  ): GraspForm<ArgsOf<Reference>, ReturnOf<Reference>>;
+  ): GraspForm<FunctionArgs<Reference>, FunctionReturn<Reference>>;
   // A form's values are named fields: an array or a single value has none
   // to render or edit, so a local form's schema takes an object.
   <Schema extends StandardSchemaV1<Readonly<Record<string, unknown>>>, Result>(

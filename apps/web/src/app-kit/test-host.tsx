@@ -1,4 +1,4 @@
-import type { OperationReference, ValueSchema } from "@grasp-os/sdk";
+import type { FunctionReference, ValueSchema } from "@grasp-os/sdk";
 import { GraspClient } from "@grasp-os/sdk/client";
 import { GraspProvider } from "@grasp-os/sdk/react";
 import { isRecord } from "@grasp-os/shared/json";
@@ -171,7 +171,7 @@ export const reference = <Args, Return, Kind extends "query" | "mutation">(
   name: string,
   args: ValueSchema<Args, unknown>,
   returns: ValueSchema<Return, unknown>
-): OperationReference<Args, Return, Kind> =>
+): FunctionReference<Kind, "public", Args, Return> =>
   // What `_generated` builds for a function of `kind`: a query's declared
   // return, a mutation's kind and arguments.
   // SAFETY: the reference type follows `Kind`, which `kind` is; a generic
@@ -179,10 +179,11 @@ export const reference = <Args, Return, Kind extends "query" | "mutation">(
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   (kind === "query"
     ? { name, returns: returns.descriptor }
-    : { name, kind, args: args.descriptor }) as OperationReference<
+    : { name, kind, args: args.descriptor }) as FunctionReference<
+    Kind,
+    "public",
     Args,
-    Return,
-    Kind
+    Return
   >;
 
 /** Lets queued work and the renders it causes land. */

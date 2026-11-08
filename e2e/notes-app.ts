@@ -272,12 +272,12 @@ export function CreateNote() {
 }
 `;
 
-const noteEditor = `import type { ReturnOf } from "@grasp-os/sdk";
+const noteEditor = `import type { FunctionReturn } from "@grasp-os/sdk";
 import { useForm } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 
-export type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
+export type Note = NonNullable<FunctionReturn<typeof api.notes.get>>;
 
 /**
  * One note, edited with explicit Save: the form sends only the fields the

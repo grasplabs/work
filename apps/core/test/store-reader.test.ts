@@ -1,7 +1,6 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import type { Id } from "@grasp-os/sdk";
-import { databaseReader } from "@grasp-os/sdk/database";
-import { manifestText } from "@grasp-os/sdk/host";
+import { databaseReader, manifestText } from "@grasp-os/sdk/host";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { Commit, StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
