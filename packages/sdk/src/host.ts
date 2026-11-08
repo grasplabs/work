@@ -25,9 +25,12 @@ export { descriptorVersion } from "./value-descriptor.ts";
 
 // An App as the host runs it: its registration as data, and its handlers.
 export {
+  actionPermission,
+  actionPermissions,
   declaredPermission,
   declaredPermissions,
   inspectApp,
+  isActionPermission,
   registerApp,
 } from "./app.ts";
 export type { AppManifest, OperationManifest, ServerModules } from "./app.ts";

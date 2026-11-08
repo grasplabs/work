@@ -2,7 +2,7 @@ import { peopleAlias } from "@grasp-os/shared/notifications";
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
 import { AppError } from "./app-error.ts";
-import { inspectApp } from "./app.ts";
+import { inspectApp, isActionPermission } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
 import {
   impureMessage,
@@ -331,18 +331,6 @@ const clientOf = (
   return Object.freeze({ call: call("call") });
 };
 
-/** Whether `declared` is one an action reaches through `ctx`. */
-const isReached = (declared: AppPermission): declared is AnyPermission => {
-  const kind = declared["~permission"];
-  return (
-    kind === "ai" ||
-    kind === "connections" ||
-    kind === "brain" ||
-    kind === "grasp" ||
-    kind === "guests"
-  );
-};
-
 /**
  * The App's permissions as an action's context holds them: `ai`,
  * `brain`, `grasp` and `guests` when declared, and the connections by
@@ -355,7 +343,7 @@ const permissionsOf = (
   const connections: Record<string, unknown> = {};
   const clients: Record<string, unknown> = {};
   for (const declared of permissions) {
-    if (!isReached(declared)) {
+    if (!isActionPermission(declared)) {
       continue;
     }
     const kind = declared["~permission"];

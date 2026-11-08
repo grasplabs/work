@@ -1,5 +1,9 @@
 import { appCodeFiles } from "@grasp-os/compiler";
-import { descriptorFromText } from "@grasp-os/sdk/host";
+import {
+  declaredPermission,
+  declaredPermissions,
+  descriptorFromText,
+} from "@grasp-os/sdk/host";
 import type { AppManifest, RowRule } from "@grasp-os/sdk/host";
 import type {
   ReviewChange,
@@ -164,21 +168,25 @@ const handsFilesOf = async (
     log.warn("version_review.manifest_unread", errorFields(error));
     return null;
   }
-  const readsFiles = Object.values(manifest.browserResources).some(
-    (resource) =>
-      resource["~permission"] === "files" &&
-      resource.operations.includes("read")
-  );
+  const readsFiles =
+    declaredPermission(manifest, "files", "files")?.operations.includes(
+      "read"
+    ) === true;
   if (!readsFiles) {
     return false;
   }
-  if (Object.values(manifest.workflows).some(({ input }) => takesFile(input))) {
+  const workflows = declaredPermissions(manifest, "workflows");
+  if (workflows.some(({ input }) => takesFile(input))) {
     return true;
   }
   // What a start hands is copied by the bound workflow's own input
   // (`handFiles`), whatever the App declares for its alias: read from
   // the version each alias is bound to.
-  return await boundTakesFile(env, app, Object.keys(manifest.workflows));
+  return await boundTakesFile(
+    env,
+    app,
+    workflows.map(({ alias }) => alias)
+  );
 };
 
 /**
@@ -198,7 +206,7 @@ const readsPeopleOf = async (
       proposed.version,
       proposed.files
     );
-    return manifest.people === true;
+    return declaredPermission(manifest, "people", "people") !== undefined;
   } catch (error) {
     log.warn("version_review.manifest_unread", errorFields(error));
     return null;

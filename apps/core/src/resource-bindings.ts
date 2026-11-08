@@ -1,5 +1,6 @@
 import { collections } from "@grasp-os/brain/schema";
 import type { AnyPermission } from "@grasp-os/sdk";
+import { actionPermission, actionPermissions } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
@@ -33,7 +34,6 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
-import type { Release } from "./app-releases.ts";
 import { appFor, findApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -104,9 +104,9 @@ import type { PlatformAction } from "./resource-platform.ts";
 //   own App, never by anything the caller sends; the adapter acts for the
 //   invocation's authority, the App and the person core resolved.
 // - A binding the review misses: a request resolves only an alias the
-//   release's manifest declares, of the kind its row was approved for,
-//   which the operation host checks the calling function lists in its
-//   `uses` first (operations.ts). The review lists exactly the manifest's
+//   release's manifest declares as a permission an action reaches, of the
+//   kind its row was approved for, which the operation host checks first
+//   (operations.ts). The review lists exactly the manifest's
 //   declarations, and every active row of an alias it doesn't declare as
 //   `undeclared`, which serves nothing: no binding reaches a version
 //   without being listed with it.
@@ -335,9 +335,7 @@ export const approveResourceBinding = async (
     throw appErrors.create("app.conflict");
   }
   const release = await loadRelease(env, found.id, reviewed.version);
-  const declaration = Object.hasOwn(release.app.resources, alias)
-    ? release.app.resources[alias]
-    : undefined;
+  const declaration = actionPermission(release.app, alias);
   if (declaration === undefined || targetKindOf(declaration) !== target.kind) {
     throw resourceBindingErrors.create("resource.undeclared");
   }
@@ -757,22 +755,6 @@ const choicesFor = async (
 };
 
 /**
- * What uses `alias` in `release`: the paths of its actions that use it,
- * as its manifest declares them.
- */
-const usersOf = (release: Release, alias: string): string[] =>
-  Object.entries(release.app.operations)
-    .filter(
-      ([, operation]) =>
-        operation.kind === "action" &&
-        operation.uses.some(
-          (use) => use.type === "resource" && use.alias === alias
-        )
-    )
-    .map(([path]) => path)
-    .toSorted();
-
-/**
  * How a review names each of `rows`' own bound target, for anyone who may
  * read the review, builders included: a connector binding's connection,
  * as `by` can see it in their own connections (connect lists them a
@@ -932,9 +914,12 @@ export const reviewResourceBindings = async (
   const version = found.currentVersion;
   const release =
     version === null ? undefined : await loadRelease(env, found.id, version);
-  const declared = Object.entries(release?.app.resources ?? {}).toSorted(
-    ([one], [other]) => one.localeCompare(other)
-  );
+  const declared = (
+    release === undefined ? [] : actionPermissions(release.app)
+  ).map((declaration): [string, AnyPermission] => [
+    declaration.alias,
+    declaration,
+  ]);
   // Read once for every resource's choices, and only for who gets them.
   // One reader for the whole review: the bindings it checks and the
   // choices it offers ask connect each (connection, contract) once, and no
@@ -955,7 +940,6 @@ export const reviewResourceBindings = async (
       const binding = row === undefined ? undefined : bindingOf(row);
       return {
         ...declaredOf(declaration),
-        usedBy: release === undefined ? [] : usersOf(release, alias),
         state: resolution?.state ?? "unbound",
         binding:
           row === undefined || binding === undefined
@@ -1051,7 +1035,7 @@ const notServed = () => operationErrors.create("resource.unavailable");
  * binding would still serve it now, exactly as a live request of the App's
  * current version would resolve it (`resourceBindingsFor`): the binding is
  * the same one and still active, the current release declares exactly
- * what was approved and an action of it uses the alias, the binding
+ * what was approved, the binding
  * resolves as a live request's would (its target serving exactly the
  * contract pinned), and that contract still names the call's tool. A
  * binding revoked or replaced since, a version that widened the
@@ -1085,20 +1069,9 @@ export const requireHeldBinding = async (
     throw notServed();
   }
   const release = await loadRelease(env, found.id, found.currentVersion);
-  const declaration = Object.hasOwn(release.app.resources, row.alias)
-    ? release.app.resources[row.alias]
-    : undefined;
-  // As a live request needs: an action of the current release lists the
-  // alias in its `uses`, so a version that keeps the declaration but no
-  // longer uses it runs nothing through it.
-  const used = Object.values(release.app.operations).some(
-    (operation) =>
-      operation.kind === "action" &&
-      operation.uses.some(
-        (use) => use.type === "resource" && use.alias === row.alias
-      )
-  );
-  if (declaration === undefined || !used) {
+  // As a live request needs: the current release declares it.
+  const declaration = actionPermission(release.app, row.alias);
+  if (declaration === undefined) {
     throw notServed();
   }
   // Resolved as a live request resolves it (`resolved`): its kind, target,

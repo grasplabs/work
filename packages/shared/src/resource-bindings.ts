@@ -224,8 +224,6 @@ export interface DeclaredResource {
   collections: string[];
   /** AI's output token ceiling; null for the other kinds. */
   maxOutputTokens: number | null;
-  /** The paths of the App's actions that use it. */
-  usedBy: string[];
   state: BindingState;
   /**
    * Its active binding, serving or not, with how its own target is named;

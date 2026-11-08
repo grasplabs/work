@@ -18,7 +18,6 @@ const knowledge = (
   operations: ["search"],
   collections,
   maxOutputTokens: null,
-  usedBy: ["help.find"],
   state: "unbound",
   binding: null,
   choices: {

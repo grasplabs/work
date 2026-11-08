@@ -13,10 +13,13 @@ import type {
   ValueSchema,
 } from "@grasp-os/sdk";
 import {
+  actionPermission,
+  appErrorDetailsOf,
+  declaredPermission,
+  declaredPermissions,
   descriptorFromText,
   schemaFromDescriptor,
   schemaHash,
-  appErrorDetailsOf,
 } from "@grasp-os/sdk/host";
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
 import type { MutationStart, OperationChannel } from "@grasp-os/sdk/runner";
@@ -128,13 +131,25 @@ import type {
 // - A query writes, a mutation reaches outside, an action holds the
 //   database: each kind's channel has only its capabilities, whatever the
 //   App code sends (operation-channel.ts): an action reaches data only
-//   through the App's queries and mutations it lists, each an invocation
-//   of its own.
-// - A function's access is widened past its declaration: every read and
-//   staged write is checked against the verbs inspection gave the
-//   function (its kind and its `tables`, narrowing only), and the
-//   store checks every read and commit against the pinned schema's own
-//   access for the caller's roles, so neither check alone decides.
+//   through the App's queries and mutations, each an invocation of its
+//   own, and a mutation runs only the App's queries.
+// - App code reaches past what the App declares: the App's permissions,
+//   sealed in its manifest, are the one list, as in Convex, where every
+//   function of an app may use what the app may. A resource request names
+//   an alias the App declares as a permission an action reaches
+//   (`actionPermission`), a start or notification a workflow it declares,
+//   a nested call a function it registers, internal ones included
+//   (`resource.not_allowed`, `operation.not_found` otherwise), each then
+//   bound and granted by an admin. No function narrows what the App holds:
+//   the App is one unit of review and of grants, its functions written
+//   together, so a list per function bounded nothing its author couldn't
+//   widen.
+// - A table is read or written past its access: every read and staged
+//   write is checked against what the function's kind may do to a table
+//   whose access isn't `none` (`mayUse`), and the store checks every read
+//   and commit against the pinned schema's own access and row rules for
+//   the caller's roles, so neither check alone decides. A nested function
+//   runs as the same caller, under the same rules.
 // - A mutation writes what its schema doesn't allow: every staged write is
 //   validated against the pinned table's fields (an insert with its
 //   defaults, a patch never with them, managed fields and unknown fields
@@ -190,8 +205,8 @@ import type {
 //   pass a made-up `data.conflict` off as the store's); anything else is
 //   `internal.unexpected` with the request ID, its cause logged.
 // - App code starts a workflow it didn't declare, or one some other App
-//   binds: a start names an alias the function lists in its `uses` and
-//   the App declares as a workflow (`resource.not_allowed` otherwise);
+//   binds: a start names an alias the App declares as a workflow
+//   (`resource.not_allowed` otherwise);
 //   core starts only what the App binds under that alias, through the
 //   App's own `start` permission, for the call's principal
 //   (`WorkflowStarts`). App code names neither the workflow, its version,
@@ -209,11 +224,12 @@ import type {
 //   takes its place among the commit's starts before it is admitted, so
 //   one past the bound is refused before anything is read.
 // - A mutation notifies a run with an event it didn't declare, or of
-//   another App's: a notification names an event the function's sealed
-//   `uses` lists (its workflow's alias, its own, its type and its
-//   fingerprint, which core takes from the manifest, never App code), and
-//   core stages it only as workflow-notifications.ts admits it, as an
-//   intent of the commit, in the commit's bound with its starts.
+//   another App's: a notification names a workflow the App declares, and
+//   the event its generated reference names (its alias, type and
+//   fingerprint, the contract it was generated for), which core stages
+//   only as workflow-notifications.ts admits it against the release it
+//   runs, as an intent of the commit, in the commit's bound with its
+//   starts.
 // - App code tells people it shouldn't, or floods them: a send to people
 //   (`peopleAlias`, an alias no App can declare) goes through
 //   `Invocation.notifyPeople` alone, after the one gate (`admit`), which decides
@@ -412,9 +428,9 @@ export interface UseRefusal {
     readonly name: string | null;
   };
   /**
-   * Not in the function's `uses` (`use_undeclared`), or a declared
-   * resource or workflow asked for what its declaration doesn't allow
-   * (`request_not_allowed`).
+   * Not a permission the App declares or a function it registers
+   * (`use_undeclared`), or a declared resource or workflow asked for what
+   * its declaration doesn't allow (`request_not_allowed`).
    */
   readonly reason: "use_undeclared" | "request_not_allowed";
   readonly errorCode: string;
@@ -446,16 +462,21 @@ const sealedName = (
     : null;
 
 /**
- * The use App code asked for under `alias`, refused as one the function
- * doesn't list: a workflow when the App declares one under it, otherwise a
- * resource, named only when the App's manifest has it.
+ * The use App code asked for under `alias`, refused as one the function's
+ * kind can't make or the App doesn't declare: a workflow when the App
+ * declares one under it, otherwise a resource, named only when the App's
+ * manifest has it.
  */
-const undeclaredUse = (run: Run, alias: unknown): RefusedUse["use"] => {
-  const workflow = sealedName(run.app.manifest.workflows, alias);
-  return workflow === null
-    ? { kind: "resource", name: sealedName(run.app.manifest.resources, alias) }
-    : { kind: "workflow", name: workflow };
-};
+const undeclaredUse = (run: Run, alias: unknown): RefusedUse["use"] =>
+  declaredPermission(run.app.manifest, alias, "workflows") === undefined
+    ? {
+        kind: "resource",
+        name: sealedName(run.app.manifest.permissions, alias),
+      }
+    : {
+        kind: "workflow",
+        name: sealedName(run.app.manifest.permissions, alias),
+      };
 
 /**
  * Runs a registered function's handler over a channel: the SDK's
@@ -558,6 +579,9 @@ export interface CallOptions {
 
 /** A table of the App's schema, as staged writes are checked against it. */
 interface CheckedTable {
+  /** Whether anyone at all may read it, and write it: its access isn't `none`. */
+  readonly readable: boolean;
+  readonly writable: boolean;
   readonly fields: Readonly<Record<string, ValueDescriptorLike>>;
   /** The whole record's fields, with their defaults: an insert, a replacement. */
   readonly whole: ValueSchema<unknown, unknown>;
@@ -616,6 +640,8 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   const tables = new Map<string, CheckedTable>();
   for (const [name, table] of Object.entries(manifest.schema.tables)) {
     tables.set(name, {
+      readable: table.access.read !== "none",
+      writable: table.access.write !== "none",
       fields: table.fields,
       whole: schemaOfDescriptor(objectOf(table.fields)),
     });
@@ -1234,15 +1260,26 @@ const payloadOf = (
   };
 };
 
-/** The App's verbs on `table` for `operation`; a table the schema hasn't is unknown. */
-const verbsOf = (operation: OperationManifest, table: string) => {
-  const verbs = Object.hasOwn(operation.tables, table)
-    ? operation.tables[table]
-    : undefined;
-  if (verbs === undefined) {
+/**
+ * Whether `operation` may `use` table `table` at all: a query and a
+ * mutation read a table whose read access isn't `none`, a mutation writes
+ * one whose write access isn't, and an action does neither. Who may, and
+ * which records, is the store's to decide by the table's access and row
+ * rules. A table the schema hasn't is unknown.
+ */
+const mayUse = (
+  run: Run,
+  operation: OperationManifest,
+  table: string,
+  use: "read" | "write"
+): boolean => {
+  const checked = run.compiled.tables.get(table);
+  if (checked === undefined) {
     throw dataErrors.create("data.unknown_table", { table });
   }
-  return verbs;
+  return use === "read"
+    ? operation.kind !== "action" && checked.readable
+    : operation.kind === "mutation" && checked.writable;
 };
 
 /**
@@ -1261,7 +1298,7 @@ const readFor = async (
     request
   );
   const table = read.kind === "get" ? read.table : read.query.table;
-  if (!verbsOf(operation, table).read) {
+  if (!mayUse(run, operation, table, "read")) {
     throw dataErrors.create("data.access_denied", { table });
   }
   return await reader.read(read, tallied(run.sensitive, operation));
@@ -1343,13 +1380,6 @@ const validFields = (
 };
 
 /** The verb of each kind of write. */
-const verbOf = {
-  insert: "insert",
-  patch: "update",
-  replace: "update",
-  delete: "delete",
-} as const;
-
 /**
  * The intent of `carried` a commit takes: its full one, counted in what
  * `staging` holds, or, past that, its lean one, which a commit's margin
@@ -1404,8 +1434,13 @@ const stagingFor = (
       writeRequestSchema,
       request
     );
-    const verbs = verbsOf(operation, write.table);
-    if (!verbs[verbOf[write.kind]]) {
+    const table = compiled.tables.get(write.table);
+    if (table === undefined) {
+      throw dataErrors.create("data.unknown_table", { table: write.table });
+    }
+    // Only a mutation writes, and only a table someone may write: who may,
+    // and which records, the store decides as it commits.
+    if (operation.kind !== "mutation" || !table.writable) {
       throw dataErrors.create("data.write_denied", { table: write.table });
     }
     if (writes.length >= commitMaxWrites) {
@@ -1413,10 +1448,6 @@ const stagingFor = (
         table: write.table,
         issues: [`A mutation stages at most ${commitMaxWrites} writes`],
       });
-    }
-    const table = compiled.tables.get(write.table);
-    if (table === undefined) {
-      throw dataErrors.create("data.unknown_table", { table: write.table });
     }
     if (write.kind === "insert") {
       const id = mintRecordId(stagedAt);
@@ -1941,8 +1972,8 @@ const providerFailure = (error: unknown, requestId: string): Error => {
 const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
 
 /**
- * One request of a resource an action declared and uses, as `alias`
- * names it: only a use its declaration allows (`allowedRequest`), its
+ * One request of a resource the App declares, as `alias` names it, from
+ * an action: only a use its declaration allows (`allowedRequest`), its
  * arguments JSON within the operation input limit, through the binding
  * core resolved for it, which must be of the declared kind and serve the
  * declared contract (`resource.unavailable` otherwise, and without a
@@ -1969,16 +2000,14 @@ const resourceCall = async (
   key: readonly string[]
 ): Promise<Json> => {
   const { alias, method } = request;
-  const declared = operation.uses.some(
-    (use) => use.type === "resource" && use.alias === alias
-  );
+  // Only an action reaches outside the App (its channel alone routes here,
+  // checked again), and only through a permission the App declares for
+  // it: never a workflow, a pages' permission or `people`.
   const declaration =
-    declared &&
-    typeof alias === "string" &&
-    Object.hasOwn(run.app.manifest.resources, alias)
-      ? run.app.manifest.resources[alias]
+    operation.kind === "action"
+      ? actionPermission(run.app.manifest, alias)
       : undefined;
-  const resourceName = sealedName(run.app.manifest.resources, alias);
+  const resourceName = sealedName(run.app.manifest.permissions, alias);
   if (declaration === undefined) {
     throw refusingUse(operationErrors.create("resource.not_allowed"), {
       use: undeclaredUse(run, alias),
@@ -2048,8 +2077,8 @@ const resourceCall = async (
 
 /**
  * The start of workflow `alias` that `operation` asks for with `method`
- * and `args`, if it lists the alias in its `uses` and the App declares a
- * workflow under it: its alias and its input, as the declaration
+ * and `args`, if it is an action or a mutation and the App declares a
+ * workflow under the alias: its alias and its input, as the declaration
  * normalizes it, within the operation input limit. `resource.not_allowed`
  * for anything else, `contract.invalid_args` for input the declaration
  * doesn't take.
@@ -2060,16 +2089,16 @@ const workflowStart = (
   request: { alias: unknown; method: unknown; args: unknown }
 ): { alias: string; input: Json } => {
   const { alias, method } = request;
-  const declared = operation.uses.some(
-    (use) => use.type === "workflow" && use.alias === alias
-  );
-  const workflows = run.app.manifest.workflows ?? {};
+  // A start is a change, never a read: a query starts nothing.
   const declaration =
-    declared && typeof alias === "string" && Object.hasOwn(workflows, alias)
-      ? workflows[alias]
-      : undefined;
+    operation.kind === "query"
+      ? undefined
+      : declaredPermission(run.app.manifest, alias, "workflows");
   const args = jsonOf(request.args);
-  const workflowName = sealedName(workflows, alias);
+  const workflowName =
+    declaration === undefined
+      ? sealedName(run.app.manifest.permissions, alias)
+      : declaration.alias;
   if (declaration === undefined) {
     throw refusingUse(operationErrors.create("resource.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
@@ -2255,18 +2284,17 @@ const notifyPeopleCall = async (
   return { delivered: receipt.delivered };
 };
 
-/** Whether `operation` lists a workflow under `alias`. */
-const startsWorkflow = (
-  operation: OperationManifest,
-  alias: unknown
-): boolean =>
-  operation.uses.some((use) => use.type === "workflow" && use.alias === alias);
+/** Whether the App declares a workflow under `alias`. */
+const declaresWorkflow = (run: Run, alias: unknown): boolean =>
+  declaredPermission(run.app.manifest, alias, "workflows") !== undefined;
 
 /**
- * The notification `operation` asks for under workflow `alias` with
- * `args` (`[event, runId, data]`, the runner's `ctx.notify`), if it lists
- * that event of the workflow in its `uses`: the event as the sealed
- * manifest lists it, the run and the data, for core to check.
+ * The notification `operation`, a mutation, asks for under workflow
+ * `alias` with `args` (`[event, runId, data, type, fingerprint]`, the
+ * runner's `ctx.notify` with the generated reference it names), if the
+ * App declares the workflow: the event as the reference names it (which
+ * core resolves against the release it runs, and refuses unless it is
+ * exactly that event of the bound workflow), the run and the data.
  * `resource.not_allowed` for anything else.
  */
 const workflowNotification = (
@@ -2275,34 +2303,35 @@ const workflowNotification = (
   request: { alias: unknown; args: unknown }
 ): { workflow: string; event: ListedEvent; runId: Json; data: Json } => {
   const args = jsonOf(request.args);
-  const [eventAlias, runId, data] =
-    args !== undefined && isJsonArray(args) ? args : [];
-  const listed = operation.uses.find(
-    (use) =>
-      use.type === "workflowEvent" &&
-      use.workflow === request.alias &&
-      use.alias === eventAlias
-  );
-  const workflowName = sealedName(run.app.manifest.workflows, request.alias);
-  if (listed?.type !== "workflowEvent") {
+  const declared =
+    operation.kind === "mutation"
+      ? declaredPermission(run.app.manifest, request.alias, "workflows")
+      : undefined;
+  const workflowName = sealedName(run.app.manifest.permissions, request.alias);
+  if (declared === undefined) {
     throw refusingUse(operationErrors.create("resource.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
       reason: "use_undeclared",
     });
   }
-  if (args === undefined || !isJsonArray(args) || args.length !== 3) {
+  const [eventAlias, runId, data, type, fingerprint] =
+    args !== undefined && isJsonArray(args) ? args : [];
+  if (
+    args === undefined ||
+    !isJsonArray(args) ||
+    args.length !== 5 ||
+    typeof eventAlias !== "string" ||
+    typeof type !== "string" ||
+    typeof fingerprint !== "string"
+  ) {
     throw refusingUse(operationErrors.create("resource.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
       reason: "request_not_allowed",
     });
   }
   return {
-    workflow: listed.workflow,
-    event: {
-      alias: listed.alias,
-      type: listed.eventType,
-      fingerprint: listed.fingerprint,
-    },
+    workflow: declared.alias,
+    event: { alias: eventAlias, type, fingerprint },
     runId: runId ?? null,
     data: data ?? null,
   };
@@ -3014,11 +3043,10 @@ const runHandler = async (
 /**
  * A query a mutation runs: its handler over the mutation's own reader, so
  * it sees the staged writes and its reads count in the mutation's guards
- * and read set, each read narrowed to what both functions may read.
+ * and read set, as the same caller under the same access and row rules.
  */
 const stagedQuery = async (
   run: Run,
-  caller: OperationManifest,
   callee: OperationManifest,
   args: Json,
   reader: StoreReader,
@@ -3030,26 +3058,14 @@ const stagedQuery = async (
   if (callee.kind !== "query") {
     throw operationErrors.create("function.kind_mismatch");
   }
-  const narrowed: OperationManifest = {
-    ...callee,
-    tables: Object.fromEntries(
-      Object.entries(callee.tables).map(([table, verbs]) => [
-        table,
-        {
-          ...verbs,
-          read: verbs.read && (caller.tables[table]?.read ?? false),
-        },
-      ])
-    ),
-  };
   return await runHandler(
     run,
-    narrowed,
+    callee,
     args,
     {
       read: async (request) => {
         spend();
-        return await readFor(run, narrowed, reader, request);
+        return await readFor(run, callee, reader, request);
       },
     },
     undefined,
@@ -3103,11 +3119,11 @@ const forCaller = (error: unknown, run: Run): Error => {
 
 /**
  * Runs the function at `path` that `operation` calls with `args`, as
- * `kind` (`runQuery`, `runMutation`, `runAction`): only one it lists in
- * its `uses`, of that kind, within the call's depth, under the call's
- * principal and the callee's own access. A mutation's query runs in the
- * mutation's staged state, its reads through `reader`, narrowed to what
- * both may read; an action's calls are invocations of their own, each
+ * `kind` (`runQuery`, `runMutation`, `runAction`): one the App registers,
+ * public or internal, of that kind, within the call's depth, under the
+ * call's principal and the tables' access and row rules. A mutation's
+ * query runs in the mutation's staged state, its reads through `reader`;
+ * an action's calls are invocations of their own, each
  * authorized again and each mutation committed on its own under a
  * receipt derived from the action's key (`derived`).
  */
@@ -3130,11 +3146,8 @@ const startNested = async (
       }
 ): Promise<Json> => {
   const { kind, path, args } = request;
-  const used = operation.uses.find(
-    (use) => use.type === "function" && use.path === path
-  );
   const callee =
-    used !== undefined && typeof path === "string"
+    typeof path === "string" && Object.hasOwn(run.app.manifest.operations, path)
       ? run.app.manifest.operations[path]
       : undefined;
   if (callee === undefined) {
@@ -3169,7 +3182,6 @@ const startNested = async (
     if (within.type === "mutation") {
       return await stagedQuery(
         nested,
-        operation,
         callee,
         admitted,
         within.reader,
@@ -3238,10 +3250,8 @@ const resourcesDeclaring = (
   manifest: AppManifest,
   use: "attach" | "read"
 ): string[] =>
-  Object.values(manifest.browserResources).flatMap((resource) =>
-    resource["~permission"] === "files" && resource.operations.includes(use)
-      ? [resource.alias]
-      : []
+  declaredPermissions(manifest, "files").flatMap((resource) =>
+    resource.operations.includes(use) ? [resource.alias] : []
   );
 
 /**
@@ -3410,8 +3420,9 @@ const runMutation = async (
               intents.push(intent);
               return null;
             }
-            if (!startsWorkflow(operation, alias)) {
-              // Any resource but a workflow it lists: not one of its uses.
+            if (!declaresWorkflow(run, alias)) {
+              // Any resource but one of the App's workflows: a mutation
+              // reaches nothing else.
               throw refusingUse(
                 operationErrors.create("function.no_resources"),
                 { use: undeclaredUse(run, alias), reason: "use_undeclared" }
@@ -3660,7 +3671,7 @@ const runAction = async (
         );
       }
       // A workflow it starts: its own place among its starts.
-      if (startsWorkflow(operation, alias)) {
+      if (declaresWorkflow(run, alias)) {
         starts += 1;
         const startKey = await derived("start", starts);
         // A start is an effect under way like any other, from when it is

@@ -9,7 +9,7 @@ import {
   workflowSdkModules,
 } from "@grasp-os/compiler";
 import type { AppCodeBuild } from "@grasp-os/compiler";
-import { manifestText } from "@grasp-os/sdk/host";
+import { declaredPermission, manifestText } from "@grasp-os/sdk/host";
 import {
   appTestTimeoutMs,
   maxAppTestName,
@@ -958,7 +958,8 @@ class FixtureSession extends TestTarget {
           people: fixturePeople(
             `fixture-${name}`,
             role,
-            this.#release.app.people === true
+            declaredPermission(this.#release.app, "people", "people") !==
+              undefined
           ),
           // A test's fixture person, on a store only the test reaches.
           actor: { type: "person", userId: `fixture-${name}` },

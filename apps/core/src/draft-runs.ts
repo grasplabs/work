@@ -1,4 +1,5 @@
 import {
+  declaredPermission,
   generatedPaths,
   generateModules,
   manifestText,
@@ -384,7 +385,8 @@ const invocationOf = (
       app: run.app,
       userId: by.userId,
       roles: authorize,
-      declared: run.release.app.people === true,
+      declared:
+        declaredPermission(run.release.app, "people", "people") !== undefined,
       actor: { type: "app", appId: run.app, part: "server" },
       requestId,
     }),
@@ -562,7 +564,9 @@ export const callDraft = async (
           app: run.app,
           userId: by.userId,
           roles: authorize,
-          declared: run.release.app.people === true,
+          declared:
+            declaredPermission(run.release.app, "people", "people") !==
+            undefined,
           actor: { type: "app", appId: run.app, part: "page" },
           requestId,
         }),

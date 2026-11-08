@@ -1,3 +1,4 @@
+import { declaredPermission } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
@@ -254,7 +255,8 @@ export const invocationFor = async (
       app,
       userId: by.userId,
       roles: async () => admitted ?? (await authorize()),
-      declared: release.app.people === true,
+      declared:
+        declaredPermission(release.app, "people", "people") !== undefined,
       actor: delegateActorOf(authority),
       requestId,
     }),
@@ -714,7 +716,8 @@ const answeredPeople = async (
         app,
         userId: by.userId,
         roles: async () => await operationRoles(env, by, app),
-        declared: release.app.people === true,
+        declared:
+          declaredPermission(release.app, "people", "people") !== undefined,
         // An agent's read is the agent's, for its person; any other is the
         // App's page's.
         actor:

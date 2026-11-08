@@ -1748,14 +1748,17 @@ const buildDeclaration = `/**
  * from \`@server/_generated/server\`; pages call them through
  * \`@server/_generated/api\`, and take the tables' types with
  * \`import type { Doc, Id } from "@server/_generated/dataModel"\`.
- * A query or mutation that needs fewer tables than their access gives
- * narrows them: \`tables: { notes: { read: true } }\`.
+ * Every function may use what the App's permissions declare, as its kind
+ * allows (an action reaches connections, AI and the Brain; a mutation
+ * stages workflow starts; a query only reads), and calls the App's other
+ * functions by reference (\`ctx.runQuery(internal.tasks.count, {})\`):
+ * there is no per-function \`uses\` or \`tables\`. What each caller
+ * reads and writes is the tables' access and row rules.
  * An App holds no workflows,
  * and a write under \`workflows/\` is refused: for something that runs on
  * its own or takes steps, build an independent workflow with
  * \`env.workflowBuild\`, add it to the App's permissions
  * (\`define\` with \`addPermission\`, \`permission.workflow("alias", { input, output })\`,
- * listed in \`uses\` as \`permissions.alias\` from grasp.config.ts and
  * started with \`ctx.workflows.alias.start(input)\`) and bind it to the App
  * under that alias.
  *
@@ -1823,9 +1826,8 @@ const buildDeclaration = `/**
  * Never write a URL, key or token into code: add it to the App's
  * permissions (\`addPermission\` with
  * \`permission.connection("billing", { contract: "http.request@1", actions: ["get", "send"] })\`:
- * only the actions you use; \`get\` reads, \`send\` changes), list
- * \`permissions.billing\` (from grasp.config.ts) in the action's \`uses\`,
- * and call \`await ctx.connections.billing.fetch("/v1/invoices?status=open")\` or
+ * only the actions you use; \`get\` reads, \`send\` changes), and from
+ * an action call \`await ctx.connections.billing.fetch("/v1/invoices?status=open")\` or
  * \`fetch("/v1/invoices", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(invoice) })\`:
  * a \`Response\` from the connection's own origin (512 KiB at most, a
  * redirect elsewhere refused). A \`send\` a person makes waits for them to

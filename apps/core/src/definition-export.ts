@@ -1,4 +1,4 @@
-import { generatedPaths } from "@grasp-os/sdk/host";
+import { declaredPermissions, generatedPaths } from "@grasp-os/sdk/host";
 import type { WorkflowPin } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
@@ -249,15 +249,17 @@ export const exportAppDefinition = async (
     }
   }
   const bindings: DefinitionPackage["app"]["bindings"] = {};
-  for (const resource of [
-    ...Object.values(release.app.resources),
-    ...Object.values(release.app.browserResources),
-  ]) {
-    bindings[resource.alias] = resource["~permission"];
+  // What an admin binds or grants: neither the workflows, which the
+  // package carries pinned below, nor the people, which need no binding.
+  for (const resource of Object.values(release.app.permissions)) {
+    const kind = resource["~permission"];
+    if (kind !== "workflows" && kind !== "people") {
+      bindings[resource.alias] = kind;
+    }
   }
   const versions = new PackagedVersions(env, by, budget);
   const workflows: DefinitionPackage["app"]["workflows"] = {};
-  for (const alias of Object.keys(release.app.workflows).toSorted()) {
+  for (const { alias } of declaredPermissions(release.app, "workflows")) {
     const pinned = release.workflows.find(
       (workflow) => workflow.alias === alias
     )?.pinned;

@@ -55,10 +55,10 @@ import type { RunEventDelivery } from "./workflows/run-events.ts";
 //   took before it ended or before the grant went is delivered, not
 //   refused (`unlessAccepted`).
 // - An event the App doesn't send, or to a run that isn't one of the
-//   App's. The function must list the event in its sealed `uses`, by its
-//   workflow's alias, its own, its type and its fingerprint, and the
-//   release the call runs must resolve exactly that event for the
-//   workflow (`resource.not_allowed` otherwise); its data must be what the
+//   App's. The App must declare the workflow in its sealed permissions,
+//   and the release the call runs must resolve exactly the event the
+//   function's generated reference names, by its alias, its type and its
+//   fingerprint, for that workflow (`resource.not_allowed` otherwise); its data must be what the
 //   event's declared contract takes (`contract.invalid_args`); the run
 //   must be one the App started through its binding of the workflow, of
 //   the version the binding names now, not yet ended. The App needs its
@@ -110,7 +110,10 @@ const notifyIntentSchema = z.strictObject({
 });
 type NotifyIntent = z.infer<typeof notifyIntentSchema>;
 
-/** The event a function's sealed `uses` lists, as the host read it. */
+/**
+ * The event a mutation's generated reference names (`ctx.notify`): what
+ * App code sent, which counts only as the release resolves exactly it.
+ */
 export interface ListedEvent {
   readonly alias: string;
   readonly type: string;
@@ -121,9 +124,8 @@ export interface ListedEvent {
 export interface WorkflowNotifications {
   /**
    * The intent a commit stages to notify run `runId` of the workflow the
-   * App binds under `workflow` with `event` (as the function's sealed
-   * `uses` lists it) and `data`, checked as the header says; refused
-   * otherwise.
+   * App binds under `workflow` with `event` (as the function's reference
+   * names it) and `data`, checked as the header says; refused otherwise.
    */
   readonly intent: (
     workflow: string,
