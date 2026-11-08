@@ -120,7 +120,7 @@ export type { JsonSchema } from "./json-schema.ts";
 // `clientInternals` is what the page runtime and the React hooks reach
 // of it: a component's reading of a query, as `useQuery` subscribes.
 export { clientInternals, GraspClient } from "./client-core.ts";
-export type { ClientTransport, StreamLink } from "./client-core.ts";
+export type { ClientTransport, StreamLink } from "./client-transport.ts";
 // The workflow channel the typed `useWorkflow` speaks over a client, for
 // core's own tests of the side of it core serves (page-workflows.ts).
 export { readWorkflowReference, workflowChannel } from "./client-workflow.ts";

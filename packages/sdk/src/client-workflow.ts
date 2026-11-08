@@ -4,12 +4,7 @@ import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import { appErrorDetailsOf } from "./app-error.ts";
 import { clientInternals } from "./client-core.ts";
-import type {
-  DecisionTransport,
-  GraspClient,
-  ReadReference,
-  WorkflowLink,
-} from "./client-core.ts";
+import type { GraspClient } from "./client-core.ts";
 import {
   clientError,
   fences,
@@ -19,12 +14,15 @@ import {
   readRejection,
   withReceiptLink,
 } from "./client-error.ts";
+import type { WorkflowLink } from "./client-internals.ts";
+import type { ReadReference } from "./client-request.ts";
 import {
   endsFollowing,
   followDelay,
   freshKey,
   steadyMs,
 } from "./client-shared.ts";
+import type { DecisionTransport } from "./client-transport.ts";
 import { deepFreeze, namePattern, sha256Pattern } from "./declaration.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
