@@ -19,7 +19,7 @@ import { schemaManifest } from "./schema-manifest.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 
-// How an App registers itself (spec 7.1, 7.5), Convex's way: each part
+// How an App registers itself, Convex's way: each part
 // is a file of its own, and the host's entry (`.grasp/app.ts`) hands them
 // all to `registerApp`:
 //
@@ -56,10 +56,10 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // - every function was declared for the App's schema;
 // - `permissions` lists each kind under its own key, each declaration of
 //   that kind, under an alias no other of the App's permissions has;
-// - `preferences` (spec 10.7.7), when declared, is a strict object; the
+// - `preferences`, when declared, is a strict object; the
 //   top-level path segments `preferences`, `workflows` and `people` are
 //   the platform's, so no function registers under them;
-// - migrations (spec 17.2, migration.ts) are `migration` declarations,
+// - migrations (migration.ts) are `migration` declarations,
 //   each named once, one a table, of a table the schema has, whose
 //   `output` declares exactly that table's fields.
 //

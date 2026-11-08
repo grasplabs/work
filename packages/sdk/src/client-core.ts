@@ -25,7 +25,7 @@ import { fences } from "./refusals.ts";
 import { Streams } from "./streams.ts";
 import { Submissions } from "./submissions.ts";
 
-// The session client (spec 10.1, 10.7.1): the one object a page's
+// The session client: the one object a page's
 // queries, mutations and actions go through. The platform makes one per
 // App session and mounts it (page-runtime.ts); App code reaches it
 // through `useClient()` and the hooks of `@grasp-os/sdk/react`, and gets
@@ -35,7 +35,7 @@ import { Submissions } from "./submissions.ts";
 // It owns what every page would otherwise write again: reading the
 // generated reference, normalizing the arguments with the same native
 // interpreter the host uses, one logical submission per explicit call,
-// receipt recovery after a lost response, and live queries (spec 11):
+// receipt recovery after a lost response, and live queries:
 // over the platform's frame, one subscription per query, shared by the
 // components that read it, whose snapshots core pushes after every write
 // that changed what the query read, whoever made it, ordered and
@@ -191,14 +191,14 @@ export class GraspClient {
 
   /**
    * The App's files: downloading and deleting them through a files
-   * resource the App declares (spec 10.7.5). Uploads and previews are
+   * resource the App declares. Uploads and previews are
    * `useUpload`'s and `useFile`'s.
    */
   readonly files: ClientFiles;
 
   /**
    * The App's external links: opening a URL through a links resource the
-   * App declares, by the host, with no opener or referrer (spec 10.7.7).
+   * App declares, by the host, with no opener or referrer.
    */
   readonly links: ClientLinks;
 
@@ -397,8 +397,8 @@ export class GraspClient {
   }
 
   /**
-   * Runs the streaming action `reference` names with `args` (spec
-   * 10.7.6): `options.onProgress` gets each newer progress snapshot, and
+   * Runs the streaming action `reference` names with `args`:
+   * `options.onProgress` gets each newer progress snapshot, and
    * the promise resolves with the action's declared result, or rejects
    * with a structured error, `function.cancelled` when it was cancelled.
    * A lost connection attaches to the same invocation again, never runs

@@ -11,7 +11,7 @@ import type { Declaring, FileRef } from "./file-references.ts";
 import type { FileTransport, TransferProgress } from "./file-transport.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
-// The session client's files (spec 10.7.5): what `useUpload`, `useFile`
+// The session client's files: what `useUpload`, `useFile`
 // and `client.files` do with a files resource the App declared, over the
 // transport the platform gives the client (`FileTransport`). Bytes never
 // travel in a JSON call: the transport hands the file itself to the
@@ -121,7 +121,7 @@ export const signalOnly: ReadonlySet<string> = new Set(["signal"]);
 const signalAndKey: ReadonlySet<string> = new Set(["signal", "idempotencyKey"]);
 
 /**
- * `client.files` (spec 10.7.5): downloading and deleting the App's files
+ * `client.files`: downloading and deleting the App's files
  * through a files resource it declares.
  */
 export class ClientFiles {
@@ -303,7 +303,7 @@ export class ClientFiles {
   }
 }
 
-/** A file as `useFile` shows it (spec 10.7.5). */
+/** A file as `useFile` shows it. */
 export interface FileView {
   readonly file: FileRef;
   readonly name: string;

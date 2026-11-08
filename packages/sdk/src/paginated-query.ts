@@ -22,7 +22,7 @@ import {
 import type { Extension, Pager } from "./pager.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
-// A paginated list (`usePaginatedQuery`, spec 10.6, 11.6) is one live
+// A paginated list (`usePaginatedQuery`) is one live
 // query of its window: the first `extent` records, which core reads
 // whole, as one state of the store, at every change (core's
 // query-windows.ts). The client never holds a cursor or appends a page.

@@ -10,7 +10,7 @@ import { nothingRanCodes } from "./refusals.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 /**
- * What a paginated list shows (spec 10.6): the ordered records of its
+ * What a paginated list shows: the ordered records of its
  * loaded window, whether more follow, whether it is loading, and how to
  * load more. Pagination controls, not an operation result.
  */
@@ -114,7 +114,7 @@ export const skippedPage: PagerSnapshot = Object.freeze({
 });
 
 /**
- * What a list's readers see (spec 10.6's states): the window `current`
+ * What a list's readers see: the window `current`
  * shows, or its failure or the list's own (`failure`); loading until the
  * first window shows, and while a Load More is `extending` it.
  */

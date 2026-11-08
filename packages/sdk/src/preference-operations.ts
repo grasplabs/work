@@ -6,7 +6,7 @@ import { readDescriptor } from "./value-read.ts";
 const checked = (descriptor: ValueDescriptor): ValueDescriptor =>
   readDescriptor(descriptor, 1, { nodes: 0 });
 
-// An App's preferences (spec 10.7.7) as the two operations its generated
+// An App's preferences as the two operations its generated
 // `preferences` namespace holds: `preferences.get`, a query of `{}` that
 // answers the declared fields and `_rev`, and `preferences.update`, a
 // mutation of `{ expectedRevision, patch }` that answers the committed

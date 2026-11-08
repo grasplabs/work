@@ -17,7 +17,7 @@ import {
 import type { ReleaseIdentity } from "./codegen-contracts.ts";
 import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 
-// The modules the host generates for an App (spec 7.3, 8), as Convex
+// The modules the host generates for an App, as Convex
 // generates `convex/_generated/`, from its manifest as the host read it
 // (app-manifest.ts), never from its code:
 //

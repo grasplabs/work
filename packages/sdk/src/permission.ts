@@ -41,8 +41,8 @@ import type { AnySchema } from "./value-schema.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";
 
-// `permission`: how an App says what it can reach outside itself (spec 12,
-// 32.3), as an admin thinks of it. Eight permissions, each listed under
+// `permission`: how an App says what it can reach outside itself,
+// as an admin thinks of it. Eight permissions, each listed under
 // its own key of the App's `permissions` (app.ts):
 //
 // - `ai`: answers from the workspace's model (`ctx.ai.generate`);
@@ -74,7 +74,7 @@ import { v } from "./values.ts";
 // workflows for after it commits; a query reaches nothing.
 
 /**
- * Permission declarations (spec 32.3). Each answers a frozen declaration
+ * Permission declarations. Each answers a frozen declaration
  * to list under its key of the App's `permissions`; the host binds it.
  */
 export const permission = Object.freeze({

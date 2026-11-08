@@ -61,8 +61,8 @@ export interface TestPrincipal {
    * outside systems aren't the tests' to touch.
    */
   action: <Reference extends PublicReference<"action">>(
-    // A streaming action runs only for a page following it (spec
-    // 10.7.6), never through a call that answers once: its type is
+    // A streaming action runs only for a page following it, never through
+    // a call that answers once: its type is
     // refused here, as the host refuses it (`function.mode_mismatch`),
     // and so is a union any member of which streams (not distributed).
     reference: SingleAnswer<Reference>,

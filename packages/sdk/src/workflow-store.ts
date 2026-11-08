@@ -13,7 +13,7 @@ import type {
   WorkflowView,
 } from "./workflow-view.ts";
 
-// One `useWorkflow`'s state (spec 10.4.1–10.4.7, 10.7.3): the run it
+// One `useWorkflow`'s state: the run it
 // selects, its own starts and controls, and the view it derives from them
 // and from the channel's snapshots (client-workflow.ts). React reads it
 // with `useSyncExternalStore`; nothing here sends a request on its own.

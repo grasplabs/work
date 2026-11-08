@@ -13,16 +13,16 @@ import type {
 } from "./value-types.ts";
 import { v } from "./values.ts";
 
-// `action`: a workflow's own action (platform specification 13.6), which a
+// `action`: a workflow's own action, which a
 // JSON workflow calls through a `grasp.operation` binding to
 // `local:code/<file>.ts#<export>`. It lives in the workflow's own `code/`
 // modules, beside its calculations, and reaches nothing but the bindings
 // it declares in `uses`: other bindings of the same workflow, by alias,
-// of a connector only the operations it names (GRA-704), of a model only
+// of a connector only the operations it names, of a model only
 // the shape it declared its answers take, of a knowledge binding (one
 // collection) only the operations it names, of a template binding its
-// one pinned version (GRA-700), and of a files binding the run's own
-// files, with only the operations it names (GRA-724).
+// one pinned version, and of a files binding the run's own
+// files, with only the operations it names.
 //
 // ```ts
 // import { action, resource, v } from "@grasp-os/sdk/action";
@@ -69,7 +69,7 @@ export type UseKind =
   | "template"
   | "files";
 
-/** What an action may do with its run's own files (GRA-724). */
+/** What an action may do with its run's own files. */
 export type FilesOperation = "write" | "read" | "list" | "delete";
 
 /** The operations of a Knowledge collection an action may declare. */
@@ -193,7 +193,7 @@ export type KnowledgeResource<Operation extends KnowledgeOperation> =
     ("recall" extends Operation
       ? {
           /**
-           * The Brain's recall over the collection (GRA-1067): evidence for
+           * The Brain's recall over the collection: evidence for
            * `query`, cited at exact versions, within `budget`. Needs the
            * workflow's `brain` permission.
            */

@@ -45,7 +45,7 @@ export type {
   Visibility,
 } from "./server-function.ts";
 
-// An App's server functions (spec 7.1, 7.4): queries, mutations and
+// An App's server functions: queries, mutations and
 // actions, public or internal, each declared with its arguments, its
 // return and a handler `handler(ctx, args)`. A definition is a value: it
 // runs nothing and registers nothing. The App registers it under a path
@@ -65,7 +65,7 @@ export type {
 //   only thing it starts is one of the App's workflows, after it commits
 //   (`ctx.afterCommit.workflows`), as part of that commit, and the only
 //   event it sends is one of the App's workflows', to a run of the App's
-//   own, likewise (`ctx.notify`, spec 10.7.4); it tells people only once
+//   own, likewise (`ctx.notify`); it tells people only once
 //   it commits, likewise (`ctx.afterCommit.notifyPeople`);
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,

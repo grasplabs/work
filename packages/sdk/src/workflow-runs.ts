@@ -15,7 +15,7 @@ export interface RunHandle {
   readonly manifestHash: string;
 }
 
-/** Who classifies a failure as what (spec 32.1). */
+/** Who classifies a failure as what. */
 export type AppErrorCategory =
   | "source"
   | "contract"
@@ -40,7 +40,7 @@ export interface AppErrorPayload {
   readonly details?: JsonValue;
 }
 
-/** What every wait a run is held at has (spec 10.7.2). */
+/** What every wait a run is held at has. */
 interface WaitFields<Key extends string> {
   /** This exact wait: its run, step, branch, iteration and generation. */
   readonly id: string;
@@ -60,7 +60,7 @@ interface WaitFields<Key extends string> {
 }
 
 /**
- * A wait the engine holds a run at on its own (spec 10.4.5, 10.7.2): a
+ * A wait the engine holds a run at on its own: a
  * timer, or a hold of the platform's that no one answers from an App. Each grants nothing of what it names.
  */
 export type WorkflowEngineWait<Key extends string = string> =
@@ -81,7 +81,7 @@ export type WorkflowEngineWait<Key extends string = string> =
     });
 
 /**
- * A run listening for an event (spec 10.4.6, 10.7.2): `Key` is the listen
+ * A run listening for an event: `Key` is the listen
  * task's path, `Event` the generated references of the events it listens
  * for. Its `event` is the very reference the App was generated with.
  */
@@ -96,7 +96,7 @@ export type WorkflowEventWait<
 };
 
 /**
- * A run held for a person's decision (spec 10.4.5, 10.7.2): `Key` is the
+ * A run held for a person's decision: `Key` is the
  * decision binding's alias, `Value` the type of the value a response to it
  * carries, in a phantom member only.
  */
@@ -112,7 +112,7 @@ export type WorkflowDecisionWait<
 };
 
 /**
- * A wait a run is held at now (spec 10.4.5, 10.7.2): a timer, an event,
+ * A wait a run is held at now: a timer, an event,
  * a person's decision, or a hold of the platform's. A
  * generated workflow reference narrows it to the waits that workflow
  * declares (`WorkflowWaitOf`).
@@ -123,7 +123,7 @@ export type WorkflowWait<Key extends string = string> =
   | WorkflowDecisionWait<Key>;
 
 /**
- * One pending decision in the person's inbox (spec 10.7.2): the run it
+ * One pending decision in the person's inbox: the run it
  * holds and the exact wait, which `respond` takes as it is.
  */
 export interface WorkflowDecisionInboxItem<
@@ -138,7 +138,7 @@ export interface WorkflowDecisionInboxItem<
 export type WorkflowQueryPage<Item> = PaginationResult<Item>;
 
 /**
- * One decision's detail (spec 10.7.2), discriminated by its `key`: the
+ * One decision's detail, discriminated by its `key`: the
  * exact wait, the prompt, the context the person reviews and whether they
  * may answer it now.
  */

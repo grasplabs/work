@@ -24,8 +24,7 @@ export const managedFields = Object.freeze([
 
 /**
  * The bounds of one schema. Indexes per table and fields per index are the
- * host's own until the runtime policy module sets validated quotas per
- * deployment, which may only lower them.
+ * host's own, the same for every deployment.
  */
 export const schemaLimits = Object.freeze({
   /** Tables in one schema: as many as a store holds. */

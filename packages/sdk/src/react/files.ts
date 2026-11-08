@@ -50,7 +50,7 @@ type UploadHandle = UploadView & {
 
 /**
  * An upload through `resource`, a files resource the App declares with
- * `upload` (spec 10.7.5): its view (idle, uploading, verifying, completed,
+ * `upload`: its view (idle, uploading, verifying, completed,
  * failed or cancelled; while uploading or verifying, `bytesUploaded` of
  * `bytesTotal`) and `upload` and `cancel`.
  *
@@ -123,7 +123,7 @@ interface ShownFile {
 
 /**
  * The file `file` (or nothing, with `"skip"`) through `resource`, a files
- * resource the App declares with `read` (spec 10.7.5): `undefined` while
+ * resource the App declares with `read`: `undefined` while
  * it loads or is skipped, then `{ file, name, mimeType, size, previewUrl }`.
  * A failure is thrown to the page's error boundary, as a query's is.
  *

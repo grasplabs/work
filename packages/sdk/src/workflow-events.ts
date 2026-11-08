@@ -6,8 +6,8 @@ import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 
 /**
- * A generated reference to one event a workflow the App binds declares
- * (spec 10.4.6): `workflows.<workflow>.events.<alias>`. It names the
+ * A generated reference to one event a workflow the App binds declares:
+ * `workflows.<workflow>.events.<alias>`. It names the
  * workflow binding it belongs to (its App release, contract ID and
  * pinned fingerprint), the event binding's alias and the exact event type
  * it admits, with the descriptor of its data and that data's type in a
@@ -59,7 +59,7 @@ const workflowContractPattern =
 
 /**
  * The event reference `value` is, read as data (`workflows.<workflow>.
- * events.<alias>`, spec 10.7.4), or undefined when it isn't one. Nothing
+ * events.<alias>`), or undefined when it isn't one. Nothing
  * about it is trusted: the host checks its workflow, alias, type and
  * fingerprint against the release it runs, and refuses one that doesn't
  * match.

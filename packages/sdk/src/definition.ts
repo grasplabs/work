@@ -21,7 +21,7 @@ import { schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 import { v } from "./values.ts";
 
-// An App's definition: what it is, as data (GRA-1530). Its name, the
+// An App's definition: what it is, as data. Its name, the
 // permissions it needs, its people's preferences, and its data model:
 // tables, their fields, indexes and access, and its answers for a change
 // of the schema. Grasp stores it with the App's files (`definition.json`)

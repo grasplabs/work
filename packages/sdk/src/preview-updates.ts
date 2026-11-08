@@ -1,5 +1,5 @@
 /**
- * How a chat's preview's frame takes its draft's updates (spec 19.2.1):
+ * How a chat's preview's frame takes its draft's updates:
  * the page hands it each version of the pages over the frame's own
  * bridge, as the address of their route tree's module (`PreviewLoad`); the
  * frame imports it from core, which serves only the modules the frame

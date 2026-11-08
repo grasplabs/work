@@ -25,7 +25,7 @@ export type WorkflowViewOf<Reference> = WorkflowView<
 const maxRunIdLength = 256;
 
 /**
- * One workflow the App binds and one run of it (spec 10.4): the run's
+ * One workflow the App binds and one run of it: the run's
  * view, narrowed by `status`, and stable `run`, `pause`, `resume`,
  * `cancel` and `send`, with what may be done now (`canRun`, `canPause`,
  * `canResume`, `canCancel`), whether a start is under way (`isStarting`)

@@ -105,7 +105,7 @@ export const referencesText = async (
 
   // Only when declared: an App without preferences has no export to import.
   // `get` and `update`, generated as any function reference is
-  // (preference-operations.ts), and nothing else (spec 10.7.7).
+  // (preference-operations.ts), and nothing else.
   if (manifest.preferences !== null) {
     const operations = Object.entries(
       preferenceOperations(manifest.preferences)

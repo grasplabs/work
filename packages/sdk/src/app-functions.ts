@@ -15,7 +15,7 @@ const refuse: (message: string) => never = refuser(AppDefinitionError);
 
 /**
  * The top-level path segments the platform keeps, with what each is for:
- * `preferences` for an App's preferences (spec 10.7.7), `workflows` for
+ * `preferences` for an App's preferences, `workflows` for
  * its generated workflow references (`workflows.<alias>.queries.*`) and
  * `people` for who calls and the organization's people (people.ts), which
  * the host answers itself. No function registers under either, whether or

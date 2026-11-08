@@ -10,7 +10,7 @@ import type {
 } from "./app-test-types.ts";
 import { refuser } from "./declaration.ts";
 
-// App tests (spec 28.2), as `@grasp-os/sdk/testing` exports them.
+// App tests, as `@grasp-os/sdk/testing` exports them.
 //
 // `appTest` describes a suite and runs nothing itself. Core's trusted test
 // runner loads an App's `tests/*.test.ts` in a sandboxed isolate, with the

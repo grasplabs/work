@@ -53,7 +53,7 @@ export interface WorkflowCommands<Input, Wait, Event = never> {
     data: NoInfer<EventDataOf<Sent>>
   ) => Promise<void>;
   /**
-   * Answers a decision the selected run is held at (spec 10.4.5, 10.7.2):
+   * Answers a decision the selected run is held at:
    * `wait` exactly as a wait of this run's (`waits`) or the decision inbox
    * (`queries.decisions`) gave it, and `value` as that decision's value
    * schema declares it. The page asks the person to confirm the answer in
@@ -90,7 +90,7 @@ export type ObservedRun = Readonly<RunHandle> & {
   readonly startedAt: number | null;
 };
 
-/** The selected run's status, and what each status has (spec 10.4.1). */
+/** The selected run's status, and what each status has. */
 export type WorkflowRunView<Output> =
   | { readonly status: "idle" }
   | { readonly status: "loading"; readonly runId: string }

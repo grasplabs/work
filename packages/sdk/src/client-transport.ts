@@ -3,14 +3,14 @@ import type { FileTransport } from "./file-transport.ts";
 
 /**
  * How the client reaches the host: one call of the App `app`, its
- * request as JSON text, answered with core's `{ result }` (spec 32.6), or
+ * request as JSON text, answered with core's `{ result }`, or
  * rejected with a coded refusal; a rejection without a code is a lost
  * response.
  */
 export interface ClientTransport {
   call: (request: string) => Promise<unknown>;
   /**
-   * Follows the query `request` names (spec 11): `onSnapshot` gets each
+   * Follows the query `request` names: `onSnapshot` gets each
    * push of core's (`{ revision, result }`), and `onLost` is called once
    * core, or the connection to it, let go of the subscription. Resolves
    * with what releases it, or rejects as `call` does.
@@ -54,8 +54,8 @@ export interface ClientTransport {
 }
 
 /**
- * How a client reaches the trusted host to answer a person's decision
- * (spec 10.7.2). The host shows the decision's review context and the
+ * How a client reaches the trusted host to answer a person's decision.
+ * The host shows the decision's review context and the
  * answer as it will be recorded, asks the person to confirm it there,
  * and only then records it with a one-use confirmation of its own: the
  * client never sees nor holds that confirmation.

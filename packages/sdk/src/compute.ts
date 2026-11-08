@@ -7,7 +7,7 @@ import type { AnySchema } from "./value-schema.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 
 // `compute`: a pure calculation a JSON workflow calls through
-// `grasp.compute` (platform specification 13.6, 32.4). It lives in the
+// `grasp.compute`. It lives in the
 // workflow's own `code/` modules, which import nothing but this module and
 // each other (compiler: `computeCode`).
 //

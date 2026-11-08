@@ -82,7 +82,7 @@ const fromPayload = (payload: unknown): GraspError | undefined => {
 };
 
 /**
- * What core answered a call (`{ result }`, spec 32.6): its value or its
+ * What core answered a call (`{ result }`): its value or its
  * failure; anything else is read as a lost response.
  */
 export const readAnswer = (answer: unknown): Settled => {

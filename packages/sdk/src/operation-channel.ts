@@ -33,7 +33,7 @@ export interface OperationChannel {
     args: unknown
   ) => Promise<unknown>;
   /**
-   * One progress snapshot of a streaming action (spec 10.7.6), for the
+   * One progress snapshot of a streaming action, for the
    * page that runs it: a streaming action's only.
    */
   readonly emit: (progress: unknown) => Promise<unknown>;

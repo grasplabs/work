@@ -4,11 +4,11 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { isPlainObject } from "./value-descriptor.ts";
 
 // The structured error a page's queries, mutations and actions fail
-// with (spec 10.1, 32.1): what core answered, as it answered it, or why
+// with: what core answered, as it answered it, or why
 // the session client refused or stopped before it had an answer. Never a
 // transport envelope, a cause or a stack.
 
-/** A failure's category, as the host classifies it (spec 32.1). */
+/** A failure's category, as the host classifies it. */
 export type ErrorCategory =
   | "source"
   | "contract"
@@ -263,7 +263,7 @@ const receiptLinks = new WeakMap<GraspError, () => Promise<unknown>>();
 
 /**
  * `error`, an uncertain failure of a call that has an identity of its own
- * (a decision's answer, spec 10.7.2), with a private link that sends
+ * (a decision's answer), with a private link that sends
  * exactly that call again: the same answer to the same decision, never a
  * fresh one. A form keeps it to send the submission again under its
  * identity (form.ts); nothing of it is on the error itself.

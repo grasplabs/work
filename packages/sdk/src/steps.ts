@@ -136,7 +136,7 @@ const common = {
 
 // Refused here, where the step is written, rather than held to the
 // platform's ceilings at run time without the author seeing it: a
-// declaration may only be stricter (spec 18.1). The host refuses the same
+// declaration may only be stricter. The host refuses the same
 // for code that gets past the SDK.
 const retries = option(
   z

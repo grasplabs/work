@@ -47,7 +47,7 @@ const httpAnswerOf = (
 };
 
 /**
- * An HTTP connection's `fetch` (GRA-1478) over its `call`: a GET or HEAD
+ * An HTTP connection's `fetch` over its `call`: a GET or HEAD
  * is the declaration's `get`, any other method its `send`; the answer as
  * a `Response`. The host and connect check everything again.
  */

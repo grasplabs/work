@@ -92,7 +92,7 @@ const readCompensation = (raw: unknown): RunSnapshot["compensation"] => {
 };
 
 /**
- * Whether `snapshot`'s fields agree with its status (spec 10.4.1): an end
+ * Whether `snapshot`'s fields agree with its status: an end
  * time exactly when it ended; output exactly when completed, an error
  * exactly when failed, a compensation exactly while compensating; no
  * outstanding wait while queued or once ended; and a completed run that

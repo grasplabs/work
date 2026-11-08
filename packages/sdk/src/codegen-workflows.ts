@@ -233,7 +233,7 @@ export const workflowReferenceOf = async (
 /**
  * `workflows`: one reference per workflow the App binds, each with its
  * events, decisions and ordinary queries and nothing else; no `.start`,
- * `.get` or `.cancel` (spec 10.4).
+ * `.get` or `.cancel`.
  */
 export const workflowsExport = async (
   identity: ReleaseIdentity,

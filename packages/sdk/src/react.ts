@@ -1,5 +1,5 @@
 /**
- * The React SDK of an App's pages (spec 10.1, 10.7.1): the platform's
+ * The React SDK of an App's pages: the platform's
  * session client in a component, and the App's queries, mutations and
  * actions through the references the host generated for it (`@server/_generated/api`).
  *
@@ -23,9 +23,8 @@
  * `null` result is the App's data. A query's failure is thrown while
  * rendering, to the platform's error boundary; a mutation's or action's
  * rejects its promise. `useWorkflow` is the client side of starting,
- * following and controlling a workflow the App binds; generated workflow
- * references and the host's side of it are still to come (GRA-625,
- * GRA-626), so no App reaches it yet.
+ * following and controlling a workflow the App binds, through its
+ * generated workflow reference.
  *
  * A query that answers pages is shown as a live list with
  * `usePaginatedQuery`:

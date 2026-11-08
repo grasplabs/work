@@ -72,7 +72,7 @@ export interface ActionDefinition<
 }
 
 /**
- * A streaming action's declaration (spec 10.7.6): an action's, and the
+ * A streaming action's declaration: an action's, and the
  * schema of the progress snapshots its handler emits (`ctx.emit`). It
  * runs only in the foreground, for a page following it (`useStream`).
  */
@@ -135,7 +135,7 @@ export const defineFunction = (
   if (!isPlainObject(args)) {
     refuse(`A ${kind}'s \`args\` is a map of field names to schemas.`);
   }
-  // Optional: without it, the handler's answer is its return (spec 32.6).
+  // Optional: without it, the handler's answer is its return.
   // Throws for anything but a `v` schema.
   if (returns !== undefined) {
     descriptorOf(returns);

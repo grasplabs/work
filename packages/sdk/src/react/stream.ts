@@ -16,8 +16,8 @@ import type {
 import { useClient } from "./provider.ts";
 
 /**
- * What a streaming action shows while `useStream` follows it (spec
- * 10.7.6): `idle` before its first run; `running` while it runs, and
+ * What a streaming action shows while `useStream` follows it: `idle`
+ * before its first run; `running` while it runs, and
  * `recovering` while its connection is restored, each with its latest
  * progress (null before the first); then `completed` with its output,
  * `failed` with its error, or `cancelled`, each with its last progress.
@@ -191,7 +191,7 @@ class StreamRun {
 }
 
 /**
- * The streaming action `reference` names (spec 10.7.6), for this
+ * The streaming action `reference` names, for this
  * component: its view (`StreamView`), and a stable `run` and `cancel`.
  *
  * ```tsx

@@ -3,7 +3,7 @@ import { canonicalText } from "@grasp-os/shared/json";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 
 // How a store's preferences contract changes when a version is sealed on
-// it (spec 10.7.7, GRA-771): which changes to an App's preferences are
+// it: which changes to an App's preferences are
 // accepted, and what the contract is afterwards. Pure: the store's host
 // runs it inside the transaction that applies it
 // (apps/core/src/store-host.ts, `definePreferences`).

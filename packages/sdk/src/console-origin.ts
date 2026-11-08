@@ -6,7 +6,7 @@
  * development warnings, a UI library's), which core serves from a
  * directory of its own. What the page runtime reports App code's calls
  * as a problem by, and the rest as a warning, which shows but fails
- * nothing (spec 22.7: only errors block a draft's check).
+ * nothing (only errors block a draft's check).
  *
  * The first frame outside `own` (the runtime's own module, which made the
  * stack) decides. A stack with no frame to read is the App's: a call is

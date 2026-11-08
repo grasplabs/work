@@ -19,7 +19,7 @@ import { schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 
 // Reading an App's manifest of unknown origin: what inspecting its code
-// in a sandbox answered (spec 8), or what a sealed release stored. The
+// in a sandbox answered, or what a sealed release stored. The
 // text is hostile, as anything App code produced is: the sandbox that
 // made it ran the App's code, which can make the SDK in there answer
 // whatever it likes.

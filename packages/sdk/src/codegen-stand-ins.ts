@@ -10,8 +10,8 @@ const symbolicTree = "symbolic()";
 
 /**
  * The modules inspection loads in place of `@server/_generated/api` and
- * `@server/_generated/internal` before the App's references exist (spec
- * 8): the registration is what says which paths there are, so its code
+ * `@server/_generated/internal` before the App's references exist: the
+ * registration is what says which paths there are, so its code
  * gets symbolic references, which grant nothing and resolve only against
  * that registration. Sealing then generates the real modules and builds
  * the code again with them; nothing symbolic survives into a release.
