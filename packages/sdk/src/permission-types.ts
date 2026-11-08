@@ -167,9 +167,9 @@ export const peopleDeclaration: PeoplePermission = Object.freeze({
 
 /**
  * A workflow permission: an independent workflow the App
- * starts, by an alias of its own. An action starts it
- * (`ctx.workflows.<alias>.start`), and a mutation stages its start for
- * after it commits (`ctx.afterCommit.workflows.<alias>.start`). Like
+ * starts, by an alias of its own (`ctx.workflows.<alias>.start`): an
+ * action starts it right away, and a mutation stages its start for after
+ * it commits. Like
  * every permission it grants nothing: the
  * host starts the version the App's builders bound under the alias,
  * through the App's own `start` permission on that workflow, acting for

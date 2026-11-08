@@ -113,7 +113,7 @@ export const kick = mutation({
   returns: v.null(),
   handler: async (ctx) => {
     await ctx.db.insert("notes", { text: "kicked" });
-    await ctx.afterCommit.workflows.followUp.start({ who: "Ada" });
+    await ctx.workflows.followUp.start({ who: "Ada" });
     return null;
   },
 });

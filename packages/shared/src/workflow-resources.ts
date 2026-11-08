@@ -699,7 +699,7 @@ export const coreStartKeyPrefix = "grasp:";
 
 /**
  * A start a committed mutation staged in its store's outbox
- * (`ctx.afterCommit.start`), which its dispatch admits after the commit:
+ * (`ctx.workflows.<alias>.start`), which its dispatch admits after the commit:
  * who starts it, as core resolved them as the mutation ran (the App, the
  * version of it whose code staged it, the person its call acted for),
  * the alias the App binds the workflow under, its input as checked

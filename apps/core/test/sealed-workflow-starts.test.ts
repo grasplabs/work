@@ -68,7 +68,7 @@ export const submit = mutation({
   returns: v.id("requests"),
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("requests", { who: args.who });
-    await ctx.afterCommit.workflows.followUp.start({ who: args.who });
+    await ctx.workflows.followUp.start({ who: args.who });
     return id;
   },
 });

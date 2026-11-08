@@ -69,8 +69,7 @@ type StartArgs<Workflow> =
     : [input: WorkflowInput<Workflow>];
 
 /**
- * `ctx.workflows` (and a mutation's `ctx.afterCommit.workflows`): each
- * workflow among `Grants`, by its alias, started with its input,
+ * `ctx.workflows`: each workflow among `Grants`, by its alias, started with its input,
  * answering `Started`.
  */
 export type Workflows<Grants extends Grant, Started> = {

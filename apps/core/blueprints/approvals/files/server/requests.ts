@@ -89,7 +89,7 @@ export const decide = mutation({
       },
       { expectedRevision: args.expectedRevision }
     );
-    await ctx.afterCommit.notifyPeople(request._ownerId, {
+    await ctx.notifyPeople(request._ownerId, {
       title: `Your request was ${args.outcome}`,
       body: request.title,
     });

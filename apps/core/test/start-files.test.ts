@@ -100,7 +100,7 @@ export const stageReview = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.db.insert("notes", { title: args.file });
-    await ctx.afterCommit.workflows.review.start({ doc: { id: args.file } });
+    await ctx.workflows.review.start({ doc: { id: args.file } });
     return null;
   },
 });

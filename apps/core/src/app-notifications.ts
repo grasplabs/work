@@ -49,8 +49,8 @@ import { requireNotRevoked } from "./release-runner.ts";
 import { requireAgentAllowed, requireLive } from "./workflow-start-intents.ts";
 import type { CallingAgent } from "./workflow-start-intents.ts";
 
-// Apps telling people (`ctx.notifyPeople` of an action,
-// `ctx.afterCommit.notifyPeople` of a mutation): a notification in the person's Grasp notifications
+// Apps telling people (`ctx.notifyPeople`, of an action or a mutation): a
+// notification in the person's Grasp notifications
 // (notifications.ts, `app_message`), which their inbox lists and which
 // opens the App. It is the one
 // channel the platform tells people through; nothing here sends mail or
@@ -113,7 +113,7 @@ export interface PeopleNotifications {
   ) => Promise<AppNotificationReceipt>;
   /**
    * What a mutation's commit stages in its outbox to tell `to` once it has
-   * committed (`ctx.afterCommit.notifyPeople`).
+   * committed (a mutation's `ctx.notifyPeople`).
    */
   readonly intent: (to: unknown, notification: unknown) => Json;
 }

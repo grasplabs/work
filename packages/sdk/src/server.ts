@@ -63,10 +63,10 @@ export type {
 //   after it returns, and may run the App's queries in the same staged
 //   state (`ctx.runQuery`); it has no resources, so no network, and the
 //   only thing it starts is one of the App's workflows, after it commits
-//   (`ctx.afterCommit.workflows`), as part of that commit, and the only
+//   (`ctx.workflows`), as part of that commit, and the only
 //   event it sends is one of the App's workflows', to a run of the App's
 //   own, likewise (`ctx.notify`); it tells people only once
-//   it commits, likewise (`ctx.afterCommit.notifyPeople`);
+//   it commits, likewise (`ctx.notifyPeople`);
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,
 //   reaches outside the App only through the App's permissions (`ctx.ai`,

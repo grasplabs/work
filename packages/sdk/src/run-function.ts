@@ -174,8 +174,8 @@ const workflowsOf = (
 };
 
 /**
- * A send to people (`ctx.notifyPeople` of an action, `ctx.afterCommit.notifyPeople` of
- * a mutation), over `channel`: the host tells them apart by the function
+ * A send to people (`ctx.notifyPeople`, of an action or a mutation), over
+ * `channel`: the host tells them apart by the function
  * it runs, as it does starts.
  */
 const notifyPeopleOf =
@@ -246,15 +246,15 @@ export const runFunction = async (
         async (request: WriteRequest) => await channel.write(request)
       ),
       runQuery: caller("query"),
-      afterCommit: Object.freeze({
-        workflows: workflowsOf(permissions, channel),
-        notifyPeople: async (
-          to: unknown,
-          notification: unknown
-        ): Promise<void> => {
-          await notifyPeopleOf(channel)(to, notification);
-        },
-      }),
+      // Staged with the commit: the host tells a mutation's starts and
+      // sends from an action's by the function it runs.
+      workflows: workflowsOf(permissions, channel),
+      notifyPeople: async (
+        to: unknown,
+        notification: unknown
+      ): Promise<void> => {
+        await notifyPeopleOf(channel)(to, notification);
+      },
       notify: notifications.notify,
     };
   } else {
