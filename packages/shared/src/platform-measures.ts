@@ -1,5 +1,5 @@
 // The measures the platform publishes to Apps' statistics (statistics.ts).
-// Free of dependencies, like operation-limits.ts, because the SDK's root
+// Free of dependencies, like function-limits.ts, because the SDK's root
 // module, where a statistics resource lists the ones it reads, can't bring
 // Zod along.
 

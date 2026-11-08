@@ -763,7 +763,7 @@ const leftOpen: StepError = {
 /**
  * `failure`, what the attempt that sent a tried-once call failed with, as
  * every later attempt of its step fails: never retried, its message and
- * code kept, a timeout's code `operation.deadline_exceeded`.
+ * code kept, a timeout's code `function.deadline_exceeded`.
  */
 const triedBefore = (failure: StepError): Error =>
   namedError(
@@ -771,7 +771,7 @@ const triedBefore = (failure: StepError): Error =>
     failure.message,
     failure.code ??
       (failure.name === "TimeoutError"
-        ? "operation.deadline_exceeded"
+        ? "function.deadline_exceeded"
         : "internal.unexpected")
   );
 

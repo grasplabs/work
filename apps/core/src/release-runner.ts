@@ -7,13 +7,13 @@ import type { MutationStart, OperationChannel } from "@grasp-os/sdk/runner";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { whenAborted } from "@grasp-os/shared/deadline";
-import type { AppId } from "@grasp-os/shared/ids";
-import type { Json } from "@grasp-os/shared/json";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
   operationResultMaxBytes,
-} from "@grasp-os/shared/operation-limits";
+} from "@grasp-os/shared/function-limits";
+import type { AppId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
 import {
   captureEntrypoint,
   captureMethod,

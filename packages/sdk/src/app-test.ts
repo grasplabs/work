@@ -63,7 +63,7 @@ export interface LiveQuery<Value> {
    * The next snapshot that `predicate` accepts (the next one, without a
    * predicate), passing over those it doesn't. Waits no longer than the
    * test may run. Fails on a refusal core pushes, such as
-   * `operation.not_found`, and once core stops following the query.
+   * `function.not_found`, and once core stops following the query.
    */
   next: (predicate?: (value: Value) => boolean) => Promise<Value>;
   /** Stops following it: core releases its subscription. */
@@ -97,7 +97,7 @@ export interface TestPrincipal {
   action: <Reference extends PublicReference<"action">>(
     // A streaming action runs only for a page following it (spec
     // 10.7.6), never through a call that answers once: its type is
-    // refused here, as the host refuses it (`operation.mode_mismatch`),
+    // refused here, as the host refuses it (`function.mode_mismatch`),
     // and so is a union any member of which streams (not distributed).
     reference: SingleAnswer<Reference>,
     args: ArgsOf<Reference>

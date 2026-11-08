@@ -1566,7 +1566,7 @@ describe(
       }).toStrictEqual({
         otherContract: "version.mismatch",
         otherRelease: "version.mismatch",
-        unknownAlias: "operation.not_found",
+        unknownAlias: "function.not_found",
         badInput: "contract.invalid_args",
         watchAsCall: "contract.invalid_request",
         commandAsWatch: "contract.invalid_request",

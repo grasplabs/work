@@ -602,7 +602,7 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
         malformed: "contract.invalid_args",
         fingerprint: "version.mismatch",
         notBrowser: "version.mismatch",
-        unknownAlias: "operation.not_found",
+        unknownAlias: "function.not_found",
         noSuchRun: "workflow.run_unavailable",
         anotherPerson: "workflow.run_unavailable",
         madeUp: "contract.invalid_request",

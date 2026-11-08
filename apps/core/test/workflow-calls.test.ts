@@ -2120,7 +2120,7 @@ describe("a step's own timeout", () => {
         Date.parse(run.endedAt ?? "") - startedAt < maxAttemptTimeoutMs / 2,
       cutOff,
     }).toStrictEqual({
-      end: { status: "failed", code: "operation.deadline_exceeded" },
+      end: { status: "failed", code: "function.deadline_exceeded" },
       requests: 1,
       early: true,
       cutOff: true,

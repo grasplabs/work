@@ -125,7 +125,7 @@ const clientErrors = {
     message: "Streaming actions can't run here.",
     category: "operational",
   },
-  "operation.unreachable": {
+  "function.unreachable": {
     message: "The App's server couldn't be reached. Try again.",
     category: "operational",
   },
@@ -215,7 +215,7 @@ export const clientError = (
     code,
     ...clientErrors[code],
     ...(message === undefined ? {} : { message }),
-    retryable: code === "operation.unreachable",
+    retryable: code === "function.unreachable",
     requestId: null,
     ...(details === undefined ? {} : { details }),
   });
@@ -293,8 +293,8 @@ export const fences = (code: string): boolean =>
  */
 export const nothingRanCodes: ReadonlySet<string> = new Set([
   "page.rate_limited",
-  "operation.sandbox_busy",
-  "operation.sandbox_unavailable",
+  "function.sandbox_busy",
+  "function.sandbox_unavailable",
   "mutation.concurrent_change",
   "query.concurrent_change",
   "submission.superseded",
@@ -398,7 +398,7 @@ export const fencingRefusalOf = (error: GraspError): GraspError | undefined => {
  */
 export const hidesOutcome = (code: string): boolean =>
   fences(code) ||
-  code === "operation.access_changed" ||
+  code === "function.access_changed" ||
   code === "submission.expired";
 
 /** The category of each refusal of core's file channel that isn't operational. */

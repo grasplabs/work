@@ -1,5 +1,5 @@
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import { appErrorDetailsOf } from "./app-error.ts";

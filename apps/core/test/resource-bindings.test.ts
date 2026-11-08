@@ -1,6 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
 import type { Json } from "@grasp-os/shared/json";
-import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { ResourceBindingsReview } from "@grasp-os/shared/resource-bindings";
@@ -1806,7 +1806,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       widened: { failed: "resource.unavailable" },
       sent: 0,
       sneak: "absent",
-      find: { failed: "operation.not_found" },
+      find: { failed: "function.not_found" },
     });
   });
 

@@ -50,31 +50,31 @@ describe(jsonWithin, () => {
 describe(categoryOf, () => {
   test("puts each verdict on a call's run where it belongs", () => {
     const verdicts = [
-      "operation.cpu_exceeded",
-      "operation.memory_exceeded",
-      "operation.sandbox_refused",
-      "operation.call_limit",
-      "operation.depth_exceeded",
-      "operation.ended",
-      "operation.unfinished_call",
-      "operation.deadline_exceeded",
-      "operation.sandbox_busy",
-      "operation.sandbox_unavailable",
+      "function.cpu_exceeded",
+      "function.memory_exceeded",
+      "function.sandbox_refused",
+      "function.call_limit",
+      "function.depth_exceeded",
+      "function.ended",
+      "function.unfinished_call",
+      "function.deadline_exceeded",
+      "function.sandbox_busy",
+      "function.sandbox_unavailable",
     ];
     expect(
       Object.fromEntries(verdicts.map((code) => [code, categoryOf(code)]))
     ).toStrictEqual({
       // The App's own code went past a bound of one call.
-      "operation.cpu_exceeded": "source",
-      "operation.memory_exceeded": "source",
-      "operation.sandbox_refused": "source",
-      "operation.call_limit": "source",
-      "operation.depth_exceeded": "source",
-      "operation.ended": "operational",
-      "operation.unfinished_call": "contract",
-      "operation.deadline_exceeded": "operational",
-      "operation.sandbox_busy": "operational",
-      "operation.sandbox_unavailable": "operational",
+      "function.cpu_exceeded": "source",
+      "function.memory_exceeded": "source",
+      "function.sandbox_refused": "source",
+      "function.call_limit": "source",
+      "function.depth_exceeded": "source",
+      "function.ended": "operational",
+      "function.unfinished_call": "contract",
+      "function.deadline_exceeded": "operational",
+      "function.sandbox_busy": "operational",
+      "function.sandbox_unavailable": "operational",
     });
   });
 });
@@ -83,24 +83,24 @@ describe(isRetryable, () => {
   test("retries a step on every code a function's caller would try again, and on the workflow's own", () => {
     const codes = [
       "resource.budget_busy",
-      "operation.sandbox_busy",
-      "operation.sandbox_unavailable",
+      "function.sandbox_busy",
+      "function.sandbox_unavailable",
       "mutation.concurrent_change",
       "connect.server_unavailable",
       "model.rate_limited",
-      "operation.cpu_exceeded",
+      "function.cpu_exceeded",
       "resource.declined",
     ];
     expect(
       Object.fromEntries(codes.map((code) => [code, isRetryable({ code })]))
     ).toStrictEqual({
       "resource.budget_busy": true,
-      "operation.sandbox_busy": true,
-      "operation.sandbox_unavailable": true,
+      "function.sandbox_busy": true,
+      "function.sandbox_unavailable": true,
       "mutation.concurrent_change": true,
       "connect.server_unavailable": true,
       "model.rate_limited": true,
-      "operation.cpu_exceeded": false,
+      "function.cpu_exceeded": false,
       "resource.declined": false,
     });
   });

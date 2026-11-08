@@ -151,7 +151,7 @@ export const fileFailure = (error: unknown): GraspError => {
   const settled = readRejection(error);
   return settled.kind === "failed"
     ? settled.error
-    : clientError("operation.unreachable");
+    : clientError("function.unreachable");
 };
 
 /** The refusal a caller hears once it stopped waiting for its call. */

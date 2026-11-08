@@ -551,7 +551,7 @@ export const callDraft = async (
     const gate = async (): Promise<void> => {
       await authorize();
       if (Date.now() >= deadline) {
-        throw operationErrors.create("operation.deadline_exceeded");
+        throw operationErrors.create("function.deadline_exceeded");
       }
     };
     // Before anything is read, the store made or opened.

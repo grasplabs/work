@@ -1,10 +1,10 @@
-import { canonicalText } from "@grasp-os/shared/json";
 import {
   appMaxOperations,
   operationPathMaxLength,
   operationPathMaxSegments,
   operationSegmentPattern,
-} from "@grasp-os/shared/operation-limits";
+} from "@grasp-os/shared/function-limits";
+import { canonicalText } from "@grasp-os/shared/json";
 
 import { isServerFunction, serverFunctions } from "./handlers.ts";
 import { isMigration } from "./migration.ts";

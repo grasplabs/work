@@ -1388,7 +1388,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
   it("refuses a test that runs a streaming action as one that answers once", async () => {
     // A streaming action runs only for a page following it (spec
     // 10.7.6): a test principal's `action` answers once, so its type
-    // refuses one, as the host does (`operation.mode_mismatch`).
+    // refuses one, as the host does (`function.mode_mismatch`).
     const streamed = {
       ...notesFiles(),
       "server/streams.ts": `import { v } from "@grasp-os/sdk";

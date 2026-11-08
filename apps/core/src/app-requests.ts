@@ -1,5 +1,5 @@
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 
 // The request a chat's code sends with an App call (env.apps.call), read
@@ -53,7 +53,7 @@ export const requestText = async (request: unknown): Promise<string> => {
     return await Promise.race([
       readBounded(reader),
       whenAborted(limit.signal).catch(() => {
-        throw operationErrors.create("operation.deadline_exceeded");
+        throw operationErrors.create("function.deadline_exceeded");
       }),
     ]);
   } catch (error) {

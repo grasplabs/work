@@ -255,7 +255,7 @@ export const fixtureActivation = async (
   }
   // Its test is over: nothing more of it runs.
   if (Date.now() > row.deadline.getTime()) {
-    throw operationErrors.create("operation.cancelled");
+    throw operationErrors.create("function.cancelled");
   }
   const build = await loadWorkflowBuild(
     env,

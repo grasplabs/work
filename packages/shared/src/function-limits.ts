@@ -35,7 +35,7 @@ export const operationResultMaxBytes = platformLimits.operationOutputBytes;
 /**
  * The most times one caller's call reads the store, the function it named
  * and every function nested in it together: reads past it are refused
- * (`operation.read_limit`). One invocation alone reaches its host calls
+ * (`function.read_limit`). One invocation alone reaches its host calls
  * first (`platformLimits.invocationHostCalls`, 100); this bounds what its
  * nested calls read with it. Longer work pages, or is a workflow's.
  */
@@ -45,7 +45,7 @@ export const invocationMaxReads = 256;
  * The most bytes of staged writes one mutation's reads may send the store
  * in all, as UTF-8 JSON: each read of a mutation that staged writes sends
  * them, and the store applies them, so this bounds what one call can make
- * the store do (`operation.read_limit` past it).
+ * the store do (`function.read_limit` past it).
  */
 export const stagedReadMaxBytes = 16 * 1024 * 1024;
 
@@ -133,7 +133,7 @@ export const streamProgressMaxBytes = operationResultMaxBytes;
 
 /**
  * The most snapshots one invocation emits: past it, `ctx.emit` is refused
- * (`operation.emit_limit`). The host keeps only the latest, so this bounds
+ * (`function.emit_limit`). The host keeps only the latest, so this bounds
  * the work of validating them, never what is held.
  */
 export const streamMaxEmits = 1000;
@@ -166,7 +166,7 @@ export const streamTombstoneMs = 24 * 60 * 60_000;
 
 /**
  * The most streaming actions one person runs at once in one App, beyond
- * which a start is refused (`operation.stream_limit`). A page follows
+ * which a start is refused (`function.stream_limit`). A page follows
  * one or two at a time (a draft, an export); each holds a sandbox run for
  * up to a server invocation's wall time (60 s) and an object with its
  * receipt, so four leaves room for a page and a second tab while a
@@ -179,7 +179,7 @@ export const streamMaxRunning = 4;
 /**
  * The most plain (non-streaming) actions one person runs at once in one
  * App through its invocation objects, beyond which a start is refused
- * (`operation.action_limit`). Such a run outlives the request that
+ * (`function.action_limit`). Such a run outlives the request that
  * started it, so its caller can come back for its receipt, and no idle
  * cancel ends it: this, with its deadline, is its only bound. A page
  * and a second tab firing actions from a form, a list's row buttons or a

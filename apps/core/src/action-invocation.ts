@@ -1,8 +1,4 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import type { AppId, ChatId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
-import { errorFields, log } from "@grasp-os/shared/log";
 import {
   actionInvocationWallMs,
   actionMaxRunning,
@@ -10,7 +6,11 @@ import {
   streamMaxRunning,
   streamRetentionMs,
   streamTombstoneMs,
-} from "@grasp-os/shared/operation-limits";
+} from "@grasp-os/shared/function-limits";
+import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import type {
   AppErrorPayload,
@@ -50,7 +50,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 //   route fingerprints, as it admits each request, the person's
 //   organization role, teams and role in the App (`accessOf`); the object
 //   records the one it started under and refuses an attach or a join
-//   under any other (`operation.access_changed`), and the route's relay
+//   under any other (`function.access_changed`), and the route's relay
 //   compares it again as it goes.
 // - Two starts under one key both run, or one with other input slips past
 //   the first: deciding to start, holding a place and recording the run
@@ -79,9 +79,9 @@ import { requireNotRevoked } from "./release-runner.ts";
 //   the latest it hasn't seen, when it asks for more (`highWaterMark: 0`).
 //   A gap in sequence numbers is snapshots it was too slow for.
 // - A cancel claims more than it knows: cancellation stops the run as its
-//   deadline does (operations.ts), and the result is `operation.cancelled`
+//   deadline does (operations.ts), and the result is `function.cancelled`
 //   only when nothing the run started was still under way, and the
-//   uncertain `operation.outcome_unknown` otherwise. Cancelling answers
+//   uncertain `function.outcome_unknown` otherwise. Cancelling answers
 //   only that it was asked while the run was going (`requested`).
 // - It outlives whoever follows it: the route cancels it at once when the
 //   person or the build loses access, and the object cancels it once no
@@ -93,7 +93,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 //   `streamRetentionMs`, then a tombstone for `streamTombstoneMs`. An
 //   object that lost a run under way (restarted while it ran), or whose run
 //   is still going past its deadline and a margin, settles it as the
-//   uncertain `operation.outcome_unknown`, never a made-up outcome, and
+//   uncertain `function.outcome_unknown`, never a made-up outcome, and
 //   whoever waits on it hears so.
 
 /** What a start or an attach names, besides the call itself. */
@@ -361,7 +361,7 @@ export const withReason = (
   result: OperationResult,
   unfollowed: boolean
 ): OperationResult =>
-  unfollowed && !result.ok && result.error.code === "operation.cancelled"
+  unfollowed && !result.ok && result.error.code === "function.cancelled"
     ? {
         ok: false,
         error: { ...result.error, details: { reason: "unfollowed" } },
@@ -378,9 +378,9 @@ export const withReason = (
  * act on what that effect changed.
  */
 const nothingRanCodes: ReadonlySet<string> = new Set([
-  "operation.mode_mismatch",
-  "operation.sandbox_busy",
-  "operation.sandbox_unavailable",
+  "function.mode_mismatch",
+  "function.sandbox_busy",
+  "function.sandbox_unavailable",
   "resource.budget_busy",
 ]);
 
@@ -495,7 +495,7 @@ export class ActionInvocation extends DurableObject<Env> {
         live?.stop.abort();
         await this.#settle(
           record,
-          refused(operationErrors.create("operation.outcome_unknown"))
+          refused(operationErrors.create("function.outcome_unknown"))
         );
         return;
       }
@@ -572,11 +572,11 @@ export class ActionInvocation extends DurableObject<Env> {
       return await this.#start(spec, inputHash);
     }
     if (record.owner !== spec.by.userId) {
-      return resultOf(refused(operationErrors.create("operation.not_found")));
+      return resultOf(refused(operationErrors.create("function.not_found")));
     }
     if (record.access !== spec.access) {
       return resultOf(
-        refused(operationErrors.create("operation.access_changed"))
+        refused(operationErrors.create("function.access_changed"))
       );
     }
     if (record.inputHash !== inputHash) {
@@ -611,7 +611,7 @@ export class ActionInvocation extends DurableObject<Env> {
       // It ran in an earlier life of this object, which ended before it
       // settled: whether it finished is unknown.
       const result = refused(
-        operationErrors.create("operation.outcome_unknown")
+        operationErrors.create("function.outcome_unknown")
       );
       await this.#settle(record, result);
       return resultOf(result);
@@ -642,7 +642,7 @@ export class ActionInvocation extends DurableObject<Env> {
   /**
    * Holds one of the person's places for a running invocation of its kind
    * (`holdInvocation`), records the run and starts it, not waiting for it;
-   * refused with `operation.stream_limit` or `operation.action_limit` when
+   * refused with `function.stream_limit` or `function.action_limit` when
    * the person has none left, recording nothing, so the same key may start
    * later.
    */
@@ -685,10 +685,10 @@ export class ActionInvocation extends DurableObject<Env> {
       return resultOf(
         refused(
           spec.streaming
-            ? operationErrors.create("operation.stream_limit", {
+            ? operationErrors.create("function.stream_limit", {
                 maxRunning: streamMaxRunning,
               })
-            : operationErrors.create("operation.action_limit", {
+            : operationErrors.create("function.action_limit", {
                 maxRunning: actionMaxRunning,
               })
         )

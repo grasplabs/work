@@ -427,7 +427,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     expect({ refused, recorded: await recordedRuns(app) }).toStrictEqual({
       refused: {
         fingerprint: "version.mismatch",
-        alias: "operation.not_found",
+        alias: "function.not_found",
         release: "version.mismatch",
         input: "contract.invalid_args",
         notAStart: "contract.invalid_request",
@@ -594,7 +594,7 @@ export default workflowTest({
       left: await recordedRuns(app),
     }).toStrictEqual({
       runs: 10,
-      refused: ["operation.call_limit", "operation.call_limit"],
+      refused: ["function.call_limit", "function.call_limit"],
       recorded: 10,
       left: [],
     });
@@ -730,7 +730,7 @@ export default workflowTest({
     await session.close();
     expect(ended).toMatchObject({
       status: "failed",
-      code: "operation.cancelled",
+      code: "function.cancelled",
     });
   });
 
@@ -825,7 +825,7 @@ export default workflowTest({
       afterFailure: [],
       // Its room stayed taken: nine more, then the limit.
       started: 9,
-      refused: ["operation.call_limit"],
+      refused: ["function.call_limit"],
     });
   });
 

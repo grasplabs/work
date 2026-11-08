@@ -18,7 +18,7 @@ import {
 
 /** Passes on the refusal it gets while the App's calls have no place. */
 const catching = suiteOf(`
-      await t.rejectsCode(owner.query(api.notes.list, page), "operation.sandbox_busy");
+      await t.rejectsCode(owner.query(api.notes.list, page), "function.sandbox_busy");
 `);
 
 /** What a suite stopped past its CPU time fails with. */

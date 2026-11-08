@@ -138,7 +138,7 @@ const timesOutUnknown: ReadonlySet<string> = new Set([
  * a listen past its timeout.
  */
 const timeoutCodes: ReadonlySet<string> = new Set([
-  "operation.deadline_exceeded",
+  "function.deadline_exceeded",
   "workflow.event_timeout",
 ]);
 
@@ -196,7 +196,7 @@ export const failureOf = (
   // A call whose effect runs once (`onceCalls`) that ran out of time may
   // have taken effect: its outcome is unknown, never a catch's to take.
   const timedOut =
-    error.name === "TimeoutError" || code === "operation.deadline_exceeded";
+    error.name === "TimeoutError" || code === "function.deadline_exceeded";
   if (timedOut && task.kind === "call" && timesOutUnknown.has(task.call.name)) {
     return uncatchable;
   }

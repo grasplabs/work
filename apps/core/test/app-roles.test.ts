@@ -123,7 +123,7 @@ const asUser = {
   report: "ok",
   open: "ok",
   // Past the role check: the App's release has no such function.
-  call: "operation.not_found",
+  call: "function.not_found",
   members: "ok",
   read: "role.forbidden",
   commit: "role.forbidden",

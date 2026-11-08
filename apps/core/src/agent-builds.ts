@@ -210,7 +210,7 @@ const callNote =
  * change of the draft's code fixes.
  */
 const draftFixable: ReadonlySet<string> = new Set([
-  "operation.not_found",
+  "function.not_found",
   ...draftSealFailures,
 ]);
 
@@ -1600,7 +1600,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             ? run.release.app.operations[method]
             : undefined;
           if (operation === undefined || operation.visibility !== "public") {
-            throw operationErrors.create("operation.not_found");
+            throw operationErrors.create("function.not_found");
           }
           ({ kind } = operation);
         } catch (error) {

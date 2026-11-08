@@ -19,6 +19,7 @@ import {
 } from "@grasp-os/brain/skills";
 import { read } from "@grasp-os/brain/tools";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
 import { collectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -28,7 +29,6 @@ import {
   searchQueryMaxLength,
 } from "@grasp-os/shared/knowledge";
 import type { SearchHit, SearchResults } from "@grasp-os/shared/knowledge";
-import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";

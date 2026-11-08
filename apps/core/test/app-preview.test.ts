@@ -280,7 +280,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
         revision: 1,
         refresh: { revision: 1, appVersion: 1 },
         callsAt: { appVersion: 1 },
-        titles: "operation.not_found",
+        titles: "function.not_found",
         update: "page.build_failed",
       },
       reports: { seen: true, problems: 1 },

@@ -117,7 +117,7 @@ const checkedArgs = (
 /**
  * Answers read `name` with `args` (App code's, or a page's), for the
  * caller `access` names: who calls, or a directory read. Anything else
- * is a read that doesn't exist (`operation.not_found`).
+ * is a read that doesn't exist (`function.not_found`).
  */
 export const answerPeople = async (
   access: PeopleAccess,
@@ -125,7 +125,7 @@ export const answerPeople = async (
   args: unknown
 ): Promise<Json> => {
   if (!isPeopleOperationName(name)) {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   const checked = checkedArgs(name, args);
   if (name === "user") {
@@ -155,10 +155,10 @@ export const peopleReadOf = (reference: {
     return undefined;
   }
   if (rest.length > 0 || !isPeopleOperationName(name)) {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   if (reference.kind !== "query") {
-    throw operationErrors.create("operation.kind_mismatch");
+    throw operationErrors.create("function.kind_mismatch");
   }
   return name;
 };

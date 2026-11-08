@@ -361,7 +361,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
           {}
         )
       )
-    ).toBe("operation.kind_mismatch");
+    ).toBe("function.kind_mismatch");
     expect(
       codeOf(
         await callWith(
@@ -371,7 +371,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
           {}
         )
       )
-    ).toBe("operation.not_found");
+    ).toBe("function.not_found");
     // Another App's reference of the same preferences is the same name: it
     // reads this App's, as the call is made to this App.
     const other = await sealedDesk();
@@ -383,7 +383,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     // An App that declares none has none.
     const plain = await sealedDesk(filesWith("", { withNotes: true }));
     expect(codeOf(await callWith(plain, plain.owner, getReference, {}))).toBe(
-      "operation.not_found"
+      "function.not_found"
     );
   });
 
@@ -437,7 +437,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       request,
       Date.now() - 1
     );
-    expect(codeOf(late.result)).toBe("operation.deadline_exceeded");
+    expect(codeOf(late.result)).toBe("function.deadline_exceeded");
     // Still allowed when it read, no longer when it would write: nothing
     // is written.
     let checks = 0;

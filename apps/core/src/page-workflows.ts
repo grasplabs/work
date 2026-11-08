@@ -8,11 +8,11 @@ import type { BoundWorkflow, WorkflowPin } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   categoryOf,
   isRetryableCode,
@@ -368,7 +368,7 @@ export const resolveIn = async (
   const found =
     alias === undefined ? undefined : await declaredIn(release, alias);
   if (alias === undefined || found === undefined) {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   const { manifest } = release;
   if (
@@ -1635,7 +1635,7 @@ const sent = async (
     ? resolved.declared.events[alias]
     : undefined;
   if (declared === undefined) {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   if (
     declared.type !== type ||

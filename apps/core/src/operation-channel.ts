@@ -1,9 +1,9 @@
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
+import { isAppErrorCode } from "@grasp-os/shared/function-limits";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { isAppErrorCode } from "@grasp-os/shared/operation-limits";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
@@ -20,13 +20,13 @@ import {
 // - what it may do is fixed by the invocation that made it: a query's has
 //   no write, call or resource, a mutation's no resource, only a streaming
 //   action's has `emit`, and asking
-//   anyway is refused whatever the App code says (`operation.read_only`,
-//   `operation.no_resources`, ...);
-// - it stops working once its invocation ends (`operation.ended`), so a
+//   anyway is refused whatever the App code says (`function.read_only`,
+//   `function.no_resources`, ...);
+// - it stops working once its invocation ends (`function.ended`), so a
 //   channel kept from an earlier call acts for no one;
 // - it answers at most `platformLimits.invocationHostCalls` reads, calls
 //   and resource requests (100), counted as each reaches it, refused or
-//   not, and none after that (`operation.call_limit`): a loop of them ends
+//   not, and none after that (`function.call_limit`): a loop of them ends
 //   there, and a function's nested calls, each an invocation of its own
 //   with its own channel, are bounded by the call's budget (operations.ts).
 //   Staged writes aren't counted: a commit bounds them
@@ -83,7 +83,7 @@ export interface ChannelCapabilities {
    */
   readonly refused?: (name: CapabilityName, error: CodedError) => void;
   /**
-   * The refusal for each capability it hasn't (`operation.not_found` for
+   * The refusal for each capability it hasn't (`function.not_found` for
    * one without its own).
    */
   readonly refusals: Readonly<
@@ -209,17 +209,17 @@ class Channel extends ChannelTarget implements OperationChannel {
         this.#state.uses += 1;
       }
       if (this.#state.ended) {
-        throw operationErrors.create("operation.ended");
+        throw operationErrors.create("function.ended");
       }
       // A write is never refused for the reads and calls before it.
       if (counted && this.#state.uses > platformLimits.invocationHostCalls) {
-        throw operationErrors.create("operation.call_limit", {
+        throw operationErrors.create("function.call_limit", {
           maxHostCalls: platformLimits.invocationHostCalls,
         });
       }
       if (capability === undefined) {
         throw operationErrors.create(
-          this.#capabilities.refusals[name] ?? "operation.not_found"
+          this.#capabilities.refusals[name] ?? "function.not_found"
         );
       }
       return await capability(...plainArgs(args));
@@ -233,7 +233,7 @@ class Channel extends ChannelTarget implements OperationChannel {
         throw error;
       }
       const { requestId, path } = this.#capabilities;
-      log.error("operation.channel_failed", {
+      log.error("function.channel_failed", {
         requestId,
         path,
         capability: name,
@@ -265,7 +265,7 @@ class Channel extends ChannelTarget implements OperationChannel {
 export interface OpenChannel {
   /** What App code is handed. */
   readonly channel: OperationChannel;
-  /** Ends the channel: every later use is `operation.ended`. */
+  /** Ends the channel: every later use is `function.ended`. */
   readonly end: () => void;
   /**
    * The expected error of `code` the channel raised to App code, if it

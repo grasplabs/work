@@ -72,7 +72,7 @@ const linkFailure = (error: unknown): GraspError => {
   const settled = readRejection(error);
   return settled.kind === "failed"
     ? settled.error
-    : clientError("operation.unreachable");
+    : clientError("function.unreachable");
 };
 
 /** `client.links` (spec 10.7.7): opening a links resource's URLs. */

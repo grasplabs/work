@@ -40,8 +40,8 @@ export const maxQueuedPerRun = 8;
 /**
  * Runs `work` once the calls run `key` made before it have finished, one
  * at a time (no key: at once), or refuses with
- * `operation.deadline_exceeded` if its turn doesn't come by `until`, and
- * with `operation.sandbox_busy` if the run has {@link maxQueuedPerRun}
+ * `function.deadline_exceeded` if its turn doesn't come by `until`, and
+ * with `function.sandbox_busy` if the run has {@link maxQueuedPerRun}
  * calls queued already.
  */
 export const inTurn = async <T>(
@@ -54,7 +54,7 @@ export const inTurn = async <T>(
   }
   const count = queued.get(key) ?? 0;
   if (count >= maxQueuedPerRun) {
-    throw operationErrors.create("operation.sandbox_busy");
+    throw operationErrors.create("function.sandbox_busy");
   }
   queued.set(key, count + 1);
   const before = turns.get(key) ?? Promise.resolve();
@@ -86,7 +86,7 @@ export const inTurn = async <T>(
     ]);
     waited.abort();
     if (!turnCame) {
-      throw operationErrors.create("operation.deadline_exceeded");
+      throw operationErrors.create("function.deadline_exceeded");
     }
     return await work();
   } finally {

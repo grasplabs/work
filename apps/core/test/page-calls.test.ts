@@ -1,8 +1,8 @@
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   appFunctionPath,
   pageLeaseHeader,

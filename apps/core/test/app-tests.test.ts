@@ -147,7 +147,7 @@ export default appTest({
     "the host refuses what a page's call is refused": async (t) => {
       const owner = await t.as("note-owner");
       const internal = { ...api.notes.titles, name: "notes.count" };
-      await t.rejectsCode(owner.query(internal, {}), "operation.not_found");
+      await t.rejectsCode(owner.query(internal, {}), "function.not_found");
       await t.rejectsCode(
         () => owner.mutation(api.notes.create, { title: "" }),
         "contract.invalid_args"

@@ -6,6 +6,7 @@ import type {
   SkillsSelectInput,
 } from "@grasp-os/brain/contract";
 import { originRefusal } from "@grasp-os/shared/app-link-limits";
+import { resourceAliasPattern } from "@grasp-os/shared/function-limits";
 import type {
   GuestChat,
   GuestInvitation,
@@ -15,7 +16,6 @@ import type {
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { ResourceRecallInput } from "@grasp-os/shared/knowledge";
-import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 import type {
   PlatformMeasure,
   platformMeasures,

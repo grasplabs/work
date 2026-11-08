@@ -115,7 +115,7 @@
     "./notifications": "./src/notifications.ts",
     "./oauth-relay": "./src/oauth-relay.ts",
     "./onboarding": "./src/onboarding.ts",
-    "./operation-limits": "./src/operation-limits.ts",
+    "./function-limits": "./src/function-limits.ts",
     "./operations": "./src/operations.ts",
     "./org-settings": "./src/org-settings.ts",
     "./organization": "./src/organization.ts",

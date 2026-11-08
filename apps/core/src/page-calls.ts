@@ -4,11 +4,11 @@ import {
   isExpectedError,
   requestErrors,
 } from "@grasp-os/shared/errors";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { readAtMost } from "@grasp-os/shared/http";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { AppErrorPayload } from "@grasp-os/shared/operations";
 import {
@@ -125,7 +125,7 @@ import { routeMember } from "./staff-audit.ts";
 //   a refusal ends the relay with it and cancels the invocation at once.
 // - Access narrowed since the stream started reaches what it computed:
 //   the relay refuses once the person's role or teams differ from those
-//   it started under (`operation.access_changed`), and so does the
+//   it started under (`function.access_changed`), and so does the
 //   invocation on an attach or a join.
 // - Another person reaches the stream: the invocation is named by the
 //   person signed in, never by anything in the request.
@@ -426,7 +426,7 @@ const stillTheirs = async (
   }
   // Refuses, too, someone with no role in the App any more.
   if ((await accessOf(env, now, call.id)) !== access) {
-    throw operationErrors.create("operation.access_changed");
+    throw operationErrors.create("function.access_changed");
   }
   await requireRuns(env, now, call, operation, stage);
   for (const version of versions) {

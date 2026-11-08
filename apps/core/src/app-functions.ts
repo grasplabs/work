@@ -2,6 +2,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import {
   agentIdSchema,
   appIdSchema,
@@ -9,7 +10,6 @@ import {
 } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   categoryOf,
   isRetryableCode,
@@ -351,8 +351,8 @@ export const readFunctionRequest = (request: unknown): FunctionRequest => {
 /**
  * The path of the public function `reference` names in `release`, the
  * release that answers the call: refused as one that doesn't exist
- * (`operation.not_found`) when there is none or it is internal, and
- * `operation.kind_mismatch` for another kind. A page's calls always name
+ * (`function.not_found`) when there is none or it is internal, and
+ * `function.kind_mismatch` for another kind. A page's calls always name
  * the App's current release, whatever build it runs (its lease only
  * says who opened it and what core served), so an old page, a replayed
  * lease or a forged name reaches only the current code's public
@@ -368,10 +368,10 @@ export const publicOperationOf = (
     : undefined;
   // An internal function is refused as one that doesn't exist.
   if (operation === undefined || operation.visibility !== "public") {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   if (operation.kind !== reference.kind) {
-    throw operationErrors.create("operation.kind_mismatch");
+    throw operationErrors.create("function.kind_mismatch");
   }
   return operation.path;
 };
@@ -545,7 +545,7 @@ const coreAnsweredGate =
     );
     await operationRoles(env, by, appIdSchema.parse(app));
     if (Date.now() >= deadline) {
-      throw operationErrors.create("operation.deadline_exceeded");
+      throw operationErrors.create("function.deadline_exceeded");
     }
   };
 
