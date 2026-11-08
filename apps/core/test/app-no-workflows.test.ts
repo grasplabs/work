@@ -40,7 +40,7 @@ const stealing = {
   "workflows/steal.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("steal", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("send", { description: "Send", sideEffect: true }, async () =>
+  await step.do("send", { description: "Send" }, async () =>
     await env.MAIL.call("mail.send", { to: "out@example.test", subject: "Data" })
   )
 );

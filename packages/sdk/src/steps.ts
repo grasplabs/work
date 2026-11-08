@@ -1,22 +1,14 @@
-// What the runtime and the describer agree on about steps. Internal to the
-// SDK: neither workflow code nor the runtime imports this module.
+// What the runner checks a step's options by. Internal to the SDK: neither
+// workflow code nor the runtime imports this module.
 
-import { resourceAliasPattern } from "@grasp-os/shared/function-limits";
 import {
   maxAttemptTimeoutMs,
   maxStepRetries,
 } from "@grasp-os/shared/workflows";
-import type { StepKind } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { paramValueSchemas } from "./params.ts";
-import type {
-  CaughtError,
-  DecisionRequest,
-  RetryChoice,
-} from "./workflow-steps.ts";
-
-export type { StepKind } from "@grasp-os/shared/workflows";
+import type { CaughtError, RetryChoice } from "./workflow-steps.ts";
 
 // Step names become part of engine step names and idempotency keys
 // (`runId:name`), so they never contain `:`, `#` or `$`, which the SDK uses
@@ -91,142 +83,73 @@ const durationSchema = z
 
 // Step options
 
-/**
- * How the describer reads an option in the code: `literal` must be written
- * as a literal, `param` as a parameter (`params.reviewer`), `value` as
- * either (or an object of literals), and `code` as any expression.
- */
-type OptionForm = "literal" | "param" | "value" | "code";
-
-/** The form of each option schema, for the describer. */
-const optionForms = z.registry<{ form: OptionForm }>();
-
-const option = <Schema extends z.ZodType>(
-  schema: Schema,
-  form: OptionForm
-): Schema => {
-  const registered: z.ZodType = schema;
-  optionForms.add(registered, { form });
-  return schema;
-};
-
 const maxKeyLength = 128;
 const text = z.string().trim().min(1);
 
 const common = {
-  description: option(text, "literal"),
-  key: option(
-    z
-      .union([
-        // Encoded into the engine's step name; ill-formed text can't be.
-        z
-          .string()
-          .refine(
-            (key) =>
-              key !== "" &&
-              key.isWellFormed() &&
-              encodeURIComponent(key).length <= maxKeyLength
-          ),
-        z.number().refine(Number.isFinite),
-      ])
-      .optional(),
-    "code"
-  ),
+  description: text,
+  key: z
+    .union([
+      // Encoded into the engine's step name; ill-formed text can't be.
+      z
+        .string()
+        .refine(
+          (key) =>
+            key !== "" &&
+            key.isWellFormed() &&
+            encodeURIComponent(key).length <= maxKeyLength
+        ),
+      z.number().refine(Number.isFinite),
+    ])
+    .optional(),
 };
 
 // Refused here, where the step is written, rather than held to the
 // platform's ceilings at run time without the author seeing it: a
 // declaration may only be stricter. The host refuses the same
 // for code that gets past the SDK.
-const retries = option(
-  z
-    .strictObject({
-      limit: z
-        .int()
-        .min(0)
-        .max(maxStepRetries, {
-          message: `A step retries at most ${maxStepRetries} times, ${maxStepRetries + 1} attempts in all`,
-        }),
-      delay: durationSchema.optional(),
-      backoff: z.enum(["constant", "linear", "exponential"]).optional(),
-    })
-    .optional(),
-  "value"
-);
+const retries = z
+  .strictObject({
+    limit: z
+      .int()
+      .min(0)
+      .max(maxStepRetries, {
+        message: `A step retries at most ${maxStepRetries} times, ${maxStepRetries + 1} attempts in all`,
+      }),
+    delay: durationSchema.optional(),
+    backoff: z.enum(["constant", "linear", "exponential"]).optional(),
+  })
+  .optional();
 /** How long one attempt of a step may run: up to a minute. */
-const attemptTimeoutSchema = durationSchema.refine(
-  (milliseconds) => milliseconds <= maxAttemptTimeoutMs,
-  {
+const attemptTimeout = durationSchema
+  .refine((milliseconds) => milliseconds <= maxAttemptTimeoutMs, {
     message: `A step attempt's timeout is at most ${maxAttemptTimeoutMs / 1000} seconds, e.g. "30 seconds": a longer step is split into steps, or waits with step.sleep or a decision`,
-  }
-);
-const attemptTimeout = option(attemptTimeoutSchema.optional(), "value");
-const zodSchema = z.custom<z.ZodType>((value) => value instanceof z.ZodType);
+  })
+  .optional();
 
-/**
- * What each `step` method takes. One schema per method checks a call's
- * options at run time and tells the describer which options there are,
- * which are required and how each must be written.
- */
+/** What each `step` method takes, checked at run time. */
 export const stepOptionSchemas = {
-  do: z
-    .strictObject({
-      ...common,
-      sideEffect: option(z.boolean().optional(), "literal"),
-      locked: option(z.boolean().optional(), "literal"),
-      retries,
-      timeout: attemptTimeout,
-      input: option(z.json().optional(), "code"),
-    })
-    .refine(
-      (options) => options.sideEffect !== true || options.input !== undefined,
-      {
-        message:
-          "A step that changes something needs `input`: what it writes, or null",
-      }
-    ),
-  llm: z.strictObject({
+  do: z.strictObject({
     ...common,
-    // Written as a literal, so the review reads which binding each AI
-    // step goes through.
-    binding: option(z.string().regex(resourceAliasPattern), "literal"),
-    instructions: option(text, "literal"),
-    input: option(z.json(), "code"),
-    schema: option(zodSchema, "code"),
     retries,
     timeout: attemptTimeout,
+    input: z.json().optional(),
   }),
-  decision: z
-    .strictObject({
-      ...common,
-      from: option(paramValueSchemas.person, "param"),
-      ask: option(
-        z.custom<(request: DecisionRequest) => Promise<void>>(
-          (value) => typeof value === "function"
-        ),
-        "code"
-      ),
-      timeout: option(durationSchema, "value"),
-      remindAfter: option(durationSchema.optional(), "value"),
-    })
-    .refine(
-      ({ timeout, remindAfter }) =>
-        remindAfter === undefined || remindAfter < timeout,
-      { message: "A decision must remind before it times out" }
-    ),
+  decision: z.strictObject({
+    ...common,
+    from: paramValueSchemas.person,
+    timeout: durationSchema,
+  }),
   sleep: z.strictObject({
     ...common,
-    duration: option(durationSchema, "value"),
+    duration: durationSchema,
   }),
 };
 
-type StepMethod = keyof typeof stepOptionSchemas;
-
 /**
  * What the steps only generated workflows run take (`step.sleepUntil`,
- * `step.caught`, `step.listen`, and `do`'s `retry`): never a step or option the
- * describer reads, so an App's workflow that uses one is refused where it
- * is written.
+ * `step.caught`, `step.listen`, and `do`'s `retry`), whose engine methods
+ * only a sealed build's run host has.
  */
 export const generatedStepOptionSchemas = {
   sleepUntil: z.strictObject({
@@ -241,12 +164,4 @@ export const generatedStepOptionSchemas = {
       (value) => typeof value === "function"
     )
     .optional(),
-};
-
-/** The kind of step each `step` method runs. */
-export const stepKinds: Record<StepMethod, StepKind> = {
-  do: "exact",
-  llm: "ai",
-  decision: "decision",
-  sleep: "wait",
 };

@@ -1,7 +1,7 @@
 import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 
-import type { Backoff, DecisionRecipient } from "./engine.ts";
+import type { Backoff } from "./engine.ts";
 import type { Person } from "./workflow-params.ts";
 
 // Steps
@@ -65,16 +65,6 @@ type StepInput = Json | undefined;
 export interface DoOptions<Input extends StepInput = StepInput>
   extends StepOptions, AttemptOptions {
   /**
-   * Changes something outside Grasp. The step gets an idempotency key to
-   * pass to connector calls, so a retry never does the change twice.
-   */
-  sideEffect?: boolean;
-  /**
-   * Deterministic, with no model involvement: totals, account numbers and
-   * references always come from a locked step.
-   */
-  locked?: boolean;
-  /**
    * A generated workflow's only (its sealed build's run host asks it; any
    * other ignores it): once the step failed, past its retries, with a
    * failure a catch's retry policy around it may try again, which `try`
@@ -85,58 +75,9 @@ export interface DoOptions<Input extends StepInput = StepInput>
   retry?: (error: CaughtError) => Promise<RetryChoice | null>;
   /**
    * What the step works on, as JSON; the function gets it back as `input`.
-   * It's recorded with the step, and a dry run shows it for a side-effect
-   * step it doesn't run, so a side-effect step must give it (`null` when it
-   * writes nothing of its own) and take everything it writes from here.
+   * It's recorded with the step.
    */
   input?: Input;
-}
-
-/** Passed to a side-effect step: hand `idempotencyKey` to connector calls. */
-export interface SideEffectContext {
-  /**
-   * `runId:stepName` (`runId:stepName:key` for a keyed step, the run ID and
-   * key URI-encoded); the same on every retry and replay of the step.
-   */
-  idempotencyKey: string;
-}
-
-export interface LlmOptions<Output extends z.ZodType>
-  extends StepOptions, AttemptOptions {
-  /**
-   * The alias of the App's `ai` permission (`permission.ai(…)`), `"ai"`,
-   * written as a literal: the step brings its own schema. The model is
-   * the one an admin approved for it,
-   * and the call falls under that binding's caps and the run's budgets.
-   * Until an admin binds it, the step fails with `resource.unavailable`.
-   */
-  binding: string;
-  /** What the model is asked to do: the prompt. */
-  instructions: string;
-  /** What the model works on, e.g. the text of an invoice. */
-  input: Json;
-  /** The shape the answer must have. */
-  schema: Output;
-  /** A model is involved, so an AI step is never locked. */
-  locked?: never;
-  sideEffect?: never;
-}
-
-/**
- * How a person is asked to decide; `step.decision` calls it inside a
- * side-effect step.
- */
-export interface DecisionRequest extends SideEffectContext {
-  /**
-   * The people who may answer now, each with the decision's link. It
-   * leads to where they answer once signed in, and grants nothing: only
-   * the people the decision is from can answer, never the run's starter
-   * unless `from` is exactly `person:<them>` (see `DecisionOptions.from`).
-   * Empty when nobody fits `from`, or the decision was answered meanwhile.
-   */
-  recipients: DecisionRecipient[];
-  /** False the first time, true when reminding. */
-  reminder: boolean;
 }
 
 export interface DecisionOptions extends StepOptions {
@@ -148,12 +89,8 @@ export interface DecisionOptions extends StepOptions {
    * starter. Every answer is audited under who gave it.
    */
   from: Person;
-  /** Tells them there is something to decide, e.g. by email. */
-  ask: (request: DecisionRequest) => Promise<void>;
   /** Stop waiting this long after the decision opened, however long asking took. */
   timeout: Duration;
-  /** Ask once more when there is no answer this long after asking. */
-  remindAfter?: Duration;
 }
 
 /**
@@ -258,43 +195,15 @@ export interface StepRunner {
    * Runs plain code. Its result must be JSON: it's recorded, and a replay
    * returns the recorded result instead of running the code again.
    */
-  do: {
-    <T extends StepResult, Input extends Json>(
-      name: string,
-      options: DoOptions<Input> & { sideEffect: true; input: Input },
-      fn: (context: SideEffectContext & { input: Input }) => Promise<T>
-    ): Promise<T>;
-    <T extends StepResult, Input extends StepInput = undefined>(
-      name: string,
-      options: DoOptions<Input> & { sideEffect?: false },
-      fn: (context: { input: Input }) => Promise<T>
-    ): Promise<T>;
-  };
-  /**
-   * Asks a model through the model gateway, by one of the App's approved
-   * model bindings (`binding`). The answer must match `schema`; an answer
-   * that doesn't counts as a failure and is retried. A binding nobody
-   * approved, or that no longer serves its declaration, fails the step with
-   * `resource.unavailable`. The deployment's rules may refuse the call, say
-   * because it must stay in the EU, its App has read sensitive data, or a
-   * budget is used up (the binding's own caps per request, day and month,
-   * or the deployment's, workflow's, run's or person's); the step then
-   * fails with the reason, and isn't retried. Each attempt is a request of
-   * its own under the binding's cap per request, which covers both asks of
-   * an attempt whose first answer didn't fit, and the binding's bound on
-   * the answer is shared between them. A budget whose rest is
-   * held by other calls still under way is retried, as the step's retries
-   * allow, no sooner than 15 seconds on; the wait the refusal suggests is
-   * advisory.
-   */
-  llm: <Output extends z.ZodType>(
+  do: <T extends StepResult, Input extends StepInput = undefined>(
     name: string,
-    options: LlmOptions<Output>
-  ) => Promise<z.output<Output>>;
+    options: DoOptions<Input>,
+    fn: (context: { input: Input }) => Promise<T>
+  ) => Promise<T>;
   /**
    * Asks a person to decide and durably waits for the answer, until the
-   * timeout. How they are asked is up to `ask`, which gets a link to where
-   * they answer.
+   * timeout. The engine tells the people the decision is from, each with a
+   * link to where they answer.
    */
   decision: (name: string, options: DecisionOptions) => Promise<Decision>;
   /** Durably pauses the run. */
@@ -333,11 +242,8 @@ export interface UntypedStepRunner {
   do: (
     name: string,
     options: unknown,
-    fn: (
-      context: Partial<SideEffectContext> & { input: StepInput }
-    ) => Promise<unknown>
+    fn: (context: { input: StepInput }) => Promise<unknown>
   ) => Promise<unknown>;
-  llm: (name: string, options: unknown) => Promise<unknown>;
   decision: (name: string, options: unknown) => Promise<Decision>;
   sleep: (name: string, options: unknown) => Promise<void>;
   sleepUntil: (name: string, options: unknown) => Promise<void>;

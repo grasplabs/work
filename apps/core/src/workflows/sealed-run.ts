@@ -543,8 +543,7 @@ const isDecisionTask = (task: SealedTask | undefined): task is DecisionTask =>
 
 /**
  * The parts `step.decision` runs of a decision task's step besides its
- * opening: asking its people, noting when, and waiting for the answer. A
- * reminder is none: a sealed decision never reminds.
+ * opening: asking its people, noting when, and waiting for the answer.
  */
 const decisionParts = ["ask", "asked", "answer"] as const;
 
@@ -2546,11 +2545,8 @@ class SealedRun implements SealedRunKind {
         ),
       openDecision: async (request) =>
         this.#noted(attempt, await this.#openDecision(attempt, request)),
-      decisionRecipients: async (decision, reminder) =>
-        this.#noted(
-          attempt,
-          await this.#askDecision(attempt, decision, reminder)
-        ),
+      decisionRecipients: async (decision) =>
+        this.#noted(attempt, await this.#askDecision(attempt, decision)),
     };
     return new AttemptHost(
       calls,
@@ -2691,21 +2687,20 @@ class SealedRun implements SealedRunKind {
   /**
    * Asks the people of the decision decision task step `attempt` (its
    * `#ask`) is for, by the host's own notice (`askDeciders`): only the
-   * decision its task step opened, never as a reminder, and only while
-   * its binding's authority still holds. Its code
-   * learns nobody's address: it is answered no recipients.
+   * decision its task step opened, and only while its binding's authority
+   * still holds. Its code learns nobody's address: it is answered no
+   * recipients.
    */
   async #askDecision(
     attempt: StepAttempt,
-    decision: unknown,
-    reminder: unknown
+    decision: unknown
   ): Promise<Settled<[]>> {
     return await settle(async () => {
       this.#host.requireUntampered();
       await this.#host.requireCurrent(attempt, "decision");
       const { task, place } = await this.#decisionStep(attempt, "ask");
       const opened = this.#opened.get(place);
-      if (opened === undefined || decision !== opened || reminder !== false) {
+      if (opened === undefined || decision !== opened) {
         return await this.#host.refuseIn(
           attempt,
           tampering(`Task "${task.id}" asks once, for the decision it opened.`),

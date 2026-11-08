@@ -13,8 +13,7 @@ export interface AttemptCalls {
     request: unknown
   ) => Promise<Settled<{ decision: string; deadline: number }>>;
   decisionRecipients: (
-    decision: unknown,
-    reminder: unknown
+    decision: unknown
   ) => Promise<Settled<DecisionRecipient[]>>;
 }
 
@@ -135,9 +134,8 @@ export class AttemptHost extends RpcTarget implements AttemptCalls {
   }
 
   async decisionRecipients(
-    decision: unknown,
-    reminder: unknown
+    decision: unknown
   ): Promise<Settled<DecisionRecipient[]>> {
-    return await this.#calls.decisionRecipients(decision, reminder);
+    return await this.#calls.decisionRecipients(decision);
   }
 }

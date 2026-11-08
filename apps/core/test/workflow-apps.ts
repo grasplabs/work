@@ -32,10 +32,9 @@ type Builder = Parameters<typeof release>[0];
  *   answers whose it is; `ledger.purchaseOrder` finds a purchase order.
  *
  * With `ai`, it declares the `ai` permission with that bound on the
- * answer, which its workflows' AI steps go through (`step.llm`'s
- * `binding`, `"ai"`). A step may ask twice, so each ask gets half. A
- * binding holds the whole bound to what its model can answer, as an
- * action would ask for all of it: at most 6,000 tokens on Llama 3.3.
+ * answer. A binding holds the whole bound to what its model can answer,
+ * as an action would ask for all of it: at most 6,000 tokens on Llama
+ * 3.3.
  */
 export const sampleApp = ({ ai }: { ai?: number } = {}): Record<
   string,

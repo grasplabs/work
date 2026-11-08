@@ -1,24 +1,6 @@
 // What the engine adapter implements; workflow code never imports it.
 import type { RunId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { z } from "zod";
-
-/** One call to the model gateway, made on behalf of an AI step. */
-export interface ModelRequest {
-  /** The step the call is made for, for the audit log and cost reporting. */
-  step: string;
-  /**
-   * The alias of the App's model resource the call goes through: an
-   * approved binding of it names the model and caps what it may spend.
-   */
-  binding: string;
-  /** What the model is asked to do. */
-  instructions: string;
-  /** What it works on. */
-  input: Json;
-  /** The model must answer with JSON that matches this schema. */
-  outputSchema: z.core.JSONSchema.JSONSchema;
-}
 
 /** An answer to a decision, as a test gives it (`@grasp-os/sdk/testing`). */
 export interface DecisionAnswer {
@@ -87,12 +69,7 @@ interface EngineStepOptions {
   retries?: EngineRetries;
   /** How long one attempt may take, in milliseconds; a minute when missing. */
   timeout?: number;
-  /**
-   * The step changes something outside Grasp. A dry run records it with its
-   * input instead of running it.
-   */
-  sideEffect?: boolean;
-  /** What the step works on, for run history and dry-run reports. */
+  /** What the step works on, for run history. */
   input?: Json;
 }
 
@@ -108,9 +85,8 @@ interface EngineStepOptions {
  * from the start at any time: every method that takes a step name must return
  * the recorded outcome when that name already completed in this run.
  *
- * The SDK reads `params` and calls `callModel`, `openDecision` and
- * `decisionRecipients` only inside `do`, so they need not be durable
- * themselves.
+ * The SDK reads `params` and calls `openDecision` and `decisionRecipients`
+ * only inside `do`, so they need not be durable themselves.
  *
  * Engines may keep only a failed step's error name and message (Cloudflare
  * Workflows does); the SDK puts what it needs to recover into both.
@@ -178,8 +154,6 @@ export interface WorkflowEngine {
     options: EngineStepOptions,
     takes: (error: Json) => Promise<boolean>
   ) => Promise<unknown>;
-  /** Calls the model gateway and returns the model's JSON answer. */
-  callModel: (request: ModelRequest) => Promise<unknown>;
   /**
    * Opens a decision on `step` in this run, answered only by the people
    * `from` names, never the run's starter unless `from` is exactly
@@ -197,13 +171,12 @@ export interface WorkflowEngine {
     timeout: number;
   }) => Promise<{ decision: string; deadline: number }>;
   /**
-   * The people an open decision asks now, each with the decision's link;
-   * nobody once it's answered. Called inside the step that asks them.
+   * Tells the people an open decision asks, each with the decision's
+   * link: nobody once it's answered. Called inside the step that asks
+   * them. What it answers isn't the run's to read (a sealed build's run
+   * host answers nobody).
    */
-  decisionRecipients: (
-    decision: string,
-    reminder: boolean
-  ) => Promise<DecisionRecipient[]>;
+  decisionRecipients: (decision: string) => Promise<DecisionRecipient[]>;
   /**
    * Durably waits up to `timeout` milliseconds (0: not at all) for an
    * answer to a decision, and returns how it stands then. With `last`, a

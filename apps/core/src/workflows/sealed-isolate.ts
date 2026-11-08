@@ -257,7 +257,7 @@ export class Run extends WorkerEntrypoint {
         caught: async (name, options, takes) => unwrapped(await host.caught(name, options, async (attempt, error) => await inAttempt(attempt, async () => await settled(async () => await takes(error))))),
         listen: async (name) => unwrapped(await host.listen(name)),
         openDecision: async (request) => unwrapped(await currentAttempt().openDecision(request)),
-        decisionRecipients: async (decision, reminder) => unwrapped(await currentAttempt().decisionRecipients(decision, reminder)),
+        decisionRecipients: async (decision) => unwrapped(await currentAttempt().decisionRecipients(decision)),
         waitForDecision: async (name, options) => unwrapped(await host.waitForDecision(name, options)),
       };
       return await definition.run(engine, input);

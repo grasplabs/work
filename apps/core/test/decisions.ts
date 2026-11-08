@@ -119,13 +119,6 @@ export const day = 86_400_000;
 export const week = 7 * day;
 
 /**
- * An App run's decision a test acts on while it waits for the reminder:
- * due a day after the ask, its deadline a week after it, so nothing a
- * test does races either (`decisionTimePassed`, runs.ts).
- */
-export const reminding = { timeout: week, remindAfter: day };
-
-/**
  * A new approval workflow asking as `asking` says, published by
  * `builder`, its decision contract published and its binding approved by
  * `admin`, for `asking.from`: its ID.

@@ -389,43 +389,6 @@ export type DeliveredConnectorEvent = z.infer<
   typeof deliveredConnectorEventSchema
 >;
 
-/** Most triggers one workflow declares. */
-const maxTriggerDeclarations = 20;
-
-/**
- * A trigger as a workflow's code declares it (the SDK's `Trigger`), within
- * the bounds core keeps: the SDK refuses a definition outside them, so a
- * version whose triggers core would refuse never passes its tests. Which
- * parameter a schedule names, and whether it is a schedule, is the SDK's
- * to check.
- */
-export const triggerDeclarationSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("manual") }),
-  z.object({
-    type: z.literal("schedule"),
-    param: paramDeclarationSchema.shape.name,
-    timeZone: z
-      .string()
-      .max(64)
-      .refine(isTimeZone, "Not a time zone the runtime knows")
-      .optional(),
-  }),
-  z.object({
-    type: z.literal("event"),
-    event: eventTypeSchema,
-    filter: eventFilterSchema.optional(),
-  }),
-  z.object({ type: z.literal("email"), address: emailLocalPartSchema }),
-]);
-
-/** A trigger as a workflow's code declares it. */
-export type TriggerDeclaration = z.infer<typeof triggerDeclarationSchema>;
-
-/** A workflow's triggers: at most {@link maxTriggerDeclarations}. */
-export const triggerDeclarationsSchema = z
-  .array(triggerDeclarationSchema)
-  .max(maxTriggerDeclarations);
-
 /**
  * What core's own steps of a run start with (core's workflows/), and the
  * keys core derives under a run's: a workflow's own steps never do, so
@@ -750,13 +713,6 @@ export interface WorkflowRun {
    */
   detailsRemoved?: true;
 }
-
-/**
- * How a step works: `exact` is plain code, `ai` asks a model for output of a
- * fixed shape, `decision` waits for a person, `wait` waits for time or an
- * event.
- */
-export type StepKind = "exact" | "ai" | "decision" | "wait";
 
 /** The SDK's own step, which reads the run's parameters and calls nothing. */
 export const paramsStep = "$params";

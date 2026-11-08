@@ -639,9 +639,8 @@ class Generator {
    * the recorded one, and waits for the answer: `{ timedOut: true }` once
    * its timeout passes. Its description is the step's ID, as every
    * step's: the host reads neither it nor the timeout passed here (the
-   * SDK requires one; the host's is the sealed one), and the format has
-   * no `ask` and no `remindAfter` (the schema refuses both), since telling
-   * people is the host's, so the SDK's `ask` does nothing here.
+   * SDK requires one; the host's is the sealed one). Telling people is
+   * the host's alone.
    */
   #decision(
     step: Placed<Extract<Step, { type: "decision" }>>,
@@ -696,7 +695,7 @@ class Generator {
       (inner, entered) => {
         this.#line(
           inner,
-          `steps[${literal(step.id)}] = { output: await step.decision(${literal(step.id)}, ${this.#options(step, "task", [`from: ${entered}.recipients[0]`, `timeout: ${literal(timeoutMs ?? sealedBuildLimits.deadlineMs)}`, "ask: async () => {}"])}) };`
+          `steps[${literal(step.id)}] = { output: await step.decision(${literal(step.id)}, ${this.#options(step, "task", [`from: ${entered}.recipients[0]`, `timeout: ${literal(timeoutMs ?? sealedBuildLimits.deadlineMs)}`])}) };`
         );
       }
     );
