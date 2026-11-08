@@ -157,7 +157,7 @@ type NumericField<Document> = {
  * ctx.db.query("notes").filter({ rank: { lt: 3 } }); // values below 3 only
  * ```
  */
-export interface FieldCondition<Value> {
+interface FieldCondition<Value> {
   readonly eq?: Value;
   readonly neq?: Value;
   readonly gt?: NonNullable<Value>;
@@ -175,7 +175,7 @@ export interface FieldCondition<Value> {
  * record whose title isn't "a", those without a title included. Data,
  * never a function: the host evaluates it.
  */
-export type QueryFilter<Document> = {
+type QueryFilter<Document> = {
   readonly [Key in FilterField<Document>]?:
     | Present<Document[Key]>
     | FieldCondition<Present<Document[Key]>>;
@@ -186,7 +186,7 @@ export type QueryFilter<Document> = {
 };
 
 /** A range a range builder answers; the brand keeps anything else out. */
-export interface IndexRange {
+interface IndexRange {
   readonly "~indexRange": true;
 }
 
@@ -220,7 +220,7 @@ interface LowerBounded<
  *   );
  * ```
  */
-export type IndexRangeBuilder<
+type IndexRangeBuilder<
   Document,
   Fields extends readonly unknown[],
 > = Fields extends readonly [
@@ -274,7 +274,7 @@ type Bounded<
 > = number extends Count ? Count : Count extends Allowed ? Count : Refusal;
 
 /** What `paginate` takes: as `paginationOptionsValidator` normalizes it. */
-export interface PaginationOptions<PageSize extends number = number> {
+interface PaginationOptions<PageSize extends number = number> {
   readonly pageSize?: Bounded<
     PageSize,
     Exclude<ResultCount, 0>,
@@ -346,7 +346,7 @@ export type Related<Value, Tables extends AnyTables> = [
     : never;
 
 /** A record with the related records of `Fields`, as `.with` answers it. */
-export type WithRelated<
+type WithRelated<
   Document,
   Fields extends keyof Document,
   Tables extends AnyTables,
@@ -365,7 +365,7 @@ export type WithRelated<
  * numeric fields to sum, average, or take the least or greatest of in
  * each group (at most 8 of these together).
  */
-export interface GroupOptions<
+interface GroupOptions<
   Document,
   By extends GroupField<Document>,
   Sum extends NumericField<Document>,
@@ -403,7 +403,7 @@ export interface Group<
 }
 
 /** A query's terminals that return records: each reads, bounded. */
-export interface RecordReads<Document> {
+interface RecordReads<Document> {
   /** At most `count` records, 0 to 100. */
   readonly take: <const Count extends number>(
     count: Bounded<
@@ -453,7 +453,7 @@ export type SearchQuery<
 };
 
 /** A query's terminals: each reads, bounded. */
-export interface QueryReads<Document> extends RecordReads<Document> {
+interface QueryReads<Document> extends RecordReads<Document> {
   /** The only record, or null; `data.not_unique` if there are more. */
   readonly unique: () => Promise<Document | null>;
   /** A count, or the sum, least or greatest of a declared numeric field. */
@@ -528,7 +528,7 @@ export type Query<
       });
 
 /** `aggregate`'s operations. */
-export interface Aggregate<Document> {
+interface Aggregate<Document> {
   (
     options:
       | { readonly operation: "count" }
@@ -541,7 +541,7 @@ export interface Aggregate<Document> {
 }
 
 /** A query of one table, before an index is chosen. */
-export type QueryInitializer<
+type QueryInitializer<
   Table extends AnyTable,
   TableName extends string,
   Tables extends AnyTables = AnyTables,
@@ -572,7 +572,7 @@ type SearchableTable<Tables extends AnyTables> = {
 }[keyof Tables & string];
 
 /** What `get` may assert. */
-export interface GetOptions {
+interface GetOptions {
   /**
    * The revision the caller expects the record at: a different one fails
    * with `data.conflict`. Applies only to a record the caller may see.
@@ -622,7 +622,7 @@ export interface DatabaseReader<Tables extends AnyTables> {
  * Runs one read for the invocation: supplied by the trusted host, which
  * resolves the caller, the store and the pinned schema itself.
  */
-export type ReadExecutor = (request: ReadRequest) => Promise<unknown>;
+type ReadExecutor = (request: ReadRequest) => Promise<unknown>;
 
 /** Why a query was refused while it was built. */
 export type QueryDefinitionCode =
@@ -1580,12 +1580,12 @@ type OptionalField<Table extends AnyTable> = {
  * What a patch sets: any of the table's fields, as stored. A field left
  * out keeps its value; a patch never fills in a default.
  */
-export type PatchFields<Table extends AnyTable> = {
+type PatchFields<Table extends AnyTable> = {
   readonly [Key in keyof Stored<Table>]?: Present<Stored<Table>[Key]>;
 };
 
 /** What `patch` asserts, and the optional fields it removes. */
-export interface PatchOptions<Table extends AnyTable> {
+interface PatchOptions<Table extends AnyTable> {
   /** The revision the record must be at, or the commit fails. */
   readonly expectedRevision: number;
   /** Optional fields to remove; never one the patch also sets. */
@@ -1593,7 +1593,7 @@ export interface PatchOptions<Table extends AnyTable> {
 }
 
 /** What `replace` and `delete` assert. */
-export interface WriteOptions {
+interface WriteOptions {
   /** The revision the record must be at, or the commit fails. */
   readonly expectedRevision: number;
 }
@@ -1647,7 +1647,7 @@ export interface DatabaseWriter<
  * Stages one write for the invocation: supplied by the trusted host. An
  * insert answers the record's ID; the others answer nothing.
  */
-export type WriteExecutor = (request: WriteRequest) => Promise<unknown>;
+type WriteExecutor = (request: WriteRequest) => Promise<unknown>;
 
 /** The revision write options assert; refused unless valid. */
 const requiredRevisionOf = (

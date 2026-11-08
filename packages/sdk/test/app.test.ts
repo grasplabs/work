@@ -234,7 +234,7 @@ describe("access", () => {
       "an action at all",
       "action",
       { notes: { read: false } },
-      "An action has no tables",
+      "declaration has no `tables`",
     ],
     [
       "an unknown table",
@@ -879,7 +879,7 @@ describe("uses", () => {
           type: "workflow",
           alias: "followUp",
         });
-      }).includes("A query uses nothing"),
+      }).includes("A query's declaration has no `uses`"),
       // A workflow without the output a run gives.
       noOutput:
         altered((copy) => {
@@ -946,13 +946,11 @@ describe("answers for a schema change", () => {
 
 describe("declarations", () => {
   test.each([
-    ["`input`", { input: {}, returns: v.null() }, "not `input`"],
-    ["`output`", { args: {}, output: v.null() }, "not `output`"],
-    ["`reads`", { args: {}, returns: v.null(), reads: [] }, "no `reads`"],
+    ["`input`", { input: {}, returns: v.null() }, "has no `input`"],
     [
       "`uses` on a query",
       { args: {}, returns: v.null(), uses: [] },
-      "uses nothing",
+      "has no `uses`",
     ],
     [
       "a `returns` that isn't a schema",

@@ -57,10 +57,10 @@ export const manifestVersion = 1;
 export const manifestMaxBytes = 1024 * 1024;
 
 /** A table's access as a manifest holds it: both modes, explicit. */
-export type ManifestAccess = AccessModes;
+type ManifestAccess = AccessModes;
 
 /** An index as a manifest holds it: its fields, in order. */
-export interface ManifestIndex {
+interface ManifestIndex {
   readonly fields: readonly string[];
 }
 

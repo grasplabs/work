@@ -307,7 +307,7 @@ const permissionKinds = [
  * `grasp.config.ts`: the App's permissions, exported by alias
  * (`permissions.<alias>`, what a function's `uses` lists), and its config.
  */
-export const configSource = (definition: AppDefinition): string => {
+const configSource = (definition: AppDefinition): string => {
   const people = definition.permissions.some(
     (data) => data["~permission"] === peoplePermission
   );

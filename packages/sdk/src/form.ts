@@ -347,7 +347,7 @@ const nativeDescriptorOf = (
 };
 
 /** A field's upload, as the form holds it while it runs. */
-export interface UploadHold {
+interface UploadHold {
   /** Whether the edits it was started for are still the form's. */
   readonly current: () => boolean;
   /** It ended: the form may submit once every one has. */

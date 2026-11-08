@@ -494,7 +494,7 @@ export interface MigrationRow {
 }
 
 /** What the host asks of a migration: its name and a batch of rows. */
-export interface MigrationRequest {
+interface MigrationRequest {
   readonly name: string;
   readonly rows: readonly MigrationRow[];
 }
@@ -503,7 +503,7 @@ export interface MigrationRequest {
  * What a batch answered: each row's output, in order, or the row whose
  * handler threw, and what it said. The host reads all of it as hostile.
  */
-export type MigrationAnswer =
+type MigrationAnswer =
   | { readonly ok: true; readonly rows: readonly unknown[] }
   | { readonly ok: false; readonly index: number; readonly message: string };
 

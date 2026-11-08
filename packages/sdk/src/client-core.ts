@@ -556,7 +556,7 @@ interface Live {
 }
 
 /** One query, by reference and normalized arguments, shared by its readers. */
-export interface QueryEntry {
+interface QueryEntry {
   readonly key: string;
   readonly reference: ReadReference;
   readonly input: Json;
@@ -834,7 +834,7 @@ export interface WorkflowLink {
 }
 
 /** How a streaming action's call goes, beyond its progress and result. */
-export interface StreamEvents {
+interface StreamEvents {
   /** It was admitted: `cancel` cancels it for everyone following it. */
   readonly onStarted: (cancel: () => Promise<void>) => void;
   /** Its connection was lost, and the client is attaching again. */
@@ -981,7 +981,7 @@ interface Extension {
 }
 
 /** One paginated list, by reference, arguments and first page size. */
-export interface Pager {
+interface Pager {
   readonly key: string;
   readonly reference: ReadReference;
   readonly input: Json;

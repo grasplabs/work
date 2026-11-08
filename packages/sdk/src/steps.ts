@@ -66,7 +66,7 @@ const millisecondsOf = (duration: number | string): number => {
  * A time span, e.g. `"3 days"` or a number of milliseconds, as whole
  * milliseconds between 1 and 365 days' worth.
  */
-export const durationSchema = z
+const durationSchema = z
   .union([z.number(), z.string()])
   .transform((duration, context) => {
     const milliseconds = millisecondsOf(duration);
@@ -92,10 +92,10 @@ export const durationSchema = z
  * as a literal, `param` as a parameter (`params.reviewer`), `value` as
  * either (or an object of literals), and `code` as any expression.
  */
-export type OptionForm = "literal" | "param" | "value" | "code";
+type OptionForm = "literal" | "param" | "value" | "code";
 
 /** The form of each option schema, for the describer. */
-export const optionForms = z.registry<{ form: OptionForm }>();
+const optionForms = z.registry<{ form: OptionForm }>();
 
 const option = <Schema extends z.ZodType>(
   schema: Schema,
@@ -216,7 +216,7 @@ export const stepOptionSchemas = {
   }),
 };
 
-export type StepMethod = keyof typeof stepOptionSchemas;
+type StepMethod = keyof typeof stepOptionSchemas;
 
 /**
  * What the steps only generated workflows run take (`step.sleepUntil`,

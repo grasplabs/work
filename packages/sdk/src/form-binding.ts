@@ -5,5 +5,5 @@
 // this.
 
 export { bindingOf } from "./form.ts";
-export type { FormBinding, UploadHold } from "./form.ts";
+export type { FormBinding } from "./form.ts";
 export type { ValueDescriptor } from "./value-descriptor.ts";

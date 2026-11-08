@@ -16,7 +16,7 @@ const { apply, construct } = Reflect;
 const dateToString: unknown = Reflect.get(Date.prototype, "toString");
 
 /** What the clock and randomness answer from. */
-export interface ClockAndRandomness {
+interface ClockAndRandomness {
   /** `Date.now()`, `new Date()`, `Date()`, and a formatter given no date. */
   readonly now: () => number;
   readonly random: () => number;

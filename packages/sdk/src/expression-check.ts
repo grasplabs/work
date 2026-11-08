@@ -129,7 +129,7 @@ export interface ExpressionError {
  * imports the guards under `runtimeNames`. Never write it right after an identifier on
  * the line before: `name\n(…)` is a call.
  */
-export type CheckedExpression =
+type CheckedExpression =
   | {
       ok: true;
       source: string;
@@ -541,7 +541,7 @@ export const checkRoots = (
 };
 
 /** How an expression is checked. */
-export interface CheckOptions {
+interface CheckOptions {
   /** Roots beside `expressionRoots`, which are always in scope. */
   readonly roots?: readonly string[];
 }

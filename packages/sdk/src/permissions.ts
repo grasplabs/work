@@ -88,7 +88,7 @@ export const permissionAliases = Object.freeze({
 } as const);
 
 /** What an `ai` permission may say. */
-export interface AiConfig {
+interface AiConfig {
   /**
    * The most tokens one answer may take, all its asks together: a whole
    * number, 1 to 100 000.
@@ -210,7 +210,7 @@ type ContractAction<Contract, Action> = Contract extends keyof ConnectorCatalog
       : never;
 
 /** What a connection permission may say. */
-export interface ConnectionConfig<
+interface ConnectionConfig<
   Contract extends ConnectorContract,
   Actions extends readonly ConnectorAction<Contract>[],
 > {
@@ -246,7 +246,7 @@ const brainOperations: readonly BrainOperation[] = [
 ];
 
 /** What a `brain` permission may say. */
-export interface BrainConfig<Operations extends readonly BrainOperation[]> {
+interface BrainConfig<Operations extends readonly BrainOperation[]> {
   readonly operations: Operations;
   /**
    * The collections the App needs, by the names its builders gave them:
@@ -272,7 +272,7 @@ interface GraspFunctionConfig<
 }
 
 /** One of the platform's functions as a declaration holds it: data only. */
-export interface GraspFunctionShape {
+interface GraspFunctionShape {
   readonly kind: "query";
   /** The object descriptor of its arguments. */
   readonly args: ValueDescriptor;

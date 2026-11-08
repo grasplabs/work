@@ -107,12 +107,12 @@ interface SubmissionFields<Kind extends ReferenceKind> {
  * refused, as the host refuses the call (`function.mode_mismatch`). A
  * definition is told by its `stream`, a reference by what it streams.
  */
-export interface StreamingFunction {
+interface StreamingFunction {
   readonly stream: object;
 }
 
 /** Whether `Reference`, a definition or a reference, streams its progress. */
-export type IsStreaming<Reference> = Reference extends StreamingFunction
+type IsStreaming<Reference> = Reference extends StreamingFunction
   ? true
   : [ProgressOf<Reference>] extends [never]
     ? false

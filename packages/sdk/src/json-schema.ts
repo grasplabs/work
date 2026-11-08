@@ -129,7 +129,7 @@ const compositeSchema = (
 };
 
 /** How a descriptor is told as JSON Schema. */
-export interface JsonSchemaOptions {
+interface JsonSchemaOptions {
   /**
    * The exact form, as every return is checked: a field with a default
    * must be given, filled in, so a value the descriptor would complete is

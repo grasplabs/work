@@ -52,7 +52,7 @@ export interface DecisionRecipient {
  * connection, an App, a collection): a workflow's code narrows what it
  * reads, to the answer's shape or to `Json` to return it from a step.
  */
-export type BindingMethod = (...args: Json[]) => Promise<unknown>;
+type BindingMethod = (...args: Json[]) => Promise<unknown>;
 
 /**
  * What a run reaches outside its own code, by binding name: the
@@ -73,7 +73,7 @@ export type Backoff = "constant" | "linear" | "exponential";
  * How often to try a failing step again. `limit` counts retries, not
  * attempts: `limit: 2` is three attempts in all.
  */
-export interface EngineRetries {
+interface EngineRetries {
   limit: number;
   /** Before the first retry, in milliseconds; the engine's when missing. */
   delay?: number;
@@ -82,7 +82,7 @@ export interface EngineRetries {
 }
 
 /** What the SDK tells the engine about a step it runs. */
-export interface EngineStepOptions {
+interface EngineStepOptions {
   /** The engine's defaults when missing. */
   retries?: EngineRetries;
   /** How long one attempt may take, in milliseconds; a minute when missing. */

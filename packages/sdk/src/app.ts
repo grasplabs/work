@@ -172,7 +172,7 @@ export interface App {
 }
 
 /** The parts of an App the host's entry hands `registerApp`. */
-export interface AppParts {
+interface AppParts {
   /** `grasp.config.ts`'s default export. */
   readonly config: App;
   /** `server/schema.ts`'s default export. */
@@ -184,7 +184,7 @@ export interface AppParts {
 }
 
 /** What one entry of a function's `uses` is, as data. */
-export type UseManifest =
+type UseManifest =
   | {
       readonly type: "function";
       readonly path: string;
@@ -255,7 +255,7 @@ export interface AppManifest {
 }
 
 /** What the host runs an App from: its manifest and its handlers by path. */
-export interface AppInspection {
+interface AppInspection {
   readonly manifest: AppManifest;
   /** Its schema, which its functions read and write through. */
   readonly schema: SchemaDefinition;
@@ -322,7 +322,7 @@ const configKeys: ReadonlySet<string> = new Set([
  * not the App declares preferences or workflows now, so declaring one
  * later never shadows or is shadowed by a function.
  */
-export const reservedSegments: ReadonlyMap<string, string> = new Map([
+const reservedSegments: ReadonlyMap<string, string> = new Map([
   ["preferences", "the App's preferences"],
   ["workflows", "the App's workflow references"],
   ["people", "the organization's people"],
@@ -334,7 +334,7 @@ export const reservedSegments: ReadonlyMap<string, string> = new Map([
  * child, and `then`, which would make a reference look like a promise to
  * whatever awaits it.
  */
-export const referenceKeys: ReadonlySet<string> = new Set(["name", "then"]);
+const referenceKeys: ReadonlySet<string> = new Set(["name", "then"]);
 
 /**
  * Refuses `segments`, a function's path, where it can't be one: past the

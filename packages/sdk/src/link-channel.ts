@@ -18,7 +18,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 // person can ask again.
 
 /** One App's page's link channel, under its lease. */
-export interface LinkChannelOptions {
+interface LinkChannelOptions {
   readonly app: string;
   readonly lease: string;
   /**

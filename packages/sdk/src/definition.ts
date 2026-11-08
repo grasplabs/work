@@ -49,7 +49,7 @@ export interface DefinedField {
 }
 
 /** An index: its name, and the fields it orders by, by ID (or `_createdAt`, `_updatedAt`). */
-export interface DefinedIndex {
+interface DefinedIndex {
   readonly name: string;
   readonly fields: readonly string[];
 }
@@ -61,7 +61,7 @@ export type DefinedRule =
   | { readonly kind: "role"; readonly role: RowRole };
 
 /** A table's access: its modes, and its row rules. */
-export interface DefinedAccess {
+interface DefinedAccess {
   readonly read: AccessMode;
   readonly write: AccessMode;
   readonly rows?: {
@@ -114,7 +114,7 @@ export const generatedFiles = {
 } as const;
 
 /** The most bytes of a definition's text. */
-export const definitionMaxBytes = 1024 * 1024;
+const definitionMaxBytes = 1024 * 1024;
 
 /** The kind of the permission that says the App reads people. */
 export const peoplePermission = "people";
@@ -301,9 +301,7 @@ const tableOf = (table: DefinedTable): AnyTable => {
 };
 
 /** The definition's permissions, by kind, as `defineApp` takes them. */
-export const definedPermissions = (
-  definition: AppDefinition
-): AppPermissions => {
+const definedPermissions = (definition: AppDefinition): AppPermissions => {
   const permissions: Record<string, unknown> = {};
   const listed = new Map<string, unknown[]>();
   for (const data of definition.permissions) {

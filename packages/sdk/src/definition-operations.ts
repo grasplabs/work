@@ -45,13 +45,13 @@ import { v } from "./values.ts";
 // changes a name only.
 
 /** A row rule as an operation takes it: its field by name. */
-export type RuleInput =
+type RuleInput =
   | { readonly kind: "owner" }
   | { readonly kind: "person" | "team"; readonly field: string }
   | { readonly kind: "role"; readonly role: RowRole };
 
 /** A table's access as an operation takes it. */
-export interface AccessInput {
+interface AccessInput {
   readonly read: AccessMode;
   readonly write: AccessMode;
   readonly rows?: {

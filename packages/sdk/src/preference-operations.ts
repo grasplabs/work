@@ -64,9 +64,7 @@ const fieldsOf = (
  * without its default, so a field left out stays as it was rather than
  * being reset; still strict, so a key the App didn't declare is refused.
  */
-export const preferencePatch = (
-  preferences: ValueDescriptor
-): ValueDescriptor => {
+const preferencePatch = (preferences: ValueDescriptor): ValueDescriptor => {
   const fields: Record<string, ValueDescriptor> = {};
   for (const [name, field] of Object.entries(fieldsOf(preferences))) {
     const { defaultValue: _default, ...kept } = field;

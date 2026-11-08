@@ -63,7 +63,7 @@ type FixtureRowOf<Input> = Input extends AnySchema
   : Readonly<Record<string, JsonValue>>;
 
 /** One record a migration is run on before it runs on the store. */
-export interface MigrationFixture<Row, Expected> {
+interface MigrationFixture<Row, Expected> {
   /** The record's fields, as the store would hand them to the transform. */
   readonly row: Row;
   /**
@@ -74,10 +74,10 @@ export interface MigrationFixture<Row, Expected> {
 }
 
 /** The most fixtures a migration declares. */
-export const migrationMaxFixtures = 16;
+const migrationMaxFixtures = 16;
 
 /** The most bytes a migration's fixtures take as canonical JSON. */
-export const migrationFixturesMaxBytes = 64 * 1024;
+const migrationFixturesMaxBytes = 64 * 1024;
 
 /** What `migration` is declared with. */
 export interface MigrationDefinition<
@@ -130,7 +130,7 @@ export interface MigrationManifest {
 }
 
 /** A fixture as the manifest records it. */
-export interface MigrationFixtureManifest {
+interface MigrationFixtureManifest {
   readonly row: Readonly<Record<string, FrozenJson>>;
   readonly expect: Readonly<Record<string, FrozenJson>> | null;
 }
@@ -141,7 +141,7 @@ export interface Migration {
 }
 
 /** Why a migration's declaration was refused. */
-export class MigrationDefinitionError extends Error {
+class MigrationDefinitionError extends Error {
   readonly code = "migration.invalid_definition";
 
   constructor(message: string) {
@@ -155,7 +155,7 @@ const refuse = (message: string): never => {
 };
 
 /** A migration's name. */
-export const migrationNamePattern = /^[a-z][a-z0-9-]{0,63}$/u;
+const migrationNamePattern = /^[a-z][a-z0-9-]{0,63}$/u;
 
 /** A schema hash: SHA-256, lower-case hex. */
 const schemaHashPattern = /^[0-9a-f]{64}$/u;
@@ -178,10 +178,7 @@ const definitionKeys: ReadonlySet<string> = new Set([
 const handlers = new WeakMap<object, AnyMigrationHandler>();
 
 /** A handler as the runner calls it. */
-export type AnyMigrationHandler = (
-  ctx: MigrationContext,
-  row: unknown
-) => unknown;
+type AnyMigrationHandler = (ctx: MigrationContext, row: unknown) => unknown;
 
 /** An object `v.object` declared, required and not nullable: its descriptor. */
 const objectDescriptor = (schema: unknown, what: string): ValueDescriptor => {

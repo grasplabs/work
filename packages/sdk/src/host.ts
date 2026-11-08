@@ -15,12 +15,9 @@ export {
 } from "./schema.ts";
 export type {
   AccessMode,
-  AccessModes,
   IndexBase,
-  RowRole,
   RowRule,
   RowRules,
-  SchemaDefinitionCode,
   TableAccess,
 } from "./schema.ts";
 // The descriptor format a manifest names, for a host that writes one.
@@ -28,14 +25,7 @@ export { descriptorVersion } from "./value-descriptor.ts";
 
 // An App as the host runs it: its registration as data, and its handlers.
 export { inspectApp, registerApp } from "./app.ts";
-export type {
-  AppInspection,
-  AppManifest,
-  AppParts,
-  OperationManifest,
-  ServerModules,
-  UseManifest,
-} from "./app.ts";
+export type { AppManifest, OperationManifest, ServerModules } from "./app.ts";
 export { appErrorDetailsOf } from "./app-error.ts";
 export { migrationPlatformMessages } from "./migration.ts";
 export type { MigrationManifest } from "./migration.ts";
@@ -53,8 +43,6 @@ export {
   schemaManifest,
 } from "./schema-manifest.ts";
 export type {
-  ManifestAccess,
-  ManifestIndex,
   ManifestTable,
   ReadManifest,
   SchemaManifest,
@@ -92,7 +80,6 @@ export type {
   WorkflowBindingExtras,
   WorkflowPin,
   CatalogAction,
-  ReleaseIdentity,
 } from "./generate.ts";
 export { workflowQueries } from "./workflow-queries.ts";
 export type { WorkflowQueryName } from "./workflow-queries.ts";
@@ -118,16 +105,12 @@ export type {
   TeamRef,
   User,
 } from "./people.ts";
-export type {
-  PreferencePlan,
-  PreferenceRefusal,
-  PreferencesContract,
-} from "./preference-plan.ts";
+export type { PreferencePlan, PreferencesContract } from "./preference-plan.ts";
 
 // A descriptor as JSON Schema, for what reads only JSON Schema (a model
 // told its answer's shape); values are still checked by the descriptor.
 export { jsonSchemaOf } from "./json-schema.ts";
-export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";
+export type { JsonSchema } from "./json-schema.ts";
 
 // The session client as a host makes it (spec 10.7.1): over the host's own
 // transport, one per App session, mounted for the pages it serves. App
@@ -139,26 +122,11 @@ export type { ClientTransport, StreamLink } from "./client-core.ts";
 // The workflow channel the typed `useWorkflow` speaks over a client, for
 // core's own tests of the side of it core serves (page-workflows.ts).
 export { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
-export type {
-  BindingSnapshot,
-  ControlReceipt,
-  RunSnapshot,
-  WatchState,
-} from "./client-workflow.ts";
 export type { FileTransport, TransferProgress } from "./client-files.ts";
-export type { LinkTransport } from "./client-links.ts";
 
 // The page's side of core's file channel (spec 10.7.5): what moves a
 // page's files' bytes, which never travel in a JSON call.
 export { fileChannel } from "./file-channel.ts";
 export { linkChannel } from "./link-channel.ts";
-export type {
-  LinkChannel,
-  LinkChannelOptions,
-  LinkDecision,
-} from "./link-channel.ts";
-export type {
-  CoreFetch,
-  FileChannel,
-  FileChannelOptions,
-} from "./file-channel.ts";
+export type { LinkChannel, LinkDecision } from "./link-channel.ts";
+export type { FileChannel } from "./file-channel.ts";

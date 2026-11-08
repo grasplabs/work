@@ -764,7 +764,7 @@ const readBinding = (value: unknown): BindingSnapshot => {
 };
 
 /** A control's receipt, as the host answers it. */
-export interface ControlReceipt {
+interface ControlReceipt {
   readonly kind: (typeof controlKinds)[number];
   readonly state: "admitted" | "applied" | "superseded";
   /**

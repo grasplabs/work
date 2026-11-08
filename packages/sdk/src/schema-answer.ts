@@ -18,10 +18,10 @@ export interface SchemaAnswer {
 }
 
 /** The most answers an App declares. */
-export const appMaxSchemaAnswers = 64;
+const appMaxSchemaAnswers = 64;
 
 /** The most bytes an App's answers take, as canonical JSON. */
-export const schemaAnswersMaxBytes = 64 * 1024;
+const schemaAnswersMaxBytes = 64 * 1024;
 
 /** How deep an answer's value nests, at most. */
 const answerValueDepth = 32;
