@@ -613,9 +613,6 @@ const supersededHints: Readonly<Record<string, string>> = {
     "There is no `reads` list: a table's access and row rules decide what each caller reads.",
   writes:
     "There is no `writes` list: a table's access and row rules decide what each caller writes.",
-  uses: "There is no `uses` list: every function may use what the App's `permissions` in grasp.config.ts declare, as its kind allows.",
-  tables:
-    "There is no `tables`: a table's access and row rules decide what each caller reads and writes.",
   stream: "Only an action streams.",
 };
 

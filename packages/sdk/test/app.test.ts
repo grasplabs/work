@@ -198,7 +198,7 @@ describe("what a function may use", () => {
     ["action", looseAction],
   ] as const)(
     "a %s that lists its own `uses` or `tables` is refused, never narrowed",
-    (_kind, declare) => {
+    (kind, declare) => {
       expect([
         refusal(() =>
           declare({
@@ -217,8 +217,8 @@ describe("what a function may use", () => {
           })
         ),
       ]).toStrictEqual([
-        "There is no `uses` list: every function may use what the App's `permissions` in grasp.config.ts declare, as its kind allows.",
-        "There is no `tables`: a table's access and row rules decide what each caller reads and writes.",
+        `A ${kind}'s declaration has no \`uses\`.`,
+        `A ${kind}'s declaration has no \`tables\`.`,
       ]);
     }
   );
@@ -837,11 +837,6 @@ describe("answers for a schema change", () => {
 describe("declarations", () => {
   test.each([
     ["`input`", { input: {}, returns: v.null() }, "has no `input`"],
-    [
-      "its own `uses`",
-      { args: {}, returns: v.null(), uses: [] },
-      "There is no `uses` list",
-    ],
     [
       "a `returns` that isn't a schema",
       { args: {}, returns: {} },

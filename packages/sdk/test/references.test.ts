@@ -1216,7 +1216,7 @@ describe("browser permissions", () => {
         uses: [files],
         handler: () => null,
       })
-    ).toThrow(/There is no `uses` list/u);
+    ).toThrow("declaration has no `uses`.");
   });
 });
 
