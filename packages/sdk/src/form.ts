@@ -184,11 +184,11 @@ export interface GraspForm<Values, Result> {
   readonly discard: () => void;
 }
 
-/** An operation-bound form's options. */
-export interface OperationFormOptions<Reference> {
-  /** The editable input, as the operation takes it. */
+/** A function-bound form's options. */
+export interface FunctionFormOptions<Reference> {
+  /** The editable input, as the function takes it. */
   readonly defaultValues: FunctionArgs<Reference>;
-  /** After a confirmed outcome, with the operation's declared result. */
+  /** After a confirmed outcome, with the function's declared result. */
   readonly onSuccess?: (
     result: FunctionReturn<Reference>
   ) => void | Promise<void>;
@@ -298,7 +298,7 @@ type Send = (
 /** How a binding validates and submits, by the way the form was made. */
 type Target =
   | {
-      readonly kind: "operation";
+      readonly kind: "function";
       readonly send: Send;
       readonly args: ValueDescriptor;
     }
@@ -426,7 +426,7 @@ export class FormBinding {
   /**
    * What the form's validator declares of its field `name`, a path as
    * TanStack names fields (`address.city`, `lines[0].amount`): the
-   * operation's argument, or a native schema's field (a `v.object`). The
+   * function's argument, or a native schema's field (a `v.object`). The
    * field helpers read it for what a control offers (an enum's values, a
    * number's bounds, whether it may be left empty); the validator still
    * checks every value. Undefined for a field it doesn't declare, or a
@@ -516,8 +516,8 @@ export class FormBinding {
   /** Whether `field` is one the person edits. */
   #editable(field: string): boolean {
     const target = this.#target;
-    if (target.kind === "operation") {
-      // Every argument the operation declares is the person's to fill,
+    if (target.kind === "function") {
+      // Every argument the function declares is the person's to fill,
       // given a default or not: the form sends nothing else.
       return target.args.kind === "object"
         ? Object.hasOwn(target.args.fields, field)
@@ -695,7 +695,7 @@ export class FormBinding {
   }
 
   /**
-   * What a submission of an operation sends of `input`, normalized from
+   * What a submission of a function sends of `input`, normalized from
    * `values`: every field its arguments require or fill in with a
    * default, and an optional field only when it differs from what the
    * last save sent (or, before one, the form's defaults), so an edit sends
@@ -704,7 +704,7 @@ export class FormBinding {
   #changed(input: unknown, values: Record<string, unknown>): unknown {
     const target = this.#target;
     if (
-      target.kind !== "operation" ||
+      target.kind !== "function" ||
       target.args.kind !== "object" ||
       !isPlainObject(input)
     ) {
@@ -927,13 +927,13 @@ const targetOf = (client: GraspClient, target: unknown): Target => {
       // SAFETY: read as an action reference just above.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       await client.action(target as ActionReference, input, submit);
-    return { kind: "operation", send, args };
+    return { kind: "function", send, args };
   }
   const send: Send = async (input, submit) =>
     // SAFETY: read as a mutation reference just above.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     await client.mutation(target as MutationReference, input, submit);
-  return { kind: "operation", send, args };
+  return { kind: "function", send, args };
 };
 
 /**

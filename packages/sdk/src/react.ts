@@ -94,7 +94,7 @@ export type {
   FormFailure,
   FormStatus,
   GraspForm,
-  OperationFormOptions,
+  FunctionFormOptions,
   SchemaFormOptions,
   SubmitPhase,
   TextFieldName,

@@ -6,10 +6,12 @@
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
+import type { Callable } from "../src/function-references.ts";
 import { AppError, defineApp, permission } from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
 import type {
   ActionCtx,
+  AnyFunction,
   FunctionArgs,
   FunctionReturn,
   MutationCtx,
@@ -175,7 +177,11 @@ action({
 });
 
 // Without `returns`, the handler's answer is the return, of every kind.
+// Each is callable as its kind, visibility, arguments and return say.
 const counted = query({ args: {}, handler: () => ({ count: 1 }) });
+expectTypeOf(counted).toExtend<
+  Callable<"query", "public", Record<never, never>, { count: number }>
+>();
 expectTypeOf<FunctionReturn<typeof counted>>().toEqualTypeOf<{
   count: number;
 }>();
@@ -183,9 +189,19 @@ const saved = mutation({
   args: {},
   handler: async () => await Promise.resolve("saved"),
 });
+expectTypeOf(saved).toExtend<
+  Callable<"mutation", "public", Record<never, never>, string>
+>();
 expectTypeOf<FunctionReturn<typeof saved>>().toEqualTypeOf<string>();
 const tallied = action({ args: {}, handler: () => 1 });
+expectTypeOf(tallied).toExtend<
+  Callable<"action", "public", Record<never, never>, number>
+>();
 expectTypeOf<FunctionReturn<typeof tallied>>().toEqualTypeOf<number>();
+// The kind and visibility are part of the type: a query isn't a mutation,
+// and a public function isn't an internal one.
+expectTypeOf(counted).not.toExtend<Callable<"mutation">>();
+expectTypeOf(counted).not.toExtend<Callable<"query", "internal">>();
 // There is no `input`/`output` form.
 // @ts-expect-error -- `input` is superseded by `args`
 query({ input: {}, returns: v.null(), handler: () => null });
@@ -365,13 +381,16 @@ action({
   },
 });
 
-// An action may declare progress snapshots for the streaming runtime.
-action({
+// An action may declare progress snapshots for the streaming runtime,
+// and is still a function the App registers.
+const streamed = action({
   args: {},
   returns: v.null(),
   stream: v.object({ done: v.number() }),
   handler: () => null,
 });
+expectTypeOf(streamed).toExtend<AnyFunction>();
+expectTypeOf(tallied).toExtend<AnyFunction>();
 
 // Workflows (spec 7.4, 9.5): an action starts one of the App's, and a
 // mutation stages a start of one for after it commits, each by its alias.

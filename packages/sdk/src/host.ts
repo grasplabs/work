@@ -92,13 +92,13 @@ export type { WorkflowQueryName } from "./workflow-queries.ts";
 // Who calls an App, and the organization's people, which core answers
 // itself (people.ts).
 export {
-  isPeopleOperationName,
+  isPeopleFunctionName,
   peopleLimits,
-  peopleOperations,
+  peopleFunctions,
   peopleReferences,
 } from "./people.ts";
 export type {
-  PeopleOperationName,
+  PeopleFunctionName,
   PeoplePage,
   Person,
   TeamRef,

@@ -70,8 +70,15 @@ export interface ServerFunction<
 /**
  * Any declared server function. Its handler takes nothing it could be
  * called with: only the runner calls it, with the context of its kind.
+ * What it streams is anything: a streaming action is one too.
  */
-export interface AnyFunction extends Callable {
+export interface AnyFunction extends Callable<
+  FunctionKind,
+  Visibility,
+  unknown,
+  unknown,
+  unknown
+> {
   readonly kind: FunctionKind;
   readonly visibility: Visibility;
   readonly args: AnySchema;

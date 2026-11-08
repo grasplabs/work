@@ -309,7 +309,7 @@ class IsolateChannel extends IsolateChannelTarget {
   constructor(channel: FunctionChannel) {
     super();
     // SAFETY: the channel copies and checks every argument as it arrives
-    // (operation-channel.ts), whatever its declared types say.
+    // (function-channel.ts), whatever its declared types say.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     this.#channel = channel as ArrivingChannel;
   }

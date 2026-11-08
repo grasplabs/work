@@ -1,6 +1,6 @@
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
-import type { PeopleOperationName } from "./people.ts";
+import type { PeopleFunctionName } from "./people.ts";
 import type { FunctionKind } from "./server-function.ts";
 
 /**
@@ -42,8 +42,5 @@ export interface FunctionChannel {
    * (people.ts), which the host answers from its own record of the
    * caller, whatever the arguments say about anyone.
    */
-  readonly people: (
-    name: PeopleOperationName,
-    args: object
-  ) => Promise<unknown>;
+  readonly people: (name: PeopleFunctionName, args: object) => Promise<unknown>;
 }

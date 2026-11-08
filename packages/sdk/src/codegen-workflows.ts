@@ -90,36 +90,33 @@ const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
       ? "never"
       : valueTypeOf(decision.value, "input");
   };
-  const typed: Record<
-    WorkflowQueryName,
-    (operation: FunctionManifest) => string
-  > = {
+  const typed: Record<WorkflowQueryName, (fn: FunctionManifest) => string> = {
     runs: referenceTypeOf,
     history: referenceTypeOf,
-    decisions: (operation) => {
+    decisions: (fn) => {
       const items = keys
         .map(
           (name) =>
             `WorkflowDecisionInboxItem<${JSON.stringify(name)}, ${valueOf(name)}>`
         )
         .join(" | ");
-      return `FunctionReference<"query", "public", ${valueTypeOf(operation.args, "input")}, WorkflowQueryPage<${items}>>`;
+      return `FunctionReference<"query", "public", ${valueTypeOf(fn.args, "input")}, WorkflowQueryPage<${items}>>`;
     },
-    decision: (operation) => {
+    decision: (fn) => {
       const details = keys.map((name) => {
         const context = workflow.decisions[name]?.context;
         return `WorkflowDecisionDetail<${JSON.stringify(name)}, ${valueOf(name)}, ${context === undefined ? "never" : valueTypeOf(context, "output")}>`;
       });
-      return `FunctionReference<"query", "public", ${valueTypeOf(operation.args, "input")}, ${[...details, "null"].join(" | ")}>`;
+      return `FunctionReference<"query", "public", ${valueTypeOf(fn.args, "input")}, ${[...details, "null"].join(" | ")}>`;
     },
   };
   return Object.entries(operations)
     .toSorted(([a], [b]) => (a < b ? -1 : 1))
-    .flatMap(([name, operation]) => {
+    .flatMap(([name, fn]) => {
       // SAFETY: the keys of `workflowQueries`' answer are query names.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       const render = typed[name as WorkflowQueryName];
-      return operation === undefined ? [] : [[name, render(operation)]];
+      return fn === undefined ? [] : [[name, render(fn)]];
     });
 };
 
@@ -208,9 +205,9 @@ export const workflowReferenceOf = async (
     }
   }
   const queries: Record<string, unknown> = {};
-  for (const [name, operation] of Object.entries(workflowQueries(workflow))) {
-    if (operation !== undefined) {
-      queries[name] = referenceOf(operation);
+  for (const [name, fn] of Object.entries(workflowQueries(workflow))) {
+    if (fn !== undefined) {
+      queries[name] = referenceOf(fn);
     }
   }
   return {

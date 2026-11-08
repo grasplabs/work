@@ -31,7 +31,7 @@ const searchSchema = v.object({ search: v.string().trim().min(1) });
 
 // The forms, made as a component makes them.
 export const useChecks = (): void => {
-  // An operation-bound form: the input its fields, the result its submit's.
+  // An function-bound form: the input its fields, the result its submit's.
   const create = useForm(api.notes.create, {
     defaultValues: { title: "", body: "" },
     resetOnSuccess: true,
@@ -50,7 +50,7 @@ export const useChecks = (): void => {
   void create.reload;
   // @ts-expect-error -- a value of the wrong type
   void useForm(api.notes.create, { defaultValues: { title: 1 } });
-  // @ts-expect-error -- an operation-bound form takes no onSubmit of its own
+  // @ts-expect-error -- an function-bound form takes no onSubmit of its own
   void useForm(api.notes.create, {
     defaultValues: { title: "" },
     onSubmit: () => {},

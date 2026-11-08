@@ -95,8 +95,8 @@ import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
 import { CallTree } from "./call-tree.ts";
 import type { RunnerCall } from "./call-tree.ts";
 import type { OpenStore } from "./data-stores.ts";
-import { openChannel } from "./operation-channel.ts";
-import type { OpenChannel } from "./operation-channel.ts";
+import { openChannel } from "./function-channel.ts";
+import type { OpenChannel } from "./function-channel.ts";
 import { sandboxVerdictOf } from "./sandbox-session.ts";
 import { SandboxUnavailableError } from "./sandboxed.ts";
 import { readConsistently, StoreReader } from "./store-reader.ts";
@@ -111,7 +111,7 @@ import type {
 // answers what it returned or why it failed, as an `OperationResult`.
 // App code runs where the runner puts it (`Runner`; the SDK's
 // `runFunction`) and holds nothing but its invocation's channel
-// (operation-channel.ts); everything that decides what the call may do is
+// (function-channel.ts); everything that decides what the call may do is
 // here. Threat model, and how each is closed:
 //
 // - A caller names a function it can't call: only the App's public tree
@@ -130,7 +130,7 @@ import type {
 //   manifest, hashed here; no channel method takes any of them.
 // - A query writes, a mutation reaches outside, an action holds the
 //   database: each kind's channel has only its capabilities, whatever the
-//   App code sends (operation-channel.ts): an action reaches data only
+//   App code sends (function-channel.ts): an action reaches data only
 //   through the App's queries and mutations, each an invocation of its
 //   own, and a mutation runs only the App's queries.
 // - App code reaches past what the App declares: the App's permissions,
@@ -394,15 +394,15 @@ export type SensitiveReadsSink = (
  */
 type SensitiveTally = Map<string, SensitiveRead>;
 
-/** Counts what `operation`'s read answered of sensitive tables into `tally`. */
+/** Counts what `fn`'s read answered of sensitive tables into `tally`. */
 const tallied =
-  (tally: SensitiveTally, operation: FunctionManifest) =>
+  (tally: SensitiveTally, fn: FunctionManifest) =>
   (sensitive: Readonly<Record<string, number>>): void => {
     for (const [table, rows] of Object.entries(sensitive)) {
-      const key = JSON.stringify([operation.path, table]);
+      const key = JSON.stringify([fn.path, table]);
       const sofar = tally.get(key);
       tally.set(key, {
-        function: operation.path,
+        function: fn.path,
         table,
         reads: (sofar?.reads ?? 0) + 1,
         rows: (sofar?.rows ?? 0) + rows,
@@ -512,7 +512,7 @@ export interface HostedApp {
 }
 
 /** A function as its caller names it: its public path and kind. */
-export interface FunctionReference {
+export interface CalledFunction {
   readonly path: string;
   readonly kind: string;
 }
@@ -625,15 +625,15 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   const args = new Map<string, ValueSchema<unknown, unknown>>();
   const returns = new Map<string, ValueSchema<unknown, unknown>>();
   const streams = new Map<string, ValueSchema<unknown, unknown>>();
-  for (const [path, operation] of Object.entries(manifest.operations)) {
-    args.set(path, schemaOfDescriptor(operation.args));
+  for (const [path, fn] of Object.entries(manifest.operations)) {
+    args.set(path, schemaOfDescriptor(fn.args));
     // A function that declares no `returns` answers what its handler
     // returns, checked as JSON within the output limit only.
-    if (operation.returns !== null) {
-      returns.set(path, schemaOfDescriptor(operation.returns));
+    if (fn.returns !== null) {
+      returns.set(path, schemaOfDescriptor(fn.returns));
     }
-    if (operation.stream !== null) {
-      streams.set(path, schemaOfDescriptor(operation.stream));
+    if (fn.stream !== null) {
+      streams.set(path, schemaOfDescriptor(fn.stream));
     }
   }
   const tables = new Map<string, CheckedTable>();
@@ -762,26 +762,26 @@ const fromApp = <Answer>(work: () => Answer): Answer => {
  */
 const publicOperation = (
   manifest: AppManifest,
-  reference: FunctionReference,
+  reference: CalledFunction,
   streaming: boolean
 ): FunctionManifest => {
   const { path, kind } = reference;
-  const operation =
+  const fn =
     typeof path === "string" && Object.hasOwn(manifest.operations, path)
       ? manifest.operations[path]
       : undefined;
-  if (operation === undefined || operation.visibility !== "public") {
+  if (fn === undefined || fn.visibility !== "public") {
     throw operationErrors.create("function.not_found");
   }
-  if (operation.kind !== kind) {
+  if (fn.kind !== kind) {
     throw operationErrors.create("function.kind_mismatch");
   }
   // A streaming action runs only where its progress has somewhere to go,
   // and any other only where it answers once (spec 10.7.6).
-  if ((operation.stream !== null) !== streaming) {
+  if ((fn.stream !== null) !== streaming) {
     throw operationErrors.create("function.mode_mismatch");
   }
-  return operation;
+  return fn;
 };
 
 /**
@@ -793,7 +793,7 @@ const publicOperation = (
  */
 const admittedArgs = (
   compiled: Compiled,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   args: unknown
 ): Json => {
   const read = jsonWithin(args, operationInputMaxBytes);
@@ -807,7 +807,7 @@ const admittedArgs = (
       issues: argumentIssues([{ message: "The arguments aren't JSON" }]),
     });
   }
-  const schema = compiled.args.get(operation.path);
+  const schema = compiled.args.get(fn.path);
   const result = schema?.["~standard"].validate(read.json);
   if (result === undefined || result.issues !== undefined) {
     throw operationErrors.create("contract.invalid_args", {
@@ -823,7 +823,7 @@ const admittedArgs = (
 
 /**
  * What a handler returned, if its contract allows it exactly: JSON within
- * the public operation output limit (`operationResultMaxBytes`) and, where
+ * the public function output limit (`operationResultMaxBytes`) and, where
  * it declares a return, valid and already as the contract normalizes it
  * (no default left out, nothing to trim). The value is App code's: reading it can run
  * its getters, so anything reading it throws becomes `internal.unexpected`
@@ -831,7 +831,7 @@ const admittedArgs = (
  */
 const checkedReturn = (
   compiled: Compiled,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   value: unknown
 ): Json => {
   const read = fromApp(() => jsonWithin(value, operationResultMaxBytes));
@@ -850,7 +850,7 @@ const checkedReturn = (
     );
   }
   const { json } = read;
-  const schema = compiled.returns.get(operation.path);
+  const schema = compiled.returns.get(fn.path);
   if (schema === undefined) {
     return json;
   }
@@ -886,7 +886,7 @@ const checkedReturn = (
  */
 const checkedProgress = (
   compiled: Compiled,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   value: unknown
 ): Json => {
   const read = jsonWithin(value, streamProgressMaxBytes);
@@ -899,7 +899,7 @@ const checkedProgress = (
   const result =
     json === undefined
       ? undefined
-      : compiled.streams.get(operation.path)?.["~standard"].validate(json);
+      : compiled.streams.get(fn.path)?.["~standard"].validate(json);
   if (result === undefined || result.issues !== undefined) {
     throw operationErrors.create("contract.invalid_progress", {
       issues: issuesOf(result?.issues ?? [{ message: "The value isn't JSON" }]),
@@ -1260,7 +1260,7 @@ const payloadOf = (
 };
 
 /**
- * Whether `operation` may `use` table `table` at all: a query and a
+ * Whether `fn` may `use` table `table` at all: a query and a
  * mutation read a table whose read access isn't `none`, a mutation writes
  * one whose write access isn't, and an action does neither. Who may, and
  * which records, is the store's to decide by the table's access and row
@@ -1268,7 +1268,7 @@ const payloadOf = (
  */
 const mayUse = (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   table: string,
   use: "read" | "write"
 ): boolean => {
@@ -1277,17 +1277,17 @@ const mayUse = (
     throw dataErrors.create("data.unknown_table", { table });
   }
   return use === "read"
-    ? operation.kind !== "action" && checked.readable
-    : operation.kind === "mutation" && checked.writable;
+    ? fn.kind !== "action" && checked.readable
+    : fn.kind === "mutation" && checked.writable;
 };
 
 /**
- * One read for `operation`, if it may read the table, through `reader`,
+ * One read for `fn`, if it may read the table, through `reader`,
  * what it answered of sensitive tables counted in `run`'s call.
  */
 const readFor = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   reader: StoreReader,
   request: unknown
 ): Promise<unknown> => {
@@ -1297,7 +1297,7 @@ const readFor = async (
     request
   );
   const table = read.kind === "get" ? read.table : read.query.table;
-  if (!mayUse(run, operation, table, "read")) {
+  if (!mayUse(run, fn, table, "read")) {
     // Kept as evidence: with no list per function, a denied table is the
     // only trace of code reaching past what the App's tables allow.
     throw refusingUse(dataErrors.create("data.access_denied", { table }), {
@@ -1305,7 +1305,7 @@ const readFor = async (
       reason: "request_not_allowed",
     });
   }
-  return await reader.read(read, tallied(run.sensitive, operation));
+  return await reader.read(read, tallied(run.sensitive, fn));
 };
 
 /**
@@ -1407,7 +1407,7 @@ const carriedWithin = (
 /** A new staging of a mutation's writes, at `stagedAt`. */
 const stagingFor = (
   compiled: Compiled,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   stagedAt: number
 ): Staging => {
   const writes: StagedWrites["writes"] = [];
@@ -1444,7 +1444,7 @@ const stagingFor = (
     }
     // Only a mutation writes, and only a table someone may write: who may,
     // and which records, the store decides as it commits.
-    if (operation.kind !== "mutation" || !table.writable) {
+    if (fn.kind !== "mutation" || !table.writable) {
       // Kept as evidence, as a denied read is (`readFor`).
       throw refusingUse(
         dataErrors.create("data.write_denied", { table: write.table }),
@@ -1649,7 +1649,7 @@ const allowsGuests = (
   args: readonly Json[]
 ): boolean => {
   const [first] = args;
-  if (!declaration.operations.some((operation) => operation === method)) {
+  if (!declaration.operations.some((fn) => fn === method)) {
     return false;
   }
   if (method === "list") {
@@ -1727,7 +1727,7 @@ const allowsKnowledge = (
     : undefined;
   const allowed =
     schema !== undefined &&
-    declaration.operations.some((operation) => operation === method) &&
+    declaration.operations.some((fn) => fn === method) &&
     args.length === 1;
   const names = method === "recall" && isRecord(first) ? first.collections : [];
   const undeclared =
@@ -1968,7 +1968,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
 
 /**
  * The most bytes of a resource's answer to one request, as UTF-8 JSON:
- * what a workflow step may carry, not a public operation's output. It
+ * what a workflow step may carry, not a public function's output. It
  * reaches App code, never the caller as it is: what the action returns is
  * held to the output limit (`checkedReturn`), so a larger answer must be
  * cut down or paginated first.
@@ -1978,7 +1978,7 @@ const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
 /**
  * One request of a resource the App declares, as `alias` names it, from
  * an action: only a use its declaration allows (`allowedRequest`), its
- * arguments JSON within the operation input limit, through the binding
+ * arguments JSON within the function input limit, through the binding
  * core resolved for it, which must be of the declared kind and serve the
  * declared contract (`resource.unavailable` otherwise, and without a
  * binding). Its answer is checked against the contract before App code
@@ -1999,7 +1999,7 @@ const requireNotCancelled = (run: Run): void => {
 
 const resourceCall = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   request: { alias: unknown; method: unknown; args: unknown },
   key: readonly string[]
 ): Promise<Json> => {
@@ -2008,7 +2008,7 @@ const resourceCall = async (
   // checked again), and only through a permission the App declares for
   // it: never a workflow, a pages' permission or `people`.
   const declaration =
-    operation.kind === "action"
+    fn.kind === "action"
       ? actionPermission(run.app.manifest, alias)
       : undefined;
   const resourceName = sealedName(run.app.manifest.permissions, alias);
@@ -2080,22 +2080,22 @@ const resourceCall = async (
 };
 
 /**
- * The start of workflow `alias` that `operation` asks for with `method`
+ * The start of workflow `alias` that `fn` asks for with `method`
  * and `args`, if it is an action or a mutation and the App declares a
  * workflow under the alias: its alias and its input, as the declaration
- * normalizes it, within the operation input limit. `resource.not_allowed`
+ * normalizes it, within the function input limit. `resource.not_allowed`
  * for anything else, `contract.invalid_args` for input the declaration
  * doesn't take.
  */
 const workflowStart = (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   request: { alias: unknown; method: unknown; args: unknown }
 ): { alias: string; input: Json } => {
   const { alias, method } = request;
   // A start is a change, never a read: a query starts nothing.
   const declaration =
-    operation.kind === "query"
+    fn.kind === "query"
       ? undefined
       : declaredPermission(run.app.manifest, alias, "workflows");
   const args = jsonOf(request.args);
@@ -2204,13 +2204,13 @@ const startFailure = (error: unknown, requestId: string): Error => {
  */
 const startCall = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   request: { alias: unknown; method: unknown; args: unknown },
   key: readonly string[],
   /** Runs the start itself as an effect under way (`runAction`). */
   sending: <Answer>(work: () => Promise<Answer>) => Promise<Answer>
 ): Promise<Json> => {
-  const { alias, input } = workflowStart(run, operation, request);
+  const { alias, input } = workflowStart(run, fn, request);
   await admit(run.invocation);
   const starts = run.invocation.workflows;
   if (starts === undefined) {
@@ -2289,7 +2289,7 @@ const notifyPeopleCall = async (
 };
 
 /**
- * The notification `operation`, a mutation, asks for under workflow
+ * The notification `fn`, a mutation, asks for under workflow
  * `alias` with `args` (`[event, runId, data, type, fingerprint]`, the
  * runner's `ctx.sendEvent` with the generated reference it names), if the
  * App declares the workflow: the event as the reference names it (which
@@ -2299,12 +2299,12 @@ const notifyPeopleCall = async (
  */
 const workflowNotification = (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   request: { alias: unknown; args: unknown }
 ): { workflow: string; event: ListedEvent; runId: Json; data: Json } => {
   const args = jsonOf(request.args);
   const declared =
-    operation.kind === "mutation"
+    fn.kind === "mutation"
       ? declaredPermission(run.app.manifest, request.alias, "workflows")
       : undefined;
   const workflowName = sealedName(run.app.manifest.permissions, request.alias);
@@ -2370,7 +2370,7 @@ const readBudget = (): ReadBudget => ({ reads: 0, shipped: 0 });
  * `stagedReadMaxBytes` sent, so one call can't make the store apply its
  * staged writes without end. The budget is the whole call's, its nested
  * functions' reads with the one it named (`runReads`): each invocation
- * alone is held to its host calls first (operation-channel.ts).
+ * alone is held to its host calls first (function-channel.ts).
  */
 const spendRead = (budget: ReadBudget, staged: number): void => {
   budget.reads += 1;
@@ -2812,13 +2812,13 @@ export const useEvidenceWaitMs = 2000;
 
 /**
  * Keeps the evidence of a use refused at the host's admission
- * (`refusedUses`) as `operation`'s code asked it: the call's first, through
+ * (`refusedUses`) as `fn`'s code asked it: the call's first, through
  * `Invocation.refusedUse`, before the refusal reaches App code. A failure
  * to keep it is logged; the refusal stands either way.
  */
 const keepEvidence = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   error: unknown
 ): Promise<void> => {
   const refused =
@@ -2836,7 +2836,7 @@ const keepEvidence = async (
     "resource.not_allowed";
   const keeping = (async () => {
     try {
-      await keep({ function: operation.path, ...refused, errorCode });
+      await keep({ function: fn.path, ...refused, errorCode });
     } catch (keepError) {
       log.error("app.use.audit_failed", {
         requestId: run.invocation.requestId,
@@ -2872,7 +2872,7 @@ const keepEvidence = async (
  */
 const keepingEvidence = (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   capabilities: Capabilities
 ): Capabilities => {
   const keeping =
@@ -2881,7 +2881,7 @@ const keepingEvidence = (
       try {
         return await capability(...args);
       } catch (error) {
-        await keepEvidence(run, operation, error);
+        await keepEvidence(run, fn, error);
         throw error;
       }
     };
@@ -2903,7 +2903,7 @@ const keepingEvidence = (
 };
 
 /**
- * Runs `operation`'s handler with `args` over a channel of `capabilities`,
+ * Runs `fn`'s handler with `args` over a channel of `capabilities`,
  * ended once it settles, and answers its checked return; a failure as the
  * host decides it (`failureOf`). `stale` says, for a failure, whether the
  * run's reads went stale, which makes it a run to repeat rather than a
@@ -2911,7 +2911,7 @@ const keepingEvidence = (
  */
 const runHandler = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   args: Json,
   capabilities: Capabilities,
   stale?: () => Promise<boolean>,
@@ -2926,7 +2926,7 @@ const runHandler = async (
   const { people } = run.invocation;
   const calls = trackedCalls(
     {
-      ...keepingEvidence(run, operation, capabilities),
+      ...keepingEvidence(run, fn, capabilities),
       // Every kind's: who calls, and the directory, as core resolved them
       // for the invocation, nested calls' included. Each directory read is
       // admitted first, as a resource request is (`admit`): a person
@@ -2948,18 +2948,18 @@ const runHandler = async (
   );
   const open = openChannel({
     requestId: run.invocation.requestId,
-    path: operation.path,
+    path: fn.path,
     ...calls.capabilities,
     trust,
     ...(capabilities.onRefused === undefined
       ? {}
       : { refused: capabilities.onRefused }),
-    refusals: refusalsOf[operation.kind],
+    refusals: refusalsOf[fn.kind],
   });
   const stopped = new AbortController();
   const ran = settle(
     run.app.run(
-      operation.path,
+      fn.path,
       fresh(args),
       open.channel,
       stopped.signal,
@@ -2997,7 +2997,7 @@ const runHandler = async (
       }
       const sandboxed = sandboxFailureOf(outcome.thrown, {
         requestId: run.invocation.requestId,
-        path: operation.path,
+        path: fn.path,
         depth: run.depth,
       });
       if (sandboxed !== undefined) {
@@ -3007,7 +3007,7 @@ const runHandler = async (
         outcome.thrown,
         open,
         run.invocation.requestId,
-        operation.path,
+        fn.path,
         tellerOf(run)
       );
     }
@@ -3021,11 +3021,11 @@ const runHandler = async (
         unfinished,
         open,
         run.invocation.requestId,
-        operation.path,
+        fn.path,
         tellerOf(run)
       );
     }
-    return checkedReturn(run.compiled, operation, outcome.value);
+    return checkedReturn(run.compiled, fn, outcome.value);
   } catch (error) {
     if (error === staleRun) {
       throw error;
@@ -3128,7 +3128,7 @@ const forCaller = (error: unknown, run: Run): Error => {
 };
 
 /**
- * Runs the function at `path` that `operation` calls with `args`, as
+ * Runs the function at `path` that `fn` calls with `args`, as
  * `kind` (`runQuery`, `runMutation`, `runAction`): one the App registers,
  * public or internal, of that kind, within the call's depth, under the
  * call's principal and the tables' access and row rules. A mutation's
@@ -3139,7 +3139,7 @@ const forCaller = (error: unknown, run: Run): Error => {
  */
 const startNested = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   request: { kind: unknown; path: unknown; args: unknown },
   within:
     | {
@@ -3229,7 +3229,7 @@ const nestedCall = async (
 /** Runs a query: its reads one state of the store (`readConsistently`). */
 const runQuery = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   args: Json
 ): Promise<Json> => {
   const { invocation, compiled } = run;
@@ -3243,10 +3243,10 @@ const runQuery = async (
         scope,
         async (reader) => {
           const budget = runReads(run);
-          return await runHandler(run, operation, args, {
+          return await runHandler(run, fn, args, {
             read: async (request) => {
               spendRead(budget, 0);
-              return await readFor(run, operation, reader, request);
+              return await readFor(run, fn, reader, request);
             },
           });
         },
@@ -3272,7 +3272,7 @@ const resourcesDeclaring = (
  */
 const runMutation = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   args: Json,
   key: readonly string[],
   inputHash: string
@@ -3292,7 +3292,7 @@ const runMutation = async (
           // so a retry after a publish, even one that changed the
           // function's arguments, finds the receipt and runs nothing
           // again. Other input under the key is refused by its hash.
-          contractId: operation.path,
+          contractId: fn.path,
           contractVersion: 1,
           operationKind: "mutation",
         },
@@ -3314,7 +3314,7 @@ const runMutation = async (
   for (let attempt = 0; attempt <= queryMaxReruns; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one run after the other
     const scope = await scopeOf(compiled, invocation, roles);
-    const staging = stagingFor(compiled, operation, Date.now());
+    const staging = stagingFor(compiled, fn, Date.now());
     // Each query it runs answers as it does from the mutation's start and
     // a seed of its own, by the order this run calls them: the same in
     // every run of the mutation, never the mutation's own seed again.
@@ -3343,12 +3343,12 @@ const runMutation = async (
       // oxlint-disable-next-line no-await-in-loop -- see above
       value = await runHandler(
         run,
-        operation,
+        fn,
         args,
         {
           read: async (request) => {
             spend();
-            return await readFor(run, operation, reader, request);
+            return await readFor(run, fn, reader, request);
           },
           write: staging.stage,
           // Any write refused, at the channel's boundary or in staging,
@@ -3362,7 +3362,7 @@ const runMutation = async (
           call: async (kind, path, callArgs) =>
             await nestedCall(
               run,
-              operation,
+              fn,
               { kind, path, args: callArgs },
               { type: "mutation", reader, spend, start: nestedStart() }
             ),
@@ -3394,7 +3394,7 @@ const runMutation = async (
               return null;
             }
             if (method === "notify") {
-              const asked = workflowNotification(run, operation, {
+              const asked = workflowNotification(run, fn, {
                 alias,
                 args: callArgs,
               });
@@ -3446,7 +3446,7 @@ const runMutation = async (
                 { use: undeclaredUse(run, alias), reason: "use_undeclared" }
               );
             }
-            const start = workflowStart(run, operation, {
+            const start = workflowStart(run, fn, {
               alias,
               method,
               args: callArgs,
@@ -3558,7 +3558,7 @@ const runMutation = async (
  */
 const emitProgress = async (
   compiled: Compiled,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   sink: ProgressSink,
   {
     emitted,
@@ -3575,7 +3575,7 @@ const emitProgress = async (
       maxEmits: streamMaxEmits,
     });
   }
-  sink.publish(checkedProgress(compiled, operation, progress));
+  sink.publish(checkedProgress(compiled, fn, progress));
   return null;
 };
 
@@ -3591,7 +3591,7 @@ const emitProgress = async (
  */
 const runAction = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   args: Json,
   key: readonly string[],
   inputHash: string
@@ -3608,7 +3608,7 @@ const runAction = async (
       resource: invocation.consumer.resourceId,
       // Its path, as a mutation's receipt is scoped: the same call
       // retried after a publish derives the same keys.
-      contract: operation.path,
+      contract: fn.path,
       inputHash,
       key: [...key],
     })
@@ -3658,7 +3658,7 @@ const runAction = async (
   ): Promise<Json> =>
     await nestedCall(
       run,
-      operation,
+      fn,
       { kind, path, args: callArgs },
       {
         type: "action",
@@ -3668,7 +3668,7 @@ const runAction = async (
         },
       }
     );
-  return await runHandler(run, operation, args, {
+  return await runHandler(run, fn, args, {
     // A query changes nothing: only what may is an effect under way.
     call: async (kind, path, callArgs) =>
       kind === "query"
@@ -3695,7 +3695,7 @@ const runAction = async (
         // sent: its gate, before, starts nothing.
         return await startCall(
           run,
-          operation,
+          fn,
           { alias, method, args: callArgs },
           startKey,
           effect
@@ -3707,7 +3707,7 @@ const runAction = async (
         async () =>
           await resourceCall(
             run,
-            operation,
+            fn,
             { alias, method, args: callArgs },
             resourceKey
           )
@@ -3719,7 +3719,7 @@ const runAction = async (
       : {
           emit: async (progress) => {
             emitted += 1;
-            return await emitProgress(compiled, operation, sink, {
+            return await emitProgress(compiled, fn, sink, {
               emitted,
               progress,
               ...(run.cancelled === undefined
@@ -3742,24 +3742,24 @@ const submittedHash = async (input: unknown, admitted: Json): Promise<string> =>
   await sha256Hex(canonicalJson(jsonOf(input) ?? admitted));
 
 /**
- * Runs `operation` with `args` (`submitted` as the caller sent them), by
+ * Runs `fn` with `args` (`submitted` as the caller sent them), by
  * its kind, under the call key `key`.
  */
 const execute = async (
   run: Run,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   args: Json,
   key: readonly string[],
   submitted: unknown
 ): Promise<Json> => {
-  if (operation.kind === "query") {
-    return await runQuery(run, operation, args);
+  if (fn.kind === "query") {
+    return await runQuery(run, fn, args);
   }
   const inputHash = await submittedHash(submitted, args);
-  if (operation.kind === "mutation") {
-    return await runMutation(run, operation, args, key, inputHash);
+  if (fn.kind === "mutation") {
+    return await runMutation(run, fn, args, key, inputHash);
   }
-  return await runAction(run, operation, args, key, inputHash);
+  return await runAction(run, fn, args, key, inputHash);
 };
 
 /**
@@ -3788,16 +3788,16 @@ const admitFiles = async (
   app: HostedApp,
   compiled: Compiled,
   invocation: Invocation,
-  operation: FunctionManifest,
+  fn: FunctionManifest,
   args: Json
 ): Promise<void> => {
-  const held = valueFiles(operation.args, args);
+  const held = valueFiles(fn.args, args);
   if (held.size === 0) {
     return;
   }
   const resources = resourcesDeclaring(
     app.manifest,
-    operation.kind === "mutation" ? "attach" : "read"
+    fn.kind === "mutation" ? "attach" : "read"
   );
   if (resources.length === 0) {
     throw fileErrors.create("file.operation_denied");
@@ -3836,7 +3836,7 @@ const tellDraft = (invocation: Invocation, told: Told): void => {
 const answer = async (
   app: HostedApp,
   asked: Invocation,
-  reference: FunctionReference,
+  reference: CalledFunction,
   args: unknown,
   options: CallOptions,
   sensitive: SensitiveTally
@@ -3848,7 +3848,7 @@ const answer = async (
   };
   const told: Told = { nested: new Map() };
   try {
-    const { compiled, operation, admitted, key } = await trusted(() => {
+    const { compiled, fn, admitted, key } = await trusted(() => {
       const known = compiledOf(app.manifest);
       const found = publicOperation(
         app.manifest,
@@ -3857,7 +3857,7 @@ const answer = async (
       );
       return {
         compiled: known,
-        operation: found,
+        fn: found,
         admitted: admittedArgs(known, found, args),
         key:
           options.idempotencyKey === undefined
@@ -3875,13 +3875,13 @@ const answer = async (
     }
     const filesAdmitted = async (): Promise<void> => {
       await trusted(async () => {
-        await admitFiles(app, compiled, invocation, operation, admitted);
+        await admitFiles(app, compiled, invocation, fn, admitted);
       });
     };
     // A mutation's files are checked once its receipt says it hasn't run
     // yet (`runMutation`): a submission that committed answers its outcome
     // whatever the caller may use now. Anything else, before it runs.
-    if (operation.kind !== "mutation") {
+    if (fn.kind !== "mutation") {
       await filesAdmitted();
     }
     const value = await execute(
@@ -3905,7 +3905,7 @@ const answer = async (
           : { commitIntent: options.commitIntent }),
         filesAdmitted,
       },
-      operation,
+      fn,
       admitted,
       ["call", key],
       args
@@ -3934,7 +3934,7 @@ const answer = async (
 export const callOperation = async (
   app: HostedApp,
   asked: Invocation,
-  reference: FunctionReference,
+  reference: CalledFunction,
   args: unknown,
   options: CallOptions = {}
 ): Promise<OperationResult> => {

@@ -1,11 +1,11 @@
 import {
-  isPeopleOperationName,
+  isPeopleFunctionName,
   peopleLimits,
-  peopleOperations,
+  peopleFunctions,
   schemaFromDescriptor,
 } from "@grasp-os/sdk/host";
 import type {
-  PeopleOperationName,
+  PeopleFunctionName,
   PeoplePage,
   Person,
   TeamRef,
@@ -54,7 +54,7 @@ import { inList } from "./db/d1.ts";
 // - Paging through everyone: what limits it is the opt-in above (only a
 //   declared App reads at all), the cap of 100 people a read
 //   (`peopleLimits.pageMax`, with a function's 100 host calls,
-//   operation-channel.ts), and the record of every read
+//   function-channel.ts), and the record of every read
 //   (`app.people.read`: the App, the person it read for, which read and
 //   how many people it answered, never whom). A declared App can still
 //   page through every member, read by read, on the record. A search's 2
@@ -79,10 +79,10 @@ export interface PeopleAccess {
    */
   readonly directory?: Directory;
   /** Refuses the directory read `name`, recorded; never returns. */
-  readonly refuse?: (name: PeopleOperationName) => Promise<never>;
+  readonly refuse?: (name: PeopleFunctionName) => Promise<never>;
 }
 
-type DirectoryRead = Exclude<PeopleOperationName, "user">;
+type DirectoryRead = Exclude<PeopleFunctionName, "user">;
 
 type Directory = (
   name: DirectoryRead,
@@ -91,18 +91,18 @@ type Directory = (
 
 /** The schema each read's arguments are checked by, read once. */
 const argsSchemas = new Map<
-  PeopleOperationName,
+  PeopleFunctionName,
   ReturnType<typeof schemaFromDescriptor>
 >();
 
 /** `args` checked by read `name`'s declared arguments, normalized. */
 const checkedArgs = (
-  name: PeopleOperationName,
+  name: PeopleFunctionName,
   args: unknown
 ): Record<string, Json> => {
   let schema = argsSchemas.get(name);
   if (schema === undefined) {
-    schema = schemaFromDescriptor(JSON.stringify(peopleOperations[name].args));
+    schema = schemaFromDescriptor(JSON.stringify(peopleFunctions[name].args));
     argsSchemas.set(name, schema);
   }
   const result = schema["~standard"].validate(args);
@@ -124,7 +124,7 @@ export const answerPeople = async (
   name: unknown,
   args: unknown
 ): Promise<Json> => {
-  if (!isPeopleOperationName(name)) {
+  if (!isPeopleFunctionName(name)) {
     throw operationErrors.create("function.not_found");
   }
   const checked = checkedArgs(name, args);
@@ -149,12 +149,12 @@ export const answerPeople = async (
 export const peopleReadOf = (reference: {
   readonly name: string;
   readonly kind: string;
-}): PeopleOperationName | undefined => {
+}): PeopleFunctionName | undefined => {
   const [segment, name, ...rest] = reference.name.split(".");
   if (segment !== "people") {
     return undefined;
   }
-  if (rest.length > 0 || !isPeopleOperationName(name)) {
+  if (rest.length > 0 || !isPeopleFunctionName(name)) {
     throw operationErrors.create("function.not_found");
   }
   if (reference.kind !== "query") {
@@ -447,7 +447,7 @@ export const visitorPeople = ({
 }: {
   readonly principal: string;
   readonly email: string;
-  readonly refuse: (name: PeopleOperationName) => Promise<never>;
+  readonly refuse: (name: PeopleFunctionName) => Promise<never>;
 }): PeopleAccess => ({
   user: async () =>
     await Promise.resolve({ id: principal, name: email, email, roles: [] }),
