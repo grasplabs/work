@@ -15,6 +15,7 @@ import {
 } from "@grasp-os/shared/page-limits";
 
 import type { TransferProgress } from "./client-files.ts";
+import { freshKey, refusal, retryDelay, sleep } from "./client-shared.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 // The page's side of core's file channel (core's app-file-route.ts): what
@@ -64,40 +65,14 @@ interface UploadHooks {
 /** A request, with a JSON body to send when it has one. */
 type ChannelInit = RequestInit & { readonly json?: unknown };
 
-/** A refusal core answered, with its code. */
-const refusal = (code: string, message: string): Error =>
-  Object.assign(new Error(message), { code });
-
 const cancelledError = (): Error =>
   refusal("file.cancelled", "The upload was cancelled.");
 
 /** How often a lost request is sent again before the channel gives up. */
 const attempts = 5;
 
-/** The wait before retry `attempt` (1 for the first), backed off, jittered. */
-const backoff = (attempt: number): number => {
-  const base = Math.min(250 * 2 ** (attempt - 1), 8000);
-  return base / 2 + Math.random() * (base / 2);
-};
-
-/** Waits `ms`, or until `signal` aborts, whichever comes first. */
-const sleep = async (
-  ms: number,
-  signal?: AbortSignal | null
-): Promise<void> => {
-  const { promise, resolve } = Promise.withResolvers<null>();
-  const done = (): void => {
-    resolve(null);
-  };
-  const timer = setTimeout(done, ms);
-  signal?.addEventListener("abort", done, { once: true });
-  if (signal?.aborted === true) {
-    done();
-  }
-  await promise;
-  clearTimeout(timer);
-  signal?.removeEventListener("abort", done);
-};
+/** The longest the channel waits before it sends a lost request again. */
+const retryCapMs = 8000;
 
 /** The code of a failure, if it has one. */
 const codeOf = (error: unknown): unknown =>
@@ -116,12 +91,6 @@ const isLost = (error: unknown): boolean => {
     code === "request.timeout"
   );
 };
-
-/** A fresh upload key: 128 random bits, in hex. */
-const freshKey = (): string =>
-  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
 
 /** The lower-case hex SHA-256 of `bytes`. */
 const sha256Of = async (bytes: ArrayBuffer): Promise<string> =>
@@ -402,7 +371,7 @@ export const fileChannel = ({
         }
       }
       // oxlint-disable-next-line no-await-in-loop -- backing off between attempts
-      await sleep(backoff(tried), options.cancel);
+      await sleep(retryDelay(tried, retryCapMs), options.cancel);
     }
   };
 
@@ -520,7 +489,7 @@ export const fileChannel = ({
             throw error;
           }
           // oxlint-disable-next-line no-await-in-loop -- backing off, then resuming
-          await sleep(backoff(lost), cancel);
+          await sleep(retryDelay(lost, retryCapMs), cancel);
           try {
             const before = holds.size;
             // oxlint-disable-next-line no-await-in-loop -- resumed from what core holds

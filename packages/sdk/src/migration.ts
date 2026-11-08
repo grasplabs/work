@@ -6,6 +6,7 @@ import {
   isOverBytes,
   namePattern,
   refuser,
+  sha256Pattern,
 } from "./declaration.ts";
 import { isPlainObject, unsafeKeys } from "./value-descriptor.ts";
 import type {
@@ -160,9 +161,6 @@ const refuse: (message: string) => never = refuser(MigrationDefinitionError);
 
 /** A migration's name. */
 const migrationNamePattern = /^[a-z][a-z0-9-]{0,63}$/u;
-
-/** A schema hash: SHA-256, lower-case hex. */
-const schemaHashPattern = /^[0-9a-f]{64}$/u;
 
 const definitionKeys: ReadonlySet<string> = new Set([
   "name",
@@ -332,9 +330,9 @@ export const migration = <
   }
   if (
     typeof fromSchema !== "string" ||
-    !schemaHashPattern.test(fromSchema) ||
+    !sha256Pattern.test(fromSchema) ||
     typeof toSchema !== "string" ||
-    !schemaHashPattern.test(toSchema)
+    !sha256Pattern.test(toSchema)
   ) {
     refuse(
       "A migration's `fromSchema` and `toSchema` are schema hashes: 64 lower-case hexadecimal characters, as the schema diff records them."

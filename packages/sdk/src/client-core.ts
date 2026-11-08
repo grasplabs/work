@@ -27,6 +27,15 @@ import { ClientFiles } from "./client-files.ts";
 import type { FileTransport } from "./client-files.ts";
 import { ClientLinks } from "./client-links.ts";
 import type { LinkTransport } from "./client-links.ts";
+import {
+  endsFollowing,
+  followDelay,
+  freshKey,
+  retryDelay,
+  sleep,
+  steadyMs,
+} from "./client-shared.ts";
+import { deepFreeze } from "./declaration.ts";
 import type {
   ArgsOf,
   OperationReference,
@@ -432,17 +441,8 @@ const readOptions = (
   };
 };
 
-/** A fresh logical submission key: 128 random bits, in hex. */
-const freshKey = (): string =>
-  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-
-/** How long to wait before retry `attempt` (1 for the first): backed off, jittered. */
-const retryDelay = (attempt: number): number => {
-  const base = Math.min(250 * 2 ** (attempt - 1), 30_000);
-  return base / 2 + Math.random() * (base / 2);
-};
+/** The longest a call waits before it is sent again. */
+const retryCapMs = 30_000;
 
 /**
  * How long to wait for a request budget to give back a request, when a
@@ -456,7 +456,7 @@ const rateLimitedWaitMs = 1000;
  * `rateLimitedWaitMs`), so retries never spend a budget that is empty.
  */
 const waitAfter = (settled: Settled, attempt: number): number => {
-  const backoff = retryDelay(attempt);
+  const backoff = retryDelay(attempt, retryCapMs);
   if (settled.kind !== "failed" || settled.error.code !== "page.rate_limited") {
     return backoff;
   }
@@ -464,25 +464,6 @@ const waitAfter = (settled: Settled, attempt: number): number => {
   // As long as the budget takes to give one back, and a little more, so
   // calls refused together don't all ask again at the same moment.
   return said + Math.random() * said;
-};
-
-/** Resolves after `ms`, or as soon as `signal` aborts. */
-const sleep = async (ms: number, signal?: AbortSignal): Promise<void> => {
-  const { promise, resolve } = Promise.withResolvers<null>();
-  const done = (): void => {
-    resolve(null);
-  };
-  const timer = setTimeout(done, ms);
-  signal?.addEventListener("abort", done, { once: true });
-  if (signal?.aborted === true) {
-    done();
-  }
-  try {
-    await promise;
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", done);
-  }
 };
 
 /** Waits for `work` without letting its failure surface unhandled. */
@@ -613,32 +594,6 @@ const worthRetrying = (settled: Settled): boolean =>
  * (`#accessChanged`), and the query is followed again under the new.
  */
 const accessChangedCode = "page.access_changed";
-
-/**
- * Refusals after which following a query again would only be refused
- * again: the App moved to another version, or the page follows too many.
- * (A refusal of the person or the build fences the whole client.)
- */
-const endsFollowing = (code: string): boolean =>
-  code.startsWith("version.") ||
-  code === "app.not_running" ||
-  code === "page.too_many_queries" ||
-  code === "page.invalid" ||
-  code.startsWith("contract.");
-
-/** The least wait before following a query again. */
-const minFollowMs = 250;
-
-/**
- * How long to wait before following a query again after it was lost
- * `failures` times in a row: from 1 up to 30 seconds, fully jittered,
- * but never under `minFollowMs`.
- */
-const followDelay = (failures: number): number =>
-  Math.max(minFollowMs, Math.random() * Math.min(30_000, 1000 * 2 ** failures));
-
-/** How long a subscription must last for its losses to count afresh. */
-const steadyMs = 30_000;
 
 /** A push of core's, read: its revision and result, or none if malformed. */
 const readPush = (
@@ -901,17 +856,6 @@ const recoveryOver = (tries: number, since: number): boolean =>
 /** Whether `signal` was aborted, read afresh. */
 const isAborted = (signal: AbortSignal | undefined): boolean =>
   signal?.aborted === true;
-
-/** `value`, and everything in it, frozen: a snapshot no caller can change. */
-const frozen = (value: unknown): unknown => {
-  if (typeof value === "object" && value !== null) {
-    for (const item of Object.values(value)) {
-      frozen(item);
-    }
-    Object.freeze(value);
-  }
-  return value;
-};
 
 /** A stream's frame, as the client reads it; anything else is undefined. */
 const readFrame = (
@@ -1587,7 +1531,7 @@ export class GraspClient {
         return;
       }
       seen = frameSeq;
-      progressed(frozen(value));
+      progressed(deepFreeze(value));
     };
     /** Resolves once the invocation first answered (true), or never will. */
     const opened = Promise.withResolvers<boolean>();
@@ -1765,7 +1709,7 @@ export class GraspClient {
       const wait =
         what === "stream" || attachRefused
           ? waitAfter(settled, tries)
-          : Math.min(retryDelay(tries), streamIdleCancelMs / 2);
+          : Math.min(retryDelay(tries, retryCapMs), streamIdleCancelMs / 2);
       // oxlint-disable-next-line no-await-in-loop -- one connection after another
       await sleep(wait, signal);
       if (isAborted(signal)) {

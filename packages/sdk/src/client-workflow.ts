@@ -19,7 +19,13 @@ import {
   readRejection,
   withReceiptLink,
 } from "./client-error.ts";
-import { namePattern } from "./declaration.ts";
+import {
+  endsFollowing,
+  followDelay,
+  freshKey,
+  steadyMs,
+} from "./client-shared.ts";
+import { deepFreeze, namePattern, sha256Pattern } from "./declaration.ts";
 import { workflowReferenceLimits } from "./references.ts";
 import type {
   AppErrorPayload,
@@ -135,8 +141,6 @@ export interface ReadWorkflow {
   };
 }
 
-const fingerprintPattern = /^[0-9a-f]{64}$/u;
-
 const readWorkflows = new WeakMap<object, ReadWorkflow>();
 
 const maxEvents = workflowReferenceLimits.events;
@@ -171,7 +175,7 @@ const isEventOf = (
     typeof event.type !== "string" ||
     !isEventType(event.type) ||
     typeof event.fingerprint !== "string" ||
-    !fingerprintPattern.test(event.fingerprint)
+    !sha256Pattern.test(event.fingerprint)
   ) {
     return false;
   }
@@ -213,7 +217,7 @@ const isDecisionOf = (
   decision.workflow === workflow.contractId &&
   decision.workflowFingerprint === workflow.fingerprint &&
   typeof decision.fingerprint === "string" &&
-  fingerprintPattern.test(decision.fingerprint) &&
+  sha256Pattern.test(decision.fingerprint) &&
   isPlainObject(decision.valueSchema) &&
   decision.valueSchema.kind === "descriptor" &&
   readsAsDescriptor(decision.valueSchema.descriptor) &&
@@ -327,7 +331,7 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
     typeof value.alias !== "string" ||
     typeof value.contractId !== "string" ||
     typeof value.fingerprint !== "string" ||
-    !fingerprintPattern.test(value.fingerprint)
+    !sha256Pattern.test(value.fingerprint)
   ) {
     throw clientError("contract.invalid_request");
   }
@@ -504,17 +508,6 @@ const descriptors = {
   compensation: descriptorOf(compensationSchema),
   binding: descriptorOf(bindingSchema),
   receipt: descriptorOf(receiptSchema),
-};
-
-/** `value`, and everything in it, frozen. */
-const frozen = <T>(value: T): T => {
-  if (typeof value === "object" && value !== null) {
-    for (const item of Object.values(value)) {
-      frozen(item);
-    }
-    Object.freeze(value);
-  }
-  return value;
 };
 
 /** `value` checked against `descriptor`: its fresh copy, or undefined. */
@@ -744,7 +737,7 @@ const readSnapshot = (
   if (!agrees(parsed)) {
     throw invalidSnapshot();
   }
-  return frozen(parsed);
+  return deepFreeze(parsed);
 };
 
 /** What the host says of a binding for the person (`watch: "binding"`). */
@@ -759,7 +752,7 @@ const readBinding = (value: unknown): BindingSnapshot => {
   }
   // SAFETY: checked against `bindingSchema` just above.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return frozen(read as BindingSnapshot);
+  return deepFreeze(read as BindingSnapshot);
 };
 
 /** A control's receipt, as the host answers it. */
@@ -773,12 +766,6 @@ interface ControlReceipt {
    */
   readonly revision: number;
 }
-
-/** A fresh logical submission key: 128 random bits, in hex. */
-const freshKey = (): string =>
-  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
 
 /** `request` as JSON text, or `contract.input_too_large` before it is sent. */
 const requestText = (request: unknown): string => {
@@ -841,13 +828,6 @@ export interface Watched<Value> {
   live: Live | undefined;
 }
 
-/** How long a subscription must last for its losses to count afresh. */
-const steadyMs = 30_000;
-
-/** How long to wait before following again after `failures` losses: jittered. */
-const followDelay = (failures: number): number =>
-  Math.max(250, Math.random() * Math.min(30_000, 1000 * 2 ** failures));
-
 /** How long a refusal said to wait before asking again, if it said. */
 const hintOf = (error: GraspError): number => {
   const hinted = isPlainObject(error.details)
@@ -867,16 +847,12 @@ const hintOf = (error: GraspError): number => {
 const unavailableRun = "workflow.run_unavailable";
 
 /**
- * Refusals after which following again would only be refused again: the
- * App moved on, the page follows too many, or the request itself.
+ * Refusals after which following a run again would only be refused again:
+ * a query's (`endsFollowing`), and the workflow's own but `unavailableRun`.
  */
-const endsFollowing = (code: string): boolean =>
-  code.startsWith("version.") ||
-  code.startsWith("contract.") ||
-  (code.startsWith("workflow.") && code !== unavailableRun) ||
-  code === "app.not_running" ||
-  code === "page.too_many_queries" ||
-  code === "page.invalid";
+const endsFollowingRun = (code: string): boolean =>
+  endsFollowing(code) ||
+  (code.startsWith("workflow.") && code !== unavailableRun);
 
 const runKey = (read: ReadWorkflow, runId: string): string =>
   canonicalJson(["run", read.key, runId]);
@@ -1002,7 +978,7 @@ export class WorkflowChannel {
     // SAFETY: the command resolves only with an answer `read` checked
     // against `runHandleSchema`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return frozen(answer as RunHandle);
+    return deepFreeze(answer as RunHandle);
   }
 
   /**
@@ -1039,7 +1015,7 @@ export class WorkflowChannel {
     );
     // SAFETY: the command resolves only with a receipt `read` accepted.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return frozen(answer as ControlReceipt);
+    return deepFreeze(answer as ControlReceipt);
   }
 
   /**
@@ -1336,7 +1312,7 @@ export class WorkflowChannel {
       this.#link.fence(error);
       return;
     }
-    if (endsFollowing(error.code)) {
+    if (endsFollowingRun(error.code)) {
       WorkflowChannel.#stop(entry);
       WorkflowChannel.#show(entry, { ...nothingYet, error });
       return;
