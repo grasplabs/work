@@ -5,7 +5,7 @@ import { AppDefinitionError } from "./app-definition-error.ts";
 import type { App, AppManifest, AppPermissions } from "./app-types.ts";
 import { defineApp, inspectApp, registerApp } from "./app.ts";
 import { isOverBytes, refuser } from "./declaration.ts";
-import { readPermissionDeclaration } from "./permissions.ts";
+import { readPermissionDeclaration } from "./permission-read.ts";
 import { defineSchema, defineTable } from "./schema.ts";
 import type {
   AccessMode,

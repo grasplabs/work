@@ -15,38 +15,44 @@ export type {
   MigrationContext,
   MigrationDefinition,
 } from "./migration.ts";
-export { graspFunctions, httpContract, permission } from "./permissions.ts";
+export { httpContract } from "./connector-contracts.ts";
+export { graspFunctions } from "./grasp-functions.ts";
+export { permission } from "./permission.ts";
+export type {
+  ComposioCall,
+  ComposioContract,
+  ConnectorAction,
+  ConnectorContract,
+  HttpAnswer,
+  HttpContract,
+  HttpRequestInit,
+} from "./connector-contracts.ts";
+export type { GraspFunctions } from "./grasp-functions.ts";
 export type {
   AiClient,
+  BrainClient,
+  BrainHit,
+  ConnectionClient,
+  GuestsClient,
+  HttpClient,
+} from "./permission-clients.ts";
+export type {
   AiPermission,
   AnyPermission,
   AppPermission,
-  BrainClient,
-  BrainHit,
   BrainOperation,
   BrainPermission,
   BrowserPermission,
-  ComposioCall,
-  ComposioContract,
-  ConnectionClient,
   ConnectionPermission,
-  ConnectorAction,
-  ConnectorContract,
   FilesPermission,
-  GraspFunctions,
   GraspPermission,
-  GuestsClient,
   GuestsOperation,
   GuestsPermission,
-  HttpAnswer,
-  HttpClient,
-  HttpContract,
-  HttpRequestInit,
   LinksPermission,
   PermissionKind,
   WorkflowConfig,
   WorkflowPermission,
-} from "./permissions.ts";
+} from "./permission-types.ts";
 // References (spec 8, 32.1): what the generated `@server/_generated/api` modules hold.
 export type {
   AnyOperationReference,

@@ -9,7 +9,7 @@ import type {
   GuestsPermission,
   LinksPermission,
   WorkflowPermission,
-} from "./permissions.ts";
+} from "./permission-types.ts";
 import type { SchemaAnswer } from "./schema-answer.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
 import type { SchemaDefinition } from "./schema.ts";

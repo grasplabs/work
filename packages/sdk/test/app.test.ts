@@ -6,7 +6,7 @@ import { inspectApp, readAppManifest, registerApp } from "../src/host.ts";
 import type { ServerModules } from "../src/host.ts";
 import { AppError, defineApp, permission } from "../src/index.ts";
 import type { AppConfig, WorkflowEventReference } from "../src/index.ts";
-import { readPermissionDeclaration } from "../src/permissions.ts";
+import { readPermissionDeclaration } from "../src/permission-read.ts";
 import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";

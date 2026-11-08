@@ -1,5 +1,5 @@
 import type { OperationManifest } from "./app-types.ts";
-import type { BoundWorkflow } from "./generate.ts";
+import type { BoundWorkflow } from "./bound-workflows.ts";
 import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
