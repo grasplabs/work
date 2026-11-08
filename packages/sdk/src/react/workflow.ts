@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 
-import { readWorkflowReference, workflowChannel } from "../client-workflow.ts";
+import { workflowChannel } from "../client-workflow.ts";
+import { readWorkflowReference } from "../workflow-reference-read.ts";
 import type {
   AnyWorkflowReference,
   WorkflowEventsOf,
@@ -9,7 +10,7 @@ import type {
   WorkflowWaitOf,
 } from "../workflow-references.ts";
 import { WorkflowStore } from "../workflow-store.ts";
-import type { WorkflowView } from "../workflow-store.ts";
+import type { WorkflowView } from "../workflow-view.ts";
 import { useClient } from "./provider.ts";
 
 /** The view `useWorkflow` answers for `Reference`. */

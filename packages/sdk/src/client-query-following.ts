@@ -1,11 +1,12 @@
 import type { AccessFence } from "./access-fence.ts";
-import { fences, nothingRanCodes, readRejection } from "./client-error.ts";
+import { readRejection } from "./call-answers.ts";
 import type { GraspError } from "./client-error.ts";
 import { readPush, show } from "./client-query-entry.ts";
 import type { Live, QueryEntry } from "./client-query-entry.ts";
 import { waitAfter } from "./client-retry.ts";
 import { endsFollowing, followDelay, steadyMs } from "./client-shared.ts";
 import type { ClientTransport } from "./client-transport.ts";
+import { fences, nothingRanCodes } from "./refusals.ts";
 
 /**
  * What core ends a followed query with once the person's roles in its App

@@ -14,8 +14,11 @@ import {
   pagePersonHeader,
 } from "@grasp-os/shared/page-limits";
 
-import type { TransferProgress } from "./client-files.ts";
 import { freshKey, refusal, retryDelay, sleep } from "./client-shared.ts";
+import { readDescription, readState } from "./file-answers.ts";
+import type { UploadState } from "./file-answers.ts";
+import type { TransferProgress } from "./file-transport.ts";
+import { following, stallWatch } from "./stall-watch.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 // The page's side of core's file channel (core's app-file-route.ts): what
@@ -103,49 +106,6 @@ const sha256Of = async (bytes: ArrayBuffer): Promise<string> =>
 const bodyOf = async (response: Response): Promise<unknown> =>
   await response.json();
 
-/** What core answers of an upload: its ID, state and the chunks it holds. */
-interface UploadState {
-  readonly file: string;
-  readonly state: "uploading" | "published" | "cancelled";
-  readonly received: readonly number[];
-}
-
-const isState = (value: unknown): value is UploadState["state"] =>
-  value === "uploading" || value === "published" || value === "cancelled";
-
-const readState = (value: unknown): UploadState => {
-  if (
-    !isPlainObject(value) ||
-    typeof value.file !== "string" ||
-    !isState(value.state) ||
-    !Array.isArray(value.received)
-  ) {
-    throw new Error("Core's answer about an upload isn't one.");
-  }
-  const received = value.received.filter((index): index is number =>
-    Number.isSafeInteger(index)
-  );
-  return { file: value.file, state: value.state, received };
-};
-
-const readDescription = (value: unknown): FileDescription => {
-  if (
-    !isPlainObject(value) ||
-    typeof value.id !== "string" ||
-    typeof value.name !== "string" ||
-    !isFileType(value.mimeType) ||
-    typeof value.size !== "number"
-  ) {
-    throw new Error("Core's answer about a file isn't one.");
-  }
-  return {
-    id: value.id,
-    name: value.name,
-    mimeType: value.mimeType,
-    size: value.size,
-  };
-};
-
 /**
  * The type `blob` says it is, if a file may be one, checked with its size
  * before any byte is sent (core checks both again, and the bytes too).
@@ -189,75 +149,6 @@ const unlessAborted = async <T>(
   } finally {
     signal.removeEventListener("abort", abort);
   }
-};
-
-/** A signal aborted once `ms` pass without a `touch`; `stop` lets it go. */
-interface StallWatch {
-  readonly signal: AbortSignal;
-  readonly touch: () => void;
-  readonly stop: () => void;
-}
-
-const stallWatch = (ms: number): StallWatch => {
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const stop = (): void => {
-    clearTimeout(timer);
-  };
-  const touch = (): void => {
-    stop();
-    timer = setTimeout(() => {
-      controller.abort(new DOMException("Nothing arrived.", "TimeoutError"));
-    }, ms);
-  };
-  touch();
-  return { signal: controller.signal, touch, stop };
-};
-
-/**
- * `response`, its body read through `watch`: each piece that arrives
- * puts its stall off again, and the end or a cancel lets it go. Its
- * reader reads it as it comes (a download does): a body no one reads
- * counts as stalled.
- */
-const following = (response: Response, watch: StallWatch): Response => {
-  const { body } = response;
-  if (body === null) {
-    watch.stop();
-    return response;
-  }
-  const reader = body.getReader();
-  // Read on demand only (no high-water mark): nothing is read ahead of
-  // its reader, so what core stops sending is never already buffered.
-  const stream = new ReadableStream<Uint8Array>(
-    {
-      pull: async (controller) => {
-        try {
-          const { done, value } = await reader.read();
-          if (done) {
-            watch.stop();
-            controller.close();
-            return;
-          }
-          watch.touch();
-          controller.enqueue(value);
-        } catch (error) {
-          watch.stop();
-          throw error;
-        }
-      },
-      cancel: async (reason) => {
-        watch.stop();
-        await reader.cancel(reason);
-      },
-    },
-    { highWaterMark: 0 }
-  );
-  return new Response(stream, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
 };
 
 /** The file channel of one App's page (see the header). */

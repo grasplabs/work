@@ -10,14 +10,12 @@ import {
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { clientError, GraspError } from "../src/client-error.ts";
 import type { ClientTransport } from "../src/client-transport.ts";
-import {
-  maxWaits,
-  readWorkflowReference,
-  workflowChannel,
-} from "../src/client-workflow.ts";
+import { workflowChannel } from "../src/client-workflow.ts";
 import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
+import { maxWaits } from "../src/run-wire.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
+import { readWorkflowReference } from "../src/workflow-reference-read.ts";
 import { workflowReferenceLimits } from "../src/workflow-references.ts";
 import { WorkflowStore } from "../src/workflow-store.ts";
 import type { Selection } from "../src/workflow-store.ts";

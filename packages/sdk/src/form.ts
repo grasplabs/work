@@ -22,9 +22,9 @@ import {
   GraspError,
   issueDetails,
   receiptLinkOf,
-  settlesSubmission,
 } from "./client-error.ts";
 import type { ArgsOf, ReturnOf } from "./function-references.ts";
+import { settlesSubmission } from "./refusals.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";

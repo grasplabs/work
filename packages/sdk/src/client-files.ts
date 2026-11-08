@@ -3,11 +3,13 @@ import type {
   FileType,
 } from "@grasp-os/shared/app-file-limits";
 
-import { clientError, GraspError, readRejection } from "./client-error.ts";
-import { namePattern } from "./declaration.ts";
-import type { FilesOperation, FilesReference } from "./file-link-references.ts";
+import { readRejection } from "./call-answers.ts";
+import { clientError, GraspError } from "./client-error.ts";
+import type { FilesReference } from "./file-link-references.ts";
+import { readFileRef, readFilesReference } from "./file-references.ts";
+import type { Declaring, FileRef } from "./file-references.ts";
+import type { FileTransport, TransferProgress } from "./file-transport.ts";
 import { isPlainObject } from "./value-descriptor.ts";
-import type { FileValue } from "./value-types.ts";
 
 // The session client's files (spec 10.7.5): what `useUpload`, `useFile`
 // and `client.files` do with a files resource the App declared, over the
@@ -31,116 +33,7 @@ import type { FileValue } from "./value-types.ts";
 //   URL is a local `blob:` URL of the frame's own, revoked when the hook
 //   lets go of it (another file, unmount) or the client is fenced.
 
-/** A reference to one of the App's files: holding it grants nothing. */
-export type FileRef = FileValue;
-
-/** Where an upload is, as its bytes say. */
-export interface TransferProgress {
-  readonly phase: "uploading" | "verifying";
-  readonly bytesUploaded: number;
-  readonly bytesTotal: number;
-}
-
-/**
- * What the client needs of the platform to move files: the page's file
- * channel, through the frame's file port (page-runtime.ts), or a host's
- * own. Each rejects with a coded refusal (`{ code, message }`), as the
- * operation transport does; one without a code is a lost answer.
- */
-export interface FileTransport {
-  /**
-   * Uploads `file` through `resource` as `name`, reporting its progress,
-   * and answers its ID once core published it. Aborting `cancel` cancels
-   * it: it then rejects with `file.cancelled`, unless core published it
-   * first, when it resolves as usual.
-   */
-  upload: (
-    resource: string,
-    file: Blob,
-    name: string,
-    options: {
-      readonly cancel: AbortSignal;
-      readonly onProgress: (progress: TransferProgress) => void;
-    }
-  ) => Promise<string>;
-  /** What file `file` is, and a preview of it when it has one. */
-  read: (
-    resource: string,
-    file: string,
-    signal?: AbortSignal
-  ) => Promise<{ description: FileDescription; preview: Blob | null }>;
-  /** Hands file `file` to the browser's own download, once it accepts it. */
-  download: (
-    resource: string,
-    file: string,
-    signal?: AbortSignal
-  ) => Promise<void>;
-  /** Deletes file `file`, resolving on core's durable record of it. */
-  delete: (
-    resource: string,
-    file: string,
-    idempotencyKey?: string,
-    signal?: AbortSignal
-  ) => Promise<void>;
-}
-
-/** A files reference as the client read it. */
-interface ReadFilesReference {
-  readonly alias: string;
-  readonly operations: readonly FilesOperation[];
-}
-
-const operations: ReadonlySet<unknown> = new Set([
-  "upload",
-  "read",
-  "attach",
-  "delete",
-]);
 const keyPattern = /^[ -~]{1,128}$/u;
-const fileIdPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-
-/**
- * `value` read as a generated files reference that declares `operation`;
- * a malformed one, or one that doesn't declare it, is refused before
- * anything is sent (core checks the App's declaration again).
- */
-const readFilesReference = (
-  value: unknown,
-  operation: FilesOperation
-): ReadFilesReference => {
-  if (
-    !isPlainObject(value) ||
-    value.kind !== "files" ||
-    typeof value.alias !== "string" ||
-    !namePattern.test(value.alias) ||
-    !Array.isArray(value.operations) ||
-    !value.operations.every((item) => operations.has(item))
-  ) {
-    throw clientError("contract.invalid_request");
-  }
-  // SAFETY: each item was checked to be one of the operations.
-  const declared = value.operations as readonly FilesOperation[];
-  if (!declared.includes(operation)) {
-    throw clientError("file.operation_undeclared");
-  }
-  return { alias: value.alias, operations: declared };
-};
-
-/** `value` read as a file reference, `{ id }`, or refused. */
-export const readFileRef = (value: unknown): FileRef => {
-  // Only an ID core could have minted (a UUID) is sent: the page refuses
-  // anything else, and a refusal must reach the caller here, at once.
-  if (
-    !isPlainObject(value) ||
-    typeof value.id !== "string" ||
-    !fileIdPattern.test(value.id) ||
-    Object.keys(value).length !== 1
-  ) {
-    throw clientError("contract.invalid_args");
-  }
-  return { id: value.id };
-};
 
 /** A transport's rejection as a structured error. */
 export const fileFailure = (error: unknown): GraspError => {
@@ -226,19 +119,6 @@ export const readSignal = (
 
 export const signalOnly: ReadonlySet<string> = new Set(["signal"]);
 const signalAndKey: ReadonlySet<string> = new Set(["signal", "idempotencyKey"]);
-
-/**
- * A generated files reference, as a parameter that takes it only if its
- * resource declares `Operation`: one that doesn't fails type-checking,
- * naming the operation it lacks.
- */
-export type Declaring<
-  Reference extends FilesReference,
-  Operation extends FilesOperation,
-> = Reference &
-  (Operation extends Reference["operations"][number]
-    ? unknown
-    : { readonly "~undeclaredOperation": Operation });
 
 /**
  * `client.files` (spec 10.7.5): downloading and deleting the App's files

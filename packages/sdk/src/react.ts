@@ -66,7 +66,7 @@ export type {
   WorkflowCommands,
   WorkflowRunView,
   WorkflowView,
-} from "./workflow-store.ts";
+} from "./workflow-view.ts";
 export type { WorkflowEventReference } from "./workflow-events.ts";
 export type { WorkflowReference } from "./workflow-references.ts";
 export type {
@@ -75,13 +75,12 @@ export type {
   WorkflowWait,
 } from "./workflow-runs.ts";
 export type {
-  Declaring,
   DeleteOptions,
   DownloadOptions,
-  FileRef,
   FileView,
   UploadOptions,
 } from "./client-files.ts";
+export type { Declaring, FileRef } from "./file-references.ts";
 export type { OpenLinkOptions } from "./client-links.ts";
 export type {
   PageOptions,

@@ -1,11 +1,9 @@
-import {
-  clientError,
-  fencingRefusalOf,
-  readAnswer,
-  readRejection,
-} from "./client-error.ts";
-import type { GraspError, Settled } from "./client-error.ts";
+import { readAnswer, readRejection } from "./call-answers.ts";
+import type { Settled } from "./call-answers.ts";
+import { clientError } from "./client-error.ts";
+import type { GraspError } from "./client-error.ts";
 import type { ClientTransport } from "./client-transport.ts";
+import { fencingRefusalOf } from "./refusals.ts";
 
 /**
  * The client's fence: the generation every request begins under, which
