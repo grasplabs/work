@@ -110,7 +110,6 @@ export const count = internalQuery({
 export const tally = action({
   args: {},
   returns: v.number(),
-  uses: [internal.notes.count],
   handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
 });
 `,
@@ -1754,7 +1753,6 @@ export const defaults = query({
 export const reach = action({
   args: {},
   returns: v.boolean(),
-  uses: [api.extra.defaults],
   handler: async (ctx) => await ctx.runQuery(api.extra.defaults, {}),
 });
 `,
@@ -1766,11 +1764,8 @@ export const reach = action({
     const release = await seal(fixture);
     expect([
       release.app.preferences !== null,
-      release.app.operations["extra.reach"]?.uses,
-    ]).toStrictEqual([
-      true,
-      [{ type: "function", path: "extra.defaults", kind: "query" }],
-    ]);
+      release.app.operations["extra.reach"]?.kind,
+    ]).toStrictEqual([true, "action"]);
   });
 
   it("makes its App's one store when it first declares tables, keyed by the App and audited", async () => {

@@ -1,5 +1,6 @@
 import { v } from "@grasp-os/sdk";
 import {
+  declaredPermission,
   declaredWorkflows,
   generatedPaths,
   workflowFingerprint,
@@ -1709,7 +1710,7 @@ describe(
       const release = await seal(fixture);
       // 60 more aliases, each declared and bound to the same version: past
       // the 100 values D1 binds to one statement, two per pinned version.
-      const declared = release.app.workflows.review;
+      const declared = declaredPermission(release.app, "review", "workflows");
       if (declared === undefined) {
         throw new Error("The App declares no review");
       }
@@ -1733,8 +1734,8 @@ describe(
       );
       const bound = await boundWorkflowsOf(env, fixture.app, {
         ...release.app,
-        workflows: {
-          ...release.app.workflows,
+        permissions: {
+          ...release.app.permissions,
           ...Object.fromEntries(
             aliases.map((alias) => [alias, { ...declared, alias }])
           ),

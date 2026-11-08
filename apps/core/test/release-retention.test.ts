@@ -78,7 +78,6 @@ export const touch = mutation({
 export const touchTwice = action({
   args: {},
   returns: v.null(),
-  uses: [touch],
   handler: async (ctx) => {
     await ctx.runMutation(touch, {});
     await ctx.runMutation(touch, {});

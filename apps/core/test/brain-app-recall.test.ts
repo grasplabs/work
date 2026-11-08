@@ -61,7 +61,6 @@ export const help = permissions.brain;
 export const ask = action({
   args: { query: v.string().min(1), collections: v.array(v.string()).optional() },
   returns: v.object({ cited: v.array(v.string()), coverage: v.string() }),
-  uses: [help],
   handler: async (ctx, args) => {
     const pack = await ctx.brain.recall({
       query: args.query,

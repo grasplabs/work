@@ -111,7 +111,6 @@ export const secrets = query({
 export const kick = mutation({
   args: {},
   returns: v.null(),
-  uses: [followUp],
   handler: async (ctx) => {
     await ctx.db.insert("notes", { text: "kicked" });
     await ctx.afterCommit.workflows.followUp.start({ who: "Ada" });

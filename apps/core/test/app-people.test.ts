@@ -108,7 +108,6 @@ export const noted = query({
 export const twice = action({
   args: {},
   returns: v.string(),
-  uses: [note],
   handler: async (ctx) => {
     const first = await ctx.people.search("Person", { limit: 1 });
     await ctx.runMutation(note, { text: "read once" });

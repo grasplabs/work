@@ -1904,7 +1904,6 @@ export const listAll = internalQuery({
 export const titles = action({
   args: {},
   returns: v.array(v.string()),
-  uses: [internal.notes.listAll],
   handler: async (ctx) => {
     const notes = await ctx.runQuery(internal.notes.listAll, {});
     return notes.map((note) => note.title);

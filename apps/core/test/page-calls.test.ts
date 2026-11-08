@@ -74,7 +74,6 @@ export const slow = action({
   args: { title: v.string(), pauseMs: v.number().integer().min(0) },
   returns: v.string(),
   stream: v.object({ step: v.number() }),
-  uses: [create],
   handler: async (ctx, args) => {
     await ctx.emit({ step: 1 });
     await new Promise((resolve) => setTimeout(resolve, args.pauseMs));

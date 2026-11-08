@@ -52,7 +52,6 @@ export const titles = query({
 export const hold = action({
   args: {},
   returns: v.null(),
-  uses: [create, titles],
   handler: async (ctx) => {
     shared.kept = ctx as unknown as Kept;
     await ctx.runMutation(create, { title: "A holding" });
@@ -85,7 +84,6 @@ export const useKept = mutation({
 export const keepAfter = action({
   args: {},
   returns: v.null(),
-  uses: [create],
   handler: (ctx) => {
     setTimeout(() => {
       void ctx.runMutation(create, { title: "after the call" }).catch(() => undefined);
@@ -98,7 +96,6 @@ export const keepAfter = action({
 export const late = action({
   args: {},
   returns: v.null(),
-  uses: [create],
   handler: async (ctx) => {
     await wait(4000);
     await ctx.runMutation(create, { title: "too late" });

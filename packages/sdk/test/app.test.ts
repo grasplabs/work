@@ -633,7 +633,7 @@ describe("the App's permissions in a function's context", () => {
     const { calls, channel } = recordingChannel();
     await expect(
       runFunction(registered, "notes.caller", {}, channel)
-    ).rejects.toMatchObject({ code: "operation.not_found" });
+    ).rejects.toMatchObject({ code: "function.not_found" });
     expect(calls).toStrictEqual([]);
   });
 
@@ -679,7 +679,7 @@ describe("the App's permissions in a function's context", () => {
     ]);
     await expect(
       runFunction(registered, "notes.forged", {}, recordingChannel().channel)
-    ).rejects.toMatchObject({ code: "operation.not_found" });
+    ).rejects.toMatchObject({ code: "function.not_found" });
   });
 
   test("a contract is short enough to name in an audit event", () => {

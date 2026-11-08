@@ -140,7 +140,6 @@ export const released = query({
 export const slow = action({
   args: { step: v.string().min(1).max(90), held: v.boolean(), patient: v.boolean().optional() },
   returns: v.array(v.string()),
-  uses: [mark, released],
   handler: async (ctx, args) => {
     const notes = [secret];
     await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
@@ -157,7 +156,6 @@ export const slow = action({
 export const big = action({
   args: { step: v.string().min(1).max(90), held: v.boolean() },
   returns: v.string(),
-  uses: [mark, released],
   handler: async (ctx, args) => {
     await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
     if (args.held) {
@@ -171,7 +169,6 @@ export const big = action({
 export const failing = action({
   args: { step: v.string().min(1).max(90), held: v.boolean() },
   returns: v.null(),
-  uses: [mark, released],
   handler: async (ctx, args) => {
     const note = secret;
     await ctx.runMutation(mark, { step: \`\${args.step}: read\` });

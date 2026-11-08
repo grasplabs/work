@@ -103,7 +103,6 @@ export const write = action({
   args: { title: v.string(), pauseMs: v.number().integer().min(0).default(0) },
   returns: v.string(),
   stream: v.object({ step: v.number() }),
-  uses: [create],
   handler: async (ctx, args) => {
     await ctx.emit({ step: 1 });
     await pause(args.pauseMs);
@@ -136,7 +135,6 @@ export const keepDeep = mutation({
 export const add = action({
   args: { title: v.string(), pauseMs: v.number().integer().min(0).default(0) },
   returns: v.string(),
-  uses: [create],
   handler: async (ctx, args) => {
     await pause(args.pauseMs);
     await ctx.runMutation(create, { title: args.title });

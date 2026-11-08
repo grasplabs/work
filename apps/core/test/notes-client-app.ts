@@ -106,7 +106,6 @@ export const stamp = action({
     untilRevoked: v.boolean().default(false),
   },
   returns: v.object({ id: v.id("notes"), token: v.string() }),
-  uses: [create, get],
   handler: async (ctx, args) => {
     await pause(args.pauseMs);
     const id = await ctx.runMutation(create, { title: args.title, body: "" });

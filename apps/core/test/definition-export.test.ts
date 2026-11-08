@@ -71,7 +71,6 @@ export const writer = permissions.ai;
 export const kickOff = action({
   args: { who: v.string() },
   returns: v.string(),
-  uses: [followUp, remind, later, writer],
   handler: async (ctx, args) => {
     const started = await ctx.workflows.followUp.start({ who: args.who });
     return started.startId;

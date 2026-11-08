@@ -91,7 +91,6 @@ export const review = permissions.review;
 export const startReview = action({
   args: { file: v.string() },
   returns: v.object({ startId: v.string(), runId: v.string().nullable(), version: v.number().integer() }),
-  uses: [review],
   handler: async (ctx, args) => await ctx.workflows.review.start({ doc: { id: args.file } }),
 });
 
@@ -99,7 +98,6 @@ export const startReview = action({
 export const stageReview = mutation({
   args: { file: v.string() },
   returns: v.null(),
-  uses: [review],
   handler: async (ctx, args) => {
     await ctx.db.insert("notes", { title: args.file });
     await ctx.afterCommit.workflows.review.start({ doc: { id: args.file } });

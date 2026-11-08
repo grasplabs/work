@@ -69,7 +69,6 @@ export const titles = query({
 export const holdThenCreate = action({
   args: { title: v.string().min(1).max(200) },
   returns: v.null(),
-  uses: [create, titles],
   handler: async (ctx, args) => {
     await ctx.runMutation(create, { title: "started" });
     for (let polls = 0; polls < 50; polls += 1) {

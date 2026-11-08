@@ -174,13 +174,13 @@ export type GrantsOf<Permissions extends AppPermissions> = Extract<
  * registered whole, as `registerApp` does. Each is what `registerApp` and
  * `inspectApp` take, and nothing else is.
  */
-export interface App<Permissions extends AppPermissions = AppPermissions> {
+export interface App<Grants extends Grant = Grant> {
   readonly name: string;
   /**
    * What its permissions grant its functions, for types only: never set.
    * The generated `server/_generated/server` reads it (`serverModule`).
    */
-  readonly "~grants"?: GrantsOf<Permissions>;
+  readonly "~grants"?: Grants;
 }
 
 /** The parts of an App the host's entry hands `registerApp`. */
@@ -681,9 +681,9 @@ export const defineApp = <
   const Permissions extends AppPermissions = Record<never, never>,
 >(
   config: AppConfig<Permissions>
-): App<Permissions> => {
+): App<GrantsOf<Permissions>> => {
   checkConfig(config);
-  const made: App<Permissions> = Object.freeze({ name: config.name });
+  const made: App<GrantsOf<Permissions>> = Object.freeze({ name: config.name });
   configs.set(made, {
     config,
     permissions: permissionsOf(config.permissions),

@@ -139,7 +139,7 @@ import type {
 //   an alias the App declares as a permission an action reaches
 //   (`actionPermission`), a start or notification a workflow it declares,
 //   a nested call a function it registers, internal ones included
-//   (`resource.not_allowed`, `operation.not_found` otherwise), each then
+//   (`resource.not_allowed`, `function.not_found` otherwise), each then
 //   bound and granted by an admin. No function narrows what the App holds:
 //   the App is one unit of review and of grants, its functions written
 //   together, so a list per function bounded nothing its author couldn't

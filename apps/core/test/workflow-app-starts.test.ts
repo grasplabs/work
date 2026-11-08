@@ -100,14 +100,20 @@ const schema = defineSchema({
   }),
 });
 
-const { query, mutation, action } = serverModule(schema);
-
 /** The workflow the App declares, by the alias its builders bind. */
 const followUp = permission.workflow("followUp", {
   // Started with no input, it takes its declared default.
   input: v.object({ who: v.string().trim().min(1) }).default({ who: "Anyone" }),
   output: v.object({ status: v.string() }),
 });
+
+/** The App's config: the one workflow it declares. */
+const config = defineApp({
+  name: "Requests",
+  permissions: { workflows: [followUp] },
+});
+
+const { query, mutation, action } = serverModule(schema, config);
 
 const handleSchema = v.object({
   startId: v.string(),
@@ -128,7 +134,6 @@ const list = query({
 const submit = mutation({
   args: { who: v.string(), fail: v.boolean().default(false) },
   returns: v.id("requests"),
-  uses: [followUp],
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("requests", { title: args.who });
     await ctx.afterCommit.workflows.followUp.start({ who: args.who });
@@ -143,7 +148,6 @@ const submit = mutation({
 const guarded = mutation({
   args: { id: v.id("requests") },
   returns: v.null(),
-  uses: [followUp],
   handler: async (ctx, args) => {
     await ctx.afterCommit.workflows.followUp.start({ who: "Guarded" });
     await ctx.db.patch(
@@ -160,7 +164,6 @@ const guarded = mutation({
 const kickOff = action({
   args: { who: v.string() },
   returns: handleSchema,
-  uses: [followUp],
   handler: async (ctx, args) =>
     await ctx.workflows.followUp.start({ who: args.who }),
 });
@@ -172,7 +175,6 @@ const kickOff = action({
 const retrying = mutation({
   args: {},
   returns: v.number(),
-  uses: [followUp],
   handler: async (ctx) => {
     let refused = 0;
     for (let index = 0; index < 40; index += 1) {
@@ -193,7 +195,6 @@ const retrying = mutation({
 const kickOffPlain = action({
   args: {},
   returns: handleSchema,
-  uses: [followUp],
   handler: async (ctx) => await ctx.workflows.followUp.start(),
 });
 
@@ -201,14 +202,13 @@ const kickOffPlain = action({
 const submitPlain = mutation({
   args: {},
   returns: v.null(),
-  uses: [followUp],
   handler: async (ctx) => {
     await ctx.afterCommit.workflows.followUp.start();
     return null;
   },
 });
 
-/** An action and a mutation that list no workflow, for rogue code. */
+/** An action and a mutation that start nothing, for rogue code. */
 const plainAction = action({
   args: {},
   returns: v.string(),
@@ -218,7 +218,6 @@ const plainAction = action({
 const flood = mutation({
   args: {},
   returns: v.number(),
-  uses: [followUp],
   handler: async (ctx) => {
     let refused = 0;
     for (let index = 0; index < 40; index += 1) {
@@ -240,7 +239,6 @@ const flood = mutation({
 const bulky = mutation({
   args: {},
   returns: v.number(),
-  uses: [followUp],
   handler: async (ctx) => {
     let refused = 0;
     for (let index = 0; index < 9; index += 1) {
@@ -264,10 +262,7 @@ const plainMutation = mutation({
 });
 
 const startsApp = registerApp({
-  config: defineApp({
-    name: "Requests",
-    permissions: { workflows: [followUp] },
-  }),
+  config,
   schema,
   modules: {
     requests: {
@@ -980,17 +975,12 @@ describe("App code starting a workflow it didn't declare", () => {
       alias: string
     ) => answerOf(await call(fx, fx.bob, path, {}, { app: hosted(alias) }));
     expect({
-      // Declared by the App, but not listed by the function asking.
-      actionUnlisted: await rogue("requests.plainAction", "followUp"),
-      mutationUnlisted: await rogue("requests.plainMutation", "followUp"),
       // Bound and granted, but never declared by the App.
       actionUndeclared: await rogue("requests.plainAction", "other"),
       mutationUndeclared: await rogue("requests.plainMutation", "other"),
       receipts: await receiptsOf(fx.app),
       outbox: await outboxOf(fx.store),
     }).toStrictEqual({
-      actionUnlisted: "resource.not_allowed",
-      mutationUnlisted: "function.no_resources",
       actionUndeclared: "resource.not_allowed",
       mutationUndeclared: "function.no_resources",
       receipts: [],

@@ -83,7 +83,6 @@ export const doubled = query({
 export const reached = action({
   args: {},
   returns: v.string(),
-  uses: [],
   handler: async () => await reach(),
 });
 `,

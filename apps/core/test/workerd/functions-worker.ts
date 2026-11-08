@@ -34,10 +34,11 @@ const contract = {
 
 const stub = () => action(contract);
 
-// Three deep, as the host lets functions nest: each calls the next.
+// Three deep, as the host lets functions nest: each calls the next, as
+// the isolate's code below does.
 const leaf = stub();
-const middle = action({ ...contract, uses: [leaf] });
-const chain = action({ ...contract, uses: [middle] });
+const middle = stub();
+const chain = stub();
 
 const busy = stub();
 const waits = stub();
@@ -61,13 +62,13 @@ const { manifest } = inspectApp(
         leaf,
         isolationChild,
         throws,
-        isolationParent: action({ ...contract, uses: [isolationChild] }),
-        callsBusy: action({ ...contract, uses: [busy] }),
-        forgets: action({ ...contract, uses: [waits] }),
-        forgetsLeaf: action({ ...contract, uses: [leaf] }),
-        awaitsLeaf: action({ ...contract, uses: [leaf] }),
-        waitsInside: action({ ...contract, uses: [leaf] }),
-        catches: action({ ...contract, uses: [throws] }),
+        isolationParent: stub(),
+        callsBusy: stub(),
+        forgets: stub(),
+        forgetsLeaf: stub(),
+        awaitsLeaf: stub(),
+        waitsInside: stub(),
+        catches: stub(),
       },
     },
     migrations: [],

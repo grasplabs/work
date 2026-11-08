@@ -79,7 +79,6 @@ export const mail = permissions.mail;
 export const send = action({
   args: { to: v.string().email(), subject: v.string().min(1) },
   returns: v.object({ mailbox: v.string(), sent: v.boolean() }),
-  uses: [mail],
   handler: async (ctx, args) => {
     const sent = await ctx.connections.mail.call("send", {
       mailbox: "team@acme.test",
@@ -97,7 +96,6 @@ export const send = action({
 export const inbox = action({
   args: {},
   returns: v.number(),
-  uses: [mail],
   handler: async (ctx) => {
     const listed = await ctx.connections.mail.call("list", { mailbox: "team@acme.test" });
     return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.messages)
@@ -110,7 +108,6 @@ export const inbox = action({
 export const sendFresh = action({
   args: {},
   returns: v.boolean(),
-  uses: [mail],
   handler: async (ctx) => {
     await ctx.connections.mail.call("send", {
       mailbox: "team@acme.test",
@@ -126,7 +123,6 @@ export const sendFresh = action({
 export const probe = action({
   args: {},
   returns: v.string(),
-  uses: [mail],
   handler: async (ctx) => {
     const client = ctx.connections.mail;
     const listed = await client.call("list", { mailbox: "team@acme.test" });
@@ -146,7 +142,6 @@ export const probe = action({
 export const careless = action({
   args: {},
   returns: v.string(),
-  uses: [mail],
   handler: async (ctx) => {
     // What its contract requires left out, past the types on purpose.
     await ctx.connections.mail.call("send", { mailbox: "team@acme.test" } as never);
@@ -177,7 +172,6 @@ export const archive = permissions.archive;
 export const archived = action({
   args: {},
   returns: v.boolean(),
-  uses: [archive],
   handler: async (ctx) => {
     await ctx.connections.archive.call("list", { mailbox: "team@acme.test" });
     return true;
@@ -1136,7 +1130,6 @@ export const crm = permissions.crm;
 export const contacts = action({
   args: {},
   returns: v.number(),
-  uses: [crm],
   handler: async (ctx) => {
     const listed = await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
     return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.contacts)
@@ -1149,7 +1142,6 @@ export const contacts = action({
 export const sloppy = action({
   args: {},
   returns: v.number(),
-  uses: [crm],
   handler: async (ctx) => {
     await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5, archived: true });
     return 0;
@@ -1159,7 +1151,6 @@ export const sloppy = action({
 export const create = action({
   args: { email: v.string() },
   returns: v.string(),
-  uses: [crm],
   handler: async (ctx, args) => {
     const created = await ctx.connections.crm.call("CRM_CREATE_CONTACT", { email: args.email });
     return typeof created === "string" ? created : "";
@@ -1194,7 +1185,6 @@ export const backup = permissions.backup;
 export const contacts = action({
   args: {},
   returns: v.number(),
-  uses: [crm, backup],
   handler: async (ctx) => {
     await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
     await ctx.connections.backup.call("CRM_LIST_CONTACTS", { limit: 5 });

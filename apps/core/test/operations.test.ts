@@ -57,6 +57,8 @@ const schema = defineSchema({
     .index("by_updated", ["_updatedAt"])
     .index("by_title", ["title"])
     .access({ read: "owner", write: "owner" }),
+  // Read by the App's members, written by no one: its write access is none.
+  ledger: defineTable({ entry: v.string() }).access({ read: "appMembers" }),
 });
 
 const { query, mutation, internalQuery, doc } = serverModule(schema);
@@ -135,28 +137,21 @@ const createAndCount = mutation({
   },
 });
 
-/** Narrowed by its `tables` to inserting only. */
-const insertOnly = mutation({
-  tables: { notes: { insert: true } },
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+/** Writes the ledger, which no one may write. */
+const stamp = mutation({
+  args: {},
   returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+  handler: async (ctx) => {
+    await ctx.db.insert("ledger", { entry: "stamped" });
     return null;
   },
 });
 
-/** Narrowed by its `tables` to inserting only: it may not read. */
-const peek = mutation({
-  tables: { notes: { insert: true } },
-  args: { id: v.id("notes") },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.db.get("notes", args.id);
-    return null;
-  },
+/** Reads the ledger, which the App's members may read. */
+const ledgerSize = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => await ctx.db.query("ledger").count(),
 });
 
 /**
@@ -360,8 +355,8 @@ const notesFunctions = {
   update,
   remove,
   createAndCount,
-  insertOnly,
-  peek,
+  stamp,
+  ledgerSize,
   stress,
   readPastThenWrite,
   insertThenGuard,
@@ -1023,40 +1018,23 @@ describe("contracts", () => {
     ).toBe("contract.invalid_return");
   });
 
-  it("narrow a function to its `operationAccess` at run time", async () => {
+  it("keep every function to what its tables' access allows at run time, with no list of its own to widen it", async () => {
     const fixture = await notes();
     const { owner } = fixture;
-    const id = idOf(
-      valueOf(
-        await call(fixture, owner, "mutation", "notes.create", {
-          title: "Keep",
-        })
-      )
-    );
-    await expect(
-      call(fixture, owner, "mutation", "notes.insertOnly", {
-        id,
-        expectedRevision: 1,
-      })
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { code: "data.write_denied", category: "authorization" },
+    expect({
+      // No function writes a table whose write access is none.
+      written: failureOf(
+        await call(fixture, owner, "mutation", "notes.stamp", {})
+      ),
+      // And any function of a kind that reads may read what its access
+      // allows.
+      read: valueOf(
+        await call(fixture, owner, "mutation", "notes.ledgerSize", {})
+      ),
+    }).toMatchObject({
+      written: { code: "data.write_denied", category: "authorization" },
+      read: 0,
     });
-  });
-
-  it("keep a function from reading a table its `operationAccess` leaves out", async () => {
-    const fixture = await notes();
-    const { owner } = fixture;
-    const id = idOf(
-      valueOf(
-        await call(fixture, owner, "mutation", "notes.create", {
-          title: "Keep",
-        })
-      )
-    );
-    expect(
-      failureOf(await call(fixture, owner, "mutation", "notes.peek", { id }))
-    ).toMatchObject({ code: "data.access_denied", category: "authorization" });
   });
 
   it("answer an expired cursor once the App's version moved on, so the list restarts", async () => {

@@ -91,7 +91,6 @@ export const help = permissions.brain;
 export const searchHelp = action({
   args: { text: v.string().min(1) },
   returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  uses: [help],
   handler: async (ctx, args) => await ctx.brain.search({ text: args.text, limit: 5 }),
 });
 

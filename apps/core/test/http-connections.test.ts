@@ -61,7 +61,6 @@ export const billing = permissions.billing;
 export const open = action({
   args: {},
   returns: v.object({ status: v.number(), count: v.number() }),
-  uses: [billing],
   handler: async (ctx) => {
     const response = await ctx.connections.billing.fetch("/v1/invoices?status=open", {
       headers: { accept: "application/json" },
@@ -74,7 +73,6 @@ export const open = action({
 export const create = action({
   args: { amount: v.number() },
   returns: v.number(),
-  uses: [billing],
   handler: async (ctx, args) => {
     const response = await ctx.connections.billing.fetch("/v1/invoices", {
       method: "POST",
@@ -89,7 +87,6 @@ export const create = action({
 export const stray = action({
   args: { path: v.string() },
   returns: v.string(),
-  uses: [billing],
   handler: async (ctx, args) => {
     try {
       const response = await ctx.connections.billing.fetch(args.path);

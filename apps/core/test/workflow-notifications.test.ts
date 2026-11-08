@@ -116,18 +116,23 @@ const schema = defineSchema({
     write: "appMembers",
   }),
 });
-const { mutation } = serverModule(schema);
-
 const review = permission.workflow("review", {
   input: v.object({ jobId: v.string() }),
   output: v.object({ status: v.string() }),
 });
 
+/** The App's config: the one workflow it declares. */
+const config = defineApp({
+  name: "Jobs",
+  permissions: { workflows: [review] },
+});
+
+const { mutation } = serverModule(schema, config);
+
 /** Records a job done and notifies its run. */
 const markDone = mutation({
   args: { runId: v.string(), jobId: v.string() },
   returns: v.string(),
-  uses: [jobEvents],
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("jobs", { jobId: args.jobId });
     ctx.notify(jobEvents, { runId: args.runId, data: { jobId: args.jobId } });
@@ -139,7 +144,6 @@ const markDone = mutation({
 const markThenFail = mutation({
   args: { runId: v.string() },
   returns: v.null(),
-  uses: [jobEvents],
   handler: async (ctx, args) => {
     await ctx.db.insert("jobs", { jobId: "job-1" });
     ctx.notify(jobEvents, { runId: args.runId, data: { jobId: "job-1" } });
@@ -147,25 +151,24 @@ const markThenFail = mutation({
   },
 });
 
-/** Lists the event; its code asks the channel for whatever it is given. */
+/** Its code asks the channel to notify `review` with whatever it is given. */
 const rawNotify = mutation({
   args: { event: v.string(), runId: v.string(), data: v.string() },
   returns: v.string(),
-  uses: [jobEvents],
   handler: () => "unreached",
 });
 
-/** Lists nothing; its code asks the channel to notify all the same. */
-const unlisted = mutation({
+/** Its code asks the channel to notify a workflow the App doesn't declare. */
+const undeclared = mutation({
   args: { event: v.string(), runId: v.string(), data: v.string() },
   returns: v.string(),
   handler: () => "unreached",
 });
 
 const jobsApp = registerApp({
-  config: defineApp({ name: "Jobs", permissions: { workflows: [review] } }),
+  config,
   schema,
-  modules: { jobs: { markDone, markThenFail, rawNotify, unlisted } },
+  modules: { jobs: { markDone, markThenFail, rawNotify, undeclared } },
   migrations: [],
 });
 
@@ -182,19 +185,27 @@ const codeOf = (error: unknown): string =>
 
 /**
  * App code as the SDK's runner runs it, but for `rawNotify` and
- * `unlisted`, which talk to their channel directly, as code in an
- * isolate could, and answer what the host said.
+ * `undeclared`, which talk to their channel directly, as code in an
+ * isolate could, and answer what the host said: the event as `jobEvents`
+ * names it, but for what `args` changes.
  */
 const runner: Runner = async (path, args, channel: OperationChannel) => {
-  if (path === "jobs.rawNotify" || path === "jobs.unlisted") {
+  if (path === "jobs.rawNotify" || path === "jobs.undeclared") {
     const asked = z
-      .object({ event: z.string(), runId: z.string(), data: z.string() })
+      .object({
+        event: z.string(),
+        runId: z.string(),
+        data: z.string(),
+        fingerprint: z.string().optional(),
+      })
       .parse(args);
     return await channel
-      .resource("review", "notify", [
+      .resource(path === "jobs.rawNotify" ? "review" : "archive", "notify", [
         asked.event,
         asked.runId,
         JSON.parse(asked.data),
+        jobEvents.type,
+        asked.fingerprint ?? jobEvents.fingerprint,
       ])
       .then(
         () => "staged",
@@ -420,7 +431,7 @@ const kinds = {
   "jobs.markDone": "mutation",
   "jobs.markThenFail": "mutation",
   "jobs.rawNotify": "mutation",
-  "jobs.unlisted": "mutation",
+  "jobs.undeclared": "mutation",
 } as const;
 
 /** Calls `path` as `by` through the App's invocation, as a page would. */
@@ -603,7 +614,7 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
     });
   });
 
-  it("stages nothing for a mutation that fails, and refuses an unlisted event, data its contract refuses, or a run that isn't the App's before anything is staged", async () => {
+  it("stages nothing for a mutation that fails, and refuses an event of a workflow the App doesn't declare, one the release doesn't resolve, data its contract refuses, or a run that isn't the App's before anything is staged", async () => {
     const fx = await fixture();
     const runId = await startedRun(fx, fx.ada);
     const { runId: personsRun } = await startWorkflow(
@@ -613,21 +624,31 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
       { version: 1, input: { jobId: "job-9" }, key: unique() }
     );
     const raw = async (
-      path: "jobs.rawNotify" | "jobs.unlisted",
-      fields: { event?: string; runId?: string | null; data?: unknown }
+      path: "jobs.rawNotify" | "jobs.undeclared",
+      fields: {
+        event?: string;
+        runId?: string | null;
+        data?: unknown;
+        fingerprint?: string;
+      }
     ) =>
       answerOf(
         await call(fx, fx.bob, path, {
           event: fields.event ?? "jobEvents",
           runId: fields.runId ?? runId,
           data: JSON.stringify(fields.data ?? { jobId: "job-1" }),
+          ...(fields.fingerprint === undefined
+            ? {}
+            : { fingerprint: fields.fingerprint }),
         })
       );
 
     const outcomes = {
       failed: answerOf(await call(fx, fx.bob, "jobs.markThenFail", { runId })),
-      unlisted: await raw("jobs.unlisted", {}),
+      undeclared: await raw("jobs.undeclared", {}),
       otherEvent: await raw("jobs.rawNotify", { event: "otherEvents" }),
+      // A reference generated for another contract than the release binds.
+      stale: await raw("jobs.rawNotify", { fingerprint: "0".repeat(64) }),
       extraField: await raw("jobs.rawNotify", {
         data: { jobId: "job-1", source: "urn:forged" },
       }),
@@ -640,8 +661,9 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
     expect({ outcomes, outbox: await outboxOf(fx.store) }).toStrictEqual({
       outcomes: {
         failed: "desk.refused",
-        unlisted: "resource.not_allowed",
+        undeclared: "resource.not_allowed",
         otherEvent: "resource.not_allowed",
+        stale: "resource.not_allowed",
         extraField: "contract.invalid_args",
         malformed: "contract.invalid_args",
         noSuchRun: "resource.unavailable",

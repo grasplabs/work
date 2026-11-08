@@ -83,7 +83,6 @@ export const insert = internalMutation({
 export const importHalfway = action({
   args: { title: noteFields.title },
   returns: v.null(),
-  uses: [internal.notes.insert],
   handler: async (ctx, args) => {
     await ctx.runMutation(internal.notes.insert, { title: args.title });
     throw new AppError("import.stopped", "The import stopped halfway.");

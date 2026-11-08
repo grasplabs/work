@@ -64,7 +64,6 @@ export const how = permissions.brain;
 export const pick = action({
   args: { type: v.string().min(1) },
   returns: v.object({ picked: v.string(), text: v.string().nullable() }),
-  uses: [how],
   handler: async (ctx, args) => {
     const selection = await ctx.brain.skillsSelect({ task: { type: args.type } });
     if (selection.result.kind === "none") {
@@ -82,7 +81,6 @@ export const pick = action({
 export const open = action({
   args: { documentId: v.string().min(1), version: v.number() },
   returns: v.string(),
-  uses: [how],
   handler: async (ctx, args) => {
     const read = await ctx.brain.skillsRead(args);
     return read.skill.name;

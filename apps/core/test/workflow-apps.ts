@@ -88,7 +88,6 @@ export const bump = mutation({
 export const hit = action({
   args: { name: v.string(), execution: v.string() },
   returns: v.number(),
-  uses: [bump],
   handler: async (ctx, args) => await ctx.runMutation(bump, { name: args.name }),
 });
 
@@ -137,7 +136,6 @@ import { invoice, outcome, send } from "./effects.ts";
 export const mail = action({
   args: {},
   returns: v.string(),
-  uses: [send],
   handler: async (ctx) => JSON.stringify(await outcome(async () => await ctx.connections.send.call("MAIL_SEND", invoice))),
 });
 
@@ -146,7 +144,6 @@ export const mail = action({
 export const mailOwnKey = action({
   args: {},
   returns: v.string(),
-  uses: [send],
   handler: async (ctx) =>
     JSON.stringify(
       await outcome(async () => {

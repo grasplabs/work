@@ -98,7 +98,6 @@ export const list = query({
 export const late = action({
   args: {},
   returns: v.null(),
-  uses: [create],
   handler: async (ctx) => {
     await wait(3000);
     await ctx.runMutation(create, { title: "too late" });
@@ -160,7 +159,6 @@ export const alsoBroken = query({
 export const handledThenFailed = action({
   args: {},
   returns: v.null(),
-  uses: [broken, alsoBroken],
   handler: async (ctx) => {
     try {
       await ctx.runQuery(broken, {});
@@ -179,7 +177,6 @@ export const handledThenFailed = action({
 export const throwsTheFirst = action({
   args: {},
   returns: v.null(),
-  uses: [broken, alsoBroken],
   handler: async (ctx) => {
     let first: unknown;
     try {
@@ -200,7 +197,6 @@ export const throwsTheFirst = action({
 export const callsThrowsTheFirst = action({
   args: {},
   returns: v.null(),
-  uses: [throwsTheFirst],
   handler: async (ctx) => {
     await ctx.runAction(throwsTheFirst, {});
     return null;
@@ -228,7 +224,6 @@ export const patient = query({
 export const forgiving = action({
   args: {},
   returns: v.null(),
-  uses: [broken],
   handler: async (ctx) => {
     try {
       await ctx.runQuery(broken, {});
@@ -243,7 +238,6 @@ export const forgiving = action({
 export const rethrows = action({
   args: {},
   returns: v.null(),
-  uses: [broken],
   handler: async (ctx) => {
     try {
       await ctx.runQuery(broken, {});
@@ -258,7 +252,6 @@ export const rethrows = action({
 export const consult = action({
   args: {},
   returns: v.string(),
-  uses: [writer],
   handler: async (ctx) => await ctx.ai.generate({ prompt: "Hi" }),
 });
 `,

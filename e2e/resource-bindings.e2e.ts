@@ -35,7 +35,6 @@ export const ai = permissions.ai;
 export const draft = action({
   args: {},
   returns: v.string(),
-  uses: [ai],
   handler: async (ctx) => await ctx.ai.generate({ prompt: "Draft a greeting." }),
 });
 `,
