@@ -3001,6 +3001,36 @@
   --icon-wait: 0.15s;
 }
 
+/*
+ * An event passes round the hook: each of its three arms reaches out in turn and comes back, on the
+ * house curve, all of it within 300 ms.
+ */
+.lucide-webhook {
+  overflow: visible;
+}
+.lucide-webhook > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: -1px;
+  --icon-y: 1px;
+  --icon-time: 0.2s;
+  --icon-ease: var(--ease-house);
+}
+.lucide-webhook > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: -1px;
+  --icon-time: 0.2s;
+  --icon-wait: 0.05s;
+  --icon-ease: var(--ease-house);
+}
+.lucide-webhook > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-x: 1px;
+  --icon-y: 0.5px;
+  --icon-time: 0.2s;
+  --icon-wait: 0.1s;
+  --icon-ease: var(--ease-house);
+}
+
 /* The line runs from the first step to the second, which comes up. */
 .lucide-workflow > :nth-child(2) {
   --icon-move: icon-draw;
