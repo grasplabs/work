@@ -68,3 +68,6 @@ export const hasExactly = (
 
 /** A name a declaration gives: a table's, or a resource's alias. */
 export const namePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
+/** A SHA-256 in lower-case hex: a fingerprint, a schema hash, an address. */
+export const sha256Pattern = /^[0-9a-f]{64}$/u;

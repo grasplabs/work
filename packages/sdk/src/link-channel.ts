@@ -5,6 +5,7 @@ import {
   pagePersonHeader,
 } from "@grasp-os/shared/page-limits";
 
+import { refusal } from "./client-shared.ts";
 import type { CoreFetch } from "./file-channel.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
@@ -55,10 +56,6 @@ export interface LinkChannel {
     signal?: AbortSignal
   ) => Promise<LinkDecision>;
 }
-
-/** A refusal core answered, with its code. */
-const refusal = (code: string, message: string): Error =>
-  Object.assign(new Error(message), { code });
 
 /** Core's decision, read as what it is. */
 const decisionOf = (body: unknown): LinkDecision => {

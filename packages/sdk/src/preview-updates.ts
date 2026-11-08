@@ -29,6 +29,8 @@
  *   is at fault, so nothing is reported, and the page is told to start the
  *   frame afresh, with a fresh token.
  */
+
+import { sha256Pattern } from "./declaration.ts";
 import type { PreviewApplied, PreviewLoad } from "./page-runtime.ts";
 
 /** What the receiver works with: Refresh, the frame, and the page. */
@@ -81,9 +83,6 @@ export const notLoaded = (error: unknown, directory: string): boolean =>
   (error.message.includes(directory) ||
     error.message === "Importing a module script failed.");
 
-/** What a module's address looks like: core's hash of it. */
-const addressPattern = /^[0-9a-f]{64}$/u;
-
 /** Whether `value` is a version as the page sends one. */
 const isLoad = (value: unknown): value is PreviewLoad => {
   if (typeof value !== "object" || value === null) {
@@ -93,7 +92,7 @@ const isLoad = (value: unknown): value is PreviewLoad => {
   const visit: unknown = Reflect.get(value, "visit");
   return (
     typeof entry === "string" &&
-    addressPattern.test(entry) &&
+    sha256Pattern.test(entry) &&
     Number.isSafeInteger(visit) &&
     typeof visit === "number" &&
     visit >= 0 &&
