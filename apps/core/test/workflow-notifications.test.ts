@@ -248,9 +248,13 @@ const person = async (role: Role): Promise<Identity> => {
 
 /**
  * A workflow waiting, in `job`, for its job's completion through
- * `jobEvents`, then ending with the event's source and job.
+ * `jobEvents`, then ending with the event's source and job; with `more`
+ * bindings, when given.
  */
-const definitionOf = (contract: string): string =>
+const definitionOf = (
+  contract: string,
+  more: Readonly<Record<string, unknown>> = {}
+): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     input: objectSchema({ jobId: { type: "string" } }),
@@ -263,7 +267,7 @@ const definitionOf = (contract: string): string =>
         },
       },
     },
-    bindings: { jobEvents: { kind: "event", contract } },
+    bindings: { jobEvents: { kind: "event", contract }, ...more },
     steps: [
       {
         id: "job",
@@ -679,6 +683,87 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
       outbox: [
         { kind: "workflow.notify", settled: false, undeliverable: null },
       ],
+    });
+  });
+
+  it("sends only the events its sealed version names, whatever the workflow is rebound to, and keeps a refused one as evidence", async () => {
+    const fx = await fixture();
+    const runId = await startedRun(fx, fx.ada);
+    // A later version of the workflow with an event of its own, bound to
+    // the App in place of the one its version was sealed with.
+    const contract = `later-events-${unique()}`;
+    await publishCatalogContract(env, fx.admin, {
+      key: contract,
+      kind: "event",
+      events: {
+        [completed]: {
+          data: JSON.stringify(jobData.descriptor),
+          browser: true,
+        },
+      },
+    });
+    await publishWorkflowVersion(env, fx.ada, fx.workflowId, {
+      definition: definitionOf(contract, {
+        laterEvents: { kind: "event", contract },
+      }),
+      basedOn: 1,
+    });
+    for (const alias of ["jobEvents", "laterEvents"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one approval after the other
+      await approveWorkflowBinding(env, fx.admin, fx.workflowId, {
+        alias,
+        target: { kind: "event" },
+        reviewed: { version: 2 },
+      });
+    }
+    await bindWorkflowToApp(env, fx.ada, fx.workflowId, {
+      app: fx.app,
+      alias: "review",
+      version: 2,
+    });
+    const raw = async (event: string) =>
+      answerOf(
+        await call(fx, fx.bob, "jobs.rawNotify", {
+          event,
+          runId,
+          data: JSON.stringify({ jobId: "job-1" }),
+        })
+      );
+    const refusals = async () => {
+      const events = await allEvents();
+      return events
+        .filter(
+          (each) =>
+            each.action === "app.use.refused" && each.target?.id === fx.app
+        )
+        .map(({ detail }) => ({
+          function: detail?.function,
+          useKind: detail?.useKind,
+          useName: detail?.useName,
+          reason: detail?.reason,
+          errorCode: detail?.errorCode,
+        }));
+    };
+    expect({
+      // The new event: the version was sealed without it.
+      later: await raw("laterEvents"),
+      // The sealed one: its workflow is bound to another version now.
+      sealed: await raw("jobEvents"),
+      refusals: await refusals(),
+      outbox: await outboxOf(fx.store),
+    }).toStrictEqual({
+      later: "resource.not_allowed",
+      sealed: "resource.unavailable",
+      refusals: [
+        {
+          function: "jobs.rawNotify",
+          useKind: "workflow",
+          useName: "review",
+          reason: "request_not_allowed",
+          errorCode: "resource.not_allowed",
+        },
+      ],
+      outbox: [],
     });
   });
 

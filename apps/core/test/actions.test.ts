@@ -2412,6 +2412,132 @@ describe("evidence of a refused use", () => {
     });
   });
 
+  it("is kept for a mutation notifying a connection's alias, named as the connection it is", async () => {
+    const fixture = await notes();
+    const heard: UseRefusal[] = [];
+    const notified = await call(
+      fixture,
+      "mutation",
+      "notes.create",
+      { title: "x" },
+      {
+        refusedUse: async (refusal) => {
+          heard.push(refusal);
+          await Promise.resolve();
+        },
+        run: misusing(
+          "notes.create",
+          async (channel) =>
+            await channel.resource("mail", "notify", [
+              "sent",
+              "run-1",
+              {},
+              "mail.sent",
+              "0".repeat(64),
+            ])
+        ),
+      }
+    );
+    expect({ notified: codeOf(notified), heard }).toStrictEqual({
+      notified: "resource.not_allowed",
+      heard: [
+        {
+          function: "notes.create",
+          use: { kind: "resource", name: "mail" },
+          reason: "use_undeclared",
+          errorCode: "resource.not_allowed",
+        },
+      ],
+    });
+  });
+
+  it("is kept by core for a table its access denies, once a call however often its code asks", async () => {
+    const fixture = await appWith({
+      ...appDefinition({
+        name: "Vault",
+        tables: {
+          vault: {
+            fields: { secret: "v.string()" },
+            access: { read: "none", write: "none" },
+          },
+        },
+      }),
+      "server/vault.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
+export const peek = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => await ctx.db.query("vault").count(),
+});
+export const stamp = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    let refused = 0;
+    for (let index = 0; index < 5; index += 1) {
+      try {
+        await ctx.db.insert("vault", { secret: "s" });
+      } catch {
+        refused += 1;
+      }
+    }
+    return refused;
+  },
+});
+`,
+    });
+    const release = await seal(fixture);
+    const appId = appIdSchema.parse(fixture.app);
+    const run = async (path: string, kind: "query" | "mutation") => {
+      const requestId = crypto.randomUUID();
+      const result = await callOperation(
+        { manifest: release.app, run: hostedRelease(env, release).run },
+        await invocationFor(env, release, {
+          by: fixture.owner,
+          requestId,
+          deadline: Date.now() + 30_000,
+        }),
+        { path, kind },
+        {}
+      );
+      const events = await allEvents();
+      const kept = events
+        .filter(
+          (event) =>
+            event.action === "app.use.refused" &&
+            event.target?.id === appId &&
+            event.requestId === requestId
+        )
+        .map(({ detail }) => detail);
+      return { result: result.ok ? result.value : result.error.code, kept };
+    };
+    const kept = (table: string, errorCode: string, fn: string) => ({
+      version: 1,
+      person: fixture.owner.userId,
+      runId: null,
+      function: fn,
+      useKind: "table",
+      useName: table,
+      reason: "request_not_allowed",
+      errorCode,
+    });
+    expect({
+      read: await run("vault.peek", "query"),
+      // Five refused writes in one call, each caught: kept once, and the
+      // mutation fails all the same, its refused write not passed off.
+      write: await run("vault.stamp", "mutation"),
+    }).toStrictEqual({
+      read: {
+        result: "data.access_denied",
+        kept: [kept("vault", "data.access_denied", "vault.peek")],
+      },
+      write: {
+        result: "data.write_denied",
+        kept: [kept("vault", "data.write_denied", "vault.stamp")],
+      },
+    });
+  });
+
   it("is kept by core as app.use.refused, from a person's call", async () => {
     const fixture = await appWith({
       ...appDefinition({

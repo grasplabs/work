@@ -424,7 +424,7 @@ export interface UseRefusal {
   /** The function whose code asked: its sealed path. */
   readonly function: string;
   readonly use: {
-    readonly kind: "function" | "resource" | "workflow";
+    readonly kind: "function" | "resource" | "workflow" | "table";
     readonly name: string | null;
   };
   /**
@@ -1297,7 +1297,12 @@ const readFor = async (
   );
   const table = read.kind === "get" ? read.table : read.query.table;
   if (!mayUse(run, operation, table, "read")) {
-    throw dataErrors.create("data.access_denied", { table });
+    // Kept as evidence: with no list per function, a denied table is the
+    // only trace of code reaching past what the App's tables allow.
+    throw refusingUse(dataErrors.create("data.access_denied", { table }), {
+      use: { kind: "table", name: table },
+      reason: "request_not_allowed",
+    });
   }
   return await reader.read(read, tallied(run.sensitive, operation));
 };
@@ -1439,7 +1444,14 @@ const stagingFor = (
     // Only a mutation writes, and only a table someone may write: who may,
     // and which records, the store decides as it commits.
     if (operation.kind !== "mutation" || !table.writable) {
-      throw dataErrors.create("data.write_denied", { table: write.table });
+      // Kept as evidence, as a denied read is (`readFor`).
+      throw refusingUse(
+        dataErrors.create("data.write_denied", { table: write.table }),
+        {
+          use: { kind: "table", name: write.table },
+          reason: "request_not_allowed",
+        }
+      );
     }
     if (writes.length >= commitMaxWrites) {
       throw dataErrors.create("data.invalid", {
@@ -2303,8 +2315,9 @@ const workflowNotification = (
       : undefined;
   const workflowName = sealedName(run.app.manifest.permissions, request.alias);
   if (declared === undefined) {
+    // Named by what the alias is in the App: a connection's is no workflow.
     throw refusingUse(operationErrors.create("resource.not_allowed"), {
-      use: { kind: "workflow", name: workflowName },
+      use: undeclaredUse(run, request.alias),
       reason: "use_undeclared",
     });
   }
@@ -2823,7 +2836,10 @@ const keepEvidence = async (
     return;
   }
   run.evidence.kept = true;
-  const errorCode = operationErrors.codeOf(error) ?? "resource.not_allowed";
+  const errorCode =
+    operationErrors.codeOf(error) ??
+    dataErrors.codeOf(error) ??
+    "resource.not_allowed";
   const keeping = (async () => {
     try {
       await keep({ function: operation.path, ...refused, errorCode });
@@ -2857,8 +2873,8 @@ const keepEvidence = async (
 };
 
 /**
- * `capabilities`, its calls and resource requests keeping the evidence of
- * a use refused at the host's admission (`keepEvidence`).
+ * `capabilities`, its reads, writes, calls and resource requests keeping
+ * the evidence of a use refused at the host's admission (`keepEvidence`).
  */
 const keepingEvidence = (
   run: Run,
@@ -2877,6 +2893,12 @@ const keepingEvidence = (
     };
   return {
     ...capabilities,
+    ...(capabilities.read === undefined
+      ? {}
+      : { read: keeping(capabilities.read) }),
+    ...(capabilities.write === undefined
+      ? {}
+      : { write: keeping(capabilities.write) }),
     ...(capabilities.call === undefined
       ? {}
       : { call: keeping(capabilities.call) }),
@@ -3404,7 +3426,15 @@ const runMutation = async (
                   asked.data
                 );
               } catch (error) {
-                throw notifyFailure(error, invocation.requestId);
+                const failure = notifyFailure(error, invocation.requestId);
+                // An event the release doesn't resolve for the workflow
+                // (another, or a stale reference's) is kept as evidence.
+                throw operationErrors.codeOf(failure) === "resource.not_allowed"
+                  ? refusingUse(failure, {
+                      use: { kind: "workflow", name: asked.workflow },
+                      reason: "request_not_allowed",
+                    })
+                  : failure;
               }
               const intent: NonNullable<Commit["intents"]>[number] = {
                 kind: "workflow.notify",
