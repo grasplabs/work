@@ -327,7 +327,7 @@ export interface GraspPermission extends DeclarationBase<"grasp", "grasp"> {
 
 /**
  * A `files` permission (spec 10.7.5, 32.3): what the App's pages may do
- * with files, through the host. Browser-facing: no function lists it.
+ * with files, through the host. Browser-facing: no function reaches it.
  */
 export interface FilesPermission<
   Operations extends readonly FilesOperation[] = readonly FilesOperation[],

@@ -612,10 +612,10 @@ export type WorkflowDecisionsOf<Reference> =
     : never;
 
 /**
- * The name of the function `value` refers to, as App code lists it in
- * `uses` or calls it through its context (generated or symbolic), read
- * once; undefined when it isn't a plain object with a string `name`.
- * Nothing about it is trusted: the registration resolves the name.
+ * The name of the function `value` refers to, as App code calls it
+ * through its context (generated or symbolic), read once; undefined when
+ * it isn't a plain object with a string `name`. Nothing about it is
+ * trusted: the host resolves the name against what the App registers.
  */
 export const referenceName = (value: unknown): string | undefined => {
   if (!isPlainObject(value)) {
@@ -625,7 +625,7 @@ export const referenceName = (value: unknown): string | undefined => {
   return typeof name === "string" ? name : undefined;
 };
 
-/** An event reference as server code lists it in `uses`, read as data. */
+/** An event reference as server code notifies with it, read as data. */
 export interface EventReferenceData {
   /** The alias of the App's workflow it belongs to (`workflows.<alias>`). */
   readonly workflow: string;

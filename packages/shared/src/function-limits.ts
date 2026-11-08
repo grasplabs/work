@@ -102,9 +102,6 @@ export const operationPathMaxLength = 200;
 /** The most functions one App registers, public and internal together. */
 export const appMaxOperations = 256;
 
-/** The most references one function's `uses` lists. */
-export const usesMaxEntries = 64;
-
 /**
  * A permission's alias, as `ctx.connections.<alias>` names it: a letter, then
  * letters, digits or underscores, at most 64 code units.

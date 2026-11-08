@@ -1587,13 +1587,14 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
   });
 
   it("can't hand the host a manifest it didn't declare", async () => {
-    // The App's code makes the SDK in its isolate answer a query that
-    // writes: no declaration makes that, so the host refuses it.
+    // The App's code makes the SDK in its isolate answer a function with
+    // a list of its own, as if it narrowed or widened what the App holds:
+    // no declaration makes that, so the host refuses it.
     const forging = `const stringify = JSON.stringify;
 JSON.stringify = (value, ...rest) => {
   const text = stringify(value, ...rest);
   return typeof value === "object" && value !== null && "operations" in value
-    ? text.replace('"insert":false', '"insert":true')
+    ? text.replace('"stream":null', '"stream":null,"uses":[{"type":"resource","kind":"ai","alias":"ai"}]')
     : text;
 };
 `;

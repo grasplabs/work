@@ -153,7 +153,12 @@ const markThenFail = mutation({
 
 /** Its code asks the channel to notify `review` with whatever it is given. */
 const rawNotify = mutation({
-  args: { event: v.string(), runId: v.string(), data: v.string() },
+  args: {
+    event: v.string(),
+    runId: v.string(),
+    data: v.string(),
+    fingerprint: v.string().optional(),
+  },
   returns: v.string(),
   handler: () => "unreached",
 });

@@ -20,6 +20,7 @@ import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { keepsReceipt } from "../src/action-invocation.ts";
@@ -30,6 +31,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { appMembers } from "../src/db/core/schema.ts";
 import {
   callMaxDepth,
   callMaxResourceRequests,
@@ -911,7 +913,16 @@ describe("composing the App's functions", () => {
 
   it("runs what a function calls for the same caller, under the tables' access and row rules, internal functions included", async () => {
     const fixture = await notes();
+    // Another builder the App is shared with, who owns none of its notes.
     const other: Fixture = { ...fixture, owner: await person() };
+    await drizzle(env.DB).insert(appMembers).values({
+      appId: fixture.appId,
+      memberType: "person",
+      memberId: other.owner.userId,
+      role: "builder",
+      addedBy: fixture.owner.userId,
+      addedAt: new Date(),
+    });
     const id = valueOf(
       await call(fixture, "action", "actions.createOnly", { title: "mine" })
     );
@@ -1004,7 +1015,7 @@ describe("composing the App's functions", () => {
 });
 
 describe("an action's channel", () => {
-  it("has no database, and calls only what the action uses, as the kind it is", async () => {
+  it("has no database, and calls only what the App registers and declares, as the kind it is", async () => {
     const fixture = await notes();
     const attempt = async (
       misuse: (channel: OperationChannel) => Promise<unknown>
@@ -1038,22 +1049,33 @@ describe("an action's channel", () => {
             fields: { title: "x" },
           })
       ),
-      unused: await attempt(
-        async (channel) => await channel.call("mutation", "notes.reject", {})
+      unregistered: await attempt(
+        async (channel) => await channel.call("mutation", "notes.missing", {})
       ),
       wrongKind: await attempt(
         async (channel) =>
           await channel.call("mutation", "notes.get", { id: "x" })
       ),
-      resource: await attempt(
-        async (channel) => await channel.resource("mail", "call", ["send", {}])
+      undeclared: await attempt(
+        async (channel) =>
+          await channel.resource("calendar", "call", ["list", {}])
+      ),
+      // Declared, but bound to nothing: the App's permission alone reaches
+      // nothing until an admin binds it.
+      unbound: await attempt(
+        async (channel) =>
+          await channel.resource("mail", "call", [
+            "send",
+            mailTo("a@acme.test"),
+          ])
       ),
     }).toStrictEqual({
       read: "function.no_database",
       write: "function.no_database",
-      unused: "function.not_found",
+      unregistered: "function.not_found",
       wrongKind: "function.kind_mismatch",
-      resource: "resource.not_allowed",
+      undeclared: "resource.not_allowed",
+      unbound: "resource.unavailable",
     });
   });
 });

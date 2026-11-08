@@ -181,21 +181,14 @@ export const archived = action({
 });
 
 /** The Mailer, declaring its mail resource still, with no action that uses it. */
-const unusedMailFiles = (): Record<string, string> => ({
+/** The Mailer's files once it no longer declares its mail connection. */
+const undeclaredMailFiles = (): Record<string, string> => ({
   "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
-import { permissions } from "../grasp.config.ts";
-
-export const mail = permissions.mail;
 
 export const ping = query({ args: {}, returns: v.string(), handler: () => "pong" });
 `,
-  ...appDefinition({
-    name: "Mailer",
-    permissions: [
-      'permission.connection("mail", {\n  contract: "microsoft-365.mail@1",\n  actions: ["send", "list"],\n})',
-    ],
-  }),
+  ...appDefinition({ name: "Mailer" }),
 });
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
@@ -776,7 +769,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     });
   });
 
-  it("refuse to confirm a held call once no action of the current version uses its alias", async () => {
+  it("refuse to confirm a held call once the current version no longer declares its alias", async () => {
     const mailer = await mailerApp();
     await call(
       mailer,
@@ -786,7 +779,11 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     );
     const held = await heldSend(mailer);
     const app = mailer.release.manifest.resourceId;
-    await mailer.builder.api.apps.files.commit(app, unusedMailFiles(), "Quiet");
+    await mailer.builder.api.apps.files.commit(
+      app,
+      undeclaredMailFiles(),
+      "Quiet"
+    );
     await mailer.builder.api.apps.versions.setCurrent(app, 2);
     await mailer.admin.api.permissions.grant(mailer.permission, { version: 2 });
     const refused = await failure(

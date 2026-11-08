@@ -1617,7 +1617,6 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           operations: [],
           collections: [],
           maxOutputTokens: 300,
-          usedBy: ["desk.draft"],
           state: "unbound",
           binding: null,
           choices: {
@@ -1634,7 +1633,6 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           operations: ["search"],
           collections: ["handbook", "salaries"],
           maxOutputTokens: null,
-          usedBy: ["desk.find"],
           state: "unbound",
           binding: null,
           // The App's own grant to read, and no other collection.

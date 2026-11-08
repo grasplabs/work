@@ -461,22 +461,20 @@ const sealedName = (
     ? name
     : null;
 
+/** Whether the App declares a workflow under `alias`. */
+const declaresWorkflow = (run: Run, alias: unknown): boolean =>
+  declaredPermission(run.app.manifest, alias, "workflows") !== undefined;
+
 /**
  * The use App code asked for under `alias`, refused as one the function's
  * kind can't make or the App doesn't declare: a workflow when the App
  * declares one under it, otherwise a resource, named only when the App's
  * manifest has it.
  */
-const undeclaredUse = (run: Run, alias: unknown): RefusedUse["use"] =>
-  declaredPermission(run.app.manifest, alias, "workflows") === undefined
-    ? {
-        kind: "resource",
-        name: sealedName(run.app.manifest.permissions, alias),
-      }
-    : {
-        kind: "workflow",
-        name: sealedName(run.app.manifest.permissions, alias),
-      };
+const undeclaredUse = (run: Run, alias: unknown): RefusedUse["use"] => ({
+  kind: declaresWorkflow(run, alias) ? "workflow" : "resource",
+  name: sealedName(run.app.manifest.permissions, alias),
+});
 
 /**
  * Runs a registered function's handler over a channel: the SDK's
@@ -2192,7 +2190,7 @@ const startFailure = (error: unknown, requestId: string): Error => {
 };
 
 /**
- * An action's start of a workflow it lists (`workflowStart`), under `key`
+ * An action's start of one of the App's workflows (`workflowStart`), under `key`
  * (derived from the action's call key and its place among its starts),
  * through core's `WorkflowStarts` for the invocation, after the one gate
  * (`admit`): its handle once admitted. `resource.unavailable` where core
@@ -2283,10 +2281,6 @@ const notifyPeopleCall = async (
   );
   return { delivered: receipt.delivered };
 };
-
-/** Whether the App declares a workflow under `alias`. */
-const declaresWorkflow = (run: Run, alias: unknown): boolean =>
-  declaredPermission(run.app.manifest, alias, "workflows") !== undefined;
 
 /**
  * The notification `operation`, a mutation, asks for under workflow
