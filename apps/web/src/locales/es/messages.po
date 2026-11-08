@@ -14619,7 +14619,6 @@ msgid "Webhook trigger"
 msgstr "Disparador de webhook"
 
 #: src/routes/_shell.settings.tsx
-#: src/routes/_shell.settings.webhooks.tsx
 #: src/settings/event-sources.tsx
 msgid "Webhooks"
 msgstr "Webhooks"
