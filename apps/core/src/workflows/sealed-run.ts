@@ -43,7 +43,9 @@ import { writeWorkflowState } from "../workflow-state.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { AttemptCalls } from "./attempt-host.ts";
 import { writeJson } from "./bounded-json.ts";
-import { eventTypeKey } from "./event-envelopes.ts";
+import { eventTypeKey, matchAttribute } from "./event-envelopes.ts";
+import { isMatchKey, matchHashOf } from "./event-matches.ts";
+import type { MatchKey } from "./event-matches.ts";
 import { fixtureCall, fixtureCalls } from "./fixture-calls.ts";
 import {
   fixtureDecisionDeadline,
@@ -303,6 +305,11 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //     response schema), in the step that records it, so a replay takes it
 //     alike. A decision nobody answered before its deadline closes as
 //     timed out, and the decision service refuses an answer after that.
+// - An event wait with a match taking an event of another match: its
+//   enter step records the value it matches (held to the sealed template,
+//   text, a number or a boolean), and the wait takes only an event core
+//   handed the run for exactly that value (event-waits.ts), which carries
+//   the match's hash as an engine attribute.
 // - An event wait taking an event the isolate made up, one sent to
 //   another run, or through a binding the run may not use. An event wait
 //   (`isEventWait`: the first event of any of its sealed types) runs only
@@ -681,6 +688,15 @@ interface OpenLoop {
   /** The item running now: -1 before its first. */
   current: number;
 }
+
+/** What an event wait's enter step records, with a match: the value it matches. */
+const matchRecordSchema = z.strictObject({ key: z.json() });
+
+/** Whether `task` is an event wait with a match, whose enter step records it. */
+const matchesBy = (
+  task: SealedTask | undefined
+): task is Extract<SealedTask, { kind: "listen" }> =>
+  task?.kind === "listen" && task.listen.match !== undefined;
 
 /** What a loop's enter step records, when not skipped. */
 const itemsRecordSchema = z.object({
@@ -1397,6 +1413,11 @@ class SealedRun implements SealedRunKind {
   readonly #deadlines = new Map<string, number>();
   /** What each decision task asks, as its enter step recorded it. */
   readonly #asks = new Map<string, DecisionAsks>();
+  /**
+   * The value each event wait with a match matches, as its enter step
+   * recorded it, by the place it runs in.
+   */
+  readonly #matchKeys = new Map<string, MatchKey>();
   /** The decision each decision task's step opened, as it recorded it. */
   readonly #opened = new Map<string, string>();
   /** The decision each attempt of a decision task's step opened. */
@@ -1854,21 +1875,79 @@ class SealedRun implements SealedRunKind {
     if (kind === "task" && task?.kind === "raise" && !skipped) {
       return { ok: false, error: raisedBy(task) };
     }
-    let unfit: StepError | undefined;
     if (kind === "enter" && task !== undefined && !skipped) {
-      if (sleepsUntil(task)) {
-        unfit = deadlineUnfit(value);
-      } else if (task.kind === "for") {
-        unfit = itemsUnfit(value);
+      const entered = await this.#enterChecked(attempt, task, value);
+      if (entered !== undefined) {
+        return entered;
       }
-    }
-    if (unfit !== undefined) {
-      return { ok: false, error: unfit };
     }
     const keeps = skipped ? undefined : keepsOf(task, kind);
     return keeps === undefined
       ? { ok: true, value }
       : await this.#stateChecked(attempt, keeps, value);
+  }
+
+  /**
+   * What an enter step of `task` that its `if` didn't skip records,
+   * `value`, settles as, when its task holds it to anything: a deadline's
+   * (`deadlineUnfit`), a loop's items (`itemsUnfit`), an event wait's
+   * match (`#matchKeyChecked`).
+   */
+  async #enterChecked(
+    attempt: StepAttempt,
+    task: SealedTask,
+    value: unknown
+  ): Promise<Settled<unknown> | undefined> {
+    if (matchesBy(task)) {
+      return await this.#matchKeyChecked(attempt, task, value);
+    }
+    let unfit: StepError | undefined;
+    if (sleepsUntil(task)) {
+      unfit = deadlineUnfit(value);
+    } else if (task.kind === "for") {
+      unfit = itemsUnfit(value);
+    }
+    return unfit === undefined ? undefined : { ok: false, error: unfit };
+  }
+
+  /**
+   * An event wait's enter step's record with a match, `value`: `{ key }`,
+   * the key held to the build's template as a call's arguments are
+   * (`matched`, no sensitive parameter: core keeps its hash), anything
+   * else tampering; one that isn't text, a number or a boolean
+   * (`isMatchKey`) fails the step, as an expression giving the wrong kind
+   * of value does.
+   */
+  async #matchKeyChecked(
+    attempt: StepAttempt,
+    task: ListenTask,
+    value: unknown
+  ): Promise<Settled<unknown>> {
+    const record = matchRecordSchema.safeParse(value);
+    const sealed = task.listen.match;
+    try {
+      if (!record.success || sealed === undefined) {
+        throw tampering(`Task "${task.id}"'s enter step records { key }.`);
+      }
+      matched(sealed.equals, record.data.key, "match.equals", undefined, []);
+    } catch (error) {
+      return await this.#refused(
+        attempt,
+        error instanceof Error ? error.message : "The match isn't sealed."
+      );
+    }
+    return isMatchKey(record.data.key)
+      ? { ok: true, value }
+      : {
+          ok: false,
+          error: forIsolate(
+            workflowResourceErrors.create("workflow.call_invalid", {
+              issues: [
+                "match.equals: Give text, a number or a boolean, of at most 512 characters.",
+              ],
+            })
+          ),
+        };
   }
 
   /**
@@ -2164,6 +2243,11 @@ class SealedRun implements SealedRunKind {
       if (items !== undefined) {
         this.#loops.set(place, { count: items.length, current: -1 });
       }
+    } else if (task.kind === "listen" && task.listen.match !== undefined) {
+      const key = matchRecordSchema.safeParse(value).data?.key;
+      if (isMatchKey(key)) {
+        this.#matchKeys.set(place, key);
+      }
     }
   }
 
@@ -2251,19 +2335,61 @@ class SealedRun implements SealedRunKind {
    * events through that binding (`#requireEventAuthority`).
    */
   async eventWait(step: string): Promise<EventWaitPlan> {
-    const task = this.#stepOf(step)?.task;
-    if (!isEventWait(task)) {
+    const sealed = this.#stepOf(step);
+    const task = sealed?.task;
+    if (sealed === undefined || !isEventWait(task)) {
       throw new Error(`Step "${step}" is no event wait's`);
     }
-    const { binding, filters } = task.listen;
+    const { binding, filters, match } = task.listen;
     await this.#requireEventAuthority(binding);
+    if (match === undefined) {
+      return {
+        match: await Promise.all(
+          filters.map(async ({ type }) => ({
+            type: await eventTypeKey(binding, type),
+          }))
+        ),
+        timeoutMs: task.timeoutMs,
+      };
+    }
+    // With a match, only an event core handed the run for exactly the
+    // value its enter step recorded, which carries that match
+    // (event-waits.ts): no other event of its binding and types.
+    const key = this.#matchKeys.get(placeOf(task.id, sealed.path));
+    if (key === undefined) {
+      throw new Error(`Step "${step}" matches nothing its enter step recorded`);
+    }
+    const matchHash = await matchHashOf(match.field, key);
+    const { calling } = this.run;
+    const real = calling.candidate === undefined && calling.fixture !== true;
+    const types = filters.map(({ type }) => type);
     return {
       match: await Promise.all(
-        filters.map(async ({ type }) => ({
+        types.map(async (type) => ({
           type: await eventTypeKey(binding, type),
+          attributes: { [matchAttribute]: matchHash },
         }))
       ),
       timeoutMs: task.timeoutMs,
+      // A test run's events are its fixtures': nothing outside reaches it.
+      ...(real
+        ? {
+            enter: async (until: number) => {
+              // Loaded as it is reached: it admits to the run's inbox,
+              // whose engine runs this host.
+              const { enterMatchWait } = await import("./event-waits.ts");
+              await enterMatchWait(
+                this.#env,
+                { run: calling, step, binding, types, matchHash },
+                until
+              );
+            },
+            left: async () => {
+              const { leaveMatchWait } = await import("./event-waits.ts");
+              await leaveMatchWait(this.#env, calling.runId, step);
+            },
+          }
+        : {}),
     };
   }
 

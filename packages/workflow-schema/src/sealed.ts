@@ -134,8 +134,11 @@ export type SealedCall = z.infer<typeof sealedCallSchema>;
 
 /**
  * An event wait's events, as the host takes them: the first of any of its
- * types sent through its event binding, matched by type alone; its output
- * is that event's envelope as the host minted it.
+ * types sent through its event binding, matched by type alone, or with
+ * `match` by the value its task's enter step records (`{ key }`, held to
+ * `equals`) at JSON Pointer `field` of the data of an event source's
+ * event (core's workflows/event-waits.ts); its output is that event's
+ * envelope as the host minted it.
  */
 const sealedListenSchema = z.strictObject({
   binding: aliasSchema,
@@ -149,6 +152,16 @@ const sealedListenSchema = z.strictObject({
     )
     .min(1)
     .max(sealedBuildLimits.eventTypes),
+  match: z
+    .strictObject({
+      field: z
+        .string()
+        .min(2)
+        .max(256)
+        .regex(/^(?:\/(?:[^~/]|~[01])*)+$/u),
+      equals: templateSchema,
+    })
+    .optional(),
 });
 
 /** A try task's catch, as the host decides it. */

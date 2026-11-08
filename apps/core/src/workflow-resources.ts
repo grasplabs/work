@@ -902,19 +902,49 @@ const eventTypeProblems = (
   }
   const admitted = contract.contract.events ?? {};
   const listed = typeof step.event.type !== "string";
-  return eventTypesOf(step).flatMap((type, index) =>
-    Object.hasOwn(admitted, type)
-      ? []
-      : [
+  const matched = step.event.match !== undefined;
+  return eventTypesOf(step).flatMap((type, index) => {
+    const at = `${pointer}/event/type${listed ? `/${index}` : ""}`;
+    if (!Object.hasOwn(admitted, type)) {
+      return [
+        {
+          code: "event.unknown_type",
+          message: "The event binding's contract admits no event of this type.",
+          pointer: at,
+          remedy: "Wait for a type its contract's events name.",
+        },
+      ];
+    }
+    // A match is decided over an event source's events alone (event-
+    // waits.ts): a type nothing sends from a source would never match;
+    // and one a source sends reaches a run only by a match, never
+    // whichever run waits first.
+    const unmatched = (each: string, where: string) =>
+      !matched && admitted[each]?.ingress === "webhook"
+        ? [
+            {
+              code: "event.match_required",
+              message:
+                "A webhook source's events reach a run only by a `match` on what the run is waiting for.",
+              pointer: where,
+              remedy:
+                "Give the wait `event.match`: the field of the event's data, and the value it must have.",
+            },
+          ]
+        : [];
+    return matched && admitted[type]?.ingress !== "webhook"
+      ? [
           {
-            code: "event.unknown_type",
+            code: "event.match_unsourced",
             message:
-              "The event binding's contract admits no event of this type.",
-            pointer: `${pointer}/event/type${listed ? `/${index}` : ""}`,
-            remedy: "Wait for a type its contract's events name.",
+              "A wait with `match` takes only events a webhook source sends, and its contract takes this type from elsewhere.",
+            pointer: at,
+            remedy:
+              'Wait for a type the contract takes from a webhook source (`ingress: "webhook"`), or leave `match` out.',
           },
         ]
-  );
+      : unmatched(type, at);
+  });
 };
 
 /**

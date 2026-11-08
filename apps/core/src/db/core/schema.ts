@@ -3770,6 +3770,81 @@ export const eventSources = sqliteTable("event_sources", {
 });
 
 /**
+ * The runs waiting now for an event source's event by a match
+ * (workflows/event-waits.ts): one row for each type an event wait at
+ * engine step `step` of run `run_id` takes, through its binding, from
+ * source `source_id`, by `match_hash` (the SHA-256 of the field it
+ * matches and the value its enter step recorded). Written as the wait is
+ * reached, deleted as it ends, and past `expires_at` (its deadline) taken
+ * by nothing.
+ */
+export const eventWaits = sqliteTable(
+  "event_waits",
+  {
+    runId: text("run_id").notNull(),
+    step: text().notNull(),
+    eventType: text("event_type").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    binding: text().notNull(),
+    sourceId: text("source_id").notNull(),
+    matchHash: text("match_hash").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.step, table.eventType] }),
+    index("event_waits_match").on(
+      table.sourceId,
+      table.eventType,
+      table.matchHash
+    ),
+  ]
+);
+
+/**
+ * An event source's events no waiting run took (workflows/event-waits.ts),
+ * kept until `expires_at` (a day) for a wait reached after it came: its
+ * ID is its delivery's (the source and its `webhook-id`), its data the
+ * event's, cleared once a wait took it (`taken_run`, `taken_step`), so
+ * nothing else takes it. Deleted past `expires_at`, and with its source.
+ */
+export const keptEvents = sqliteTable(
+  "kept_events",
+  {
+    id: text().primaryKey(),
+    sourceId: text("source_id").notNull(),
+    eventType: text("event_type").notNull(),
+    data: text(),
+    receivedAt: timestamp("received_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    takenRun: text("taken_run"),
+    takenStep: text("taken_step"),
+    takenAt: timestamp("taken_at"),
+  },
+  (table) => [
+    index("kept_events_source").on(table.sourceId, table.receivedAt),
+    index("kept_events_expires").on(table.expiresAt),
+    index("kept_events_taken").on(table.takenRun, table.takenStep),
+  ]
+);
+
+/**
+ * What a kept event may be matched by (workflows/event-waits.ts): the
+ * SHA-256 of each JSON Pointer to a text, number or boolean in its data
+ * and that value, within bounds. Deleted with its event.
+ */
+export const keptEventKeys = sqliteTable(
+  "kept_event_keys",
+  {
+    eventId: text("event_id").notNull(),
+    matchHash: text("match_hash").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventId, table.matchHash] }),
+    index("kept_event_keys_match").on(table.matchHash),
+  ]
+);
+
+/**
  * Each version of a trigger, written once: the exact workflow version it
  * starts (never "the latest": a new workflow version changes no trigger
  * until one is explicitly updated to it), the SHA-256 of its

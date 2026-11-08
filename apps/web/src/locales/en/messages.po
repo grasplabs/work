@@ -4587,6 +4587,14 @@ msgid "Did this happen? {who}"
 msgstr "Did this happen? {who}"
 
 #: src/activity/audit-words.ts
+msgid "Didn't hand a webhook event to the run waiting for it"
+msgstr "Didn't hand a webhook event to the run waiting for it"
+
+#: src/activity/audit-words.ts
+msgid "Didn't keep a webhook event: its source keeps as many as it may"
+msgstr "Didn't keep a webhook event: its source keeps as many as it may"
+
+#: src/activity/audit-words.ts
 msgid "Didn't start a workflow from a webhook event"
 msgstr "Didn't start a workflow from a webhook event"
 
@@ -7209,6 +7217,10 @@ msgstr "Let version {version} of {name} go live?"
 #: src/workflows/workflow-status.tsx
 msgid "Let version {version} of {who} go live"
 msgstr "Let version {version} of {who} go live"
+
+#: src/activity/audit-words.ts
+msgid "Let webhook events no run waited for expire"
+msgstr "Let webhook events no run waited for expire"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Let’s start"
@@ -12960,6 +12972,10 @@ msgstr "The earlier wording stays in the goal's history."
 #: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "The events its contract admits"
+
+#: src/workflows/binding-approvals.tsx
+msgid "The events its contract admits, from a webhook source"
+msgstr "The events its contract admits, from a webhook source"
 
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx

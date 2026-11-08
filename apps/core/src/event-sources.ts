@@ -19,6 +19,7 @@ import type { Acting } from "./auth/identity.ts";
 import { eventSources } from "./db/core/schema.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 import { requireNotStaff } from "./sharing.ts";
+import { keptEventsDeleted } from "./workflows/event-waits.ts";
 
 // Event sources (GRA-1560): where an outside system sends events into the
 // deployment, one per sender ("Stripe", "Shop system"), each an admin's
@@ -45,7 +46,8 @@ import { requireNotStaff } from "./sharing.ts";
 //   rotated), never listed, logged or audited. Rotating makes a new
 //   generation, never one used before, so the old secret takes nothing
 //   from then on; revoking takes nothing until a new one is made; deleting
-//   the source clears its token, so its URL answers as one nobody has.
+//   the source clears its token, so its URL answers as one nobody has, and
+//   deletes the events it kept for waits reached later at once.
 //   Rotating core's auth secret changes them all. A delivery checked with
 //   a secret rotated, revoked or deleted while it was admitted starts
 //   nothing (source-events.ts).
@@ -289,5 +291,7 @@ export const deleteEventSource = async (
         and(eq(eventSources.id, source.id), isNull(eventSources.deletedAt))
       ),
     outboxedIfChanged(db, entry(by, "event_source.deleted", source.id)),
+    // Its events kept for a later wait: nothing takes them now.
+    ...keptEventsDeleted(db, source.id),
   ]);
 };

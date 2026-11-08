@@ -95,9 +95,11 @@ const typeRules: readonly {
   // Event sources (core's src/event-sources.ts): an admin creating one,
   // rotating or revoking its secret, and deleting it.
   { action: "event_source", type: "config" },
-  // A signed delivery to an event source that a workflow's trigger
-  // refused for good (core's src/workflows/source-events.ts).
-  { action: "workflow.webhook.refused", type: "action" },
+  // An event source's event a workflow's trigger refused for good (core's
+  // src/workflows/source-events.ts), or a waiting run refused; its events
+  // kept for a later wait expiring, or one not kept as it keeps all it
+  // may (src/workflows/event-waits.ts).
+  { action: "workflow.webhook", type: "action" },
   // A held action dropped because nobody can confirm it any more, then a
   // person confirming or declining one (or being refused that).
   { action: "connection.action.dropped", type: "action" },

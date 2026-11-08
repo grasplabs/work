@@ -4587,6 +4587,14 @@ msgid "Did this happen? {who}"
 msgstr "Is dit gebeurd? {who}"
 
 #: src/activity/audit-words.ts
+msgid "Didn't hand a webhook event to the run waiting for it"
+msgstr "Heeft een webhookgebeurtenis niet doorgegeven aan de run die erop wachtte"
+
+#: src/activity/audit-words.ts
+msgid "Didn't keep a webhook event: its source keeps as many as it may"
+msgstr "Heeft een webhookgebeurtenis niet bewaard: de bron bewaart er al zoveel als mag"
+
+#: src/activity/audit-words.ts
 msgid "Didn't start a workflow from a webhook event"
 msgstr "Heeft geen workflow gestart vanuit een webhookgebeurtenis"
 
@@ -7209,6 +7217,10 @@ msgstr "Versie {version} van {name} live zetten?"
 #: src/workflows/workflow-status.tsx
 msgid "Let version {version} of {who} go live"
 msgstr "Versie {version} van {who} live zetten"
+
+#: src/activity/audit-words.ts
+msgid "Let webhook events no run waited for expire"
+msgstr "Heeft webhookgebeurtenissen laten verlopen waarop geen run wachtte"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Let’s start"
@@ -12960,6 +12972,10 @@ msgstr "De eerdere formulering blijft in de geschiedenis van het doel."
 #: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "De gebeurtenissen die zijn contract toelaat"
+
+#: src/workflows/binding-approvals.tsx
+msgid "The events its contract admits, from a webhook source"
+msgstr "De gebeurtenissen die het contract toelaat, uit een webhookbron"
 
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx

@@ -157,8 +157,10 @@ const ingressBindings = async (
     if (contract?.fingerprint !== fingerprint) {
       return [];
     }
+    // Replies to the run's mail alone: a webhook source's events reach a
+    // run by a match, never at an inbox of its own (event-waits.ts).
     const outside = Object.entries(contract.contract.events ?? {}).find(
-      ([, type]) => type.ingress !== undefined
+      ([, type]) => type.ingress === "email"
     );
     const ingress = outside?.[1].ingress;
     return outside === undefined || ingress === undefined

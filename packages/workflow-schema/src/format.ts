@@ -281,11 +281,28 @@ export interface ForEachStep extends StepBase {
 /**
  * The events an event wait takes: those sent to the run through event
  * binding `from`, of `type` or any of a list of types, each one the
- * binding's contract admits.
+ * binding's contract admits; with `match`, only one of the events an
+ * event source sends (a webhook) whose data has, at `match.field`, the
+ * value `match.equals` gives.
  */
 export interface EventFilter {
   readonly from: string;
   readonly type: string | readonly string[];
+  readonly match?: EventFieldMatch;
+}
+
+/**
+ * Which of an event source's events a wait takes (core's
+ * workflows/event-waits.ts): the first whose `data` has, at JSON Pointer
+ * `field` (RFC 6901, `/invoice` or `/order/id`), exactly the text, number
+ * or boolean `equals` gives, worked out and recorded as the wait is
+ * reached, so a replay waits for the same. Core matches it, never the
+ * run's code. One that came before the wait was reached, and that no
+ * other wait took, is taken first, if it came within a day.
+ */
+export interface EventFieldMatch {
+  readonly field: string;
+  readonly equals: Value;
 }
 
 /**
@@ -424,6 +441,8 @@ export const formatLimits = {
   bindings: 64,
   /** The keys one step keeps in its workflow's state, as the host seals them. */
   stateKeys: 64,
+  /** An event wait's `match.field`, a JSON Pointer. */
+  matchFieldLength: 256,
 } as const;
 
 const unitMs: Readonly<Record<DurationUnit, number>> = {
@@ -474,7 +493,7 @@ export const stateDeclarationDescription = `What the workflow keeps between its 
 
 /** What a wait is, to whoever writes one: the schema's description. */
 export const waitDescription =
-  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. To wait for a reply to the run's mail, give the mail `inbox.<from>` (the run's reply address for that binding, or `undefined` when it has none) as its reply-to address, then wait on the same binding. Any failure of an event wait fails the run; no `try` catches it: its binding revoked, the run's person no longer active, or a test run's wait limit. The run checks its binding again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
+  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). To wait for a webhook event about this run's own thing (a payment for the invoice it sent, say), give `event.match: { field, equals }`: `field` a JSON Pointer into the event's data (`/invoice`), `equals` the text, number or boolean it must be, usually an expression (`{ $expr: \"steps.send.output.invoice\" }`); Grasp matches it, and an event that came up to a day before the wait is taken first. An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. To wait for a reply to the run's mail, give the mail `inbox.<from>` (the run's reply address for that binding, or `undefined` when it has none) as its reply-to address, then wait on the same binding. Any failure of an event wait fails the run; no `try` catches it: its binding revoked, the run's person no longer active, or a test run's wait limit. The run checks its binding again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
 
 /**
  * Who a decision asks: a person or a team by ID, or everyone with a role,

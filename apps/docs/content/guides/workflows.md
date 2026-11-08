@@ -122,3 +122,25 @@ An outside system, such as a payment provider or a shop, sends events into Grasp
 Grasp checks the signature, refuses a delivery more than five minutes old or larger than 64 KiB, and takes a retry with the same `webhook-id` as the same event. A provider that signs its webhooks its own way comes in through its connector instead.
 
 A workflow starts on a source's events from its Triggers tab: a webhook trigger names the source and the event type, and each such event's `data` is the run's input, checked against the workflow's input. It starts nothing until an admin allows it. App code never handles the request itself: a workflow started this way calls the App's mutations through its binding.
+
+### Waiting for a webhook event
+
+A workflow can also wait for an event about its own run, such as the payment for the invoice it just sent. Its event binding's contract takes the event's type from a webhook source (`ingress: "webhook"`), and an admin names the source as they approve the binding. The wait says which event is the run's own with `match`: a field of the event's data, as a JSON Pointer, and the value it must have.
+
+```json
+{
+  "id": "paid",
+  "type": "wait",
+  "event": {
+    "from": "payments",
+    "type": "payment.paid",
+    "match": {
+      "field": "/invoice",
+      "equals": { "$expr": "steps.send.output.invoice" }
+    }
+  },
+  "timeout": "5 days"
+}
+```
+
+Grasp works the value out as the wait is reached, and hands the run only the event whose data has it. An event that came before the run started waiting is kept for a day, and the first wait for it takes it, once. A wait on a source's type always names its `match`, so no run takes another's event.

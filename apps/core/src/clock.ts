@@ -44,6 +44,7 @@ import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { sweepConnectorTriggerHolds } from "./workflows/connector-triggers.ts";
 import { cancelArchivedRuns, repairControls } from "./workflows/controls.ts";
+import { sweepEventWaits } from "./workflows/event-waits.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import {
   repairResourceStarts,
@@ -213,6 +214,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "workflows.connector_holds",
     period: "quarterHour",
     run: sweepConnectorTriggerHolds,
+  },
+  // Event sources' events kept past their day, and waits past their
+  // deadline (src/workflows/event-waits.ts).
+  {
+    name: "workflows.kept_events",
+    period: "quarterHour",
+    run: sweepEventWaits,
   },
   { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
   // Stephen's counts past their week (src/channels/signals.ts).

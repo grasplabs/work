@@ -788,20 +788,36 @@ class Generator {
    * when from the table alone (`step.listen` passes neither), and answers
    * `{ timedOut: true }` past its timeout. Any failure of the wait fails
    * the run, whatever `try` is around it (`EventWaitStep`). Its `if`, if
-   * any, is decided in an enter step before it, as a sleep's.
+   * any, is decided in an enter step before it, as a sleep's; with a
+   * `match`, that enter step records the value it matches (`{ key }`),
+   * which the host holds to the sealed template and matches events by.
    */
   #listen(step: Placed<EventWaitStep>, depth: number): void {
-    const { from, type } = step.event;
+    const { from, type, match } = step.event;
     const types = typeof type === "string" ? [type] : type;
+    const equals =
+      match === undefined
+        ? undefined
+        : this.#value(match.equals, `${step.pointer}/event/match/equals`, {
+            taskId: step.id,
+            stage: "taskDefinition",
+            result: "json",
+          });
     this.#task({
       id: step.id,
       kind: "listen",
       pointer: step.pointer,
-      steps: step.if === undefined ? ["task"] : ["enter", "task"],
+      steps:
+        step.if === undefined && equals === undefined
+          ? ["task"]
+          : ["enter", "task"],
       listen: {
         binding: from,
         strategy: "any",
         filters: types.map((each) => ({ type: each, attributes: [] })),
+        ...(match === undefined || equals === undefined
+          ? {}
+          : { match: { field: match.field, equals: equals.template } }),
       },
       timeoutMs: durationMs(step.timeout),
     });
@@ -811,6 +827,16 @@ class Generator {
         `steps[${literal(step.id)}] = { output: await step.listen(${literal(step.id)}, ${this.#options(step, "task")}) };`
       );
     };
+    if (equals !== undefined) {
+      this.#decided(
+        step,
+        depth,
+        "enter",
+        `{ ["key"]: z.json().parse(${equals.code}) }`,
+        listen
+      );
+      return;
+    }
     if (step.if === undefined) {
       listen(depth);
       return;

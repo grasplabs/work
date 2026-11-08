@@ -4587,6 +4587,14 @@ msgid "Did this happen? {who}"
 msgstr "¿Ocurrió esto? {who}"
 
 #: src/activity/audit-words.ts
+msgid "Didn't hand a webhook event to the run waiting for it"
+msgstr "No entregó un evento de webhook a la ejecución que lo esperaba"
+
+#: src/activity/audit-words.ts
+msgid "Didn't keep a webhook event: its source keeps as many as it may"
+msgstr "No guardó un evento de webhook: su fuente ya guarda todos los que puede"
+
+#: src/activity/audit-words.ts
 msgid "Didn't start a workflow from a webhook event"
 msgstr "No inició un flujo de trabajo a partir de un evento de webhook"
 
@@ -7209,6 +7217,10 @@ msgstr "¿Pasar a producción la versión {version} de {name}?"
 #: src/workflows/workflow-status.tsx
 msgid "Let version {version} of {who} go live"
 msgstr "Pasar a producción la versión {version} de {who}"
+
+#: src/activity/audit-words.ts
+msgid "Let webhook events no run waited for expire"
+msgstr "Dejó caducar eventos de webhook que ninguna ejecución esperaba"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Let’s start"
@@ -12960,6 +12972,10 @@ msgstr "La redacción anterior queda en el historial del objetivo."
 #: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "Los eventos que admite su contrato"
+
+#: src/workflows/binding-approvals.tsx
+msgid "The events its contract admits, from a webhook source"
+msgstr "Los eventos que admite su contrato, de una fuente de webhook"
 
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx

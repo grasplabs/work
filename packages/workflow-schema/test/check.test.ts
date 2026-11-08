@@ -508,6 +508,35 @@ describe("checking a workflow", () => {
       match: at({
         event: { from: "replies", type: "x", match: { subject: "a" } },
       }),
+      // A match on a field of the event's data, by a value the run gives.
+      matched: at({
+        event: {
+          from: "replies",
+          type: "x",
+          match: { field: "/order/id", equals: { $expr: "input.who" } },
+        },
+      }),
+      matchRoot: at({
+        event: {
+          from: "replies",
+          type: "x",
+          match: { field: "", equals: "a" },
+        },
+      }),
+      matchNoPointer: at({
+        event: {
+          from: "replies",
+          type: "x",
+          match: { field: "invoice", equals: "a" },
+        },
+      }),
+      matchUnknownRoot: at({
+        event: {
+          from: "replies",
+          type: "x",
+          match: { field: "/invoice", equals: { $expr: "nope.invoice" } },
+        },
+      }),
       blankType: at({ event: { from: "replies", type: "" } }),
       spaceType: at({ event: { from: "replies", type: " " } }),
       paddedInList: at({
@@ -570,7 +599,13 @@ describe("checking a workflow", () => {
       noTypes: { "/steps/5/event/type": "workflow.out_of_bounds" },
       twice: { "/steps/5/event/type": "workflow.duplicate" },
       tooMany: { "/steps/5/event/type": "workflow.out_of_bounds" },
-      match: { "/steps/5/event/match": "workflow.unknown_property" },
+      match: { "/steps/5/event/match": "workflow.missing_property" },
+      matched: "ok",
+      matchRoot: { "/steps/5/event/match/field": "workflow.out_of_bounds" },
+      matchNoPointer: { "/steps/5/event/match/field": "workflow.invalid" },
+      matchUnknownRoot: {
+        "/steps/5/event/match/equals/$expr": "expression.global",
+      },
       blankType: { "/steps/5/event/type": "workflow.invalid_event_type" },
       spaceType: { "/steps/5/event/type": "workflow.invalid_event_type" },
       paddedInList: { "/steps/5/event/type/1": "workflow.invalid_event_type" },

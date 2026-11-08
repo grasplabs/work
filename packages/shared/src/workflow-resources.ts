@@ -315,9 +315,12 @@ const catalogContractMaxBytes = 512 * 1024;
 /**
  * Where outsiders send an event contract's type from: a reply to mail the
  * run sent (`email`), to the run's own reply address (core's
- * run-inboxes.ts), the workflow's `inbox.<alias>`.
+ * run-inboxes.ts), the workflow's `inbox.<alias>`; or an event source an
+ * admin made (`webhook`, core's event-sources.ts), the one the binding's
+ * approval names, matched to a waiting run by a field of its data (core's
+ * workflows/event-waits.ts).
  */
-export const eventIngressKinds = ["email"] as const;
+export const eventIngressKinds = ["email", "webhook"] as const;
 export type EventIngressKind = (typeof eventIngressKinds)[number];
 
 /**
@@ -386,8 +389,9 @@ export const catalogContractSchema = z
      * whether a person's page may send it, which is what makes it an
      * App's event reference, and whether outsiders may (`ingress`): a
      * reply to the run's mail (`email`), through a reply address of the
-     * run's own (core's run-inboxes.ts). An email type's data is the
-     * platform's received message, as core checks it is.
+     * run's own (core's run-inboxes.ts), or an event source's event
+     * (`webhook`). An email type's data is the platform's received
+     * message, as core checks it is.
      */
     events: z
       .record(
@@ -419,12 +423,12 @@ export const catalogContractSchema = z
   .refine(
     // A binding's inbox (`inbox.<alias>`) is one address, and what arrives
     // there is of one type: an event contract admits at most one type
-    // from outside.
+    // of replies to the run's mail. A source sends many types.
     (contract) =>
       Object.values(contract.events ?? {}).filter(
-        ({ ingress }) => ingress !== undefined
+        ({ ingress }) => ingress === "email"
       ).length <= 1,
-    { message: "An event contract admits at most one type from outside." }
+    { message: "An event contract admits at most one type of email replies." }
   )
   .refine(
     // One row of the catalog: well under what a database row may hold.
@@ -482,7 +486,13 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("decision"),
     deciders: z.array(deciderSchema).min(1).max(decisionDecidersMax),
   }),
-  z.strictObject({ kind: z.literal("event") }),
+  // An event binding, and for one whose contract takes types from a
+  // webhook source, the event source whose events reach it (core's
+  // event-sources.ts): only that one's, only as those types.
+  z.strictObject({
+    kind: z.literal("event"),
+    source: identifierSchema.optional(),
+  }),
   // One Knowledge collection, through a permission the workflow itself
   // holds to read it (GRA-700): its runs' actions read only that, and
   // only what the person a run acts for may read too.

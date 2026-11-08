@@ -1,0 +1,721 @@
+import { auditEventSchema } from "@grasp-os/shared/audit";
+import type { AuditDetailValue } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { and, asc, eq, gt, inArray, isNull, lte, not, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import {
+  auditedBatch,
+  outboxedEventWhere,
+  storedEvent,
+  uuidFromHash,
+} from "../audit-outbox.ts";
+import {
+  eventWaits,
+  keptEventKeys,
+  keptEvents,
+  workflowBindingApprovals,
+} from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
+import { resolveCatalogKeys } from "../workflow-catalog.ts";
+import { isMatchKey, matchHashOf } from "./event-matches.ts";
+import type { MatchKey } from "./event-matches.ts";
+import { callingRunOf } from "./resource-authority.ts";
+import type { CallingRun } from "./resource-authority.ts";
+import { admitRunEvent, notStartedYet } from "./run-events.ts";
+
+// Event waits on an event source's events (GRA-1560): a workflow's `wait`
+// with `match` (@grasp-os/workflow-schema's format) takes the first event
+// of its types from the source its event binding's approval names whose
+// data has, at the match's field, the value the wait's enter step
+// recorded. Core matches, never the isolate: the run's code only records
+// a value; which event a run takes is decided here, by equality of hashes
+// in core's own database, and handed to the run's inbox through
+// `admitRunEvent`, as every event is. An event that comes before its run
+// waits is kept, for a day, and the first wait reached after it that
+// matches takes it. Threat model, written before the code, and how each
+// is closed:
+//
+// - One run's event reaching another. An event reaches a run only by a
+//   match: the SHA-256 of the field and the value, which the wait's enter
+//   step recorded (held to the build's sealed template and to a text,
+//   number or boolean, sealed-run.ts) and which core computes again from
+//   the event's own data. A wait without a match takes no source's event
+//   (publication refuses one on such a type: workflow-resources.ts), so
+//   no event goes to whichever run waits first. A run takes only events
+//   of the source its binding's approval names (`target.source`, frozen
+//   at its start), through that binding, as a type its contract takes
+//   from a source (`ingress: "webhook"`), its data checked against that
+//   type's contract. A matched event carries its match as an engine
+//   attribute (`graspmatch`), and the run's wait takes only an event
+//   with that attribute, so a match for one wait is never taken by
+//   another wait of the same run on the same binding. Every run waiting
+//   on the same match gets the event: each is a run that asked for it.
+// - A kept event taken by the wrong run, or by two. A kept event is
+//   taken by one wait, in one conditional update (`taken_run IS NULL`),
+//   only for a match on exactly its data's value, source and type;
+//   once taken its data is cleared, and a wait takes at most one
+//   (`claimKept`): a try of its step again after a failure finds the one
+//   it took, never another. Taking it is a step the engine journals
+//   (host.ts, `listen`), so a replay of a wait takes nothing again. One
+//   its run can't take (its contract refuses the data, its approval went,
+//   its inbox is full) is let go for another wait, the refusal audited.
+// - A wait taking an event after it ended. Each wait's row is deleted as
+//   it ends, and past its deadline matches nothing; an event for a run
+//   that ended takes nothing (`admitRunEvent` refuses it, audited), and
+//   that run's rows go.
+// - Replays and retries. A delivery's ID is its source and `webhook-id`
+//   (source-events.ts): each run gets it under a key of that ID and its
+//   match, so the same delivery again is the same event in its inbox; a
+//   kept event's ID is the same ID, so it is kept once, and a wait that
+//   took it live and a claim are the same event.
+// - The source deleted, or a grant revoked, while events are kept.
+//   Deleting a source deletes its kept events and their keys at once
+//   (event-sources.ts). A wait asks for its binding's authority before it
+//   is reached (sealed-run.ts, `eventWait`), and every admission reads it
+//   again, so a revoked approval takes nothing kept; the event stays kept
+//   for another run, until it expires.
+// - Floods. Only a signed delivery reaches here. A source keeps at most
+//   `keptPerSource` events at once, counted in the statement that keeps
+//   one; past it an event isn't kept, logged and audited once a day for
+//   the source. An event is kept only when some active approval names
+//   its source, so a source nobody waits on keeps nothing. Each event is
+//   indexed by at most `maxLeaves` values. Each run's inbox bounds what
+//   one sender fills of it (`source:<id>`), as for any sender.
+// - The secret rotated mid-delivery. An event is kept only while the
+//   secret it was checked with is still the source's (`also`), as a
+//   trigger's start is.
+// - Privacy. A kept event holds an outside system's data, which may name
+//   people: it is kept at most `keptWindowMs` (a day), its data cleared
+//   as soon as a wait takes it, and it is deleted on the clock once
+//   expired (`sweepEventWaits`, audited by source and count) or with its
+//   source. Its keys are hashes. Nothing of it is logged or audited but
+//   its delivery's hash, its source and its type.
+
+/** How long an event no wait took is kept for one: a day. */
+export const keptWindowMs = 24 * 60 * 60 * 1000;
+
+/** The most events one source keeps at once. */
+export const keptPerSource = 1000;
+
+/** The most values of an event's data it may be matched by. */
+const maxLeaves = 256;
+
+/** How deep into an event's data its values are indexed. */
+const maxLeafDepth = 8;
+
+/** An event a source took (source-events.ts): its type and data. */
+export interface SourceEvent {
+  readonly source: string;
+  /**
+   * Its key: the hash of the source and its `webhook-id`, the same for
+   * every retry of it.
+   */
+  readonly same: string;
+  readonly type: string;
+  readonly data: Json;
+}
+
+/** The URI an event source's events say they are from. */
+export const sourceUriOf = (source: string): string =>
+  `urn:grasp:event-source:${source}`;
+
+/** Who sends an event source's events, for its share of a run's inbox. */
+const senderOf = (source: string): string => `source:${source}`;
+
+/** `key` as a JSON Pointer's reference token (RFC 6901). */
+const tokenOf = (key: string): string =>
+  key.replaceAll("~", "~0").replaceAll("/", "~1");
+
+/**
+ * The values `data` may be matched by, each with its JSON Pointer: every
+ * text, number or boolean (`isMatchKey`) at most `maxLeafDepth` deep, the
+ * first `maxLeaves` in document order.
+ */
+const leavesOf = (data: Json): [string, MatchKey][] => {
+  const leaves: [string, MatchKey][] = [];
+  const visit = (node: Json, pointer: string, depth: number): void => {
+    if (leaves.length >= maxLeaves) {
+      return;
+    }
+    if (isMatchKey(node)) {
+      if (pointer !== "") {
+        leaves.push([pointer, node]);
+      }
+      return;
+    }
+    if (depth >= maxLeafDepth || node === null || typeof node !== "object") {
+      return;
+    }
+    const entries: [string, Json][] = Array.isArray(node)
+      ? node.map((item: Json, index) => [String(index), item])
+      : Object.entries(node).flatMap(([key, item]): [string, Json][] =>
+          item === undefined ? [] : [[key, item]]
+        );
+    for (const [key, item] of entries) {
+      visit(item, `${pointer}/${tokenOf(key)}`, depth + 1);
+    }
+  };
+  visit(data, "", 0);
+  return leaves;
+};
+
+/** The match hashes of `data`'s values (`leavesOf`), each once. */
+const hashesOf = async (data: Json): Promise<string[]> => [
+  ...new Set(
+    await Promise.all(
+      leavesOf(data).map(async ([field, key]) => await matchHashOf(field, key))
+    )
+  ),
+];
+
+/**
+ * The types the contract a binding pinned (by its fingerprint) takes from
+ * a webhook source.
+ */
+export const sourcedTypesOf = async (
+  env: Env,
+  binding: { contractId: string; fingerprint: string }
+): Promise<string[]> => {
+  const contracts = await resolveCatalogKeys(env, [binding.contractId]);
+  const contract = contracts.get(binding.contractId);
+  if (contract?.fingerprint !== binding.fingerprint) {
+    return [];
+  }
+  return Object.entries(contract.contract.events ?? {}).flatMap(
+    ([type, event]) => (event.ingress === "webhook" ? [type] : [])
+  );
+};
+
+/**
+ * Audits `action` once for `key` on `target` (the same delivery or day
+ * again records nothing more), with `detail`.
+ */
+const auditedOnce = async (
+  env: Env,
+  action: string,
+  key: string,
+  target: { type: string; id: string },
+  detail: Readonly<Record<string, AuditDetailValue>>
+): Promise<void> => {
+  const event = auditEventSchema.parse({
+    id: uuidFromHash(
+      await sha256Hex(`${action}:${target.type}:${target.id}:${key}`)
+    ),
+    at: new Date().toISOString(),
+    source: "core",
+    actor: { type: "system" },
+    action,
+    target,
+    detail,
+  });
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxedEventWhere(db, event, not(storedEvent(event.id))),
+  ]);
+};
+
+/** Why a waiting run didn't take an event of its match. */
+type Refusal =
+  | "run_ended"
+  | "source_mismatch"
+  | "event_denied"
+  | "event_invalid"
+  | "event_refused";
+
+/** The refusals for good of `admitRunEvent`, by code. */
+const refusals: Readonly<Record<string, Refusal>> = {
+  "workflow.run_ended": "run_ended",
+  "workflow.run_unavailable": "run_ended",
+  "workflow.event_denied": "event_denied",
+  "workflow.event_invalid": "event_invalid",
+  "workflow.event_conflict": "event_invalid",
+  "workflow.event_refused": "event_refused",
+};
+
+/** The refusal a code of `admitRunEvent`'s is, if it is one for good. */
+const refusalOf = (error: unknown): Refusal | undefined => {
+  const code = workflowResourceErrors.codeOf(error) ?? "";
+  const reason = z
+    .object({ details: z.object({ reason: z.string() }) })
+    .safeParse(error).data?.details.reason;
+  // A run whose start isn't confirmed yet may take it later.
+  return reason === notStartedYet ? undefined : refusals[code];
+};
+
+/** A run's wait, as an event is handed to it. */
+interface Waiting {
+  readonly workflowId: string;
+  readonly runId: string;
+  readonly step: string;
+  readonly binding: string;
+  readonly matchHash: string;
+}
+
+/** An event, as a wait takes it: a delivery's or a kept one's. */
+interface Taken {
+  /** Its delivery's ID: the source and its `webhook-id`, hashed. */
+  readonly same: string;
+  readonly source: string;
+  readonly type: string;
+  readonly data: Json;
+}
+
+/**
+ * Hands `event` to `wait`'s run (`run`, as it calls now), through its
+ * binding, keyed by the delivery and the match, carrying the match: what
+ * came of it. A refusal for good is audited, once per delivery and run.
+ */
+const handed = async (
+  env: Env,
+  run: CallingRun | undefined,
+  wait: Waiting,
+  event: Taken
+): Promise<"taken" | Refusal | "retry"> => {
+  let refusal: Refusal | undefined;
+  const binding = run?.bindings.get(wait.binding);
+  if (run === undefined) {
+    refusal = "run_ended";
+  } else if (
+    binding?.target.kind !== "event" ||
+    binding.target.source !== event.source
+  ) {
+    // Its approval names another source, or none: never this one's.
+    refusal = "source_mismatch";
+  } else {
+    try {
+      await admitRunEvent(env, {
+        workflowId: wait.workflowId,
+        runId: wait.runId,
+        binding: wait.binding,
+        type: event.type,
+        data: event.data,
+        key: `${event.same}:${wait.matchHash}`,
+        source: sourceUriOf(event.source),
+        sender: senderOf(event.source),
+        match: wait.matchHash,
+      });
+      return "taken";
+    } catch (error) {
+      refusal = refusalOf(error);
+      if (refusal === undefined) {
+        log.error("workflow.event_wait_failed", {
+          run: wait.runId,
+          ...errorFields(error),
+        });
+        return "retry";
+      }
+    }
+  }
+  if (refusal === "run_ended") {
+    await drizzle(env.DB)
+      .delete(eventWaits)
+      .where(eq(eventWaits.runId, wait.runId));
+  }
+  await auditedOnce(
+    env,
+    "workflow.webhook.wait_refused",
+    event.same,
+    { type: "workflow_run", id: wait.runId },
+    {
+      workflow: wait.workflowId,
+      binding: wait.binding,
+      source: event.source,
+      event: event.type,
+      delivery: event.same,
+      reason: refusal,
+    }
+  );
+  return refusal;
+};
+
+/**
+ * Keeps `event` (`hashes`, its values' match hashes) for a wait reached
+ * later: only while `also` holds (the secret it was checked with still
+ * its source's), some active approval names its source, and the source
+ * keeps fewer than `keptPerSource`, all in the statement that keeps it.
+ * The same delivery again is kept once. Whether it is kept now.
+ */
+const kept = async (
+  env: Env,
+  event: SourceEvent,
+  hashes: readonly string[],
+  also: SQL
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const now = Date.now();
+  const used = sql`EXISTS (SELECT 1 FROM ${workflowBindingApprovals}
+    WHERE ${workflowBindingApprovals.status} = 'active'
+      AND ${workflowBindingApprovals.kind} = 'event'
+      AND json_extract(${workflowBindingApprovals.target}, '$.source') = ${event.source})`;
+  const room = sql`(SELECT COUNT(*) FROM ${keptEvents}
+    WHERE ${keptEvents.sourceId} = ${event.source}
+      AND ${keptEvents.takenRun} IS NULL
+      AND ${keptEvents.expiresAt} > ${now}) < ${keptPerSource}`;
+  await db.batch([
+    db
+      .insert(keptEvents)
+      .select(
+        sql`SELECT ${event.same}, ${event.source}, ${event.type},
+          ${JSON.stringify(event.data)}, ${now}, ${now + keptWindowMs},
+          NULL, NULL, NULL
+          WHERE ${also} AND ${used} AND ${room}`
+      )
+      .onConflictDoNothing(),
+    db
+      .insert(keptEventKeys)
+      .select(
+        sql`SELECT ${event.same}, value FROM json_each(${JSON.stringify(hashes)})
+          WHERE EXISTS (SELECT 1 FROM ${keptEvents}
+            WHERE ${keptEvents.id} = ${event.same})`
+      )
+      .onConflictDoNothing(),
+  ]);
+  const row = await db
+    .select({ id: keptEvents.id })
+    .from(keptEvents)
+    .where(eq(keptEvents.id, event.same))
+    .get();
+  return row !== undefined;
+};
+
+/**
+ * Audits, once a day for source `source`, that it keeps as many events
+ * as it may, if it does: an event that came then wasn't kept.
+ */
+const auditedIfFull = async (env: Env, source: string): Promise<void> => {
+  const { count } = await drizzle(env.DB).get<{ count: number }>(
+    sql`SELECT COUNT(*) AS count FROM ${keptEvents}
+      WHERE ${keptEvents.sourceId} = ${source}
+        AND ${keptEvents.takenRun} IS NULL
+        AND ${keptEvents.expiresAt} > ${Date.now()}`
+  );
+  if (count < keptPerSource) {
+    return;
+  }
+  await auditedOnce(
+    env,
+    "workflow.webhook.kept_full",
+    new Date().toISOString().slice(0, 10),
+    { type: "event_source", id: source },
+    { kept: count }
+  );
+};
+
+/**
+ * Hands an event a source took (source-events.ts) to every run waiting
+ * on a match its data has, from that source and of its type, each by its
+ * own match; keeps it when none took it (`kept`), for a wait reached
+ * later. What came of it: `retry` when a run's wait may take it later
+ * (core failing), so its sender tries again.
+ */
+export const routeSourceEvent = async (
+  env: Env,
+  event: SourceEvent,
+  also: SQL
+): Promise<"taken" | "kept" | "unkept" | "retry"> => {
+  const hashes = await hashesOf(event.data);
+  if (hashes.length === 0) {
+    // Nothing in it a match could name.
+    return "unkept";
+  }
+  const db = drizzle(env.DB);
+  const waits = await db
+    .select()
+    .from(eventWaits)
+    .where(
+      and(
+        eq(eventWaits.sourceId, event.source),
+        eq(eventWaits.eventType, event.type),
+        inList(eventWaits.matchHash, hashes),
+        gt(eventWaits.expiresAt, new Date())
+      )
+    )
+    .orderBy(asc(eventWaits.runId), asc(eventWaits.step));
+  const outcomes: { wait: Waiting; outcome: string }[] = [];
+  for (const wait of waits) {
+    // oxlint-disable-next-line no-await-in-loop -- one run after another, few
+    const run = await callingRunOf(env, wait.workflowId, wait.runId);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const outcome = await handed(env, run, wait, event);
+    outcomes.push({ wait, outcome });
+  }
+  const first = outcomes.find(({ outcome }) => outcome === "taken");
+  if (first !== undefined) {
+    // Kept by an earlier delivery of it: taken now, so no later wait
+    // takes it again.
+    await db
+      .update(keptEvents)
+      .set({
+        takenRun: first.wait.runId,
+        takenStep: first.wait.step,
+        takenAt: new Date(),
+        data: null,
+      })
+      .where(and(eq(keptEvents.id, event.same), isNull(keptEvents.takenRun)));
+    return "taken";
+  }
+  if (outcomes.some(({ outcome }) => outcome === "retry")) {
+    return "retry";
+  }
+  if (await kept(env, event, hashes, also)) {
+    return "kept";
+  }
+  log.warn("workflow.event_unkept", {
+    source: event.source,
+    delivery: event.same,
+  });
+  await auditedIfFull(env, event.source);
+  return "unkept";
+};
+
+/** A wait for an event source's event by a match, as its run reaches it. */
+export interface MatchWait {
+  readonly run: CallingRun;
+  /** Its engine step's name. */
+  readonly step: string;
+  readonly binding: string;
+  readonly types: readonly string[];
+  readonly matchHash: string;
+}
+
+/** A kept event a wait took, as `claimKept` answers it. */
+type Claimed = typeof keptEvents.$inferSelect;
+
+/** Tries at taking a kept event another wait took first. */
+const claimTries = 3;
+
+/**
+ * The kept event `wait` takes (`source`'s, of one of `types`, matching its
+ * hash), taken in one conditional update so no other wait takes it too:
+ * the one it took already if it did (a try of its step again), so it
+ * takes at most one; none when there is none, or the one it took was
+ * handed already (its data cleared).
+ */
+const claimKept = async (
+  env: Env,
+  wait: MatchWait,
+  source: string,
+  types: readonly string[]
+): Promise<Claimed | undefined> => {
+  const db = drizzle(env.DB);
+  const ours = await db
+    .select()
+    .from(keptEvents)
+    .where(
+      and(
+        eq(keptEvents.takenRun, wait.run.runId),
+        eq(keptEvents.takenStep, wait.step)
+      )
+    )
+    .get();
+  if (ours !== undefined) {
+    return ours.data === null ? undefined : ours;
+  }
+  for (let attempt = 0; attempt < claimTries; attempt += 1) {
+    const now = Date.now();
+    const candidate = sql`(SELECT event.id FROM ${keptEvents} AS event
+      JOIN ${keptEventKeys} AS keyed ON keyed.event_id = event.id
+      WHERE event.source_id = ${source}
+        AND ${inList(sql`event.event_type`, types)}
+        AND keyed.match_hash = ${wait.matchHash}
+        AND event.taken_run IS NULL
+        AND event.expires_at > ${now}
+      ORDER BY event.received_at, event.id
+      LIMIT 1)`;
+    // oxlint-disable-next-line no-await-in-loop -- one try after another
+    const [taken] = await db
+      .update(keptEvents)
+      .set({
+        takenRun: wait.run.runId,
+        takenStep: wait.step,
+        takenAt: new Date(now),
+      })
+      .where(and(eq(keptEvents.id, candidate), isNull(keptEvents.takenRun)))
+      .returning();
+    if (taken !== undefined) {
+      return taken;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const left = await db.get<{ any: number }>(
+      sql`SELECT ${candidate} IS NOT NULL AS any`
+    );
+    if (left.any === 0) {
+      return undefined;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Reaches `wait` (until `until`, its deadline): registers it for the
+ * events of its match (`event_waits`), then takes the oldest kept event
+ * of its match, if any (`claimKept`), and hands it to its run. A kept
+ * event its run refuses for good is let go for another wait. Refused
+ * (`workflow.event_denied`) when the run's binding names no source. The
+ * host runs it as a step it journals, so a replay reaches nothing again.
+ */
+export const enterMatchWait = async (
+  env: Env,
+  wait: MatchWait,
+  until: number
+): Promise<void> => {
+  const frozen = wait.run.bindings.get(wait.binding);
+  const source =
+    frozen?.kind === "event" && frozen.target.kind === "event"
+      ? frozen.target.source
+      : undefined;
+  if (frozen === undefined || source === undefined) {
+    throw workflowResourceErrors.create("workflow.event_denied");
+  }
+  const sourced = new Set(await sourcedTypesOf(env, frozen));
+  const types = wait.types.filter((type) => sourced.has(type));
+  if (types.length === 0) {
+    throw workflowResourceErrors.create("workflow.event_denied");
+  }
+  const db = drizzle(env.DB);
+  const expiresAt = new Date(until);
+  await db
+    .insert(eventWaits)
+    .values(
+      types.map((eventType) => ({
+        runId: wait.run.runId,
+        step: wait.step,
+        eventType,
+        workflowId: wait.run.workflowId,
+        binding: wait.binding,
+        sourceId: source,
+        matchHash: wait.matchHash,
+        expiresAt,
+      }))
+    )
+    .onConflictDoUpdate({
+      target: [eventWaits.runId, eventWaits.step, eventWaits.eventType],
+      set: { sourceId: source, matchHash: wait.matchHash, expiresAt },
+    });
+  const claimed = await claimKept(env, wait, source, types);
+  if (claimed === undefined || claimed.data === null) {
+    return;
+  }
+  const outcome = await handed(
+    env,
+    wait.run,
+    {
+      workflowId: wait.run.workflowId,
+      runId: wait.run.runId,
+      step: wait.step,
+      binding: wait.binding,
+      matchHash: wait.matchHash,
+    },
+    {
+      same: claimed.id,
+      source: claimed.sourceId,
+      type: claimed.eventType,
+      data: z.json().parse(JSON.parse(claimed.data)),
+    }
+  );
+  if (outcome === "retry") {
+    throw new Error(`Run ${wait.run.runId} couldn't take its kept event now`);
+  }
+  // One its run can't take is let go for another wait.
+  const settled =
+    outcome === "taken"
+      ? { data: null }
+      : { takenRun: null, takenStep: null, takenAt: null };
+  await db
+    .update(keptEvents)
+    .set(settled)
+    .where(
+      and(
+        eq(keptEvents.id, claimed.id),
+        eq(keptEvents.takenRun, wait.run.runId),
+        eq(keptEvents.takenStep, wait.step)
+      )
+    );
+};
+
+/** Ends wait `step` of run `runId`: it takes no event of its match more. */
+export const leaveMatchWait = async (
+  env: Env,
+  runId: string,
+  step: string
+): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(eventWaits)
+    .where(and(eq(eventWaits.runId, runId), eq(eventWaits.step, step)));
+};
+
+/**
+ * The statements deleting source `id`'s kept events and their keys, as
+ * it is deleted (event-sources.ts).
+ */
+export const keptEventsDeleted = (db: ReturnType<typeof drizzle>, id: string) =>
+  [
+    db
+      .delete(keptEventKeys)
+      .where(
+        inArray(
+          keptEventKeys.eventId,
+          db
+            .select({ id: keptEvents.id })
+            .from(keptEvents)
+            .where(eq(keptEvents.sourceId, id))
+        )
+      ),
+    db.delete(keptEvents).where(eq(keptEvents.sourceId, id)),
+  ] as const;
+
+/** The most kept events one clock run deletes. */
+const sweptPerRun = 500;
+
+/**
+ * On the clock: deletes the kept events past their day, and their keys,
+ * at most `sweptPerRun` a run, audited by source with how many no wait
+ * had taken (`workflow.webhook.kept_expired`); and the waits past their
+ * deadline.
+ */
+export const sweepEventWaits = async (env: Env): Promise<void> => {
+  const db = drizzle(env.DB);
+  const now = new Date();
+  await db.delete(eventWaits).where(lte(eventWaits.expiresAt, now));
+  const expired = await db
+    .select({
+      id: keptEvents.id,
+      sourceId: keptEvents.sourceId,
+      takenRun: keptEvents.takenRun,
+    })
+    .from(keptEvents)
+    .where(lte(keptEvents.expiresAt, now))
+    .orderBy(asc(keptEvents.expiresAt))
+    .limit(sweptPerRun);
+  if (expired.length === 0) {
+    return;
+  }
+  const ids = expired.map(({ id }) => id);
+  await db.batch([
+    db.delete(keptEventKeys).where(inList(keptEventKeys.eventId, ids)),
+    db.delete(keptEvents).where(inList(keptEvents.id, ids)),
+  ]);
+  const untaken = new Map<string, number>();
+  for (const { sourceId, takenRun } of expired) {
+    if (takenRun === null) {
+      untaken.set(sourceId, (untaken.get(sourceId) ?? 0) + 1);
+    }
+  }
+  await Promise.all(
+    [...untaken].map(async ([source, events]) => {
+      await auditedOnce(
+        env,
+        "workflow.webhook.kept_expired",
+        `${now.toISOString()}:${ids[0] ?? ""}`,
+        { type: "event_source", id: source },
+        { events }
+      );
+    })
+  );
+};

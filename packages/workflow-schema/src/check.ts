@@ -1154,6 +1154,15 @@ const checkStep = (
           ["event"],
           join(pointer, "event", "from")
         );
+        if (step.event.match !== undefined) {
+          checkValue(
+            walk,
+            step.event.match.equals,
+            join(pointer, "event", "match", "equals"),
+            place,
+            false
+          );
+        }
         checkDuration(walk, step.timeout, join(pointer, "timeout"));
       } else {
         checkDuration(walk, step.for, join(pointer, "for"));

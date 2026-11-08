@@ -118,7 +118,9 @@ export const targetWords = (
       return i18n._(msg`A Brain collection it may read`);
     }
     case "event": {
-      return i18n._(msg`The events its contract admits`);
+      return target.source === undefined
+        ? i18n._(msg`The events its contract admits`)
+        : i18n._(msg`The events its contract admits, from a webhook source`);
     }
     case "files": {
       return i18n._(msg`The run's own files`);

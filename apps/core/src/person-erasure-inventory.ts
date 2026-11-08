@@ -186,6 +186,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_resource_members": { company: "who has a role in a workflow" },
   "core.trigger_resources": { company: "triggers they own" },
   "core.event_sources": { company: "event sources an admin created" },
+  "core.event_waits": { none: "runs' waits, by run and hash" },
+  "core.kept_events": {
+    none: "an outside system's events, deleted within a day, and with their source",
+  },
+  "core.kept_event_keys": { none: "hashes of a kept event's values" },
   "core.trigger_resource_versions": { none: "a binding's name" },
   "core.trigger_schedules": noPerson,
   "core.trigger_hour_slots": noPerson,

@@ -16,7 +16,7 @@ import type {
   WorkflowBindingApproval,
   WorkflowBindingTarget,
 } from "@grasp-os/shared/workflow-resources";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -24,6 +24,7 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
+  eventSources,
   permissions,
   teams,
   workflowBindingApprovals,
@@ -39,6 +40,7 @@ import {
 } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
 import { envelopedSchemaText } from "./workflows/connector-schemas.ts";
+import { sourcedTypesOf } from "./workflows/event-waits.ts";
 
 // Approved bindings of independent workflows (platform specification 13.2):
 // which concrete resource serves each catalog binding a workflow declares
@@ -307,6 +309,40 @@ const requireConnectorServes = async (
 };
 
 /**
+ * Refuses an event binding's target naming `source` unless it serves
+ * `declared`: a live event source for a contract that takes types from
+ * one, none for any other.
+ */
+const requireSourceServes = async (
+  env: Env,
+  declared: PinnedBinding,
+  source: string | undefined
+): Promise<void> => {
+  const sourced = await sourcedTypesOf(env, declared);
+  if (sourced.length === 0) {
+    if (source !== undefined) {
+      throw invalid(
+        "target.source: Its contract takes no events from a webhook source."
+      );
+    }
+    return;
+  }
+  if (source === undefined) {
+    throw invalid(
+      "target.source: Name the webhook source whose events its contract takes."
+    );
+  }
+  const live = await drizzle(env.DB)
+    .select({ id: eventSources.id })
+    .from(eventSources)
+    .where(and(eq(eventSources.id, source), isNull(eventSources.deletedAt)))
+    .get();
+  if (live === undefined) {
+    throw invalid("target.source: No such webhook source.");
+  }
+};
+
+/**
  * Refuses `target` unless it can serve `declared` for workflow `id` now,
  * as the threat model above says (`workflow.binding_invalid`, naming why):
  * the one answer approving and starting both take.
@@ -336,11 +372,17 @@ export const requireTargetServes = async (
       await requireDeciders(env, target.deciders);
       break;
     }
-    case "event":
+    case "event": {
+      // An event's contract says which types it admits and with what
+      // data, and every send is checked on its own. One whose contract
+      // takes types from a webhook source names the live source whose
+      // events reach it, and only such a one names a source
+      // (event-waits.ts).
+      await requireSourceServes(env, declared, target.source);
+      break;
+    }
     case "files": {
-      // Nothing to load: an event's contract says which types it admits
-      // and with what data, and every send is checked on its own; nothing
-      // outside the run serves its own files (GRA-724).
+      // Nothing outside the run serves its own files (GRA-724).
       break;
     }
     case "knowledge": {
@@ -390,7 +432,10 @@ const targetDetail = (
       return { targetKind: target.kind, deciders: target.deciders.length };
     }
     case "event": {
-      return { targetKind: target.kind };
+      return {
+        targetKind: target.kind,
+        ...(target.source === undefined ? {} : { source: target.source }),
+      };
     }
     case "knowledge": {
       return { targetKind: target.kind, permissionId: target.permissionId };

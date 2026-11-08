@@ -209,6 +209,12 @@ const listenFor = (...types: string[]) => ({
   filters: types.map((type) => ({ type, attributes: [] })),
 });
 
+/** `value`, "a slot" if it is an expression's slot, which the isolate fills by its place. */
+const slotted = (value: unknown): unknown =>
+  typeof value === "object" && value !== null && "slot" in value
+    ? "a slot"
+    : value;
+
 describe("generating a workflow", () => {
   it("keeps every string, key and title of the document data", () => {
     const document = everyStep();
@@ -546,6 +552,66 @@ describe("generating a workflow", () => {
         input: { object: [["who", { slot: slotOf("/steps/6/input/who") }]] },
         timeoutMs: 2 * 86_400_000,
       },
+    });
+  });
+
+  it("seals an event wait's match, its value recorded in an enter step before it waits", () => {
+    const generated = generateWorkflow(
+      checked(
+        withEventWaits(
+          eventWait({
+            event: {
+              from: "replies",
+              type: "grasp.reply.received",
+              match: { field: "/order/id", equals: { $expr: "input.who" } },
+            },
+          }),
+          eventWait({
+            id: "literal",
+            event: {
+              from: "replies",
+              type: "grasp.reply.received",
+              match: { field: "/kind", equals: "refund" },
+            },
+          })
+        )
+      ),
+      "workflow"
+    );
+    const taskOf = (id: string) => {
+      const task = generated.tasks.find((each) => each.id === id);
+      const listen = task?.kind === "listen" ? task.listen : undefined;
+      return (
+        listen && {
+          steps: task?.steps,
+          binding: listen.binding,
+          filters: listen.filters,
+          match: listen.match && {
+            field: listen.match.field,
+            equals: slotted(listen.match.equals),
+          },
+        }
+      );
+    };
+    expect({
+      reply: taskOf("reply"),
+      literal: taskOf("literal"),
+      // The enter step records `{ key }`, then the task step waits.
+      records: generated.source.includes('{ ["key"]: z.json().parse('),
+    }).toStrictEqual({
+      reply: {
+        steps: ["enter", "task"],
+        binding: "replies",
+        filters: listenFor("grasp.reply.received").filters,
+        match: { field: "/order/id", equals: "a slot" },
+      },
+      literal: {
+        steps: ["enter", "task"],
+        binding: "replies",
+        filters: listenFor("grasp.reply.received").filters,
+        match: { field: "/kind", equals: { literal: "refund" } },
+      },
+      records: true,
     });
   });
 

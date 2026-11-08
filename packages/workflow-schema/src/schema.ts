@@ -138,6 +138,21 @@ const stepKinds = {
           type: "object",
           required: ["from", "type"],
           properties: {
+            match: {
+              type: "object",
+              required: ["field", "equals"],
+              properties: {
+                // A JSON Pointer into the event's data, never its root.
+                field: {
+                  type: "string",
+                  minLength: 2,
+                  maxLength: formatLimits.matchFieldLength,
+                  pattern: "^(?:/(?:[^~/]|~[01])*)+$",
+                },
+                equals: ref("value"),
+              },
+              additionalProperties: false,
+            },
             from: ref("alias"),
             type: {
               anyOf: [
