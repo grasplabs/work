@@ -55,7 +55,6 @@ import { isWorkflowRequest } from "./page-workflows.ts";
 import { appCodeAndTestFiles } from "./pages.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { functionProblem } from "./preview-reports.ts";
-import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
@@ -457,8 +456,6 @@ export interface DraftCallOptions {
   readonly deadline: number;
   /** Only this kind of function may be called (a live query's). */
   readonly kind?: FunctionRequest["reference"]["kind"];
-  /** Given, a query may read a paginated window, its pages charged here. */
-  readonly chargeWindow?: (pages: number, whole: number) => Promise<void>;
   /** Told the store a query read and its read set. */
   readonly observeReads?: (
     storeId: OpenStore["id"],
@@ -485,11 +482,11 @@ const answerOf = (result: OperationResult, run?: DraftRun): FunctionAnswer => ({
  * as `resource.unavailable` for a workflow reference's queries, which
  * read runs through the App's binding of the workflow, a preview has none
  * of; and as `contract.invalid_request` when it isn't of the kind asked
- * for, or reads a window but isn't a query of a caller that may.
+ * for.
  */
 const draftCallOf = (
   request: unknown,
-  { kind, chargeWindow }: Pick<DraftCallOptions, "kind" | "chargeWindow">
+  { kind }: Pick<DraftCallOptions, "kind">
 ): FunctionRequest => {
   if (isWorkflowRequest(request)) {
     throw appErrors.create("app.preview_side_effect");
@@ -498,34 +495,20 @@ const draftCallOf = (
   if (isWorkflowQueryPath(call.reference.name)) {
     throw operationErrors.create("resource.unavailable");
   }
-  const windowed = call.window !== undefined;
-  if (
-    (kind !== undefined && call.reference.kind !== kind) ||
-    (windowed &&
-      (chargeWindow === undefined ||
-        call.reference.kind !== "query" ||
-        isPeoplePath(call.reference.name)))
-  ) {
+  if (kind !== undefined && call.reference.kind !== kind) {
     throw operationErrors.create("contract.invalid_request");
   }
   return call;
 };
 
-/**
- * `call` of one of the draft's own functions, on `store`: a window of a
- * query when it asks for one, otherwise the call itself.
- */
+/** `call` of one of the draft's own functions, on `store`. */
 const operationOf = async (
   env: Env,
   by: Pick<Identity, "userId">,
   run: DraftRun,
   store: OpenStore,
   call: FunctionRequest,
-  {
-    chargeWindow,
-    observeReads,
-    ...made
-  }: DraftCall & Pick<DraftCallOptions, "chargeWindow" | "observeReads">
+  { observeReads, ...made }: DraftCall & Pick<DraftCallOptions, "observeReads">
 ): Promise<OperationResult> => {
   const path = publicOperationOf(run.release, call.reference);
   const invocation = invocationOf(env, by, run, store, made);
@@ -536,20 +519,6 @@ const operationOf = async (
           observeReads(store.id, readSet);
         };
   const reference = { path, kind: call.reference.kind };
-  if (call.window !== undefined && chargeWindow !== undefined) {
-    return await readWindow(
-      {
-        charge: chargeWindow,
-        app: hosted(env, run),
-        invocation,
-        reference,
-        args: run.release.app.operations[path]?.args,
-        input: call.input,
-        extent: call.window.extent,
-      },
-      observe
-    );
-  }
   return await callOperation(
     hosted(env, run),
     observe === undefined

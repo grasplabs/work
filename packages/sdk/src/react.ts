@@ -47,7 +47,11 @@ export {
   useQuery,
   useRetryFailed,
 } from "./react/queries.ts";
-export type { PageItemOf, PaginatedArgsOf } from "./react/queries.ts";
+export type {
+  PageItemOf,
+  PaginatedArgsOf,
+  QueryArgsOrSkip,
+} from "./react/queries.ts";
 export { useStream } from "./react/stream.ts";
 export { useWorkflow } from "./react/workflow.ts";
 export type { WorkflowViewOf } from "./react/workflow.ts";

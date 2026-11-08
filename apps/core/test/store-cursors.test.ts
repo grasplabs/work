@@ -169,7 +169,7 @@ const pageAfter = async (
         range: [],
         filter: null,
         order: "asc",
-        terminal: { kind: "paginate", pageSize: 2, cursor },
+        terminal: { kind: "paginate", pageSize: 2, cursor, endCursor: null },
         ...changes,
       },
     })
@@ -407,7 +407,12 @@ const pageQuery = (index: string | null, order: "asc" | "desc") => ({
   range: [],
   filter: null,
   order,
-  terminal: { kind: "paginate" as const, pageSize: 2, cursor: null },
+  terminal: {
+    kind: "paginate" as const,
+    pageSize: 2,
+    cursor: null,
+    endCursor: null,
+  },
 });
 
 /** The length of the cursor an anchor of a `length`-character label makes. */
@@ -613,6 +618,142 @@ describe("cursors", () => {
     }).toStrictEqual({
       fits: true,
       second: ["n-ada-00001"],
+      gone: "data.cursor_expired",
+    });
+  });
+});
+
+describe("pages ended at a cursor", () => {
+  it("tile the query as records move in and out, along an index with left-out and null values, both ways", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, ranked);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const along = (order: "asc" | "desc") =>
+      db.query("notes").withIndex("by_done_rank").order(order);
+    const loaded = {
+      asc: await allPages(
+        async (cursor) => await along("asc").paginate({ pageSize: 3, cursor })
+      ),
+      desc: await allPages(
+        async (cursor) => await along("desc").paginate({ pageSize: 3, cursor })
+      ),
+    };
+    // Records move in and out of the loaded pages: some inserted, with
+    // every state of the field, and two deleted, one each page's anchor.
+    await insertNotes(
+      fixture,
+      [
+        { title: "k", done: false },
+        { title: "l", done: false, rank: null },
+        { title: "m", done: false, rank: 2 },
+        { title: "n", done: true, rank: 0 },
+      ],
+      "ada",
+      100
+    );
+    const anchors = loaded.asc.pages
+      .slice(0, 2)
+      .map((page) => page.items.at(-1)?._id ?? "");
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        for (const id of anchors) {
+          state.storage.sql.exec(
+            "DELETE FROM sdk_records WHERE record_id = ?",
+            id
+          );
+        }
+      }
+    );
+    for (const order of ["asc", "desc"] as const) {
+      const cursors = loaded[order].pages.map((page) => page.nextCursor);
+      // Each page from where the one before ended to its own end, however
+      // small its size; the last up to its size, as a live list's is.
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const pages = await Promise.all(
+        cursors.map(
+          async (endCursor, page) =>
+            await along(order).paginate({
+              pageSize: 1,
+              cursor: cursors[page - 1] ?? null,
+              endCursor,
+            })
+        )
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const whole = await along(order).collect();
+      expect({
+        ids: idsOf(pages.flatMap((page) => page.items)),
+        ends: pages.slice(0, -1).map((page) => page.nextCursor),
+      }).toStrictEqual({
+        ids: idsOf(whole).slice(0, pages.flatMap((page) => page.items).length),
+        ends: cursors.slice(0, -1),
+      });
+    }
+  });
+
+  it("hold only the caller's own records of an owner-only table, another owner's interleaved", async () => {
+    const fixture = await storeWith("owner");
+    const notes = Array.from({ length: 9 }, (_, index) => ({
+      title: `t${index}`,
+      done: false,
+      rank: index % 3,
+    }));
+    await insertNotes(fixture, notes, "ada");
+    await insertNotes(fixture, notes, "grace", 1000);
+    const ada = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const grace = dbOf(
+      fixture,
+      scopeOf(fixture.schemaHash, { principal: "grace" })
+    );
+    const first = await ada
+      .query("notes")
+      .withIndex("by_done_rank")
+      .paginate({ pageSize: 4, cursor: null });
+    const end = first.nextCursor ?? "";
+    // Grace holding Ada's end cursor still reads only her own records.
+    const theirs = await grace
+      .query("notes")
+      .withIndex("by_done_rank")
+      .paginate({ pageSize: 1, endCursor: end });
+    const mine = await ada
+      .query("notes")
+      .withIndex("by_done_rank")
+      .paginate({ pageSize: 1, endCursor: end });
+    expect({
+      mine: idsOf(mine.items),
+      theirs: [...new Set(theirs.items.map(({ _ownerId }) => _ownerId))],
+    }).toStrictEqual({ mine: idsOf(first.items), theirs: ["grace"] });
+  });
+
+  it("expire with an end of its ID alone once that record went", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: long("a") },
+      { title: long("b") },
+      { title: long("c") },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const first = await byTitle().paginate({ pageSize: 2, cursor: null });
+    const endCursor = first.nextCursor ?? "";
+    const ended = await byTitle().paginate({ pageSize: 1, endCursor });
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "DELETE FROM sdk_records WHERE record_id = ?",
+          first.items.at(-1)?._id ?? ""
+        );
+      }
+    );
+    expect({
+      values: Object.keys(decoded(endCursor)).includes("values"),
+      ended: idsOf(ended.items),
+      gone: await outcome(byTitle().paginate({ pageSize: 1, endCursor })),
+    }).toStrictEqual({
+      values: false,
+      ended: idsOf(first.items),
       gone: "data.cursor_expired",
     });
   });

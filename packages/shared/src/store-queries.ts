@@ -3,16 +3,10 @@ import { z } from "zod";
 import { identifierSchema } from "./ids.ts";
 import {
   cursorMaxLength,
-  filterMaxInValues,
   filterMaxNodes,
-  groupMaxAggregates,
-  groupMaxFields,
-  queryMaxRelations,
-  queryMaxResults,
-  queryMaxStringLength,
+  queryMaxScannedEntries,
   rangeMaxBounds,
   searchMaxTerms,
-  searchTextMaxLength,
   storeNameMaxLength,
   storeNamePattern,
 } from "./store-limits.ts";
@@ -57,7 +51,7 @@ export type {
 
 /** A finite JSON scalar: what a descriptor may compare a field with. */
 const scalarSchema = z.union([
-  z.string().max(queryMaxStringLength),
+  z.string(),
   z.number().refine(Number.isFinite, "A finite number"),
   z.boolean(),
   z.null(),
@@ -128,7 +122,7 @@ const filterNodeSchema: z.ZodType<FilterNode> = z.lazy(() =>
     z.strictObject({
       field: fieldSchema,
       op: z.literal("in"),
-      values: z.array(scalarSchema).max(filterMaxInValues),
+      values: z.array(scalarSchema),
     }),
     z.strictObject({
       field: fieldSchema,
@@ -157,7 +151,7 @@ const filterSchema = z
 const terminalSchema = z.union([
   z.strictObject({
     kind: z.literal("take"),
-    count: z.number().int().min(0).max(queryMaxResults),
+    count: z.number().int().min(0).max(queryMaxScannedEntries),
   }),
   z.strictObject({ kind: z.literal("first") }),
   z.strictObject({ kind: z.literal("unique") }),
@@ -165,8 +159,9 @@ const terminalSchema = z.union([
   z.strictObject({ kind: z.literal("collect") }),
   z.strictObject({
     kind: z.literal("paginate"),
-    pageSize: z.number().int().min(1).max(queryMaxResults),
+    pageSize: z.number().int().min(1).max(queryMaxScannedEntries),
     cursor: z.string().min(1).max(cursorMaxLength).nullable(),
+    endCursor: z.string().min(1).max(cursorMaxLength).nullable(),
   }),
   z.strictObject({
     kind: z.literal("aggregate"),
@@ -180,30 +175,22 @@ const terminalSchema = z.union([
   z
     .strictObject({
       kind: z.literal("group"),
-      by: z.array(nameSchema).min(1).max(groupMaxFields),
-      sum: z.array(nameSchema).max(groupMaxAggregates),
-      avg: z.array(nameSchema).max(groupMaxAggregates),
-      min: z.array(nameSchema).max(groupMaxAggregates),
-      max: z.array(nameSchema).max(groupMaxAggregates),
+      by: z.array(nameSchema).min(1),
+      sum: z.array(nameSchema),
+      avg: z.array(nameSchema),
+      min: z.array(nameSchema),
+      max: z.array(nameSchema),
     })
-    .superRefine((group, context) => {
-      if (
-        group.sum.length +
-          group.avg.length +
-          group.min.length +
-          group.max.length >
-        groupMaxAggregates
-      ) {
-        context.addIssue({
-          code: "custom",
-          message: `A grouped read computes at most ${groupMaxAggregates} aggregates`,
-        });
-      }
-      if (new Set(group.by).size !== group.by.length) {
-        context.addIssue({
-          code: "custom",
-          message: "A grouped read groups by each field once",
-        });
+    .superRefine(({ kind: _kind, ...lists }, context) => {
+      // Each field once per list, so no list holds more than the table's
+      // declared fields, however long a descriptor is.
+      for (const [list, names] of Object.entries(lists)) {
+        if (new Set(names).size !== names.length) {
+          context.addIssue({
+            code: "custom",
+            message: `A grouped read names each field once in \`${list}\``,
+          });
+        }
       }
     }),
 ]) satisfies z.ZodType<QueryTerminal>;
@@ -217,8 +204,8 @@ export const queryRequestSchema = z
     filter: filterSchema.nullable(),
     order: z.enum(["asc", "desc"]),
     terminal: terminalSchema,
-    search: z.string().max(searchTextMaxLength).optional(),
-    with: z.array(nameSchema).min(1).max(queryMaxRelations).optional(),
+    search: z.string().optional(),
+    with: z.array(nameSchema).min(1).optional(),
   })
   .superRefine(({ range, filter, search, terminal }, context) => {
     const issue = boundValuesIssue(range, filter);

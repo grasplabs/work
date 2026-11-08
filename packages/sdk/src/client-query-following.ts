@@ -45,8 +45,6 @@ export const waitsToFollow = (live: Live): boolean =>
 
 /** What following a query tells the rest of the client. */
 export interface FollowerEvents {
-  /** A window's push failed in a way that keeps it shown (`#failExtensionsOf`). */
-  readonly onWindowFailed: (entry: QueryEntry, error: GraspError) => void;
   /** Core ended a followed query as `page.access_changed` (`#accessChanged`). */
   readonly onAccessChanged: (error: GraspError) => void;
 }
@@ -157,20 +155,6 @@ export class QueryFollower {
       const { error } = settled;
       if (fences(error.code)) {
         this.#fence.fence(error);
-        return;
-      }
-      if (
-        entry.window &&
-        error.retryable &&
-        entry.snapshot.value !== undefined
-      ) {
-        // A paginated list's window core couldn't read whole while writes
-        // landed (`query.concurrent_change`, its last push): what it
-        // shows stays, and it follows again, backing off, once core lets
-        // go of it. A Load More waiting for this window afresh fails now,
-        // rather than wait on a read writes may keep tearing; whoever
-        // else shows the window keeps it.
-        this.#events.onWindowFailed(entry, error);
         return;
       }
       if (endsFollowing(error.code) || error.retryable) {

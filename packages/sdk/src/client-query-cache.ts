@@ -28,13 +28,8 @@ export class QueryCache {
   readonly #follower: QueryFollower;
   readonly #reader: QueryReader;
 
-  constructor(
-    transport: ClientTransport,
-    fence: AccessFence,
-    onWindowFailed: (entry: QueryEntry, error: GraspError) => void
-  ) {
+  constructor(transport: ClientTransport, fence: AccessFence) {
     this.#follower = new QueryFollower(transport, fence, {
-      onWindowFailed,
       onAccessChanged: (error) => {
         this.#accessChanged(error);
       },
@@ -50,14 +45,13 @@ export class QueryCache {
 
   /**
    * The shared entry of `read` with `input`, made if there is none: the
-   * query, or with `extent` a paginated list's window of it.
+   * query.
    */
-  entryFor(read: ReadReference, input: Json, extent?: number): QueryEntry {
+  entryFor(read: ReadReference, input: Json): QueryEntry {
     // A query's request is bounded as a submission's is, before it is sent.
     const request = JSON.stringify({
       reference: read,
       input,
-      ...(extent === undefined ? {} : { window: { extent } }),
     });
     if (
       new TextEncoder().encode(request).byteLength > functionRequestMaxBytes
@@ -66,11 +60,7 @@ export class QueryCache {
         maxBytes: functionRequestMaxBytes,
       });
     }
-    const key = canonicalJson([
-      read.name,
-      input,
-      ...(extent === undefined ? [] : [{ window: extent }]),
-    ]);
+    const key = canonicalJson([read.name, input]);
     const known = this.#queries.get(key);
     if (known !== undefined) {
       return known;
@@ -91,7 +81,6 @@ export class QueryCache {
       reading: undefined,
       evict: undefined,
       settled: 0,
-      window: extent !== undefined,
     };
     this.#queries.set(key, entry);
     // Made for a render that may never subscribe: let go of it unless one does.

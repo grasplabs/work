@@ -1,9 +1,4 @@
 import type {
-  queryDefaultPageSize,
-  queryMaxResults,
-} from "@grasp-os/shared/store-limits";
-
-import type {
   AnyTables,
   Doc,
   IsComparable,
@@ -13,36 +8,17 @@ import type {
 } from "./query-types.ts";
 import type { Id } from "./value-types.ts";
 
-/** The whole numbers 0 to `Max`, as a union. */
-type UpTo<
-  Max extends number,
-  Counted extends readonly number[] = [],
-> = Counted["length"] extends Max
-  ? Counted[number] | Max
-  : UpTo<Max, [...Counted, Counted["length"]]>;
-
-/** How many records `take` may ask for: 0 to 100. */
-type ResultCount = UpTo<typeof queryMaxResults>;
-
-/**
- * `Count` if it is a valid result count, or any `number` (checked at run
- * time); a literal out of range fails to type-check against `Refusal`,
- * which the type error then names: what the count may be.
- */
-type Bounded<
-  Count extends number,
-  Allowed extends number,
-  Refusal extends string,
-> = number extends Count ? Count : Count extends Allowed ? Count : Refusal;
-
 /** What `paginate` takes: as `paginationOptionsValidator` normalizes it. */
-interface PaginationOptions<PageSize extends number = number> {
-  readonly pageSize?: Bounded<
-    PageSize,
-    Exclude<ResultCount, 0>,
-    `pageSize is a whole number from 1 to ${typeof queryMaxResults}`
-  >;
+interface PaginationOptions {
+  /** How many records the page holds, 50 unless set. */
+  readonly pageSize?: number;
   readonly cursor?: string | null;
+  /**
+   * Where the page ends, whatever `pageSize` says: a live list's loaded
+   * pages pass the cursor their next page starts at, so a page keeps its
+   * bounds as records move. Pass `pagination` on as it came.
+   */
+  readonly endCursor?: string | null;
 }
 
 /**
@@ -123,9 +99,8 @@ type WithRelated<
 >;
 
 /**
- * What `group` takes: the one or two fields to group by, and the declared
- * numeric fields to sum, average, or take the least or greatest of in
- * each group (at most 8 of these together).
+ * What `group` takes: the fields to group by, and the declared numeric
+ * fields to sum, average, or take the least or greatest of in each group.
  */
 interface GroupOptions<
   Document,
@@ -135,7 +110,7 @@ interface GroupOptions<
   Min extends NumericField<Document>,
   Max extends NumericField<Document>,
 > {
-  readonly by: readonly [By] | readonly [By, By];
+  readonly by: readonly [By, ...By[]];
   readonly sum?: readonly Sum[];
   readonly avg?: readonly Avg[];
   readonly min?: readonly Min[];
@@ -166,28 +141,23 @@ export interface Group<
 
 /** A query's terminals that return records: each reads, bounded. */
 interface RecordReads<Document> {
-  /** At most `count` records, 0 to 100. */
-  readonly take: <const Count extends number>(
-    count: Bounded<
-      Count,
-      ResultCount,
-      `take() returns 0 to ${typeof queryMaxResults} records: use paginate() for more`
-    >
-  ) => Promise<Document[]>;
+  /** At most `count` records. */
+  readonly take: (count: number) => Promise<Document[]>;
   /** The first record, or null. */
   readonly first: () => Promise<Document | null>;
   /** How many records there are, within the host's scan bound. */
   readonly count: () => Promise<number>;
-  /** Every record, at most 100; `data.result_limit` if there are more. */
+  /**
+   * Every record, within the host's scan bound: `data.scan_limit` if it
+   * would read more, never a part. Page through larger lists.
+   */
   readonly collect: () => Promise<Document[]>;
   /**
    * One page, of `pageSize` records (50 unless set) from `cursor`. Pages
    * go on through a table of any size: each costs only what it reads.
    */
-  readonly paginate: <
-    const PageSize extends number = typeof queryDefaultPageSize,
-  >(
-    options: PaginationOptions<PageSize>
+  readonly paginate: (
+    options: PaginationOptions
   ) => Promise<PaginationResult<Document>>;
 }
 
@@ -221,11 +191,11 @@ interface QueryReads<Document> extends RecordReads<Document> {
   /** A count, or the sum, least or greatest of a declared numeric field. */
   readonly aggregate: Aggregate<Document>;
   /**
-   * The records counted per distinct value of one or two scalar fields
+   * The records counted per distinct value of one or more scalar fields
    * (`by`), with sums, averages, least and greatest values of declared
-   * numeric fields per group, ordered by key: at most 100 groups
-   * (`data.group_limit` past it, never a part), over the records the
-   * query reads within the host's scan bound. Larger reports are a
+   * numeric fields per group, ordered by key, over the records the
+   * query reads within the host's scan bound (`data.scan_limit` past it,
+   * never a part). Larger reports are a
    * workflow's, in pages.
    *
    * ```ts
@@ -263,7 +233,7 @@ export type Query<
   /**
    * Each record it returns with the records its `v.id` fields (or lists
    * of them) name, under `_with`: loaded together, a statement per field,
-   * at most 4 fields, under the caller's access to their tables. A record
+   * under the caller's access to their tables. A record
    * the caller may not see (missing, deleted, another owner's, or one its
    * table's row rules keep from them) is null; a
    * table the caller can't read at all is `{ _withheld: true }`. Only for

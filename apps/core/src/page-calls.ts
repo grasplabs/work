@@ -48,7 +48,7 @@ import {
   requireDelivery,
 } from "./page-delivery.ts";
 import type { PageLease } from "./page-delivery.ts";
-import { admitted, admitWindow, windowCharger } from "./pages-rpc.ts";
+import { admitted } from "./pages-rpc.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
@@ -102,9 +102,7 @@ import { routeMember } from "./staff-audit.ts";
 // - Skipping the rate limits. Every call is counted before its body is
 //   read: a member's against their requests of the App's pages, whether
 //   on the release or a draft (`admitted`); a visitor's against theirs and
-//   the App's visitors' together. A paginated list's window counts one
-//   more for each page past its first (`admitWindow`), and every page past
-//   what it paid for is charged as it is read (`windowCharger`).
+//   the App's visitors' together.
 // - A request or an answer too large: the body is read no further than
 //   `functionRequestMaxBytes`, whatever `content-length` says; an answer
 //   larger than a frame takes is refused (`page.answer_too_large`).
@@ -331,11 +329,7 @@ const keyedAction = (
     return undefined;
   }
   const key = idempotencyKeySchema.safeParse(call.idempotencyKey);
-  // One with a window is a query's or nothing: the plain call refuses it
-  // before anything runs.
-  return call.reference.kind === "action" &&
-    key.success &&
-    call.window === undefined
+  return call.reference.kind === "action" && key.success
     ? { call, key: key.data }
     : undefined;
 };
@@ -564,26 +558,22 @@ const memberCall = async (
   admittedCall: AdmittedCall
 ): Promise<unknown> => {
   const { person, id, body, lease } = admittedCall;
-  // A window counts as the pages it reads (query-windows.ts).
-  await admitWindow(env, person, id, body);
   const keyed = keyedAction(body);
   if (keyed !== undefined) {
     // Checks delivery itself, before the run and again before its answer.
     return await keyedAnswer(env, admittedCall, keyed);
   }
   const deadline = Date.now() + pageCallMs;
-  const chargeWindow = windowCharger(env, person, id);
   if (lease?.kind === "draft") {
     return withinFrame(
       await callDraftOn(env, person, { app: id, chatId: lease.chatId }, body, {
         deadline,
-        chargeWindow,
       })
     );
   }
   return await delivering(env, person, id, buildOf(lease), "call", async () =>
     withinFrame(
-      await callPageFunction(env, person, id, body, deadline, chargeWindow, {
+      await callPageFunction(env, person, id, body, deadline, {
         // A page's keyed mutation commits its form with its writes.
         tellsForm: true,
       })

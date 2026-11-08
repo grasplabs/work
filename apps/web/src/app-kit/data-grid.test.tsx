@@ -136,14 +136,14 @@ const argsOf = ({ search, sort, filters }: DataGridState<Person>) => {
   return { search, sort: order, team: filters.team };
 };
 
-/** A host whose query answers `people` a window at a time, and whose mutations do as `saved` says. */
+/** A host whose query answers `people` a page at a time, and whose mutations do as `saved` says. */
 const hostOf = (
   saved: (sent: Sent) => Answer = () => ({ value: null }),
   records: readonly unknown[] = people
 ) =>
   testHost((sent) =>
     sent.contractId === "people.list"
-      ? pageOf(records, sent.extent)
+      ? pageOf(records, sent.pagination)
       : saved(sent)
   );
 
@@ -249,14 +249,22 @@ describe("a data grid", () => {
     await rendered(client, grid);
     const first = { names: names(), read: reads.at(-1) };
     await click(find("button", "Load more"));
-    const second = { names: names(), extent: reads.at(-1)?.extent };
+    const second = { names: names(), page: reads.at(-1)?.pagination };
     await click(find("button", "Load more"));
     expect({ first, second }).toStrictEqual({
       first: {
         names: ["Ada", "Grace"],
-        read: { contractId: "people.list", extent: 2, input: { search: "" } },
+        read: {
+          contractId: "people.list",
+          input: { search: "" },
+          pagination: { pageSize: 2, cursor: null },
+        },
       },
-      second: { names: ["Ada", "Grace", "Linus", "Margaret"], extent: 4 },
+      // The next page, from where the first ends.
+      second: {
+        names: ["Ada", "Grace", "Linus", "Margaret"],
+        page: { pageSize: 2, cursor: "2" },
+      },
     });
     expect(names()).toHaveLength(people.length);
     // Everything loaded: nothing more to load.
@@ -291,7 +299,10 @@ describe("a data grid", () => {
     ]);
     expect(ascending).toBe("ascending");
     // Another filter starts the list again, at its first page.
-    expect(reads.at(-1)?.extent).toBe(2);
+    expect(reads.at(-1)?.pagination).toStrictEqual({
+      pageSize: 2,
+      cursor: null,
+    });
   });
 
   it("shows each field as the query declares it", async () => {
@@ -343,7 +354,7 @@ describe("a data grid", () => {
         {
           contractId: "people.rename",
           input: { id: idOf(0), name: "Ada Lovelace" },
-          extent: undefined,
+          pagination: undefined,
         },
       ],
       alert: "Ada's record is locked.",
@@ -378,7 +389,7 @@ describe("a data grid", () => {
         {
           contractId: "people.rename",
           input: { id: idOf(1), name: "Grace Hopper" },
-          extent: undefined,
+          pagination: undefined,
         },
       ],
     });
@@ -542,7 +553,7 @@ describe("a data grid", () => {
     const { client } = testHost((sent) =>
       fail
         ? { failed: "people.unavailable", message: "The directory is down." }
-        : pageOf(people, sent.extent)
+        : pageOf(people, sent.pagination)
     );
     await rendered(client, grid);
     expect(find('[role="alert"]').textContent).toContain(

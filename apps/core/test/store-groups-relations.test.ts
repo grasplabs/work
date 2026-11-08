@@ -2,11 +2,7 @@ import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import type { Id } from "@grasp-os/sdk";
 import { databaseReader, manifestText } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
-import {
-  queryMaxGroups,
-  queryMaxRelations,
-  queryMaxScannedEntries,
-} from "@grasp-os/shared/store-limits";
+import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
 import type { StoreFields } from "@grasp-os/shared/stores";
@@ -327,31 +323,29 @@ describe("groups", () => {
     });
   });
 
-  it("are refused past their bounds, clearly", async () => {
+  it("answer every group the read examines, and refuse what isn't one, clearly", async () => {
+    // More groups than a page of records: a grouped read answers as many
+    // as the records it examines make, bounded only by what it reads.
+    const manyGroups = 150;
     const fixture = await storeWith();
     await put(
       fixture,
       "orders",
-      Array.from({ length: queryMaxGroups + 1 }, (_, index) => ({
+      Array.from({ length: manyGroups }, (_, index) => ({
         id: `g${index}`,
         fields: { status: `s${index}`, region: "EU", paid: true },
       }))
     );
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
     const scope = scopeOf(fixture.schemaHash);
+    const byStatus = await db.query("orders").group({ by: ["status"] });
+    const byThree = await db
+      .query("orders")
+      .group({ by: ["status", "region", "paid"] });
     expect({
-      groups: await outcome(
-        async () => await db.query("orders").group({ by: ["status"] })
-      ),
-      // Within the bound, by a field with fewer values.
+      groups: byStatus.length,
       regions: await db.query("orders").group({ by: ["region"] }),
-      sdkThree: await outcome(
-        async () =>
-          await db.query("orders").group({
-            // @ts-expect-error -- at most two fields
-            by: ["status", "region", "paid"],
-          })
-      ),
+      threeFields: byThree.length,
       sdkText: await outcome(
         async () =>
           await db.query("orders").group({
@@ -367,13 +361,11 @@ describe("groups", () => {
             .with("customer")
             .group({ by: ["region"] })
       ),
-      storeThree: await outcome(
+      storeTwice: await outcome(
         async () =>
           await fixture.store.read(
             scope,
-            ordersRequest({
-              terminal: groupBy(["status", "region", "paid"]),
-            })
+            ordersRequest({ terminal: groupBy(["region", "region"]) })
           )
       ),
       storeText: await outcome(
@@ -400,21 +392,21 @@ describe("groups", () => {
           )
       ),
     }).toStrictEqual({
-      groups: "data.group_limit",
+      groups: manyGroups,
       regions: [
         {
           key: { region: "EU" },
-          count: queryMaxGroups + 1,
+          count: manyGroups,
           sum: {},
           avg: {},
           min: {},
           max: {},
         },
       ],
-      sdkThree: "query.invalid_terminal",
+      threeFields: manyGroups,
       sdkText: "query.invalid_terminal",
       sdkWith: "query.invalid_terminal",
-      storeThree: "data.invalid_query",
+      storeTwice: "data.invalid_query",
       storeText: "data.invalid_query",
       storeManaged: "data.invalid_query",
       storeObject: "data.invalid_query",
@@ -583,18 +575,6 @@ describe("related records", () => {
         async () =>
           await fixture.store.read(scope, ordersRequest({ with: ["region"] }))
       ),
-      storeMany: await outcome(
-        async () =>
-          await fixture.store.read(
-            scope,
-            ordersRequest({
-              with: Array.from(
-                { length: queryMaxRelations + 1 },
-                (_, index) => `f${index}`
-              ),
-            })
-          )
-      ),
       storeCount: await outcome(
         async () =>
           await fixture.store.read(
@@ -606,7 +586,6 @@ describe("related records", () => {
       sdkField: "query.invalid_terminal",
       sdkCount: "query.invalid_terminal",
       storeField: "data.invalid_query",
-      storeMany: "data.invalid_query",
       storeCount: "data.invalid_query",
     });
   });

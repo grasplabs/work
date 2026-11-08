@@ -16,12 +16,21 @@ import { afterEach } from "vite-plus/test";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
+/** A page a paginated list's query asks for (`paginationOptionsValidator`). */
+export interface PageAsked {
+  readonly pageSize: number;
+  readonly cursor: string | null;
+  /** Where the page ends, once a page follows it. */
+  readonly endCursor?: string;
+}
+
 /** One query read or call the client sent the host. */
 export interface Sent {
   readonly contractId: string;
+  /** Its arguments, without `pagination`. */
   readonly input: Readonly<Record<string, unknown>>;
-  /** A paginated list's window: how many records it asks for. */
-  readonly extent: number | undefined;
+  /** The page a paginated list's read asks for, if it is one. */
+  readonly pagination: PageAsked | undefined;
 }
 
 /** What the host answers: a value, or a failure the App's code raised. */
@@ -41,16 +50,31 @@ type Transport = Extract<
 const read = (value: unknown, key: string): unknown =>
   isRecord(value) ? value[key] : undefined;
 
-/** What `body` asks for: its function, input and window. */
+/** The page `pagination` asks for, if it is one. */
+const pageAskedOf = (pagination: unknown): PageAsked | undefined => {
+  const pageSize = read(pagination, "pageSize");
+  const cursor = read(pagination, "cursor");
+  const endCursor = read(pagination, "endCursor");
+  if (typeof pageSize !== "number") {
+    return undefined;
+  }
+  return {
+    pageSize,
+    cursor: typeof cursor === "string" ? cursor : null,
+    ...(typeof endCursor === "string" ? { endCursor } : {}),
+  };
+};
+
+/** What `body` asks for: its function, input and page. */
 const sentOf = (body: string): Sent => {
   const parsed: unknown = JSON.parse(body);
   const contractId = read(read(parsed, "reference"), "name");
-  const input = read(parsed, "input");
-  const extent = read(read(parsed, "window"), "extent");
+  const sentInput = read(parsed, "input");
+  const { pagination, ...input } = isRecord(sentInput) ? sentInput : {};
   return {
     contractId: typeof contractId === "string" ? contractId : "",
-    input: isRecord(input) ? input : {},
-    extent: typeof extent === "number" ? extent : undefined,
+    input,
+    pagination: pageAskedOf(pagination),
   };
 };
 
@@ -153,17 +177,34 @@ export const testHost = (
   return { client: new GraspClient(transport), reads, calls, uploads, links };
 };
 
-/** A page of `records` for a list's window of `extent`. */
-export const pageOf = (records: readonly unknown[], extent = 25) =>
-  extent < records.length
+/**
+ * The page of `records` `asked` names, each cursor the position the page
+ * after it starts at: from its cursor to its end cursor, else as many as
+ * its size.
+ */
+export const pageOf = (records: readonly unknown[], asked?: PageAsked) => {
+  const cursor = asked?.cursor ?? null;
+  const start = cursor === null ? 0 : Number(cursor);
+  const end =
+    asked?.endCursor === undefined
+      ? start + (asked?.pageSize ?? 25)
+      : Number(asked.endCursor);
+  return end < records.length
     ? {
         value: {
-          items: records.slice(0, extent),
+          items: records.slice(start, end),
           hasMore: true,
-          nextCursor: String(extent),
+          nextCursor: String(end),
         },
       }
-    : { value: { items: records, hasMore: false, nextCursor: null } };
+    : {
+        value: {
+          items: records.slice(start),
+          hasMore: false,
+          nextCursor: null,
+        },
+      };
+};
 
 /** A public reference of an App's function, as the host generates one. */
 export const reference = <Args, Return, Kind extends "query" | "mutation">(

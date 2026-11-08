@@ -225,12 +225,11 @@ export class App extends DurableObject<Env> {
   /**
    * Whether core may read one more of `userId`'s live queries of the App
    * now because a write changed what it read
-   * (`querySubscriptionLimits.liveReads`), at `cost` reads: a paginated
-   * list's window costs one per page it reads (query-windows.ts), never
-   * more than the burst. One that may not waits.
+   * (`querySubscriptionLimits.liveReads`): each page a paginated list
+   * follows is one. One that may not waits.
    */
-  admitLiveRead(userId: string, cost = 1): boolean {
-    return this.#liveReads.take(userId, Date.now(), cost);
+  admitLiveRead(userId: string): boolean {
+    return this.#liveReads.take(userId, Date.now(), 1);
   }
 
   /**

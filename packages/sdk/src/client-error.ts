@@ -72,11 +72,6 @@ const clientErrors = {
       "That query doesn't take a pagination argument and answer pages, so it can't be read as a paginated list.",
     category: "contract",
   },
-  "query.window_limit": {
-    message:
-      "This list can't load more: it holds as many records as one live list may. Narrow it with the query's arguments instead.",
-    category: "operational",
-  },
   "contract.invalid_request": {
     message:
       "That isn't a public reference of this kind: use one from the App's generated api.",

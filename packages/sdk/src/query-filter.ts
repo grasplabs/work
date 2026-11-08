@@ -1,8 +1,4 @@
-import {
-  filterMaxDepth,
-  filterMaxInValues,
-  filterMaxNodes,
-} from "@grasp-os/shared/store-limits";
+import { filterMaxDepth, filterMaxNodes } from "@grasp-os/shared/store-limits";
 import { filterChildren } from "@grasp-os/shared/store-reads";
 import type { FilterNode, QueryScalar } from "@grasp-os/shared/store-reads";
 
@@ -34,12 +30,11 @@ const conditionNode = (
   if (op === "in") {
     if (
       !Array.isArray(operand) ||
-      operand.length > filterMaxInValues ||
       !operand.every((item) => fits(item, base, nullable))
     ) {
       return refuse(
         "query.invalid_filter",
-        `\`${field}.in\` lists at most ${filterMaxInValues} values, each a ${base}${nullable ? " or null" : ""}.`
+        `\`${field}.in\` lists values, each a ${base}${nullable ? " or null" : ""}.`
       );
     }
     const values: readonly unknown[] = operand;

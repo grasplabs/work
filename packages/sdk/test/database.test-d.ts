@@ -121,14 +121,9 @@ declare const pagination: Infer<typeof paginationOptionsValidator>;
 void db.query("notes").order("desc").paginate(pagination);
 declare const anyCount: number;
 void db.query("notes").take(anyCount);
-// @ts-expect-error -- `take` returns at most 100
-void db.query("notes").take(101);
-// @ts-expect-error -- `take` counts from 0
-void db.query("notes").take(-1);
-// @ts-expect-error -- a page holds at most 100
+// `take` and a page are bounded by what a read examines, not by type.
+void db.query("notes").take(500);
 void db.query("notes").paginate({ pageSize: 500 });
-// @ts-expect-error -- a page holds at least one
-void db.query("notes").paginate({ pageSize: 0 });
 // There is no unbounded `all`, and a query isn't iterable.
 expectTypeOf(db.query("notes")).not.toHaveProperty("all");
 expectTypeOf(db.query("notes")).not.toExtend<AsyncIterable<Note>>();

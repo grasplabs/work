@@ -1,5 +1,3 @@
-import { queryMaxStringLength } from "@grasp-os/shared/store-limits";
-
 import { allowsNull, indexBase } from "./schema-fields.ts";
 import type { IndexBase } from "./schema-fields.ts";
 import type { TableState } from "./schema-types.ts";
@@ -36,7 +34,7 @@ export const nullableField = (table: TableState, field: string): boolean => {
 
 /**
  * Whether `value` is a scalar of base type `base`, or null where null is
- * allowed: a string within the length a descriptor carries.
+ * allowed.
  */
 export const fits = (
   value: unknown,
@@ -48,9 +46,6 @@ export const fits = (
   }
   if (base === "number") {
     return typeof value === "number" && Number.isFinite(value);
-  }
-  if (base === "string") {
-    return typeof value === "string" && value.length <= queryMaxStringLength;
   }
   return typeof value === base;
 };

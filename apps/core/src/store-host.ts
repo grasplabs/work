@@ -2163,7 +2163,7 @@ export class StoreHost {
    * compares later (store-reader.ts), handed back with its answer and
    * added to a data error it fails with (`details.generations`), since a
    * read that failed after it looked at records (`data.not_unique`,
-   * `data.result_limit`, ...) depended on them as much as one that
+   * `data.scan_limit`, ...) depended on them as much as one that
    * answered.
    *
    * Handed back the same way (`sensitive`, and `details.sensitive` on a
@@ -2509,6 +2509,13 @@ export class StoreHost {
       terminal.cursor === null
         ? null
         : await decodeCursor(binding, terminal.cursor);
+    // Where a live list's loaded page ends: a cursor of the same query,
+    // checked as its start is, and handed back as the page's next cursor
+    // unchanged, so the page after it goes on starting where it did.
+    const end =
+      terminal.endCursor === null
+        ? null
+        : await decodeCursor(binding, terminal.endCursor);
     const {
       value: read,
       generations,
@@ -2520,16 +2527,22 @@ export class StoreHost {
       [query.table, ...relatedTables(pinned, reader, query)],
       preview,
       (statements) =>
-        indexRequired(() => readPage(statements, pinned, reader, query, anchor))
+        indexRequired(() =>
+          readPage(statements, pinned, reader, query, anchor, end)
+        )
     );
+    let nextCursor: string | null = null;
+    if (read.hasMore) {
+      nextCursor =
+        terminal.endCursor ??
+        (read.last === undefined
+          ? null
+          : await encodeCursor(binding, read.last));
+    }
     const value: PageAnswer =
-      read.hasMore && read.last !== undefined
-        ? {
-            items: read.items,
-            nextCursor: await encodeCursor(binding, read.last),
-            hasMore: true,
-          }
-        : { items: read.items, nextCursor: null, hasMore: false };
+      nextCursor === null
+        ? { items: read.items, nextCursor: null, hasMore: false }
+        : { items: read.items, nextCursor, hasMore: true };
     return { value, generations, sensitive };
   }
 

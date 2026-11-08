@@ -23,7 +23,6 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { liveWindowMaxItems } from "@grasp-os/shared/store-limits";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { waitUntil } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -58,7 +57,6 @@ import {
   readWorkflowWatch,
   watchesWorkflow,
 } from "./page-workflows.ts";
-import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
@@ -72,7 +70,6 @@ import {
   callWorkflowQuery,
   isDecisionQueryPath,
   isWorkflowQueryPath,
-  readWorkflowWindow,
   workflowQueryOf,
 } from "./workflow-reference-queries.ts";
 import type {
@@ -296,29 +293,16 @@ const isOverBytes = (text: string, max: number): boolean =>
   (text.length * 3 > max && encoder.encode(text).byteLength > max);
 
 /** A call's request, as a page or agent sends it (spec 32.6). */
-const functionRequestSchema = z
-  .strictObject({
-    // A function's name and kind, nothing more: resolved in the release
-    // that answers the call, the App's current one for a page.
-    reference: z.strictObject({
-      name: z.string().min(1).max(256),
-      kind: z.enum(["query", "mutation", "action"]),
-    }),
-    input: z.unknown(),
-    idempotencyKey: z.string().optional(),
-    /**
-     * A paginated list's window (query-windows.ts): the query read from the
-     * start for at most `extent` records, for a page only.
-     */
-    window: z
-      .strictObject({ extent: z.int().min(1).max(liveWindowMaxItems) })
-      .optional(),
-  })
-  // A window is a query's only, on every path a call is read on: a
-  // mutation or action with one, a stream's included, runs nothing.
-  .refine(
-    (call) => call.window === undefined || call.reference.kind === "query"
-  );
+const functionRequestSchema = z.strictObject({
+  // A function's name and kind, nothing more: resolved in the release
+  // that answers the call, the App's current one for a page.
+  reference: z.strictObject({
+    name: z.string().min(1).max(256),
+    kind: z.enum(["query", "mutation", "action"]),
+  }),
+  input: z.unknown(),
+  idempotencyKey: z.string().optional(),
+});
 
 /** A call's request, read. */
 export type FunctionRequest = z.infer<typeof functionRequestSchema>;
@@ -395,7 +379,7 @@ export const refusalOf = (
     ? error
     : internalErrors.create("internal.unexpected", { requestId });
   // Of its details, only how long to wait before asking again: what a
-  // caller needs to wait for its budget (a window's pages, say).
+  // caller needs to wait for its budget.
   const details: unknown = Reflect.get(expected, "details");
   const retryAfterMs: unknown =
     typeof details === "object" && details !== null
@@ -426,12 +410,6 @@ interface FunctionCallOptions {
   readonly parentSession?: string;
   /** Only this kind of function may be called (a live query's). */
   readonly kind?: FunctionRequest["reference"]["kind"];
-  /**
-   * Given, the call may read a paginated list's window (a page's): what
-   * charges the person for its pages past what the caller paid
-   * (`WindowRequest.charge`).
-   */
-  readonly chargeWindow?: (pages: number, whole: number) => Promise<void>;
   /** Told the store a query read and its read set (`Invocation.observeReads`). */
   readonly observeReads?: (
     storeId: StoreId,
@@ -443,28 +421,14 @@ interface FunctionCallOptions {
 
 /**
  * The call `request`, refused as `contract.invalid_request` when it isn't
- * of `kind` (when given), or reads a window but isn't a query of a caller
- * that may (`windowed`).
+ * of `kind` (when given).
  */
 const callAllowed = (
   request: unknown,
-  {
-    kind,
-    windowed,
-  }: {
-    kind: FunctionRequest["reference"]["kind"] | undefined;
-    windowed: boolean;
-  }
+  kind?: FunctionRequest["reference"]["kind"]
 ): FunctionRequest => {
   const call = readFunctionRequest(request);
   if (kind !== undefined && call.reference.kind !== kind) {
-    throw operationErrors.create("contract.invalid_request");
-  }
-  // A window is a page's, and a query's only.
-  if (
-    call.window !== undefined &&
-    (!windowed || call.reference.kind !== "query")
-  ) {
     throw operationErrors.create("contract.invalid_request");
   }
   return call;
@@ -544,7 +508,6 @@ const answeredWorkflowQuery = async (
     release,
     refused,
     stillAllowed,
-    chargeWindow,
     deadline,
   }: {
     by: Pick<Identity, "userId" | "role">;
@@ -555,33 +518,17 @@ const answeredWorkflowQuery = async (
     release: Release;
     refused: (error: unknown) => FunctionAnswer;
     stillAllowed: FunctionCallOptions["stillAllowed"];
-    chargeWindow: FunctionCallOptions["chargeWindow"];
   }
 ): Promise<FunctionAnswer> => {
   try {
-    // A window passes the gate again before each page it reads.
-    const gate = coreAnsweredGate(env, {
+    await coreAnsweredGate(env, {
       by,
       app: caller.app,
       release,
       stillAllowed,
       deadline,
-    });
-    await gate();
-    const result =
-      call.window === undefined
-        ? await callWorkflowQuery(env, caller, query, call.input)
-        : await readWorkflowWindow(env, caller, query, call.input, {
-            extent: call.window.extent,
-            gate,
-            charge:
-              chargeWindow ??
-              (async () => {
-                await Promise.reject(
-                  operationErrors.create("contract.invalid_request")
-                );
-              }),
-          });
+    })();
+    const result = await callWorkflowQuery(env, caller, query, call.input);
     return {
       result,
       provenance: null,
@@ -624,9 +571,6 @@ const answeredPeople = async (
 ): Promise<FunctionAnswer> => {
   try {
     const read = peopleReadOf(call.reference);
-    if (call.window !== undefined) {
-      throw operationErrors.create("contract.invalid_request");
-    }
     // Anyone without a role in the App learns nothing of it.
     const found = await usableApp(env, by, named);
     if (found.currentVersion === null) {
@@ -728,7 +672,6 @@ const callFunction = async (
     parentSession,
     kind,
     observeReads,
-    chargeWindow,
     agent,
     tellsForm,
   } = options;
@@ -741,7 +684,7 @@ const callFunction = async (
   });
   let call: FunctionRequest;
   try {
-    call = callAllowed(request, { kind, windowed: chargeWindow !== undefined });
+    call = callAllowed(request, kind);
   } catch (error) {
     return refused(error);
   }
@@ -776,7 +719,6 @@ const callFunction = async (
       release,
       refused,
       stillAllowed,
-      chargeWindow,
       deadline,
     });
   }
@@ -796,54 +738,40 @@ const callFunction = async (
     const submittedCall = call;
     const submittedKey = call.idempotencyKey;
     const submittedApp = appId;
-    const result =
-      call.window === undefined
-        ? await callOperation(hosted, observed, reference, call.input, {
-            ...(call.idempotencyKey === undefined
-              ? {}
-              : { idempotencyKey: call.idempotencyKey }),
-            ...(parentSession === undefined ? {} : { parentSession }),
-            ...(tellsForm !== true ||
-            submittedCall.reference.kind !== "mutation" ||
-            submittedKey === undefined
-              ? {}
-              : {
-                  // Only for a form some webhook would hear: a receipt
-                  // whose outbox owes nothing keeps to its own time.
-                  // Its values left out when the commit wouldn't hold them.
-                  commitIntent: async (startedAt: number) =>
-                    (await formHeardBy(env, submittedApp, startedAt))
-                      ? formIntents(
-                          formSubmissionOf({
-                            app: submittedApp,
-                            userId: by.userId,
-                            call: submittedCall,
-                            key: submittedKey,
-                            operation: path,
-                            startedAt,
-                          })
-                        )
-                      : undefined,
-                }),
-          })
-        : await readWindow(
-            {
-              charge:
-                chargeWindow ??
-                (async () => {
-                  await Promise.reject(
-                    operationErrors.create("contract.invalid_request")
-                  );
-                }),
-              app: hosted,
-              invocation,
-              reference,
-              args: release.app.operations[path]?.args,
-              input: call.input,
-              extent: call.window.extent,
-            },
-            observed.observeReads
-          );
+    const result = await callOperation(
+      hosted,
+      observed,
+      reference,
+      call.input,
+      {
+        ...(call.idempotencyKey === undefined
+          ? {}
+          : { idempotencyKey: call.idempotencyKey }),
+        ...(parentSession === undefined ? {} : { parentSession }),
+        ...(tellsForm !== true ||
+        submittedCall.reference.kind !== "mutation" ||
+        submittedKey === undefined
+          ? {}
+          : {
+              // Only for a form some webhook would hear: a receipt
+              // whose outbox owes nothing keeps to its own time.
+              // Its values left out when the commit wouldn't hold them.
+              commitIntent: async (startedAt: number) =>
+                (await formHeardBy(env, submittedApp, startedAt))
+                  ? formIntents(
+                      formSubmissionOf({
+                        app: submittedApp,
+                        userId: by.userId,
+                        call: submittedCall,
+                        key: submittedKey,
+                        operation: path,
+                        startedAt,
+                      })
+                    )
+                  : undefined,
+            }),
+      }
+    );
     return {
       result,
       provenance: sources.snapshot(),
@@ -965,15 +893,12 @@ export const callVisitorFunction = async (
     manifestHash: null,
   });
   try {
-    const call = callAllowed(request, { kind: undefined, windowed: false });
+    const call = callAllowed(request);
     const { name: contractId } = call.reference;
     // Who they are, and nothing of the directory (app-people.ts): no grant
     // opens it to a visitor.
     if (isPeoplePath(contractId)) {
       const read = peopleReadOf(call.reference);
-      if (call.window !== undefined) {
-        throw operationErrors.create("contract.invalid_request");
-      }
       // Their session was found live, the App published and their address
       // listed before this call was taken: that is all telling them who
       // they are needs. Every directory read is refused, and recorded.
@@ -1135,8 +1060,7 @@ const workflowWatchRead = async (
 
 /**
  * Calls a public function of App `app` for a page of `by`'s, as
- * `callAppFunction` calls it, or reads a query's paginated window for it
- * (query-windows.ts). Never throws.
+ * `callAppFunction` calls it. Never throws.
  */
 export const callPageFunction = async (
   env: Env,
@@ -1145,29 +1069,11 @@ export const callPageFunction = async (
   app: unknown,
   request: unknown,
   deadline: number,
-  chargeWindow: (pages: number, whole: number) => Promise<void>,
   options: Pick<FunctionCallOptions, "tellsForm"> = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)
-    : await callFunction(env, by, app, request, {
-        deadline,
-        chargeWindow,
-        ...options,
-      });
-
-/**
- * The extent of the window `request` asks for, or undefined when it asks
- * for none or isn't a call (its call refuses it): what its pages are
- * charged by (query-windows.ts, `windowPages`).
- */
-export const windowExtentOf = (request: unknown): number | undefined => {
-  try {
-    return readFunctionRequest(request).window?.extent;
-  } catch {
-    return undefined;
-  }
-};
+    : await callFunction(env, by, app, request, { deadline, ...options });
 
 /**
  * Whether `request` calls one of a workflow reference's queries
@@ -1234,8 +1140,7 @@ export const evaluateAppQuery = async (
     Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: string,
-  deadline: number,
-  chargeWindow: (pages: number, whole: number) => Promise<void>
+  deadline: number
 ): Promise<EvaluatedQuery> => {
   if (isWorkflowRequest(request)) {
     return await workflowWatchRead(env, by, app, request);
@@ -1244,7 +1149,6 @@ export const evaluateAppQuery = async (
   const answer = await callFunction(env, by, app, request, {
     deadline,
     kind: "query",
-    chargeWindow,
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },

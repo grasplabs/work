@@ -246,9 +246,14 @@ describe("the session client's paginated list", () => {
     args.search = "changed";
     await pager.loadMore();
     expect(followed.map(({ input }) => input)).toStrictEqual([
-      // The first page, then the larger window Load More asks for.
-      { search: "launch" },
-      { search: "launch" },
+      // The first page; then, for the Load More once it shows, that page
+      // ended where it ends and the page after it.
+      { search: "launch", pagination: { pageSize: 2, cursor: null } },
+      {
+        search: "launch",
+        pagination: { pageSize: 2, cursor: null, endCursor: "next" },
+      },
+      { search: "launch", pagination: { pageSize: 2, cursor: "next" } },
     ]);
     stop();
   });

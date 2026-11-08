@@ -12,7 +12,7 @@ import { api } from "@server/_generated/api";
 import { stages } from "./stages";
 
 export const Pipeline = () => {
-  const pipeline = useQuery(api.deals.pipeline, {});
+  const pipeline = useQuery(api.deals.pipeline);
   const count = (stage: keyof typeof stages) =>
     pipeline?.find((group) => group.stage === stage)?.deals ?? 0;
   return (

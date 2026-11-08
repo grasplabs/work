@@ -2,18 +2,13 @@ import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import {
-  callAppFunction,
-  callPageFunction,
-  evaluateAppQuery,
-} from "../src/app-functions.ts";
+import { callAppFunction, evaluateAppQuery } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import {
   bindWorkflowToApp,
@@ -23,10 +18,6 @@ import { appFor } from "../src/apps.ts";
 import { readWorkflowWatch } from "../src/page-workflows.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import {
-  readWorkflowWindow,
-  workflowQueryOf,
-} from "../src/workflow-reference-queries.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -404,27 +395,14 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     const ask = async (
       who: Identity,
       reference: object,
-      input: unknown,
-      window?: number
+      input: unknown
     ): Promise<OperationResult> => {
-      const request = JSON.stringify({
-        reference,
-        input,
-        ...(window === undefined ? {} : { window: { extent: window } }),
-      });
-      const { result } =
-        window === undefined
-          ? await callAppFunction(env, who, app, request)
-          : await callPageFunction(
-              env,
-              who,
-              app,
-              request,
-              Date.now() + 30_000,
-              async () => {
-                // A window's pages cost nothing here.
-              }
-            );
+      const { result } = await callAppFunction(
+        env,
+        who,
+        app,
+        JSON.stringify({ reference, input })
+      );
       return result;
     };
 
@@ -439,10 +417,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       bob,
       app,
       JSON.stringify({ reference: references.runs, input: { pagination: {} } }),
-      Date.now() + 30_000,
-      async () => {
-        // A window's pages cost nothing here.
-      }
+      Date.now() + 30_000
     );
     expect({
       liveReads: live.reads,
@@ -482,13 +457,16 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
           })
         ),
       ],
-      window: runIds(await ask(bob, references.runs, {}, 10)),
+      // A live list's loaded page: up to where the next page starts.
+      ended: await ask(bob, references.runs, {
+        pagination: { pageSize: 2, endCursor: cursor },
+      }),
       live: runIds(live.answer.result),
       direct: bobs.includes(direct.id),
     }).toStrictEqual({
       bobs: [first, second].toSorted(),
       pages: bobs,
-      window: bobs,
+      ended: firstPage,
       live: bobs,
       direct: false,
     });
@@ -510,15 +488,18 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
           pagination: { cursor: "not a cursor" },
         })
       ),
-      historyWindow: codeOf(
-        await ask(bob, references.history, { runId: first }, 10)
+      historyEnded: codeOf(
+        await ask(bob, references.history, {
+          runId: first,
+          pagination: { endCursor: "1" },
+        })
       ),
     }).toStrictEqual({
       forged: "contract.invalid_request",
       unknown: "function.not_found",
       status: "contract.invalid_args",
       cursor: "data.invalid_cursor",
-      historyWindow: "workflow.run_unavailable",
+      historyEnded: "workflow.run_unavailable",
     });
 
     // A caller no longer allowed to call (an agent whose permission was
@@ -542,7 +523,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     );
   });
 
-  it("keep each App's runs its own, answer a window of more than a page, and follow access, revocation and rebinding", async () => {
+  it("keep each App's runs its own, end a page where the next starts, and follow access, revocation and rebinding", async () => {
     const admin = await person("admin");
     const bob = await person("user");
     const owner = await person("builder");
@@ -553,25 +534,13 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     await startedRuns(first.app, workflow.id, bob.userId, 150);
     await startedRuns(second.app, workflow.id, bob.userId, 3);
     const runs = queryReference(first.release, "followUp", "runs");
-    const ask = async (input: unknown, window?: number) => {
-      const request = JSON.stringify({
-        reference: runs,
-        input,
-        ...(window === undefined ? {} : { window: { extent: window } }),
-      });
-      const { result } =
-        window === undefined
-          ? await callAppFunction(env, bob, first.app, request)
-          : await callPageFunction(
-              env,
-              bob,
-              first.app,
-              request,
-              Date.now() + 30_000,
-              async () => {
-                // A window's pages cost nothing here.
-              }
-            );
+    const ask = async (input: unknown) => {
+      const { result } = await callAppFunction(
+        env,
+        bob,
+        first.app,
+        JSON.stringify({ reference: runs, input })
+      );
       return result;
     };
     const askSecond = async () => {
@@ -595,15 +564,22 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     )
       .bind(workflow.id, first.app, bob.userId, bob.userId)
       .all<{ detail: string }>();
+    const secondPage = await ask({ pagination: { cursor } });
+    const secondCursor = secondPage.ok
+      ? z.object({ nextCursor: z.string() }).parse(secondPage.value).nextCursor
+      : "";
     expect({
-      window: runIds(await ask({}, 500)).length,
+      // Ended where a third page would start: two pages' worth of runs.
+      ended: runIds(
+        await ask({ pagination: { pageSize: 1, endCursor: secondCursor } })
+      ),
       firstPage: runIds(firstPage).length,
       secondApp: runIds(await askSecond()).length,
       indexed: plan.results.some(({ detail }) =>
         detail.includes("workflow_resource_runs_principal_idx")
       ),
     }).toStrictEqual({
-      window: 150,
+      ended: [...runIds(firstPage), ...runIds(secondPage)],
       firstPage: 50,
       secondApp: 3,
       indexed: true,
@@ -1007,27 +983,14 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const history = queryReference(release, "followUp", "history");
     const ask = async (
       who: Identity,
-      input: unknown,
-      window?: number
+      input: unknown
     ): Promise<OperationResult> => {
-      const request = JSON.stringify({
-        reference: history,
-        input,
-        ...(window === undefined ? {} : { window: { extent: window } }),
-      });
-      const { result } =
-        window === undefined
-          ? await callAppFunction(env, who, app, request)
-          : await callPageFunction(
-              env,
-              who,
-              app,
-              request,
-              Date.now() + 30_000,
-              async () => {
-                // A window's pages cost nothing here.
-              }
-            );
+      const { result } = await callAppFunction(
+        env,
+        who,
+        app,
+        JSON.stringify({ reference: history, input })
+      );
       return result;
     };
     const pageOf = (result: OperationResult) =>
@@ -1035,6 +998,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const whole = pageOf(await ask(bob, { runId: bobs, pagination: {} }));
     // Page by page, one entry each, from each page's cursor.
     const paged: unknown[] = [];
+    const cursors: string[] = [];
     let cursor: string | null = null;
     do {
       // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
@@ -1045,9 +1009,16 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       const page = pageOf(answer);
       paged.push(...page.items);
       ({ nextCursor: cursor } = page);
+      if (cursor !== null) {
+        cursors.push(cursor);
+      }
     } while (cursor !== null);
-    const window = await ask(bob, { runId: bobs }, 50);
-    const partWindow = await ask(bob, { runId: bobs }, 3);
+    // A live list's loaded page, ended where its fourth entry's page
+    // starts: its first three entries, whatever its size.
+    const ended = await ask(bob, {
+      runId: bobs,
+      pagination: { pageSize: 1, endCursor: cursors[2] },
+    });
     expect({
       told: whole.items.map((item) =>
         Object.fromEntries(
@@ -1061,8 +1032,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
           index === 0 || item.sequence > (whole.items[index - 1]?.sequence ?? 0)
       ),
       paged,
-      window: window.ok ? window.value : window.error.code,
-      partWindow: partWindow.ok ? partWindow.value : partWindow.error.code,
+      ended: ended.ok ? ended.value : ended.error.code,
     }).toStrictEqual({
       // Metadata only: no input, output or engine step ID; the task named
       // by the ID its sealed build declares.
@@ -1078,8 +1048,11 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ],
       ascending: true,
       paged: whole.items,
-      window: { items: whole.items, hasMore: false },
-      partWindow: { items: whole.items.slice(0, 3), hasMore: true },
+      ended: {
+        items: whole.items.slice(0, 3),
+        nextCursor: cursors[2],
+        hasMore: true,
+      },
     });
 
     // Anyone else's run, a run started outside the App, and an ID no run
@@ -1096,7 +1069,9 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       carolsWithBadCursor: refusalOf(
         await ask(bob, { runId: carols, pagination: { cursor: "x" } })
       ),
-      carolsWindow: refusalOf(await ask(bob, { runId: carols }, 50)),
+      carolsEnded: refusalOf(
+        await ask(bob, { runId: carols, pagination: { endCursor: "1" } })
+      ),
       ownBadCursor: codeOf(
         await ask(bob, { runId: bobs, pagination: { cursor: "x" } })
       ),
@@ -1121,7 +1096,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       direct: unknown,
       otherApps: unknown,
       carolsWithBadCursor: unknown,
-      carolsWindow: unknown,
+      carolsEnded: unknown,
       ownBadCursor: "data.invalid_cursor",
       lastCursor: 0,
       pastCursor: "data.invalid_cursor",
@@ -1169,11 +1144,13 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     expect({
       unverified: pageOf(unverified),
       reboundPage: refusalOf(await ask(bob, { runId: bobs, pagination: {} })),
-      reboundWindow: refusalOf(await ask(bob, { runId: bobs }, 50)),
+      reboundEnded: refusalOf(
+        await ask(bob, { runId: bobs, pagination: { endCursor: "1" } })
+      ),
     }).toStrictEqual({
       unverified: { items: [], nextCursor: null, hasMore: false },
       reboundPage: unknown,
-      reboundWindow: unknown,
+      reboundEnded: unknown,
     });
 
     // Rebound to version 2, which fails on what it reads: version 1's
@@ -1324,7 +1301,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     expect(greetSteps).toHaveLength(4);
   });
 
-  it("fills a window of more than a page from successive pages of the history", async () => {
+  it("ends a page of the history where the next starts, however many entries it holds", async () => {
     const admin = await person("admin");
     const bob = await person("user");
     const owner = await person("builder");
@@ -1363,107 +1340,52 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       { timeout: 60_000, interval: 200 }
     );
     const history = queryReference(release, "followUp", "history");
-    const read = async (input: unknown, window?: number) => {
-      const request = JSON.stringify({
-        reference: history,
-        input,
-        ...(window === undefined ? {} : { window: { extent: window } }),
-      });
-      const { result } =
-        window === undefined
-          ? await callAppFunction(env, bob, fixture.app, request)
-          : await callPageFunction(
-              env,
-              bob,
-              fixture.app,
-              request,
-              Date.now() + 30_000,
-              async () => {
-                // A window's pages cost nothing here.
-              }
-            );
+    const read = async (input: unknown) => {
+      const { result } = await callAppFunction(
+        env,
+        bob,
+        fixture.app,
+        JSON.stringify({ reference: history, input })
+      );
       if (!result.ok) {
         throw new Error(`${result.error.code}: ${result.error.message}`);
       }
-      return result.value;
+      return historySchema.parse(result.value);
     };
     // Every row, page by page as a caller pages it.
     const rows: unknown[] = [];
+    const cursors: string[] = [];
     let cursor: string | null = null;
     do {
       // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
-      const answer = await read({
-        runId,
-        pagination: { pageSize: 100, cursor },
-      });
-      const page = historySchema.parse(answer);
+      const page = await read({ runId, pagination: { pageSize: 100, cursor } });
       rows.push(...page.items);
       ({ nextCursor: cursor } = page);
+      if (cursor !== null) {
+        cursors.push(cursor);
+      }
     } while (cursor !== null);
-    const windowed = z
-      .object({ items: z.array(z.unknown()), hasMore: z.boolean() })
-      .parse(await read({ runId }, 500));
-    // Access lost while the window reads: checked again before each page
-    // past the first, so nothing more is read.
-    let gates = 0;
-    const cutOff = await readWorkflowWindow(
-      env,
-      { app: fixture.app, userId: bob.userId },
-      workflowQueryOf(release, history),
-      { runId },
-      {
-        extent: 500,
-        charge: async () => {
-          // A window's pages cost nothing here.
-        },
-        gate: async () => {
-          gates += 1;
-          await Promise.reject(roleErrors.create("role.forbidden"));
-        },
-      }
-    ).then(
-      () => "read",
-      (error: unknown) => roleErrors.codeOf(error)
-    );
-    // The alias bound to another workflow while the window reads: the
-    // binding is read again before each further page, as `runs` reads it.
-    const other = await greetingOf(owner);
-    const rebound = await readWorkflowWindow(
-      env,
-      { app: fixture.app, userId: bob.userId },
-      workflowQueryOf(release, history),
-      { runId },
-      {
-        extent: 500,
-        charge: async () => {
-          // A window's pages cost nothing here.
-        },
-        gate: async () => {
-          await bindWorkflowToApp(env, owner, other.id, {
-            app: fixture.app,
-            alias: "followUp",
-            version: 1,
-          });
-        },
-      }
-    ).then(
-      () => "read",
-      (error: unknown) => workflowResourceErrors.codeOf(error)
-    );
+    // A live list's loaded page: from the start to the first page's end,
+    // however small its size, then the page after it from there.
+    const [end = ""] = cursors;
+    const ended = await read({
+      runId,
+      pagination: { pageSize: 1, endCursor: end },
+    });
+    const after = await read({
+      runId,
+      pagination: { pageSize: 100, cursor: end },
+    });
     expect({
       morethanAPage: rows.length > 100,
-      window: windowed.items,
-      hasMore: windowed.hasMore,
-      cutOff,
-      gates,
-      rebound,
+      ended: ended.items,
+      endedAt: ended.nextCursor,
+      after: after.items,
     }).toStrictEqual({
       morethanAPage: true,
-      window: rows,
-      hasMore: false,
-      cutOff: "role.forbidden",
-      gates: 1,
-      rebound: "workflow.run_unavailable",
+      ended: rows.slice(0, 100),
+      endedAt: end,
+      after: rows.slice(100, 200),
     });
   });
 });

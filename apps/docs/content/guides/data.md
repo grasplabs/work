@@ -95,7 +95,9 @@ export const overdue = query({
 });
 ```
 
-The terminals are `take(n)` (at most 100), `first()`, `unique()`, `collect()` (all of them; it fails with `data.result_limit` past 100), `count()` and `paginate()`, which pages through a table of any size. Index your reads: a range on an index is as cheap on the thousandth page as on the first, while `filter` checks records one by one.
+The terminals are `take(n)`, `first()`, `unique()`, `collect()` (all of them), `count()` and `paginate()`, which pages through a table of any size. As in Convex, a read is bounded by what it reads, not by what it answers: one terminal examines at most 10,000 index entries and 16 MiB of records, and fails with `data.scan_limit` rather than answer part. So `collect()` is fine for a list you know stays small, and `paginate()` is for one that grows. Index your reads: a range on an index is as cheap on the thousandth page as on the first, while `filter` checks records one by one.
+
+Pass `args.pagination` on to `paginate` as it came. A Page's `usePaginatedQuery` follows each loaded page as a live query of its own, and once it loads the next page it gives the one before an `endCursor`: that page then holds every record up to where the next starts, however many, so records saved, moved or deleted never show twice or go missing between pages, and a change re-renders only the pages it touched.
 
 A table with a search index can be searched by its words with `ctx.db.search("projects", text)`, best match first.
 

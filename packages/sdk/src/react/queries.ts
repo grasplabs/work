@@ -15,6 +15,16 @@ export const noSubscription = (): (() => void) => () => {
 };
 
 /**
+ * What `useQuery` takes after its reference: the query's arguments, or
+ * `"skip"`; left out for a query whose arguments are all optional, as
+ * Convex's optional rest arguments are.
+ */
+export type QueryArgsOrSkip<Reference> =
+  Record<never, never> extends FunctionArgs<Reference>
+    ? [args?: FunctionArgs<Reference> | "skip"]
+    : [args: FunctionArgs<Reference> | "skip"];
+
+/**
  * The current result of the query `reference` names with `args`, kept up
  * to date: its declared value, or `undefined` while it loads or when
  * `args` is `"skip"`. Check for loading with `=== undefined`. A failure
@@ -22,10 +32,11 @@ export const noSubscription = (): (() => void) => () => {
  */
 export const useQuery = <Reference extends QueryReference>(
   reference: Reference,
-  args: FunctionArgs<Reference> | "skip"
+  ...[args]: QueryArgsOrSkip<Reference>
 ): FunctionReturn<Reference> | undefined => {
   const internals = clientInternals(useClient());
-  const entry = args === "skip" ? undefined : internals.entry(reference, args);
+  const entry =
+    args === "skip" ? undefined : internals.entry(reference, args ?? {});
   const snapshot: QuerySnapshot = useSyncExternalStore(
     (onChange) =>
       entry === undefined
@@ -73,7 +84,7 @@ export type PaginatedArgsOf<Reference> =
 interface PaginatedQueryOptions {
   /**
    * How many records it shows first, and loads more by unless a Load More
-   * says: a whole number from 1 to 100.
+   * says: a whole number from 1.
    */
   readonly initialPageSize: number;
 }

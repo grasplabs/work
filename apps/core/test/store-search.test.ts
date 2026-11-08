@@ -5,7 +5,6 @@ import type { PaginationResult } from "@grasp-os/sdk/server";
 import {
   queryMaxScannedEntries,
   searchMaxTerms,
-  searchTextMaxLength,
 } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
@@ -446,15 +445,11 @@ describe("a search's bounds", () => {
     await insert(fixture, "ada", { name: "Globex" });
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
     const scope = scopeOf(fixture.schemaHash);
-    const long = "a".repeat(searchTextMaxLength + 1);
     const many = Array.from(
       { length: searchMaxTerms + 1 },
       (_, index) => `w${index}`
     ).join(" ");
     expect({
-      sdkLong: await attempt(
-        async () => await db.search("customers", long).collect()
-      ),
       sdkMany: await attempt(
         async () => await db.search("customers", many).collect()
       ),
@@ -462,7 +457,6 @@ describe("a search's bounds", () => {
       sdkOrder: await attempt(() =>
         callAnyway(db.search("customers", "globex"), "order", "desc")
       ),
-      storeLong: await outcome(fixture.store.read(scope, searchRequest(long))),
       storeMany: await outcome(fixture.store.read(scope, searchRequest(many))),
       storeIndex: await outcome(
         fixture.store.read(scope, searchRequest("globex", { index: "by_city" }))
@@ -489,10 +483,8 @@ describe("a search's bounds", () => {
         )
       ),
     }).toStrictEqual({
-      sdkLong: "query.invalid_terminal",
       sdkMany: "query.invalid_terminal",
       sdkOrder: "query.invalid_terminal",
-      storeLong: "data.invalid_query",
       storeMany: "data.invalid_query",
       storeIndex: "data.invalid_query",
       storeGroup: "data.invalid_query",

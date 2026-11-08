@@ -14,10 +14,6 @@ import {
   operationErrors,
 } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
-import {
-  liveWindowMaxItems,
-  queryMaxResults,
-} from "@grasp-os/shared/store-limits";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { RunHistoryEntry } from "@grasp-os/shared/workflows";
@@ -27,9 +23,11 @@ import {
   desc,
   eq,
   gt,
+  gte,
   isNotNull,
   isNull,
   lt,
+  lte,
   or,
   sql,
 } from "drizzle-orm";
@@ -49,7 +47,6 @@ import {
 } from "./decisions/decisions.ts";
 import { appHost } from "./durable-objects.ts";
 import { followableOrigins } from "./page-workflows.ts";
-import { windowPages } from "./query-windows.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
 import { historyEntries } from "./workflows/history.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
@@ -249,8 +246,14 @@ const defaultPageSize = 50;
 
 const cursorPattern = /^(?<at>\d{1,16}):(?<id>[\w-]{1,128})$/u;
 
-/** A place in a person's list of runs, after the run it names. */
-const placeOf = (cursor: unknown): { at: number; id: string } | undefined => {
+/** A place in a list of runs or decisions: a time, then an ID. */
+interface Place {
+  readonly at: number;
+  readonly id: string;
+}
+
+/** A place in a person's list of runs or decisions, at the one it names. */
+const placeOf = (cursor: unknown): Place | undefined => {
   if (cursor === null || cursor === undefined) {
     return undefined;
   }
@@ -286,16 +289,6 @@ const bindingOf = async (
     throw operationErrors.create("resource.unavailable");
   }
   return binding;
-};
-
-/** The workflow the App's binding of `alias` names now, or none. */
-const boundWorkflowId = async (
-  env: Env,
-  app: string,
-  alias: string
-): Promise<string> => {
-  const binding = await bindingOf(env, app, alias);
-  return binding.workflowId;
 };
 
 /** Whether `row` returned while restricted: shown only to a restricted App. */
@@ -382,7 +375,12 @@ const runsPage = async (
   env: Env,
   caller: WorkflowQueryCaller,
   from: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
-  options: { status?: string; size: number; after?: { at: number; id: string } }
+  options: {
+    status?: string;
+    size: number;
+    after?: Place;
+    until?: Place;
+  }
 ): Promise<{ items: Json[]; hasMore: boolean; last?: string }> => {
   const statuses =
     options.status === undefined
@@ -391,7 +389,7 @@ const runsPage = async (
   if (statuses !== undefined && statuses.length === 0) {
     return { items: [], hasMore: false };
   }
-  const { after } = options;
+  const { after, until } = options;
   const { workflowId } = from.binding;
   const rows: RunsRow[] = await drizzle(env.DB)
     .select({
@@ -451,6 +449,17 @@ const runsPage = async (
                   lt(workflowResourceRuns.id, after.id)
                 )
               ),
+            ]),
+        ...(until === undefined
+          ? []
+          : [
+              or(
+                gt(workflowResourceRuns.createdAt, new Date(until.at)),
+                and(
+                  eq(workflowResourceRuns.createdAt, new Date(until.at)),
+                  gte(workflowResourceRuns.id, until.id)
+                )
+              ),
             ])
       )
     )
@@ -458,8 +467,10 @@ const runsPage = async (
       desc(workflowResourceRuns.createdAt),
       desc(workflowResourceRuns.id)
     )
-    .limit(options.size + 1);
-  const shown = rows.slice(0, options.size);
+    // Up to its end, a page holds every run there; SQLite reads a
+    // negative limit as none.
+    .limit(until === undefined ? options.size + 1 : -1);
+  const shown = until === undefined ? rows.slice(0, options.size) : rows;
   const watchable = await followable(env, caller, from, shown);
   const items: Json[] = shown.map((row) => {
     const status = publicStatus[row.status];
@@ -493,7 +504,7 @@ const runsPage = async (
   const lastRow = shown.at(-1);
   return {
     items,
-    hasMore: rows.length > options.size,
+    hasMore: until === undefined && rows.length > options.size,
     ...(lastRow === undefined
       ? {}
       : { last: `${lastRow.createdAt.getTime()}:${lastRow.id}` }),
@@ -695,7 +706,11 @@ const historyPage = async (
   caller: WorkflowQueryCaller,
   { query, bound }: { query: ResolvedWorkflowQuery; bound: string },
   runId: string,
-  { size, cursor }: { size: number; cursor: unknown }
+  {
+    size,
+    cursor,
+    endCursor,
+  }: { size: number; cursor: unknown; endCursor: unknown }
 ): Promise<{ items: Json[]; nextCursor: string | null; hasMore: boolean }> => {
   const nothing = { items: [], nextCursor: null, hasMore: false };
   const run = await historyRunOf(
@@ -707,6 +722,10 @@ const historyPage = async (
   // Read only once the run is the caller's: a cursor tells nothing of a
   // run they can't read.
   const after = sequenceOf(cursor);
+  const until =
+    endCursor === null || endCursor === undefined
+      ? undefined
+      : sequenceOf(endCursor);
   if (detailsRemoved(run) || query.pinned === undefined) {
     return nothing;
   }
@@ -717,7 +736,7 @@ const historyPage = async (
   const page = await historyEntries(
     env,
     run.id,
-    { after, pageSize: size },
+    { after, pageSize: size, ...(until === undefined ? {} : { until }) },
     {
       // Nobody reads a failure's own message through an App.
       sees: false,
@@ -726,82 +745,11 @@ const historyPage = async (
       taskOf: (engineStep) => sealedStepOf(engineStep, declared)?.task ?? null,
     }
   );
-  return {
-    items: page.items.flatMap((entry) => historyRowOf(entry) ?? []),
-    nextCursor: page.nextCursor,
-    hasMore: page.hasMore,
-  };
-};
-
-/**
- * The most pages one window of a run's history reads: enough for the
- * largest window in pages of ten rows, as an App's own windows
- * (query-windows.ts). A journal sparser than that, mostly bookkeeping no
- * row tells, has its window refused (`function.read_limit`) rather than
- * cut short, so Load More never stalls on the same records.
- */
-const historyWindowMaxPages = liveWindowMaxItems / 10;
-
-/**
- * Up to `size` rows of run `runId`'s history from its start, as a live
- * window reads it: page after page, each from the cursor the one before
- * ended at, until the window is full or the history ends. The caller paid
- * `windowPages(extent)` pages; `charge` is asked for each page past them,
- * and `gate`, the call's access check, before each page after the first,
- * with the App's binding of the alias read again, so access lost or the
- * alias rebound while the window reads stops it.
- */
-const historyWindow = async (
-  env: Env,
-  caller: WorkflowQueryCaller,
-  from: { query: ResolvedWorkflowQuery; bound: string },
-  runId: string,
-  {
-    size,
-    extent,
-    charge,
-    gate,
-  }: {
-    size: number;
-    extent: number;
-    charge: (pages: number, whole: number) => Promise<void>;
-    gate: () => Promise<void>;
-  }
-): Promise<{ items: Json[]; hasMore: boolean }> => {
-  const paid = windowPages(extent);
-  const items: Json[] = [];
-  let cursor: string | null = null;
-  for (let pages = 1; pages <= historyWindowMaxPages; pages += 1) {
-    if (pages > 1) {
-      // oxlint-disable-next-line no-await-in-loop -- access again before each further page
-      await gate();
-    }
-    if (pages > paid) {
-      // oxlint-disable-next-line no-await-in-loop -- a page's charge before its read
-      await charge(1, pages);
-    }
-    // The binding in force before each further page too: rebound while
-    // the window reads, the rest of it is refused as `runs` would list it.
-    const bound =
-      pages === 1
-        ? from.bound
-        : // oxlint-disable-next-line no-await-in-loop -- read again for each further page
-          await boundWorkflowId(env, caller.app, from.query.alias);
-    // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
-    const page = await historyPage(env, caller, { ...from, bound }, runId, {
-      size: Math.min(size - items.length, queryMaxResults),
-      cursor,
-    });
-    items.push(...page.items);
-    if (!page.hasMore || page.nextCursor === null) {
-      return { items, hasMore: false };
-    }
-    if (items.length >= size) {
-      return { items, hasMore: true };
-    }
-    cursor = page.nextCursor;
-  }
-  throw operationErrors.create("function.read_limit");
+  const items = page.items.flatMap((entry) => historyRowOf(entry) ?? []);
+  // Given an end, a page answers it as its next cursor (`pageAnswer`).
+  return typeof endCursor === "string"
+    ? { items, nextCursor: endCursor, hasMore: true }
+    : { items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 };
 
 /** The version the release pins, while the App's binding still names it. */
@@ -988,14 +936,15 @@ const decisionsPage = async (
   options: {
     runId?: string;
     size: number;
-    after?: { at: number; id: string };
+    after?: Place;
+    until?: Place;
   }
 ): Promise<{ items: Json[]; hasMore: boolean; last?: string }> => {
   const pinned = pinnedBound(query, binding);
   if (pinned === undefined || query.decisionKeys.size === 0) {
     return { items: [], hasMore: false };
   }
-  const { after, runId } = options;
+  const { after, until, runId } = options;
   const appRestricted = await restrictedApp(env, caller);
   const rows: DecisionRow[] = await decisionRows(
     env,
@@ -1013,12 +962,25 @@ const decisionsPage = async (
                 gt(workflowDecisions.id, after.id)
               )
             ),
+          ]),
+      ...(until === undefined
+        ? []
+        : [
+            or(
+              lt(workflowDecisions.openedAt, new Date(until.at)),
+              and(
+                eq(workflowDecisions.openedAt, new Date(until.at)),
+                lte(workflowDecisions.id, until.id)
+              )
+            ),
           ])
     )
   )
     .orderBy(asc(workflowDecisions.openedAt), asc(workflowDecisions.id))
-    .limit(options.size + 1);
-  const shown = rows.slice(0, options.size);
+    // Up to its end, a page holds every decision there; SQLite reads a
+    // negative limit as none.
+    .limit(until === undefined ? options.size + 1 : -1);
+  const shown = until === undefined ? rows.slice(0, options.size) : rows;
   // One build a manifest: the pinned version's runs share it.
   const manifests = [...new Set(shown.map((row) => row.manifestHash))];
   const builds = new Map(
@@ -1050,7 +1012,7 @@ const decisionsPage = async (
   const lastRow = shown.at(-1);
   return {
     items,
-    hasMore: rows.length > options.size,
+    hasMore: until === undefined && rows.length > options.size,
     ...(lastRow === undefined
       ? {}
       : { last: `${lastRow.openedAt.getTime()}:${lastRow.id}` }),
@@ -1150,6 +1112,23 @@ const runIdOf = (args: Readonly<Record<string, Json | undefined>>): string => {
   return args.runId;
 };
 
+/**
+ * A page of runs or decisions as a query answers it. A page given an end
+ * answers that end as its next cursor, so the page after it, a live
+ * list's, goes on starting where it did, whether or not anything follows.
+ */
+const pageAnswer = (
+  page: { items: Json[]; hasMore: boolean; last?: string },
+  endCursor: Json | undefined
+): Json => {
+  if (typeof endCursor === "string") {
+    return { items: page.items, nextCursor: endCursor, hasMore: true };
+  }
+  return page.hasMore && page.last !== undefined
+    ? { items: page.items, nextCursor: page.last, hasMore: true }
+    : { items: page.items, nextCursor: null, hasMore: false };
+};
+
 /** What a query answers, before its descriptor checks it. */
 const answerOf = async (
   env: Env,
@@ -1168,6 +1147,7 @@ const answerOf = async (
           ? Math.min(pagination.pageSize, maxPageSize)
           : defaultPageSize;
       const after = placeOf(pagination.cursor);
+      const until = placeOf(pagination.endCursor);
       const page = await runsPage(
         env,
         caller,
@@ -1176,15 +1156,15 @@ const answerOf = async (
           ...(typeof args.status === "string" ? { status: args.status } : {}),
           size,
           ...(after === undefined ? {} : { after }),
+          ...(until === undefined ? {} : { until }),
         }
       );
-      return page.hasMore && page.last !== undefined
-        ? { items: page.items, nextCursor: page.last, hasMore: true }
-        : { items: page.items, nextCursor: null, hasMore: false };
+      return pageAnswer(page, pagination.endCursor);
     }
     case "decisions": {
       const pagination = isRecord(args.pagination) ? args.pagination : {};
       const after = placeOf(pagination.cursor);
+      const until = placeOf(pagination.endCursor);
       const page = await decisionsPage(
         env,
         caller,
@@ -1196,11 +1176,10 @@ const answerOf = async (
               ? Math.min(pagination.pageSize, maxPageSize)
               : defaultPageSize,
           ...(after === undefined ? {} : { after }),
+          ...(until === undefined ? {} : { until }),
         }
       );
-      return page.hasMore && page.last !== undefined
-        ? { items: page.items, nextCursor: page.last, hasMore: true }
-        : { items: page.items, nextCursor: null, hasMore: false };
+      return pageAnswer(page, pagination.endCursor);
     }
     case "decision": {
       if (typeof args.decisionId !== "string") {
@@ -1226,6 +1205,7 @@ const answerOf = async (
               ? Math.min(pagination.pageSize, maxPageSize)
               : defaultPageSize,
           cursor: pagination.cursor,
+          endCursor: pagination.endCursor,
         }
       );
     }
@@ -1255,114 +1235,4 @@ export const callWorkflowQuery = async (
     ok: true,
     value: checked(query.returns, answer, "contract.invalid_return"),
   };
-};
-
-/**
- * Reads a paginated workflow query's window of `extent` records for
- * `caller`, as a live list reads one (query-windows.ts): its records and
- * whether more follow, from one read, charged as a window's pages are:
- * the caller paid `windowPages(extent)`, and `charge` is asked for any
- * page's worth of records past that. `runs` and `history` page through
- * records, as `decisions` does through the caller's inbox; `decision`
- * isn't paginated.
- */
-export const readWorkflowWindow = async (
-  env: Env,
-  caller: WorkflowQueryCaller,
-  query: ResolvedWorkflowQuery,
-  input: unknown,
-  window: {
-    readonly extent: number;
-    readonly charge: (pages: number, whole: number) => Promise<void>;
-    /** The call's access check, passed again before each further page. */
-    readonly gate: () => Promise<void>;
-  }
-): Promise<OperationResult> => {
-  if (query.name === "decision") {
-    throw operationErrors.create("contract.not_paginated");
-  }
-  if (!isRecord(input) || Object.hasOwn(input, "pagination")) {
-    // `pagination` is core's to supply: a caller never pages a window.
-    throw operationErrors.create("contract.invalid_args");
-  }
-  const args = checked(
-    query.args,
-    { ...input, pagination: {} },
-    "contract.invalid_args"
-  );
-  if (!isRecord(args)) {
-    throw operationErrors.create("contract.invalid_args");
-  }
-  const binding = await bindingOf(env, caller.app, query.alias);
-  const { workflowId } = binding;
-  const size = Math.min(Math.max(window.extent, 1), liveWindowMaxItems);
-  let page: { items: Json[]; hasMore: boolean };
-  if (query.name === "decisions") {
-    page = await decisionsPage(
-      env,
-      caller,
-      { query, binding },
-      {
-        ...(typeof args.runId === "string" ? { runId: args.runId } : {}),
-        size,
-      }
-    );
-    const owed =
-      Math.ceil(page.items.length / queryMaxResults) -
-      windowPages(window.extent);
-    if (owed > 0) {
-      await window.charge(owed, windowPages(window.extent) + owed);
-    }
-  } else if (query.name === "history") {
-    page = await historyWindow(
-      env,
-      caller,
-      { query, bound: workflowId },
-      runIdOf(args),
-      {
-        size,
-        extent: window.extent,
-        charge: window.charge,
-        gate: window.gate,
-      }
-    );
-  } else {
-    page = await runsPage(
-      env,
-      caller,
-      { query, binding },
-      {
-        ...(typeof args.status === "string" ? { status: args.status } : {}),
-        size,
-      }
-    );
-    const owed =
-      Math.ceil(page.items.length / queryMaxResults) -
-      windowPages(window.extent);
-    if (owed > 0) {
-      await window.charge(owed, windowPages(window.extent) + owed);
-    }
-  }
-  // Each record as the query's own pages carry it: checked in pages of
-  // the most a page holds, since a window holds more than one page.
-  const items: Json[] = [];
-  for (let start = 0; start < page.items.length; start += queryMaxResults) {
-    const checkedPage = checked(
-      query.returns,
-      {
-        items: page.items.slice(start, start + queryMaxResults),
-        nextCursor: null,
-        hasMore: false,
-      },
-      "contract.invalid_return"
-    );
-    const checkedItems: unknown = isRecord(checkedPage)
-      ? checkedPage.items
-      : undefined;
-    if (Array.isArray(checkedItems)) {
-      const list: readonly Json[] = checkedItems;
-      items.push(...list);
-    }
-  }
-  return { ok: true, value: { items, hasMore: page.hasMore } };
 };

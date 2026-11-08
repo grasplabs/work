@@ -1,7 +1,6 @@
 import { isRecord } from "./json.ts";
 import {
   filterMaxDepth,
-  filterMaxInValues,
   filterMaxNodes,
   queryMaxBoundValues,
   rangeMaxBounds,
@@ -85,7 +84,13 @@ export type QueryTerminal =
   | { kind: "unique" }
   | { kind: "count" }
   | { kind: "collect" }
-  | { kind: "paginate"; pageSize: number; cursor: string | null }
+  | {
+      kind: "paginate";
+      pageSize: number;
+      cursor: string | null;
+      /** Where the page ends, whatever `pageSize` says (a live list's). */
+      endCursor: string | null;
+    }
   | { kind: "aggregate"; operation: "count" }
   | { kind: "aggregate"; operation: "sum" | "min" | "max"; field: string }
   | GroupTerminal;
@@ -152,8 +157,8 @@ export const filterChildren = (node: FilterNode): readonly FilterNode[] => {
 
 /**
  * Why `value`, read as a filter tree, is past a filter's bounds (deeper
- * than `filterMaxDepth`, more than `filterMaxNodes` nodes, an `in` of more
- * than `filterMaxInValues`), or undefined if it isn't. Iterative, with an
+ * than `filterMaxDepth`, more than `filterMaxNodes` nodes), or undefined
+ * if it isn't. Iterative, with an
  * explicit stack, and it stops at the first node past a bound: run it on
  * untrusted input before anything recursive reads or copies it, so no
  * input can exhaust the stack or the clock. It checks only the bounds;
@@ -191,10 +196,6 @@ export const filterBudgetIssue = (value: unknown): string | undefined => {
     }
     if (Object.hasOwn(node, "not") && !push([node.not], depth + 1)) {
       return tooMany;
-    }
-    const values = Object.hasOwn(node, "values") ? node.values : undefined;
-    if (Array.isArray(values) && values.length > filterMaxInValues) {
-      return `An \`in\` lists at most ${filterMaxInValues} values`;
     }
   }
   return undefined;

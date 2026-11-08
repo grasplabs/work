@@ -19,13 +19,26 @@ export const storeNamePattern = /^[A-Za-z][A-Za-z0-9_]*$/u;
  */
 export const stableIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$/u;
 
-/** The longest table, field or index name. */
+/**
+ * The longest table, field or index name: a name is typed in code and
+ * carried in every query descriptor and error that names it, so this
+ * keeps those short whatever a schema declares.
+ */
 export const storeNameMaxLength = 64;
 
-/** The most fields one index orders by. */
+/**
+ * The most fields one index orders by. A page's seek binds two values per
+ * index field and one for the record ID (34 at 16), which must fit
+ * SQLite's 100 bound parameters a statement beside a query's own
+ * (`queryMaxBoundValues`).
+ */
 export const indexMaxFields = 16;
 
-/** The most tables a store may define. */
+/**
+ * The most tables a store may define. Every live query's read set names
+ * the tables it read with their generations, and a store keeps up to
+ * `storeMaxWatches` of them in memory (store-watches.ts): this bounds each.
+ */
 export const storeMaxTables = 64;
 
 /**
@@ -40,34 +53,36 @@ export const storeMaxTables = 64;
  */
 export const storeMaxIndexes = 256;
 
-// The bounds of one read of a store (`ctx.db`): what a query's descriptor
-// may hold, and what one terminal returns. Checked by the SDK as a query is
-// built and again by the store's host, which trusts no descriptor. The
-// host's own until the runtime policy module sets validated quotas, which
-// may only lower them.
-
-/** The most records `take`, `collect` and one page return. */
-export const queryMaxResults = 100;
+// The bounds of one read of a store (`ctx.db`). As Convex's, they are
+// what one read may cost, by the records it examines and the bytes it
+// reads (`queryMaxScannedEntries`, `queryMaxScannedBytes`), never how many
+// records a feature may answer: `collect`, `take`, a page, a `group` or a
+// `with` answer whatever those bounds let them read. The few others each
+// name the failure they prevent. Checked by the SDK as a query is built
+// and again by the store's host, which trusts no descriptor.
 
 /** How many records a page holds when its caller doesn't say. */
 export const queryDefaultPageSize = 50;
 
-/** The longest string a range or filter compares with, in characters. */
-export const queryMaxStringLength = 4096;
-
 /**
  * The most bounds one index range holds: equality on every field but the
- * last, then a lower and an upper bound on the last.
+ * last, then a lower and an upper bound on the last. Not a choice: no
+ * valid range on an index holds more.
  */
 export const rangeMaxBounds = indexMaxFields + 1;
 
-/** The most values one filter's `in` lists. */
-export const filterMaxInValues = 100;
-
-/** How deeply a filter's `AND`, `OR` and `NOT` may nest. */
+/**
+ * How deeply a filter's `AND`, `OR` and `NOT` may nest: a filter is read
+ * recursively once its size is checked, and becomes one SQL expression,
+ * which SQLite refuses past a depth of 1000.
+ */
 export const filterMaxDepth = 8;
 
-/** The most conditions and logic nodes one filter holds, all told. */
+/**
+ * The most conditions and logic nodes one filter holds, all told: SQLite
+ * nests `a AND b AND c` one level per term, so a long flat filter is as
+ * deep as it is long and would pass its 1000 levels.
+ */
 export const filterMaxNodes = 64;
 
 /**
@@ -82,34 +97,25 @@ export const queryMaxBoundValues = 64;
 
 /**
  * The most index entries one terminal examines: a filter that must skip
- * more to answer, or a count or aggregate over more, fails
- * (`data.scan_limit`) rather than answering part. Longer work is a
- * workflow's, in pages.
+ * more to answer, a `collect` of more, or a count or aggregate over more,
+ * fails (`data.scan_limit`) rather than answering part. Longer work is a
+ * workflow's, in pages. A terminal answers no more records than it
+ * examines, so this also bounds what `take` and a page may ask for.
  */
 export const queryMaxScannedEntries = 10_000;
 
 /** The most bytes of documents (UTF-8 JSON) one terminal reads. */
 export const queryMaxScannedBytes = 16 * 1024 * 1024;
 
-/** The longest a pagination cursor may be, in characters (spec 9.2: 4 KiB). */
+/**
+ * The longest a pagination cursor may be, in characters (spec 9.2: 4 KiB):
+ * it travels in every page's arguments. A cursor whose last record's
+ * values don't fit holds its ID alone (store-cursors.ts).
+ */
 export const cursorMaxLength = 4096;
 
-/**
- * The most records one live paginated list (`usePaginatedQuery`, spec
- * 10.6) holds at once: its loaded window, read again whole from the start
- * at every change (spec 11.6), page by page within `queryMaxResults`. A
- * Load More past it fails as `query.window_limit` rather than keep
- * growing what core reads and pushes; the window's bytes are bounded on
- * their own, as any push is (`pageLimits.answerBytes`).
- */
-export const liveWindowMaxItems = 1000;
-
-// Full-text search, grouped aggregates and related records: the bounds of
-// what one read of them asks and answers, checked by the SDK as a query is
-// built and again by the store's host.
-
-/** The most text fields one table's search index covers. */
-export const searchIndexMaxFields = 8;
+// Full-text search: a search's work in SQLite's full-text index happens
+// before the store counts what it examines, so it is bounded here.
 
 /**
  * The most search indexes a store holds, retained ones (for consumers
@@ -118,23 +124,9 @@ export const searchIndexMaxFields = 8;
  */
 export const storeMaxSearchIndexes = 64;
 
-/** The longest text one search looks for, in characters. */
-export const searchTextMaxLength = 256;
-
-/** The most words one search looks for: each must match. */
-export const searchMaxTerms = 8;
-
-/** The most fields records are grouped by. */
-export const groupMaxFields = 2;
-
-/** The most aggregated fields one grouped read computes, all told. */
-export const groupMaxAggregates = 8;
-
 /**
- * The most groups one grouped read answers: more fails
- * (`data.group_limit`) rather than answering part.
+ * The most words one search looks for, each of which must match: SQLite's
+ * full-text index reads every word's whole list of matching rows before
+ * the store examines the first match, outside `queryMaxScannedEntries`.
  */
-export const queryMaxGroups = 100;
-
-/** The most relations one read loads the related records of (`with`). */
-export const queryMaxRelations = 4;
+export const searchMaxTerms = 8;

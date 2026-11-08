@@ -9,7 +9,7 @@
 import { expectTypeOf } from "vite-plus/test";
 
 import type { GraspClient } from "../src/client.ts";
-import type { Id } from "../src/index.ts";
+import type { Id, OperationReference } from "../src/index.ts";
 import {
   useAction,
   useClient,
@@ -24,6 +24,12 @@ import { internal } from "./notes/server/_generated/internal.ts";
 declare const client: GraspClient;
 declare const noteId: Id<"notes">;
 declare const signal: AbortSignal;
+/** A public query that takes no arguments. */
+declare const everyone: OperationReference<
+  Record<never, never>,
+  number,
+  "query"
+>;
 
 type Note = NonNullable<
   Awaited<ReturnType<typeof client.query<typeof api.notes.get>>>
@@ -43,6 +49,9 @@ export const useChecks = (): void => {
   ).toEqualTypeOf<Note[] | undefined>();
   // @ts-expect-error -- a query's input is required
   void useQuery(api.notes.get);
+  // Left out where every argument is optional, as Convex's rest arguments.
+  expectTypeOf(useQuery(everyone)).toEqualTypeOf<number | undefined>();
+  expectTypeOf(useQuery(everyone, "skip")).toEqualTypeOf<number | undefined>();
   // @ts-expect-error -- null doesn't skip a query; only "skip" does
   void useQuery(api.notes.get, null);
   // @ts-expect-error -- the wrong field

@@ -1,7 +1,7 @@
 import {
   cursorMaxLength,
   queryDefaultPageSize,
-  queryMaxResults,
+  queryMaxScannedEntries,
 } from "@grasp-os/shared/store-limits";
 
 import { seal } from "./descriptor-seal.ts";
@@ -194,32 +194,39 @@ export const v = Object.freeze({
 });
 
 // The page contract, as schemas an operation declares for its
-// arguments and return: `{ pageSize, cursor }` in, `{ items, nextCursor,
-// hasMore }` out. A page's two shapes are two strict objects, so a page
-// with a cursor always says there is more, and the last page never carries
-// a cursor, empty or not.
+// arguments and return: `{ pageSize, cursor, endCursor }` in, `{ items,
+// nextCursor, hasMore }` out. A page's two shapes are two strict objects,
+// so a page with a cursor always says there is more, and the last page
+// never carries a cursor, empty or not.
 
-/** A page request: `pageSize` 1 to 100 (50 unless set), and a cursor or null. */
+/**
+ * A page request: `pageSize` (50 unless set), and a cursor or null. With
+ * `endCursor`, the page ends at the record that cursor ends at, however
+ * many records that is, and answers `endCursor` as its own next cursor:
+ * how a live list (`usePaginatedQuery`) keeps each loaded page's bounds
+ * fixed while records move in and out of it, as Convex does.
+ */
 export const paginationOptionsValidator = v.object({
   pageSize: v
     .number()
     .integer()
     .min(1)
-    .max(queryMaxResults)
+    .max(queryMaxScannedEntries)
     .default(queryDefaultPageSize),
   cursor: v.string().min(1).max(cursorMaxLength).nullable().default(null),
+  endCursor: v.string().min(1).max(cursorMaxLength).nullable().default(null),
 });
 
 /** One page of `item`s: the last one without a cursor, any other with one. */
 export const paginationResultValidator = <Item extends AnySchema>(item: Item) =>
   v.union(
     v.object({
-      items: v.array(item).max(queryMaxResults),
+      items: v.array(item),
       nextCursor: v.null(),
       hasMore: v.literal(false),
     }),
     v.object({
-      items: v.array(item).min(1).max(queryMaxResults),
+      items: v.array(item),
       nextCursor: v.string().min(1).max(cursorMaxLength),
       hasMore: v.literal(true),
     })
