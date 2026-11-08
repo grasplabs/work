@@ -31,17 +31,17 @@ import type {
   WorkflowEventReference,
 } from "./references.ts";
 import type { AnyTable, SchemaDefinition } from "./schema-types.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
-import { v } from "./values.ts";
 import type {
   Infer,
   ObjectInput,
   ObjectOutput,
   ObjectSchema,
   ValueShape,
-} from "./values.ts";
+} from "./value-types.ts";
+import { v } from "./values.ts";
 
 // An App's server functions (spec 7.1, 7.4): queries, mutations and
 // actions, public or internal, each declared with its arguments, its

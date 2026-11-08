@@ -1,5 +1,5 @@
 import type { AnyTable } from "./schema-types.ts";
-import type { Id, ObjectOutput } from "./values.ts";
+import type { Id, ObjectOutput } from "./value-types.ts";
 
 // oxlint-disable-next-line typescript/ban-types -- `& {}` makes an editor show the object's keys instead of this alias
 export type Simplify<Value> = { [Key in keyof Value]: Value[Key] } & {};

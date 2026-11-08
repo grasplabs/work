@@ -10,7 +10,7 @@ import { migration } from "./migration.ts";
 import type { Migration } from "./migration.ts";
 import { readPermissionDeclaration } from "./permission-read.ts";
 import type { AppPermission } from "./permission-types.ts";
-import { readSchemaManifest } from "./schema-manifest.ts";
+import { readSchemaManifest } from "./schema-manifest-read.ts";
 import { serverModule } from "./server.ts";
 import type { FunctionKind, Visibility } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";

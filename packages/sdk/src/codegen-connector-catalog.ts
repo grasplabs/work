@@ -1,6 +1,6 @@
 import { indent, key, valueTypeOf } from "./codegen-render.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import type { ValueSchema } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
 
 /** One action of a generated connector contract, as the schemas core checks it by. */
 export interface CatalogAction {

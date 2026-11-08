@@ -25,11 +25,11 @@ import {
   settlesSubmission,
 } from "./client-error.ts";
 import type { ArgsOf, ReturnOf } from "./references.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 import { readDescriptor } from "./value-read.ts";
-import { descriptorOf } from "./value-schema.ts";
 
 // Forms (spec 10.2.1–10.2.4): one `useForm`, two ways in.
 //

@@ -28,10 +28,10 @@ import {
 } from "./permission-checks.ts";
 import { permission } from "./permission.ts";
 import { SchemaDefinitionError } from "./schema-error.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import type { AccessMode, RowRole } from "./table-access.ts";
 import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
 import { v } from "./values.ts";
 
 // The operations that change an App's definition (definition.ts): what

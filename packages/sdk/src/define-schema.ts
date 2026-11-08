@@ -4,7 +4,7 @@ import { checkedName, checkUnique, schemaLimits } from "./schema-limits.ts";
 import type { AnyTable, SchemaDefinition, TableState } from "./schema-types.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
-import type { Infer, ValueShape } from "./values.ts";
+import type { Infer, ValueShape } from "./value-types.ts";
 
 // `defineSchema` and `defineTable`: how an App (or a store of its own)
 // declares its tables once. A schema is a value, like a `v` schema: frozen,

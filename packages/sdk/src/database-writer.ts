@@ -9,7 +9,7 @@ import { refuse } from "./query-error.ts";
 import type { AnyTables, Present } from "./query-types.ts";
 import { hasOnly, isPlainRecord } from "./query-values.ts";
 import type { AnyTable, SchemaDefinition } from "./schema-types.ts";
-import type { Id, ObjectInput, ObjectOutput } from "./values.ts";
+import type { Id, ObjectInput, ObjectOutput } from "./value-types.ts";
 
 // `ctx.db` for writing, a mutation's only: each write is one request
 // (`WriteRequest`) handed to the invocation's executor, which stages it on

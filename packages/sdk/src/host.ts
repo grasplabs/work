@@ -44,15 +44,12 @@ export {
   manifestMaxBytes,
   manifestText,
   manifestVersion,
-  readSchemaManifest,
   schemaHash,
   schemaManifest,
 } from "./schema-manifest.ts";
-export type {
-  ManifestTable,
-  ReadManifest,
-  SchemaManifest,
-} from "./schema-manifest.ts";
+export type { ManifestTable, SchemaManifest } from "./schema-manifest.ts";
+export { readSchemaManifest } from "./schema-manifest-read.ts";
+export type { ReadManifest } from "./schema-manifest-read.ts";
 
 // What a host reads a descriptor from its JSON text with: one reader,
 // which a workflow's run uses too (`fittedValue`).

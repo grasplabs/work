@@ -3,7 +3,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { expectTypeOf } from "vite-plus/test";
 
-import { v } from "../src/values.ts";
 import type {
   FileValue,
   Id,
@@ -11,8 +10,9 @@ import type {
   InferInput,
   MoneyValue,
   ScheduleValue,
-  ValueIssue,
-} from "../src/values.ts";
+} from "../src/value-types.ts";
+import { v } from "../src/values.ts";
+import type { ValueIssue } from "../src/values.ts";
 
 // A caller may leave out a field with a default; a handler always gets it.
 const note = v.object({

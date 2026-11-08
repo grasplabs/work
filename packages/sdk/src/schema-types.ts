@@ -1,7 +1,7 @@
 import type { IndexableManagedField } from "./schema-indexes.ts";
 import type { AccessModes, RowRules, TableAccess } from "./table-access.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
-import type { Infer, ValueShape } from "./values.ts";
+import type { Infer, ValueShape } from "./value-types.ts";
 
 /** One index of a table: its name and the fields it orders by, in order. */
 export interface IndexDefinition {

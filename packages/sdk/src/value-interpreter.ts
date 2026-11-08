@@ -1,4 +1,12 @@
-import { currencyCodes, timeZones } from "./value-catalog.ts";
+import {
+  checkNumber,
+  checkStrictObject,
+  checkString,
+  invalid,
+  refuse,
+  semanticChecks,
+} from "./value-checks.ts";
+import type { Checked, CheckState } from "./value-checks.ts";
 import {
   isPlainObject,
   isSemanticKind,
@@ -29,34 +37,6 @@ import type {
 // descriptor's depth bounds the recursion: a value that refers to itself
 // can't loop it. `valueLimits.steps` bounds the width.
 
-/** Returned in place of a value that was refused. */
-const invalid = Symbol("invalid");
-type Checked = unknown;
-
-interface CheckState {
-  /** Read past `valueLimits.steps`: the whole check is refused. */
-  exhausted: boolean;
-  /** Stop once this many issues are collected. */
-  issueLimit: number;
-  issues: ValueIssue[];
-  /** Where the value being read sits in the one being checked. */
-  readonly path: (string | number)[];
-  steps: number;
-  stopped: boolean;
-}
-
-const refuse = (state: CheckState, code: ValueIssueCode): typeof invalid => {
-  state.issues.push({
-    code,
-    message: valueIssueMessages[code],
-    path: [...state.path],
-  });
-  if (state.issues.length >= state.issueLimit) {
-    state.stopped = true;
-  }
-  return invalid;
-};
-
 /** A copy of a default, so no two results share an array or an object. */
 const copyJson = (value: FrozenJson): JsonValue => {
   if (typeof value !== "object" || value === null) {
@@ -72,245 +52,12 @@ const copyJson = (value: FrozenJson): JsonValue => {
   return copy;
 };
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
-const emailMaxLength = 254;
-
 /**
  * A record ID: a UUIDv7 in lower case, as they are minted. One spelling per
  * ID, so two strings that differ only in case can't name the same record.
  */
 const idPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-
-/**
- * An opaque reference (a person, a model, a template, a file): visible
- * ASCII without spaces. The host resolves it and decides access; the format
- * only keeps control characters and unbounded text out.
- */
-const referencePattern = /^[!-~]+$/u;
-
-const isReference = (value: unknown): value is string =>
-  typeof value === "string" &&
-  value.length <= valueLimits.nameLength &&
-  referencePattern.test(value);
-
-const cronPartPattern =
-  /^(?:(?<all>\*)|(?<from>\d{1,2})(?:-(?<to>\d{1,2}))?)(?:\/(?<step>\d{1,2}))?$/u;
-
-/** The lowest and highest number of each cron field, in order. */
-const cronFieldRanges = [
-  [0, 59],
-  [0, 23],
-  [1, 31],
-  [1, 12],
-  [0, 7],
-] as const;
-
-/** The most days each month can have, January first. */
-const longestMonths = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
-/**
- * The numbers one part of a cron field names (`5`, `1-5`, `*`, `1-5/2`,
- * `*\/15`), or nothing when it isn't one. A step follows `*` or a range
- * only, and is no larger than the field's highest number.
- */
-const cronPartNumbers = (
-  part: string,
-  lowest: number,
-  highest: number
-): number[] | undefined => {
-  const groups = cronPartPattern.exec(part)?.groups;
-  if (groups === undefined) {
-    return undefined;
-  }
-  const { all, from, to, step } = groups;
-  let first = lowest;
-  let last = highest;
-  if (all === undefined) {
-    first = Number(from);
-    last = to === undefined ? first : Number(to);
-  }
-  const stride = step === undefined ? 1 : Number(step);
-  const stepsAnything = all !== undefined || to !== undefined;
-  const valid =
-    first >= lowest &&
-    last <= highest &&
-    first <= last &&
-    stride >= 1 &&
-    stride <= highest &&
-    (step === undefined || stepsAnything);
-  if (!valid) {
-    return undefined;
-  }
-  const numbers: number[] = [];
-  for (let number = first; number <= last; number += stride) {
-    numbers.push(number);
-  }
-  return numbers;
-};
-
-/** The numbers a whole cron field names, or nothing when it isn't one. */
-const cronFieldNumbers = (
-  field: string | undefined,
-  lowest: number,
-  highest: number
-): number[] | undefined => {
-  const numbers: number[] = [];
-  for (const part of (field ?? "").split(",")) {
-    const named = cronPartNumbers(part, lowest, highest);
-    if (named === undefined) {
-      return undefined;
-    }
-    numbers.push(...named);
-  }
-  return numbers;
-};
-
-/**
- * Five cron fields (minute, hour, day of month, month, day of week) in
- * numbers, single spaces between them: `*`, `5`, `1-5`, `*\/15`, `1-5/2` and
- * lists of those, naming a time that comes (not 31 February). Names (`MON`)
- * and other dialects aren't one fixed form. Everything accepted here is
- * accepted by the parser schedules run on (`isCronExpression` in
- * `@grasp-os/shared/workflows`); values.test.ts holds the two together.
- */
-const isCron = (value: unknown): value is string => {
-  if (typeof value !== "string" || value.length > valueLimits.nameLength) {
-    return false;
-  }
-  const fields = value.split(" ");
-  if (fields.length !== cronFieldRanges.length) {
-    return false;
-  }
-  const numbers = cronFieldRanges.map(([lowest, highest], index) =>
-    cronFieldNumbers(fields[index], lowest, highest)
-  );
-  const { 2: days, 3: months } = numbers;
-  if (
-    numbers.includes(undefined) ||
-    days === undefined ||
-    months === undefined
-  ) {
-    return false;
-  }
-  // A day of the week makes a date come whatever the day of the month says;
-  // without one, some named month must be long enough for a named day.
-  return (
-    fields[4] !== "*" ||
-    months.some((month) =>
-      days.some((day) => day <= (longestMonths[month - 1] ?? 0))
-    )
-  );
-};
-
-/**
- * Reads an object with a fixed set of keys: refuses anything that isn't a
- * JSON object or has a key outside the set, then checks each key with
- * `checkKey`. A key left out of the result is one whose value is absent.
- */
-const checkStrictObject = (
-  value: unknown,
-  keys: ReadonlySet<string>,
-  state: CheckState,
-  checkKey: (key: string, entry: unknown) => Checked
-): Checked => {
-  if (!isPlainObject(value)) {
-    return refuse(state, "value.invalid_type");
-  }
-  let valid = true;
-  for (const key of Object.keys(value)) {
-    if (state.stopped) {
-      break;
-    }
-    if (!keys.has(key)) {
-      // The path names the key only when it is short: an issue never
-      // carries an unbounded piece of what was submitted.
-      const named = key.length <= valueLimits.nameLength;
-      if (named) {
-        state.path.push(key);
-      }
-      refuse(state, "value.unknown_key");
-      if (named) {
-        state.path.pop();
-      }
-      valid = false;
-    }
-  }
-  const result: Record<string, unknown> = {};
-  for (const key of keys) {
-    state.path.push(key);
-    // Only what the object itself holds: a field named `toString` that is
-    // left out is absent, not the method every object inherits.
-    const checked = checkKey(
-      key,
-      Object.hasOwn(value, key) ? value[key] : undefined
-    );
-    state.path.pop();
-    if (checked === invalid) {
-      valid = false;
-    } else if (checked !== undefined) {
-      result[key] = checked;
-    }
-  }
-  return valid ? result : invalid;
-};
-
-const checkSafeInteger = (
-  value: unknown,
-  state: CheckState,
-  code: ValueIssueCode,
-  lowest = Number.MIN_SAFE_INTEGER
-): Checked => {
-  if (value === undefined) {
-    return refuse(state, "value.required");
-  }
-  if (typeof value !== "number") {
-    return refuse(state, "value.invalid_type");
-  }
-  return Number.isSafeInteger(value) && value >= lowest
-    ? value
-    : refuse(state, code);
-};
-
-const checkReference = (value: unknown, state: CheckState): Checked => {
-  if (value === undefined) {
-    return refuse(state, "value.required");
-  }
-  if (typeof value !== "string") {
-    return refuse(state, "value.invalid_type");
-  }
-  return isReference(value) ? value : refuse(state, "value.invalid_reference");
-};
-
-/** A string that must be in a catalog, e.g. a currency code. */
-const checkListed = (
-  value: unknown,
-  state: CheckState,
-  catalog: ReadonlySet<string>,
-  code: ValueIssueCode
-): Checked => {
-  if (value === undefined) {
-    return refuse(state, "value.required");
-  }
-  if (typeof value !== "string") {
-    return refuse(state, "value.invalid_type");
-  }
-  return catalog.has(value) ? value : refuse(state, code);
-};
-
-const checkCron = (value: unknown, state: CheckState): Checked => {
-  if (value === undefined) {
-    return refuse(state, "value.required");
-  }
-  if (typeof value !== "string") {
-    return refuse(state, "value.invalid_type");
-  }
-  return isCron(value) ? value : refuse(state, "value.invalid_cron");
-};
-
-const moneyKeys: ReadonlySet<string> = new Set(["minorUnits", "currency"]);
-const scheduleKeys: ReadonlySet<string> = new Set(["cron", "timeZone"]);
-const fileKeys: ReadonlySet<string> = new Set(["id"]);
 
 /** The names of an object descriptor's fields, listed once per descriptor. */
 const fieldNames = new WeakMap<object, ReadonlySet<string>>();
@@ -324,83 +71,6 @@ const namesOf = (
     fieldNames.set(fields, names);
   }
   return names;
-};
-
-/** The kinds with one fixed wire form each. */
-const semanticChecks: Record<
-  SemanticKind,
-  (value: unknown, state: CheckState) => Checked
-> = {
-  timestamp: (value, state) =>
-    checkSafeInteger(value, state, "value.invalid_timestamp"),
-  duration: (value, state) =>
-    checkSafeInteger(value, state, "value.invalid_duration", 1),
-  person: checkReference,
-  model: checkReference,
-  template: checkReference,
-  file: (value, state) =>
-    checkStrictObject(value, fileKeys, state, (_key, entry) =>
-      checkReference(entry, state)
-    ),
-  money: (value, state) =>
-    checkStrictObject(value, moneyKeys, state, (key, entry) =>
-      key === "currency"
-        ? checkListed(entry, state, currencyCodes, "value.invalid_currency")
-        : checkSafeInteger(entry, state, "value.not_integer")
-    ),
-  schedule: (value, state) =>
-    checkStrictObject(value, scheduleKeys, state, (key, entry) =>
-      key === "cron"
-        ? checkCron(entry, state)
-        : checkListed(entry, state, timeZones, "value.invalid_time_zone")
-    ),
-};
-
-const checkString = (
-  descriptor: ValueDescriptor & { kind: "string" },
-  value: unknown,
-  state: CheckState
-): Checked => {
-  if (typeof value !== "string") {
-    return refuse(state, "value.invalid_type");
-  }
-  const text = descriptor.trim ? value.trim() : value;
-  if (descriptor.min !== undefined && text.length < descriptor.min) {
-    return refuse(state, "value.too_short");
-  }
-  if (descriptor.max !== undefined && text.length > descriptor.max) {
-    return refuse(state, "value.too_long");
-  }
-  if (
-    descriptor.email &&
-    (text.length > emailMaxLength || !emailPattern.test(text))
-  ) {
-    return refuse(state, "value.invalid_email");
-  }
-  return text;
-};
-
-const checkNumber = (
-  descriptor: ValueDescriptor & { kind: "number" },
-  value: unknown,
-  state: CheckState
-): Checked => {
-  if (typeof value !== "number") {
-    return refuse(state, "value.invalid_type");
-  }
-  if (!Number.isFinite(value)) {
-    return refuse(state, "value.not_finite");
-  }
-  if (descriptor.integer && !Number.isSafeInteger(value)) {
-    return refuse(state, "value.not_integer");
-  }
-  if (descriptor.min !== undefined && value < descriptor.min) {
-    return refuse(state, "value.too_small");
-  }
-  if (descriptor.max !== undefined && value > descriptor.max) {
-    return refuse(state, "value.too_large");
-  }
-  return value;
 };
 
 const checkArray = (
