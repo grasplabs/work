@@ -19,7 +19,6 @@ interface Note {
   _createdAt: number;
   _id: Id<"notes">;
   _ownerId: string;
-  _rev: number;
   _updatedAt: number;
   body: string;
   summary: string | null;
@@ -63,20 +62,19 @@ export const useChecks = (): void => {
   // @ts-expect-error -- a streaming action doesn't bind
   void useForm(api.notes.exportAll, { defaultValues: { format: "csv" } });
 
-  // Editing a record: its values and revision as the defaults, the
-  // committed document the result.
+  // Editing a record: its values as the defaults, the committed document
+  // the result.
   const edit = useForm(api.notes.update, {
     defaultValues: {
       id: note._id,
-      expectedRevision: note._rev,
       title: note.title,
       body: note.body,
     },
   });
   expectTypeOf(edit.submit()).toEqualTypeOf<Promise<Note>>();
-  // @ts-expect-error -- the revision is missing
+  // @ts-expect-error -- the record's ID is missing
   void useForm(api.notes.update, {
-    defaultValues: { id: note._id, title: note.title, body: note.body },
+    defaultValues: { title: note.title, body: note.body },
   });
 
   // A local form: the schema's input its fields, the callback's result

@@ -348,14 +348,12 @@ describe("a search", () => {
         table: "customers",
         id: first,
         fields: { notes: "juice" },
-        expectedRevision: 1,
       },
       {
         op: "replace",
         table: "customers",
         id: second,
         fields: { name: "Eastwind", archived: false },
-        expectedRevision: 1,
       },
     ]);
     expect({
@@ -372,7 +370,7 @@ describe("a search", () => {
       eastwind: ["Eastwind"],
     });
     await commit(fixture, "ada", [
-      { op: "delete", table: "customers", id: first, expectedRevision: 2 },
+      { op: "delete", table: "customers", id: first },
     ]);
     expect({
       juice: await find("juice"),

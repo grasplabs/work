@@ -148,7 +148,7 @@ describe("live queries", { timeout: 120_000 }, () => {
     const id = await client.mutation(api.create, { title: "First" });
     const note = reading(client, api.get, { id });
     await eventually(() => {
-      expect(note.now().value).toMatchObject({ _rev: 1 });
+      expect(note.now().value).toMatchObject({ title: "First" });
     });
     // Nobody reads the note now, as when another note is opened: it is
     // kept for a remount, but followed by no one.
@@ -156,17 +156,16 @@ describe("live queries", { timeout: 120_000 }, () => {
     await scheduler.wait(0);
     await client.mutation(api.update, {
       id,
-      expectedRevision: 1,
       title: "Second",
       body: "",
     });
 
-    // Opened again: never the revision from before the change, which an
+    // Opened again: never the note as it was before the change, which an
     // editor would take as its starting point.
     const again = reading(client, api.get, { id });
     const first = again.now().value;
     await eventually(() => {
-      expect(again.now().value).toMatchObject({ _rev: 2, title: "Second" });
+      expect(again.now().value).toMatchObject({ title: "Second" });
     });
     expect(first).toBeUndefined();
   });
@@ -179,7 +178,7 @@ describe("live queries", { timeout: 120_000 }, () => {
     const id = await client.mutation(api.create, { title: "First" });
     const note = reading(client, api.get, { id });
     await eventually(() => {
-      expect(note.now().value).toMatchObject({ _rev: 1 });
+      expect(note.now().value).toMatchObject({ title: "First" });
     });
 
     // A read whose answer is held back while the note moves on.
@@ -188,12 +187,11 @@ describe("live queries", { timeout: 120_000 }, () => {
     const other = clientFor(opened).client;
     await other.mutation(api.update, {
       id,
-      expectedRevision: 1,
       title: "Second",
       body: "",
     });
     await eventually(() => {
-      expect(note.now().value).toMatchObject({ _rev: 2, title: "Second" });
+      expect(note.now().value).toMatchObject({ title: "Second" });
     });
     // Nobody follows the note now: the read sent before the push is still
     // older than what it shows.
@@ -202,7 +200,7 @@ describe("live queries", { timeout: 120_000 }, () => {
     open();
     await late;
 
-    expect(note.now().value).toMatchObject({ _rev: 2, title: "Second" });
+    expect(note.now().value).toMatchObject({ title: "Second" });
   });
 
   it("clears what a page shows once the person loses access, before anything more reaches it", async () => {

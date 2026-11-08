@@ -34,18 +34,13 @@ const tally = async (
     });
     return;
   }
-  await ctx.db.patch(
-    "months",
-    totals._id,
-    {
-      sales: totals.sales + direction,
-      revenue: {
-        currency,
-        minorUnits: totals.revenue.minorUnits + minorUnits,
-      },
+  await ctx.db.patch("months", totals._id, {
+    sales: totals.sales + direction,
+    revenue: {
+      currency,
+      minorUnits: totals.revenue.minorUnits + minorUnits,
     },
-    { expectedRevision: totals._rev }
-  );
+  });
 };
 
 export const list = query({
@@ -79,16 +74,14 @@ export const record = mutation({
 });
 
 export const remove = mutation({
-  args: { id: v.id("sales"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("sales") },
   returns: v.null(),
   handler: async (ctx, args) => {
     const sale = await ctx.db.get("sales", args.id);
     if (sale === null) {
       return null;
     }
-    await ctx.db.delete("sales", sale._id, {
-      expectedRevision: args.expectedRevision,
-    });
+    await ctx.db.delete("sales", sale._id);
     await tally(ctx, sale, -1);
     return null;
   },

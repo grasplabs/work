@@ -99,9 +99,7 @@ export const useChecks = (): void => {
   void create.mutate;
 
   const remove = useMutation(api.notes.remove);
-  expectTypeOf(remove({ id: noteId, expectedRevision: 1 })).toEqualTypeOf<
-    Promise<null>
-  >();
+  expectTypeOf(remove({ id: noteId })).toEqualTypeOf<Promise<null>>();
 
   const tally = useAction(api.notes.tally);
   // An empty input may be left out; options then follow `{}`.
@@ -132,7 +130,6 @@ void client.query(api.notes.get, { id: noteId }, { idempotencyKey: "k" });
 expectTypeOf(
   client.mutation(api.notes.update, {
     id: noteId,
-    expectedRevision: 1,
     title: "t",
     body: "",
   })

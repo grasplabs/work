@@ -324,7 +324,6 @@ export const WorkflowEditor = ({
       async () =>
         await saveWorkflow({
           id: current?.id ?? null,
-          expectedRevision: current?.revision ?? null,
           ...toSave(stored, draft, body, to, baselineFor(to)),
         })
     );

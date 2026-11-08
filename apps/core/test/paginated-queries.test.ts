@@ -83,7 +83,7 @@ export const touchOldest = mutation({
   handler: async (ctx, args) => {
     const oldest = await ctx.db.query("notes").withIndex("by_updated").order("asc").first();
     if (oldest) {
-      await ctx.db.patch("notes", oldest._id, { body: args.stamp }, { expectedRevision: oldest._rev });
+      await ctx.db.patch("notes", oldest._id, { body: args.stamp });
     }
     return null;
   },
@@ -482,7 +482,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     if (six === undefined) {
       throw new Error("Note 6 was saved");
     }
-    await other.mutation(api.remove, { id: six, expectedRevision: 1 });
+    await other.mutation(api.remove, { id: six });
     await eventually(() => {
       expect(list.titles()).toStrictEqual(["Note 8", "Note 7", "Note 5"]);
     });
@@ -508,10 +508,9 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     if (four === undefined || one === undefined) {
       throw new Error("Notes 1 and 4 were saved");
     }
-    await other.mutation(api.remove, { id: four, expectedRevision: 1 });
+    await other.mutation(api.remove, { id: four });
     await other.mutation(api.update, {
       id: one,
-      expectedRevision: 1,
       title: "Note 1, edited",
       body: "",
     });

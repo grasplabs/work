@@ -51,7 +51,6 @@ describe("the board page", { timeout: 90_000 }, () => {
     const { admin, app, map } = await setUp();
     await seedMap(admin, map);
     const taken = idSchema.parse(valueOf(await take(admin, app)));
-    const { snapshot } = await opened(admin, app, taken);
     const member = await signedInApi(idp, "user");
     await admin.api.apps.members.add(app, {
       type: "person",
@@ -69,7 +68,6 @@ describe("the board page", { timeout: 90_000 }, () => {
       write: codeOf(
         await call(member, app, "snapshots.write", "mutation", {
           id: taken,
-          expectedRevision: snapshot._rev,
           decisionNeeded: "",
           narrative: "Theirs.",
         })

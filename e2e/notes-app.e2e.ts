@@ -84,7 +84,7 @@ const createNote = async (
   await form.getByRole("button", { name: "Create note" }).click();
 };
 
-test("a person creates, loads, edits and deletes notes, and a stale save keeps what they typed", async ({
+test("a person creates, loads, edits and deletes notes, and two saves of different fields both stick", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
@@ -142,14 +142,14 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps w
   await expect(list.getByText("Call Acme back", { exact: true })).toBeVisible();
   await expect(editor.getByLabel("Body")).toHaveValue("On Monday");
 
-  // The same note open in a second tab, its edit started from the same
-  // revision. The first tab saves again; the second's save is stale.
+  // The same note open in a second tab, both edits started from the same
+  // note: the first tab changes its title, the second its body.
   const other = await pageOf(builder);
   const second = await openNotes(other, app);
   await second.getByRole("button", { name: "Edit Call Acme back" }).click();
   const draft = second.getByRole("form", { name: "Edit note" });
   await expect(draft.getByLabel("Title")).toHaveValue("Call Acme back");
-  await draft.getByLabel("Title").fill("Their title");
+  await draft.getByLabel("Body").fill("Their body");
 
   await editor.getByLabel("Title").fill("My title");
   await editor.getByRole("button", { name: "Save changes" }).click();
@@ -169,19 +169,13 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps w
   await reloaded.getByRole("button", { name: "Edit My title" }).click();
   await expect(editor.getByLabel("Title")).toHaveValue("My title");
 
+  // The second tab's save sends only the body it changed: the first tab's
+  // title stays, and the note it opens again on has both.
   await draft.getByRole("button", { name: "Save changes" }).click();
-  await expect(draft.getByRole("alert")).toContainText("changed since");
-  // What they typed survived the refusal, unchanged.
-  await expect(draft.getByLabel("Title")).toHaveValue("Their title");
-
-  // Only a deliberate, confirmed reload gives it up for the latest version.
-  await draft.getByRole("button", { name: "Load the latest version" }).click();
-  const confirm = second.getByRole("alertdialog", {
-    name: "Discard your changes?",
-  });
-  await confirm.getByRole("button", { name: "Discard and load" }).click();
   await expect(draft.getByLabel("Title")).toHaveValue("My title");
+  await expect(draft.getByLabel("Body")).toHaveValue("Their body");
   await expect(draft.getByRole("alert")).toHaveCount(0);
+  await expect(list.getByText("My title", { exact: true })).toBeVisible();
 
   // Deleted, from the first tab, while the second still has it open.
   await reloaded.getByRole("button", { name: "Delete My title" }).click();

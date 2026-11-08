@@ -9,7 +9,7 @@ Each App has a store of its own. Its definition declares its tables and who may 
 
 ## Tables and fields
 
-A table is a set of fields, each typed with `v`. Every record also has the fields Grasp keeps for it: `_id`, `_ownerId` (who inserted it), `_rev` (its revision, raised by every write), `_createdAt` and `_updatedAt`.
+A table is a set of fields, each typed with `v`. Every record also has the fields Grasp keeps for it: `_id`, `_ownerId` (who inserted it), `_createdAt` and `_updatedAt`.
 
 Tables live in the App's definition. Grasp adds and changes them with its definition tools: `addTable` adds a table, `addField` a field, `changeField` gives a field another type, `renameField` renames one and `renameTable` a table (their IDs stay, so their records, values, indexes and rules follow them) and `addIndex` adds an index or the table's search index. A field's type is written as code writes it, such as `v.string().max(200)`. Each change answers what it does to the records the App already holds: a field they lack, for instance, takes a default or an answer to fill it in.
 
@@ -104,31 +104,42 @@ A table with a search index can be searched by its words with `ctx.db.search("pr
 Mutations write through `ctx.db`:
 
 - `insert(table, fields)` adds a record and returns its ID; the caller owns it.
-- `patch(table, id, fields, { expectedRevision })` sets some fields.
-- `replace(table, id, fields, { expectedRevision })` sets all of them.
-- `delete(table, id, { expectedRevision })` removes the record.
+- `patch(table, id, fields)` sets some fields and leaves the others as they are. `{ unset: [...] }` as a fourth argument removes optional fields.
+- `replace(table, id, fields)` sets all of them.
+- `delete(table, id)` removes the record.
 
 ```ts server/projects.ts
 import { v } from "@grasp-os/sdk";
 import { mutation } from "@server/_generated/server";
 
 export const assign = mutation({
-  args: {
-    task: v.id("tasks"),
-    expectedRevision: v.number().integer().min(1),
-    project: v.id("projects"),
-  },
+  args: { task: v.id("tasks"), project: v.id("projects") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch(
-      "tasks",
-      args.task,
-      { project: args.project },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("tasks", args.task, { project: args.project });
     return null;
   },
 });
 ```
 
-Every change names the revision it expects. If someone changed the record since you read it, the mutation fails with `data.conflict` and writes nothing, so nobody overwrites a change they never saw. Pass the revision a Page showed (`_rev`) as an argument, as `assign` does.
+A mutation is one transaction: if a record it read changes before it commits, Grasp runs it again, so what it decides from its reads always holds. Between mutations, the last write wins. When two people change the same field of a record at once, the later save stays, and the record's history keeps the earlier value and who changed it. A change to a record that's gone fails with `data.conflict`.
+
+Change only what someone edited, so two people who edit different fields of a record both keep their changes. A form does this for you: `useForm` sends the fields its mutation requires, and only the optional fields the person changed. An editing mutation takes the record's ID and its fields as optional, and patches what it gets:
+
+```ts server/edits.ts
+import { v } from "@grasp-os/sdk";
+import { mutation } from "@server/_generated/server";
+
+export const editTask = mutation({
+  args: {
+    id: v.id("tasks"),
+    title: v.string().trim().min(1).max(200).optional(),
+    due: v.timestamp().nullable().optional(),
+  },
+  returns: v.null(),
+  handler: async (ctx, { id, ...fields }) => {
+    await ctx.db.patch("tasks", id, fields);
+    return null;
+  },
+});
+```

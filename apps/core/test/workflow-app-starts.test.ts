@@ -144,18 +144,14 @@ const submit = mutation({
   },
 });
 
-/** Stages a start, then a write whose revision guard can't hold. */
+/** Stages a start, then a write the store refuses: of a record it deleted. */
 const guarded = mutation({
   args: { id: v.id("requests") },
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.workflows.followUp.start({ who: "Guarded" });
-    await ctx.db.patch(
-      "requests",
-      args.id,
-      { title: "changed" },
-      { expectedRevision: 99 }
-    );
+    await ctx.db.delete("requests", args.id);
+    await ctx.db.patch("requests", args.id, { title: "changed" });
     return null;
   },
 });

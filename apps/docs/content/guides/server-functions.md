@@ -56,12 +56,7 @@ export const rename = mutation({
     if (task === null) {
       throw new AppError("task.not_found", "The task is gone.");
     }
-    await ctx.db.patch(
-      "tasks",
-      task._id,
-      { title: args.title },
-      { expectedRevision: task._rev }
-    );
+    await ctx.db.patch("tasks", task._id, { title: args.title });
     return null;
   },
 });

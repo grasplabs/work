@@ -9,8 +9,6 @@ import type { Parameter, Step, WorkflowRecord } from "./totals";
 /** A workflow, at its current version or an earlier one. */
 export interface Workflow {
   id: Id<"workflows">;
-  /** The revision it was read at, which a save or link asserts. */
-  revision: number;
   version: number;
   record: WorkflowRecord;
   /** Its notes: empty where the list leaves them out. */
@@ -58,23 +56,17 @@ export const recordFrom = (stored: Stored): WorkflowRecord => ({
 
 /** A workflow the list shows, without its notes. */
 export const listedFrom = (
-  listed: Stored & { id: Id<"workflows">; revision: number }
+  listed: Stored & { id: Id<"workflows"> }
 ): Workflow => ({
   id: listed.id,
-  revision: listed.revision,
   version: listed.version,
   record: recordFrom(listed),
   body: "",
 });
 
 /** The version of a workflow last drawn, without its notes. */
-export const drawnFrom = (
-  id: Id<"workflows">,
-  revision: number,
-  drawn: Stored
-): Workflow => ({
+export const drawnFrom = (id: Id<"workflows">, drawn: Stored): Workflow => ({
   id,
-  revision,
   version: drawn.version,
   record: recordFrom(drawn),
   body: "",
@@ -83,10 +75,9 @@ export const drawnFrom = (
 /** A workflow, as the store answers it. */
 export const workflowFrom = (
   id: Id<"workflows">,
-  stored: Stored & { _rev: number; notes: string }
+  stored: Stored & { notes: string }
 ): Workflow => ({
   id,
-  revision: stored._rev,
   version: stored.version,
   record: recordFrom(stored),
   body: stored.notes,
@@ -119,9 +110,8 @@ export const settle = async <T>(run: () => Promise<T>): Promise<Outcome<T>> => {
 /** What a refusal means to the person using the map. */
 export const refusal = (code: string): string => {
   switch (code) {
-    case "data.conflict":
-    case "data.reads_changed": {
-      return "Someone saved this workflow since you opened it. Open it again to see their changes.";
+    case "data.conflict": {
+      return "This workflow is gone: someone removed it.";
     }
     case "data.access_denied":
     case "data.write_denied": {

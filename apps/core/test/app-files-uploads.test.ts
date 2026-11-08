@@ -82,27 +82,16 @@ describe("an App's files", { timeout: 120_000 }, () => {
     });
   });
 
-  it("attaches a file to a note under its revision, and downloads it only as an attachment", async () => {
+  it("attaches a file to a note, and downloads it only as an attachment", async () => {
     const { client, api, page, downloads } = await openedApp();
     const id = await upload(page.channel, blobOf(png(), "image/png"));
     const note = await client.mutation(api.create, { title: "Plan" });
     await expect(
       client.mutation(api.attachFile, {
         id: note,
-        expectedRevision: 1,
         file: { id },
       })
-    ).resolves.toMatchObject({ _rev: 2, attachments: [{ id }] });
-    // A stale revision is a conflict, the attachment as it was.
-    await expect(
-      codeOf(
-        client.mutation(api.detachFile, {
-          id: note,
-          expectedRevision: 1,
-          file: { id },
-        })
-      )
-    ).resolves.toBe("data.conflict");
+    ).resolves.toMatchObject({ attachments: [{ id }] });
     await client.files.download(permissions.files, { id });
     expect(downloads.get(id)).toStrictEqual(png());
     const response = await page.channel.content("files", id);
@@ -134,7 +123,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
         codeOf(
           colleague.client.mutation(api.attachFile, {
             id: theirNote,
-            expectedRevision: 1,
             file: { id },
           })
         ),
@@ -154,7 +142,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const note = await client.mutation(api.create, { title: "Shared" });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 1,
       file: { id },
     });
     await colleague.client.files.download(permissions.files, { id });
@@ -165,7 +152,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     // Detached again: theirs to read no longer.
     await client.mutation(api.detachFile, {
       id: note,
-      expectedRevision: 2,
       file: { id },
     });
     await expect(
@@ -183,7 +169,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
         codeOf(
           one.client.mutation(one.api.attachFile, {
             id: note,
-            expectedRevision: 1,
             file: { id },
           })
         ),

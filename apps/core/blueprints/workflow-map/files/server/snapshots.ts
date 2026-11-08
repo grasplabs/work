@@ -231,13 +231,12 @@ export const take = action({
 });
 
 /**
- * Saves a snapshot's narrative and the decision it asks for, at
- * `expectedRevision`: what it froze stays as it was taken.
+ * Saves a snapshot's narrative and the decision it asks for: what it
+ * froze stays as it was taken.
  */
 export const write = mutation({
   args: {
     id: v.id("snapshots"),
-    expectedRevision: v.number().integer().min(1),
     decisionNeeded: v.string().trim().max(decisionMax),
     narrative: v.string().max(narrativeMax),
   },
@@ -247,12 +246,10 @@ export const write = mutation({
     if (stored === null) {
       throw new AppError("board.not_found", "There's no such snapshot.");
     }
-    await ctx.db.patch(
-      "snapshots",
-      args.id,
-      { decisionNeeded: args.decisionNeeded, narrative: args.narrative },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("snapshots", args.id, {
+      decisionNeeded: args.decisionNeeded,
+      narrative: args.narrative,
+    });
     return null;
   },
 });

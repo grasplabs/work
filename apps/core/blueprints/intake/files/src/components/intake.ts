@@ -77,10 +77,9 @@ export interface GuestChat {
   endedAt: string | null;
 }
 
-/** A draft as the editor opens it: the stored draft at its revision. */
+/** A draft as the editor opens it: the stored draft. */
 export interface OpenedDraft {
   id: Id<"drafts">;
-  revision: number;
   origin: Origin;
   draft: Draft;
 }
@@ -176,9 +175,6 @@ export const settle = async <T>(run: () => Promise<T>): Promise<Outcome<T>> => {
 export const refusal = (code: string): string => {
   switch (code) {
     case "data.conflict":
-    case "data.reads_changed": {
-      return "Someone changed this draft since you opened it. Open it again to see their changes.";
-    }
     case "intake.not_found": {
       return "This draft is gone: someone saved or discarded it.";
     }

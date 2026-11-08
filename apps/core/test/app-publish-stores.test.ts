@@ -201,7 +201,7 @@ export const rename = mutation({
   handler: async (ctx, { id, title }) => {
     const found = await ctx.db.get("notes", id);
     if (found === null) throw new Error("No such note");
-    await ctx.db.patch("notes", id, { title }, { expectedRevision: found._rev });
+    await ctx.db.patch("notes", id, { title });
     return null;
   },
 });
@@ -212,7 +212,7 @@ export const retitle = mutation({
   handler: async (ctx, { id, title }) => {
     const found = await ctx.db.get("notes", id);
     if (found === null) throw new Error("No such note");
-    await ctx.db.replace("notes", id, { title }, { expectedRevision: found._rev });
+    await ctx.db.replace("notes", id, { title });
     return null;
   },
 });
@@ -222,7 +222,7 @@ export const rows = query({
   returns: v.array(note),
   handler: async (ctx) =>
     (await ctx.db.query("notes").take(100))
-      .map(({ _id, _ownerId, _rev, _createdAt, _updatedAt, ...fields }) => fields)
+      .map(({ _id, _ownerId, _createdAt, _updatedAt, ...fields }) => fields)
       .toSorted((a, b) => (a.title < b.title ? -1 : 1)),
 });
 `,
@@ -995,8 +995,8 @@ describe(
       const files = {
         ...required,
         "server/notes.ts": (required["server/notes.ts"] ?? "").replaceAll(
-          "{ title }, { expectedRevision",
-          "{ title, category: found.category }, { expectedRevision"
+          "{ title });",
+          "{ title, category: found.category });"
         ),
       };
       const unanswered = await nextVersion(owner, app, files);

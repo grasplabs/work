@@ -38,28 +38,17 @@ export const create = mutation({
   handler: async (ctx, args) => await ctx.db.insert("notes", args),
 });
 
+/** Saves what someone changed of a note, and only that. */
 export const update = mutation({
   args: {
     id: v.id("notes"),
-    expectedRevision: v.number().integer().min(1),
-    title: noteFields.title,
-    body: v.string().max(100_000),
+    title: noteFields.title.optional(),
+    body: v.string().max(100_000).optional(),
   },
   returns: doc("notes"),
-  handler: async (ctx, args) => {
-    const previous = await ctx.db.get("notes", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
-    if (!previous) {
-      throw new AppError("note.not_found", "The note is unavailable.");
-    }
-    await ctx.db.patch(
-      "notes",
-      args.id,
-      { title: args.title, body: args.body },
-      { expectedRevision: args.expectedRevision }
-    );
-    const updated = await ctx.db.get("notes", args.id);
+  handler: async (ctx, { id, ...changed }) => {
+    await ctx.db.patch("notes", id, changed);
+    const updated = await ctx.db.get("notes", id);
     if (!updated) {
       throw new AppError("note.not_found", "The note is unavailable.");
     }
@@ -68,12 +57,10 @@ export const update = mutation({
 });
 
 export const remove = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+    await ctx.db.delete("notes", args.id);
     return null;
   },
 });
@@ -91,17 +78,11 @@ export const count = internalQuery({
 export const setSummary = mutation({
   args: {
     id: v.id("notes"),
-    expectedRevision: v.number().integer().min(1),
     summary: v.string().max(10_000),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch(
-      "notes",
-      args.id,
-      { summary: args.summary },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("notes", args.id, { summary: args.summary });
     return null;
   },
 });

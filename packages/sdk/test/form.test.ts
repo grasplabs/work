@@ -15,7 +15,8 @@ import { api, workflows } from "./notes/server/_generated/api.ts";
 // A form's submission state through the real session client, against the
 // network it reaches the host through: an outcome it can't tell, given up
 // only by the person, and never sent again as anyone else; server issues
-// where they belong; a stale save of a record shown at the form's level;
+// where they belong; an edit sent as only what changed, and its failure
+// shown at the form's level;
 // and its callback's own failures.
 
 /** What the host answers one call: core's `{ result }`, a refusal, or nothing. */
@@ -449,20 +450,43 @@ describe("a form's issues", () => {
 });
 
 describe("a form editing a record", () => {
-  const record = { _id: noteId, _rev: 3, title: "Before", body: "" };
+  const record = {
+    _id: noteId,
+    _ownerId: "u1",
+    _createdAt: 1,
+    _updatedAt: 1,
+    title: "Before",
+    body: "Notes",
+    summary: null,
+  };
 
-  it("shows a stale save as the form's own data.conflict, keeping the person's values", async () => {
-    const { client, sent } = host(() => ({
+  it("sends the record's ID and only the fields the person changed since it opened or last saved", async () => {
+    const { client, sent } = host(() => ({ value: record }));
+    const { binding, form } = formOf(client, api.notes.update, {
+      defaultValues: { id: record._id, title: record.title, body: record.body },
+    });
+    form.setFieldValue("title", "Edited");
+    await binding.submit();
+    form.setFieldValue("body", "More notes");
+    await binding.submit();
+    // Changed and changed back: nothing of it to send.
+    form.setFieldValue("title", "Other");
+    form.setFieldValue("title", "Edited");
+    await binding.submit();
+    expect(sent.map(({ input }) => input)).toStrictEqual([
+      { id: record._id, title: "Edited" },
+      { id: record._id, body: "More notes" },
+      { id: record._id },
+    ]);
+  });
+
+  it("shows a save of a record that is gone as the form's own data.conflict, keeping the person's values", async () => {
+    const { client } = host(() => ({
       failed: "data.conflict",
       category: "domain",
     }));
     const { binding, form } = formOf(client, api.notes.update, {
-      defaultValues: {
-        id: record._id,
-        expectedRevision: record._rev,
-        title: record.title,
-        body: record.body,
-      },
+      defaultValues: { id: record._id, title: record.title, body: record.body },
     });
     form.setFieldValue("title", "Edited");
     const outcome = await settle(binding.submit());
@@ -470,7 +494,6 @@ describe("a form editing a record", () => {
       outcome,
       status: binding.status(),
       values: form.state.values,
-      sent: sent.map(({ input }) => input),
     }).toMatchObject({
       outcome: { rejected: { code: "data.conflict" } },
       status: {
@@ -479,7 +502,6 @@ describe("a form editing a record", () => {
         fieldIssues: {},
       },
       values: { title: "Edited" },
-      sent: [{ id: record._id, expectedRevision: 3, title: "Edited" }],
     });
   });
 });

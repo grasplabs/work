@@ -88,8 +88,7 @@ const Dashboard = () => {
           {
             label: "Remove",
             destructive: true,
-            onSelect: async (sale) =>
-              await remove({ id: sale._id, expectedRevision: sale._rev }),
+            onSelect: async (sale) => await remove({ id: sale._id }),
           },
         ]}
       />

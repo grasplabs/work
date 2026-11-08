@@ -101,9 +101,7 @@ export const TakeSnapshot = ({
 /**
  * The snapshot's narrative and the decision it asks for, saved as its
  * next version; what it froze stays as it was taken. The form starts from
- * the snapshot as it was opened, its revision among what it sends, so a
- * save someone else's overtook fails as `data.conflict`, shown in the
- * form, with what the person typed kept.
+ * the snapshot as it was opened.
  */
 export const NarrativeEditor = ({
   snapshot,
@@ -115,7 +113,6 @@ export const NarrativeEditor = ({
   const form = useForm(api.snapshots.write, {
     defaultValues: {
       id: snapshot.id,
-      expectedRevision: snapshot.revision,
       decisionNeeded: snapshot.record.decisionNeeded ?? "",
       narrative: snapshot.body,
     },

@@ -32,7 +32,6 @@ const isDate = (value: string): boolean =>
 /** A draft as the review lists it. */
 const summary = v.object({
   id: v.id("drafts"),
-  revision: v.number().integer().min(1),
   origin: v.enum(draftOrigins),
   title: v.string(),
   date: v.string(),
@@ -84,7 +83,6 @@ export const list = query({
       .take(listed);
     return drafts.map((draft) => ({
       id: draft._id,
-      revision: draft._rev,
       origin: draft.origin,
       title: draft.source.title,
       date: draft.source.date,
@@ -200,62 +198,38 @@ export const propose = mutation({
 });
 
 /**
- * Keeps the edits of a draft at `expectedRevision` as its next revision,
- * without saving it yet. Where it came from never changes: an edit of a
- * stakeholder's draft is still theirs (`data.conflict` when someone kept,
- * saved or discarded it since).
+ * Keeps the edits of a draft, without saving it yet. Where it came from
+ * never changes: an edit of a stakeholder's draft is still theirs
+ * (`data.conflict` when someone saved or discarded it since).
  */
 export const keep = mutation({
-  args: {
-    id: v.id("drafts"),
-    expectedRevision: v.number().integer().min(1),
-    ...draftArgs,
-  },
-  returns: v.number().integer().min(1),
-  handler: async (ctx, args) => {
-    requireDate(args.source.date);
-    await ctx.db.patch(
-      "drafts",
-      args.id,
-      {
-        source: args.source,
-        statements: args.statements.map((statement) => ({
-          ...statement,
-          tags: tagsInOrder(statement.tags),
-        })),
-      },
-      { expectedRevision: args.expectedRevision }
-    );
-    // The revision the commit gives it, as a staged read shows it: one
-    // more only when the edits change it, so not always one more.
-    const kept = await ctx.db.get("drafts", args.id);
-    if (kept === null) {
-      throw new AppError(
-        "intake.not_found",
-        "This draft is gone: someone saved or discarded it."
-      );
-    }
-    return kept._rev;
-  },
-});
-
-/** Throws a draft away, at `expectedRevision`. */
-export const discard = mutation({
-  args: {
-    id: v.id("drafts"),
-    expectedRevision: v.number().integer().min(1),
-  },
+  args: { id: v.id("drafts"), ...draftArgs },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("drafts", args.id, {
-      expectedRevision: args.expectedRevision,
+    requireDate(args.source.date);
+    await ctx.db.patch("drafts", args.id, {
+      source: args.source,
+      statements: args.statements.map((statement) => ({
+        ...statement,
+        tags: tagsInOrder(statement.tags),
+      })),
     });
     return null;
   },
 });
 
+/** Throws a draft away. */
+export const discard = mutation({
+  args: { id: v.id("drafts") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.delete("drafts", args.id);
+    return null;
+  },
+});
+
 /**
- * Saves a draft, as it was edited, at `expectedRevision`: its source, a
+ * Saves a draft, as it was edited: its source, a
  * statement for each claim naming it, and drops the draft, all in one
  * commit, so a save is whole or not at all, and a save run again under
  * its key saves nothing twice. A stakeholder's draft (`guest`) is saved
@@ -263,11 +237,7 @@ export const discard = mutation({
  * (`intake.no_statements`).
  */
 export const save = mutation({
-  args: {
-    id: v.id("drafts"),
-    expectedRevision: v.number().integer().min(1),
-    ...draftArgs,
-  },
+  args: { id: v.id("drafts"), ...draftArgs },
   returns: v.object({
     source: v.id("sources"),
     statements: v.number().integer().min(1),
@@ -299,9 +269,7 @@ export const save = mutation({
         guest,
       });
     }
-    await ctx.db.delete("drafts", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+    await ctx.db.delete("drafts", args.id);
     return { source: savedSource, statements: args.statements.length };
   },
 });

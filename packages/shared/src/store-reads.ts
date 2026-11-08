@@ -128,11 +128,10 @@ export interface QueryRequest {
   with?: string[];
 }
 
-/** A record by ID, optionally asserting the revision the caller expects. */
+/** A record by ID. */
 export interface GetRequest {
   table: string;
   id: string;
-  expectedRevision: number | null;
 }
 
 /** One read App code asks of a store through `ctx.db`. */
@@ -303,16 +302,9 @@ export type WriteRequest =
       id: string;
       fields: WriteFields;
       unset: string[];
-      expectedRevision: number;
     }
-  | {
-      kind: "replace";
-      table: string;
-      id: string;
-      fields: WriteFields;
-      expectedRevision: number;
-    }
-  | { kind: "delete"; table: string; id: string; expectedRevision: number };
+  | { kind: "replace"; table: string; id: string; fields: WriteFields }
+  | { kind: "delete"; table: string; id: string };
 
 /** What separates a search's words. */
 const searchSeparator = /\s+/u;

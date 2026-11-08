@@ -48,7 +48,6 @@ export const emitterVersion = 1;
 const managedColumns: Readonly<Record<string, string>> = {
   _id: "record_id",
   _ownerId: "owner_id",
-  _rev: "revision",
   _createdAt: "created_at",
   _updatedAt: "updated_at",
 };

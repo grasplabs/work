@@ -41,9 +41,7 @@ const RequestActions = ({ request }: { request: Request }) => {
   if (request._ownerId === user.id) {
     return (
       <Button
-        onClick={async () =>
-          await withdraw({ id: request._id, expectedRevision: request._rev })
-        }
+        onClick={async () => await withdraw({ id: request._id })}
         size="sm"
         variant="outline"
       >
@@ -52,12 +50,7 @@ const RequestActions = ({ request }: { request: Request }) => {
     );
   }
   return user.roles.includes("builder") ? (
-    <Decide
-      expectedRevision={request._rev}
-      id={request._id}
-      key={request._rev}
-      title={request.title}
-    />
+    <Decide id={request._id} key={request._updatedAt} title={request.title} />
   ) : null;
 };
 

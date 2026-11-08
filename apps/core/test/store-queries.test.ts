@@ -296,26 +296,12 @@ describe("owner-only tables", () => {
       mine: {
         _id: adaFirst,
         _ownerId: "ada",
-        _rev: 1,
         _createdAt: 0,
         _updatedAt: 0,
         title: "a",
         rank: 1,
       },
     });
-  });
-
-  it("assert a revision only on a record the caller may see", async () => {
-    const fixture = await storeWith("owner");
-    const [mine] = await insert(fixture, "ada", { title: "a" });
-    const [theirs] = await insert(fixture, "grace", { title: "b" });
-    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
-    const guarded = { expectedRevision: 2 };
-    expect({
-      mine: await refusal(db.get("notes", idOf(mine), guarded)),
-      theirs: await db.get("notes", idOf(theirs), guarded),
-      missing: await db.get("notes", idOf("missing"), guarded),
-    }).toStrictEqual({ mine: "data.conflict", theirs: null, missing: null });
   });
 
   it("read through the owner's index, never scanning others' records", async () => {
@@ -420,7 +406,11 @@ describe("what a descriptor names", () => {
       ),
       managedAggregate: await read(
         queryRequest({
-          terminal: { kind: "aggregate", operation: "sum", field: "_rev" },
+          terminal: {
+            kind: "aggregate",
+            operation: "sum",
+            field: "_createdAt",
+          },
         })
       ),
     }).toStrictEqual({
@@ -618,7 +608,6 @@ describe("stored documents", () => {
         kind: "get",
         table: "notes",
         id: id ?? "",
-        expectedRevision: null,
       });
       return {
         title: fieldOf(answer, "title"),
@@ -716,7 +705,6 @@ describe("more owners, more tables", () => {
           kind: "get",
           table: "people",
           id: person ?? "",
-          expectedRevision: null,
         }),
         "name"
       ),

@@ -53,7 +53,6 @@ const observed = (value: number) => ({ value, basis: "observed" as const });
 export const idSchema = z.string().min(1);
 
 export const snapshotSchema = z.looseObject({
-  _rev: z.number(),
   take: z.string(),
   title: z.string(),
   date: z.string(),
@@ -206,13 +205,12 @@ export const saveWorkflow = async (
   admin: Person,
   map: AppId,
   fields: Record<string, unknown>,
-  from: { id: string; revision: number } | null = null
+  from: { id: string } | null = null
 ): Promise<string> =>
   z.object({ id: idSchema }).parse(
     valueOf(
       await call(admin, map, "map.save", "mutation", {
         id: from?.id ?? null,
-        expectedRevision: from?.revision ?? null,
         team: null,
         parameters: [],
         gain: null,
@@ -221,17 +219,6 @@ export const saveWorkflow = async (
       })
     )
   ).id;
-
-/** A map workflow's revision now. */
-export const revisionOf = async (
-  admin: Person,
-  map: AppId,
-  id: string
-): Promise<number> =>
-  z
-    .object({ current: z.looseObject({ _rev: z.number() }) })
-    .parse(valueOf(await call(admin, map, "map.open", "query", { id }))).current
-    ._rev;
 
 /**
  * A team, a drawn workflow and a designed one linked to `pay` of a new
@@ -293,13 +280,12 @@ export const seedMap = async (admin: Person, map: AppId) => {
         },
       ],
     },
-    { id: pay, revision: await revisionOf(admin, map, pay) }
+    { id: pay }
   );
   const payables = await payablesApp(admin);
   valueOf(
     await call(admin, map, "map.link", "mutation", {
       id: pay,
-      expectedRevision: await revisionOf(admin, map, pay),
       app: { appId: payables, workflowId: "pay" },
     })
   );

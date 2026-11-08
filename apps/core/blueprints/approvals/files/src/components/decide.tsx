@@ -20,16 +20,14 @@ import { useState } from "react";
 
 export const Decide = ({
   id,
-  expectedRevision,
   title,
 }: {
   id: Id<"requests">;
-  expectedRevision: number;
   title: string;
 }) => {
   const [open, setOpen] = useState(false);
   const form = useForm(api.requests.decide, {
-    defaultValues: { id, expectedRevision, outcome: "approved", note: "" },
+    defaultValues: { id, outcome: "approved", note: "" },
     onSuccess: () => {
       setOpen(false);
     },

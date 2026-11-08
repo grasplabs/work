@@ -13,8 +13,6 @@ import type { Id, MutationCtx } from "@server/_generated/server";
 
 const currency = "EUR";
 
-const revision = v.number().integer().min(1);
-
 const pendingRequest = async (ctx: MutationCtx, id: Id<"requests">) => {
   const request = await ctx.db.get("requests", id);
   if (request === null) {
@@ -60,7 +58,6 @@ export const submit = mutation({
 export const decide = mutation({
   args: {
     id: v.id("requests"),
-    expectedRevision: revision,
     outcome: v.enum(["approved", "rejected"]),
     note: v.string().trim().max(1000),
   },
@@ -80,15 +77,10 @@ export const decide = mutation({
         "Someone else decides a request of your own."
       );
     }
-    await ctx.db.patch(
-      "requests",
-      request._id,
-      {
-        status: args.outcome,
-        decision: { by: user.name, note: args.note, at: Date.now() },
-      },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("requests", request._id, {
+      status: args.outcome,
+      decision: { by: user.name, note: args.note, at: Date.now() },
+    });
     await ctx.notifyPeople(request._ownerId, {
       title: `Your request was ${args.outcome}`,
       body: request.title,
@@ -98,7 +90,7 @@ export const decide = mutation({
 });
 
 export const withdraw = mutation({
-  args: { id: v.id("requests"), expectedRevision: revision },
+  args: { id: v.id("requests") },
   returns: v.null(),
   handler: async (ctx, args) => {
     const user = await ctx.auth.getUser();
@@ -109,9 +101,7 @@ export const withdraw = mutation({
         "Only whoever asked withdraws a request."
       );
     }
-    await ctx.db.delete("requests", request._id, {
-      expectedRevision: args.expectedRevision,
-    });
+    await ctx.db.delete("requests", request._id);
     return null;
   },
 });

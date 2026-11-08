@@ -31,9 +31,12 @@ interface UseForm {
  * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
  *   public mutation or action, its input the fields, the argument
  *   descriptor its reference carries the validator (core checks again
- *   with its own). To edit a record, start `defaultValues` from it, its
- *   `_id` and `expectedRevision: record._rev` among them: a stale save
- *   fails as `data.conflict`, shown at the form's level.
+ *   with its own). The form sends the fields its function requires, and
+ *   of its optional fields only those the person changed. To edit a
+ *   record, bind a mutation that takes its ID and its fields as optional
+ *   (`.optional()`), start `defaultValues` from the record, and patch what
+ *   the form sends: two people changing different fields both keep their
+ *   changes.
  * - `useForm(schema, { defaultValues, onSubmit })`: a local form, checked
  *   by a native schema, `onSubmit` given its normalized output.
  *

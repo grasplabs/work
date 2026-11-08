@@ -88,7 +88,6 @@ const savedSchema = z.object({ id: z.string(), version: z.number() });
 
 const workflowSchema = z
   .object({
-    _rev: z.number(),
     version: z.number(),
     title: z.string(),
     state: z.string(),
@@ -135,17 +134,15 @@ const opened = async (person: Person, app: AppId, id: string) =>
     valueOf(await call(person, app, "map.open", "query", { id }))
   );
 
-/** Saves `fields` as a new workflow (`id` null) or from `expectedRevision`. */
+/** Saves `fields` as a new workflow (`id` null) or as one's next version. */
 const save = async (
   person: Person,
   app: AppId,
   id: string | null,
-  expectedRevision: number | null,
   fields: Record<string, unknown>
 ): Promise<OperationResult> =>
   await call(person, app, "map.save", "mutation", {
     id,
-    expectedRevision,
     ...fields,
   });
 
@@ -185,12 +182,12 @@ describe("the workflow map", { timeout: 60_000 }, () => {
       )
     );
     const first = savedSchema.parse(
-      valueOf(await save(admin, app, null, null, { ...drawn, team }))
+      valueOf(await save(admin, app, null, { ...drawn, team }))
     );
     const v1 = await opened(admin, app, first.id);
     // Drawn again: version 2, the one designing starts from.
     valueOf(
-      await save(admin, app, first.id, v1?.current._rev ?? 0, {
+      await save(admin, app, first.id, {
         ...drawn,
         team,
         title: "Pay invoices",
@@ -198,7 +195,7 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     );
     const v2 = await opened(admin, app, first.id);
     valueOf(
-      await save(admin, app, first.id, v2?.current._rev ?? 0, {
+      await save(admin, app, first.id, {
         ...drawn,
         team,
         title: "Pay invoices",
@@ -210,7 +207,7 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const v3 = await opened(admin, app, first.id);
     // Designed again, without its team: still beside version 2.
     valueOf(
-      await save(admin, app, first.id, v3?.current._rev ?? 0, {
+      await save(admin, app, first.id, {
         ...drawn,
         title: "Pay invoices",
         state: "designed",
@@ -309,46 +306,41 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const app = await mapOf(admin);
     const first = savedSchema.parse(
-      valueOf(await save(admin, app, null, null, drawn))
+      valueOf(await save(admin, app, null, drawn))
     );
-    const v1 = await opened(admin, app, first.id);
     const link = { appId: "app-1", workflowId: "pay" };
     const drawnLink = codeOf(
       await call(admin, app, "map.link", "mutation", {
         id: first.id,
-        expectedRevision: v1?.current._rev,
         app: link,
       })
     );
     const designed = { ...drawn, state: "designed", steps: designedSteps };
-    valueOf(await save(admin, app, first.id, v1?.current._rev ?? 0, designed));
-    const v2 = await opened(admin, app, first.id);
+    valueOf(await save(admin, app, first.id, designed));
     valueOf(
       await call(admin, app, "map.link", "mutation", {
         id: first.id,
-        expectedRevision: v2?.current._rev,
         app: link,
       })
     );
     const v3 = await opened(admin, app, first.id);
-    const revision = v3?.current._rev ?? 0;
     const sneaked = {
       byHandLink: codeOf(
-        await save(admin, app, first.id, revision, {
+        await save(admin, app, first.id, {
           ...designed,
           app: { appId: "app-2", workflowId: "other" },
         })
       ),
       byHandDrawn: codeOf(
-        await save(admin, app, first.id, revision, {
+        await save(admin, app, first.id, {
           ...designed,
           drawnVersion: 3,
         })
       ),
-      drawnAgain: codeOf(await save(admin, app, first.id, revision, drawn)),
+      drawnAgain: codeOf(await save(admin, app, first.id, drawn)),
     };
     // Saved again as designed: the link and the version last drawn kept.
-    valueOf(await save(admin, app, first.id, revision, designed));
+    valueOf(await save(admin, app, first.id, designed));
     const v4 = await opened(admin, app, first.id);
     expect({
       drawnLink,
@@ -372,53 +364,33 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     });
   });
 
-  it("never writes over someone else's edits, nor loses a version", async () => {
+  it("keeps the later of two saves from the same version, and the earlier among the versions", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await mapOf(admin);
     const designed = { ...drawn, state: "designed", steps: designedSteps };
     const first = savedSchema.parse(
-      valueOf(await save(admin, app, null, null, drawn))
+      valueOf(await save(admin, app, null, drawn))
     );
-    const v1 = await opened(admin, app, first.id);
-    valueOf(await save(admin, app, first.id, v1?.current._rev ?? 0, designed));
-    const v2 = await opened(admin, app, first.id);
-    const read = v2?.current._rev ?? 0;
-    // Someone else saves first.
-    valueOf(
-      await save(admin, app, first.id, read, { ...designed, title: "Theirs" })
-    );
-    const stale = {
-      saved: codeOf(
-        await save(admin, app, first.id, read, { ...designed, title: "Mine" })
-      ),
-      linked: codeOf(
-        await call(admin, app, "map.link", "mutation", {
-          id: first.id,
-          expectedRevision: read,
-          app: { appId: "app-1", workflowId: "pay" },
-        })
-      ),
-    };
+    valueOf(await save(admin, app, first.id, designed));
+    // Someone else saves first; the later save, from the same version,
+    // is the current one.
+    valueOf(await save(admin, app, first.id, { ...designed, title: "Theirs" }));
+    valueOf(await save(admin, app, first.id, { ...designed, title: "Mine" }));
     const now = await opened(admin, app, first.id);
-    const fourth = valueOf(
-      await call(admin, app, "map.version", "query", {
-        id: first.id,
-        version: 4,
-      })
+    const third = z.looseObject({ title: z.string() }).parse(
+      valueOf(
+        await call(admin, app, "map.version", "query", {
+          id: first.id,
+          version: 3,
+        })
+      )
     );
     expect({
-      stale,
-      now: {
-        version: now?.current.version,
-        title: now?.current.title,
-        app: now?.current.app,
-      },
-      fourth,
+      now: { version: now?.current.version, title: now?.current.title },
+      third: third.title,
     }).toStrictEqual({
-      stale: { saved: "data.conflict", linked: "data.conflict" },
-      now: { version: 3, title: "Theirs", app: null },
-      // Neither refused write left a version behind.
-      fourth: null,
+      now: { version: 4, title: "Mine" },
+      third: "Theirs",
     });
   });
 
@@ -426,16 +398,14 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const app = await mapOf(admin);
     const first = savedSchema.parse(
-      valueOf(await save(admin, app, null, null, drawn))
+      valueOf(await save(admin, app, null, drawn))
     );
-    const drawnFirst = await opened(admin, app, first.id);
     valueOf(
-      await save(admin, app, first.id, drawnFirst?.current._rev ?? 0, {
+      await save(admin, app, first.id, {
         ...drawn,
         state: "designed",
       })
     );
-    const v1 = await opened(admin, app, first.id);
     const member = await memberOf(admin, app, "user", "user");
     const builder = await memberOf(admin, app, "builder", "builder");
     const outsider = await signedInApi(idp, "user");
@@ -454,20 +424,17 @@ describe("the workflow map", { timeout: 60_000 }, () => {
         open: await by(member, "map.open", "query", { id: first.id }),
         teams: await by(member, "teams.list", "query"),
         writable: await writable(member),
-        save: codeOf(await save(member, app, null, null, drawn)),
-        edit: codeOf(
-          await save(member, app, first.id, v1?.current._rev ?? 0, drawn)
-        ),
+        save: codeOf(await save(member, app, null, drawn)),
+        edit: codeOf(await save(member, app, first.id, drawn)),
         team: await by(member, "teams.add", "mutation", { title: "Ops" }),
         link: await by(member, "map.link", "mutation", {
           id: first.id,
-          expectedRevision: v1?.current._rev,
           app: { appId: "app-1", workflowId: "pay" },
         }),
       },
       builder: {
         writable: await writable(builder),
-        save: codeOf(await save(builder, app, null, null, drawn)),
+        save: codeOf(await save(builder, app, null, drawn)),
       },
       admin: await writable(admin),
       outsider: await by(outsider, "map.list", "query", { pagination: {} }),
@@ -516,18 +483,18 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const app = await mapOf(admin);
     const first = savedSchema.parse(
-      valueOf(await save(admin, app, null, null, drawn))
+      valueOf(await save(admin, app, null, drawn))
     );
     expect({
       // A workflow's ID where a team's goes.
       notATeam: codeOf(
-        await save(admin, app, null, null, { ...drawn, team: first.id })
+        await save(admin, app, null, { ...drawn, team: first.id })
       ),
       madeUp: codeOf(
-        await save(admin, app, null, null, { ...drawn, team: "team-1" })
+        await save(admin, app, null, { ...drawn, team: "team-1" })
       ),
       designedFirst: codeOf(
-        await save(admin, app, null, null, { ...drawn, state: "designed" })
+        await save(admin, app, null, { ...drawn, state: "designed" })
       ),
     }).toStrictEqual({
       notATeam: "data.reference_invalid",
@@ -541,7 +508,7 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const app = await mapOf(admin);
     const saved = async (title: string, steps: unknown[]) =>
       savedSchema.parse(
-        valueOf(await save(admin, app, null, null, { ...drawn, title, steps }))
+        valueOf(await save(admin, app, null, { ...drawn, title, steps }))
       ).id;
     const mixed = await saved("Mixed", [
       {
@@ -627,23 +594,20 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const app = await mapOf(admin);
     const saved = async (fields: Record<string, unknown>) =>
-      codeOf(await save(admin, app, null, null, { ...drawn, ...fields }));
+      codeOf(await save(admin, app, null, { ...drawn, ...fields }));
     const designed = savedSchema.parse(
-      valueOf(await save(admin, app, null, null, drawn))
+      valueOf(await save(admin, app, null, drawn))
     );
-    const v1 = await opened(admin, app, designed.id);
     valueOf(
-      await save(admin, app, designed.id, v1?.current._rev ?? 0, {
+      await save(admin, app, designed.id, {
         ...drawn,
         state: "designed",
       })
     );
-    const v2 = await opened(admin, app, designed.id);
     const linked = async (appId: string, workflowId: string) =>
       codeOf(
         await call(admin, app, "map.link", "mutation", {
           id: designed.id,
-          expectedRevision: v2?.current._rev,
           app: { appId, workflowId },
         })
       );
@@ -692,12 +656,9 @@ describe("the workflow map", { timeout: 60_000 }, () => {
       steps: Array.from({ length: 12 }, (_, index) => longStep(index)),
       notes: "€".repeat(30_000),
     };
-    const first = savedSchema.parse(
-      valueOf(await save(admin, app, null, null, big))
-    );
-    const v1 = await opened(admin, app, first.id);
+    const first = savedSchema.parse(valueOf(await save(admin, app, null, big)));
     valueOf(
-      await save(admin, app, first.id, v1?.current._rev ?? 0, {
+      await save(admin, app, first.id, {
         ...big,
         state: "designed",
       })
@@ -719,7 +680,7 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const ids = [];
     for (const title of ["Bill", "Close", "Deliver"]) {
       // oxlint-disable-next-line no-await-in-loop -- in the order they're made
-      const made = await save(admin, app, null, null, { ...drawn, title });
+      const made = await save(admin, app, null, { ...drawn, title });
       ids.push(savedSchema.parse(valueOf(made)).id);
     }
     const figuresSchema = z.object({
@@ -737,9 +698,8 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const first = await page(null);
     // The one not read yet is renamed to sort first by title.
     const last = ids[2] ?? "";
-    const before = await opened(admin, app, last);
     valueOf(
-      await save(admin, app, last, before?.current._rev ?? 0, {
+      await save(admin, app, last, {
         ...drawn,
         title: "Account",
       })
@@ -755,7 +715,7 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     const app = await mapOf(admin);
     // Each field within its limit, all at their longest too much to list.
     const tooLarge = codeOf(
-      await save(admin, app, null, null, {
+      await save(admin, app, null, {
         ...drawn,
         steps: Array.from({ length: 100 }, (_, index) => longStep(index)),
       })
@@ -767,7 +727,7 @@ describe("the workflow map", { timeout: 60_000 }, () => {
       notes: "n".repeat(30_000),
     };
     const saveLarge = async (): Promise<void> => {
-      valueOf(await save(admin, app, null, null, large));
+      valueOf(await save(admin, app, null, large));
     };
     for (let count = 0; count < 11; count += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one save at a time

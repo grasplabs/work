@@ -71,13 +71,13 @@ export const create = mutation({
 });
 
 export const attachFile = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1), file: v.file() },
+  args: { id: v.id("notes"), file: v.file() },
   returns: doc("notes"),
   handler: async (ctx, args) => {
-    const note = await ctx.db.get("notes", args.id, { expectedRevision: args.expectedRevision });
+    const note = await ctx.db.get("notes", args.id);
     if (!note) throw new AppError("note.not_found", "The note is unavailable.");
     if (note.attachments.some((file) => file.id === args.file.id)) return note;
-    await ctx.db.patch("notes", args.id, { attachments: [...note.attachments, args.file] }, { expectedRevision: args.expectedRevision });
+    await ctx.db.patch("notes", args.id, { attachments: [...note.attachments, args.file] });
     const updated = await ctx.db.get("notes", args.id);
     if (!updated) throw new AppError("note.not_found", "The note is unavailable.");
     return updated;
@@ -85,32 +85,32 @@ export const attachFile = mutation({
 });
 
 export const detachFile = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1), file: v.file() },
+  args: { id: v.id("notes"), file: v.file() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const note = await ctx.db.get("notes", args.id, { expectedRevision: args.expectedRevision });
+    const note = await ctx.db.get("notes", args.id);
     if (!note) throw new AppError("note.not_found", "The note is unavailable.");
-    await ctx.db.patch("notes", args.id, { attachments: note.attachments.filter((file) => file.id !== args.file.id) }, { expectedRevision: args.expectedRevision });
+    await ctx.db.patch("notes", args.id, { attachments: note.attachments.filter((file) => file.id !== args.file.id) });
     return null;
   },
 });
 
 export const remove = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, { expectedRevision: args.expectedRevision });
+    await ctx.db.delete("notes", args.id);
     return null;
   },
 });
 
 /** Moves a note's file to a new note, written first, then deletes the note. */
 export const renew = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1), file: v.file() },
+  args: { id: v.id("notes"), file: v.file() },
   returns: v.id("notes"),
   handler: async (ctx, args) => {
     const renewed = await ctx.db.insert("notes", { title: "Renewed", attachments: [args.file] });
-    await ctx.db.delete("notes", args.id, { expectedRevision: args.expectedRevision });
+    await ctx.db.delete("notes", args.id);
     return renewed;
   },
 });
@@ -166,10 +166,10 @@ export const pinById = mutation({
 
 /** Takes the file off a board entry, whoever pinned it. */
 export const unpin = mutation({
-  args: { id: v.id("board"), expectedRevision: v.number().integer().min(1), file: v.file() },
+  args: { id: v.id("board"), file: v.file() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch("board", args.id, { file: null }, { expectedRevision: args.expectedRevision });
+    await ctx.db.patch("board", args.id, { file: null });
     return null;
   },
 });
@@ -192,14 +192,12 @@ export const Route = createFileRoute("/")({ component: Notes });
 /** A note as the App's queries return it. */
 interface Note {
   _id: Id<"notes">;
-  _rev: number;
   title: string;
   attachments: { id: string }[];
 }
 
 interface FileArgs {
   id: Id<"notes">;
-  expectedRevision: number;
   file: { id: string };
 }
 
@@ -220,11 +218,10 @@ const apiOf = (release: Release) => ({
     release,
     "notes.detachFile"
   ),
-  remove: referenceTo<
-    { id: Id<"notes">; expectedRevision: number },
-    null,
-    "mutation"
-  >(release, "notes.remove"),
+  remove: referenceTo<{ id: Id<"notes"> }, null, "mutation">(
+    release,
+    "notes.remove"
+  ),
   stash: referenceTo<{ file: { id: string } }, string, "mutation">(
     release,
     "notes.stash"
@@ -233,11 +230,10 @@ const apiOf = (release: Release) => ({
     release,
     "notes.pin"
   ),
-  renew: referenceTo<
-    { id: string; expectedRevision: number; file: { id: string } },
-    string,
-    "mutation"
-  >(release, "notes.renew"),
+  renew: referenceTo<{ id: string; file: { id: string } }, string, "mutation">(
+    release,
+    "notes.renew"
+  ),
   keepTwice: referenceTo<
     { file: { id: string }; vaultFirst: boolean },
     null,
@@ -252,11 +248,10 @@ const apiOf = (release: Release) => ({
     release,
     "notes.pinById"
   ),
-  unpin: referenceTo<
-    { id: string; expectedRevision: number; file: { id: string } },
-    null,
-    "mutation"
-  >(release, "notes.unpin"),
+  unpin: referenceTo<{ id: string; file: { id: string } }, null, "mutation">(
+    release,
+    "notes.unpin"
+  ),
 });
 
 /** The App's `permissions`, as its pages import them from `@server/_generated/api`. */

@@ -2276,7 +2276,6 @@ export class StoreHost {
             reader.principal,
             reader,
             preview.writes,
-            [],
             undefined,
             true
           );
@@ -3129,13 +3128,7 @@ export class StoreHost {
         id: row.recordId,
         fields: storedFieldsSchema.parse(JSON.parse(row.valueJson)),
       }));
-      const { staged: written } = this.#apply(
-        pinned,
-        principal,
-        roles,
-        writes,
-        []
-      );
+      const { staged: written } = this.#apply(pinned, principal, roles, writes);
       this.#requireNotDeleting(written);
       this.#flush(written, principal, schemaHash, now);
       this.#indexReferences(pinned, written, principal, roles);
@@ -3359,10 +3352,10 @@ export class StoreHost {
    * outbox entries, or nothing: the attempt must hold the receipt's
    * current fence (`submission.superseded`) before its deadline
    * (`submission.deadline_passed`); every table it read must still be at
-   * the generation it read (`data.reads_changed`); each guard's record
-   * must still be at the revision read, and each write's record at its
-   * expected revision (a record the commit inserted is at 1), otherwise
-   * `data.conflict`. Every write is checked against the access of the
+   * the generation it read (`data.reads_changed`); each record a patch,
+   * replacement or deletion changes must still be there, and the
+   * principal's under `owner` access, otherwise `data.conflict`. Every
+   * write is checked against the access of the
    * schema it is pinned to, for the principal and the roles core resolved
    * just before (`#apply`). An attempt whose mutation another attempt
    * committed meanwhile answers that outcome. Inserted records are owned
@@ -3379,7 +3372,6 @@ export class StoreHost {
       schemaHash,
       receipt: held,
       stagedAt,
-      guards,
       readSet,
       writes,
       intents,
@@ -3425,16 +3417,11 @@ export class StoreHost {
       // Checked again here, with nothing awaited between it and the
       // writes: a schema applied since `#pinned` read it.
       this.#requireCurrent(schemaHash);
-      // The explicit guards first: a record the mutation asserted a
-      // revision of, now at another, is a conflict for its caller
-      // (`data.conflict`), never a stale read set to run again for, which
-      // could commit a fallback its rerun reached instead.
       const { staged, inserted, cascadeJob } = this.#apply(
         pinned,
         principal.userId,
         roles,
         writes,
-        guards,
         () => {
           const current = this.#generationsOf(pinned, Object.keys(readSet));
           for (const [table, generation] of Object.entries(readSet)) {
@@ -3570,12 +3557,11 @@ export class StoreHost {
   /**
    * The records `writes` change, as they would be after them, checked
    * against the store as it is (call it inside a transaction): each
-   * guard's record still at its revision; each write to a table of the
+   * write to a table of the
    * pinned schema that the schema lets `roles` write (`data.write_denied`
    * otherwise; `data.unknown_table` for a table it hasn't); a record an
    * `owner` table's write changes owned by `principal`, as one that
-   * doesn't exist and one at another revision are (`data.conflict`, the
-   * same for all three, so a write learns nothing of a record it may not
+   * doesn't exist is (`data.conflict`, the same for both, so a write learns nothing of a record it may not
    * change); an insert's ID not in use. What a commit writes, and what a
    * preview applies before its read.
    */
@@ -3584,8 +3570,7 @@ export class StoreHost {
     principal: string,
     roles: WriterRoles,
     writes: readonly StoredWrite[],
-    guards: readonly { table: string; id: string; expectedRevision: number }[],
-    afterGuards?: () => void,
+    beforeWrites?: () => void,
     preview = false
   ): { staged: Staged[]; inserted: string[]; cascadeJob?: CascadePlan } {
     const tableIdOf = (table: string): string => {
@@ -3663,50 +3648,25 @@ export class StoreHost {
       return entry;
     };
     /**
-     * The staged record and its fields, if it exists at `expected` (and,
-     * with `own`, is the principal's); otherwise a conflict.
+     * The staged record and its fields, if it exists (and, with `own`, is
+     * the principal's); otherwise a conflict.
      */
-    const at = (
+    const existing = (
       table: string,
       tableId: string,
       recordId: string,
-      expected: number,
       own: boolean
     ): { entry: Staged; fields: StoreFields } => {
       const entry = stage(table, tableId, recordId);
       const { fields, base } = entry;
-      const revision = base?.revision ?? 1;
-      // A record an earlier write of this commit changed is shown to the
-      // mutation's staged reads at the revision its commit will give it
-      // (one more, once, if its fields differ): a later write may assert
-      // that, as well as the revision it was read at before the change.
-      const shown =
-        base !== undefined &&
-        fields !== null &&
-        storedText(fields) !== base.valueJson
-          ? base.revision + 1
-          : revision;
       const owned = base === undefined || base.ownerId === principal;
-      if (
-        fields === null ||
-        (expected !== revision && expected !== shown) ||
-        (own && !owned)
-      ) {
+      if (fields === null || (own && !owned)) {
         throw conflict(table, recordId);
       }
       return { entry, fields };
     };
 
-    for (const guard of guards) {
-      at(
-        guard.table,
-        tableIdOf(guard.table),
-        guard.id,
-        guard.expectedRevision,
-        false
-      );
-    }
-    afterGuards?.();
+    beforeWrites?.();
     const inserted: string[] = [];
     for (const write of writes) {
       const { tableId, own, rows } = writable(write.table);
@@ -3738,13 +3698,7 @@ export class StoreHost {
         inserted.push(write.id);
         continue;
       }
-      const { entry, fields } = at(
-        write.table,
-        tableId,
-        write.id,
-        write.expectedRevision,
-        own
-      );
+      const { entry, fields } = existing(write.table, tableId, write.id, own);
       // A row the rules keep from the writer, for reading or writing, is
       // answered as one that isn't there, as `owner` answers another's
       // (`at`): a patch, replacement or deletion learns nothing of it,

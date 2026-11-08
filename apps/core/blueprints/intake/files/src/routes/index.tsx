@@ -268,13 +268,12 @@ const Intake = () => {
       setProblem(refusal("intake.not_found"));
       return;
     }
-    const { _id, _rev, origin, source, statements } = answer.ok;
+    const { _id, origin, source, statements } = answer.ok;
     setProblem("");
     setView({
       kind: "open",
       opened: {
         id: _id,
-        revision: _rev,
         origin,
         draft: { source, statements },
       },
@@ -445,11 +444,7 @@ const Intake = () => {
       ) : null}
       {view.kind === "new" || view.kind === "open" ? (
         <DraftEditor
-          key={
-            view.kind === "new"
-              ? `new:${view.count}`
-              : `${view.opened.id}@${view.opened.revision}`
-          }
+          key={view.kind === "new" ? `new:${view.count}` : view.opened.id}
           opened={view.kind === "new" ? null : view.opened}
           problem={view.kind === "new" ? "" : view.problem}
           onResult={onResult}

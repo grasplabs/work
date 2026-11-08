@@ -11,7 +11,6 @@ import {
   idSchema,
   listed,
   opened,
-  revisionOf,
   saveWorkflow,
   seedMap,
   seedRuns,
@@ -160,12 +159,11 @@ describe("the board page", { timeout: 90_000 }, () => {
           },
         ],
       },
-      { id: gone, revision: await revisionOf(admin, map, gone) }
+      { id: gone }
     );
     valueOf(
       await call(admin, map, "map.link", "mutation", {
         id: gone,
-        expectedRevision: await revisionOf(admin, map, gone),
         app: { appId: crypto.randomUUID(), workflowId: "pay" },
       })
     );
@@ -248,34 +246,31 @@ describe("the board page", { timeout: 90_000 }, () => {
           },
         ],
       },
-      { id: book, revision: await revisionOf(admin, map, book) }
+      { id: book }
     );
     await seedRuns(payables, 60, dayMs);
     await seedSignals([[payables, "pay", "failing_step", "match", 30]]);
     const later = await opened(admin, app, taken);
-    // Its narrative and decision written; from its first revision again,
-    // someone else's came first.
-    const write = async (expectedRevision: number, narrative: string) =>
+    // Its narrative and decision written, then written again from the
+    // same snapshot: the later save stays.
+    const write = async (narrative: string) =>
       codeOf(
         await call(admin, app, "snapshots.write", "mutation", {
           id: taken,
-          expectedRevision,
           decisionNeeded: "Hire a bid writer?",
           narrative,
         })
       );
-    const written = await write(before.snapshot._rev, "Tenders take hours.");
-    const stale = await write(before.snapshot._rev, "Mine.");
+    const written = await write("Tenders take hours.");
+    const again = await write("Mine.");
     const after = await opened(admin, app, taken);
     const {
-      _rev: _before,
       _updatedAt: _beforeUpdated,
       narrative: _noNarrative,
       decisionNeeded: _noDecision,
       ...frozen
     } = before.snapshot;
     const {
-      _rev: _after,
       _updatedAt: _afterUpdated,
       narrative,
       decisionNeeded,
@@ -285,7 +280,7 @@ describe("the board page", { timeout: 90_000 }, () => {
       later: later.snapshot,
       laterFigures: [...later.figures.values()],
       written,
-      stale,
+      again,
       after: { narrative, decisionNeeded },
       kept,
       keptFigures: [...after.figures.values()],
@@ -293,9 +288,9 @@ describe("the board page", { timeout: 90_000 }, () => {
       later: before.snapshot,
       laterFigures: [...before.figures.values()],
       written: "ok",
-      stale: "data.conflict",
+      again: "ok",
       after: {
-        narrative: "Tenders take hours.",
+        narrative: "Mine.",
         decisionNeeded: "Hire a bid writer?",
       },
       kept: frozen,

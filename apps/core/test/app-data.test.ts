@@ -94,8 +94,22 @@ export const rename = mutation({
   handler: async (ctx, args) => {
     const found = await ctx.db.get("notes", args.id);
     if (found !== null) {
-      await ctx.db.patch("notes", args.id, { title: args.title }, { expectedRevision: found._rev });
+      await ctx.db.patch("notes", args.id, { title: args.title });
     }
+    return null;
+  },
+});
+
+/** Saves what someone changed of a note, and only that, as a form sends it. */
+export const edit = mutation({
+  args: {
+    id: v.id("notes"),
+    title: v.string().min(1).max(200).optional(),
+    status: v.string().optional(),
+  },
+  returns: v.null(),
+  handler: async (ctx, { id, ...changed }) => {
+    await ctx.db.patch("notes", id, changed);
     return null;
   },
 });
@@ -106,7 +120,7 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     const found = await ctx.db.get("notes", args.id);
     if (found !== null) {
-      await ctx.db.delete("notes", args.id, { expectedRevision: found._rev });
+      await ctx.db.delete("notes", args.id);
     }
     return null;
   },
@@ -325,6 +339,58 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     await expect(
       builder.api.apps.data.record(notes.app, "notes", notes.version, id)
     ).resolves.toBeNull();
+  });
+
+  it("keeps both of two saves to different fields of one record", async () => {
+    const notes = await notesApp();
+    const { builder } = notes;
+    const id = String(
+      await call(notes, builder, "notes.create", {
+        title: "Plan",
+        status: "open",
+      })
+    );
+    // Two people's saves, each of the field they changed, from the same
+    // record, at once.
+    await Promise.all([
+      call(notes, builder, "notes.edit", { id, title: "Plan B" }),
+      call(notes, builder, "notes.edit", { id, status: "done" }),
+    ]);
+    await expect(
+      builder.api.apps.data.record(notes.app, "notes", notes.version, id)
+    ).resolves.toMatchObject({ fields: { title: "Plan B", status: "done" } });
+  });
+
+  it("ends a race on one field with the later save, the earlier value in the record's history", async () => {
+    const notes = await notesApp();
+    const { builder } = notes;
+    const id = String(
+      await call(notes, builder, "notes.create", { title: "Plan" })
+    );
+    await Promise.all([
+      call(notes, builder, "notes.edit", { id, title: "Mine" }),
+      call(notes, builder, "notes.edit", { id, title: "Theirs" }),
+    ]);
+    const [later, earlier] = await historyOf(notes, "notes", id);
+    const kept = await builder.api.apps.data.record(
+      notes.app,
+      "notes",
+      notes.version,
+      id
+    );
+    // Whichever committed last is the record's title; the other is the
+    // change before it, nothing lost.
+    expect({
+      saved: [later?.after?.title, earlier?.after?.title]
+        .map(String)
+        .toSorted((a, b) => a.localeCompare(b)),
+      kept: kept?.fields.title,
+      before: later?.before,
+    }).toStrictEqual({
+      saved: ["Mine", "Theirs"],
+      kept: later?.after?.title,
+      before: { title: earlier?.after?.title },
+    });
   });
 
   it("keeps which fields changed in a table declared sensitive, never their values", async () => {

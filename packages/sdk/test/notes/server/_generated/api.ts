@@ -16,12 +16,12 @@ export const api: {
   readonly notes: {
     readonly create: OperationReference<{ body?: string; title: string }, Id<"notes">, "mutation", "public">;
     readonly exportAll: OperationReference<{ format: "csv" | "json" }, string, "action", "public", { done: number }>;
-    readonly get: OperationReference<{ id: Id<"notes"> }, { _createdAt: number; _id: Id<"notes">; _ownerId: string; _rev: number; _updatedAt: number; body: string; summary: string | null; title: string } | null, "query", "public">;
-    readonly list: OperationReference<{ pagination: { cursor?: string | null; pageSize?: number } }, ({ hasMore: false; items: Array<{ _createdAt: number; _id: Id<"notes">; _ownerId: string; _rev: number; _updatedAt: number; body: string; summary: string | null; title: string }>; nextCursor: null }) | ({ hasMore: true; items: Array<{ _createdAt: number; _id: Id<"notes">; _ownerId: string; _rev: number; _updatedAt: number; body: string; summary: string | null; title: string }>; nextCursor: string }), "query", "public">;
-    readonly remove: OperationReference<{ expectedRevision: number; id: Id<"notes"> }, null, "mutation", "public">;
-    readonly setSummary: OperationReference<{ expectedRevision: number; id: Id<"notes">; summary: string }, null, "mutation", "public">;
+    readonly get: OperationReference<{ id: Id<"notes"> }, { _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string } | null, "query", "public">;
+    readonly list: OperationReference<{ pagination: { cursor?: string | null; pageSize?: number } }, ({ hasMore: false; items: Array<{ _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string }>; nextCursor: null }) | ({ hasMore: true; items: Array<{ _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string }>; nextCursor: string }), "query", "public">;
+    readonly remove: OperationReference<{ id: Id<"notes"> }, null, "mutation", "public">;
+    readonly setSummary: OperationReference<{ id: Id<"notes">; summary: string }, null, "mutation", "public">;
     readonly tally: OperationReference<Record<never, never>, number, "action", "public">;
-    readonly update: OperationReference<{ body: string; expectedRevision: number; id: Id<"notes">; title: string }, { _createdAt: number; _id: Id<"notes">; _ownerId: string; _rev: number; _updatedAt: number; body: string; summary: string | null; title: string }, "mutation", "public">;
+    readonly update: OperationReference<{ body?: string; id: Id<"notes">; title?: string }, { _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string }, "mutation", "public">;
   };
 } = frozen({
   notes: {
@@ -105,14 +105,6 @@ export const api: {
             "nullable": false,
             "presence": "required",
             "trim": false
-          },
-          "_rev": {
-            "descriptorVersion": 1,
-            "integer": true,
-            "kind": "number",
-            "min": 1,
-            "nullable": false,
-            "presence": "required"
           },
           "_updatedAt": {
             "descriptorVersion": 1,
@@ -198,14 +190,6 @@ export const api: {
                       "nullable": false,
                       "presence": "required",
                       "trim": false
-                    },
-                    "_rev": {
-                      "descriptorVersion": 1,
-                      "integer": true,
-                      "kind": "number",
-                      "min": 1,
-                      "nullable": false,
-                      "presence": "required"
                     },
                     "_updatedAt": {
                       "descriptorVersion": 1,
@@ -301,14 +285,6 @@ export const api: {
                       "presence": "required",
                       "trim": false
                     },
-                    "_rev": {
-                      "descriptorVersion": 1,
-                      "integer": true,
-                      "kind": "number",
-                      "min": 1,
-                      "nullable": false,
-                      "presence": "required"
-                    },
                     "_updatedAt": {
                       "descriptorVersion": 1,
                       "kind": "timestamp",
@@ -380,14 +356,6 @@ export const api: {
       "args": {
         "descriptorVersion": 1,
         "fields": {
-          "expectedRevision": {
-            "descriptorVersion": 1,
-            "integer": true,
-            "kind": "number",
-            "min": 1,
-            "nullable": false,
-            "presence": "required"
-          },
           "id": {
             "descriptorVersion": 1,
             "kind": "id",
@@ -407,14 +375,6 @@ export const api: {
       "args": {
         "descriptorVersion": 1,
         "fields": {
-          "expectedRevision": {
-            "descriptorVersion": 1,
-            "integer": true,
-            "kind": "number",
-            "min": 1,
-            "nullable": false,
-            "presence": "required"
-          },
           "id": {
             "descriptorVersion": 1,
             "kind": "id",
@@ -460,16 +420,8 @@ export const api: {
             "kind": "string",
             "max": 100000,
             "nullable": false,
-            "presence": "required",
+            "presence": "optional",
             "trim": false
-          },
-          "expectedRevision": {
-            "descriptorVersion": 1,
-            "integer": true,
-            "kind": "number",
-            "min": 1,
-            "nullable": false,
-            "presence": "required"
           },
           "id": {
             "descriptorVersion": 1,
@@ -485,7 +437,7 @@ export const api: {
             "max": 200,
             "min": 1,
             "nullable": false,
-            "presence": "required",
+            "presence": "optional",
             "trim": true
           }
         },

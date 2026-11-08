@@ -182,7 +182,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await expect(
       client.mutation(api.attachFile, {
         id: note,
-        expectedRevision: 1,
         file: { id },
       })
     ).resolves.toMatchObject({ attachments: [{ id }] });
@@ -225,7 +224,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const unpin = async () =>
       await colleague.client.mutation(
         api.unpin,
-        { id: pinned, expectedRevision: 1, file: { id } },
+        { id: pinned, file: { id } },
         { idempotencyKey: "unpin-once" }
       );
     // Its answer lost, the colleague sends it again under the same key.
@@ -236,7 +235,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
       codeOf(
         colleague.client.mutation(api.unpin, {
           id: pinned,
-          expectedRevision: 2,
           file: { id },
         })
       )
@@ -546,7 +544,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const note = await client.mutation(api.create, { title: "Holder" });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 1,
       file: { id: held },
     });
     const keyed = { idempotencyKey: "clean-up" };
@@ -562,7 +559,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
         codeOf(
           client.mutation(api.attachFile, {
             id: other,
-            expectedRevision: 1,
             file: { id: loose },
           })
         ),
@@ -581,11 +577,10 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const note = await client.mutation(api.create, { title: "Holder" });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 1,
       file: { id },
     });
     // Its note deleted: kept through the orphan retention.
-    await client.mutation(api.remove, { id: note, expectedRevision: 2 });
+    await client.mutation(api.remove, { id: note });
     await sweepIn(release, fileLimits.orphanMs - 60_000);
     await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       id,
@@ -594,7 +589,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const again = await client.mutation(api.create, { title: "Again" });
     await client.mutation(api.attachFile, {
       id: again,
-      expectedRevision: 1,
       file: { id },
     });
     await sweepIn(release, fileLimits.orphanMs + purgeGraceMs + 1);
@@ -605,7 +599,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     // its bytes removed.
     await client.mutation(api.detachFile, {
       id: again,
-      expectedRevision: 2,
       file: { id },
     });
     await sweepIn(release, fileLimits.orphanMs + 1);
@@ -669,7 +662,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const note = await client.mutation(api.create, { title: "Shared" });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 1,
       file: { id },
     });
     const response = await colleague.page.channel.content("files", id);
@@ -678,7 +670,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     // Detached: the colleague reads it through no record any more.
     await client.mutation(api.detachFile, {
       id: note,
-      expectedRevision: 2,
       file: { id },
     });
     await expect(reader?.read()).rejects.toThrow("That file isn't available.");

@@ -62,15 +62,13 @@ export const move = mutation({
   args: {
     id: v.id("cards"),
     column: v.enum(columns),
-    expectedRevision: v.number().integer().min(1),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.db.patch(
       "cards",
       args.id,
-      { column: args.column },
-      { expectedRevision: args.expectedRevision }
+      { column: args.column }
     );
     return null;
   },
@@ -136,7 +134,6 @@ const Board = () => {
                             await move({
                               id: card._id,
                               column: next.id,
-                              expectedRevision: card._rev,
                             });
                           }}
                         >

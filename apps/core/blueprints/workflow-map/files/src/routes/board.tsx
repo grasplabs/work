@@ -193,7 +193,7 @@ const Board = () => {
           {writable ? (
             <div className="print:hidden">
               <NarrativeEditor
-                key={`${opened.id}@${opened.revision}`}
+                key={opened.id}
                 snapshot={opened}
                 onSaved={(id) => {
                   void snapshots.current.saved(id, to);

@@ -49,7 +49,7 @@ const CardItem = ({ card }: { card: Doc<"cards"> }) => {
       setProblem(error.message);
     }
   };
-  const ref = { id: card._id, expectedRevision: card._rev };
+  const ref = { id: card._id };
   const moveTo = async (column: ColumnId) =>
     await attempt(async () => await move({ ...ref, column }));
   return (

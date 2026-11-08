@@ -71,9 +71,9 @@ const ranNothing = (settled: Settled, isAction: boolean): boolean =>
  * Whether, after `settled`, what the App's queries show may be out of
  * date: a confirmed change; an action's failure after a step, or its lost
  * answer, which undoes none of what it committed (its queries are read
- * again, the action itself is never run again); or records that moved on since this
- * client read them (`data.conflict`), so a form edited from them gets the
- * record as it is now.
+ * again, the action itself is never run again); or a record that is gone since this
+ * client read it (`data.conflict`), so a page shows the records as they
+ * are now.
  */
 export const showsStale = (settled: Settled, isAction: boolean): boolean =>
   settled.kind === "value" ||

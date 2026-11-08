@@ -194,7 +194,6 @@ describe("a search's pages", () => {
         op: "delete",
         table: "notes",
         id: last?._id ?? "",
-        expectedRevision: last?._rev ?? 1,
       },
     ]);
     expect({
@@ -298,16 +297,13 @@ describe("a search index's text", () => {
         table: "notes",
         id,
         fields: { title: "quokka" },
-        expectedRevision: 1,
       },
     ]);
     const changed = {
       old: await pagesHolding(store, "zyzzyva"),
       found: await found(store, schemaHash, "quokka"),
     };
-    await commit(store, schemaHash, [
-      { op: "delete", table: "notes", id, expectedRevision: 2 },
-    ]);
+    await commit(store, schemaHash, [{ op: "delete", table: "notes", id }]);
     expect({
       stored,
       changed,
@@ -410,7 +406,7 @@ describe("a search index", () => {
     };
     const before = await search();
     const { cascaded } = await commit(store, schemaHash, [
-      { op: "delete", table: "accounts", id: account, expectedRevision: 1 },
+      { op: "delete", table: "accounts", id: account },
     ]);
     expect({
       before,
