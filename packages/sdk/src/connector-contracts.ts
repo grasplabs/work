@@ -36,7 +36,7 @@ export interface HttpAnswer {
   readonly body: string;
 }
 
-/** An HTTP connection's actions, as `call` takes them. */
+/** An HTTP connection's actions, as its client's `fetch` makes them. */
 interface HttpActions {
   readonly get: {
     readonly input: {
@@ -59,9 +59,15 @@ interface HttpActions {
   };
 }
 
-/** What `fetch` of an HTTP connection's client takes besides its path. */
-export interface HttpRequestInit {
-  readonly method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+/** An HTTP connection's request methods: `get`'s, then `send`'s. */
+export type HttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/**
+ * What `fetch` of an HTTP connection's client takes besides its path:
+ * `Method`, the methods its declared actions allow.
+ */
+export interface HttpRequestInit<Method extends HttpMethod = HttpMethod> {
+  readonly method?: Method;
   readonly headers?: HttpHeaders;
   readonly body?: string;
 }

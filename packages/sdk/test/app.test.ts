@@ -538,6 +538,27 @@ const recordingChannel = () => {
   };
 };
 
+/** A client read past its types: the members the tests below reach. */
+interface Loose {
+  (...args: unknown[]): Promise<unknown>;
+  readonly tools: Loose;
+  readonly billing: Loose;
+  readonly sendMail: Loose;
+  readonly statistics: Loose;
+  readonly read: Loose;
+}
+
+// SAFETY: deliberately loose, to read what a client holds at run time.
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+const loose = (client: unknown): Loose => client as Loose;
+
+/** What a client holds: its own names, its prototype, and whether it's frozen. */
+const shapeOf = (client: object) => ({
+  own: Reflect.ownKeys(client),
+  prototype: Reflect.getPrototypeOf(client),
+  frozen: Object.isFrozen(client),
+});
+
 describe("the App's permissions in a function's context", () => {
   const mail = permission.connection("mail", {
     contract: "microsoft-365.mail@1",
@@ -598,6 +619,71 @@ describe("the App's permissions in a function's context", () => {
     await expect(
       runFunction(registered, "notes.read", {}, channel)
     ).resolves.toStrictEqual([]);
+  });
+
+  test("each declared action is a member that sends its declared name, and nothing else is a member", async () => {
+    const tools = permission.connection("tools", {
+      contract: "composio.tools@1",
+      actions: ["send-mail", "LIST_ROWS"],
+    });
+    const billing = permission.connection("billing", {
+      contract: "http.request@1",
+      actions: ["get"],
+    });
+    const reach = server.action({
+      args: {},
+      handler: async (ctx) => {
+        const connections = loose(ctx.connections);
+        const grasp = loose(Reflect.get(ctx, "grasp"));
+        await connections.tools.sendMail({ to: "ada" });
+        await grasp.statistics.read({ days: 1 });
+        return {
+          connections: shapeOf(connections),
+          tools: shapeOf(connections.tools),
+          billing: shapeOf(connections.billing),
+          grasp: shapeOf(grasp),
+          statistics: shapeOf(grasp.statistics),
+          inherited: ["constructor", "toString", "__proto__", "call"].map(
+            (name) => typeof Reflect.get(connections.tools, name)
+          ),
+        };
+      },
+    });
+    const registered = notes(
+      {
+        permissions: {
+          connections: [tools, billing],
+          grasp: permission.grasp(),
+        },
+      },
+      { notes: { reach } }
+    );
+    const { calls, channel } = recordingChannel();
+    await expect(
+      runFunction(registered, "notes.reach", {}, channel)
+    ).resolves.toStrictEqual({
+      connections: { own: ["tools", "billing"], prototype: null, frozen: true },
+      tools: { own: ["sendMail", "LIST_ROWS"], prototype: null, frozen: true },
+      billing: { own: ["fetch"], prototype: null, frozen: true },
+      grasp: { own: ["statistics"], prototype: null, frozen: true },
+      statistics: { own: ["read"], prototype: null, frozen: true },
+      inherited: ["undefined", "undefined", "undefined", "undefined"],
+    });
+    expect(calls).toStrictEqual([
+      ["resource", "tools", "call", ["send-mail", { to: "ada" }]],
+      ["resource", "grasp", "call", ["statistics.read", { days: 1 }]],
+    ]);
+  });
+
+  test("a connection can't list two actions with one member", () => {
+    expect(
+      refusal(() =>
+        permission.connection("tools", {
+          contract: "composio.tools@1",
+          actions: ["send-mail", "sendMail"],
+        })
+      )
+    ).toContain("called alike");
   });
 
   test("a call names the App's function by its path, internal ones included, and the host decides it", async () => {

@@ -1,9 +1,45 @@
 import { httpContract } from "./connector-contracts.ts";
 import type { FunctionChannel } from "./function-channel.ts";
 import { isActionPermission } from "./manifest-permissions.ts";
+import { memberName, membersOf } from "./member-names.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
+
+// The clients an action reaches the App's permissions through
+// (`ctx.ai`, `ctx.brain`, `ctx.connections.<alias>`, `ctx.grasp`,
+// `ctx.guests`), built from the App's sealed declarations as frozen
+// objects with no prototype: each declared action, operation or function
+// a member, and nothing else. Never a `Proxy`, so a name is a member only
+// if it was declared.
+//
+// What can go wrong, and what holds:
+// - The members are names, never authority. Each member sends its alias,
+//   its method and its declared name over the channel
+//   (`resource(alias, "call", [action, args])`), and the host decides
+//   every call there and then, against the release's sealed manifest:
+//   the alias is declared, the action is among its actions, an admin bound
+//   the permission and granted what it reaches, and the arguments and the
+//   answer fit the contract the binding pinned. App code that builds its
+//   own client, rewrites the channel's arguments or calls the channel
+//   directly reaches nothing more than these members do.
+// - An undeclared name isn't a member: undefined at run time (calling it
+//   throws a `TypeError` before anything is sent), and a type error. With
+//   no prototype, `constructor`, `toString` and `hasOwnProperty` are
+//   undefined too, unless declared; TypeScript still lists `Object`'s own
+//   members on every object type, a limit of the language, and calling one
+//   throws the same way.
+// - `__proto__` can't be declared (a name starts with a letter), and a
+//   declared name becomes an own property, never the prototype.
+// - A name that isn't an identifier (one with `-`) maps to a member as
+//   member-names.ts says; two names with the same member are refused when
+//   declared, so a member names exactly one action.
+// - Frozen: App code can't add, replace or remove a member.
+// - An action named `then` makes its client thenable. Nothing awaits a
+//   client, so this is left alone: it is the action's member like any.
+// - An HTTP connection has `fetch` alone: its path and request are data,
+//   which the host checks against the connection's prefixes and methods,
+//   and its method picks `get` or `send`, whichever is declared.
 
 /**
  * `ctx.ai.generate`, over `call`: the request, and the descriptor of its
@@ -74,6 +110,48 @@ const httpFetchOf =
     );
   };
 
+/**
+ * The members of `names`, each a call of `call` with its own name first:
+ * a connection's actions (`send-mail` as `sendMail`, member-names.ts).
+ */
+const callsOf = (
+  names: readonly string[],
+  call: (...args: unknown[]) => Promise<unknown>
+): Readonly<Record<string, unknown>> =>
+  membersOf(
+    names.map((name) => [
+      memberName(name),
+      async (...args: unknown[]): Promise<unknown> => await call(name, ...args),
+    ])
+  );
+
+/**
+ * `ctx.grasp`: the platform's functions its declaration lists, by path,
+ * each a member of its namespace, the part of the path before its first
+ * `.`: `statistics.read` as `statistics.read(args)`.
+ */
+const graspOf = (
+  paths: readonly string[],
+  call: (...args: unknown[]) => Promise<unknown>
+): Readonly<Record<string, unknown>> => {
+  const namespaces = new Map<string, [string, unknown][]>();
+  for (const path of paths) {
+    const [namespace = ""] = path.split(".", 1);
+    const functions = namespaces.get(namespace) ?? [];
+    functions.push([
+      path.slice(namespace.length + 1),
+      async (...args: unknown[]): Promise<unknown> => await call(path, ...args),
+    ]);
+    namespaces.set(namespace, functions);
+  }
+  return membersOf(
+    [...namespaces].map(([namespace, functions]) => [
+      namespace,
+      membersOf(functions),
+    ])
+  );
+};
+
 /** The client of `permission`, over `channel`. */
 const clientOf = (
   permission: AnyPermission,
@@ -85,22 +163,20 @@ const clientOf = (
       await channel.resource(permission.alias, method, args);
   const kind = permission["~permission"];
   if (kind === "ai") {
-    return Object.freeze({ generate: generateOf(call("generate")) });
+    return membersOf([["generate", generateOf(call("generate"))]]);
   }
   if (kind === "brain" || kind === "guests") {
-    return Object.freeze(
-      Object.fromEntries(
-        permission.operations.map((method) => [method, call(method)])
-      )
+    return membersOf(
+      permission.operations.map((method) => [method, call(method)])
     );
   }
-  if (kind === "connections" && permission.contract === httpContract) {
-    return Object.freeze({
-      call: call("call"),
-      fetch: httpFetchOf(call("call")),
-    });
+  if (kind === "grasp") {
+    return graspOf(Object.keys(permission.functions), call("call"));
   }
-  return Object.freeze({ call: call("call") });
+  if (permission.contract === httpContract) {
+    return membersOf([["fetch", httpFetchOf(call("call"))]]);
+  }
+  return callsOf(permission.actions, call("call"));
 };
 
 /**
@@ -112,7 +188,7 @@ export const permissionsOf = (
   permissions: readonly AppPermission[],
   channel: FunctionChannel
 ): Record<string, unknown> => {
-  const connections: Record<string, unknown> = {};
+  const connections: [string, unknown][] = [];
   const clients: Record<string, unknown> = {};
   for (const declared of permissions) {
     if (!isActionPermission(declared)) {
@@ -121,13 +197,10 @@ export const permissionsOf = (
     const kind = declared["~permission"];
     const client = clientOf(declared, channel);
     if (kind === "connections") {
-      connections[declared.alias] = client;
+      connections.push([declared.alias, client]);
     } else {
       clients[kind] = client;
     }
   }
-  return {
-    ...clients,
-    connections: Object.freeze(connections),
-  };
+  return { ...clients, connections: membersOf(connections) };
 };

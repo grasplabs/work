@@ -221,7 +221,7 @@ const sendMail = action({
   args: { to: v.string().email() },
   returns: v.object({ mailbox: v.string() }),
   handler: async (ctx, args) => {
-    const sent = await ctx.connections.mail.call("send", mailTo(args.to));
+    const sent = await ctx.connections.mail.send(mailTo(args.to));
     return { mailbox: sent.mailbox };
   },
 });
@@ -299,7 +299,7 @@ const sendMany = action({
   handler: async (ctx, args) => {
     for (let index = 0; index < args.count; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one request after the other
-      await ctx.connections.mail.call("send", mailTo("ada@acme.test"));
+      await ctx.connections.mail.send(mailTo("ada@acme.test"));
     }
     return args.count;
   },
@@ -310,7 +310,7 @@ const sendMailToo = action({
   args: { to: v.string().email() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.connections.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.send(mailTo(args.to));
     return null;
   },
 });
@@ -481,7 +481,7 @@ const sendsWhileStreaming = action({
   stream: v.object({ done: v.number() }),
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
-    await ctx.connections.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.send(mailTo(args.to));
     return null;
   },
 });
@@ -493,7 +493,7 @@ const sendsAndLeaves = action({
   stream: v.object({ done: v.number() }),
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
-    void ctx.connections.mail.call("send", mailTo(args.to));
+    void ctx.connections.mail.send(mailTo(args.to));
     return null;
   },
 });
@@ -530,7 +530,7 @@ const savesThenSends = action({
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.runMutation(create, { title: args.title });
-    await ctx.connections.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.send(mailTo(args.to));
     return null;
   },
 });

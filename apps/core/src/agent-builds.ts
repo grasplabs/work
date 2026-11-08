@@ -1819,6 +1819,13 @@ const buildDeclaration = `/**
  * this. A visitor's call can't tell anyone. For the rest, read Grasp's
  * docs (\`searchDocs\`, \`readDocs\`).
  *
+ * A connection's declared actions are typed methods of its alias:
+ * \`permission.connection("mail", { contract: "microsoft-365.mail@1", actions: ["send"] })\`
+ * is called as \`await ctx.connections.mail.send({ ... })\` from an action
+ * (a name with \`-\` in camel case: \`send-mail\` as \`sendMail\`), and
+ * \`permission.grasp()\` as \`await ctx.grasp.statistics.read({ ... })\`.
+ * There's no \`.call(name, args)\`.
+ *
  * An outside API is reached only as an HTTP connection an admin approved
  * (\`env.connections.available()\`, \`forAppsOnly\`: one origin, the paths
  * and methods it allows; its credential is connect's and never yours).

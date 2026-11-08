@@ -4,6 +4,7 @@ import { identifierMaxLength } from "@grasp-os/shared/identifier";
 
 import { deepFreeze, refuser } from "./declaration.ts";
 import type { FilesOperation } from "./file-link-references.ts";
+import { memberName } from "./member-names.ts";
 import type {
   AnyPermission,
   BrainOperation,
@@ -174,6 +175,20 @@ export const checkedList = (
     names.push(name);
   }
   return Object.freeze(names);
+};
+
+/**
+ * A connection's actions (`checkedList`), each a member of its client of
+ * its own (member-names.ts): two names with one member are refused.
+ */
+export const checkedActions = (list: unknown): readonly string[] => {
+  const actions = checkedList(list, "actions");
+  if (new Set(actions.map(memberName)).size !== actions.length) {
+    return refuse(
+      "A connection lists two actions that are called alike, such as `send-mail` and `sendMail`."
+    );
+  }
+  return actions;
 };
 
 /** The names of `list` that are among `known`, typed as such. */

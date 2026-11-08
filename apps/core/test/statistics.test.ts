@@ -86,15 +86,16 @@ export const platformRead = action({
   args: json,
   returns: v.string(),
   handler: async (ctx, args) =>
-    await outcome(async () => await loose(ctx.grasp).call("statistics.read", JSON.parse(args.json))),
+    await outcome(async () => await loose(ctx.grasp.statistics).read(JSON.parse(args.json))),
 });
 
-// A function the platform doesn't serve, called past the types.
+// A function the platform doesn't serve, called past the types: it
+// isn't a member, so the call throws before anything is sent.
 export const platformWrite = action({
   args: json,
   returns: v.string(),
   handler: async (ctx, args) =>
-    await outcome(async () => await loose(ctx.grasp).call("statistics.write", JSON.parse(args.json))),
+    await outcome(async () => await loose(ctx.grasp.statistics).write(JSON.parse(args.json))),
 });
 
 export const platformReadMany = action({
@@ -103,7 +104,7 @@ export const platformReadMany = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       for (let read = 0; read < args.count; read += 1) {
-        await loose(ctx.grasp).call("statistics.read", JSON.parse(args.json));
+        await loose(ctx.grasp.statistics).read(JSON.parse(args.json));
       }
     }),
 });
@@ -115,7 +116,7 @@ export const platformReadBurst = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       await Promise.all(
-        Array.from({ length: args.count }, async () => await loose(ctx.grasp).call("statistics.read", JSON.parse(args.json)))
+        Array.from({ length: args.count }, async () => await loose(ctx.grasp.statistics).read(JSON.parse(args.json)))
       );
     }),
 });
@@ -399,7 +400,7 @@ describe("the platform's functions", { timeout: 60_000 }, () => {
       asApp: "resource.binding_invalid",
       byBuilder: "role.forbidden",
       bound: [],
-      write: { error: "resource.not_allowed" },
+      write: { error: "failed" },
       revoked: { error: "resource.unavailable" },
     });
   });

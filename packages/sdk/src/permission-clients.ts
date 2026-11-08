@@ -19,6 +19,7 @@ import type {
   HttpRequestInit,
 } from "./connector-contracts.ts";
 import type { GraspFunctions } from "./grasp-functions.ts";
+import type { MemberName } from "./member-names.ts";
 import type {
   BrainOperation,
   BrainPermission,
@@ -28,7 +29,7 @@ import type {
 } from "./permission-types.ts";
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
-import type { Infer, ObjectInput, ValueShape } from "./value-types.ts";
+import type { Infer, ObjectInput } from "./value-types.ts";
 
 /** One search result from the Brain: a title and an excerpt of it. */
 export interface BrainHit {
@@ -60,49 +61,51 @@ export interface AiClient {
   >;
 }
 
-/** A catalog action's arguments. */
-type InputOf<Entry> = Entry extends { readonly input: infer Input }
-  ? Input
-  : never;
-
 /**
- * A call's arguments: each action of `Action` paired with its own
- * arguments, so an action that may be either of two needs arguments that
- * fit whichever it is, never just one of them.
+ * What `ctx.connections.<alias>` is: each declared action as a member of
+ * its own (`MemberName`), taking that action's arguments and answering
+ * its answer, as the contract's catalog entry types them
+ * (`ConnectorCatalog`; any JSON for a Composio tool). Connect checks both
+ * against the contract the binding serves. An action the permission
+ * doesn't declare isn't a member.
  */
-type CallArgs<Contract, Action> = Action extends string
-  ? [action: Action, args: InputOf<ContractAction<Contract, Action>>]
-  : never;
-
-/**
- * What `ctx.connections.<alias>` is: its calls typed by the contract's
- * catalog entry (`ConnectorCatalog`).
- */
-export interface ConnectionClient<
+export type ConnectionClient<
   Contract extends string,
   Actions extends readonly string[],
-> {
-  /**
-   * One of the declared actions, with its arguments, through connect: its
-   * answer, or any of theirs when the action may be several. Both are
-   * checked against the contract the binding serves.
-   */
-  readonly call: <Action extends Actions[number]>(
-    ...call: CallArgs<Contract, Action>
+> = {
+  readonly [Action in Actions[number] as MemberName<Action>]: (
+    args: ContractAction<Contract, Action>["input"]
   ) => Promise<ContractAction<Contract, Action>["output"]>;
-}
+};
+
+/** The methods an HTTP connection's declared `Actions` allow. */
+type HttpMethodOf<Actions extends readonly string[]> =
+  | ("get" extends Actions[number] ? "GET" | "HEAD" : never)
+  | ("send" extends Actions[number]
+      ? "POST" | "PUT" | "PATCH" | "DELETE"
+      : never);
 
 /**
- * What `ctx.connections.<alias>` is for an HTTP connection: `call`, and
- * `fetch`, a request as the web's `fetch` makes one, to a path of the
- * connection's own origin, answered as a `Response`. A GET or HEAD is the
- * declaration's `get`; any other method its `send`, which the host may hold
- * for the person to confirm (`resource.awaiting_confirmation`).
+ * What `ctx.connections.<alias>` is for an HTTP connection: `fetch`, a
+ * request as the web's `fetch` makes one, to a path of the connection's
+ * own origin, answered as a `Response`. A GET or HEAD (the default) is
+ * the declaration's `get`; any other method its `send`, which the host
+ * may hold for the person to confirm (`resource.awaiting_confirmation`).
+ * Only the methods its declared actions allow type-check: without `get`,
+ * the method is required.
  */
-export interface HttpClient<
-  Actions extends readonly string[],
-> extends ConnectionClient<HttpContract, Actions> {
-  readonly fetch: (path: string, init?: HttpRequestInit) => Promise<Response>;
+export interface HttpClient<Actions extends readonly string[]> {
+  readonly fetch: "get" extends Actions[number]
+    ? (
+        path: string,
+        init?: HttpRequestInit<HttpMethodOf<Actions>>
+      ) => Promise<Response>
+    : (
+        path: string,
+        init: HttpRequestInit<HttpMethodOf<Actions>> & {
+          readonly method: HttpMethodOf<Actions>;
+        }
+      ) => Promise<Response>;
 }
 
 /** What `ctx.brain` is, by its operations. */
@@ -196,30 +199,30 @@ export type GuestsClient<Operations extends readonly GuestsOperation[]> =
         }
       : unknown);
 
-/**
- * A call's arguments: each path of `Path` paired with its own arguments,
- * so a path that may be either of two needs arguments that fit whichever
- * it is, never just one of them.
- */
-type FunctionCallArgs<
-  Functions extends Readonly<
-    Record<string, { readonly args: ValueShape; readonly returns: AnySchema }>
-  >,
-  Path,
-> =
-  Path extends Extract<keyof Functions, string>
-    ? [path: Path, args: ObjectInput<Functions[Path]["args"]>]
-    : never;
+/** The paths of the platform's functions: `<namespace>.<function>`. */
+type GraspPath = Extract<keyof GraspFunctions, string>;
+
+/** The namespace of path `Path`: what comes before its first `.`. */
+type GraspNamespace<Path> = Path extends `${infer Namespace}.${string}`
+  ? Namespace
+  : never;
 
 /**
- * What `ctx.grasp` is: each of the platform's functions by its path, with
- * its arguments, answering its return.
+ * What `ctx.grasp` is: each of the platform's functions as a member of
+ * its namespace, `statistics.read` as `ctx.grasp.statistics.read(args)`,
+ * taking its arguments and answering its return.
  */
-export interface GraspClient {
-  readonly call: <Path extends Extract<keyof GraspFunctions, string>>(
-    ...call: FunctionCallArgs<GraspFunctions, Path>
-  ) => Promise<Infer<GraspFunctions[Path]["returns"]>>;
-}
+export type GraspClient = {
+  readonly [Namespace in GraspNamespace<GraspPath>]: {
+    readonly [
+      Path in GraspPath as Path extends `${Namespace}.${infer Name}`
+        ? Name
+        : never
+    ]: (
+      args: ObjectInput<GraspFunctions[Path]["args"]>
+    ) => Promise<Infer<GraspFunctions[Path]["returns"]>>;
+  };
+};
 
 /** What `ctx.connections.<alias>` is for `Permission`. */
 export type ConnectionClientOf<Permission> =
