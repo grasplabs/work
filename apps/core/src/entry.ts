@@ -83,10 +83,10 @@ import {
   runFileRouteOf,
 } from "./workflows/run-file-downloads.ts";
 import {
-  webhookTokenAt,
-  withoutWebhookToken,
-  workflowWebhookResponse,
-} from "./workflows/webhook-triggers.ts";
+  eventSourceTokenAt,
+  sourceEventResponse,
+  withoutSourceToken,
+} from "./workflows/source-events.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -361,8 +361,8 @@ const adminSignedHandlers: ReadonlyMap<
 /**
  * The answer to a webhook core takes, if `pathname` is one's: a chat
  * platform's (src/channels/door.ts), which only the platform's own signed
- * requests get through, or a webhook trigger's deliveries
- * (src/workflows/webhook-triggers.ts), which only those signed with its
+ * requests get through, or an event source's deliveries
+ * (src/workflows/source-events.ts), which only those signed with its
  * secret get through.
  */
 const webhookResponse = async (
@@ -377,10 +377,10 @@ const webhookResponse = async (
     const { channelResponse } = await import("./channels/door.ts");
     return await channelResponse(request, env, platform, requestId, ctx);
   }
-  const token = webhookTokenAt(pathname);
+  const token = eventSourceTokenAt(pathname);
   return token === undefined
     ? undefined
-    : await workflowWebhookResponse(request, env, token, requestId);
+    : await sourceEventResponse(request, env, token, requestId);
 };
 
 /** Routes a request that has passed the router-secret check. */
@@ -544,12 +544,12 @@ export const handleRequest = async (
     requestId
   );
   // One line per request. Only the path: query strings can carry tokens
-  // (a page module's), and so can a webhook
-  // trigger's path, without it.
+  // (a page module's), and so can an event
+  // source's path, without it.
   log[level]("request", {
     requestId,
     method: request.method,
-    path: withoutWebhookToken(url.pathname),
+    path: withoutSourceToken(url.pathname),
     status: response.status,
     durationMs: Date.now() - startedAt,
     ...fields,

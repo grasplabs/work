@@ -92,6 +92,12 @@ const typeRules: readonly {
   // didn't start.
   { action: "connection.events.dropped", type: "action" },
   { action: "connection.events", type: "config" },
+  // Event sources (core's src/event-sources.ts): an admin creating one,
+  // rotating or revoking its secret, and deleting it.
+  { action: "event_source", type: "config" },
+  // A signed delivery to an event source that a workflow's trigger
+  // refused for good (core's src/workflows/source-events.ts).
+  { action: "workflow.webhook.refused", type: "action" },
   // A held action dropped because nobody can confirm it any more, then a
   // person confirming or declining one (or being refused that).
   { action: "connection.action.dropped", type: "action" },

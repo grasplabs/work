@@ -3740,17 +3740,33 @@ export const triggerResources = sqliteTable("trigger_resources", {
    */
   emailAddress: text("email_address").unique(),
   /**
-   * For a webhook trigger (GRA-1478, workflows/webhook-triggers.ts): the
-   * token its URL ends in, 128 random bits, set as it is created and never
-   * changed, shown and logged as the email address is; and the generation
-   * of its secret, which is never stored but derived from the trigger and
-   * this generation: one more each time it is rotated, never reused; and
-   * when its secret was revoked, until a new one is made: no delivery is
-   * taken meanwhile. Null for any other kind.
+   * Never written or read since webhook triggers start on event sources
+   * (GRA-1560, `event_sources`). Kept, with the token's index, until
+   * GRA-1659 drops them (expand, then contract).
    */
   webhookToken: text("webhook_token").unique(),
   webhookSecretGeneration: integer("webhook_secret_generation"),
   webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
+});
+
+/**
+ * The deployment's event sources (GRA-1560, event-sources.ts): where an
+ * outside system sends events, each created by an admin. `token` is what
+ * its URL ends in, 128 random bits, shown only to admins and never
+ * logged, set to null as it is deleted, so its URL takes nothing more.
+ * Its secret is never stored: it is derived from its ID and
+ * `secret_generation`, one more each time it is rotated, never reused;
+ * `secret_revoked_at` is when it was revoked, until a new one is made.
+ */
+export const eventSources = sqliteTable("event_sources", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  token: text().unique(),
+  secretGeneration: integer("secret_generation").notNull(),
+  secretRevokedAt: timestamp("secret_revoked_at"),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  deletedAt: timestamp("deleted_at"),
 });
 
 /**
@@ -3805,9 +3821,19 @@ export const triggerResourceVersions = sqliteTable(
     connectionId: text("connection_id"),
     connectionResource: text("connection_resource"),
     inputMapping: text("input_mapping"),
+    /**
+     * For a webhook trigger (GRA-1560): the event source whose events
+     * start it (`event_sources`), of type `event_type`; each event's data
+     * is its run's input. Null for any other kind.
+     */
+    eventSourceId: text("event_source_id"),
   },
   (table) => [
     primaryKey({ columns: [table.triggerId, table.version] }),
+    // The webhook triggers' versions that take a source's events.
+    index("trigger_resource_versions_source")
+      .on(table.eventSourceId, table.eventType)
+      .where(sql`${table.eventSourceId} IS NOT NULL`),
     // Dropped with its column (GRA-1592).
     index("trigger_resource_versions_event")
       .on(table.eventContract, table.eventType)

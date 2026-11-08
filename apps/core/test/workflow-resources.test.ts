@@ -34,6 +34,7 @@ import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
+import { webhookConfig } from "./source-config.ts";
 
 // Independent workflows (workflow-resources.ts), from its threat model:
 // a definition's text names no workflow, so it carries no authority; a
@@ -1045,7 +1046,7 @@ describe("releasing a deleted workflow's name", () => {
       kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: {},
+      config: await webhookConfig(),
     });
     // Neither holds a grant to start it, so neither keeps it from being
     // deleted; both still name it.

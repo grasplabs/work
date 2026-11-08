@@ -326,6 +326,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         // The company admin's view of the onboarding interviews.
         "Onboarding",
         "Audit trail",
+        // The event sources outside systems send events to, for admins.
+        "Webhooks",
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
         "Billing",

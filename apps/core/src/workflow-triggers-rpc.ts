@@ -11,8 +11,6 @@ import {
   createTriggerResource,
   deleteTriggerResource,
   listWorkflowTriggers,
-  revokeWebhookSecret,
-  rotateWebhookSecret,
   setTriggerEnabled,
   updateTriggerVersion,
   workflowTrigger,
@@ -45,14 +43,8 @@ export class WorkflowTriggersRpc
 
   async create(input: unknown): Promise<CreatedWorkflowTrigger> {
     return await withPerson(this.#check, async (person) => {
-      const { id, secret } = await createTriggerResource(
-        this.#env,
-        person,
-        input
-      );
-      const created = await workflowTrigger(this.#env, person, id);
-      // A webhook trigger's secret: answered this once, never again.
-      return secret === undefined ? created : { ...created, secret };
+      const { id } = await createTriggerResource(this.#env, person, input);
+      return await workflowTrigger(this.#env, person, id);
     });
   }
 
@@ -73,20 +65,6 @@ export class WorkflowTriggersRpc
   async delete(id: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await deleteTriggerResource(this.#env, person, id);
-    });
-  }
-
-  async rotateWebhookSecret(id: string): Promise<{ secret: string }> {
-    return await withPerson(
-      this.#check,
-      async (person) => await rotateWebhookSecret(this.#env, person, id)
-    );
-  }
-
-  async revokeWebhookSecret(id: string): Promise<WorkflowTrigger> {
-    return await withPerson(this.#check, async (person) => {
-      await revokeWebhookSecret(this.#env, person, id);
-      return await workflowTrigger(this.#env, person, id);
     });
   }
 }

@@ -53,6 +53,7 @@ const textAt = (config: unknown, ...path: string[]): string | undefined => {
 export const summaryOf = ({
   kind,
   config,
+  source,
 }: WorkflowTrigger): TriggerSummary => {
   const cron = textAt(config, "schedule", "cron");
   const timeZone = textAt(config, "schedule", "timeZone");
@@ -61,7 +62,7 @@ export const summaryOf = ({
     kind,
     schedule:
       cron === undefined || timeZone === undefined ? null : { cron, timeZone },
-    event: textAt(config, "event") ?? null,
+    event: textAt(config, "event") ?? textAt(config, "type") ?? null,
     connection:
       connectionId === undefined
         ? null
@@ -69,6 +70,7 @@ export const summaryOf = ({
             connectionId,
             resource: textAt(config, "connection", "resource") ?? null,
           },
+    source,
   };
 };
 
@@ -106,5 +108,10 @@ export const triggerDescription = (
     const localPart = address;
     return i18n._(msg`When an email arrives for ${localPart}`);
   }
-  return i18n._(msg`When its webhook is called`);
+  const type = summary.event ?? "";
+  if (summary.source === null || summary.source.deleted) {
+    return i18n._(msg`On ${type} events from a deleted webhook source`);
+  }
+  const { name } = summary.source;
+  return i18n._(msg`On ${type} events from ${name}`);
 };

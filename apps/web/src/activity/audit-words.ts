@@ -267,6 +267,23 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Was refused packages known as malware`,
   },
   { action: "dependency", text: msg`Changed a request for packages` },
+  {
+    action: "event_source.created",
+    text: msg`Created a webhook source`,
+  },
+  {
+    action: "event_source.secret_rotated",
+    text: msg`Made a webhook source a new secret`,
+  },
+  {
+    action: "event_source.secret_revoked",
+    text: msg`Revoked a webhook source's secret`,
+  },
+  { action: "event_source.deleted", text: msg`Deleted a webhook source` },
+  {
+    action: "workflow.webhook.refused",
+    text: msg`Didn't start a workflow from a webhook event`,
+  },
   { action: "workflow.email.read", text: msg`Read an email attachment` },
   {
     action: "workflow.email.attachment.sent",

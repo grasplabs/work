@@ -252,17 +252,22 @@ describe("guest chat rate limit", () => {
     expect(statuses).toStrictEqual([200, 200, 429, 200]);
   });
 
-  it("limits a webhook trigger's URL per client address and per URL, by its own limit, without reaching core", async () => {
+  it("limits an event source's URL per client address and per URL, each by its own limit, without reaching core", async () => {
     const limiter = limiterAllowing(2);
+    const perSource = limiterAllowing(2);
     const before = cores.received.length;
     const deliver = async (ip: string, token: string) =>
       await worker.fetch(
-        new Request(`https://acme.guest.test/api/workflow-webhooks/${token}`, {
+        new Request(`https://acme.guest.test/api/hooks/${token}`, {
           method: "POST",
           headers: { "cf-connecting-ip": ip },
           body: "{}",
         }),
-        { ...env, WEBHOOK_RATE_LIMIT: limiter }
+        {
+          ...env,
+          WEBHOOK_RATE_LIMIT: limiter,
+          WEBHOOK_SOURCE_RATE_LIMIT: perSource,
+        }
       );
     const one = "a".repeat(32);
     const responses = [
@@ -283,6 +288,43 @@ describe("guest chat rate limit", () => {
     }).toStrictEqual({
       statuses: [200, 200, 429, 200, 200, 429],
       retryAfter: "60",
+      reached: 4,
+    });
+  });
+
+  it("counts one source's deliveries from all addresses against the source's own, larger budget, not an address's", async () => {
+    // An address's budget: two; the source's: four, across its sender's
+    // addresses.
+    const perAddress = limiterAllowing(2);
+    const perSource = limiterAllowing(4);
+    const before = cores.received.length;
+    const deliver = async (ip: string) =>
+      await worker.fetch(
+        new Request(`https://acme.guest.test/api/hooks/${"e".repeat(32)}`, {
+          method: "POST",
+          headers: { "cf-connecting-ip": ip },
+          body: "{}",
+        }),
+        {
+          ...env,
+          WEBHOOK_RATE_LIMIT: perAddress,
+          WEBHOOK_SOURCE_RATE_LIMIT: perSource,
+        }
+      );
+    const responses = [
+      await deliver("192.0.2.51"),
+      await deliver("192.0.2.51"),
+      await deliver("192.0.2.52"),
+      await deliver("192.0.2.52"),
+      await deliver("192.0.2.53"),
+      await deliver("192.0.2.53"),
+    ];
+    const statuses = responses.map(({ status }) => status);
+    expect({
+      statuses,
+      reached: cores.received.length - before,
+    }).toStrictEqual({
+      statuses: [200, 200, 200, 200, 429, 429],
       reached: 4,
     });
   });

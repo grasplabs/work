@@ -1589,10 +1589,6 @@ msgstr "Ein geteilter Chat mit {people}"
 msgid "A shared chat with only you in it"
 msgstr "Ein geteilter Chat, in dem nur du bist"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "A signed call to its own URL"
-msgstr "Ein signierter Aufruf seiner eigenen URL"
-
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "Eine Mitarbeiterliste ist der schnellste Weg: Namen, E-Mail-Adressen, Teams und Funktionen, als CSV- oder Excel-Datei. Ich nutze sie nur, um zu wissen, mit wem ich sprechen soll."
@@ -1890,6 +1886,10 @@ msgstr "Etwas ergänzen"
 #: src/connections/http-connections.tsx
 msgid "Add the connection"
 msgstr "Verbindung hinzufügen"
+
+#: src/settings/event-sources.tsx
+msgid "Add the source"
+msgstr "Quelle hinzufügen"
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Add the trigger"
@@ -2229,6 +2229,10 @@ msgstr "Ein Eintrag wurde geändert, nachdem er geschrieben wurde."
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "An event at a connection"
 msgstr "Ein Ereignis bei einer Verbindung"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "An event from a webhook source"
+msgstr "Ein Ereignis aus einer Webhook-Quelle"
 
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
@@ -3580,6 +3584,10 @@ msgstr "Wählen Sie eine Verbindung."
 msgid "Choose a model"
 msgstr "Modell wählen"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Choose a source."
+msgstr "Wählen Sie eine Quelle."
+
 #: src/apps/app-workflows.tsx
 msgid "Choose a version"
 msgstr "Version wählen"
@@ -4186,9 +4194,9 @@ msgstr "Link für {name} kopieren"
 msgid "Copy the secret"
 msgstr "Geheimnis kopieren"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Copy the URL of the webhook ending {ending}"
-msgstr "URL des Webhooks mit der Endung {ending} kopieren"
+#: src/settings/event-sources.tsx
+msgid "Copy the URL of {name}"
+msgstr "URL von {name} kopieren"
 
 #: src/copy.ts
 msgid "Copying didn't work"
@@ -4240,6 +4248,10 @@ msgstr "Tabelle erstellen"
 msgid "Create team"
 msgstr "Team erstellen"
 
+#: src/settings/event-sources.tsx
+msgid "Created {created}"
+msgstr "Erstellt am {created}"
+
 #: src/activity/audit-words.ts
 msgid "Created a collection"
 msgstr "Eine Sammlung angelegt"
@@ -4247,6 +4259,10 @@ msgstr "Eine Sammlung angelegt"
 #: src/activity/audit-words.ts
 msgid "Created a team"
 msgstr "Ein Team angelegt"
+
+#: src/activity/audit-words.ts
+msgid "Created a webhook source"
+msgstr "Hat eine Webhook-Quelle erstellt"
 
 #: src/apps/app-sharing.tsx
 msgid "Created by you. It opens for you, the admins, and whoever it is shared with."
@@ -4396,6 +4412,7 @@ msgstr "Version der Definition"
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/projects/project-view.tsx
+#: src/settings/event-sources.tsx
 #: src/settings/teams.tsx
 msgid "Delete"
 msgstr "Löschen"
@@ -4408,6 +4425,10 @@ msgstr "Löschen"
 #: src/chat/delete-chat-dialog.tsx
 msgid "Delete “{title}”?"
 msgstr "„{title}“ löschen?"
+
+#: src/settings/event-sources.tsx
+msgid "Delete {name}"
+msgstr "{name} löschen"
 
 #: src/apps/app-remove.tsx
 #: src/settings/teams.tsx
@@ -4435,6 +4456,10 @@ msgstr "Mein Interview löschen"
 msgid "Delete project"
 msgstr "Projekt löschen"
 
+#: src/settings/event-sources.tsx
+msgid "Delete the source"
+msgstr "Quelle löschen"
+
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Delete the trigger"
 msgstr "Auslöser löschen"
@@ -4446,6 +4471,10 @@ msgstr "Workflow löschen"
 #: src/apps/field-editor.tsx
 msgid "Delete this record too"
 msgstr "Diesen Datensatz ebenfalls löschen"
+
+#: src/settings/event-sources.tsx
+msgid "Delete this source?"
+msgstr "Diese Quelle löschen?"
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Delete this trigger?"
@@ -4467,6 +4496,10 @@ msgstr "Gelöscht"
 #: src/activity/audit-words.ts
 msgid "Deleted a team"
 msgstr "Ein Team gelöscht"
+
+#: src/activity/audit-words.ts
+msgid "Deleted a webhook source"
+msgstr "Hat eine Webhook-Quelle gelöscht"
 
 #: src/activity/audit-words.ts
 msgid "Deleted entries past their retention"
@@ -4552,6 +4585,10 @@ msgstr "Ist es geschehen?"
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
 msgstr "Ist das geschehen? {who}"
+
+#: src/activity/audit-words.ts
+msgid "Didn't start a workflow from a webhook event"
+msgstr "Hat keinen Workflow aus einem Webhook-Ereignis gestartet"
 
 #: src/brain/brain-atlas.ts
 msgid "Directory"
@@ -4815,6 +4852,10 @@ msgstr "Jeder erlaubt alles darunter; / erlaubt alle Pfade."
 msgid "Each area is erased on its own. One that fails is tried again until it is done, even after you close this."
 msgstr "Jeder Bereich wird für sich gelöscht. Schlägt einer fehl, wird er erneut versucht, bis er erledigt ist, auch nachdem Sie dies schließen."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Each event of this type from the source starts a run, with its data as the input."
+msgstr "Jedes Ereignis dieses Typs aus der Quelle startet einen Lauf, mit seinen Daten als Eingabe."
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Jede Rechnung als PDF, sobald sie ausgestellt ist."
@@ -4980,6 +5021,10 @@ msgstr "Europäische Union"
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Event"
 msgstr "Ereignis"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Event type"
+msgstr "Ereignistyp"
 
 #: src/settings/audit-archive.tsx
 msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
@@ -6530,10 +6575,6 @@ msgstr "Sie funktioniert gerade nicht. Ein Admin kann sie widerrufen und mit neu
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Sie ist an ihren Testdatensätzen gescheitert, als die Version versiegelt wurde: Sie läuft auf keinem Datensatz, und die Version kann nicht aktuell gemacht werden"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "It gets a URL of its own and a secret, which you see only once, as it is added. Each signed POST to the URL starts a run, with the body as its input."
-msgstr "Er erhält eine eigene URL und ein Geheimnis, das Sie nur einmal sehen, wenn er hinzugefügt wird. Jeder signierte POST an die URL startet einen Lauf, mit dem Body als Eingabe."
-
 #: src/projects/new-item-dialog.tsx
 msgid "It goes in the project from the start."
 msgstr "Es liegt von Anfang an im Projekt."
@@ -6678,9 +6719,9 @@ msgstr "Sie läuft sofort nicht mehr, auch laufende Aufrufe nicht, und kann nie 
 msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
 msgstr "Er hält an, wo er gerade ist, und läuft nie weiter. Was er schon getan hat, bleibt getan. Das lässt sich nicht rückgängig machen."
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "It takes no delivery until whoever made it makes a new secret."
-msgstr "Er nimmt keine Zustellung an, bis die Person, die ihn erstellt hat, ein neues Geheimnis erzeugt."
+#: src/settings/event-sources.tsx
+msgid "It takes no event until you make it a new secret."
+msgstr "Sie nimmt kein Ereignis an, bis Sie ihr ein neues Geheimnis erzeugen."
 
 #: src/workflows/today-lanes.tsx
 msgid "It waits on you since {since}."
@@ -6864,9 +6905,17 @@ msgstr "Seine Läufe ließen sich immer wieder nicht starten, darum startet er n
 msgid "Its source files"
 msgstr "Seine Quelldateien"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Its source was deleted, so it starts nothing: delete it, or add a trigger on another source."
+msgstr "Seine Quelle wurde gelöscht, daher startet er nichts: Löschen Sie ihn, oder fügen Sie einen Auslöser für eine andere Quelle hinzu."
+
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 msgstr "Ihre Tokens werden gelöscht, jede App und jeder Agent verliert sie, und Aktionen, die auf sie warten, werden verworfen. Verbinden Sie sie erneut, um sie wieder zu nutzen."
+
+#: src/settings/event-sources.tsx
+msgid "Its URL takes nothing more, and no workflow starts on its events. This can't be undone."
+msgstr "Ihre URL nimmt nichts mehr an, und kein Workflow startet mehr bei ihren Ereignissen. Das lässt sich nicht rückgängig machen."
 
 #: src/workflows/item-test.tsx
 msgid "Its version"
@@ -7342,6 +7391,10 @@ msgstr "Erstellt"
 msgid "Made {made}"
 msgstr "Erstellt {made}"
 
+#: src/activity/audit-words.ts
+msgid "Made a webhook source a new secret"
+msgstr "Hat für eine Webhook-Quelle ein neues Geheimnis erzeugt"
+
 #: src/apps/app-settings.tsx
 msgid "Made by {person} on {date}."
 msgstr "Erstellt von {person} am {date}."
@@ -7395,15 +7448,15 @@ msgstr "Erstellen"
 msgid "Make {name} an admin?"
 msgstr "{name} zum Admin machen?"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/settings/event-sources.tsx
 msgid "Make a new secret"
 msgstr "Neues Geheimnis erzeugen"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Make a new secret for the webhook ending {ending}"
-msgstr "Neues Geheimnis für den Webhook mit der Endung {ending} erzeugen"
+#: src/settings/event-sources.tsx
+msgid "Make a new secret for {name}"
+msgstr "Neues Geheimnis für {name} erzeugen"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/settings/event-sources.tsx
 msgid "Make a new secret?"
 msgstr "Neues Geheimnis erzeugen?"
 
@@ -7904,6 +7957,10 @@ msgstr "Neue Option"
 msgid "New project"
 msgstr "Neues Projekt"
 
+#: src/settings/event-sources.tsx
+msgid "New source, named after its sender"
+msgstr "Neue Quelle, benannt nach ihrem Absender"
+
 #: src/apps/app-data-model.tsx
 msgid "New table"
 msgstr "Neue Tabelle"
@@ -8050,9 +8107,9 @@ msgstr "Noch kein Code: Grasp schreibt die erste Version im Chat."
 msgid "No connector yet"
 msgstr "Noch kein Connector"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "No delivery starts a run until whoever made the trigger makes a new secret."
-msgstr "Keine Zustellung startet einen Lauf, bis die Person, die den Auslöser erstellt hat, ein neues Geheimnis erzeugt."
+#: src/settings/event-sources.tsx
+msgid "No event from this source starts anything until you make it a new secret."
+msgstr "Kein Ereignis aus dieser Quelle startet etwas, bis Sie ihr ein neues Geheimnis erzeugen."
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -8195,6 +8252,10 @@ msgstr "Diese Woche keine Läufe."
 msgid "No runs yet."
 msgstr "Noch keine Läufe."
 
+#: src/settings/event-sources.tsx
+msgid "No source yet."
+msgstr "Noch keine Quelle."
+
 #: src/brain/brain.ts
 msgid "No stakeholder named yet"
 msgstr "Noch kein Stakeholder benannt"
@@ -8226,6 +8287,10 @@ msgstr "Noch keine Version nutzt es"
 #: src/apps/app-versions.tsx
 msgid "No version yet: its builders make the first in a chat."
 msgstr "Noch keine Version: Ihre Entwickler erstellen die erste in einem Chat."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
+msgstr "Noch keine Webhook-Quelle: Ein Admin fügt eine in den Einstellungen hinzu, mit der URL und dem Geheimnis, die ihr Absender verwendet."
 
 #: src/dashboard/spend-widget.tsx
 #: src/routes/_shell.settings.spend.tsx
@@ -8834,6 +8899,14 @@ msgstr "am {date} um {hour}"
 #: src/settings/audit-chain.tsx
 msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified."
 msgstr "Am {time} brach die Kette bei Eintrag {entry}: Ab dort ist nichts geprüft."
+
+#: src/workflows/trigger-description.ts
+msgid "On {type} events from {name}"
+msgstr "Bei {type}-Ereignissen von {name}"
+
+#: src/workflows/trigger-description.ts
+msgid "On {type} events from a deleted webhook source"
+msgstr "Bei {type}-Ereignissen einer gelöschten Webhook-Quelle"
 
 #: src/chat/held-writes.tsx
 #: src/dashboard/outcome-card.tsx
@@ -10723,17 +10796,17 @@ msgstr "Bindung von {alias} widerrufen?"
 msgid "Revoke the connection"
 msgstr "Verbindung widerrufen"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/settings/event-sources.tsx
 msgid "Revoke the secret"
 msgstr "Geheimnis widerrufen"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Revoke the secret of the webhook ending {ending}"
-msgstr "Geheimnis des Webhooks mit der Endung {ending} widerrufen"
+#: src/settings/event-sources.tsx
+msgid "Revoke the secret of {name}"
+msgstr "Geheimnis von {name} widerrufen"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Revoke the webhook's secret?"
-msgstr "Das Geheimnis des Webhooks widerrufen?"
+#: src/settings/event-sources.tsx
+msgid "Revoke the secret?"
+msgstr "Geheimnis widerrufen?"
 
 #: src/apps/release-controls.tsx
 msgid "Revoke this version"
@@ -10754,6 +10827,10 @@ msgstr "Den Zugriff eines getrennten Kontos bei seinem Anbieter widerrufen"
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "Eine Berechtigung entzogen"
+
+#: src/activity/audit-words.ts
+msgid "Revoked a webhook source's secret"
+msgstr "Hat das Geheimnis einer Webhook-Quelle widerrufen"
 
 #: src/activity/audit-words.ts
 msgid "Revoked packages as malware"
@@ -10839,17 +10916,17 @@ msgstr "Auf Version {version} zurücksetzen?"
 msgid "Rome"
 msgstr "Rom"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/settings/event-sources.tsx
 msgid "Rotate the secret"
 msgstr "Geheimnis erneuern"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Rotate the secret of the webhook ending {ending}"
-msgstr "Geheimnis des Webhooks mit der Endung {ending} erneuern"
+#: src/settings/event-sources.tsx
+msgid "Rotate the secret of {name}"
+msgstr "Geheimnis von {name} erneuern"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Rotate the webhook's secret?"
-msgstr "Das Geheimnis des Webhooks erneuern?"
+#: src/settings/event-sources.tsx
+msgid "Rotate the secret?"
+msgstr "Geheimnis erneuern?"
 
 #: src/apps/app-data.tsx
 msgid "Row {row} {where}: {message}"
@@ -11304,7 +11381,7 @@ msgstr "Suche nach {query} in der Doku"
 msgid "Secret"
 msgstr "Geheimnis"
 
-#: src/workflows/workflow-triggers-tab.tsx
+#: src/settings/event-sources.tsx
 msgid "Secret revoked"
 msgstr "Geheimnis widerrufen"
 
@@ -11398,14 +11475,6 @@ msgstr "Anfrage senden"
 #: src/inbox/item-detail.tsx
 msgid "Send version {version} of {who} back"
 msgstr "Version {version} von {who} zurücksenden"
-
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Senders must sign with the new secret, which you see only once."
-msgstr "Absender müssen mit dem neuen Geheimnis signieren, das Sie nur einmal sehen."
-
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Senders sign every delivery with it, so Grasp can tell a call is theirs."
-msgstr "Absender signieren jede Zustellung damit, sodass Grasp erkennt, dass ein Aufruf von ihnen stammt."
 
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
@@ -11929,6 +11998,7 @@ msgid "Sort"
 msgstr "Sortieren"
 
 #: src/brain/brain.ts
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Source"
 msgstr "Quelle"
 
@@ -12826,9 +12896,9 @@ msgstr "Die Verbindung funktioniert nicht mehr. Workflows, die sie nutzen, warte
 msgid "The credential needs a header name (letters, digits and dashes) and a secret of at least {shortest} plain ASCII characters, on one line."
 msgstr "Die Zugangsdaten brauchen einen Header-Namen (Buchstaben, Ziffern und Bindestriche) und ein Geheimnis aus mindestens {shortest} einfachen ASCII-Zeichen, in einer Zeile."
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "The current secret stops working at once: senders must sign with the new one, which you see only once."
-msgstr "Das aktuelle Geheimnis funktioniert sofort nicht mehr: Absender müssen mit dem neuen signieren, das Sie nur einmal sehen."
+#: src/settings/event-sources.tsx
+msgid "The current secret stops working at once: the sender must sign with the new one, which you see only once."
+msgstr "Das aktuelle Geheimnis funktioniert sofort nicht mehr: Der Absender muss mit dem neuen signieren, das Sie nur einmal sehen."
 
 #: src/apps/resource-bindings.tsx
 msgid "The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now."
@@ -13155,6 +13225,18 @@ msgstr "Derselbe Schmerz in anderen Teams"
 msgid "The schedule of {workflowName} stopped"
 msgstr "Der Zeitplan von {workflowName} wurde gestoppt"
 
+#: src/settings/event-sources.tsx
+msgid "The sender must sign with the new secret, which you see only once."
+msgstr "Der Absender muss mit dem neuen Geheimnis signieren, das Sie nur einmal sehen."
+
+#: src/settings/event-sources.tsx
+msgid "The sender POSTs each event as JSON, with its type and data (<0>{example}</0>), signed with the secret as <1>Standard Webhooks</1> describes, in the headers {headers}. A delivery more than five minutes old is refused."
+msgstr "Der Absender sendet jedes Ereignis per POST als JSON, mit Typ und Daten (<0>{example}</0>), signiert mit dem Geheimnis, wie <1>Standard Webhooks</1> es beschreibt, in den Headern {headers}. Eine Zustellung, die älter als fünf Minuten ist, wird abgelehnt."
+
+#: src/settings/event-sources.tsx
+msgid "The sender signs every event with it, so Grasp can tell an event is theirs."
+msgstr "Der Absender signiert jedes Ereignis damit, damit Grasp erkennt, dass ein Ereignis von ihm kommt."
+
 #: src/apps/app-settings.tsx
 msgid "The settings the App offers itself."
 msgstr "Die Einstellungen, die die App selbst anbietet."
@@ -13162,6 +13244,10 @@ msgstr "Die Einstellungen, die die App selbst anbietet."
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"
 msgstr "Die Quelldateien von Version {sourceVersion}"
+
+#: src/settings/event-sources.tsx
+msgid "The source's secret"
+msgstr "Das Geheimnis der Quelle"
 
 #: src/workflows/workflow-flow.tsx
 msgid "The step, as JSON"
@@ -13208,7 +13294,6 @@ msgid "The way some told it"
 msgstr "So haben es manche erzählt"
 
 #: src/apps/app-webhooks.tsx
-#: src/workflows/workflow-triggers-tab.tsx
 msgid "The webhook's secret"
 msgstr "Das Geheimnis des Webhooks"
 
@@ -13718,10 +13803,6 @@ msgstr "Damit privat bleibt, wer gesprochen hat, fehlt ein Team, bis fünf seine
 msgid "To move an item, press space or enter, then the arrow keys. Press space or enter again to put it down, or escape to cancel."
 msgstr "Um einen Eintrag zu verschieben, drücken Sie die Leertaste oder Enter und dann die Pfeiltasten. Drücken Sie erneut die Leertaste oder Enter, um ihn abzulegen, oder Escape, um abzubrechen."
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "To start a run, POST its input as JSON to the URL, signed with the secret as <0>Standard Webhooks</0> describes, in the headers {headers}. A delivery more than five minutes old is refused."
-msgstr "Um einen Lauf zu starten, senden Sie seine Eingabe als JSON per POST an die URL, signiert mit dem Geheimnis, wie <0>Standard Webhooks</0> es beschreibt, in den Headern {headers}. Eine Zustellung, die älter als fünf Minuten ist, wird abgelehnt."
-
 #: src/onboarding/send-plan-form.tsx
 msgid "To the team leads. Everyone else follows once their lead has talked."
 msgstr "An die Teamleitungen. Alle anderen folgen, sobald ihre Teamleitung gesprochen hat."
@@ -14071,6 +14152,10 @@ msgstr "In das Wissen hochgeladen"
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Wird hochgeladen…"
+
+#: src/settings/event-sources.tsx
+msgid "URL of {name}"
+msgstr "URL von {name}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Use a staff list instead"
@@ -14533,9 +14618,10 @@ msgstr "Wir wollen weniger Zeit mit wiederkehrender Arbeit verbringen, damit meh
 msgid "Webhook trigger"
 msgstr "Webhook-Auslöser"
 
-#: src/workflows/workflow-triggers-tab.tsx
-msgid "Webhook URL"
-msgstr "Webhook-URL"
+#: src/routes/_shell.settings.tsx
+#: src/settings/event-sources.tsx
+msgid "Webhooks"
+msgstr "Webhooks"
 
 #: src/apps/app-settings.tsx
 msgctxt "an app's settings section"
@@ -14975,10 +15061,6 @@ msgstr "Wann er zuletzt geändert wurde"
 msgid "When it was added"
 msgstr "Wann er hinzugefügt wurde"
 
-#: src/workflows/trigger-description.ts
-msgid "When its webhook is called"
-msgstr "Wenn sein Webhook aufgerufen wird"
-
 #: src/apps/field-editor.tsx
 msgid "When the linked record is deleted"
 msgstr "Wenn der verknüpfte Datensatz gelöscht wird"
@@ -15024,6 +15106,10 @@ msgstr "Wohin Grasp die Ereignisse der App sendet."
 msgctxt "the card that follows one item across workflows"
 msgid "Where is it"
 msgstr "Wo ist es"
+
+#: src/settings/event-sources.tsx
+msgid "Where outside systems send events, such as a payment that came in. Give each sender its source's URL and secret; workflows start on its events from their Triggers tab, once you allow it."
+msgstr "Wohin externe Systeme Ereignisse senden, etwa eine eingegangene Zahlung. Geben Sie jedem Absender die URL und das Geheimnis seiner Quelle; Workflows starten über ihren Tab „Auslöser“ bei deren Ereignissen, sobald Sie es erlauben."
 
 #: src/settings/stephen-settings.tsx
 msgid "Where people reach him"

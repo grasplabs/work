@@ -55,6 +55,7 @@ import { allEvents } from "./audit-events.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
+import { webhookConfig } from "./source-config.ts";
 
 // Starting an independent workflow (workflow-starts.ts), and the
 // permissions of independent resources it relies on (permissions.ts),
@@ -235,7 +236,7 @@ const webhookTrigger = async (by: Person, id: string) =>
     kind: "webhook",
     workflowId: id,
     version: 1,
-    config: {},
+    config: await webhookConfig(),
   });
 
 /** Version `version` of App `app`, approved (1), unapproved (0) or from before approvals (null). */
@@ -799,7 +800,7 @@ describe("a trigger starting a workflow", () => {
       kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: {},
+      config: await webhookConfig(),
     });
     await granted(
       bob,
@@ -849,7 +850,7 @@ describe("a trigger starting a workflow", () => {
       kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: {},
+      config: await webhookConfig(),
     });
     const tries = {
       adminMoves: await outcome(
@@ -920,7 +921,7 @@ describe("a trigger starting a workflow", () => {
       kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: {},
+      config: await webhookConfig(),
     });
     await granted(
       bob,
@@ -971,7 +972,7 @@ describe("a trigger starting a workflow", () => {
         kind: "webhook",
         workflowId: workflow.id,
         version: 1,
-        config: {},
+        config: await webhookConfig(),
       });
       await granted(
         ada,
@@ -1199,7 +1200,7 @@ describe("permissions of independent resources", () => {
       kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: {},
+      config: await webhookConfig(),
     });
     const subject = { type: "workflow", workflowId: workflow.id } as const;
     const ask = async (by: Person, permission: PermissionRequest) =>
@@ -1397,7 +1398,7 @@ describe("what code and triggers may learn and name", () => {
       kind: "webhook",
       workflowId: theirs.id,
       version: 1,
-      config: {},
+      config: await webhookConfig(),
     });
     const ask = async (by: Person, permission: PermissionRequest) =>
       await outcome(requestPermission(env, by, permission, rolesOf(by)));

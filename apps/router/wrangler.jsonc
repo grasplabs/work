@@ -110,15 +110,25 @@
       "namespace_id": "1007",
       "simple": { "limit": 20, "period": 60 },
     },
-    // A workflow's webhook trigger (/api/workflow-webhooks/<token>), per
-    // hostname and client address, and per URL too: 120 a minute each, two
-    // a second, well past the 60 runs an hour a trigger starts, while a
-    // flood of guessed URLs, or of one URL from many addresses, is cut
-    // before core looks a URL up or reads a body.
+    // An event source's URL (/api/hooks/<token>), per hostname and client
+    // address: 120 a minute, two a second, so one address guessing URLs is
+    // cut before core looks a URL up or reads a body.
     {
       "name": "WEBHOOK_RATE_LIMIT",
       "namespace_id": "1008",
       "simple": { "limit": 120, "period": 60 },
+    },
+    // And per URL, from every address together: one source takes all of
+    // its sender's events, and a payment provider or a shop bursts (a
+    // batch of payouts, a sale opening), from a handful of addresses.
+    // 3,000 a minute, 50 a second, holds a busy provider's bursts with
+    // room to spare, while a flood of one learned URL from many addresses
+    // is still cut. Core checks each delivery's signature before anything
+    // else, and each trigger's runs stay within its hourly room.
+    {
+      "name": "WEBHOOK_SOURCE_RATE_LIMIT",
+      "namespace_id": "1009",
+      "simple": { "limit": 3000, "period": 60 },
     },
   ],
   // Staging (`wrangler deploy --env staging`, deploy-platform with stage
@@ -180,6 +190,14 @@
           "namespace_id": "2008",
           "simple": {
             "limit": 120,
+            "period": 60,
+          },
+        },
+        {
+          "name": "WEBHOOK_SOURCE_RATE_LIMIT",
+          "namespace_id": "2009",
+          "simple": {
+            "limit": 3000,
             "period": 60,
           },
         },

@@ -110,3 +110,15 @@ export const Route = createFileRoute("/")({ component: Tasks });
 Before its first start, `useWorkflow` is `idle`, and `loading` while the run you gave it by ID loads. A run is `queued`, `running`, `waiting` (for time, an event or a decision) or `paused`; `compensating` while it undoes its work after a failure or a cancellation; and it ends `completed` with its output, `failed` with its error, or `cancelled`. A run the person may no longer see, such as one whose decision someone else answered, is `unavailable`.
 
 `pause`, `resume` and `cancel` control the run, for whoever may. `send` sends it an event its workflow declares, typed by that event: `review.send(workflows.review.events.<name>, data)`.
+
+## Events from outside
+
+An outside system, such as a payment provider or a shop, sends events into Grasp through a webhook source. An admin creates one per sender in Settings › Webhooks, and gives the sender its URL and secret. The sender POSTs each event as JSON, with its type and its data, signed with the secret as [Standard Webhooks](https://www.standardwebhooks.com) describes:
+
+```json
+{ "type": "payment.paid", "data": { "invoice": "INV-42", "amount": 120 } }
+```
+
+Grasp checks the signature, refuses a delivery more than five minutes old or larger than 64 KiB, and takes a retry with the same `webhook-id` as the same event. A provider that signs its webhooks its own way comes in through its connector instead.
+
+A workflow starts on a source's events from its Triggers tab: a webhook trigger names the source and the event type, and each such event's `data` is the run's input, checked against the workflow's input. It starts nothing until an admin allows it. App code never handles the request itself: a workflow started this way calls the App's mutations through its binding.
