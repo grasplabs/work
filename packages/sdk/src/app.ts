@@ -13,7 +13,7 @@ import type {
   OperationManifest,
 } from "./app-types.ts";
 import { deepFreeze, refuser } from "./declaration.ts";
-import type { AppPermission } from "./permissions.ts";
+import type { AppPermission } from "./permission-types.ts";
 import { readSchemaAnswers } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import { isPlainObject } from "./value-descriptor.ts";

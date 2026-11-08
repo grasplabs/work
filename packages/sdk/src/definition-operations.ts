@@ -24,9 +24,9 @@ import {
   isBrowserPermission,
   isPermission,
   isWorkflowPermission,
-  permission,
   PermissionDefinitionError,
-} from "./permissions.ts";
+} from "./permission-checks.ts";
+import { permission } from "./permission.ts";
 import { SchemaDefinitionError } from "./schema.ts";
 import type { AccessMode, RowRole } from "./schema.ts";
 import { ValueDefinitionError } from "./value-descriptor.ts";

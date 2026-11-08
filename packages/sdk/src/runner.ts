@@ -3,6 +3,7 @@ import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
 import { AppError } from "./app-error.ts";
 import { inspectApp } from "./app.ts";
+import { httpContract } from "./connector-contracts.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
 import { isThenable, refusals } from "./lockdown.ts";
 import { isActionPermission } from "./manifest-permissions.ts";
@@ -14,8 +15,7 @@ import {
 import type { MigrationContext } from "./migration.ts";
 import { peopleDirectory } from "./people.ts";
 import type { PeopleOperationName } from "./people.ts";
-import { httpContract } from "./permissions.ts";
-import type { AnyPermission, AppPermission } from "./permissions.ts";
+import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { eventReferenceData, referenceName } from "./references.ts";
 import type { EventReferenceData } from "./references.ts";
 import type { FunctionKind } from "./server.ts";

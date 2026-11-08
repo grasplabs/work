@@ -4,18 +4,20 @@ import { serverFunctions } from "./handlers.ts";
 import type { PeopleDirectory, User } from "./people.ts";
 import type {
   AiClient,
-  AiPermission,
-  AnyPermission,
   BrainClientOf,
-  BrainPermission,
   ConnectionClientOf,
-  ConnectionPermission,
   GuestsClientOf,
   GraspClient,
+} from "./permission-clients.ts";
+import type {
+  AiPermission,
+  AnyPermission,
+  BrainPermission,
+  ConnectionPermission,
   GraspPermission,
   GuestsPermission,
   WorkflowPermission,
-} from "./permissions.ts";
+} from "./permission-types.ts";
 import type {
   ArgsOf,
   Callable,

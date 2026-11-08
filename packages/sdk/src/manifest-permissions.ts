@@ -1,5 +1,5 @@
 import type { AppManifest } from "./app-types.ts";
-import type { AnyPermission, AppPermission } from "./permissions.ts";
+import type { AnyPermission, AppPermission } from "./permission-types.ts";
 
 /** A permission's kind, as a manifest files it (`~permission`). */
 export type AppPermissionKind = AppPermission["~permission"];

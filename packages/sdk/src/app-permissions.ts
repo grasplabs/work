@@ -4,10 +4,9 @@ import {
   isBrowserPermission,
   isPermission,
   isWorkflowPermission,
-  peopleDeclaration,
-  permissionAliases,
-} from "./permissions.ts";
-import type { AppPermission } from "./permissions.ts";
+} from "./permission-checks.ts";
+import { peopleDeclaration, permissionAliases } from "./permission-types.ts";
+import type { AppPermission } from "./permission-types.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 const refuse: (message: string) => never = refuser(AppDefinitionError);

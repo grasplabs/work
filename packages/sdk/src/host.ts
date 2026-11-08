@@ -67,31 +67,30 @@ export { descriptorFromText, schemaFromDescriptor } from "./descriptor-text.ts";
 // release answered, and the modules and references it generates from it.
 export { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 export { readAppManifest } from "./app-manifest.ts";
-export {
-  connectorCatalogSource,
-  contractFingerprint,
-  contractFingerprints,
-  contractsFormatVersion,
-  declaredWorkflows,
-  eventFingerprint,
-  generatedPaths,
-  generateModules,
-  readSealedWorkflows,
-  dataModelSource,
-  serverModuleSource,
-  symbolicModules,
-  valueTypeOf,
-  workflowFingerprint,
-  workflowReferenceOf,
-} from "./generate.ts";
+export { declaredWorkflows } from "./bound-workflows.ts";
 export type {
   BoundWorkflow,
   BoundWorkflowDecision,
   BoundWorkflowEvent,
   WorkflowBindingExtras,
   WorkflowPin,
-  CatalogAction,
-} from "./generate.ts";
+} from "./bound-workflows.ts";
+export { connectorCatalogSource } from "./codegen-connector-catalog.ts";
+export type { CatalogAction } from "./codegen-connector-catalog.ts";
+export {
+  contractFingerprint,
+  contractFingerprints,
+  contractsFormatVersion,
+  eventFingerprint,
+  generatedPaths,
+  workflowFingerprint,
+} from "./codegen-contracts.ts";
+export { valueTypeOf } from "./codegen-render.ts";
+export { readSealedWorkflows } from "./codegen-sealed.ts";
+export { dataModelSource, serverModuleSource } from "./codegen-server.ts";
+export { symbolicModules } from "./codegen-stand-ins.ts";
+export { workflowReferenceOf } from "./codegen-workflows.ts";
+export { generateModules } from "./generate.ts";
 export { workflowQueries } from "./workflow-queries.ts";
 export type { WorkflowQueryName } from "./workflow-queries.ts";
 export {
