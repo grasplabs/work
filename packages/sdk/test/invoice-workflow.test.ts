@@ -8,36 +8,28 @@ import {
   vi,
 } from "vite-plus/test";
 
+import { createTestEngine } from "../src/testing.ts";
 import { z } from "../src/workflow.ts";
-import type { DecisionRequest } from "../src/workflow.ts";
-import { createFakeEngine, invoice } from "./fakes.ts";
+import { invoice } from "./fakes.ts";
 import { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 import type { InvoiceSystems } from "./workflows/invoice-approval.ts";
 
 const fakeSystems = (
   overrides: Partial<InvoiceSystems> = {}
-): InvoiceSystems & {
-  booked: { idempotencyKey: string }[];
-  asked: DecisionRequest[];
-} => {
-  const booked: { idempotencyKey: string }[] = [];
-  const asked: DecisionRequest[] = [];
+): InvoiceSystems & { booked: { invoice: string; total: number }[] } => {
+  const booked: { invoice: string; total: number }[] = [];
   return {
     booked,
-    asked,
     findPurchaseOrder: async () => ({ amount: 800_000 }),
-    book: async (_entry, idempotencyKey) => {
-      booked.push({ idempotencyKey });
+    book: async (entry) => {
+      booked.push(entry);
       return "ledger-42";
-    },
-    askReviewer: async (request) => {
-      asked.push(request);
     },
     ...overrides,
   };
 };
 
-const modelSays = (total: number) => () => ({ total, currency: "EUR" });
+const small = { ...invoice, total: 400_000 };
 
 const day = 86_400_000;
 
@@ -50,92 +42,67 @@ describe("the sample invoice workflow", () => {
     vi.useRealTimers();
   });
 
-  it("asks the model through the App's binding, with the instructions", async () => {
-    const { engine, modelRequests } = createFakeEngine({
-      model: modelSays(400_000),
-    });
-
-    await invoiceWorkflow(fakeSystems()).run(engine, invoice);
-
-    expect(modelRequests).toMatchObject([
-      {
-        step: "extract",
-        binding: "extractor",
-        instructions:
-          "Read the invoice's total amount in whole minor units (cents for EUR) and its ISO 4217 currency code.",
-        input: "Total €8,000",
-      },
-    ]);
-  });
-
-  it("exposes its parameters and triggers as plain JSON", () => {
+  it("exposes its parameters as plain JSON", () => {
     const { metadata } = invoiceWorkflow(fakeSystems());
 
-    expect(metadata.id).toBe("invoice-approval");
-    expect(metadata.params).toStrictEqual([
-      {
-        name: "threshold",
-        kind: "money",
-        label: "Review invoices above",
-        default: 500_000,
-        sensitive: true,
-        currency: "EUR",
-      },
-      {
-        name: "reviewer",
-        kind: "person",
-        label: "Reviewer",
-        default: "team:finance",
-        sensitive: false,
-      },
-    ]);
-    expect(metadata.triggers).toStrictEqual([
-      { type: "event", event: "invoice.received" },
-    ]);
+    expect(metadata).toStrictEqual({
+      id: "invoice-approval",
+      params: [
+        {
+          name: "threshold",
+          kind: "money",
+          label: "Review invoices above",
+          default: 500_000,
+          sensitive: true,
+          currency: "EUR",
+        },
+        {
+          name: "reviewer",
+          kind: "person",
+          label: "Reviewer",
+          default: "team:finance",
+          sensitive: false,
+        },
+      ],
+    });
     expect(z.json().safeParse(metadata).success).toBeTruthy();
   });
 
   it("books an invoice below the threshold without asking anyone", async () => {
     const systems = fakeSystems();
-    const { engine } = createFakeEngine({ model: modelSays(400_000) });
+    const { engine, decisions } = createTestEngine();
 
-    const result = await invoiceWorkflow(systems).run(engine, invoice);
+    const result = await invoiceWorkflow(systems).run(engine, small);
 
-    expect(result).toStrictEqual({ status: "booked", entry: "ledger-42" });
-    expect(systems.asked).toStrictEqual([]);
-    expect(systems.booked).toStrictEqual([{ idempotencyKey: "run-1:book" }]);
+    expect({ result, decisions, booked: systems.booked }).toStrictEqual({
+      result: { status: "booked", entry: "ledger-42" },
+      decisions: [],
+      booked: [{ invoice: "INV-7", total: 400_000 }],
+    });
   });
 
   it("asks the reviewer above the threshold and books once approved", async () => {
     const systems = fakeSystems();
-    const { engine } = createFakeEngine({
-      model: modelSays(800_000),
+    const { engine, decisions } = createTestEngine({
       decisions: { review: { approved: true, by: "anna" } },
     });
 
     const result = await invoiceWorkflow(systems).run(engine, invoice);
 
-    expect(result).toStrictEqual({ status: "booked", entry: "ledger-42" });
-    expect(systems.asked).toStrictEqual([
-      {
-        recipients: [
-          {
-            userId: "test-person",
-            name: "Test Person",
-            email: "test-person@grasp.test",
-            link: "https://grasp.test/decisions/review",
-          },
-        ],
-        reminder: false,
-        idempotencyKey: "run-1:review#ask",
-      },
-    ]);
+    expect({
+      result,
+      decisions: decisions.map(({ step, from }) => ({ step, from })),
+      booked: systems.booked,
+    }).toStrictEqual({
+      result: { status: "booked", entry: "ledger-42" },
+      decisions: [{ step: "review", from: "team:finance" }],
+      booked: [{ invoice: "INV-7", total: 800_000 }],
+    });
   });
 
   it("doesn't book an invoice the reviewer rejects", async () => {
     const systems = fakeSystems();
-    const { engine } = createFakeEngine({
-      model: modelSays(800_000),
+    const { engine } = createTestEngine({
       decisions: {
         review: {
           approved: false,
@@ -151,18 +118,9 @@ describe("the sample invoice workflow", () => {
     expect(systems.booked).toStrictEqual([]);
   });
 
-  it("reminds the reviewer once, then gives up at the timeout", async () => {
+  it("gives up at the timeout, waiting it out once", async () => {
     const systems = fakeSystems();
-    const { askReviewer } = systems;
-    // Sending the reminder takes a day, which comes off the time left.
-    systems.askReviewer = async (request) => {
-      await askReviewer(request);
-      if (request.reminder) {
-        vi.setSystemTime(Date.now() + day);
-      }
-    };
-    const { engine, steps } = createFakeEngine({
-      model: modelSays(800_000),
+    const { engine, steps } = createTestEngine({
       // A wait that times out takes its time; move the frozen clock on.
       skipTime: (milliseconds) => {
         vi.setSystemTime(Date.now() + milliseconds);
@@ -171,35 +129,34 @@ describe("the sample invoice workflow", () => {
 
     const result = await invoiceWorkflow(systems).run(engine, invoice);
 
-    expect(result).toStrictEqual({ status: "timedOut" });
-    expect(systems.asked.map(({ reminder }) => reminder)).toStrictEqual([
-      false,
-      true,
-    ]);
-    expect(
-      steps.flatMap((record) =>
+    expect({
+      result,
+      waits: steps.flatMap((record) =>
         record.type === "wait" ? [record.timeout] : []
-      )
-    ).toStrictEqual([2 * day, 4 * day]);
-    expect(systems.booked).toStrictEqual([]);
+      ),
+      booked: systems.booked,
+    }).toStrictEqual({
+      result: { status: "timedOut" },
+      waits: [7 * day],
+      booked: [],
+    });
   });
 
   it("uses the values people set instead of the defaults", async () => {
     const systems = fakeSystems();
-    const { engine } = createFakeEngine({
+    const { engine, decisions } = createTestEngine({
       params: { threshold: 1_000_000 },
-      model: modelSays(800_000),
     });
 
     const result = await invoiceWorkflow(systems).run(engine, invoice);
 
     expect(result.status).toBe("booked");
-    expect(systems.asked).toStrictEqual([]);
+    expect(decisions).toStrictEqual([]);
   });
 
   it("fails a run whose parameter value doesn't fit its kind, or is empty", async () => {
     for (const threshold of ["lots", null]) {
-      const { engine } = createFakeEngine({ params: { threshold } });
+      const { engine } = createTestEngine({ params: { threshold } });
 
       // oxlint-disable-next-line no-await-in-loop -- each run is one case
       await expect(
@@ -212,18 +169,15 @@ describe("the sample invoice workflow", () => {
     const systems = fakeSystems();
     const { book } = systems;
     let crashed = false;
-    systems.book = async (entry, idempotencyKey) => {
+    systems.book = async (entry) => {
       if (!crashed) {
         crashed = true;
         throw new Error("Ledger went away mid-call");
       }
-      return await book(entry, idempotencyKey);
+      return await book(entry);
     };
     const params: Record<string, unknown> = { threshold: 1_000_000 };
-    const { engine } = createFakeEngine({
-      params,
-      model: modelSays(800_000),
-    });
+    const { engine, decisions } = createTestEngine({ params });
     const definition = invoiceWorkflow(systems);
 
     await expect(definition.run(engine, invoice)).rejects.toThrow(
@@ -233,18 +187,18 @@ describe("the sample invoice workflow", () => {
     const result = await definition.run(engine, invoice);
 
     expect(result.status).toBe("booked");
-    expect(systems.asked).toStrictEqual([]);
+    expect(decisions).toStrictEqual([]);
   });
 
   it("fails a run whose input doesn't match the input schema", async () => {
-    const { engine } = createFakeEngine();
+    const { engine } = createTestEngine();
 
     await expect(
       invoiceWorkflow(fakeSystems()).run(engine, { number: "INV-7" })
     ).rejects.toMatchObject({ code: "workflow.invalid_input" });
   });
 
-  it("resumes after a crash without redoing finished steps, with the same key", async () => {
+  it("resumes after a crash without redoing finished steps", async () => {
     let lookups = 0;
     let crashed = false;
     const systems = fakeSystems({
@@ -254,28 +208,24 @@ describe("the sample invoice workflow", () => {
       },
     });
     const bookOnce = systems.book;
-    const keys: string[] = [];
-    systems.book = async (entry, idempotencyKey) => {
-      keys.push(idempotencyKey);
+    systems.book = async (entry) => {
       if (!crashed) {
         crashed = true;
         throw new Error("Ledger went away mid-call");
       }
-      return await bookOnce(entry, idempotencyKey);
+      return await bookOnce(entry);
     };
-    const { engine, modelRequests } = createFakeEngine({
-      model: modelSays(400_000),
-    });
+    const { engine } = createTestEngine();
     const definition = invoiceWorkflow(systems);
 
-    await expect(definition.run(engine, invoice)).rejects.toThrow(
+    await expect(definition.run(engine, small)).rejects.toThrow(
       "Ledger went away"
     );
-    const result = await definition.run(engine, invoice);
+    const result = await definition.run(engine, small);
 
-    expect(result.status).toBe("booked");
-    expect(lookups).toBe(1);
-    expect(modelRequests).toHaveLength(1);
-    expect(keys).toStrictEqual(["run-1:book", "run-1:book"]);
+    expect({ status: result.status, lookups }).toStrictEqual({
+      status: "booked",
+      lookups: 1,
+    });
   });
 });

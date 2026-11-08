@@ -534,7 +534,6 @@ const doOptionsSchema = z.object({
     })
     .optional(),
   timeout: z.int().positive().max(maxAttemptTimeoutMs).optional(),
-  sideEffect: z.boolean().optional(),
   input: z.json().optional(),
 });
 
@@ -1724,7 +1723,7 @@ export class RunHost extends RpcTarget {
   async #audited(
     step: string,
     outcome: "completed" | "failed",
-    detail: { sideEffect: boolean; errorCode?: string }
+    errorCode?: string
   ): Promise<void> {
     if (!this.#kind.stepsAudited) {
       return;
@@ -1741,10 +1740,7 @@ export class RunHost extends RpcTarget {
           detail: {
             ...runDetail,
             step,
-            sideEffect: detail.sideEffect,
-            ...(detail.errorCode === undefined
-              ? {}
-              : { errorCode: detail.errorCode }),
+            ...(errorCode === undefined ? {} : { errorCode }),
           },
         }),
       ]);
@@ -2133,7 +2129,6 @@ export class RunHost extends RpcTarget {
     // Whether its kind let it start: only such a step's end is its to hear.
     let started = false;
     let step = "";
-    let sideEffect = false;
     let input: InputShape | null = null;
     // Its wait for its AI provider, over its rounds in a row: ended however
     // the step ends, a throw included, so no run reads as waiting on.
@@ -2145,7 +2140,6 @@ export class RunHost extends RpcTarget {
       await this.#requireStep(step, use);
       started = true;
       const parsed = checked(doOptionsSchema, options);
-      sideEffect = parsed.sideEffect === true;
       input = inputShape(parsed.input);
       const config = stepConfig(parsed, this.#kind.limitsOf?.(step));
       await this.#kind.requirePerson();
@@ -2281,7 +2275,7 @@ export class RunHost extends RpcTarget {
             this.#kind.attemptFailed?.(attempt, refused);
             throw toStepError(refused);
           }
-          await this.#audited(step, "completed", { sideEffect });
+          await this.#audited(step, "completed");
         }
         return result.value;
       };
@@ -2437,10 +2431,11 @@ export class RunHost extends RpcTarget {
       }
       if (attempted) {
         this.#hooks.stepFailed({ step, input, error: reported });
-        await this.#audited(step, "failed", {
-          sideEffect,
-          errorCode: reported.code ?? "workflow.step_failed",
-        });
+        await this.#audited(
+          step,
+          "failed",
+          reported.code ?? "workflow.step_failed"
+        );
       }
       return { ok: false, error: reported };
     } finally {
@@ -3190,8 +3185,7 @@ export class RunHost extends RpcTarget {
       // The SDK worked `timeout` out from when it asked, but a pause or a
       // restart may have outlasted that: so never wait past the decision's
       // deadline, as its row has it, from when the wait was first reached.
-      // Once that has passed, the decision is closed as timed out at once,
-      // so a reminder that follows asks nobody.
+      // Once that has passed, the decision is closed as timed out at once.
       const kept = this.#kind.decisionsKept;
       const deadline =
         kept === undefined

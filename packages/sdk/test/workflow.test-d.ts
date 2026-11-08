@@ -5,28 +5,17 @@ import type { RunId } from "@grasp-os/shared/ids";
 import { expectTypeOf } from "vite-plus/test";
 
 import type { stepOptionSchemas } from "../src/steps.ts";
-import {
-  money,
-  person,
-  schedule,
-  template,
-  workflow,
-} from "../src/workflow.ts";
+import { money, person, template } from "../src/workflow.ts";
 import type {
   DecisionOptions,
   DoOptions,
-  LlmOptions,
   Person,
-  SideEffectContext,
   SleepOptions,
   StepRunner,
   WorkflowContext,
   z,
 } from "../src/workflow.ts";
-import {
-  extractionSchema,
-  invoiceWorkflow,
-} from "./workflows/invoice-approval.ts";
+import { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 
 const params = {
   threshold: money({ label: "Above", currency: "EUR", default: 500_000 }),
@@ -36,13 +25,6 @@ const params = {
 declare const step: StepRunner;
 declare const context: WorkflowContext<typeof params, undefined>;
 const { params: p } = context;
-const llm = {
-  description: "Extract",
-  binding: "extractor",
-  instructions: "Read the total.",
-  input: "",
-  schema: extractionSchema,
-};
 
 // Parameters are typed by their kind.
 expectTypeOf(p.threshold).toExtend<number>();
@@ -51,15 +33,10 @@ expectTypeOf(context.runId).toEqualTypeOf<RunId>();
 expectTypeOf<string>().not.toExtend<Person>();
 
 // A parameter of the wrong kind doesn't compile.
-// @ts-expect-error -- a binding is named by its alias, a string
-await step.llm("extract", { ...llm, binding: 1 });
-// @ts-expect-error -- a model isn't named: its binding is
-await step.llm("extract", { ...llm, model: "mistral-large" });
 await step.decision("review", {
   description: "Review",
   // @ts-expect-error -- a template isn't a person
   from: p.reminder,
-  ask: async () => {},
   timeout: "7 days",
 });
 // @ts-expect-error -- a money parameter holds a number
@@ -72,7 +49,6 @@ money({ label: "Above", default: 500_000 });
 await step.decision("review", {
   description: "Review",
   from: p.reviewer,
-  ask: async () => {},
 });
 
 // Retries say how many, and how far apart.
@@ -106,30 +82,12 @@ await step.do(
 expectTypeOf<Exclude<keyof DoOptions, "retry">>().toEqualTypeOf<
   keyof z.input<typeof stepOptionSchemas.do>
 >();
-expectTypeOf<
-  Exclude<keyof LlmOptions<z.ZodType>, "locked" | "sideEffect">
->().toEqualTypeOf<keyof z.input<typeof stepOptionSchemas.llm>>();
 expectTypeOf<keyof DecisionOptions>().toEqualTypeOf<
   keyof z.input<typeof stepOptionSchemas.decision>
 >();
 expectTypeOf<keyof SleepOptions>().toEqualTypeOf<
   keyof z.input<typeof stepOptionSchemas.sleep>
 >();
-
-// step.llm needs instructions and a schema, can't be locked, and its answer
-// is typed by the schema.
-const { instructions: _instructions, ...withoutInstructions } = llm;
-// @ts-expect-error -- the instructions are required
-await step.llm("extract", withoutInstructions);
-const { schema: _schema, ...withoutSchema } = llm;
-// @ts-expect-error -- the schema is required
-await step.llm("extract", withoutSchema);
-// @ts-expect-error -- a model is involved, so an AI step is never locked
-await step.llm("extract", { ...llm, locked: true });
-expectTypeOf(await step.llm("extract", llm)).toEqualTypeOf<{
-  total: number;
-  currency: string;
-}>();
 
 // Every step needs a description.
 // @ts-expect-error -- the description is required
@@ -139,31 +97,10 @@ await step.sleep("pause", { duration: "1 day" });
 // @ts-expect-error -- durations need a unit
 await step.sleep("pause", { description: "Pause", duration: "1 fortnight" });
 
-// Only side-effect steps get an idempotency key.
-expectTypeOf(
-  await step.do(
-    "book",
-    { description: "Book", sideEffect: true, input: null },
-    async ({ idempotencyKey }) => idempotencyKey
-  )
-).toEqualTypeOf<string>();
-await step.do(
-  "book",
-  // @ts-expect-error -- a side-effect step says what it writes
-  { description: "Book", sideEffect: true },
-  async () => 1
-);
-await step.do(
-  "match",
-  { description: "Match" },
-  // @ts-expect-error -- a step without side effects gets no key
-  async (sideEffect: SideEffectContext) => sideEffect.idempotencyKey
-);
-
 // A step gets back the input it's given, as typed, and input is JSON.
 await step.do(
   "notify",
-  { description: "Notify", sideEffect: true, input: { to: "anna", count: 2 } },
+  { description: "Notify", input: { to: "anna", count: 2 } },
   async ({ input }) => {
     expectTypeOf(input).toEqualTypeOf<{ to: string; count: number }>();
   }
@@ -178,26 +115,11 @@ await step.do(
   async () => 1
 );
 
-// Schedule triggers refer to schedule parameters.
-workflow(
-  "schedule-trigger",
-  {
-    params: {
-      ...params,
-      every: schedule({ label: "Runs", default: "0 9 * * *" }),
-    },
-    // @ts-expect-error -- a schedule trigger needs a schedule parameter
-    triggers: [{ type: "schedule", param: "threshold" }],
-  },
-  async () => null
-);
-
 // A run resolves to what the workflow returns.
 expectTypeOf(
   invoiceWorkflow({
     findPurchaseOrder: async () => null,
     book: async () => "",
-    askReviewer: async () => {},
   }).run
 ).returns.resolves.toExtend<{
   status: "unmatched" | "rejected" | "timedOut" | "booked";

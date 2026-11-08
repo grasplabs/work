@@ -3,6 +3,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
+import { generatorVersion } from "@grasp-os/workflow-schema/generate";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
@@ -614,6 +615,32 @@ return { before, after: await late };
     );
     await expect(sealedRunOf(runId ?? "")).rejects.toMatchObject({
       code: "workflow.version_corrupt",
+    });
+  });
+
+  it("refuses a build an earlier generator made before any run of it starts, as one to publish again", async () => {
+    // Sealed with the SDK of generator 1, whose decisions the run host's
+    // engine no longer runs.
+    const older = await publishedBefore((manifest) => {
+      const changed = manifest.replace(
+        `"generator":${JSON.stringify(generatorVersion)}`,
+        '"generator":"grasp-workflow-ts/1"'
+      );
+      expect(changed).not.toBe(manifest);
+      return changed;
+    });
+    const runs = async () =>
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS runs FROM workflow_resource_runs WHERE workflow_resource_id = ?"
+      )
+        .bind(older.workflow.id)
+        .first<{ runs: number }>();
+    expect({
+      start: await startOfFirst(older),
+      runs: await runs(),
+    }).toStrictEqual({
+      start: "workflow.format_unsupported",
+      runs: { runs: 0 },
     });
   });
 
@@ -1614,12 +1641,11 @@ const reviewAsks =
 
 /**
  * Task `review`'s decision, as generated code asks it (`from` code), its
- * outcome and how many people its code was told of, returned.
+ * outcome returned.
  */
 const decideReview = (from = "entered.recipients[0]"): string => `
-const told = [];
-const decided = await step.decision("review", { key: "task", description: entered.prompt, from: ${from}, timeout: "365 days", ask: async ({ recipients }) => { told.push(recipients.length); } });
-return { decided, told };`;
+const decided = await step.decision("review", { key: "task", description: entered.prompt, from: ${from}, timeout: "365 days" });
+return { decided };`;
 
 /** How many times run `runId` asked the people of a decision, as audited. */
 const asksAudited = async (runId: string): Promise<number> => {
@@ -1648,7 +1674,7 @@ const refusedPastTheSdk = (step: string) => ({
 const signed = (body: string): string => `
 const { items } = await step.do("batch", { key: "enter", description: "Its items" }, async () => ({ items: ["INV-1", "INV-2"] }));
 const ask = (at) => step.do("sign", { key: "enter@" + at, description: "Its ask" }, async () => ({ recipients: [input.reviewer], prompt: "Approve this one", input: { invoice: items[at] } }));
-const decide = (at) => step.decision("sign", { key: "task@" + at, description: "Approve this one", from: input.reviewer, timeout: "365 days", ask: async () => undefined });
+const decide = (at) => step.decision("sign", { key: "task@" + at, description: "Approve this one", from: input.reviewer, timeout: "365 days" });
 ${body}`;
 
 describe("a sealed run's decisions on the run host", () => {
@@ -1697,8 +1723,6 @@ describe("a sealed run's decisions on the run host", () => {
             by: reviewer.userId,
             payload: { comment: "Fine" },
           },
-          // Its code learns nobody's address.
-          told: [0],
         },
         tampered: [],
       },
@@ -1753,7 +1777,7 @@ describe("a sealed run's decisions on the run host", () => {
     });
   });
 
-  it("opens a decision only as its enter step recorded it, and refuses a step recording one it didn't open, a reminder, or a wait for another decision", async () => {
+  it("opens a decision only as its enter step recorded it, tells its code nobody's address, and refuses a step recording one it didn't open or a wait for another decision", async () => {
     const { reviewer } = reviewed;
     const forReviewer = `person:${reviewer.userId}`;
     // The engine itself, as code past the SDK has it, once task `review`
@@ -1781,8 +1805,8 @@ describe("a sealed run's decisions on the run host", () => {
       unopened: await pastTheSdk(
         'await engine.do("review:task", {}, async () => ({ decision: "forged", deadline: 1 })); return "recorded";'
       ),
-      reminder: await pastTheSdk(
-        'const { decision } = await open(); await engine.do("review:task#ask", {}, async () => await engine.decisionRecipients(decision, true)); return "reminded";'
+      told: await pastTheSdk(
+        'const { decision } = await open(); return await engine.do("review:task#ask", {}, async () => await engine.askDecision(decision));'
       ),
       otherDecision: await pastTheSdk(
         `await open(); await engine.waitForDecision("review:task#answer", { decision: "${crypto.randomUUID()}", timeout: 1000, last: true }); return "waited";`
@@ -1792,7 +1816,7 @@ describe("a sealed run's decisions on the run host", () => {
         'Task "review" opens its decision as its enter step recorded it.'
       ),
       unopened: refusedPastTheSdk("review:task"),
-      reminder: refusedPastTheSdk("review:task#ask"),
+      told: { ended: undefined, tampered: [], refused: [] },
       otherDecision: refusedPastTheSdk("review:task#answer"),
     });
   });
@@ -1845,7 +1869,7 @@ describe("a sealed run's decisions on the run host", () => {
         tampered: [],
       },
       timedOut: {
-        ended: { decided: { timedOut: true }, told: [0] },
+        ended: { decided: { timedOut: true } },
         tampered: [],
       },
       status: "timed_out",
@@ -1919,7 +1943,7 @@ describe("a sealed run's decisions on the run host", () => {
     }).toStrictEqual({
       refused: "decision.forbidden",
       ownRun: {
-        ended: { decided: { timedOut: true }, told: [0] },
+        ended: { decided: { timedOut: true } },
         tampered: [],
       },
       revokedRun: failedWith("workflow.call_denied"),
@@ -1931,11 +1955,14 @@ describe("a sealed run's decisions on the run host", () => {
   it("asks a decision's people once: a step that fails after asking them fails for good", async () => {
     const { reviewer } = reviewed;
     const runId = await reviewRun(reviewed, `person:${reviewer.userId}`);
+    // Code past the SDK whose ask step fails once its people were asked.
     const ran = await ranAs(
       runId,
-      reviewModuleOf(
-        `${enterReview(reviewAsks)} return await step.decision("review", { key: "task", description: entered.prompt, from: entered.recipients[0], timeout: "365 days", ask: async () => { throw new Error("The mail server is down"); } });`
-      ),
+      `export default { run: async (engine, input) => {
+  await engine.do("review:enter", {}, async () => ({ recipients: [input.reviewer], prompt: "Approve the invoice", input: { invoice: input.invoice } }));
+  const { decision } = await engine.do("review:task", {}, async () => await engine.openDecision({ step: "review:task", from: input.reviewer, description: "Approve the invoice", timeout: 1000 }));
+  await engine.do("review:task#ask", {}, async () => { await engine.askDecision(decision); throw new Error("The mail server is down"); });
+} };`,
       { engine: retryingEngine() }
     );
     expect({ ran, asked: await asksAudited(runId) }).toStrictEqual({
@@ -2011,7 +2038,7 @@ describe("a sealed run's decisions on the run host", () => {
       asked: await asksAudited(runId),
     }).toStrictEqual({
       // Its people aren't told again: the ask is journaled.
-      replayed: { ...z.object({}).loose().parse(first.ended), told: [] },
+      replayed: first.ended,
       ran: [],
       decisions: [expect.objectContaining({ step: "review:task" })],
       asked: 1,

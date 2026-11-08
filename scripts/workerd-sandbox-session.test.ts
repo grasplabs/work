@@ -770,7 +770,7 @@ server.listen(socket, () => {
 
   it("gives a run's step exactly its attempt's calls, and refuses its attempt's host once the step is over", async () => {
     const outcome = await runHost("attempts");
-    const names = ["callConnection", "openDecision", "decisionRecipients"];
+    const names = ["callConnection", "openDecision", "askDecision"];
     expect(outcome).toMatchObject({
       status: "ok",
       value: {

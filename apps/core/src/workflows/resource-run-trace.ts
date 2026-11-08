@@ -104,7 +104,7 @@ const sealedDecisionPart = /^#(?:ask|asked|answer)$/u;
 /**
  * The wait a decision's ask leads to (the SDK's): core's steps of it go by
  * its key from the first, a look that may find it answered before it is
- * ever reached. A sealed decision has no reminder (sealed-run.ts).
+ * ever reached.
  */
 const answerAfter: Readonly<Record<string, string>> = { "#ask": "#answer" };
 

@@ -7,7 +7,6 @@ import { z } from "zod";
 import type {
   DecisionAnswer,
   EngineDecision,
-  ModelRequest,
   WorkflowEngine,
   WorkflowEnv,
 } from "./engine.ts";
@@ -32,19 +31,14 @@ export type StepRecord =
        * part of a decision (`review#ask`).
        */
       name: string;
-      sideEffect: boolean;
       input?: Json;
-      /**
-       * `ran` for its function, `mocked` for a mocked result and `recorded`
-       * for a side effect that didn't run, which has no result.
-       */
-      status: "ran" | "mocked" | "recorded";
+      /** `ran` for its function, `mocked` for a mocked result. */
+      status: "ran" | "mocked";
       output: unknown;
     }
   | {
       type: "step";
       name: string;
-      sideEffect: boolean;
       input?: Json;
       status: "failed";
       error: string;
@@ -58,12 +52,6 @@ export type StepRecord =
       /** What the wait ended with, or nothing before the timeout. */
       event: { received: true; payload: unknown } | { received: false };
     };
-
-/** A side effect the run would have had, in the order it would happen. */
-export interface SideEffect {
-  name: string;
-  input?: Json;
-}
 
 export interface TestEngineOptions {
   runId?: string;
@@ -79,26 +67,16 @@ export interface TestEngineOptions {
   /**
    * Step results by step name, instead of running the step. A keyed step
    * takes the mock for `name:key` (the key as the workflow gives it), or
-   * else the one for `name`. An AI step's mock is the model's answer, which
-   * is still checked against its schema. A side-effect step that isn't
-   * mocked has no result.
+   * else the one for `name`.
    */
   mocks?: Readonly<Record<string, StepMock>>;
   /** Steps that fail, by name (as for mocks), with this error message. */
   failures?: Readonly<Record<string, string>>;
-  /** Answers the model gateway; an AI step without a mock fails without it. */
-  model?: (request: ModelRequest) => unknown;
   /**
    * Answers to decisions by the decision's name (as for mocks). A decision
-   * without an answer times out, after its reminder if it has one. Each
-   * decision asks one stand-in person, `test-person`.
+   * without an answer times out.
    */
   decisions?: Readonly<Record<string, DecisionAnswer>>;
-  /**
-   * `record` (the default) records side-effect steps without running them;
-   * `run` runs them, e.g. against a fake of the system they change.
-   */
-  sideEffects?: "record" | "run";
   /**
    * Called with the time each sleep, and each wait that times out, would
    * have taken. The test engine skips it; move a fake clock with it.
@@ -206,10 +184,8 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
   const recorded = new Map<string, unknown>();
   const results = new Map<string, string | undefined>();
   const steps: StepRecord[] = [];
-  const modelRequests: ModelRequest[] = [];
   /** The decisions opened, once each. */
   const decisions: { step: string; from: string; deadline: number }[] = [];
-  const runSideEffects = options.sideEffects === "run";
   // The SDK's own step (parameters) isn't the workflow's.
   const log = (record: StepRecord): void => {
     if (!record.name.startsWith("$")) {
@@ -223,7 +199,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     // A copy: the run freezes what it reads, never the test's own object.
     state: structuredClone(options.state ?? {}),
     env: options.env ?? {},
-    do: async (name, { retries, sideEffect = false, input }, fn) => {
+    do: async (name, { retries, input }, fn) => {
       if (results.has(name)) {
         // SAFETY: only `do` stores under a name, with the result of the same
         // step, which a deterministic workflow asks for with the same T.
@@ -241,40 +217,36 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         if (failure !== undefined) {
           throw new Error(failure);
         }
-        let status: "ran" | "mocked" | "recorded" = "ran";
+        let status: "ran" | "mocked" = "ran";
         let output: unknown;
-        if (mock !== undefined) {
-          status = "mocked";
-          output = typeof mock === "function" ? await mock(call) : mock;
-        } else if (sideEffect && !runSideEffects) {
-          status = "recorded";
-        } else {
+        if (mock === undefined) {
           // As the engine: the platform's attempts when it declares none.
           output = await attempt(
             retries?.limit ?? maxStepRetries,
             async () => await fn()
           );
+        } else {
+          status = "mocked";
+          output = typeof mock === "function" ? await mock(call) : mock;
         }
         const stored = toStored(step.name, output);
         results.set(name, stored);
         log({
           type: "step",
           ...call,
-          sideEffect,
           status,
           output: fromStored(stored),
         });
         // A copy of its own: the workflow may change what it gets back,
         // which must not change the record above.
-        // SAFETY: a mock stands in for the step's result, and a side effect
-        // that isn't run has none; the test decides what the step returns.
+        // SAFETY: a mock stands in for the step's result; the test decides
+        // what the step returns.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         return fromStored(stored) as Awaited<ReturnType<typeof fn>>;
       } catch (error) {
         log({
           type: "step",
           ...call,
-          sideEffect,
           status: "failed",
           error: messageOf(error),
         });
@@ -288,15 +260,6 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         options.skipTime?.(milliseconds);
       }
       await Promise.resolve();
-    },
-    callModel: async (request) => {
-      modelRequests.push(request);
-      if (!options.model) {
-        throw new Error(
-          `Step "${request.step}" asks a model: mock it, or give the test a model`
-        );
-      }
-      return await options.model(request);
     },
     // Idempotent per step, as the engine contract asks: opening a decision
     // again (a crash before its step was recorded) opens nothing new. A
@@ -312,15 +275,10 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         deadline: opened.deadline,
       });
     },
-    decisionRecipients: async (decision) =>
-      await Promise.resolve([
-        {
-          userId: "test-person",
-          name: "Test Person",
-          email: "test-person@grasp.test",
-          link: `https://grasp.test/decisions/${decision}`,
-        },
-      ]),
+    // Nobody to tell in memory: a test answers decisions up front.
+    askDecision: async () => {
+      await Promise.resolve();
+    },
     waitForDecision: async (name, { decision, timeout }) => {
       const replayed = recorded.get(name);
       if (replayed !== undefined) {
@@ -357,7 +315,6 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
   return {
     engine,
     steps,
-    modelRequests,
     decisions,
   };
 };

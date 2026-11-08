@@ -93,7 +93,7 @@ export const number = param("number");
 export const text = param("text");
 /** A person or group, e.g. who reviews; required by `step.decision`. */
 export const person = param("person");
-/** A schedule, as five cron fields; what a schedule trigger runs on. */
+/** A schedule, as five cron fields. */
 export const schedule = param("schedule");
 /** A template, e.g. for an email. */
 export const template = param("template");

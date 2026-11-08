@@ -304,45 +304,13 @@ export type InboundEmail = z.infer<typeof inboundEmailSchema>;
 /** An event's type, e.g. `m365.mail.received`. */
 export const eventTypeSchema = z.string().min(1).max(200);
 
-/** Most fields an event trigger's filter names. */
-const maxFilterFields = 20;
-
-/**
- * An event trigger's filter: each field it names must hold that value at
- * the top of the event's payload, compared as is.
- */
-export const eventFilterSchema = z
-  .record(
-    z.string().min(1).max(64),
-    z.union([z.string().max(200), z.number(), z.boolean(), z.null()])
-  )
-  .refine((filter) => Object.keys(filter).length <= maxFilterFields, {
-    message: `At most ${maxFilterFields} fields`,
-  });
-
-/** An event trigger's filter. */
-export type EventFilter = z.infer<typeof eventFilterSchema>;
-
-/** Whether `payload` holds every value `filter` names, at its top. */
-export const matchesFilter = (
-  filter: EventFilter | null | undefined,
-  payload: Json
-): boolean => {
-  const isObject =
-    typeof payload === "object" && payload !== null && !Array.isArray(payload);
-  const fields = new Map(isObject ? Object.entries(payload) : []);
-  return Object.entries(filter ?? {}).every(
-    ([field, value]) => fields.has(field) && fields.get(field) === value
-  );
-};
-
 /** The most JSON text an event's payload takes. */
 const maxEventPayloadLength = 64 * 1024;
 
 /**
  * An event a connection reported, as core takes it from connect and
- * delivers it, and as the run an event trigger starts gets it as input (the SDK's
- * `connectorEvent`). `id` is the source's own ID of the event, the same
+ * delivers it, and as the run an event trigger starts gets it as input.
+ * `id` is the source's own ID of the event, the same
  * for the same event delivered again; for an ID longer than 200
  * characters it is `sha256:` and the ID's SHA-256 instead, and the payload
  * has the ID in full. `resource` narrows it to a part of
@@ -388,43 +356,6 @@ export const deliveredConnectorEventSchema = connectorEventSchema.extend({
 export type DeliveredConnectorEvent = z.infer<
   typeof deliveredConnectorEventSchema
 >;
-
-/** Most triggers one workflow declares. */
-const maxTriggerDeclarations = 20;
-
-/**
- * A trigger as a workflow's code declares it (the SDK's `Trigger`), within
- * the bounds core keeps: the SDK refuses a definition outside them, so a
- * version whose triggers core would refuse never passes its tests. Which
- * parameter a schedule names, and whether it is a schedule, is the SDK's
- * to check.
- */
-export const triggerDeclarationSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("manual") }),
-  z.object({
-    type: z.literal("schedule"),
-    param: paramDeclarationSchema.shape.name,
-    timeZone: z
-      .string()
-      .max(64)
-      .refine(isTimeZone, "Not a time zone the runtime knows")
-      .optional(),
-  }),
-  z.object({
-    type: z.literal("event"),
-    event: eventTypeSchema,
-    filter: eventFilterSchema.optional(),
-  }),
-  z.object({ type: z.literal("email"), address: emailLocalPartSchema }),
-]);
-
-/** A trigger as a workflow's code declares it. */
-export type TriggerDeclaration = z.infer<typeof triggerDeclarationSchema>;
-
-/** A workflow's triggers: at most {@link maxTriggerDeclarations}. */
-export const triggerDeclarationsSchema = z
-  .array(triggerDeclarationSchema)
-  .max(maxTriggerDeclarations);
 
 /**
  * What core's own steps of a run start with (core's workflows/), and the
@@ -751,31 +682,16 @@ export interface WorkflowRun {
   detailsRemoved?: true;
 }
 
-/**
- * How a step works: `exact` is plain code, `ai` asks a model for output of a
- * fixed shape, `decision` waits for a person, `wait` waits for time or an
- * event.
- */
-export type StepKind = "exact" | "ai" | "decision" | "wait";
-
 /** The SDK's own step, which reads the run's parameters and calls nothing. */
 export const paramsStep = "$params";
 
 /**
- * How the host is asked to run a step, by the SDK only in these ways for
- * each kind (workflow.ts): `do` its function (an exact step, an AI step,
- * a decision's opening, and its parts `name#…`); `sleep` (a wait);
- * `waitForDecision` (a decision's `name#answer…`); and, inside a step's
- * attempt, `model` (an AI step), `decision` (opening one) and
- * `recipients` (who a decision asks, in its `#ask` or `#remind` part).
+ * How the host is asked to run a step, by the SDK only in these ways
+ * (workflow.ts): `do` its function (a plain step, a decision's opening,
+ * and its parts `name#…`); `sleep` (a wait); and `waitForDecision` (a
+ * decision's `name#answer`).
  */
-export type StepUse =
-  | "do"
-  | "sleep"
-  | "waitForDecision"
-  | "model"
-  | "decision"
-  | "recipients";
+export type StepUse = "do" | "sleep" | "waitForDecision";
 
 /** Which runs `WorkflowsApi.runs` lists. */
 export interface RunFilter {

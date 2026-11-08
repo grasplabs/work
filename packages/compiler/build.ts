@@ -82,7 +82,7 @@ const ui = realpathSync(path.join(modules, "@grasp-os/ui"));
 const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
 /**
  * The SDK's own dependency: its types name `@grasp-os/shared`'s (a
- * workflow's `emailMessage`, a run's errors), so the kit's type chunks
+ * workflow's `Json`, a run's errors), so the kit's type chunks
  * carry what they name of it, or a check would read each as `any`.
  */
 const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));

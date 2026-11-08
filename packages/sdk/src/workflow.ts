@@ -18,22 +18,21 @@ import {
 import type { ParamMetadata, ParamValues, Params } from "./workflow-params.ts";
 import { createRunner } from "./workflow-runner.ts";
 import type { StepRunner } from "./workflow-steps.ts";
-import { validateTriggers } from "./workflow-triggers.ts";
-import type { ScheduleParams, Trigger } from "./workflow-triggers.ts";
 
 /**
- * Workflow SDK: the only API workflow code sees. A workflow declares its
- * parameters, then runs its steps in code, each with its options inline:
+ * Workflow SDK: what the code core generates from a grasp-workflow/1
+ * document (@grasp-os/workflow-schema's generate.ts) runs on, and the only
+ * API that code sees. A workflow declares its parameters, then runs its
+ * steps in code, each with its options inline:
  *
  * ```ts
  * export default workflow("invoice-approval", {
  *   params: {
  *     threshold: money({ label: "Review invoices above", currency: "EUR", default: 500_000 }),
  *   },
- * }, async (step, { params }) => {
- *   await step.do("book",
- *     { description: "Book the invoice", sideEffect: true, input: { invoice: 7 } },
- *     async ({ idempotencyKey, input }) => ...);
+ * }, async (step, { params, env }) => {
+ *   await step.do("book", { key: "task", description: "book" },
+ *     async () => ({ output: await env.ledger.call("entries.create", { invoice: 7 }) }));
  * });
  * ```
  */
@@ -85,14 +84,6 @@ export { paramValueSchemas } from "./params.ts";
 // What a step records and a binding is handed: a workflow's code names it
 // to narrow what a binding answers (`unknown`) into a step's result.
 export type { Json } from "@grasp-os/shared/json";
-// The input schemas of runs an email trigger (`input: emailMessage`) and an
-// event trigger (`input: connectorEvent`) start, and what they parse to.
-export {
-  connectorEventSchema as connectorEvent,
-  inboundEmailSchema as emailMessage,
-  type ConnectorEvent,
-} from "@grasp-os/shared/workflows";
-export type { DecisionRecipient } from "./engine.ts";
 export { WorkflowError } from "./workflow-error.ts";
 export {
   money,
@@ -114,19 +105,15 @@ export type {
   CaughtError,
   Decision,
   DecisionOptions,
-  DecisionRequest,
   DoOptions,
   Duration,
   EventWait,
-  LlmOptions,
   Retries,
   RetryChoice,
-  SideEffectContext,
   SleepOptions,
   StepRunner,
   WorkflowEvent,
 } from "./workflow-steps.ts";
-export type { Trigger } from "./workflow-triggers.ts";
 
 /**
  * The runtime's `Object.freeze`, kept as this module loads: a run's main
@@ -193,7 +180,6 @@ export interface WorkflowContext<P extends Params, Input> {
 interface WorkflowMetadata {
   id: WorkflowId;
   params: ParamMetadata[];
-  triggers: Trigger[];
 }
 
 /** A workflow, ready for the runtime to run. */
@@ -222,8 +208,6 @@ export const workflow = <
     params: P;
     /** The run's input, e.g. the invoice that started it. */
     input?: InputSchema;
-    /** Manual only when missing. */
-    triggers?: Trigger<ScheduleParams<P>>[];
   },
   run: (
     step: StepRunner,
@@ -237,8 +221,6 @@ export const workflow = <
     "Workflow ID"
   );
   validateParams(config.params);
-  const triggers: Trigger[] = config.triggers ?? [{ type: "manual" }];
-  validateTriggers(config.params, triggers);
   const inputSchema: z.ZodType = config.input ?? z.undefined();
 
   const runOnce = async (
@@ -292,7 +274,6 @@ export const workflow = <
     metadata: {
       id: workflowId,
       params: describeParams(config.params),
-      triggers,
     },
     run: async (engine, rawInput) => {
       try {

@@ -133,10 +133,13 @@ const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /**
  * A version's build, as its manifest seals it: every definition that
- * passes generates (`generateWorkflow`), so every version has one.
+ * passes generates (`generateWorkflow`), so every version has one. Only
+ * a build of today's generator loads: one an earlier generator made seals
+ * an SDK the run host's engine no longer fits, and is refused as a format
+ * this host doesn't read (`buildOf`), before any run of it starts.
  */
 export const sealedBuildSchema = z.strictObject({
-  generator: z.string().min(1).max(64),
+  generator: z.literal(generatorVersion),
   compilerVersion: z.string().min(1).max(128),
   /** The executable identity: see `identityOf`. */
   hash: sha256Schema,
@@ -336,7 +339,7 @@ export const compileWorkflow = async (
     artifacts.push({ path, sha256, bytes: encoded.byteLength });
     bytes.set(sha256, encoded);
   }
-  const identity = {
+  const identity: Omit<SealedBuild, "hash"> = {
     generator: generatorVersion,
     compilerVersion,
     artifacts,

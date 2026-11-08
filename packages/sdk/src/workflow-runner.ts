@@ -1,8 +1,7 @@
 import { isRecord } from "@grasp-os/shared/json";
-import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
-import { z } from "zod";
+import type { z } from "zod";
 
-import type { EngineDecision, WorkflowEngine } from "./engine.ts";
+import type { WorkflowEngine } from "./engine.ts";
 import {
   generatedStepOptionSchemas,
   namePattern,
@@ -16,10 +15,6 @@ import {
   eventWaitSchema,
 } from "./workflow-steps.ts";
 import type { UntypedStepRunner } from "./workflow-steps.ts";
-
-// Core requires exactly this key on the step's connection calls.
-const idempotencyKeyOf = (engine: WorkflowEngine, step: string): string =>
-  stepIdempotencyKey(engine.runId, step);
 
 /** A step call's options, checked against its method's schema. */
 const optionsOf = <Schema extends z.ZodType>(
@@ -104,66 +99,19 @@ export const createRunner = (
           throw invalidCall(`Step "${name}" needs a function to run`);
         }
         const { input, retries, timeout } = options;
-        const sideEffect = options.sideEffect === true;
         return await engine.do(
           step,
-          { retries, timeout, sideEffect, input },
-          async () =>
-            sideEffect
-              ? await fn({
-                  idempotencyKey: idempotencyKeyOf(engine, step),
-                  input,
-                })
-              : await fn({ input }),
+          { retries, timeout, input },
+          async () => await fn({ input }),
           retry === undefined
             ? undefined
             : async (error) => await retry(caughtErrorSchema.parse(error))
         );
       }),
 
-    llm: async (name, rawOptions) =>
-      await exclusive(`Step "${name}"`, async () => {
-        const options = optionsOf(stepOptionSchemas.llm, name, rawOptions);
-        const step = start(name, options.key);
-        const { instructions, input, schema, retries, timeout } = options;
-        const request = {
-          step,
-          binding: options.binding,
-          instructions,
-          input,
-          // The model writes what the schema accepts, so describe its input
-          // side.
-          outputSchema: z.toJSONSchema(schema, { io: "input" }),
-        };
-        // The raw answer is recorded, not the parsed one: parsed output may
-        // hold values that don't survive being recorded (a transform to a
-        // Date, say). Checking it inside the step makes an answer that
-        // doesn't fit a failure the step's retries may fix.
-        const answer = await engine.do(
-          step,
-          { retries, timeout, input },
-          async () => {
-            const raw = await engine.callModel(request);
-            parseOrThrow(
-              schema,
-              raw,
-              "workflow.invalid_model_output",
-              `Answer to step "${name}"`
-            );
-            return raw;
-          }
-        );
-        return parseOrThrow(
-          schema,
-          answer,
-          "workflow.invalid_model_output",
-          `Answer to step "${name}"`
-        );
-      }),
-
     decision: async (name, rawOptions) =>
       await exclusive(`Step "${name}"`, async () => {
-        const { key, description, from, ask, timeout, remindAfter } = optionsOf(
+        const { key, description, from, timeout } = optionsOf(
           stepOptionSchemas.decision,
           name,
           rawOptions
@@ -171,76 +119,31 @@ export const createRunner = (
         const step = start(name, key);
 
         // The engine sets the deadline when the decision opens, so time
-        // spent asking or reminding never pushes it out, and no answer
-        // counts after it. Other times are taken inside steps, so a replay
-        // computes the same waits.
+        // spent asking never pushes it out, and no answer counts after it.
+        // Other times are taken inside steps, so a replay computes the same
+        // wait.
         const { decision, deadline } = await engine.do(
           step,
           { input: { from } },
           async () =>
             await engine.openDecision({ step, from, description, timeout })
         );
-        // Asking is a side effect, which a dry run doesn't run, so when it
-        // finished is a step of its own rather than the ask step's result.
-        const askPeople = async (reminder: boolean): Promise<number> => {
-          const askStep = `${step}#${reminder ? "remind" : "ask"}`;
-          await engine.do(
-            askStep,
-            { sideEffect: true, input: { from, reminder } },
-            async () => {
-              const recipients = await engine.decisionRecipients(
-                decision,
-                reminder
-              );
-              // A reminder of a decision that was answered or has closed
-              // (timed out) goes to nobody, so it isn't sent at all.
-              if (reminder && recipients.length === 0) {
-                return;
-              }
-              await ask({
-                recipients,
-                reminder,
-                idempotencyKey: idempotencyKeyOf(engine, askStep),
-              });
-            }
-          );
-          return await engine.do(
-            `${step}#${reminder ? "reminded" : "asked"}`,
-            {},
-            async () => await Promise.resolve(Date.now())
-          );
-        };
-        const waitForAnswer = async (
-          waitStep: string,
-          since: number,
-          until: number,
-          last: boolean
-        ): Promise<EngineDecision> =>
-          await engine.waitForDecision(waitStep, {
-            decision,
-            timeout: Math.max(until - since, 0),
-            last,
-          });
-
-        const askedAt = await askPeople(false);
-        const remindAt =
-          remindAfter === undefined ? undefined : askedAt + remindAfter;
-        const reminds = remindAt !== undefined && remindAt < deadline;
-        let answer = await waitForAnswer(
-          `${step}#answer`,
-          askedAt,
-          reminds ? remindAt : deadline,
-          !reminds
+        // The engine tells the people it is from in a step of its own, and
+        // when that finished is a step of its own again, so a replay waits
+        // from the same time.
+        await engine.do(`${step}#ask`, { input: { from } }, async () => {
+          await engine.askDecision(decision);
+        });
+        const askedAt = await engine.do(
+          `${step}#asked`,
+          {},
+          async () => await Promise.resolve(Date.now())
         );
-        if (!answer.answered && reminds) {
-          const remindedAt = await askPeople(true);
-          answer = await waitForAnswer(
-            `${step}#answer-after-reminder`,
-            remindedAt,
-            deadline,
-            true
-          );
-        }
+        const answer = await engine.waitForDecision(`${step}#answer`, {
+          decision,
+          timeout: Math.max(deadline - askedAt, 0),
+          last: true,
+        });
         if (!answer.answered) {
           return { timedOut: true };
         }

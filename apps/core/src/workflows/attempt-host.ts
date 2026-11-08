@@ -1,6 +1,5 @@
 import { RpcTarget } from "cloudflare:workers";
 
-import type { DecisionRecipient } from "../decisions/decisions.ts";
 import type { Settled } from "./sealed-isolate.ts";
 
 /** What an attempt's host does, each call as its attempt (`AttemptHost`). */
@@ -12,10 +11,7 @@ export interface AttemptCalls {
   openDecision: (
     request: unknown
   ) => Promise<Settled<{ decision: string; deadline: number }>>;
-  decisionRecipients: (
-    decision: unknown,
-    reminder: unknown
-  ) => Promise<Settled<DecisionRecipient[]>>;
+  askDecision: (decision: unknown) => Promise<Settled<null>>;
 }
 
 /**
@@ -47,7 +43,7 @@ export const attemptCallLabels: {
 } = {
   callConnection: "connection",
   openDecision: "decision",
-  decisionRecipients: "decision",
+  askDecision: "decision",
 };
 
 /** The names of the calls an attempt's code makes (`AttemptCalls`). */
@@ -134,10 +130,7 @@ export class AttemptHost extends RpcTarget implements AttemptCalls {
     return await this.#calls.openDecision(request);
   }
 
-  async decisionRecipients(
-    decision: unknown,
-    reminder: unknown
-  ): Promise<Settled<DecisionRecipient[]>> {
-    return await this.#calls.decisionRecipients(decision, reminder);
+  async askDecision(decision: unknown): Promise<Settled<null>> {
+    return await this.#calls.askDecision(decision);
   }
 }
