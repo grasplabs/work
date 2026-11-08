@@ -512,8 +512,9 @@ const workspaceArea: ErasureStep = {
 
 /**
  * What they left in the company's Apps that is theirs alone (GRA-1184):
- * their preferences in every App's store (`sdk_preferences`, a host-owned
- * table no App code reaches), what the forms they sent held in each
+ * what App preferences kept of them in every App's store
+ * (`sdk_preferences`, which nothing writes since they were removed, until
+ * GRA-1550 drops it), what the forms they sent held in each
  * store's outbox for its webhooks, and the usage signals computed for them as
  * the owner of
  * Knowledge collections (what others asked there, counted, and what they

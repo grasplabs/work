@@ -11,8 +11,7 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // arguments its validator accepts.
 //
 // The generated modules hold them: `@server/_generated/api` the public
-// `api`, the browser resources and the preferences (two
-// function references, preference-operations.ts);
+// `api` and the browser resources;
 // `@server/_generated/internal` the `internal` tree, for the App's own
 // server code. Their types come from the functions' descriptors, through
 // the phantom members below, which exist in types only: they are keyed by

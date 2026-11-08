@@ -85,13 +85,6 @@ export { workflowReferenceOf } from "./codegen-workflows.ts";
 export { generateModules } from "./generate.ts";
 export { workflowQueries } from "./workflow-queries.ts";
 export type { WorkflowQueryName } from "./workflow-queries.ts";
-export {
-  preferenceOperations,
-  preferencePaths,
-} from "./preference-operations.ts";
-export type { PreferenceOperationName } from "./preference-operations.ts";
-
-export { planPreferenceChange } from "./preference-plan.ts";
 // Who calls an App, and the organization's people, which core answers
 // itself (people.ts).
 export {
@@ -107,7 +100,6 @@ export type {
   TeamRef,
   User,
 } from "./people.ts";
-export type { PreferencePlan, PreferencesContract } from "./preference-plan.ts";
 
 // A descriptor as JSON Schema, for what reads only JSON Schema (a model
 // told its answer's shape); values are still checked by the descriptor.

@@ -1,13 +1,11 @@
-import { v } from "@grasp-os/sdk";
-import { preferenceOperations } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 
-import { appDefinition, preferencesOf, redefined } from "./app-definitions.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
-import { chatWithDraft, outcome, previewCall } from "./previews.ts";
+import { chatWithDraft } from "./previews.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The previews' tests' helpers, shared by their test files
@@ -276,39 +274,9 @@ export const notesApp = async (builder: Person): Promise<AppId> => {
   return appIdSchema.parse(id);
 };
 
-/** The App's preferences, as both the App and its drafts declare them. */
-const preferencesSource = `v.object({
-    compact: v.boolean().default(false),
-    theme: v.enum(["light", "dark"]).default("light"),
-  })`;
-
-/** Those preferences' descriptor, as the release's manifest holds it. */
-const preferencesDeclared = v.object({
-  compact: v.boolean().default(false),
-  theme: v.enum(["light", "dark"]).default("light"),
-}).descriptor;
-
-/** `files` with the App declaring those preferences. */
-export const withPreferences = (
-  files: Record<string, string>
-): Record<string, string> =>
-  redefined(files, (definition) => ({
-    ...definition,
-    preferences: preferencesOf(preferencesSource),
-  }));
-
-/**
- * The reference to the preference operation `name` of a release of `app`
- * at `version`, as `@server/_generated/api` generates it from those preferences.
- */
-export const preferenceReference = (name: "get" | "update") => {
-  const operation = preferenceOperations(preferencesDeclared)[name];
-  return { name: operation.path, kind: operation.kind };
-};
-
-/** An App with preferences and no tables, and one page. */
+/** An App with no tables, and one page. */
 export const deskFiles = (marker = "Desk"): Record<string, string> => ({
-  ...appDefinition({ name: "Desk", preferences: preferencesSource }),
+  ...appDefinition({ name: "Desk" }),
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
 const Desk = () => <main>${marker}</main>;
@@ -316,25 +284,6 @@ const Desk = () => <main>${marker}</main>;
 export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
-
-/**
- * What a call of the draft's preference operation `name` answers in its
- * preview, as its frame's page sends it (`previewCall`).
- */
-export const preferenceCall = async (
-  person: Person,
-  { chatId, app }: { chatId: string; app: AppId },
-  name: "get" | "update",
-  input: unknown
-): Promise<unknown> =>
-  outcome(
-    await previewCall(
-      person,
-      chatId,
-      app,
-      JSON.stringify({ reference: preferenceReference(name), input })
-    )
-  );
 
 /** A Desk App of `builder`'s, released, and a chat with a draft of it. */
 export const deskDraft = async (builder: Person) => {

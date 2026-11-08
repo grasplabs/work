@@ -785,7 +785,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("removes what the definition holds and sets its preferences with the definition tools, recording each by its table or alias", async () => {
+  it("removes what the definition holds with the definition tools, recording each by its table or alias", async () => {
     const { builder, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
@@ -795,17 +795,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         };
         const steps = [
           await define({ op: "addPermission", permission: "people" }),
-          await define({ op: "addPreference", name: "compact", type: "v.boolean().default(false)" }),
-          await define({ op: "changePreference", name: "compact", type: "v.boolean().default(true)" }),
           await define({ op: "removeIndex", table: "notes", name: "by_updated" }),
           await define({ op: "removeField", table: "notes", field: "body" }),
           await define({ op: "removePermission", alias: "people" }),
-          await define({ op: "removePreference", name: "compact" }),
           await define({ op: "removeTable", table: "notes" }),
         ];
         const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
         const schema = (await env.build.files(app.id)).files["server/schema.ts"];
-        return { steps, definition: [definition.tables.length, definition.preferences.length, definition.permissions.length], schema: schema.includes("notes") };
+        return { steps, definition: [definition.tables.length, definition.permissions.length], schema: schema.includes("notes") };
       };`),
       says("Removed."),
     ]);
@@ -831,17 +828,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         detail.alias,
       ]),
     }).toStrictEqual({
-      steps: Array.from({ length: 8 }, () => "ok"),
-      definition: [0, 0, 0],
+      steps: Array.from({ length: 5 }, () => "ok"),
+      definition: [0, 0],
       schema: false,
       audited: [
         ["addPermission", null, "people"],
-        ["addPreference", null, null],
-        ["changePreference", null, null],
         ["removeIndex", "notes", null],
         ["removeField", "notes", null],
         ["removePermission", null, "people"],
-        ["removePreference", null, null],
         ["removeTable", "notes", null],
       ],
     });

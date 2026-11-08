@@ -1499,8 +1499,8 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
 describe("an App's definition", { timeout: 120_000 }, () => {
   it("seals as the App it is: its generated config and schema register as the definition does", async () => {
     // A definition of every part the generator writes: tables of row
-    // rules, indexes and a search index, a sensitive one, permissions,
-    // preferences, and an answer.
+    // rules, indexes and a search index, a sensitive one, permissions and
+    // an answer.
     const spec: AppSpec = {
       name: "Desk",
       tables: {
@@ -1537,7 +1537,6 @@ describe("an App's definition", { timeout: 120_000 }, () => {
         'permission.links({ origins: ["https://help.example.com"] })',
         "people",
       ],
-      preferences: { compact: "v.boolean().default(false)" },
       answers: [{ table: "notes", field: "priority", value: "low" }],
     };
     const fixture = await appWith(appDefinition(spec), "Desk");
@@ -1737,36 +1736,31 @@ JSON.stringify = (value, ...rest) => {
     ]);
   });
 
-  it("seals server code that imports the App's preferences, and functions at any segment a reference doesn't answer", async () => {
-    const files = notesFiles();
+  it("seals functions at any segment a reference doesn't answer, `preferences` among them", async () => {
     const fixture = await appWith({
-      ...files,
-      "server/extra.ts": `import { v } from "@grasp-os/sdk";
-import { api, preferences } from "@server/_generated/api";
+      ...notesFiles(),
+      "server/preferences.ts": `import { v } from "@grasp-os/sdk";
+import { api } from "@server/_generated/api";
 import { action, query } from "@server/_generated/server";
 
 export const defaults = query({
   args: {},
   returns: v.boolean(),
-  handler: () => preferences.get.name === "preferences.get",
+  handler: () => true,
 });
 
 export const reach = action({
   args: {},
   returns: v.boolean(),
-  handler: async (ctx) => await ctx.runQuery(api.extra.defaults, {}),
+  handler: async (ctx) => await ctx.runQuery(api.preferences.defaults, {}),
 });
 `,
-      ...appDefinition({
-        ...notesSpec(),
-        preferences: { compact: "v.boolean().default(false)" },
-      }),
     });
     const release = await seal(fixture);
     expect([
-      release.app.preferences !== null,
-      release.app.operations["extra.reach"]?.kind,
-    ]).toStrictEqual([true, "action"]);
+      release.app.operations["preferences.defaults"]?.kind,
+      release.app.operations["preferences.reach"]?.kind,
+    ]).toStrictEqual(["query", "action"]);
   });
 
   it("makes its App's one store when it first declares tables, keyed by the App and audited", async () => {

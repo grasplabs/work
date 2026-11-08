@@ -15,7 +15,6 @@ import {
 } from "./codegen-render.ts";
 import { workflowsExport } from "./codegen-workflows.ts";
 import { declaredPermissions } from "./manifest-permissions.ts";
-import { preferenceOperations } from "./preference-operations.ts";
 
 /** A tree of function references as a module's typed, frozen export. */
 const referenceExport = (
@@ -102,25 +101,6 @@ export const referencesText = async (
       ? "export const permissions: Readonly<Record<never, never>> = frozen({});\n"
       : `export const permissions: {\n${resourceTypes.join("\n")}\n} = frozen({\n${resourceValues.join("\n")}\n});\n`
   );
-
-  // Only when declared: an App without preferences has no export to import.
-  // `get` and `update`, generated as any function reference is
-  // (preference-operations.ts), and nothing else.
-  if (manifest.preferences !== null) {
-    const operations = Object.entries(
-      preferenceOperations(manifest.preferences)
-    ).toSorted(([a], [b]) => (a < b ? -1 : 1));
-    const types = operations.map(
-      ([name, operation]) =>
-        `  readonly ${name}: ${referenceTypeOf(operation)};`
-    );
-    const values = operations.map(
-      ([name, operation]) => `  ${name}: ${dataOf(referenceOf(operation), 1)},`
-    );
-    parts.push(
-      `export const preferences: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n} as const);\n`
-    );
-  }
 
   const body = parts.join("\n");
   return `${banner}${typeImports(body, [

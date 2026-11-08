@@ -20,7 +20,6 @@ import type {
   Visibility,
 } from "./server-function.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
-import type { AnySchema } from "./value-schema.ts";
 
 /**
  * An App's server modules, by their path under `server/` without `.ts`
@@ -42,8 +41,6 @@ export interface AppConfig<
    * Every function of the App may use them, as its kind allows.
    */
   readonly permissions?: Permissions;
-  /** Its people's preferences: a strict object, when declared. */
-  readonly preferences?: AnySchema;
   /**
    * Its answers for the records that lack a field a change of its schema
    * requires (schema-answer.ts): for one field each, the value they take
@@ -155,8 +152,6 @@ export interface AppManifest {
    * organization's people. What the host checks every use against.
    */
   readonly permissions: Readonly<Record<string, AppPermission>>;
-  /** Its preferences' strict object, or null when it declares none. */
-  readonly preferences: ValueDescriptor | null;
   /** Its migrations, by name, in the order declared. */
   readonly migrations: Readonly<Record<string, MigrationManifest>>;
   /** Its answers for a schema change, when it declares any. */

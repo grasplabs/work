@@ -5,7 +5,6 @@ import { decisionFingerprint } from "../src/codegen-contracts.ts";
 import {
   contractFingerprint,
   declaredWorkflows,
-  preferenceOperations,
   eventFingerprint,
   generateModules,
   inspectApp,
@@ -38,12 +37,7 @@ import contractsText from "./notes/.grasp/contracts.json?raw";
 import { archiveNotes, summarizeNote } from "./notes/grasp.config.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import referencesText from "./notes/server/_generated/api.ts?raw";
-import {
-  api,
-  preferences,
-  permissions,
-  workflows,
-} from "./notes/server/_generated/api.ts";
+import { api, permissions, workflows } from "./notes/server/_generated/api.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import dataModelText from "./notes/server/_generated/dataModel.ts?raw";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
@@ -288,49 +282,6 @@ describe("generated modules", () => {
         origins: ["https://help.example.com"],
       },
     });
-  });
-
-  test("export preferences as a get query and an update mutation, named as any function is", () => {
-    expect({
-      get: Object.keys(preferences.get).toSorted(),
-      update: [preferences.update.name, preferences.update.kind],
-    }).toStrictEqual({
-      get: ["name", "returns"],
-      update: ["preferences.update", "mutation"],
-    });
-  });
-
-  test("answer every preference and `_rev`, and take a strict, all-optional patch", () => {
-    const declared = notesManifest().preferences;
-    if (declared === null) {
-      throw new Error("The fixture declares preferences");
-    }
-    const operations = preferenceOperations(declared);
-    expect(
-      schemaOf(operations.get.returns ?? v.null().descriptor)[
-        "~standard"
-      ].validate({ compact: true, _rev: 3 })
-    ).toStrictEqual({ value: { compact: true, _rev: 3 } });
-    const updateArgs = schemaOf(operations.update.args)["~standard"];
-    expect(
-      updateArgs.validate({ expectedRevision: 0, patch: {} })
-    ).toStrictEqual({ value: { expectedRevision: 0, patch: {} } });
-    expect(
-      updateArgs.validate({ expectedRevision: 0, patch: { dark: true } }).issues
-    ).toBeDefined();
-    expect(
-      updateArgs.validate({ expectedRevision: -1, patch: {} }).issues
-    ).toBeDefined();
-  });
-
-  test("export no preferences for an App that declares none", async () => {
-    const manifest = readAppManifest(
-      changed((data) => {
-        setAt(data, ["preferences"], null);
-      })
-    );
-    const files = await generateModules(manifest, identity);
-    expect(files["server/_generated/api.ts"]).not.toContain("preferences");
   });
 
   test("export no workflows for an App that declares none", async () => {
@@ -1086,47 +1037,8 @@ describe("reserved segments", () => {
   );
 });
 
-describe("an App's preferences", () => {
+describe("the platform's path segments", () => {
   test.each([
-    ["a value that isn't an object", v.boolean()],
-    [
-      "a nullable object",
-      v.object({ compact: v.boolean().default(false) }).nullable(),
-    ],
-  ])("preferences that are %s are refused", (_case, declared) => {
-    expect(refusal(() => small({ preferences: declared }))).toContain(
-      "is a required `v.object`"
-    );
-  });
-
-  test.each([
-    [
-      "a required field",
-      v.object({ compact: v.boolean() }),
-      "needs a `.default",
-    ],
-    [
-      "an optional field",
-      v.object({ compact: v.boolean().optional() }),
-      "needs a `.default",
-    ],
-    [
-      "a field named `_rev`",
-      v.object({ _rev: v.number().default(0) }),
-      "starts with `_`",
-    ],
-    [
-      "a field starting with `_`",
-      v.object({ _theme: v.string().default("light") }),
-      "starts with `_`",
-    ],
-  ])("preferences with %s are refused", (_case, declared, message) => {
-    expect(refusal(() => small({ preferences: declared }))).toContain(message);
-  });
-
-  test.each([
-    ["public", "preferences", { preferences: { list } }],
-    ["internal", "preferences", { preferences: { secret } }],
     ["public", "workflows", { "workflows/review/queries": { runs: list } }],
     ["internal", "workflows", { workflows: { secret } }],
   ])(
@@ -1327,25 +1239,6 @@ describe("reading a manifest back", () => {
         );
       },
       "exact HTTPS origin",
-    ],
-    [
-      "nullable preferences",
-      (data: unknown) => {
-        setAt(data, ["preferences", "nullable"], true);
-      },
-      "is a required `v.object`",
-    ],
-    [
-      "a preference without a default",
-      (data: unknown) => {
-        setAt(
-          data,
-          ["preferences", "fields", "compact", "presence"],
-          "required"
-        );
-        removeAt(data, ["preferences", "fields", "compact", "defaultValue"]);
-      },
-      "needs a `.default",
     ],
     [
       "a descriptor of a kind there isn't",

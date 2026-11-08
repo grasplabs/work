@@ -337,19 +337,13 @@ const configSource = (definition: AppDefinition): string => {
   if (byKind.length > 0) {
     config.push(["permissions", objectOf(byKind)]);
   }
-  if (definition.preferences.length > 0) {
-    config.push([
-      "preferences",
-      call(v, "object", [fieldsOf(definition.preferences)]),
-    ]);
-  }
   if (answers.length > 0) {
     config.push(["answers", literal(answers)]);
   }
-  // `v` declares preferences, and a workflow's input and output.
-  const validated =
-    definition.preferences.length > 0 ||
-    declarations.some((declared) => declared["~permission"] === "workflows");
+  // `v` declares a workflow's input and output.
+  const validated = declarations.some(
+    (declared) => declared["~permission"] === "workflows"
+  );
   const permissions = objectOf(
     declarations.map((declared) => [declared.alias, permissionOf(declared)])
   );

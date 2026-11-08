@@ -15,15 +15,14 @@ const refuse: (message: string) => never = refuser(AppDefinitionError);
 
 /**
  * The top-level path segments the platform keeps, with what each is for:
- * `preferences` for an App's preferences, `workflows` for
- * its generated workflow references (`workflows.<alias>.queries.*`) and
- * `people` for who calls and the organization's people (people.ts), which
- * the host answers itself. No function registers under either, whether or
- * not the App declares preferences or workflows now, so declaring one
- * later never shadows or is shadowed by a function.
+ * `workflows` for its generated workflow references
+ * (`workflows.<alias>.queries.*`) and `people` for who calls and the
+ * organization's people (people.ts), which the host answers itself. No
+ * function registers under either, whether or not the App declares
+ * workflows now, so declaring one later never shadows or is shadowed by a
+ * function.
  */
 const reservedSegments: ReadonlyMap<string, string> = new Map([
-  ["preferences", "the App's preferences"],
   ["workflows", "the App's workflow references"],
   ["people", "the organization's people"],
 ]);

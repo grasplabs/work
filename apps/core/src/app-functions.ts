@@ -39,12 +39,6 @@ import {
   visitorPeople,
 } from "./app-people.ts";
 import type { PeopleAccess } from "./app-people.ts";
-import {
-  answerPreferences,
-  isPreferencePath,
-  preferenceOperationOf,
-} from "./app-preferences.ts";
-import type { ResolvedPreferenceOperation } from "./app-preferences.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import {
@@ -483,34 +477,22 @@ const callAllowed = (
  * keeps the top-level `workflows` segment for the platform, so a release
  * that registers a function there never seals.
  */
-const referenceIn = async (
+const referenceIn = (
   release: Release,
   reference: FunctionRequest["reference"]
-): Promise<{
+): {
   path: string;
   workflowQuery: ResolvedWorkflowQuery | undefined;
-  preference: ResolvedPreferenceOperation | undefined;
-}> => {
+} => {
   if (isWorkflowQueryPath(reference.name)) {
     return {
       path: reference.name,
       workflowQuery: workflowQueryOf(release, reference),
-      preference: undefined,
-    };
-  }
-  // The App's preferences (app-preferences.ts): core's too, under the
-  // `preferences` segment the SDK likewise keeps for the platform.
-  if (isPreferencePath(reference.name)) {
-    return {
-      path: reference.name,
-      workflowQuery: undefined,
-      preference: await preferenceOperationOf(release, reference),
     };
   }
   return {
     path: publicOperationOf(release, reference),
     workflowQuery: undefined,
-    preference: undefined,
   };
 };
 
@@ -600,64 +582,6 @@ const answeredWorkflowQuery = async (
                 );
               }),
           });
-    return {
-      result,
-      provenance: null,
-      manifestHash: release.manifestHash,
-    };
-  } catch (error) {
-    return refused(error);
-  }
-};
-
-/** An App's preference operation, answered as `callFunction` answers a call. */
-const answeredPreferences = async (
-  env: Env,
-  {
-    by,
-    app,
-    preference,
-    call,
-    release,
-    refused,
-    stillAllowed,
-    observeReads,
-    deadline,
-  }: {
-    by: Pick<Identity, "userId" | "role">;
-    app: string;
-    preference: ResolvedPreferenceOperation;
-    call: FunctionRequest;
-    release: Release;
-    refused: (error: unknown) => FunctionAnswer;
-    stillAllowed: FunctionCallOptions["stillAllowed"];
-    observeReads: FunctionCallOptions["observeReads"];
-    deadline: number;
-  }
-): Promise<FunctionAnswer> => {
-  try {
-    // Read whole: there is no window of one document.
-    if (call.window !== undefined) {
-      throw operationErrors.create("contract.invalid_request");
-    }
-    const result = await answerPreferences(
-      env,
-      {
-        userId: by.userId,
-        release,
-        gate: coreAnsweredGate(env, {
-          by,
-          app,
-          release,
-          stillAllowed,
-          deadline,
-        }),
-        ...(observeReads === undefined ? {} : { observeReads }),
-      },
-      preference,
-      call.input,
-      call.idempotencyKey
-    );
     return {
       result,
       provenance: null,
@@ -786,7 +710,7 @@ const currentResolution = async (
     throw versionErrors.create("version.not_sealed");
   }
   const release = await loadRelease(env, found.id, found.currentVersion);
-  const resolved = await referenceIn(release, call.reference);
+  const resolved = referenceIn(release, call.reference);
   return { release, appId: found.id, ...resolved };
 };
 
@@ -840,20 +764,7 @@ const callFunction = async (
   } catch (error) {
     return refused(error);
   }
-  const { release, path, appId, workflowQuery, preference } = resolved;
-  if (preference !== undefined) {
-    return await answeredPreferences(env, {
-      by,
-      app: appId,
-      preference,
-      call,
-      release,
-      refused,
-      stillAllowed,
-      observeReads,
-      deadline,
-    });
-  }
+  const { release, path, appId, workflowQuery } = resolved;
   if (workflowQuery !== undefined) {
     return await answeredWorkflowQuery(env, {
       by,
@@ -1038,7 +949,7 @@ export const visitorInvocation = async (
  * Calls a function of a published App for a visitor (app-visitor-grants.ts),
  * as the App itself: only a public query or mutation of the version the
  * visitor's grant is on, never an action (which reaches resources) and
- * never core's own workflow or preference queries, which are a member's.
+ * never core's own workflow queries, which are a member's.
  * `request` is the call as the page client wrote it, as text.
  */
 export const callVisitorFunction = async (
@@ -1077,15 +988,11 @@ export const callVisitorFunction = async (
     }
     // Never granted, whatever the grants say: refused, and recorded, before
     // anything of the release is read.
-    if (
-      call.reference.kind === "action" ||
-      isWorkflowQueryPath(contractId) ||
-      isPreferencePath(contractId)
-    ) {
+    if (call.reference.kind === "action" || isWorkflowQueryPath(contractId)) {
       return refused(await caller.notGranted(contractId));
     }
     const release = await loadRelease(env, caller.app, caller.version);
-    const { path } = await referenceIn(release, call.reference);
+    const { path } = referenceIn(release, call.reference);
     await caller.stillAllowed(path);
     await caller.admitted(path);
     const invocation = await visitorInvocation(
@@ -1259,20 +1166,6 @@ export const windowExtentOf = (request: unknown): number | undefined => {
     return readFunctionRequest(request).window?.extent;
   } catch {
     return undefined;
-  }
-};
-
-/**
- * Whether `request` asks for a window of an App's preferences
- * (app-preferences.ts): one document, read whole, so no window of it is
- * charged or read.
- */
-export const asksPreferenceWindow = (request: unknown): boolean => {
-  try {
-    const call = readFunctionRequest(request);
-    return call.window !== undefined && isPreferencePath(call.reference.name);
-  } catch {
-    return false;
   }
 };
 

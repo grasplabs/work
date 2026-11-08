@@ -1,4 +1,3 @@
-import type { ValueDescriptor } from "@grasp-os/sdk";
 import {
   applyOperation,
   definitionPath,
@@ -7,7 +6,6 @@ import {
   emptyDefinition,
   generatedFiles,
   readDefinition,
-  typeFrom,
 } from "@grasp-os/sdk/definition";
 import type {
   AppDefinition,
@@ -44,17 +42,12 @@ export interface TableSpec {
   };
 }
 
-/** What a test's App is: its name, tables, permissions, preferences and answers. */
+/** What a test's App is: its name, tables, permissions and answers. */
 export interface AppSpec {
   readonly name: string;
   readonly tables?: Readonly<Record<string, TableSpec>>;
   /** Each a `permission.*(…)` expression, or `people`. */
   readonly permissions?: readonly string[];
-  /**
-   * Each preference's type, by its name, or all of them as one
-   * `v.object({ … })`, as `defineApp` takes them.
-   */
-  readonly preferences?: Readonly<Record<string, string>> | string;
   /** Answers for a schema change, by table and field name. */
   readonly answers?: readonly {
     readonly table: string;
@@ -62,33 +55,6 @@ export interface AppSpec {
     readonly value: FrozenJson;
   }[];
 }
-
-/** Each preference's name and type, in the order `preferences` has them. */
-const preferenceTypes = (
-  preferences: AppSpec["preferences"]
-): [string, ValueDescriptor][] => {
-  if (typeof preferences !== "string") {
-    return Object.entries(preferences ?? {}).map(([name, type]) => [
-      name,
-      typeFrom(type),
-    ]);
-  }
-  const type = typeFrom(preferences);
-  if (type.kind !== "object") {
-    throw new Error("An App's preferences are a v.object({ … }).");
-  }
-  return Object.entries(type.fields);
-};
-
-/** The preferences `preferences` declares, their IDs counted up apart from the tables'. */
-export const preferencesOf = (
-  preferences: AppSpec["preferences"]
-): AppDefinition["preferences"] =>
-  preferenceTypes(preferences).map(([name, type], index) => ({
-    id: `preference${String(index + 1)}`,
-    name,
-    type,
-  }));
 
 /**
  * `operation` applied to `definition`, a new table's or field's ID taken
@@ -156,7 +122,6 @@ export const definitionOf = (spec: AppSpec): AppDefinition => {
   for (const permission of spec.permissions ?? []) {
     apply({ op: "addPermission", permission });
   }
-  const preferences = preferencesOf(spec.preferences);
   const answers = (spec.answers ?? []).map(({ table, field, value }) => {
     const defined = definition.tables.find(({ name }) => name === table);
     const held = defined?.fields.find(({ name }) => name === field);
@@ -165,7 +130,7 @@ export const definitionOf = (spec: AppSpec): AppDefinition => {
     }
     return { table: defined.id, field: held.id, value };
   });
-  return { ...definition, preferences, answers };
+  return { ...definition, answers };
 };
 
 /** The files `definition` is: itself, its config and its schema. */

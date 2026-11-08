@@ -1,7 +1,6 @@
 {
   "name": "Kanban board",
   "permissions": [],
-  "preferences": [],
   "tables": [
     {
       "id": "975fa56d-a2e7-47ff-ad82-d925db1cab4e",

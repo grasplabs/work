@@ -415,14 +415,18 @@ const envOf = (instance: object): object => {
   return objectEnv;
 };
 
-/** An App with preferences, sealed, current, and its store's ID. */
-const appWithPreferences = async () => {
+/** An App with a store, sealed, current, and its store's ID. */
+const appWithStore = async () => {
   const fixture = await appWith(
     {
       ...appDefinition({
         name: "Desk",
-        preferences: { theme: 'v.enum(["light", "dark"]).default("light")' },
-        tables: {},
+        tables: {
+          notes: {
+            fields: { title: "v.string()" },
+            access: { read: "appMembers", write: "appMembers" },
+          },
+        },
       }),
 
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
@@ -1948,10 +1952,10 @@ describe("erasing a person", () => {
     });
   });
 
-  it("forgets their preferences and what their forms sent in every App's store, and their own Knowledge signals, and leaves everyone else's", async () => {
+  it("forgets what App preferences kept of them and what their forms sent in every App's store, and their own Knowledge signals, and leaves everyone else's", async () => {
     const { admin, person } = await removedPerson();
     const other = await signedInApi(idp, "user");
-    const { storeId } = await appWithPreferences();
+    const { storeId } = await appWithStore();
     const later = Date.now() + 3_600_000;
     await inStore(storeId, (sql) => {
       for (const who of [person.userId, other.userId]) {

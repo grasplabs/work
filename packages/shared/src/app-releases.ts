@@ -216,7 +216,7 @@ export const versionErrors = defineErrorFamily({
   "version.invalid_manifest":
     "This version's registration isn't one the platform accepts.",
   "version.store_unbound":
-    "This version declares tables or preferences, but no store is bound for it.",
+    "This version declares tables, but no store is bound for it.",
   "version.seal_busy": "Sealing this version took too long. Publish it again.",
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",

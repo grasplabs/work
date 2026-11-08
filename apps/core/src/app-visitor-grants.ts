@@ -30,8 +30,8 @@ import { requireNotStaff } from "./sharing.ts";
 // - Calling what wasn't granted. A version grants visitors nothing until
 //   a builder grants functions of it by path (`setAppVisitorGrants`): only
 //   the version's public queries and mutations, never an action, which is
-//   what reaches resources, and never core's workflow or preference
-//   queries, which answer for a member. A call names its function by the
+//   what reaches resources, and never core's workflow queries, which
+//   answer for a member. A call names its function by the
 //   release's own reference (resource, version, fingerprint), checked as
 //   for a member.
 // - Keeping a grant after it was taken away. The grant is read again

@@ -1,7 +1,6 @@
 {
   "name": "Sales dashboard",
   "permissions": [],
-  "preferences": [],
   "tables": [
     {
       "id": "c9f27959-be3d-4f4f-b104-6f964d548078",

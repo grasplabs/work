@@ -85,7 +85,6 @@ export const pageTests = [
   "test/sealed-workflow-starts.test.ts",
   "test/definition-export.test.ts",
   "test/workflow-query-subscriptions.test.ts",
-  "test/app-preferences.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
   "test/agent-builds.test.ts",

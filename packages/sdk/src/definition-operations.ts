@@ -132,12 +132,6 @@ export type DefinitionOperation =
     }
   | { readonly op: "removePermission"; readonly alias: string }
   | {
-      readonly op: "addPreference" | "changePreference";
-      readonly name: string;
-      readonly type: string;
-    }
-  | { readonly op: "removePreference"; readonly name: string }
-  | {
       readonly op: "moveField";
       readonly table: string;
       readonly field: string;
@@ -449,55 +443,6 @@ const withFieldMoved = (
   });
 };
 
-/** The preference named `name`. */
-const preferenceNamed = (
-  definition: AppDefinition,
-  name: string
-): DefinedField =>
-  definition.preferences.find((preference) => preference.name === name) ??
-  refuse(
-    `The App has no preference \`${name}\`. Its preferences: ${definition.preferences.map((preference) => `\`${preference.name}\``).join(", ") || "none yet"}.`
-  );
-
-/** `definition` with the change of its preferences `operation` makes. */
-const withPreference = (
-  definition: AppDefinition,
-  operation: Extract<
-    DefinitionOperation,
-    { op: "addPreference" | "changePreference" | "removePreference" }
-  >,
-  newId: () => string
-): AppDefinition => {
-  if (operation.op === "addPreference") {
-    if (definition.preferences.some(({ name }) => name === operation.name)) {
-      return refuse(
-        `The App has a preference \`${operation.name}\` already: change it with changePreference.`
-      );
-    }
-    return {
-      ...definition,
-      preferences: [
-        ...definition.preferences,
-        { id: newId(), name: operation.name, type: typeFrom(operation.type) },
-      ],
-    };
-  }
-  const held = preferenceNamed(definition, operation.name);
-  if (operation.op === "removePreference") {
-    return {
-      ...definition,
-      preferences: definition.preferences.filter(({ id }) => id !== held.id),
-    };
-  }
-  const type = typeFrom(operation.type);
-  return {
-    ...definition,
-    preferences: definition.preferences.map((preference) =>
-      preference.id === held.id ? { ...preference, type } : preference
-    ),
-  };
-};
-
 /** `definition` with the table `operation` adds, with new IDs from `newId`. */
 const withNewTable = (
   definition: AppDefinition,
@@ -577,7 +522,6 @@ const withTableRenamed = (
   });
   return {
     ...definition,
-    preferences: definition.preferences.map(referring),
     tables: definition.tables.map((held) => ({
       ...held,
       ...(held.id === table.id ? { name } : {}),
@@ -678,11 +622,6 @@ const applied = (
     case "removeIndex":
     case "removePermission": {
       return removed(definition, operation);
-    }
-    case "addPreference":
-    case "changePreference":
-    case "removePreference": {
-      return withPreference(definition, operation, newId);
     }
     default: {
       return refuse("That isn't an operation on a definition.");

@@ -525,43 +525,6 @@ describe("operations", () => {
     ).toThrow(/from 0 to 2/u);
   });
 
-  test("add, change and remove a preference, declared as code would", () => {
-    const added = applyOperation(tasks(), {
-      op: "addPreference",
-      name: "compact",
-      type: "v.boolean().default(false)",
-    });
-    const changed = applyOperation(added, {
-      op: "changePreference",
-      name: "compact",
-      type: 'v.enum(["on", "off"]).default("off")',
-    });
-    expect({
-      declared: definitionManifest(changed).preferences !== undefined,
-      id: changed.preferences[0]?.id,
-      kind: changed.preferences[0]?.type.kind,
-      removed: applyOperation(changed, {
-        op: "removePreference",
-        name: "compact",
-      }).preferences,
-    }).toStrictEqual({
-      declared: true,
-      id: added.preferences[0]?.id,
-      kind: "enum",
-      removed: [],
-    });
-    expect(() =>
-      applyOperation(added, {
-        op: "addPreference",
-        name: "compact",
-        type: "v.boolean()",
-      })
-    ).toThrow(/changePreference/u);
-    expect(() =>
-      applyOperation(changed, { op: "removePreference", name: "nope" })
-    ).toThrow(/no preference `nope`/u);
-  });
-
   test("keep an answer for the records a required field is added to", () => {
     const after = applyOperation(tasks(), {
       op: "addField",

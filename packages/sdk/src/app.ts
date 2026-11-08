@@ -2,7 +2,6 @@ import { AppDefinitionError } from "./app-definition-error.ts";
 import { exportedFunctions, registeredFunctions } from "./app-functions.ts";
 import { migrationsOf } from "./app-migrations.ts";
 import { permissionsOf } from "./app-permissions.ts";
-import { preferencesOf } from "./app-preferences.ts";
 import type {
   App,
   AppConfig,
@@ -17,14 +16,13 @@ import type { AppPermission } from "./permission-types.ts";
 import { readSchemaAnswers } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import { isPlainObject } from "./value-descriptor.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
 
 // How an App registers itself, Convex's way: each part
 // is a file of its own, and the host's entry (`.grasp/app.ts`) hands them
 // all to `registerApp`:
 //
 // - its config, `grasp.config.ts`: `defineApp({ name, permissions,
-//   preferences, answers })`, generated from the App's definition;
+//   answers })`, generated from the App's definition;
 // - its schema, `server/schema.ts`, each table with its access
 //   (`.access`), generated from the definition too;
 // - its server functions: as in Convex, each an export of a module under
@@ -56,9 +54,8 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // - every function was declared for the App's schema;
 // - `permissions` lists each kind under its own key, each declaration of
 //   that kind, under an alias no other of the App's permissions has;
-// - `preferences`, when declared, is a strict object; the
-//   top-level path segments `preferences`, `workflows` and `people` are
-//   the platform's, so no function registers under them;
+// - the top-level path segments `workflows` and `people` are the
+//   platform's, so no function registers under them;
 // - migrations (migration.ts) are `migration` declarations,
 //   each named once, one a table, of a table the schema has, whose
 //   `output` declares exactly that table's fields.
@@ -79,13 +76,11 @@ const inspections = new WeakMap<object, AppInspection>();
 interface CheckedConfig {
   readonly config: AppConfig;
   readonly permissions: ReadonlyMap<string, AppPermission>;
-  readonly preferences: ValueDescriptor | null;
 }
 
 const configKeys: ReadonlySet<string> = new Set([
   "name",
   "permissions",
-  "preferences",
   "answers",
 ]);
 
@@ -106,8 +101,8 @@ const checkConfig = (config: unknown): void => {
 };
 
 /**
- * An App's config (`grasp.config.ts`), checked: its name, its
- * permissions and its preferences. Throws `AppDefinitionError` for one
+ * An App's config (`grasp.config.ts`), checked: its name and its
+ * permissions. Throws `AppDefinitionError` for one
  * that isn't coherent; what needs its schema (`answers`) is checked as it
  * registers (`registerApp`). What it answers carries its permissions'
  * types, which type its functions' contexts (`serverModule`).
@@ -122,7 +117,6 @@ export const defineApp = <
   configs.set(made, {
     config,
     permissions: permissionsOf(config.permissions),
-    preferences: preferencesOf(config.preferences),
   });
   return made;
 };
@@ -182,7 +176,6 @@ export const registerApp = (parts: AppParts): App => {
       schema: manifest,
       operations,
       permissions: Object.fromEntries(permissions),
-      preferences: checked.preferences,
       migrations,
       ...(answers.length > 0 ? { answers } : {}),
     }),

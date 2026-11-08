@@ -7,13 +7,7 @@ import { holdThrowawayStore } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  deskDraft,
-  livePushes,
-  notesFiles,
-  preferenceCall,
-  previewDraftsOf,
-} from "./preview-drafts.ts";
+import { livePushes, notesFiles, previewDraftsOf } from "./preview-drafts.ts";
 import {
   chatsOf,
   outcome,
@@ -182,21 +176,6 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
       refreshed: broken,
       serverUnbuilt: true,
       titles: "version.build_failed",
-    });
-  });
-
-  it("answers the draft's preferences from its own store", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { app, chatId } = await deskDraft(builder);
-    const before = await preferenceCall(builder, { chatId, app }, "get", {});
-    await preferenceCall(builder, { chatId, app }, "update", {
-      expectedRevision: 0,
-      patch: { theme: "dark" },
-    });
-    const after = await preferenceCall(builder, { chatId, app }, "get", {});
-    expect({ before, after }).toStrictEqual({
-      before: { _rev: 0, compact: false, theme: "light" },
-      after: { _rev: 1, compact: false, theme: "dark" },
     });
   });
 
@@ -374,28 +353,6 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
       settled: "string",
       titles: [],
     });
-  });
-
-  it("starts a new store when a preference's type changes, rather than refusing to read the old", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { app, chatId, revision, write } = await deskDraft(builder);
-    await preferenceCall(builder, { chatId, app }, "update", {
-      expectedRevision: 0,
-      patch: { theme: "dark" },
-    });
-    await write(
-      appDefinition({
-        name: "Desk",
-        preferences: `v.object({
-    compact: v.string().default("no"),
-    theme: v.enum(["light", "dark"]).default("light"),
-  })`,
-      }),
-      revision
-    );
-    await expect(
-      preferenceCall(builder, { chatId, app }, "get", {})
-    ).resolves.toStrictEqual({ _rev: 0, compact: "no", theme: "light" });
   });
 
   it("discards a removed person's preview stores made before throwaway stores, which never expire on their own", async () => {

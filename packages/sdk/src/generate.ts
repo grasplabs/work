@@ -31,9 +31,8 @@ import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 // - `server/_generated/internal.ts` (`@server/_generated/internal`): the
 //   `internal` tree, for the App's own server code only.
 // - `server/_generated/api.ts` (`@server/_generated/api`): the public
-//   `api`, `workflows`, the permissions its pages use
-//   (`permissions.files`, `permissions.links`), and `preferences` when it
-//   declares them. What a browser gets: data and
+//   `api`, `workflows` and the permissions its pages use
+//   (`permissions.files`, `permissions.links`). What a browser gets: data and
 //   types, extracted from descriptors, with no handler, schema or server
 //   code in it.
 // - `.grasp/contracts.json`: the App's manifest, each function's

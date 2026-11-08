@@ -647,11 +647,9 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
       "notes.GET",
       // An internal function.
       "notes.count",
-      // The names the host answers itself: people, preferences, workflows.
+      // The names the host answers itself: people, workflows.
       "people.__proto__",
       "people.constructor",
-      "preferences.constructor",
-      "preferences.get",
       "workflows.x.queries.constructor",
       "workflows.__proto__.queries.runs",
     ];

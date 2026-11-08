@@ -31,15 +31,14 @@ import type {
 import { actorOf } from "@grasp-os/shared/audit";
 import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
-import { storeIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { pageErrors, surfaceKinds } from "@grasp-os/shared/pages";
 import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
-import { dataErrors, migrationErrors } from "@grasp-os/shared/stores";
+import { dataErrors } from "@grasp-os/shared/stores";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -65,7 +64,6 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withReferencesText } from "./draft-references.ts";
-import { inJurisdiction } from "./durable-objects.ts";
 import { hostModules } from "./host-modules.ts";
 import {
   evidenceFits,
@@ -200,7 +198,7 @@ export interface Release {
    * (`sdk/` artifacts): what it runs with, whatever SDK the host has now.
    */
   readonly sdk: Readonly<Record<string, string>>;
-  /** The store it reads and writes, if it declares tables or preferences. */
+  /** The store it reads and writes, if it declares tables. */
   readonly store: DataStoreBinding | null;
   /**
    * What its seal resolved of each workflow it declares (bound-workflows.ts),
@@ -805,72 +803,9 @@ export const loadDraftRelease = async (
 /** The empty dependency lock: server code imports no packages. */
 const emptyLock = "{}";
 
-/**
- * The App needs a store: its schema has tables, or it declares
- * preferences, which its store keeps (app-preferences.ts).
- */
+/** The App needs a store: its schema has tables. */
 const needsStore = (app: AppManifest): boolean =>
-  Object.keys(app.schema.tables).length > 0 || app.preferences !== null;
-
-/**
- * Plans `manifest`'s preferences onto `store`'s preferences contract
- * (store-host.ts, `definePreferences`): refused when it changes one; with
- * `apply`, the contract takes them. Nothing for an App without.
- */
-const definedPreferences = async (
-  env: Env,
-  store: StoreId,
-  manifest: AppManifest,
-  apply: boolean
-): Promise<void> => {
-  if (manifest.preferences === null) {
-    return;
-  }
-  await inJurisdiction(env, env.DATA_STORES)
-    .getByName(store)
-    .definePreferences(store, JSON.stringify(manifest.preferences), apply);
-};
-
-/**
- * Has `release`'s store's preferences contract take its preferences, once
- * it is sealed: so a seal that failed left nothing there. The release is
- * sealed whatever happens here (D1 committed it; the contract is the
- * store's), so two cases differ:
- *
- * - The contract refuses them (`migration.preference_changed`): another
- *   version with other preferences was sealed on the store between this
- *   one's check and now. The seal fails with it, so the version is never
- *   published (publishing seals first, app-publish.ts), and sealing it
- *   again fails the same way (`resealed`). It serves no preference call
- *   either way (store-host.ts, `readPreferences`).
- * - Anything else (the store unreachable): logged, and the release stands.
- *   Its first preference call, or sealing it again, applies them.
- */
-const appliedPreferences = async (
-  env: Env,
-  release: Pick<Release, "app" | "store" | "manifest">
-): Promise<void> => {
-  if (release.store === null) {
-    return;
-  }
-  try {
-    await definedPreferences(
-      env,
-      storeIdSchema.parse(release.store.storeId),
-      release.app,
-      true
-    );
-  } catch (error) {
-    if (migrationErrors.codeOf(error) === "migration.preference_changed") {
-      throw error;
-    }
-    log.error("seal.preferences_not_applied", {
-      app: release.manifest.resourceId,
-      version: release.manifest.resourceVersion,
-      ...errorFields(error),
-    });
-  }
-};
+  Object.keys(app.schema.tables).length > 0;
 
 /** The SHA-256 of the canonical text of the App's functions. */
 const operationManifestHash = async (app: AppManifest): Promise<string> =>
@@ -1027,7 +962,7 @@ export const sealedEvidence = async (
 /**
  * The store release `request` binds, its App's own (`appStoreFor`, created
  * now if the App has none that lives), with the App's schema (`schema`,
- * its hash); or null for an App without tables or preferences. Sealing
+ * its hash); or null for an App without tables. Sealing
  * changes nothing in the store: its schema is applied as the version is
  * published (app-schema.ts).
  */
@@ -1044,12 +979,6 @@ const boundStore = async (
     env,
     await appStoreFor(env, request.by, request.app)
   );
-  // Its preferences checked against the store's preferences contract
-  // first (store-host.ts, `definePreferences`): a version that changes one
-  // people may have chosen is refused before its tables are touched. The
-  // contract takes them only once the release is sealed
-  // (`appliedPreferences`).
-  await definedPreferences(env, opened.id, manifest, false);
   return {
     alias: "default",
     storeId: opened.id,
@@ -1067,11 +996,7 @@ const boundStore = async (
 const resealed = async (
   env: Env,
   { app, version }: { app: AppId; version: number }
-): Promise<Release> => {
-  const release = await readBackRelease(env, app, version);
-  await appliedPreferences(env, release);
-  return release;
-};
+): Promise<Release> => await readBackRelease(env, app, version);
 
 /** What sealing makes of an App's files, before the host binds or stores any of it. */
 interface InspectedRelease {
@@ -1468,14 +1393,8 @@ export const sealRelease = async (
     if (won.manifestHash !== hash) {
       throw versionErrors.create("version.seal_conflict");
     }
-    await appliedPreferences(env, won);
     return won;
   }
-  await appliedPreferences(env, {
-    app: manifest,
-    store,
-    manifest: releaseManifest,
-  });
   // What was just built and stored, as it was verified here: the next load
   // reads it all back from storage.
   return deepFreeze({
