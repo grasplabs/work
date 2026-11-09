@@ -93,6 +93,8 @@ export interface PartTest {
 
 /** A test of a report or listing, with its attempts. */
 export interface ReportTest extends PartTest {
+  /** Its describe blocks' titles and its own, as its key joins them. */
+  titles: readonly string[];
   results: readonly { duration: number; status: string }[];
 }
 
@@ -124,6 +126,7 @@ export const testsIn = (json: string): ReportTest[] => {
             " › "
           ),
           file: specFile,
+          titles: [...titles, spec.title],
           results,
         });
       }
@@ -209,23 +212,42 @@ export const partOf = (
 const serialMode = /mode: "serial"|describe\.serial\(/u;
 
 /** The parallel part's Chromium tests, as Playwright lists them. */
+/**
+ * `tests`, when a test list can name each: Playwright splits a list's line
+ * at `›` and trims each name, so a title with `›` in it, or with space at
+ * either end, would match no test, and the test would silently run in no
+ * part. Throws, naming the first such test.
+ */
+export const listable = (tests: readonly ReportTest[]): ReportTest[] => {
+  for (const { key, titles } of tests) {
+    if (titles.some((title) => title.includes("›") || title !== title.trim())) {
+      throw new Error(
+        `A test list can't name ${JSON.stringify(key)}: rename it without "›" or space at either end`
+      );
+    }
+  }
+  return [...tests];
+};
+
 const listed = (): PartTest[] =>
-  testsIn(
-    execFileSync(
-      path.join(root, "node_modules/.bin/playwright"),
-      ["test", "--list", "--reporter=json", "--project", "chromium"],
-      {
-        cwd: root,
-        encoding: "utf-8",
-        // Its report on stdout, never where the run after it sends its own
-        // (PLAYWRIGHT_JSON_OUTPUT_FILE).
-        env: {
-          ...process.env,
-          GRASP_E2E_PART: "parallel",
-          PLAYWRIGHT_JSON_OUTPUT_FILE: "",
-        },
-        maxBuffer: 64 * 1024 * 1024,
-      }
+  listable(
+    testsIn(
+      execFileSync(
+        path.join(root, "node_modules/.bin/playwright"),
+        ["test", "--list", "--reporter=json", "--project", "chromium"],
+        {
+          cwd: root,
+          encoding: "utf-8",
+          // Its report on stdout, never where the run after it sends its own
+          // (PLAYWRIGHT_JSON_OUTPUT_FILE).
+          env: {
+            ...process.env,
+            GRASP_E2E_PART: "parallel",
+            PLAYWRIGHT_JSON_OUTPUT_FILE: "",
+          },
+          maxBuffer: 64 * 1024 * 1024,
+        }
+      )
     )
   );
 

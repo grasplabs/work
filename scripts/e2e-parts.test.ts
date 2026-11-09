@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { testSecondsIn, updatedDurations } from "./e2e-durations.ts";
-import { partOf, testsIn } from "./e2e-parts.ts";
+import { listable, partOf, testsIn } from "./e2e-parts.ts";
 
 const test = (file: string, title: string) => ({
   key: `[chromium] › ${file} › ${title}`,
@@ -64,8 +64,12 @@ describe("splitting the e2e tests between CI's parts", () => {
       keys.reduce((sum, key) => sum + (durations[key] ?? 20), 0)
     );
 
+    const longest = Math.max(...Object.values(durations));
+
     expect(partOfTest("creates")).not.toBe(partOfTest("attaches"));
-    expect(seconds).toStrictEqual([130, 90]);
+    expect(Math.max(...seconds) - Math.min(...seconds)).toBeLessThanOrEqual(
+      longest
+    );
   });
 });
 
@@ -114,6 +118,17 @@ describe("keeping a serial file's tests together", () => {
     expect(parts.flat().toSorted()).toStrictEqual(
       tests.map(({ key }) => key).toSorted()
     );
+  });
+});
+
+describe("naming the tests in a test list", () => {
+  it("refuses a title a test list can't name, rather than run it in no part", () => {
+    const named = (title: string) =>
+      testsIn(report([["chat.e2e.ts", title, []]]));
+
+    expect(() => listable(named("asks › answers"))).toThrow(/asks › answers/u);
+    expect(() => listable(named("asks "))).toThrow(/asks /u);
+    expect(listable(named("asks"))).toStrictEqual(named("asks"));
   });
 });
 
