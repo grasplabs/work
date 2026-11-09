@@ -6,6 +6,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { nativeToolClasses } from "../src/native-tool-classes.gen.ts";
 import { codeResults, codeStep, chatOf, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -171,6 +172,130 @@ const connectCalls = async (connectionId: string) => {
   );
 };
 
+/**
+ * `person`'s own Google account, connected through the OAuth callback with
+ * every right it asked for: its ID and its mailbox's address.
+ */
+const ownGmail = async (person: Admin) => {
+  const { url } = await person.api.connections.start({
+    provider: "google",
+    scope: "personal",
+  });
+  const authorization = new URL(url);
+  // The person's own account: Google names them by their email address.
+  const mailbox = String(person.person.email);
+  const [subject = "", domain = ""] = mailbox.split("@");
+  await routed(
+    `/api/connections/callback?${new URLSearchParams({
+      code: consentCode(
+        authorization,
+        domain,
+        subject,
+        authorization.searchParams.get("scope") ?? ""
+      ),
+      state: authorization.searchParams.get("state") ?? "",
+    }).toString()}`,
+    { headers: { cookie: person.session } }
+  );
+  const listed = await person.api.connections.list();
+  const connection = listed.find(({ accountName }) => accountName === mailbox);
+  if (connection === undefined) {
+    throw new Error("Expected the person's own Google connection");
+  }
+  return { id: connection.id, mailbox };
+};
+
+/**
+ * A chat of `personId`'s whose code sends one mail from `mailbox`, through
+ * `MAIL`, which the admin granted its agent, then says what the call
+ * answered, or why it was refused.
+ */
+const chatSending = async (
+  admin: Admin,
+  personId: string,
+  mailbox: string,
+  connectionId: string
+) => {
+  const mail = {
+    mailbox,
+    to: ["ben@acme.test"],
+    subject: `Invoice ${crypto.randomUUID()}`,
+    body: "Attached.",
+  };
+  const chat = await chatOf(
+    personId,
+    codeStep(
+      `export default async (self, env) => { try { const { pending } = await env.connections.call("MAIL", "mail.send", ${JSON.stringify(mail)}); return pending === null ? "sent" : "held"; } catch (error) { return error.message; } };`
+    ),
+    says("Done.")
+  );
+  await requestGranted(idp, admin, {
+    subject: chat.agent,
+    object: { type: "connection", connectionId },
+    actions: ["mail.send"],
+    binding: "MAIL",
+  });
+  await chat.ask("Send Ben the invoice.");
+  const [result] = await codeResults(chat.stub, chat.chat.id);
+  return result?.text;
+};
+
+/** The classes on for everyone until an admin changes them. */
+const onByDefault = new Set(
+  Object.entries(defaultToolClassAudiences).flatMap(([toolClass, audience]) =>
+    audience.who === "nobody" ? [] : [toolClass]
+  )
+);
+
+// Whatever a native tool's class lets through by default, the chat's agent
+// may call before any admin chooses: reading and changing what is the
+// person's own, and nothing that reaches anyone else. A tool moving into
+// one of these classes, by what its manifest says it reaches, needs a
+// review here: for some, such as Google's mail.send (a token that may
+// change mail may send it too), the class is the only guard.
+describe("the native tools on by default", () => {
+  it("are exactly the reviewed ones, each of a class on for everyone until an admin changes it", () => {
+    const tools = Object.entries(nativeToolClasses).flatMap(
+      ([provider, classes]) =>
+        Object.entries(classes).flatMap(([tool, toolClass]) =>
+          onByDefault.has(toolClass) ? [`${provider} ${tool}`] : []
+        )
+    );
+
+    expect({
+      classes: [...onByDefault].toSorted(),
+      tools: tools.toSorted(),
+    }).toStrictEqual({
+      classes: ["change-own", "read-own"],
+      tools: [
+        "google calendar.create",
+        "google files.createDraft",
+        "google mail.createDraft",
+        "google mail.get",
+        "google mail.label",
+        "google mail.labels",
+        "google mail.list",
+        "google mail.readAttachment",
+        "microsoft calendar.create",
+        "microsoft calendar.freeTime",
+        "microsoft calendar.update",
+        "microsoft files.createDraft",
+        "microsoft mail.categorise",
+        "microsoft mail.flag",
+        "microsoft mail.move",
+        "microsoft onenote.create",
+        "microsoft onenote.pages",
+        "microsoft onenote.read",
+        "microsoft onenote.sections",
+        "microsoft todo.complete",
+        "microsoft todo.create",
+        "microsoft todo.lists",
+        "microsoft todo.tasks",
+      ],
+    });
+  });
+});
+
 describe("the classes a company turned on", setUpTime, () => {
   beforeEach(async () => {
     // Every test starts from the defaults.
@@ -198,6 +323,20 @@ describe("the classes a company turned on", setUpTime, () => {
       sends: calls.filter(({ detail }) => detail.action === "mail.send"),
       sent: await sentWith(chat.subject),
     }).toStrictEqual({ sends: [], sent: [] });
+  });
+
+  it("refuse, by default, the chat's agent's send from a person's own Gmail in core, so connect never sees it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const { id, mailbox } = await ownGmail(person);
+
+    await expect(chatSending(admin, person.userId, mailbox, id)).resolves.toBe(
+      `Returned:\n${off}`
+    );
+    const calls = await connectCalls(id);
+    expect(
+      calls.filter(({ detail }) => detail.action === "mail.send")
+    ).toStrictEqual([]);
   });
 
   it("let a class through once an admin turns it on for everyone", async () => {
