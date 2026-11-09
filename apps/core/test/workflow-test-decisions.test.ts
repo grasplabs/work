@@ -1,5 +1,5 @@
 import { v } from "@grasp-os/sdk";
-import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
+import { declaredWorkflows } from "@grasp-os/sdk/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -217,18 +217,15 @@ const startOf = async (release: Release, amount: number): Promise<string> => {
   if (declared === undefined) {
     throw new Error("No approval");
   }
-  return JSON.stringify({
-    workflow: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: "workflows.approval",
-      fingerprint: await workflowFingerprint(declared),
-      kind: "workflow",
-    },
-    command: "start",
-    input: { amount },
-    idempotencyKey: "0".repeat(32),
-  });
+  return await Promise.resolve(
+    JSON.stringify({
+      reference: {
+        name: "workflows.approval.mutations.start",
+        kind: "mutation",
+      },
+      input: { input: { amount } },
+    })
+  );
 };
 
 const resultSchema = z.union([

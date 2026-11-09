@@ -13,7 +13,7 @@ import {
   registerApp,
   symbolicModules,
   workflowFingerprint,
-  workflowQueries,
+  workflowFunctions,
 } from "../src/host.ts";
 import type {
   AppManifest,
@@ -389,7 +389,7 @@ describe("workflow references", () => {
     ).toThrow(/pin/u);
   });
 
-  test("hold their contract and their events as data, and have no .start, .get or .cancel", () => {
+  test("hold their contract, events and functions as data, and have no .start, .get or .cancel of their own", () => {
     for (const reference of Object.values(workflows)) {
       expect(Object.keys(reference).toSorted()).toStrictEqual([
         "alias",
@@ -400,6 +400,7 @@ describe("workflow references", () => {
         "input",
         "kind",
         "listens",
+        "mutations",
         "output",
         "queries",
         "resourceId",
@@ -491,32 +492,100 @@ describe("workflow references", () => {
     );
   });
 
-  test("expose runs, history, the decision inbox and a decision as public query references, by name", async () => {
-    const queries = Object.entries(workflows).flatMap(([alias, reference]) =>
-      Object.entries<AnyFunctionReference>(reference.queries).map(
-        ([name, query]) => ({
-          path: `workflows.${alias}.queries.${name}`,
-          query,
-        })
-      )
-    );
-    expect(queries.map(({ path }) => path).toSorted()).toStrictEqual(
-      ["archiveNotes", "summarizeNote"].flatMap((alias) =>
-        ["decision", "decisions", "history", "runs"].map(
-          (name) => `workflows.${alias}.queries.${name}`
+  test("expose a run, whether one may start, runs, history, the decision inbox and a decision as queries, and starts, controls and sends as mutations, by name", async () => {
+    const functions = Object.entries(workflows).flatMap(([alias, reference]) =>
+      (["queries", "mutations"] as const).flatMap((group) =>
+        Object.entries<AnyFunctionReference>(reference[group]).map(
+          ([name, fn]) => ({
+            path: `workflows.${alias}.${group}.${name}`,
+            fn,
+          })
         )
       )
     );
-    for (const { path, query } of queries) {
-      expect(query.name).toBe(path);
+    expect(functions.map(({ path }) => path).toSorted()).toStrictEqual(
+      ["archiveNotes", "summarizeNote"].flatMap((alias) => [
+        ...["cancel", "pause", "resume", "send", "start"].map(
+          (name) => `workflows.${alias}.mutations.${name}`
+        ),
+        ...["canStart", "decision", "decisions", "history", "run", "runs"].map(
+          (name) => `workflows.${alias}.queries.${name}`
+        ),
+      ])
+    );
+    for (const { path, fn } of functions) {
+      expect(fn.name).toBe(path);
     }
-    // A workflow that asks nobody has no inbox, and no decision rows.
+    // A workflow that asks nobody has no inbox, and no decision rows; one
+    // that listens for nothing takes no event.
     const files = await generatedWith([
       { alias: "archiveNotes", events: {}, listens: {}, decisions: {} },
     ]);
     const text = files["server/_generated/api.ts"] ?? "";
     expect(text).toContain("workflows.archiveNotes.queries.history");
     expect(text).not.toContain("workflows.archiveNotes.queries.decision");
+    expect(text).not.toContain("workflows.archiveNotes.mutations.send");
+  });
+
+  test("take only what each mutation declares: the workflow's input, a run, and an event it declares with that event's data", () => {
+    const bound = declaredWorkflows(notesManifest(), notesWorkflows).find(
+      ({ alias }) => alias === "summarizeNote"
+    );
+    if (bound === undefined) {
+      throw new Error("The fixture binds summarizeNote");
+    }
+    const { mutations } = workflowFunctions(bound);
+    const noteId = "01890000-0000-7000-8000-000000000001";
+    const cases = {
+      start: [mutations.start, { input: { noteId } }],
+      "start: input the workflow doesn't take": [
+        mutations.start,
+        { input: { noteId: 1 } },
+      ],
+      cancel: [mutations.cancel, { runId: "run-1" }],
+      "cancel: a field it doesn't take": [
+        mutations.cancel,
+        { runId: "run-1", workflow: "wf-1" },
+      ],
+      send: [
+        mutations.send,
+        { runId: "run-1", event: "styleChosen", data: { style: "short" } },
+      ],
+      "send: another event's data": [
+        mutations.send,
+        { runId: "run-1", event: "styleChosen", data: { noteId } },
+      ],
+      "send: an event it doesn't declare": [
+        mutations.send,
+        { runId: "run-1", event: "documentUploaded", data: {} },
+      ],
+      "send: an envelope's source": [
+        mutations.send,
+        {
+          runId: "run-1",
+          event: "styleChosen",
+          data: { style: "short" },
+          source: "urn:someone",
+        },
+      ],
+    } as const;
+    const accepted = Object.fromEntries(
+      Object.entries(cases).map(([what, [fn, value]]) => [
+        what,
+        fn !== undefined &&
+          schemaOf(fn.args)["~standard"].validate(value).issues === undefined,
+      ])
+    );
+    expect(accepted).toStrictEqual({
+      start: true,
+      "start: input the workflow doesn't take": false,
+      cancel: true,
+      "cancel: a field it doesn't take": false,
+      send: true,
+      "send: another event's data": false,
+      "send: an event it doesn't declare": false,
+      "send: an envelope's source": false,
+    });
   });
 
   test("hold as many decisions as a reference does, contexts nested one level short of the limit, and refuse deeper by name", async () => {
@@ -546,7 +615,7 @@ describe("workflow references", () => {
       generatedWith([deep(valueLimits.depth - 1)])
     ).resolves.toBeDefined();
     await expect(generatedWith([deep(valueLimits.depth)])).rejects.toThrow(
-      "summarizeNote's decision contexts don't fit its decision query"
+      "summarizeNote's contracts don't fit its generated functions"
     );
   });
 
@@ -558,7 +627,7 @@ describe("workflow references", () => {
     if (bound === undefined) {
       throw new Error("The fixture binds summarizeNote");
     }
-    const queries = workflowQueries(bound);
+    const { queries } = workflowFunctions(bound);
     const historyRow = {
       id: "h-1",
       sequence: 4,
@@ -568,6 +637,23 @@ describe("workflow references", () => {
       eventId: "e-1",
       key: "noteEdited",
       state: "accepted",
+    };
+    const completed = {
+      runId: "run-1",
+      workflowId: "wf-1",
+      workflowVersion: 2,
+      manifestHash: "m",
+      status: "completed",
+      startedAt: 1000,
+      finishedAt: 2000,
+      waits: [],
+      control: {
+        canPause: false,
+        canResume: false,
+        canCancel: false,
+        pendingControl: null,
+      },
+      output: { summary: "s", words: 1 },
     };
     const runRow = {
       run: {
@@ -622,6 +708,14 @@ describe("workflow references", () => {
         queries.decision,
         { ...detail, wait: { ...detail.wait, key: "approveSummary" } },
       ],
+      run: [queries.run, completed],
+      "run: not seen": [queries.run, null],
+      "run: an output the App doesn't declare": [
+        queries.run,
+        { ...completed, output: { summary: "s" } },
+      ],
+      "run: its input": [queries.run, { ...completed, input: { noteId: "n" } }],
+      canStart: [queries.canStart, true],
     } as const;
     const accepted = Object.fromEntries(
       Object.entries(cases).map(([what, [query, value]]) => [
@@ -642,6 +736,11 @@ describe("workflow references", () => {
       "decision: closed": true,
       "decision: another decision's context": false,
       "decision: another decision's wait": false,
+      run: true,
+      "run: not seen": true,
+      "run: an output the App doesn't declare": false,
+      "run: its input": false,
+      canStart: true,
     });
   });
 

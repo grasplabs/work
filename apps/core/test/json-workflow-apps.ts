@@ -373,44 +373,69 @@ const workflowReference = async (app: string, alias: string) => {
 /** A workflow reference, as `@server/_generated/api` generates it for a page. */
 export type WorkflowReference = Awaited<ReturnType<typeof workflowReference>>;
 
-/** A reference as the SDK sends it. */
-export const wireOf = (reference: WorkflowReference) => ({
-  resourceId: reference.resourceId,
-  resourceVersion: reference.resourceVersion,
-  contractId: reference.contractId,
-  fingerprint: reference.fingerprint,
-  kind: "workflow",
-});
-
 /** A fresh command key, as the SDK makes one. */
 export const keyOf = (): string => crypto.randomUUID().replaceAll("-", "");
 
-/** A page's start of the workflow `reference` names, under `key`. */
-export const startCommand = (
-  reference: WorkflowReference,
-  input?: unknown,
+/** What names a workflow reference's functions: its path. */
+interface Named {
+  readonly contractId: string;
+}
+
+/**
+ * A page's call of the mutation `name` of the workflow `reference` names,
+ * with `args`, under `key`: as `useWorkflow` and `useMutation` send it.
+ */
+export const mutationCall = (
+  reference: Named,
+  name: "start" | "pause" | "resume" | "cancel" | "send",
+  args: unknown,
   key = keyOf()
 ): string =>
   JSON.stringify({
-    workflow: wireOf(reference),
-    command: "start",
-    input: input ?? { who: "Ada" },
+    reference: {
+      name: `${reference.contractId}.mutations.${name}`,
+      kind: "mutation",
+    },
+    input: args,
     idempotencyKey: key,
   });
 
+/**
+ * A page's read of the query `name` of the workflow `reference` names,
+ * with `args`: as `useQuery` reads it, as data (`following` takes it) or
+ * as a call's text (`queryCall`).
+ */
+export const workflowQuery = (
+  reference: Named,
+  name: "run" | "canStart" | "runs" | "history" | "decisions" | "decision",
+  args: unknown
+) => ({
+  reference: {
+    name: `${reference.contractId}.queries.${name}`,
+    kind: "query",
+  },
+  input: args,
+});
+
+/** `workflowQuery` as a call's text. */
+export const queryCall = (...args: Parameters<typeof workflowQuery>): string =>
+  JSON.stringify(workflowQuery(...args));
+
+/** A page's start of the workflow `reference` names, under `key`. */
+export const startCommand = (
+  reference: Named,
+  input?: unknown,
+  key = keyOf()
+): string =>
+  mutationCall(reference, "start", { input: input ?? { who: "Ada" } }, key);
+
 /** A page's pause, resume or cancel of run `runId`, under `key`. */
 export const controlCommand = (
-  reference: WorkflowReference,
+  reference: Named,
   command: "pause" | "resume" | "cancel",
   runId: string,
   key = keyOf()
-): string =>
-  JSON.stringify({
-    workflow: wireOf(reference),
-    command,
-    runId,
-    idempotencyKey: key,
-  });
+): string => mutationCall(reference, command, { runId }, key);
 
 const resultSchema = z.union([
   z.object({ ok: z.literal(true), value: z.unknown() }),
@@ -433,13 +458,9 @@ export const startedOf = (answer: unknown) =>
     })
     .parse(outcomeOf(answer));
 
-/** A control's receipt as a page's command answered it, without its revision. */
-export const staged = (receipt: unknown) => {
-  const { kind, state } = z
-    .object({ kind: z.string(), state: z.string(), revision: z.number() })
-    .parse(receipt);
-  return { kind, state };
-};
+/** A control's receipt as a page's call answered it. */
+export const staged = (receipt: unknown) =>
+  z.strictObject({ kind: z.string(), state: z.string() }).parse(receipt);
 
 /**
  * Someone of `role` signed in through `idp`, with their session's RPC, and
@@ -563,7 +584,7 @@ export const called = async (
 /**
  * A session client of `person`'s page, as the frame's own: its calls
  * over core's function route, its live queries over its frame
- * (`pages.frame`). Hand it to `workflowChannel` for the SDK's view.
+ * (`pages.frame`), as `useQuery` and `useMutation` reach core.
  */
 export const pageClient = (
   person: Person,

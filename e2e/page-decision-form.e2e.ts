@@ -155,7 +155,7 @@ export function Review({
       "src/components/watched.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
 import { workflows } from "@server/_generated/api";
 
-/** Run \`runId\`'s status, as the person may see it: thrown otherwise. */
+/** Run \`runId\`'s status, as the person may see it: \`unavailable\` otherwise. */
 export function Watched({ runId }: { runId: string }) {
   const run = useWorkflow(workflows.followUp, { runId });
   return <output aria-label="Watched status">{run.status}</output>;
@@ -184,13 +184,13 @@ function Desk() {
         {followUp.status === "idle" ? "" : followUp.runId}
       </output>
       <Button
-        onClick={() => void followUp.run({ who: "Ada", reviewer: "${admin}" })}
+        onClick={() => void followUp.start({ who: "Ada", reviewer: "${admin}" })}
       >
         Start follow-up
       </Button>
       <Button
         onClick={() =>
-          void followUp.run({ who: "Grace", reviewer: "${colleague}" })
+          void followUp.start({ who: "Grace", reviewer: "${colleague}" })
         }
       >
         Start colleague's follow-up
@@ -329,8 +329,12 @@ const watch = async (appPage: FrameLocator, runId: string): Promise<void> => {
   await appPage.getByRole("button", { name: "Watch" }).click();
 };
 
-/** What a page shows of a run the person may not see (the SDK's message). */
-const noSuchRun = "This workflow has no such run.";
+/**
+ * What `useWorkflow` shows of a run the person may not see: no run at
+ * all, nothing of what it is or returned, and no error.
+ */
+const watchedStatus = (appPage: FrameLocator) =>
+  appPage.getByRole("status", { name: "Watched status" });
 
 test("a reviewer answers a run's decision through a decision form on a page, confirmed in Grasp's own dialog, and watches only a run whose decision asks them now", async ({
   pageOf,
@@ -361,7 +365,7 @@ test("a reviewer answers a run's decision through a decision form on a page, con
   // A run whose decision asks someone else is none of the reviewer's to
   // watch: it reads as no run at all.
   await watch(reviewer, notAsked);
-  await expect(reviewer.getByRole("alert")).toContainText(noSuchRun, live);
+  await expect(watchedStatus(reviewer)).toHaveText("unavailable", live);
   const desk = await openDesk(second, app);
 
   // The reviewer chooses to approve and writes a comment: nothing is sent
@@ -401,9 +405,7 @@ test("a reviewer answers a run's decision through a decision form on a page, con
   await expect(confirmation).toBeHidden();
   await expect(decisionsOn(desk)).toHaveCount(0, live);
   await watch(starter, asked);
-  await expect(
-    starter.getByRole("status", { name: "Watched status" })
-  ).toHaveText("completed", live);
+  await expect(watchedStatus(starter)).toHaveText("completed", live);
   // Its answer given, the reviewer's page goes on: their form of it
   // leaves with the decision, never failing the page.
   await expect(desk.getByRole("alert")).toHaveCount(0);
@@ -412,6 +414,7 @@ test("a reviewer answers a run's decision through a decision form on a page, con
   // Nothing asks the reviewer of the ended run any more: watched again,
   // it reads as no run, never showing what it returned.
   await watch(desk, asked);
-  await expect(desk.getByRole("alert")).toContainText(noSuchRun, live);
+  await expect(watchedStatus(desk)).toHaveText("unavailable", live);
+  await expect(desk.getByRole("alert")).toHaveCount(0);
   await expect(decisionsOn(other)).toHaveCount(1);
 });

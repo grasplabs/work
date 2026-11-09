@@ -16,7 +16,7 @@ const refuse: (message: string) => never = refuser(AppDefinitionError);
 /**
  * The top-level path segments the platform keeps, with what each is for:
  * `workflows` for its generated workflow references
- * (`workflows.<alias>.queries.*`) and `people` for who calls and the
+ * (`workflows.<alias>.queries.*` and `.mutations.*`) and `people` for who calls and the
  * organization's people (people.ts), which the host answers itself. No
  * function registers under either, whether or not the App declares
  * workflows now, so declaring one later never shadows or is shadowed by a

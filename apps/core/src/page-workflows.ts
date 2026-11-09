@@ -1,16 +1,24 @@
 import {
   declaredWorkflows,
-  eventFingerprint,
   schemaFromDescriptor,
   workflowFingerprint,
+  workflowFunctions,
 } from "@grasp-os/sdk/host";
-import type { BoundWorkflow, WorkflowPin } from "@grasp-os/sdk/host";
+import type {
+  BoundWorkflow,
+  WorkflowMutationName,
+  WorkflowPin,
+} from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
-import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
+import {
+  expectedMessageOf,
+  isExpectedCode,
+  isExpectedError,
+} from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
+import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -21,6 +29,10 @@ import {
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
+import {
+  idempotencyKeySchema,
+  submissionErrors,
+} from "@grasp-os/shared/submissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { and, eq, exists, inArray, or, sql } from "drizzle-orm";
@@ -38,7 +50,6 @@ import {
   workflowDecisions,
   workflowResourceRunControlKeys,
   workflowResourceRunControls,
-  workflowResources,
   workflowResourceRuns,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
@@ -68,33 +79,47 @@ import { admitRunEvent, unlessAccepted } from "./workflows/run-events.ts";
 import type { AdmittedEvent } from "./workflows/run-events.ts";
 import { runWaits, withRespond } from "./workflows/run-waits.ts";
 
-// What an App's page asks of the workflows its App binds, through the
-// typed `useWorkflow` (spec 10.4; the SDK's client-workflow.ts speaks the
-// other side): a start, a control of a run, and live snapshots of a run
-// and of whether the person may start one. Requests travel as a page's
-// calls and live queries do (app-functions.ts routes them here), never an
-// agent's or a preview's. Threat model on GRA-626, and how each is closed:
+// What an App's page asks of the workflows its App binds, through each
+// generated workflow reference's ordinary functions (spec 10.4;
+// workflow-functions.ts in the SDK declares them, and `useWorkflow` is
+// built on them): its mutations `start`, `pause`, `resume`, `cancel` and
+// `send`, answered here as a page's calls (`answerWorkflowMutation`), and
+// its queries `run` and `canStart`, read here as any of its queries is,
+// live or not (`readRun`, `mayStartNow`, through
+// workflow-reference-queries.ts). All of these are a person's page's
+// alone (app-functions.ts, `FunctionCallOptions.page`): an agent's, a
+// Code Mode run's or the App's own server code's call of them names no
+// function (`function.not_found`), a visitor's is refused as not granted,
+// and a preview's is its side effect (`app.preview_side_effect`). Threat
+// model on GRA-626, and how each is closed:
 //
 // - A run started twice: by a render, a remount, a reconnect or a lost
-//   answer. Only a command starts one, under the client's key, and the
-//   receipt is unique per App, person and key, so a request sent again
-//   answers the run it started (`startAppBinding`). A watch starts and
-//   controls nothing.
-// - A reference made up, stale or of another contract: it must name the
-//   App's current release, an alias the release declares, and exactly the
-//   fingerprint the release's declaration gives (`version.mismatch`
-//   otherwise), computed here from the sealed release, never taken from
-//   the request. Only an alias the seal pinned to a workflow version has
-//   anything to start or watch.
+//   answer. Only a `start` call starts one, under the client's key (one
+//   of the App's mutations' keys, `submission.key_invalid` otherwise),
+//   and the receipt is unique per App, person and key, so a call sent
+//   again answers the run it started (`startAppBinding`), and the same key
+//   with other input is refused (`workflow.start_conflict`). A query
+//   starts and controls nothing.
+// - A function made up, or of another workflow: it is a name, resolved in
+//   the App's current release as the App's own functions are, against the
+//   workflow that release declares under the alias it names
+//   (`function.not_found` otherwise), its arguments checked by the
+//   descriptors generated from that declaration. Only an alias the seal
+//   pinned to a workflow version has anything to start or read. As with
+//   the App's own functions, a page of an older release open across a
+//   publish is answered by the current one's contract: it never names its
+//   own, so nothing is refused as stale, and
+//   the page's types may lag until it loads the new release.
 // - A rebind since the seal running a version the reference's contract
 //   wasn't made for: a start requires, in its admitting statement, that the
 //   App's active binding still names exactly the pinned version; a run is
 //   seen only while it does.
 // - Another person's run, or another App's: a run is seen only when its
 //   start receipt says this App started it for the caller, and it acts for
-//   them, of exactly the pinned version; anything else, one that doesn't
-//   exist included, is `workflow.run_unavailable`. No App role, owner or
-//   admin sees past that.
+//   them, of exactly the pinned version, started by an App version that
+//   declared the same contract; anything else, one that doesn't exist
+//   included, is `workflow.run_unavailable`, which the `run` query answers
+//   as null. No App role, owner or admin sees past that.
 // - Controls by someone who may no longer use the App: what the page is
 //   told it may do, and what a control requires as its receipt is written,
 //   is the rule an App's start is admitted on now (`appStartHoldsSql`:
@@ -102,16 +127,14 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   grant) and the binding in force: read in the statement that writes the
 //   receipt, so a revocation between the two lets nothing through.
 // - Status and capability from different moments: a run's snapshot is one
-//   value under one revision, which moves only forward, with the run's
-//   lifecycle and with the policy generation of its workflow (`revisionOf`):
-//   an App grant revoked or given again is a revision of its own, and its
-//   pages read again as it changes (permissions.ts). A control's receipt
-//   carries the same revisions, so the page knows which snapshot settles
-//   it.
+//   read, its status and what may be done with it together, read again
+//   whole as the run changes (run-changes.ts) and as the App's grants do
+//   (permissions.ts); a live query shows only its newest read.
 // - What a run returned reaching anyone else: only the run's person sees
 //   its snapshot, through the App that started it, under the run's
 //   retention (`resultOf`). What it returned is projected by the output
-//   the App version that started it declared, refused if it doesn't fit;
+//   the App declares, which the version that started it declared alike,
+//   refused if it doesn't fit;
 //   why it failed, only as a code the platform defines, in the platform's
 //   own words (`failureOf`): the engine's message, or a code of the
 //   workflow's own, can be made of what the run read through grants the
@@ -119,9 +142,9 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   in restricted mode itself.
 // - An event sent to a run by someone, or through something, that may not
 //   send it (spec 10.4.6). A send names a run the page sees (above), an
-//   event the release declares for the workflow, of exactly the type and
-//   fingerprint the release resolved (`version.mismatch` otherwise), and
-//   data that the event's declared contract takes, extra fields refused.
+//   event the release declares for the workflow, by its alias, its type
+//   the one the release resolved, and data that the event's declared
+//   contract takes, extra fields refused.
 //   It needs the App's own `send` grant on the workflow, which no `start`,
 //   `read` or decision implies, held for the person now with their role in
 //   the App and the binding in force; the run takes it only as its inbox
@@ -134,9 +157,9 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   store, so a revocation landing between the two lets that one send in;
 //   the next is refused.
 // - A sender forging provenance, or another sender's event. A send carries
-//   only the event's reference, its data and the client's key: a request
-//   with any other field (an envelope's source, ID, time or subject) is
-//   refused whole (`contract.invalid_request`). The host mints the
+//   only the run, the event's alias, its data and the client's key: a call
+//   with any other argument (an envelope's source, ID, time or subject) is
+//   refused whole by its descriptor (`contract.invalid_args`). The host mints the
 //   envelope: its source from the App, release and person the request is
 //   authenticated as (`sourceOf`), its ID from the run, binding, source
 //   and key, its time as the run accepts it.
@@ -180,136 +203,26 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   the engine says the run is rolling back (spec 10.7.3: during a
 //   compensation nothing may be paused, resumed or cancelled from an App).
 
-/** A workflow reference, as the SDK sends it. */
-const referenceSchema = z.strictObject({
-  resourceId: z.string().min(1).max(128),
-  resourceVersion: z.int().min(1),
-  contractId: z.string().min(1).max(256),
-  fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
-  kind: z.literal("workflow"),
-});
-
-/** A command's key, as the SDK makes it: 16 random bytes in hex. */
-const keySchema = z.string().regex(/^[0-9a-f]{32}$/u);
-
-const runIdSchema = z.string().min(1).max(128);
-
-/** An event a send names, by the reference the SDK was generated with. */
-const eventReferenceSchema = z.strictObject({
-  alias: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-  type: z.string().min(1).max(256),
-  fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
-});
-
-/** What a page asks of a workflow (see the header). */
-const workflowRequestSchema = z.union([
-  z.strictObject({
-    workflow: referenceSchema,
-    command: z.literal("start"),
-    input: z.unknown(),
-    idempotencyKey: keySchema,
-  }),
-  z.strictObject({
-    workflow: referenceSchema,
-    command: z.enum(["pause", "resume", "cancel"]),
-    runId: runIdSchema,
-    idempotencyKey: keySchema,
-  }),
-  z.strictObject({
-    workflow: referenceSchema,
-    command: z.literal("send"),
-    runId: runIdSchema,
-    event: eventReferenceSchema,
-    data: z.unknown(),
-    idempotencyKey: keySchema,
-  }),
-  z.strictObject({
-    workflow: referenceSchema,
-    watch: z.literal("run"),
-    runId: runIdSchema,
-  }),
-  z.strictObject({
-    workflow: referenceSchema,
-    watch: z.literal("binding"),
-  }),
-]);
-
-/** A page's request of a workflow, read. */
-export type WorkflowRequest = z.infer<typeof workflowRequestSchema>;
-
-/** A command: a start, a control or a send. */
-type WorkflowCommand = Extract<WorkflowRequest, { command: string }>;
-
-/** A watch: of a run, or of the binding. */
-type WorkflowWatch = Extract<WorkflowRequest, { watch: string }>;
-
-const encoder = new TextEncoder();
-
-/** `request` parsed, if it is JSON text within a call's bound. */
-const parsedRequest = (request: unknown): unknown => {
-  if (
-    typeof request !== "string" ||
-    request.length > functionRequestMaxBytes ||
-    encoder.encode(request).byteLength > functionRequestMaxBytes
-  ) {
-    return undefined;
-  }
-  try {
-    const parsed: unknown = JSON.parse(request);
-    return parsed;
-  } catch {
-    return undefined;
-  }
-};
+const mutationPath =
+  /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})\.mutations\.(?<name>[A-Za-z]{1,32})$/u;
 
 /**
- * Whether `request` (a call's or live query's text) is a request of a
- * workflow: an object naming one under `workflow`. Then it is read as one
- * (`readWorkflowRequest`), never as a call of the App's functions.
+ * Whether `contractId` names one of a workflow reference's mutations
+ * (`workflows.<alias>.mutations.<name>`): core answers it itself, only
+ * for a page (`answerWorkflowMutation`), never as an App's function.
  */
-export const isWorkflowRequest = (request: unknown): boolean => {
-  const parsed = parsedRequest(request);
-  return (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    !Array.isArray(parsed) &&
-    Object.hasOwn(parsed, "workflow")
-  );
-};
-
-/**
- * The workflow request `request` is, read exactly:
- * `contract.invalid_request` for anything else.
- */
-export const readWorkflowRequest = (request: unknown): WorkflowRequest => {
-  const parsed = workflowRequestSchema.safeParse(parsedRequest(request));
-  if (!parsed.success) {
-    throw operationErrors.create("contract.invalid_request");
-  }
-  return parsed.data;
-};
-
-/** Whether `request` watches a workflow's run or binding. */
-export const watchesWorkflow = (request: unknown): boolean => {
-  try {
-    return "watch" in readWorkflowRequest(request);
-  } catch {
-    return false;
-  }
-};
-
-const aliasPattern = /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
+export const isWorkflowMutationPath = (contractId: string): boolean =>
+  mutationPath.test(contractId);
 
 /** Who asks, and through which App's current release. */
 interface Asking {
-  readonly by: Pick<Identity, "userId" | "role" | "teams"> &
-    Partial<Pick<Identity, "staff">>;
+  readonly by: { readonly userId: string; readonly staff?: boolean };
   readonly app: AppId;
   readonly version: number;
   readonly release: Release;
 }
 
-/** What a reference resolved to in the release. */
+/** What an alias resolved to in the release. */
 export interface Resolved {
   readonly alias: string;
   readonly declared: BoundWorkflow;
@@ -325,7 +238,8 @@ export interface Resolved {
  */
 const askingOf = async (
   env: Env,
-  by: Asking["by"],
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: unknown
 ): Promise<Asking> => {
   const found = await usableApp(env, by, app);
@@ -356,40 +270,49 @@ const declaredIn = async (
 };
 
 /**
- * What `reference` names in `release`: a workflow it declares, of exactly
- * that release and contract (`version.mismatch` otherwise). For an App's
- * tests too, against the release under test (fixture-runs.ts).
+ * What `alias` names in `release`: a workflow it declares, resolved by
+ * name in the release that answers, as an App's functions are
+ * (`function.not_found` otherwise). For an App's tests too, against the
+ * release under test (fixture-runs.ts).
  */
-export const resolveIn = async (
+export const resolvedIn = async (
   release: Release,
-  reference: WorkflowRequest["workflow"]
+  alias: string
 ): Promise<Resolved> => {
-  const alias = aliasPattern.exec(reference.contractId)?.groups?.alias;
-  const found =
-    alias === undefined ? undefined : await declaredIn(release, alias);
-  if (alias === undefined || found === undefined) {
+  const found = await declaredIn(release, alias);
+  if (found === undefined) {
     throw operationErrors.create("function.not_found");
-  }
-  const { manifest } = release;
-  if (
-    reference.resourceId !== manifest.resourceId ||
-    reference.resourceVersion !== manifest.resourceVersion ||
-    reference.fingerprint !== found.fingerprint
-  ) {
-    throw versionErrors.create("version.mismatch");
   }
   return { alias, ...found, pinned: found.declared.pinned };
 };
 
 /**
- * What `reference` names in the asking App's release: a workflow it
- * declares, of exactly its release and contract (`version.mismatch`
- * otherwise).
+ * `value` checked by `descriptor`, normalized: a call's arguments
+ * (`contract.invalid_args` otherwise) or an answer about to leave, which
+ * must already be in the form its descriptor gives it
+ * (`contract.invalid_return`).
  */
-const resolve = async (
-  asking: Asking,
-  reference: WorkflowRequest["workflow"]
-): Promise<Resolved> => await resolveIn(asking.release, reference);
+export const checkedValue = (
+  descriptor: unknown,
+  value: unknown,
+  code: "contract.invalid_args" | "contract.invalid_return"
+): Json => {
+  const schema = schemaFromDescriptor(JSON.stringify(descriptor));
+  const result = schema["~standard"].validate(value);
+  if (result instanceof Promise || result.issues !== undefined) {
+    throw operationErrors.create(code);
+  }
+  // SAFETY: what a descriptor admits is JSON.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const normalized = result.value as Json;
+  if (
+    code === "contract.invalid_return" &&
+    canonicalText(normalized) !== canonicalText(value)
+  ) {
+    throw operationErrors.create(code);
+  }
+  return normalized;
+};
 
 /** The pin of `resolved`: refused when the seal pinned nothing. */
 export const pinOf = (resolved: Resolved): WorkflowPin => {
@@ -546,7 +469,7 @@ const isEnded = (status: RunRow["status"]): boolean =>
  * Run `row` as it is now, and the control a page sees applying on it:
  * its cancel if one is asked, which has priority, otherwise the pause or
  * resume unresolved; none once it has ended. Read in one batch, so both
- * are of one moment, and so of the revision the row says.
+ * are of one moment.
  */
 const runAndPending = async (
   env: Env,
@@ -581,26 +504,6 @@ const runAndPending = async (
   ];
 };
 
-/**
- * The revision of a run's snapshot: the run's own (`summary_revision`,
- * moved on by every write that changes what its snapshot shows, in that
- * write) and its workflow's policy generation, which every grant and
- * revocation on the workflow moves on (workflow-resources.ts,
- * `nextGeneration`): the App's `start` grant among them. Both only move
- * forward, so their sum does with either: what the person may do with the
- * run (an App grant revoked or given again) is a revision of its own,
- * never a change under the same one. Everything else a snapshot holds is
- * the gate's to keep current (the person's role, the build's trust). One
- * more, so the first is 1; and one more again once the App is in
- * restricted mode (`appRestricted`), which is for good: what it may send
- * the run changes with it, so a page following the run is pushed it.
- */
-const revisionOf = (
-  generation: number,
-  row: RunRow,
-  appRestricted = false
-): number => generation + row.summaryRevision + 1 + (appRestricted ? 1 : 0);
-
 /** Why a run compensates, as its row keeps it (resource-runs.ts). */
 const compensationSchema = z.object({
   cause: z.enum(["failure", "cancellation"]),
@@ -617,16 +520,6 @@ const compensationOf = (
   row.status === "running" && row.compensation !== null
     ? compensationSchema.safeParse(JSON.parse(row.compensation)).data
     : undefined;
-
-/** Workflow `id`'s policy generation now. */
-const generationOf = async (env: Env, id: string): Promise<number> => {
-  const row = await drizzle(env.DB)
-    .select({ generation: workflowResources.policyGeneration })
-    .from(workflowResources)
-    .where(eq(workflowResources.id, id))
-    .get();
-  return row?.generation ?? 0;
-};
 
 /** A run's status, as a page sees it. */
 const statusOf = {
@@ -661,16 +554,17 @@ const originRelease = async (
 };
 
 /**
- * The contract the App version that started a run declared for `alias`:
- * its fingerprint, so the page tells a run of another contract apart,
- * and its output, which what the run returned is projected by.
+ * That the App version that started a run declared `alias` under the
+ * contract the asking release does (`workflow.run_unavailable`
+ * otherwise): a run of another contract is never shown through this
+ * one's `run` query, whose output, waits and events it would not fit.
  */
-const startedContract = async (
+const requireSameContract = async (
   env: Env,
   asking: Asking,
   resolved: Resolved,
   originAppVersion: number | null
-): Promise<{ fingerprint: string; output: unknown }> => {
+): Promise<void> => {
   if (originAppVersion === null) {
     throw workflowResourceErrors.create("workflow.run_unavailable");
   }
@@ -681,19 +575,17 @@ const startedContract = async (
           await originRelease(env, asking.app, originAppVersion),
           resolved.alias
         );
-  if (started === undefined) {
+  if (started?.fingerprint !== resolved.fingerprint) {
     throw workflowResourceErrors.create("workflow.run_unavailable");
   }
-  return { fingerprint: started.fingerprint, output: started.declared.output };
 };
 
 /**
  * Which of `versions`, versions of App `app` that started runs of `alias`,
  * a page of `release` can follow such a run of: one whose release still
  * loads and declares `alias` under the contract `release` declares it
- * with. A run any other version started is refused (`startedContract`),
- * or its snapshot pins another contract than the page's reference, which
- * the SDK refuses.
+ * with. A run any other version started is not shown
+ * (`requireSameContract`).
  */
 export const followableOrigins = async (
   env: Env,
@@ -949,7 +841,6 @@ const requireWatchable = (row: RunRow, asking: Asking): void => {
  */
 const watchedSnapshot = (
   row: RunRow,
-  fingerprint: string,
   waits: Json[],
   pending: ResourceControlRow["kind"] | undefined
 ): Json => {
@@ -959,7 +850,6 @@ const watchedSnapshot = (
     workflowId: row.workflowResourceId,
     workflowVersion: row.version,
     manifestHash: row.manifestHash,
-    fingerprint,
     status,
     startedAt: status === "queued" ? null : row.createdAt.getTime(),
     finishedAt: null,
@@ -974,47 +864,34 @@ const watchedSnapshot = (
   };
 };
 
-/** Run `runId`'s snapshot for the asking person, and its revision. */
+/**
+ * Run `runId`'s snapshot for the asking person: one read of the run, its
+ * status and what they may do with it together.
+ */
 const runSnapshot = async (
   env: Env,
   asking: Asking,
   resolved: Resolved,
   runId: string
-): Promise<{ value: Json; revision: number }> => {
+): Promise<Json> => {
   const pin = pinOf(resolved);
-  // Read first, before anything the snapshot says: a grant or revocation
-  // landing after this moves the generation on, so the snapshot read
-  // under the one before it is never numbered as one of the newer's, and
-  // the read again it causes is a revision of its own.
-  const generation = await generationOf(env, pin.workflowId);
   const appRestricted = await appHost(env, asking.app).isRestricted();
   const seen = await seenRun(env, asking, resolved.alias, pin, runId, {
     appRestricted,
   });
-  const { originAppVersion } = seen;
-  // The run and the control it has applying, read together: one moment of
-  // it, under the revision its row says (`summary_revision`, which every
-  // write that changes either moves on in that write).
+  await requireSameContract(env, asking, resolved, seen.originAppVersion);
+  // The run and the control it has applying, read together: one moment
+  // of it.
   const [row, pending] = await runAndPending(env, seen.row);
   requireWatchable(row, asking);
   const compensation = compensationOf(row);
-  // Read after the row: a wait opened or closed since moves its revision on.
   const waits = await snapshotWaits(env, asking, resolved, row, appRestricted);
   const status =
     compensation === undefined
       ? await shownStatus(env, row, waits.length)
       : "compensating";
-  const contract = await startedContract(
-    env,
-    asking,
-    resolved,
-    originAppVersion
-  );
   if (row.principalId !== asking.by.userId) {
-    return {
-      value: watchedSnapshot(row, contract.fingerprint, waits, pending),
-      revision: revisionOf(generation, row, appRestricted),
-    };
+    return watchedSnapshot(row, waits, pending);
   }
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
   const returned =
@@ -1029,14 +906,13 @@ const runSnapshot = async (
   const result = returned ? await resultOf(env, row) : {};
   const output =
     row.status === "completed"
-      ? outputOf(contract.output, result.output)
+      ? outputOf(resolved.declared.output, result.output)
       : undefined;
-  const value: Json = {
+  return {
     runId: row.id,
     workflowId: row.workflowResourceId,
     workflowVersion: row.version,
     manifestHash: row.manifestHash,
-    fingerprint: contract.fingerprint,
     status,
     startedAt: row.status === "starting" ? null : row.createdAt.getTime(),
     finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
@@ -1052,33 +928,24 @@ const runSnapshot = async (
     // says it; its cleanup's activity, which the engine reports as running.
     ...compensationShown(compensation),
   };
-  return { value, revision: revisionOf(generation, row, appRestricted) };
 };
 
-/** The start `command` asks for, admitted: its run's handle. */
+/** A start of `resolved` with `input` under `key`, admitted: its run's handle. */
 const started = async (
   env: Env,
   asking: Asking,
   resolved: Resolved,
-  command: Extract<WorkflowCommand, { command: "start" }>
+  input: Json,
+  key: string
 ): Promise<Json> => {
   const pin = pinOf(resolved);
-  const checked = schemaFromDescriptor(JSON.stringify(resolved.declared.input))[
-    "~standard"
-  ].validate(command.input);
-  if (checked instanceof Promise || checked.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_args");
-  }
   const start = await startAppBinding(
     env,
     authorityOf(asking),
     resolved.alias,
-    {
-      input: checked.value,
-      key: coreStartKey("page", command.idempotencyKey),
-    },
+    { input, key: coreStartKey("page", key) },
     undefined,
-    // The binding still names the version the reference was made for.
+    // The binding still names the version the release's seal pinned.
     bindingPinnedSql(asking.app, resolved.alias, pin),
     undefined,
     null,
@@ -1162,29 +1029,6 @@ const joinKey = async (
     keysOf(env, runId),
   ]);
   return answeredBefore(receipts, keys, kind, key) ?? receipt;
-};
-
-/**
- * A receipt of run `runId`, as a page is answered it: its kind and
- * state, under the revision of the run's snapshot now, which shows it
- * (`summary_revision` moves on as a receipt is admitted or settled).
- */
-const receiptAnswer = async (
-  env: Env,
-  runId: string,
-  workflowId: string,
-  receipt: Pick<ResourceControlRow, "kind" | "state">
-): Promise<Json> => {
-  const generation = await generationOf(env, workflowId);
-  const row = await runOf(env, runId);
-  if (row === undefined) {
-    throw workflowResourceErrors.create("workflow.run_unavailable");
-  }
-  return {
-    kind: receipt.kind,
-    state: receipt.state,
-    revision: revisionOf(generation, row),
-  };
 };
 
 /** Where the engine has a run as its controls are decided. */
@@ -1272,7 +1116,7 @@ const requestedAction = {
  * person may still start the workflow through the binding and nobody
  * admitted a control of the run since `row` was read, read in the
  * statements that write it: admitted under the run's next control
- * generation, the snapshot moving on with it; or, for a request the run is
+ * generation, the run's pages read again (`tellQueryFollowers`); or, for a request the run is
  * already past (`done`), applied at once under the current one. A cancel
  * takes the next generation too, so a pause or resume admitted before it
  * is superseded unsent (resource-runs.ts, `applyResourceControl`), or by
@@ -1395,6 +1239,13 @@ const writeReceipt = async (
   return found?.id;
 };
 
+/** A control a page asks of a run, under the call's key. */
+interface Control {
+  readonly kind: ResourceControlRow["kind"];
+  readonly runId: string;
+  readonly key: string;
+}
+
 /** What deciding a control comes to: a receipt, done at once, or refused. */
 type Decided =
   | { type: "receipt"; receipt: ResourceControlRow }
@@ -1418,9 +1269,9 @@ const decide = async (
   asking: Asking,
   may: SQL,
   row: RunRow,
-  command: Extract<WorkflowCommand, { command: "pause" | "resume" | "cancel" }>
+  command: Control
 ): Promise<Decided> => {
-  const kind = command.command;
+  const { kind } = command;
   // The receipts before the engine, both after `row`: a control admitted
   // since `row` moved the run's generation on, so the write below fails;
   // one admitted before it is either unresolved here (joined or a
@@ -1444,14 +1295,7 @@ const decide = async (
       }
     }
   }
-  const admission = admissionOf(
-    row,
-    receipts,
-    keys,
-    kind,
-    command.idempotencyKey,
-    live
-  );
+  const admission = admissionOf(row, receipts, keys, kind, command.key, live);
   if (admission.type === "refused") {
     return admission;
   }
@@ -1461,13 +1305,7 @@ const decide = async (
   if (admission.type === "join" && kind !== "cancel") {
     return {
       type: "receipt",
-      receipt: await joinKey(
-        env,
-        row.id,
-        kind,
-        command.idempotencyKey,
-        admission.receipt
-      ),
+      receipt: await joinKey(env, row.id, kind, command.key, admission.receipt),
     };
   }
   if (admission.type === "done" && kind === "cancel") {
@@ -1479,7 +1317,7 @@ const decide = async (
     may,
     row,
     kind,
-    command.idempotencyKey,
+    command.key,
     admission.type === "done"
   );
   const [after, afterKeys] = await Promise.all([
@@ -1491,7 +1329,7 @@ const decide = async (
   // meanwhile under another key, which it joins, keeping its key.
   let receipt =
     after.find(({ id }) => id === written) ??
-    answeredBefore(after, afterKeys, kind, command.idempotencyKey);
+    answeredBefore(after, afterKeys, kind, command.key);
   const unresolved = after.find(
     (each) => each.kind === kind && each.state === "admitted"
   );
@@ -1499,7 +1337,7 @@ const decide = async (
     receipt =
       kind === "cancel"
         ? unresolved
-        : await joinKey(env, row.id, kind, command.idempotencyKey, unresolved);
+        : await joinKey(env, row.id, kind, command.key, unresolved);
   }
   if (receipt === undefined) {
     // Another control admitted meanwhile, or the person may no longer.
@@ -1543,7 +1381,7 @@ const controlled = async (
   env: Env,
   asking: Asking,
   resolved: Resolved,
-  command: Extract<WorkflowCommand, { command: "pause" | "resume" | "cancel" }>
+  command: Control
 ): Promise<Json> => {
   const pin = pinOf(resolved);
   const { row } = await seenRun(
@@ -1553,10 +1391,8 @@ const controlled = async (
     pin,
     command.runId
   );
-  const kind = command.command;
+  const { kind } = command;
   const may = mayStartSql(asking, resolved.alias, pin);
-  const answer = async (receipt: Pick<ResourceControlRow, "kind" | "state">) =>
-    await receiptAnswer(env, row.id, row.workflowResourceId, receipt);
   let receipt: ResourceControlRow | undefined;
   // A cancel that lost its write to a control admitted at once is decided
   // again, once, against the run as it is then: a cancel always wins.
@@ -1566,8 +1402,7 @@ const controlled = async (
     // oxlint-disable-next-line no-await-in-loop -- once more at most
     const decided = await decide(env, asking, may, current, command);
     if (decided.type === "applied") {
-      // oxlint-disable-next-line no-await-in-loop -- done: the last turn
-      return await answer({ kind, state: "applied" });
+      return { kind, state: "applied" };
     }
     if (decided.type === "receipt") {
       ({ receipt } = decided);
@@ -1601,7 +1436,7 @@ const controlled = async (
       });
     }
   }
-  return await answer(receipt);
+  return { kind: receipt.kind, state: receipt.state };
 };
 
 /**
@@ -1620,49 +1455,39 @@ const senderOf = (asking: Asking): string =>
   `app:${asking.app}:person:${asking.by.userId}`;
 
 /**
- * The event `command` sends to the asking person's run, admitted to its
- * inbox (see the header): its ID, the same for the same key.
+ * The event `send` sends to the asking person's run, admitted to its
+ * inbox (see the header): its ID, the same for the same key. Its
+ * arguments were checked by the `send` mutation's descriptor: one of the
+ * workflow's events, by alias, with the data that event declares.
  */
 const sent = async (
   env: Env,
   asking: Asking,
   resolved: Resolved,
-  command: Extract<WorkflowCommand, { command: "send" }>
+  send: {
+    readonly runId: string;
+    readonly event: string;
+    readonly data: Json;
+    readonly key: string;
+  }
 ): Promise<Json> => {
   const pin = pinOf(resolved);
-  const { alias, type, fingerprint } = command.event;
+  const alias = send.event;
   const declared = Object.hasOwn(resolved.declared.events, alias)
     ? resolved.declared.events[alias]
     : undefined;
   if (declared === undefined) {
-    throw operationErrors.create("function.not_found");
-  }
-  if (
-    declared.type !== type ||
-    (await eventFingerprint(declared)) !== fingerprint
-  ) {
-    throw versionErrors.create("version.mismatch");
-  }
-  const { row } = await seenRun(
-    env,
-    asking,
-    resolved.alias,
-    pin,
-    command.runId
-  );
-  const checked = schemaFromDescriptor(JSON.stringify(declared.data))[
-    "~standard"
-  ].validate(command.data);
-  if (checked instanceof Promise || checked.issues !== undefined) {
     throw operationErrors.create("contract.invalid_args");
   }
+  const { type } = declared;
+  const { row } = await seenRun(env, asking, resolved.alias, pin, send.runId);
   const delivery = {
     workflowId: pin.workflowId,
     runId: row.id,
     binding: alias,
     type,
-    data: checked.value,
-    key: command.idempotencyKey,
+    data: send.data,
+    key: send.key,
     source: sourceOf(asking),
     sender: senderOf(asking),
   };
@@ -1672,22 +1497,50 @@ const sent = async (
   // conflict.
   const refuse = async (refusal: Error) =>
     await unlessAccepted(env, delivery, refusal);
-  let admitted: AdmittedEvent;
-  if (!(await holds(env, maySendSql(asking, resolved.alias, pin)))) {
-    admitted = await refuse(
-      workflowResourceErrors.create("workflow.event_denied")
-    );
-  } else if (
-    !row.restricted &&
-    (await appHost(env, asking.app).isRestricted())
-  ) {
-    // What a restricted App's page sends may carry what it read: never
-    // into a run that isn't restricted itself (restricted.ts).
-    admitted = await refuse(permissionErrors.create("permission.restricted"));
-  } else {
-    admitted = await admitRunEvent(env, delivery);
-  }
   const db = drizzle(env.DB);
+  /** What a send names of the run, the workflow and the event, audited. */
+  const detail = {
+    workflow: pin.workflowId,
+    version: pin.version,
+    binding: alias,
+    type,
+    app: asking.app,
+    appVersion: asking.version,
+    via: "page",
+  };
+  let admitted: AdmittedEvent;
+  try {
+    if (!(await holds(env, maySendSql(asking, resolved.alias, pin)))) {
+      admitted = await refuse(
+        workflowResourceErrors.create("workflow.event_denied")
+      );
+    } else if (
+      !row.restricted &&
+      (await appHost(env, asking.app).isRestricted())
+    ) {
+      // What a restricted App's page sends may carry what it read: never
+      // into a run that isn't restricted itself (restricted.ts).
+      admitted = await refuse(permissionErrors.create("permission.restricted"));
+    } else {
+      admitted = await admitRunEvent(env, delivery);
+    }
+  } catch (error) {
+    // Every send refused, the grant's, restricted mode's or the run's
+    // inbox's, is recorded with why, as every send taken is; one the host
+    // couldn't decide (no code it defines) is the caller's to send again.
+    const code = isExpectedError(error) ? error.code : undefined;
+    if (code !== undefined) {
+      await auditedBatch(env, db, [
+        outboxed(db, {
+          actor: { type: "person", userId: asking.by.userId },
+          action: "workflow.event.refused",
+          target: { type: "workflow_run", id: row.id },
+          detail: { ...detail, code },
+        }),
+      ]);
+    }
+    throw error;
+  }
   // Every send the run took, a resend of one too: a resend may follow a
   // first answer lost before it was recorded here.
   await auditedBatch(env, db, [
@@ -1697,14 +1550,8 @@ const sent = async (
       action: "workflow.event.sent",
       target: { type: "workflow_run", id: row.id },
       detail: {
+        ...detail,
         event: admitted.id,
-        workflow: pin.workflowId,
-        version: pin.version,
-        binding: alias,
-        type,
-        app: asking.app,
-        appVersion: asking.version,
-        via: "page",
         redelivered: !admitted.accepted,
       },
     }),
@@ -1712,54 +1559,217 @@ const sent = async (
   return { eventId: admitted.id };
 };
 
+/** A call of a workflow mutation, as `readFunctionRequest` reads one. */
+interface MutationCall {
+  readonly reference: { readonly name: string; readonly kind: string };
+  readonly input: unknown;
+  readonly idempotencyKey?: string | undefined;
+}
+
+const mutationNames: ReadonlySet<string> = new Set<WorkflowMutationName>([
+  "start",
+  "pause",
+  "resume",
+  "cancel",
+  "send",
+]);
+
+/** Whether `name` names one of a workflow reference's mutations. */
+const isMutationName = (name: string): name is WorkflowMutationName =>
+  mutationNames.has(name);
+
+const startArgs = z.object({ input: z.json() });
+const controlArgs = z.object({ runId: z.string() });
+const sendArgs = z.object({
+  runId: z.string(),
+  event: z.string(),
+  data: z.json(),
+});
+
 /**
- * Answers a page's workflow command `command` for `by` through App
- * `app`: a start's run handle, a control's receipt, or a send's event ID;
- * a refusal throws.
- * The answer names the release it was decided under.
+ * `args`, which a mutation's descriptor already checked, read by
+ * `schema`: `contract.invalid_args` for anything it doesn't take.
  */
-export const answerWorkflowCommand = async (
-  env: Env,
-  by: Asking["by"],
-  app: unknown,
-  command: WorkflowCommand
-): Promise<{ value: Json; manifestHash: string }> => {
-  const asking = await askingOf(env, by, app);
-  const resolved = await resolve(asking, command.workflow);
-  let value: Json;
-  if (command.command === "start") {
-    value = await started(env, asking, resolved, command);
-  } else if (command.command === "send") {
-    value = await sent(env, asking, resolved, command);
-  } else {
-    value = await controlled(env, asking, resolved, command);
+const argsOf = <Args>(schema: z.ZodType<Args>, args: Json): Args => {
+  const parsed = schema.safeParse(args);
+  if (!parsed.success) {
+    throw operationErrors.create("contract.invalid_args");
   }
-  return { value, manifestHash: asking.release.manifestHash };
+  return parsed.data;
 };
 
 /**
- * Reads a page's workflow watch `watch` for `by` through App `app`: a
- * run's snapshot and its revision, or whether they may start a run now
- * (`{ canRun }`, whose revisions the subscription numbers); a refusal
- * throws.
+ * Answers a page's call `call` of one of a workflow reference's mutations
+ * (`workflows.<alias>.mutations.<name>`) for `by` through App `app`, as
+ * the App's own mutations are answered: resolved by name in the App's
+ * current release (`function.not_found`, `function.kind_mismatch`), its
+ * arguments checked by the mutation's own descriptor, and kept under the
+ * call's key, so a call sent again answers what the first did. A start
+ * answers its run's handle, a control its receipt, a send its event's ID;
+ * a refusal throws. The answer names the release it was decided under.
  */
-export const readWorkflowWatch = async (
+export const answerWorkflowMutation = async (
   env: Env,
-  by: Asking["by"],
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: unknown,
-  watch: WorkflowWatch
-): Promise<{ value: Json; revision?: number; manifestHash: string }> => {
+  call: MutationCall
+): Promise<{ value: Json; manifestHash: string }> => {
+  const path = mutationPath.exec(call.reference.name)?.groups;
   const asking = await askingOf(env, by, app);
-  const resolved = await resolve(asking, watch.workflow);
-  const { manifestHash } = asking.release;
-  if (watch.watch === "run") {
-    return {
-      ...(await runSnapshot(env, asking, resolved, watch.runId)),
-      manifestHash,
-    };
+  const resolved = await resolvedIn(asking.release, path?.alias ?? "");
+  const { mutations } = workflowFunctions(resolved.declared);
+  const name = path?.name ?? "";
+  const fn = isMutationName(name) ? mutations[name] : undefined;
+  if (fn === undefined) {
+    throw operationErrors.create("function.not_found");
   }
-  const canRun =
-    resolved.pinned !== undefined &&
-    (await holds(env, mayStartSql(asking, resolved.alias, resolved.pinned)));
-  return { value: { canRun }, manifestHash };
+  if (call.reference.kind !== fn.kind) {
+    throw operationErrors.create("function.kind_mismatch");
+  }
+  const args = checkedValue(fn.args, call.input, "contract.invalid_args");
+  // Keyed as the App's own mutations are (operations.ts): the client
+  // sends each under one, the caller's or its own.
+  const key =
+    call.idempotencyKey === undefined
+      ? crypto.randomUUID()
+      : submissionErrors.parse(
+          "submission.key_invalid",
+          idempotencyKeySchema,
+          call.idempotencyKey
+        );
+  let value: Json;
+  if (name === "start") {
+    value = await started(
+      env,
+      asking,
+      resolved,
+      argsOf(startArgs, args).input,
+      key
+    );
+  } else if (name === "send") {
+    value = await sent(env, asking, resolved, {
+      ...argsOf(sendArgs, args),
+      key,
+    });
+  } else if (name === "pause" || name === "resume" || name === "cancel") {
+    value = await controlled(env, asking, resolved, {
+      kind: name,
+      runId: argsOf(controlArgs, args).runId,
+      key,
+    });
+  } else {
+    throw operationErrors.create("function.not_found");
+  }
+  return {
+    value: checkedValue(fn.returns, value, "contract.invalid_return"),
+    manifestHash: asking.release.manifestHash,
+  };
+};
+
+const startCallSchema = z.strictObject({
+  reference: z.strictObject({ name: z.string(), kind: z.literal("mutation") }),
+  input: z.unknown(),
+});
+
+/**
+ * The workflow `request` starts in `release`, and its input, checked: a
+ * call's JSON text of a workflow reference's `start` mutation, as an App's
+ * tests send it (fixture-runs.ts); `contract.invalid_request` for any
+ * other.
+ */
+export const startCallIn = async (
+  release: Release,
+  request: unknown
+): Promise<{ readonly resolved: Resolved; readonly input: Json }> => {
+  let parsed: unknown;
+  try {
+    parsed = typeof request === "string" ? JSON.parse(request) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  const call = startCallSchema.safeParse(parsed);
+  const path = call.success
+    ? mutationPath.exec(call.data.reference.name)?.groups
+    : undefined;
+  if (!call.success || path?.alias === undefined || path.name !== "start") {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  const resolved = await resolvedIn(release, path.alias);
+  const { start } = workflowFunctions(resolved.declared).mutations;
+  if (start === undefined) {
+    throw operationErrors.create("function.not_found");
+  }
+  const args = checkedValue(
+    start.args,
+    call.data.input,
+    "contract.invalid_args"
+  );
+  return { resolved, input: argsOf(startArgs, args).input };
+};
+
+/** Who reads a workflow reference's query, and through which App. */
+export interface WorkflowCaller {
+  readonly app: string;
+  readonly userId: string;
+  /** Grasp staff: asked no client's decision. */
+  readonly staff?: boolean;
+}
+
+/** `caller` asking through `release`, the App's current one. */
+const askingFor = (caller: WorkflowCaller, release: Release): Asking => ({
+  by: {
+    userId: caller.userId,
+    ...(caller.staff === true ? { staff: true } : {}),
+  },
+  app: appIdSchema.parse(caller.app),
+  version: release.manifest.resourceVersion,
+  release,
+});
+
+/**
+ * Run `runId` of `alias` as `caller` may see it now, for the reference's
+ * `run` query: its snapshot, or null for a run they may not see, one that
+ * doesn't exist alike (`seenRun`), so a run's ID is no oracle. The caller
+ * passed the gate a call core answers itself passes (app-functions.ts).
+ */
+export const readRun = async (
+  env: Env,
+  caller: WorkflowCaller,
+  release: Release,
+  alias: string,
+  runId: string
+): Promise<Json> => {
+  const asking = askingFor(caller, release);
+  try {
+    return await runSnapshot(
+      env,
+      asking,
+      await resolvedIn(release, alias),
+      runId
+    );
+  } catch (error) {
+    if (workflowResourceErrors.codeOf(error) === "workflow.run_unavailable") {
+      return null;
+    }
+    throw error;
+  }
+};
+
+/**
+ * Whether `caller` may start a run of `alias` through the App's binding
+ * now, for the reference's `canStart` query: an App's start's own rule,
+ * and the binding in force naming the version the seal pinned.
+ */
+export const mayStartNow = async (
+  env: Env,
+  caller: WorkflowCaller,
+  release: Release,
+  alias: string
+): Promise<boolean> => {
+  const { pinned } = await resolvedIn(release, alias);
+  return (
+    pinned !== undefined &&
+    (await holds(env, mayStartSql(askingFor(caller, release), alias, pinned)))
+  );
 };

@@ -112,21 +112,6 @@ const withheldCode = (
   return lost || (isAction && ranUnderKeyCodes.has(code)) ? code : undefined;
 };
 
-/**
- * `answered` with its value read by `read`, when given: one `read` doesn't
- * accept is as good as lost.
- */
-export const readSettled = (
-  answered: Settled,
-  read: ((value: unknown) => unknown) | undefined
-): Settled => {
-  if (answered.kind !== "value" || read === undefined) {
-    return answered;
-  }
-  const value = read(answered.value);
-  return value === undefined ? { kind: "lost" } : { kind: "value", value };
-};
-
 /** What a submission does next after `settled` (see `#send`). */
 export const submissionVerdict = (
   settled: Settled,

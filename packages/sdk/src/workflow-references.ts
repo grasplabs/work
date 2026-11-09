@@ -19,9 +19,9 @@ declare const waitType: unique symbol;
  * under `decisions`. Its types, the input a run takes,
  * the output a completed run has and the waits it can be held at, live
  * in phantom members only. It holds no binding and grants nothing: the
- * host resolves it against the release and binding in force, and refuses
- * a run whose pinned contract isn't this one. It has no `.start`, `.get`
- * or `.cancel`: runs go through `useWorkflow`.
+ * host resolves it against the release and binding in force. Its runs
+ * are read and changed through its ordinary `queries` and `mutations`,
+ * which `useWorkflow` is built on.
  */
 export interface WorkflowReference<
   Alias extends string = string,
@@ -31,6 +31,7 @@ export interface WorkflowReference<
   Events = Readonly<Record<string, WorkflowEventReference>>,
   Decisions = Readonly<Record<string, WorkflowDecisionReference>>,
   Queries = Readonly<Record<string, AnyFunctionReference>>,
+  Mutations = Readonly<Record<string, AnyFunctionReference>>,
 > {
   readonly kind: "workflow";
   readonly visibility: "public";
@@ -53,11 +54,16 @@ export interface WorkflowReference<
   /** Its decisions, by their binding's alias in the workflow. */
   readonly decisions: Decisions;
   /**
-   * Its ordinary queries: `runs` and `history`, and, when it
-   * declares decisions, `decisions` and `decision`; for `useQuery` and
-   * `usePaginatedQuery`.
+   * Its ordinary queries: `run`, `canStart`, `runs` and `history`, and,
+   * when it declares decisions, `decisions` and `decision`; for
+   * `useQuery` and `usePaginatedQuery`.
    */
   readonly queries: Queries;
+  /**
+   * Its ordinary mutations: `start`, `pause`, `resume` and `cancel`, and,
+   * when it declares events, `send`; for `useMutation`.
+   */
+  readonly mutations: Mutations;
   /** Types only: never set. */
   readonly [argsType]?: Input;
   /** Types only: never set. */
@@ -78,6 +84,8 @@ export type AnyWorkflowReference = WorkflowReference<
   // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowEventsOf`
   any,
   // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowDecisionsOf`
+  any,
+  // oxlint-disable-next-line typescript/no-explicit-any -- never read
   any,
   // oxlint-disable-next-line typescript/no-explicit-any -- never read
   any

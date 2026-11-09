@@ -19,8 +19,11 @@ import {
   referenceTypeOf,
   valueTypeOf,
 } from "./codegen-render.ts";
-import { workflowQueries } from "./workflow-queries.ts";
-import type { WorkflowQueryName } from "./workflow-queries.ts";
+import { workflowFunctions } from "./workflow-functions.ts";
+import type {
+  WorkflowMutationName,
+  WorkflowQueryName,
+} from "./workflow-functions.ts";
 
 /** A workflow's contract ID: its registered path. */
 const workflowContractId = (alias: string): string => `workflows.${alias}`;
@@ -75,14 +78,28 @@ const waitTypeOf = (workflow: BoundWorkflow, depth: number): string => {
     .join(`\n${indent(depth)}`);
 };
 
+/** `functions` as sorted `[name, type]` pairs, each typed by `typed`. */
+const typesOf = <Name extends string>(
+  functions: Partial<Record<Name, FunctionManifest>>,
+  typed: Record<Name, (fn: FunctionManifest) => string>
+): [string, string][] =>
+  Object.entries<FunctionManifest | undefined>(functions)
+    .toSorted(([a], [b]) => (a < b ? -1 : 1))
+    .flatMap(([name, fn]) => {
+      // SAFETY: the keys of `functions` are `Name`s.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const render = typed[name as Name];
+      return fn === undefined ? [] : [[name, render(fn)]];
+    });
+
 /**
- * The types of `workflow`'s query references, by name: `runs` and
- * `history` from their descriptors, as any function's; `decisions` and
- * `decision` naming each decision's own wait type, so an item or detail
- * narrowed by its key answers `respond` with that decision's value.
+ * The types of `workflow`'s query references, by name: each from its
+ * descriptors, as any function's, but `decisions` and `decision`, which
+ * name each decision's own wait type, so an item or detail narrowed by
+ * its key answers `respond` with that decision's value.
  */
 const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
-  const operations = workflowQueries(workflow);
+  const operations = workflowFunctions(workflow).queries;
   const keys = sortedKeys(workflow.decisions);
   const valueOf = (name: string): string => {
     const decision = workflow.decisions[name];
@@ -90,7 +107,9 @@ const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
       ? "never"
       : valueTypeOf(decision.value, "input");
   };
-  const typed: Record<WorkflowQueryName, (fn: FunctionManifest) => string> = {
+  return typesOf<WorkflowQueryName>(operations, {
+    run: referenceTypeOf,
+    canStart: referenceTypeOf,
     runs: referenceTypeOf,
     history: referenceTypeOf,
     decisions: (fn) => {
@@ -109,21 +128,40 @@ const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
       });
       return `FunctionReference<"query", "public", ${valueTypeOf(fn.args, "input")}, ${[...details, "null"].join(" | ")}>`;
     },
-  };
-  return Object.entries(operations)
-    .toSorted(([a], [b]) => (a < b ? -1 : 1))
-    .flatMap(([name, fn]) => {
-      // SAFETY: the keys of `workflowQueries`' answer are query names.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      const render = typed[name as WorkflowQueryName];
-      return fn === undefined ? [] : [[name, render(fn)]];
-    });
+  });
 };
+
+/** The types of `workflow`'s mutation references, from their descriptors. */
+const mutationTypesOf = (workflow: BoundWorkflow): [string, string][] =>
+  typesOf<WorkflowMutationName>(workflowFunctions(workflow).mutations, {
+    start: referenceTypeOf,
+    pause: referenceTypeOf,
+    resume: referenceTypeOf,
+    cancel: referenceTypeOf,
+    send: referenceTypeOf,
+  });
 
 const recordType = (members: readonly string[]): string =>
   members.length === 0
     ? "Readonly<Record<never, never>>"
     : `{\n${members.join("\n")}\n${indent(2)}}`;
+
+/** `[name, type]` pairs as a reference type's members. */
+const members = (types: readonly [string, string][]): string[] =>
+  types.map(([name, type]) => `${indent(3)}readonly ${name}: ${type};`);
+
+/** `manifests` as the references a generated module holds, by name. */
+const referencesOf = (
+  manifests: Readonly<Record<string, FunctionManifest | undefined>>
+): Record<string, unknown> => {
+  const references: Record<string, unknown> = {};
+  for (const [name, fn] of Object.entries(manifests)) {
+    if (fn !== undefined) {
+      references[name] = referenceOf(fn);
+    }
+  }
+  return references;
+};
 
 /** The type of the reference to `workflow`. */
 const workflowTypeOf = (workflow: BoundWorkflow): string => {
@@ -141,9 +179,6 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
         : decisionTypeOf(workflow, name, decision);
     return `${indent(3)}readonly ${key(name)}: ${type};`;
   });
-  const queries = queryTypesOf(workflow).map(
-    ([name, type]) => `${indent(3)}readonly ${name}: ${type};`
-  );
   const parts = [
     JSON.stringify(workflow.alias),
     valueTypeOf(workflow.input, "input"),
@@ -151,7 +186,8 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
     waitTypeOf(workflow, 2),
     recordType(events),
     recordType(decisions),
-    recordType(queries),
+    recordType(members(queryTypesOf(workflow))),
+    recordType(members(mutationTypesOf(workflow))),
   ];
   // No trailing comma: TypeScript refuses one in a type-argument list.
   return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part}`).join(",\n")}\n${indent(1)}>`;
@@ -204,12 +240,7 @@ export const workflowReferenceOf = async (
       };
     }
   }
-  const queries: Record<string, unknown> = {};
-  for (const [name, fn] of Object.entries(workflowQueries(workflow))) {
-    if (fn !== undefined) {
-      queries[name] = referenceOf(fn);
-    }
-  }
+  const functions = workflowFunctions(workflow);
   return {
     kind: "workflow",
     visibility: "public",
@@ -223,14 +254,14 @@ export const workflowReferenceOf = async (
     events,
     listens: sortedListens(workflow.listens),
     decisions,
-    queries,
+    queries: referencesOf(functions.queries),
+    mutations: referencesOf(functions.mutations),
   };
 };
 
 /**
  * `workflows`: one reference per workflow the App binds, each with its
- * events, decisions and ordinary queries and nothing else; no `.start`,
- * `.get` or `.cancel`.
+ * events, decisions and ordinary queries and mutations.
  */
 export const workflowsExport = async (
   identity: ReleaseIdentity,
