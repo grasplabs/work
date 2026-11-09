@@ -1437,6 +1437,9 @@ const filingContract = async (admin: Identity): Promise<string> => {
   return key;
 };
 
+/** A CSV attachment's name and label, as a read answers them. */
+const invoiceFile = { name: "invoice.csv", contentType: "text/csv" };
+
 describe("a draft's test run keeping and attaching run files", () => {
   it("answers a read kept as a file with a stand-in reference, checked as a real read is, attaches it, and keeps nothing", async () => {
     const admin = await person("admin");
@@ -1476,18 +1479,16 @@ describe("a draft's test run keeping and attaching run files", () => {
         'kept.file.file + " " + kept.file.name + " " + kept.file.size + " " + sent.messageId',
     });
     const csv = "a,b\n1,2\n";
-    const run = async (content: string) => {
+    const run = async (
+      content: string,
+      file: { name: string; contentType: string } = invoiceFile
+    ) => {
       const { runId } = await startCandidateRun(env, ada, workflow.id, {
         revision,
         input: { who: "Ada" },
         fixtures: {
           reader: {
-            output: {
-              name: "invoice.csv",
-              contentType: "text/csv",
-              encoding: "base64",
-              content,
-            },
+            output: { ...file, encoding: "base64", content },
           },
           mailer: { output: { messageId: "m-1" } },
         },
@@ -1505,7 +1506,23 @@ describe("a draft's test run keeping and attaching run files", () => {
     const kept = await run(btoa(csv));
     // A fixture that isn't a file's content fails as a real read would.
     const { end: notBase64 } = await run("not base64!");
-    expect({ kept, notBase64 }).toStrictEqual({
+    // Typed by its bytes and named as a real read's file is: a PDF
+    // labelled text is a PDF, and a name no run file may have is replaced.
+    const pdf = "%PDF-1.7\n";
+    const { end: relabelled } = await run(btoa(pdf), {
+      name: "../../etc/scan.pdf",
+      contentType: "text/plain",
+    });
+    // A ZIP labelled a Word document declares nothing: no run file's type.
+    const { end: unsupported } = await run(
+      btoa(String.fromCodePoint(0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4)),
+      {
+        name: "letter.docx",
+        contentType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      }
+    );
+    expect({ kept, notBase64, relabelled, unsupported }).toStrictEqual({
       kept: {
         end: {
           status: "completed",
@@ -1515,6 +1532,11 @@ describe("a draft's test run keeping and attaching run files", () => {
         files: 0,
       },
       notBase64: { status: "failed", code: "workflow.call_invalid" },
+      relabelled: {
+        status: "completed",
+        output: { status: `candidate attachment ${pdf.length} m-1` },
+      },
+      unsupported: { status: "failed", code: "file.run_type_unsupported" },
     });
   });
 });

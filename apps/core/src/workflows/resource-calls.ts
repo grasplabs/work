@@ -17,6 +17,7 @@ import {
   runFileErrors,
   runFileIdSchema,
   runFileLimits,
+  runFileNamed,
   runFileNameSchema,
 } from "@grasp-os/shared/run-files";
 import { valueDepth } from "@grasp-os/shared/value-depth";
@@ -456,12 +457,19 @@ const candidateKept = async (
   } catch {
     throw callInvalid("output: Its content isn't base64.");
   }
+  // Typed by its bytes and named as a real read's kept file would be
+  // (`keptAsFile`, `keepFile`): a type no run file may be refused.
+  const type = await runFileTypeShown(bytes, rest.contentType);
+  if (type === undefined) {
+    throw runFileErrors.create("file.run_type_unsupported");
+  }
+  const named = runFileNameSchema.safeParse(rest.name);
   return {
     ...rest,
     file: {
       file: candidateFileId,
-      name: rest.name ?? unnamedFile,
-      type: rest.contentType ?? "application/octet-stream",
+      name: runFileNamed(named.success ? named.data : unnamedFile, type),
+      type,
       size: bytes.length,
       sha256: await sha256HexOfBytes(bytes),
     },

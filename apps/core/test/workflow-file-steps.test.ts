@@ -399,6 +399,39 @@ describe("a step's calls on its run's files, again", () => {
     }).toStrictEqual({ died: "failed", same: true, states: ["done"] });
   });
 
+  it("read a text file whole only as its step records it: one its escaping takes past a step's payload is not read", async () => {
+    const caller = stepCaller(() => {});
+    // Within one call's bytes, but six times as long as JSON escapes it.
+    const escaped = "\u0001".repeat(256 * 1024);
+    const plain = "a".repeat(256 * 1024);
+    const readOf = async (text: string) => {
+      // Each written by a step of its own.
+      const writer = {
+        ...caller,
+        effectKey: `${caller.runId}:${unique()}:task`,
+      };
+      const written = await callFiles(env, writer, "write", {
+        name: "notes.txt",
+        type: "text/plain",
+        text,
+      });
+      return await outcomeOf(
+        callFiles(
+          env,
+          { ...caller, effectKey: `${caller.runId}:read:task` },
+          "readText",
+          { file: fileOf(written.output) }
+        )
+      );
+    };
+    const plainRead = await readOf(plain);
+    const escapedRead = await readOf(escaped);
+    expect({ plain: plainRead, escaped: escapedRead }).toStrictEqual({
+      plain: "done",
+      escaped: "file.not_readable",
+    });
+  });
+
   it("delete a finished file once, answering a second delete as done, and never one still being written", async () => {
     const caller = stepCaller(() => {});
     const written = await callFiles(env, caller, "write", note);
