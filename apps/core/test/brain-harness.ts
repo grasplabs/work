@@ -743,21 +743,31 @@ const fullContextOf = async (
   granted: ReadonlySet<string>
 ): Promise<{ sources: Source[]; truncated: boolean }> => {
   const readable = await person.api.knowledge.listCollections();
+  // Every document asked for at once, then taken in path order, as before:
+  // one read after another was most of the arm's time at scale, and a
+  // context builder has no reason to wait for one before asking the next.
+  const reads = await Promise.all(
+    readable
+      .filter(({ id }) => granted.has(id))
+      .map(async (collection) => {
+        const documents = await documentsOf(person, collection.id);
+        return await Promise.all(
+          documents.map(
+            async (document) => await person.api.knowledge.read(document.id)
+          )
+        );
+      })
+  );
   const sources: Source[] = [];
   let chars = 0;
   let truncated = false;
-  for (const collection of readable.filter(({ id }) => granted.has(id))) {
-    // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    for (const document of await documentsOf(person, collection.id)) {
-      // oxlint-disable-next-line no-await-in-loop -- one document at a time
-      const read = await person.api.knowledge.read(document.id);
-      for (const section of sectionsOf(read.path, read.text)) {
-        if (chars + section.text.length <= fullContextChars) {
-          chars += section.text.length;
-          sources.push(section);
-        } else {
-          truncated = true;
-        }
+  for (const read of reads.flat()) {
+    for (const section of sectionsOf(read.path, read.text)) {
+      if (chars + section.text.length <= fullContextChars) {
+        chars += section.text.length;
+        sources.push(section);
+      } else {
+        truncated = true;
       }
     }
   }
