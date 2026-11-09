@@ -161,6 +161,10 @@ describe("a request Teams didn't send for this client", () => {
     ).resolves.toBe(401);
 
     await expect(kept(teams.conversation)).resolves.toStrictEqual([]);
+    await expect(reached(teams.conversation)).resolves.toMatchObject({
+      activities: [],
+      asked: [],
+    });
   });
 
   it("is refused from another tenant, and nothing is read or sent", async () => {
