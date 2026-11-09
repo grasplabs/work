@@ -321,7 +321,6 @@ const cast = {
   workflowEditor: { builder: "builder" },
   workflowDrawn: { builder: "builder" },
   workflowDiagram: { builder: "builder", admin: "admin" },
-  workflowModules: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   productPageScripts: { builder: "builder" },
   decisionUnreachable: { decider: "user" },

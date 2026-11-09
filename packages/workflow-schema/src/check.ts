@@ -245,29 +245,7 @@ const branchKeywords = new Set([
 ]);
 
 /** A schema error the validator reported, where it is. */
-type SchemaError = OutputUnit & {
-  readonly pointer: string;
-  /** Whether it is about a `call` step. */
-  readonly calls?: boolean;
-};
-
-/** The `type` of the value at `pointer` of `json`, if it has a string one. */
-const stepTypeAt = (json: unknown, pointer: string): string | undefined => {
-  let value = json;
-  for (const token of pointer.split("/").slice(1)) {
-    const key = token.replaceAll("~1", "/").replaceAll("~0", "~");
-    value =
-      typeof value === "object" && value !== null && Object.hasOwn(value, key)
-        ? Reflect.get(value, key)
-        : undefined;
-  }
-  return typeof value === "object" &&
-    value !== null &&
-    "type" in value &&
-    typeof value.type === "string"
-    ? value.type
-    : undefined;
-};
+type SchemaError = OutputUnit & { readonly pointer: string };
 
 /** An `anyOf` branch, as its errors' keyword locations start. */
 const anyOfBranch =
@@ -316,7 +294,7 @@ const meantErrors = (errors: readonly OutputUnit[]): SchemaError[] => {
 const durationProperties = new Set(["for", "timeout", "delay"]);
 
 /** The properties of a step that name a permission by its alias. */
-const aliasProperties = new Set(["connection", "module", "decision"]);
+const aliasProperties = new Set(["connection", "decision"]);
 
 /** What a bound error's remedy says, by the keyword it failed. */
 const boundRemedies: Readonly<Record<string, string>> = {
@@ -354,9 +332,9 @@ const patternProblem = ({
   if (last === "contract") {
     return {
       code: "workflow.invalid_contract",
-      message: "Not a contract this permission's kind takes.",
+      message: "Not a contract of the catalog.",
       remedy:
-        "Name a module's file and export, `local:code/<file>.ts#<export>`; any other permission names a catalog contract, never `local:`.",
+        "Name a contract of the catalog, e.g. `grasp/http`; never `local:`.",
     };
   }
   if (parent.endsWith("/state")) {
@@ -486,9 +464,9 @@ const schemaProblem = (error: SchemaError): Problem => {
     return as({
       code: "workflow.call_kind",
       message:
-        "A call calls one member: a connection's action, an action on the run's files or a Brain collection, or one of the workflow's own modules.",
+        "A call calls one member: a connection's action, or an action on the run's files or a Brain collection.",
       remedy:
-        "Give it `connection` and `action` (with `into` or `from` if it keeps or attaches files), `files` and one of read, write, list and delete, `brain` and one of search, read and recall, or `module`.",
+        "Give it `connection` and `action` (with `into` or `from` if it keeps or attaches files), `files` and one of read, write, list and delete, or `brain` and one of search, read and recall.",
     });
   }
   if (keyword === "oneOf") {
@@ -572,14 +550,7 @@ const shapeProblems = (json: unknown): Problem[] => {
   const problems = new Map<string, Problem>();
   for (const error of meantErrors(validated.errors)) {
     if (!problems.has(error.pointer)) {
-      problems.set(
-        error.pointer,
-        schemaProblem({
-          ...error,
-          // Which step's `oneOf` it is, by the step's own type.
-          calls: stepTypeAt(json, error.pointer) === "call",
-        })
-      );
+      problems.set(error.pointer, schemaProblem(error));
     }
   }
   return [...problems.values()];
@@ -1162,14 +1133,6 @@ const checkCall = (
         `Name one of ${actions.join(", ")}.`
       );
     }
-  } else {
-    permissionFor(
-      walk,
-      step.module,
-      ["compute", "action"],
-      "modules",
-      join(pointer, "module")
-    );
   }
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
   checkValue(walk, step.args, join(pointer, "args"), place, connection);

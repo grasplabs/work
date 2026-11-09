@@ -25,7 +25,7 @@ const detailOf = (step: Step): string | null => {
       if ("files" in step) {
         return `${step.files} · ${step.action}`;
       }
-      return "brain" in step ? `${step.brain} · ${step.action}` : step.module;
+      return `${step.brain} · ${step.action}`;
     }
     case "generate": {
       return "ai";

@@ -5,7 +5,6 @@ import {
   isAppErrorCode,
 } from "@grasp-os/shared/function-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
-import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 import {
   workflowEventTypeSchema,
   workflowStateKeySchema,
@@ -86,15 +85,6 @@ const maxStateKeys = 64;
 
 const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
 
-/** One of the workflow's own modules' exports, as its binding names it. */
-const ownExport = {
-  module: z.string().regex(workflowModulePattern).max(256),
-  export: z
-    .string()
-    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
-    .max(256),
-};
-
 /** A call task's call, as the host checks and makes it. */
 const sealedCallSchema = z.discriminatedUnion("name", [
   z.strictObject({
@@ -147,18 +137,6 @@ const sealedCallSchema = z.discriminatedUnion("name", [
      * timeout: without one, the host waits as long as the run may.
      */
     timeoutMs: z.int().positive().optional(),
-  }),
-  z.strictObject({
-    name: z.literal("grasp.compute"),
-    binding: aliasSchema,
-    ...ownExport,
-    arguments: templateSchema,
-  }),
-  z.strictObject({
-    name: z.literal("grasp.action"),
-    binding: aliasSchema,
-    ...ownExport,
-    arguments: templateSchema,
   }),
 ]);
 

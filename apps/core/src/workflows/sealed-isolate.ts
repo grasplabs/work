@@ -577,8 +577,6 @@ const runLoadFailure = (error: unknown): unknown => {
 /** How a run's load is let go of (`loadSealedIsolate`). */
 export interface SealedLoadOptions {
   over?: AbortSignal;
-  /** Hears the run's sandbox session ID on-prem, once it's open. */
-  onSession?: (id: string) => void;
   /**
    * Whether the run is still its activation's: not cancelled, nor taken
    * over by a newer activation (run-object.ts).
@@ -623,7 +621,7 @@ export interface SealedIsolate {
 export const loadSealedIsolate = <Attempt extends object = AttemptHost>(
   env: Env,
   { owner, mainModule, modules, attemptHostMethods: methods }: SealedIsolate,
-  { over, current = () => true, onSession }: SealedLoadOptions = {}
+  { over, current = () => true }: SealedLoadOptions = {}
 ): {
   run: (
     host: IsolateHostCalls<Attempt> & RpcTarget,
@@ -713,11 +711,10 @@ export const loadSealedIsolate = <Attempt extends object = AttemptHost>(
               try {
                 return await runInSession(sandboxHost, call, {
                   signal,
-                  opened: (id, live) => {
+                  opened: (_id, live) => {
                     sessionLive = live;
                     // Its code starts now: the wait for a place isn't its.
                     clock.started();
-                    onSession?.(id);
                   },
                 });
               } finally {

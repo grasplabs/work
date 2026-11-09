@@ -136,7 +136,6 @@ export interface Taker {
 export const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.start_denied",
   "workflow.start_invalid",
-  "workflow.packages_revoked",
   "workflow.lineage_limit",
   "workflow.paused",
   // An input holding files where nothing hands the run any, or more than a

@@ -73,12 +73,10 @@ import type {
   WaitLength,
 } from "./host.ts";
 import type { AttemptAdmission } from "./quotas.ts";
-import { callAction } from "./resource-action.ts";
 import { requireCallAuthority, runAuthority } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
+import { makeCall } from "./resource-calls.ts";
 import type { BuiltCall, Effect } from "./resource-calls.ts";
-import { callCompute } from "./resource-compute.ts";
 import {
   askDeciders,
   callInvalid,
@@ -103,7 +101,6 @@ import { stepFilesOperations } from "./run-files.ts";
 import { inboxOf } from "./run-inboxes.ts";
 import { sealedMainModules } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
-import { requirePackagesAdmitted } from "./sealed-packages.ts";
 import { engineStepOf } from "./sealed-steps.ts";
 
 // What a run of a sealed build of a generated JSON workflow may do on the
@@ -472,12 +469,12 @@ export interface HostedResourceRun {
 }
 
 /**
- * The model calls a run and its actions made (GRA-700), kept with the run
- * (run-object.ts, `modelCallsIn`): an action step's record holds only its
- * answer, and a failed attempt none, so its calls can't be counted from
- * records on a replay. Each is kept, by its call's key, before it goes out.
+ * The model calls a run made (GRA-700), kept with the run (run-object.ts,
+ * `modelCallsIn`): a failed attempt records none, so its calls can't be
+ * counted from records on a replay. Each is kept, by its call's key,
+ * before it goes out.
  */
-export interface ActionModelCalls {
+export interface RunModelCalls {
   /** How many were kept. */
   count: () => number;
   /** Keeps one, with its call's key: each time it is kept, as made. */
@@ -576,10 +573,8 @@ export interface SentCalls {
 export interface SealedRunMemory {
   /** Its tried-once calls that went out (`SentCalls`). */
   sentCalls: SentCalls;
-  /** The model calls it made, its actions' included. */
-  modelCalls: ActionModelCalls;
-  /** The run's own sandbox session on-prem, once open: its actions' parent. */
-  sessionId?: () => string | undefined;
+  /** The model calls it made. */
+  modelCalls: RunModelCalls;
 }
 
 /** A `grasp.decision` call task. */
@@ -711,13 +706,7 @@ const matchesBy = (
 type BoundCall = Extract<
   SealedCall,
   {
-    name:
-      | "grasp.connector"
-      | "grasp.model"
-      | "grasp.files"
-      | "grasp.brain"
-      | "grasp.compute"
-      | "grasp.action";
+    name: "grasp.connector" | "grasp.model" | "grasp.files" | "grasp.brain";
   }
 >;
 
@@ -739,10 +728,6 @@ const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
     case "grasp.files":
     case "grasp.brain": {
       return { call, operation: call.operation, arguments: call.arguments };
-    }
-    case "grasp.compute":
-    case "grasp.action": {
-      return { call, operation: call.name, arguments: call.arguments };
     }
     case "grasp.model": {
       return {
@@ -767,13 +752,9 @@ const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
   }
 };
 
-/**
- * The calls whose step makes them once only (spec 13.7): a model request,
- * and an action, whose effects aren't proven idempotent as a whole.
- */
+/** The calls whose step makes them once only (spec 13.7): a model request. */
 const triedOnceCalls: ReadonlySet<SealedCall["name"]> = new Set([
   "grasp.model",
-  "grasp.action",
 ]);
 
 /**
@@ -2794,9 +2775,8 @@ class SealedRun implements SealedRunKind {
         return await refuse(named);
       }
       const { params, calling } = this.run;
-      // A test's run reaches only its own sealed modules and the model and
-      // store calls its test serves (fixture-calls.ts): never a connection,
-      // an action or an event. Refused before its arguments are matched,
+      // A test's run reaches only the model calls its test serves
+      // (fixture-calls.ts): never a connection or an event. Refused before its arguments are matched,
       // its sensitive values put in or it is audited, so nothing says a
       // call went out.
       if (calling.fixture === true && !fixtureCalls.has(template.call.name)) {
@@ -2937,7 +2917,7 @@ class SealedRun implements SealedRunKind {
     sensitive: Json[],
     effect: Effect
   ): Promise<Json> {
-    const { calling, build } = this.run;
+    const { calling } = this.run;
     switch (call.name) {
       case "grasp.connector": {
         const built: BuiltCall = {
@@ -3009,30 +2989,6 @@ class SealedRun implements SealedRunKind {
           effect
         );
       }
-      case "grasp.compute": {
-        await this.#packagesAdmitted();
-        return await callCompute(
-          this.#env,
-          build.compute,
-          build.sdk,
-          call,
-          value,
-          attempt.deadline
-        );
-      }
-      case "grasp.action": {
-        await this.#packagesAdmitted();
-        this.#requireHolds(attempt);
-        effect.sending?.();
-        return await this.#action(
-          attempt,
-          admission,
-          task,
-          call,
-          value,
-          effect.key
-        );
-      }
       default: {
         return call satisfies never;
       }
@@ -3071,93 +3027,6 @@ class SealedRun implements SealedRunKind {
       });
     }
     this.#memory.modelCalls.keep(key);
-  }
-
-  /**
-   * Admits the approved graph the build seals, if it seals one, before
-   * its modules load: `workflow.packages_revoked` once it is revoked.
-   */
-  async #packagesAdmitted(): Promise<void> {
-    const { build, workflowId } = this.run;
-    if (build.packages !== undefined) {
-      await requirePackagesAdmitted(
-        this.#env,
-        workflowId,
-        build.packages.graphHash
-      );
-    }
-  }
-
-  /**
-   * An action task's call: the action run in the modules' sandbox
-   * (resource-action.ts), each of its calls admitted as one of the run's
-   * own (its packages, a host call, a model call's place), then made
-   * under its step's key and its ordinal.
-   */
-  async #action(
-    attempt: StepAttempt,
-    admission: AttemptAdmission,
-    task: SealedTask,
-    call: Extract<SealedCall, { name: "grasp.action" }>,
-    input: Json,
-    stepKey: string
-  ): Promise<Json> {
-    const { calling, build, workflowId } = this.run;
-    const refused = {
-      build: build.hash,
-      task: task.id,
-      attempt: attempt.number,
-      generation: attempt.generation,
-    };
-    return await callAction(
-      this.#env,
-      build.compute,
-      build.sdk,
-      call,
-      input,
-      attempt.deadline,
-      {
-        owner: `workflow-action:${workflowId}`,
-        parent: this.#memory.sessionId?.(),
-        make: async (built, ordinal) => {
-          this.#requireHolds(attempt);
-          await this.#packagesAdmitted();
-          this.#requireHolds(attempt);
-          await admission.hostCall();
-          this.#requireHolds(attempt);
-          if (built.name === "grasp.model") {
-            try {
-              this.#reserveModelCall(
-                `${stepKey}:${attempt.number}:${attempt.generation}:${ordinal}`
-              );
-            } catch (error) {
-              await auditAdmissionRefusal(this.#env, calling, {
-                ...refused,
-                call: built.binding,
-                errorCode:
-                  workflowResourceErrors.codeOf(error) ?? "internal.unexpected",
-                reason: "model_call_limit",
-              });
-              throw error;
-            }
-          }
-          return await makeCall(this.#env, calling, task.id, built, {
-            key: `${stepKey}:${ordinal}`,
-            deadline: attempt.deadline,
-            requireHolds: () => {
-              this.#requireHolds(attempt);
-            },
-            fromAction: true,
-          });
-        },
-        refused: async (refusal) => {
-          await auditAdmissionRefusal(this.#env, calling, {
-            ...refused,
-            ...refusal,
-          });
-        },
-      }
-    );
   }
 }
 

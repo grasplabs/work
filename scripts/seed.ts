@@ -294,7 +294,7 @@ const isTaken = (error: unknown): boolean =>
 
 /**
  * An App's workflow, as an independent workflow of its owner's: its
- * version 1 published from the seed's definition and modules; for one
+ * version 1 published from the seed's definition; for one
  * that asks a decision, its decision contract published by an admin, its
  * binding approved for the team that answers it, and its person parameter
  * set to that team; shared with the App's teams. Returns its ID.
@@ -348,7 +348,6 @@ const seedWorkflow = async (
   await resources.publish(created.id, {
     definition: definitionText(workflow.parts),
     basedOn: null,
-    modules: workflow.modules,
   });
   if (decision !== undefined) {
     const teamId = teams.get(decision.team);

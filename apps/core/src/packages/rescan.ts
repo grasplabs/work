@@ -24,17 +24,14 @@ import { scanPackages } from "./malware.ts";
 import { buildersOf } from "./subjects.ts";
 
 // Approvals in force (`inForce`: current, or replaced but still what an
-// older release or version runs on) scanned again on core's clock
-// (clock.ts): each at most every `rescanMs`, the longest unscanned first,
-// a few a run. What could go wrong, and what stops it:
+// older release runs on) scanned again on core's clock (clock.ts): each
+// at most every `rescanMs`, the longest unscanned first, a few a run.
+// What could go wrong, and what stops it:
 //
 // - Malware reported after approval running on: every row in force of a
-//   graph a report covers is revoked, by core, whichever App or workflow
-//   it is of, in one batch, each with its audit event and a notice to its
-//   builders. Nothing of a revoked graph is built or served any more, no
-//   start or call of a workflow sealing it is admitted
-//   (workflows/package-seal.ts), and a run in flight fails at its next
-//   call.
+//   graph a report covers is revoked, by core, whichever App it is of, in
+//   one batch, each with its audit event and a notice to its builders.
+//   Nothing of a revoked graph is built or served any more.
 // - A new advisory going unnoticed: one not known of a current approval
 //   as it was approved, or at its last scan, is audited and told to its
 //   builders once; the approval stands, as every other finding only warns.
@@ -59,7 +56,7 @@ const stillInForce = (row: Pick<Row, "id">) =>
 
 /**
  * Revokes every row in force of `row`'s graph for `malware`, by core: one
- * audit event and builders' notice each, every App and workflow sharing
+ * audit event and builders' notice each, every App sharing
  * the graph at once, in one batch.
  */
 const revokeGraph = async (
@@ -121,7 +118,7 @@ const revokeGraph = async (
         ),
         ...packageNoticed(db, {
           type: "package_revoked",
-          subject,
+          app: subject.id,
           package: malware.package,
           advisory: malware.advisory,
           personIds: await buildersOf(env, subject),
@@ -209,7 +206,7 @@ const rescanApproval = async (
     ...found.flatMap(({ advisory, package: ref }, index) =>
       packageNoticed(db, {
         type: "package_advisory",
-        subject,
+        app: subject.id,
         package: ref,
         advisory: advisory.id,
         personIds: builders,

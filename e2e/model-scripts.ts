@@ -247,7 +247,6 @@ export const modelScripts = {
           workflow: readIn(said, besideWorkflow),
           expectedRevision: 0,
           source: invoiceApproval(),
-          modules: {},
         }),
       says(approvalDrawn),
     ],

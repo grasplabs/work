@@ -76,21 +76,19 @@ export interface EventsStoppedNotification {
 }
 
 /**
- * What core's rescan found of the approved packages of an App or workflow
- * the person builds (core's packages/rescan.ts): `package_revoked`, one
- * was reported as malware, so they were revoked and nothing of them is
- * built or started until a builder removes it and approves a new set;
- * `package_advisory`, an advisory not known as they were approved, which
- * a builder decides about (the approval stands). Listed while the person
- * can still open the App or workflow.
+ * What core's rescan found of the approved packages of an App the person
+ * builds (core's packages/rescan.ts): `package_revoked`, one was reported
+ * as malware, so they were revoked and nothing of them is built or served
+ * until a builder removes it and approves a new set; `package_advisory`,
+ * an advisory not known as they were approved, which a builder decides
+ * about (the approval stands). Listed while the person can still open the
+ * App, by its name now.
  */
 export interface PackageNotification {
   id: string;
   type: "package_revoked" | "package_advisory";
-  /** The App or workflow, by its name now. */
-  subject:
-    | { type: "app"; app: string; appName: string }
-    | { type: "workflow"; workflow: string; workflowName: string };
+  app: string;
+  appName: string;
   /** The package version it is about. */
   package: { name: string; version: string };
   /** The advisory or report, such as an OSV or GHSA ID. */

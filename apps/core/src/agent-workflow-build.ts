@@ -89,7 +89,7 @@ import {
 //   the workflow (workflows/candidate-runs.ts).
 // - Restricted data leaking into what others read. A chat that read
 //   restricted data writes no workflow, as it writes no App code
-//   (`buildingAs`): a definition, its modules and a test run's input are
+//   (`buildingAs`): a definition and a test run's input are
 //   read by every builder of the workflow.
 // - A turn that runs away. A turn creates at most `maxCreatesPerTurn`
 //   Apps and workflows together, as a workflow can't be deleted free (each
@@ -123,7 +123,6 @@ export interface AgentWorkflowDraft {
   note: string;
   revision: number;
   source: string;
-  modules: Record<string, string>;
   problems: WorkflowDraft["problems"];
   /** The latest revision that passed: what may be test-run and published. */
   checkpoint: { revision: number } | null;
@@ -133,7 +132,6 @@ const agentDraft = (draft: WorkflowDraft): AgentWorkflowDraft => ({
   note: draftNote,
   revision: draft.revision,
   source: draft.source,
-  modules: draft.modules,
   problems: draft.problems,
   checkpoint:
     draft.checkpoint === null ? null : { revision: draft.checkpoint.revision },
@@ -186,8 +184,8 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Admits a write of this run's, handed to what writes it so it runs
-   * right before the write commits, after any slow work (building
-   * modules, compiling, storing a build): a run that ended or lost a
+   * right before the write commits, after any slow work (generating
+   * code, compiling, storing a build): a run that ended or lost a
    * permission meanwhile writes nothing. The check each method makes
    * before it starts is the cheap early refusal.
    */
@@ -230,7 +228,7 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * The host catalog's contracts with their terms: what a definition can
    * bind for a model, a person's decision, a connector, an operation or
-   * an event, besides its own code and other workflows.
+   * an event, besides other workflows.
    */
   async catalog(): Promise<CatalogContractTerms[]> {
     return await this.#build(
@@ -240,7 +238,7 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
     );
   }
 
-  /** The workflow's draft: its latest text, modules and problems. */
+  /** The workflow's draft: its latest text and problems. */
   async draft(workflow: unknown): Promise<AgentWorkflowDraft> {
     return await this.#build(
       "draft",
@@ -461,7 +459,6 @@ interface WorkflowDraft {
   note: string;
   revision: number;
   source: string;
-  modules: Record<string, string>;
   problems: { code: string; message: string; pointer: string; taskId?: string; remedy: string }[];
   /** The latest revision that passed, null before any did. */
   checkpoint: { revision: number } | null;
@@ -485,8 +482,8 @@ interface CatalogContract {
 
 /** What the model reads of `env.workflowBuild`. */
 const workflowBuildDeclaration = `/**
- * Independent JSON workflows: a grasp-workflow/2 document (\`"$schema": "${workflowSchemaUrl}"\`)
- * and its modules, which an App binds under the alias its app.ts declares
+ * Independent JSON workflows: a grasp-workflow/2 document (\`"$schema": "${workflowSchemaUrl}"\`),
+ * which an App binds under the alias its app.ts declares
  * (\`permissions: { workflows: [permission.workflow("alias", { input, output })] }\`). Nothing here grants or approves
  * anything: each permission a workflow declares outside itself waits for an admin to approve
  * it for that exact version, and an App starts it only once an admin grants
@@ -512,12 +509,10 @@ const workflowBuildDeclaration = `/**
  * 500000, "currency": "EUR" } }, "sensitive": false }\`.
  * \`permissions\` declare what the workflow reaches outside itself, by kind, as an App's do:
  * \`{ ai?: { contract }, connections?: { [alias]: { contract, title? } }, decisions?: { [alias]: { contract } },
- * events?: { [alias]: { contract } }, files?: { [alias]: { contract } }, brain?: { [alias]: { contract } },
- * modules?: { [alias]: { kind: "compute" | "action", contract } } }\`. \`ai\` is the workflow's one model
- * (its alias is \`ai\`); a connection, decision or event permission names a contract of its kind from
+ * events?: { [alias]: { contract } }, files?: { [alias]: { contract } }, brain?: { [alias]: { contract } } }\`.
+ * \`ai\` is the workflow's one model (its alias is \`ai\`); a connection, decision or event permission names a contract of its kind from
  * \`catalog()\` (an event contract's \`events\` are the types a wait for it takes), a files permission a
- * \`files\` one and a brain permission a \`knowledge\` one; a module one of the workflow's own
- * (\`local:code/<file>.ts#<export>\`). Each alias is used once across every kind. A files permission is
+ * \`files\` one and a brain permission a \`knowledge\` one. Each alias is used once across every kind. A files permission is
  * the run's own files, and a brain permission one Brain collection, read as the run's person may: a
  * \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
  * sha256 }\`, never its content, and found by its \`file\` ID in its own run alone.
@@ -539,8 +534,7 @@ const workflowBuildDeclaration = `/**
  *   application/json: its reference), \`list\` (\`{}\`: the references) or \`delete\` (\`{ file }\`).
  *   \`{ brain, action, args }\` reads Brain collection \`brain\`: \`search\` (\`{ text, limit? }\`:
  *   \`[{ id, title, excerpt }]\`), \`read\` (\`{ id }\`: \`{ title, text }\`) or \`recall\` (\`{ query }\`:
- *   the evidence that applies, \`items\`, each citing its source). \`{ module, args?, timeout? }\` calls the
- *   workflow's own compute or action;
+ *   the evidence that applies, \`items\`, each citing its source);
  * - \`generate\`: \`{ instructions, input, returns, timeout? }\` asks the workflow's model (\`permissions.ai\`)
  *   for an answer of the descriptor \`returns\`;
  * - a \`call\` or \`generate\` step may also take \`state: { [key]: value }\`: declared keys it writes once it
@@ -579,7 +573,10 @@ const workflowBuildDeclaration = `/**
  * computed name, and never \`constructor\`, \`prototype\` or \`__proto__\`. It may call
  * \`JSON.stringify(value)\` and \`JSON.parse(text)\`, each on one value and nothing more. A string is
  * always text, never interpolated. At most ${formatLimits.steps} steps in all.
- * Never write judgement, an outside system or a person's approval as code: when the catalog
+ * A workflow has no code of its own: a calculation is an expression
+ * (\`{ "$expr": "args.lines.filter((line) => line.total > 0)" }\`), a branch an \`if\`, and failing the run
+ * on purpose a \`raise\`.
+ * Never write judgement, an outside system or a person's approval as an expression: when the catalog
  * has no contract for such a step, say which one (its kind, input and output) an admin
  * should publish.
  * An outside API is reached only through an HTTP connection an admin approved
@@ -593,14 +590,14 @@ const workflowBuildDeclaration = `/**
  * put a URL, key or token in a definition.
  */
 workflowBuild: {
-  /** The host catalog's contracts: what a definition's permissions can name besides its own code and other workflows. */
+  /** The host catalog's contracts: what a definition's permissions can name besides other workflows. */
   catalog(): Promise<CatalogContract[]>;
   /** Creates a workflow owned by the person; counts with \`env.build.create\`: at most ${maxCreatesPerTurn} a question. */
   create(name: string): Promise<{ id: string; name: string }>;
   /** The draft; revision 0 is a starting definition nobody saved yet. */
   draft(workflow: string): Promise<WorkflowDraft>;
-  /** Saves the whole draft over the revision you read, with all its modules (\`{}\` for none); refused if anyone saved since. */
-  edit(workflow: string, edit: { expectedRevision: number; source: string; modules: Record<string, string> }): Promise<WorkflowDraft>;
+  /** Saves the whole draft over the revision you read; refused if anyone saved since. */
+  edit(workflow: string, edit: { expectedRevision: number; source: string }): Promise<WorkflowDraft>;
   /**
    * Changes or inserts one step over the revision you read, as people do on the canvas; refused if anyone saved since.
    * \`change\` replaces the fields of the step at \`pointer\` (\`/steps/0\`, \`/steps/2/then/1\`), keeping its \`id\`;

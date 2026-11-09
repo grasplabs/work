@@ -20,7 +20,6 @@ import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { saveDocument } from "../src/knowledge/person-writes.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
-import { publishTemplate } from "../src/resource-templates.ts";
 import { testApp } from "./app-definitions.ts";
 import type { AppSpec, TestApp, TestSource } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
@@ -442,22 +441,6 @@ export const answerOf = async (
 /** A search text of exactly `length` code units that still finds the leave policy. */
 export const searchTextOf = (length: number): string =>
   "leave ".repeat(length).slice(0, length);
-
-/** The error code publishing `publication` as `by` fails with. */
-export const publishRefusal = async (
-  by: Awaited<ReturnType<typeof person>>,
-  publication: object
-): Promise<string> =>
-  await failure(async () => await publishTemplate(env, by, publication));
-
-/** Letter content whose deepest value is `depth` levels down. */
-export const deepLetter = (depth: number): Json => {
-  let rest: Json = "end";
-  for (let level = 2; level < depth; level += 1) {
-    rest = [rest];
-  }
-  return { greeting: "Deep", rest };
-};
 
 /** An admin's approval of the App's `writer`. */
 export const approveWriter = async (sealed: Sealed) =>

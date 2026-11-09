@@ -41,7 +41,6 @@ export type {
   AppCodeBuild,
   CompileTarget,
   IncrementalTarget,
-  ComputeModulesBuild,
   InspectTarget,
   GeneratedWorkflowBuild,
   PageBuild,
@@ -64,7 +63,6 @@ export {
 export {
   appCodeLimitErrors,
   buildFiles,
-  computeModuleErrors,
   isGeneratedPath,
   isLintedCode,
   isPageFile,
@@ -74,7 +72,6 @@ export {
 } from "./inputs.ts";
 export {
   appModuleName,
-  computePackagesFile,
   graphsOfModules,
   kitModuleName,
   packageModuleName,
@@ -269,8 +266,8 @@ export const kitPreviewModules = async (assets: Fetcher): Promise<KitModules> =>
 
 /**
  * The SDK's modules the isolates core runs outside the pages load (a
- * sealed run's, a JSON workflow's generated and compute modules', an
- * App's tests'): one set per release.
+ * sealed run's, a JSON workflow's generated module's, an App's tests'):
+ * one set per release.
  */
 export const workflowSdkModules = async (
   assets: Fetcher

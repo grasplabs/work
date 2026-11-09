@@ -1,6 +1,5 @@
 // Puts what an isolate's code reads the clock and randomness through in
-// place, for good, from sources the caller gives: refusals, for a
-// workflow's calculation (compute-lockdown.ts), or a mutation's fixed
+// place, for good, from sources the caller gives: a mutation's fixed
 // time and seeded randomness (mutation-runtime.ts). Each replacement is
 // non-configurable and non-writable, on the object code reaches it on and
 // on the prototype the platform keeps it on, so code that loads after

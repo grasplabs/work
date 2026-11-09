@@ -31,7 +31,6 @@ import {
 } from "./db/core/schema.ts";
 import { modelSettings } from "./models.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
-import { pinnedTemplate } from "./resource-templates.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import {
   bindingsOf,
@@ -389,21 +388,6 @@ export const requireTargetServes = async (
       await requireKnowledgeServes(env, id, target);
       break;
     }
-    case "template": {
-      if (
-        (await pinnedTemplate(
-          env,
-          target.templateId,
-          target.version,
-          target.contentHash
-        )) === undefined
-      ) {
-        throw invalid(
-          "target.contentHash: No published template version has that content now."
-        );
-      }
-      break;
-    }
     default: {
       target satisfies never;
     }
@@ -442,14 +426,6 @@ const targetDetail = (
     }
     case "files": {
       return { targetKind: target.kind };
-    }
-    case "template": {
-      return {
-        targetKind: target.kind,
-        templateId: target.templateId,
-        version: target.version,
-        contentHash: target.contentHash,
-      };
     }
     default: {
       return target satisfies never;

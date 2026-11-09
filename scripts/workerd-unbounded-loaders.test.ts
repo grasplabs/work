@@ -3,9 +3,9 @@
  * set `SANDBOX_IN_PROCESS=unbounded`, core refuses what would run App code
  * in process (apps/core/test/workerd/unbounded-worker.ts):
  * a bound `SANDBOX_HOST` doesn't allow them, as nothing runs them there.
- * An independent JSON workflow's run and its calculations, the page
- * compiler and the package builder run on the sandbox host where one is
- * bound, and are refused where none is. Gone with App workflows: an App
+ * An independent JSON workflow's run, the page compiler and the package
+ * builder run on the sandbox host where one is bound, and are refused
+ * where none is. Gone with App workflows: an App
  * workflow's metadata, tests and dry runs, read by loading its code.
  */
 import path from "node:path";
@@ -38,12 +38,6 @@ describe("App code no sandbox bounds, on plain workerd", () => {
 
   it("refuses to load a JSON workflow's run where no sandbox host is bound", async () => {
     const refused = await refusal("run");
-    expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain("No sandbox bounds App code here");
-  });
-
-  it("refuses to run a JSON workflow's calculation where no sandbox host is bound", async () => {
-    const refused = await refusal("compute");
     expect(refused).toContain("SandboxUnavailableError");
     expect(refused).toContain("No sandbox bounds App code here");
   });

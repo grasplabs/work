@@ -27,7 +27,7 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 //   binding the fixture gives no answer fails the run
 //   (`workflow.test_unfixtured`): it never falls through to a real call.
 // - Any other call leaves the run's code: the host refuses a connector's,
-//   Knowledge's, a template's, a file's, an action's and an event's before
+//   Knowledge's, a file's and an event's before
 //   it is built or audited (sealed-run.ts, `#call`, by `fixtureCalls`),
 //   and `makeCall` refuses every call of a test's run
 //   again (`fixture`), so none reaches connect or a model even if the
@@ -88,13 +88,12 @@ const requireModelBinding = async (
 };
 
 /**
- * The named calls a run an App's test started makes: its own
- * calculations, its decisions (fixture-decisions.ts), and the model calls
+ * The named calls a run an App's test started makes: its decisions
+ * (fixture-decisions.ts), and the model calls
  * its test answers (`fixtureCall`). Every other is refused before it is
  * built, on either host of the run.
  */
 export const fixtureCalls: ReadonlySet<string> = new Set([
-  "grasp.compute",
   "grasp.decision",
   "grasp.model",
 ]);

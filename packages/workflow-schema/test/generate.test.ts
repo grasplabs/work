@@ -311,9 +311,7 @@ describe("generating a workflow", () => {
     ).toContain(
       'const noted = await ctx.connections.crm.notes.add({}, { step: "noted" });'
     );
-    expect(generated(everyCall()).source).toContain(
-      'modules: { total: "compute", note: "action" }'
-    );
+    expect(generated(everyCall()).source).not.toContain("modules");
   });
 
   it("names a hyphenated action's member as an App does, and sends the action's own name", () => {

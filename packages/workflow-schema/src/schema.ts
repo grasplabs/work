@@ -16,7 +16,6 @@ import {
   aliasPattern,
   forEachDescription,
   formatLimits,
-  localContractPattern,
   paramNamePattern,
   recipientPattern,
   reservedStepIds,
@@ -72,7 +71,6 @@ const callTargets = [
   "connection",
   "files",
   "brain",
-  "module",
   "action",
   "into",
   "from",
@@ -93,7 +91,6 @@ const stepKinds = {
         connection: ref("alias"),
         files: ref("alias"),
         brain: ref("alias"),
-        module: ref("alias"),
         action: { type: "string", pattern: actionPattern, maxLength: 256 },
         into: ref("alias"),
         from: ref("alias"),
@@ -105,8 +102,7 @@ const stepKinds = {
     ),
     // One member: a connection's action (which alone keeps a file `into`
     // or attaches files `from` a files permission), an action on the run's
-    // files, an action on a Brain collection, or one of the workflow's
-    // own modules.
+    // files, or an action on a Brain collection.
     oneOf: [
       {
         required: ["connection", "action"],
@@ -119,10 +115,6 @@ const stepKinds = {
       {
         required: ["brain", "action"],
         not: callTargetsBut("brain", "action"),
-      },
-      {
-        required: ["module"],
-        not: callTargetsBut("module"),
       },
     ],
   },
@@ -333,7 +325,6 @@ export const workflowSchema: Schema = {
         events: byAlias(ref("permission")),
         files: byAlias(ref("permission")),
         brain: byAlias(ref("permission")),
-        modules: byAlias(ref("module")),
       },
       additionalProperties: false,
     },
@@ -459,7 +450,7 @@ export const workflowSchema: Schema = {
       then: { properties: { type: { required: ["default"] } } },
       else: { properties: { type: { not: { required: ["default"] } } } },
     },
-    // A contract of the host's catalog, never one of the workflow's own.
+    // A contract of the host's catalog.
     permission: {
       type: "object",
       required: ["contract"],
@@ -469,25 +460,6 @@ export const workflowSchema: Schema = {
           minLength: 1,
           maxLength: 256,
           not: { pattern: "^local:" },
-        },
-        title: {
-          type: "string",
-          minLength: 1,
-          maxLength: formatLimits.titleLength,
-        },
-      },
-      additionalProperties: false,
-    },
-    // One of the workflow's own modules.
-    module: {
-      type: "object",
-      required: ["kind", "contract"],
-      properties: {
-        kind: { enum: ["compute", "action"] },
-        contract: {
-          type: "string",
-          maxLength: 256,
-          pattern: localContractPattern,
         },
         title: {
           type: "string",

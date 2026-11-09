@@ -6,6 +6,10 @@ import type { NpmAdvisories } from "@grasp-os/shared/packages";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { addMember, removeMember } from "../src/app-members.ts";
+import { removeApp } from "../src/app-removal.ts";
+import { changeStatus } from "../src/app-status.ts";
+import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { buildPackages } from "../src/packages/build.ts";
 import {
@@ -16,12 +20,6 @@ import {
 import { rescanPackages } from "../src/packages/rescan.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
-import {
-  createWorkflowResource,
-  deleteWorkflowResource,
-  shareWorkflowResource,
-  unshareWorkflowResource,
-} from "../src/workflow-resources.ts";
 import { personalChatsOf, says } from "./agent-chat.ts";
 import {
   advise,
@@ -40,7 +38,7 @@ import { person } from "./sealed-apps.ts";
 import { auditedDuring, outcome, unique } from "./sign-in.ts";
 
 // npm packages, from the threat model on GRA-1636: the agent asks and
-// never approves; only the App's or workflow's builder decides, in their
+// never approves; only the App's builder decides, in their
 // own session, on exactly the graph they were shown; known malware is
 // refused at every step; a lookalike name is shown to the builder; a
 // build reaches only the lock's own packages, at its integrity, and
@@ -48,22 +46,22 @@ import { auditedDuring, outcome, unique } from "./sign-in.ts";
 // malware and tells builders of new advisories. Each test is an attack
 // or a failure, and each fails when its check is taken away.
 
-/** A workflow of a new builder's: whose packages these tests ask for. */
-const workflowOfBuilder = async () => {
+/** An App of a new builder's: whose packages these tests ask for. */
+const appOfBuilder = async () => {
   const builder = await person("builder");
-  const workflow = await createWorkflowResource(env, builder, `p-${unique()}`);
-  return { builder, workflow: workflow.id };
+  const { id } = await createApp(env, builder, { name: `p-${unique()}` });
+  return { builder, app: id };
 };
 
-/** `by`'s request for workflow `workflow`'s `dependencies`. */
+/** `by`'s request for App `app`'s `dependencies`. */
 const asked = async (
   by: Acting,
-  workflow: string,
+  app: string,
   dependencies: Record<string, string>,
   entries?: string[]
 ): Promise<DependencyRequest> =>
   await resolveDependencies(env, by, {
-    workflow,
+    app,
     purpose: "Double the quarter's total.",
     dependencies: Object.entries(dependencies).map(([name, range]) => ({
       name,
@@ -72,26 +70,26 @@ const asked = async (
     ...(entries === undefined ? {} : { entries }),
   });
 
-/** `by`'s request taking `names` out of workflow `workflow`'s packages. */
+/** `by`'s request taking `names` out of App `app`'s packages. */
 const removing = async (
   by: Acting,
-  workflow: string,
+  app: string,
   names: string[]
 ): Promise<DependencyRequest> =>
   await resolveDependencies(env, by, {
-    workflow,
+    app,
     purpose: "No longer needed.",
     dependencies: [],
     remove: names,
   });
 
-/** What building workflow `workflow`'s graph `graphHash` comes to. */
-const builds = async (by: Acting, workflow: string, graphHash: string) =>
+/** What building App `app`'s graph `graphHash` comes to. */
+const builds = async (by: Acting, app: string, graphHash: string) =>
   await outcome(
     buildPackages(
       env,
       actorOf(by),
-      { type: "workflow", id: workflow },
+      { type: "app", id: app },
       graphHash,
       "worker"
     )
@@ -108,15 +106,15 @@ const decided = async (
     graphHash: request.graphHash,
   });
 
-/** The request waiting for `workflow`'s builders, if any. */
-const pendingOf = async (by: Acting, workflow: string) => {
-  const { pending } = await dependencyStatus(env, by, { workflow });
+/** The request waiting for `app`'s builders, if any. */
+const pendingOf = async (by: Acting, app: string) => {
+  const { pending } = await dependencyStatus(env, by, { app });
   return pending?.id ?? null;
 };
 
-/** The approval `workflow`'s builders gave last, if any. */
-const approvedOf = async (by: Acting, workflow: string) => {
-  const { approved } = await dependencyStatus(env, by, { workflow });
+/** The approval `app`'s builders gave last, if any. */
+const approvedOf = async (by: Acting, app: string) => {
+  const { approved } = await dependencyStatus(env, by, { app });
   return approved?.id ?? null;
 };
 
@@ -127,12 +125,12 @@ const published = async (base = "dates"): Promise<string> => {
   return name;
 };
 
-/** A workflow of a new builder's whose `name` is asked for and approved. */
+/** An App of a new builder's whose `name` is asked for and approved. */
 const approvedPackage = async (name: string, entries?: string[]) => {
-  const { builder, workflow } = await workflowOfBuilder();
-  const request = await asked(builder, workflow, { [name]: "^1.0.0" }, entries);
+  const { builder, app } = await appOfBuilder();
+  const request = await asked(builder, app, { [name]: "^1.0.0" }, entries);
   await decided(builder, request);
-  return { builder, workflow, request };
+  return { builder, app, request };
 };
 
 /** The chat's agent, acting for `by` in their chat `chatId`. */
@@ -160,12 +158,12 @@ describe("asking for packages", () => {
     const name = named("dates");
     await publish(plain(name, "1.0.0"));
     await publish({ ...plain(name, "1.1.0"), publishedAt: daysAgo(1) });
-    const { builder, workflow } = await workflowOfBuilder();
+    const { builder, app } = await appOfBuilder();
 
     const events = await auditedDuring(async () => {
-      await asked(builder, workflow, { [name]: "^1.0.0" });
+      await asked(builder, app, { [name]: "^1.0.0" });
     });
-    const status = await dependencyStatus(env, builder, { workflow });
+    const status = await dependencyStatus(env, builder, { app });
 
     expect({
       direct: status.pending?.lock.direct,
@@ -179,7 +177,7 @@ describe("asking for packages", () => {
   });
 
   it("refuses sources other than the registry, and someone else's package in the platform's scope", async () => {
-    const { builder, workflow } = await workflowOfBuilder();
+    const { builder, app } = await appOfBuilder();
     const sources: Record<string, string>[] = [
       { a: "github:acme/a" },
       { a: "latest" },
@@ -188,7 +186,7 @@ describe("asking for packages", () => {
     ];
     const codes = await Promise.all(
       sources.map(async (dependencies) => {
-        const { code } = await failure(asked(builder, workflow, dependencies));
+        const { code } = await failure(asked(builder, app, dependencies));
         return code;
       })
     );
@@ -210,9 +208,9 @@ describe("asking for packages", () => {
       severity: "high",
       vulnerable_versions: "<1.2.1",
     });
-    const { builder, workflow } = await workflowOfBuilder();
+    const { builder, app } = await appOfBuilder();
 
-    const request = await asked(builder, workflow, {
+    const request = await asked(builder, app, {
       [lookalike]: "^1.0.0",
       [advised]: "^1.0.0",
     });
@@ -228,17 +226,17 @@ describe("asking for packages", () => {
   it("refuses known malware before anything is proposed, audited", async () => {
     const name = await published("evil");
     await reportToOsv(name, "1.0.0", "MAL-2026-40001");
-    const { builder, workflow } = await workflowOfBuilder();
+    const { builder, app } = await appOfBuilder();
 
     let code = "";
     const events = await auditedDuring(async () => {
-      ({ code } = await failure(asked(builder, workflow, { [name]: "1" })));
+      ({ code } = await failure(asked(builder, app, { [name]: "1" })));
     });
 
     expect({
       code,
       audited: events.map(({ action }) => action),
-      pending: await pendingOf(builder, workflow),
+      pending: await pendingOf(builder, app),
     }).toStrictEqual({
       code: "dependency.malware",
       audited: ["dependency.malware_refused"],
@@ -246,13 +244,13 @@ describe("asking for packages", () => {
     });
   });
 
-  it("keeps one request waiting per workflow: another takes its place, audited", async () => {
+  it("keeps one request waiting per App: another takes its place, audited", async () => {
     const [first, second] = [await published(), await published()];
-    const { builder, workflow } = await workflowOfBuilder();
-    const replaced = await asked(builder, workflow, { [first]: "1" });
+    const { builder, app } = await appOfBuilder();
+    const replaced = await asked(builder, app, { [first]: "1" });
 
     const events = await auditedDuring(async () => {
-      await asked(builder, workflow, { [second]: "1" });
+      await asked(builder, app, { [second]: "1" });
     });
 
     expect({
@@ -268,10 +266,10 @@ describe("asking for packages", () => {
 describe("deciding packages", () => {
   it("never takes a decision from the chat's agent, though it may ask, and shows its request on the chat's card", async () => {
     const name = await published();
-    const { builder, workflow } = await workflowOfBuilder();
+    const { builder, app } = await appOfBuilder();
     const chatId = chatIdSchema.parse(crypto.randomUUID());
     const agent = agentFor(builder, chatId);
-    const request = await asked(agent, workflow, { [name]: "1" });
+    const request = await asked(agent, app, { [name]: "1" });
 
     const shown = await chatPackageRequests(env, builder.userId, chatId);
     const byAgent = await outcome(decided(agent, request));
@@ -292,7 +290,7 @@ describe("deciding packages", () => {
 
   it("shows a request on the card of every chat whose agent asked for it, one that asked as it was decided too, and tells each the decision", async () => {
     const name = await published();
-    const { builder, workflow } = await workflowOfBuilder();
+    const { builder, app } = await appOfBuilder();
     // Two real chats of the builder's, each with its agent asking.
     const chats = await personalChatsOf(
       builder.userId,
@@ -304,7 +302,7 @@ describe("deciding packages", () => {
       return { id: chat.id, ask, agent: agentFor(builder, chat.id, chats.id) };
     };
     const [first, second] = [await chatIn(), await chatIn()];
-    const request = await asked(first.agent, workflow, { [name]: "1" });
+    const request = await asked(first.agent, app, { [name]: "1" });
     // The second chat asks for the same graph while the approval is being
     // checked for malware: after the request was read, before it lands.
     let again: DependencyRequest | undefined;
@@ -315,7 +313,7 @@ describe("deciding packages", () => {
           ? async (
               ...args: Parameters<typeof target.npmAdvisories>
             ): Promise<NpmAdvisories> => {
-              again ??= await asked(second.agent, workflow, { [name]: "1" });
+              again ??= await asked(second.agent, app, { [name]: "1" });
               const shown = await chatPackageRequests(
                 env,
                 builder.userId,
@@ -366,14 +364,14 @@ describe("deciding packages", () => {
 
   it("takes no decision from a builder whose role was taken away while it was checked for malware", async () => {
     const name = await published();
-    const { builder: owner, workflow } = await workflowOfBuilder();
+    const { builder: owner, app } = await appOfBuilder();
     const other = await person("builder");
-    await shareWorkflowResource(env, owner, workflow, {
+    await addMember(env, owner, app, {
       type: "person",
       id: other.userId,
       role: "builder",
     });
-    const request = await asked(owner, workflow, { [name]: "1" });
+    const request = await asked(owner, app, { [name]: "1" });
     // Unshared as the malware sources are asked, before the decision lands.
     const connect = new Proxy(env.CONNECT, {
       get: (target, key): unknown =>
@@ -381,7 +379,7 @@ describe("deciding packages", () => {
           ? async (
               ...args: Parameters<typeof target.npmAdvisories>
             ): Promise<NpmAdvisories> => {
-              await unshareWorkflowResource(env, owner, workflow, {
+              await removeMember(env, owner, app, {
                 type: "person",
                 id: other.userId,
               });
@@ -400,22 +398,23 @@ describe("deciding packages", () => {
       })
     );
 
-    expect({ decision, still: await pendingOf(owner, workflow) }).toStrictEqual(
-      { decision: "dependency.not_found", still: request.id }
-    );
+    expect({ decision, still: await pendingOf(owner, app) }).toStrictEqual({
+      decision: "dependency.not_found",
+      still: request.id,
+    });
   });
 
-  it("takes a decision only from a builder of the request's own workflow, never Grasp staff", async () => {
+  it("takes a decision only from a builder of the request's own app, never Grasp staff", async () => {
     const name = await published();
-    const { builder, workflow } = await workflowOfBuilder();
-    const request = await asked(builder, workflow, { [name]: "1" });
-    const elsewhere = await workflowOfBuilder();
+    const { builder, app } = await appOfBuilder();
+    const request = await asked(builder, app, { [name]: "1" });
+    const elsewhere = await appOfBuilder();
 
     expect({
       otherBuilder: await outcome(decided(elsewhere.builder, request)),
       user: await outcome(decided(await person("user"), request)),
       staff: await outcome(decided({ ...builder, staff: true }, request)),
-      still: await pendingOf(builder, workflow),
+      still: await pendingOf(builder, app),
     }).toStrictEqual({
       otherBuilder: "dependency.not_found",
       user: "dependency.not_found",
@@ -426,10 +425,10 @@ describe("deciding packages", () => {
 
   it("takes one decision, on the graph its builder was shown, never one replayed for another", async () => {
     const [mine, theirs] = [await published(), await published()];
-    const { builder, workflow } = await workflowOfBuilder();
-    const request = await asked(builder, workflow, { [mine]: "1" });
-    const other = await workflowOfBuilder();
-    const otherRequest = await asked(other.builder, other.workflow, {
+    const { builder, app } = await appOfBuilder();
+    const request = await asked(builder, app, { [mine]: "1" });
+    const other = await appOfBuilder();
+    const otherRequest = await asked(other.builder, other.app, {
       [theirs]: "1",
     });
 
@@ -459,11 +458,11 @@ describe("deciding packages", () => {
 
   it("refuses to approve known malware reported after it was asked for, audited, and fails closed when it can't be checked", async () => {
     const [reported, unchecked] = [await published(), await published()];
-    const { builder, workflow } = await workflowOfBuilder();
-    const request = await asked(builder, workflow, { [reported]: "1" });
+    const { builder, app } = await appOfBuilder();
+    const request = await asked(builder, app, { [reported]: "1" });
     await reportToOsv(reported, "1.0.0", "MAL-2026-40002");
-    const second = await workflowOfBuilder();
-    const uncheckable = await asked(second.builder, second.workflow, {
+    const second = await appOfBuilder();
+    const uncheckable = await asked(second.builder, second.app, {
       [unchecked]: "1",
     });
     await osvAnswers(unchecked, 503);
@@ -479,7 +478,7 @@ describe("deciding packages", () => {
     expect({
       audited: malware.map(({ action, detail }) => [action, detail.at]),
       closed,
-      still: await pendingOf(builder, workflow),
+      still: await pendingOf(builder, app),
     }).toStrictEqual({
       audited: [["dependency.malware_refused", "approval"]],
       closed: "package.malware_unchecked",
@@ -491,13 +490,13 @@ describe("deciding packages", () => {
 describe("one current approval", () => {
   it("lets a removal hold: a graph approved before is no longer built once another replaces it", async () => {
     const [a, b] = [await published("left"), await published("right")];
-    const { builder, workflow } = await workflowOfBuilder();
-    const first = await asked(builder, workflow, { [a]: "^1.0.0" });
+    const { builder, app } = await appOfBuilder();
+    const first = await asked(builder, app, { [a]: "^1.0.0" });
     await decided(builder, first);
-    const both = await asked(builder, workflow, { [b]: "^1.0.0" });
+    const both = await asked(builder, app, { [b]: "^1.0.0" });
     await decided(builder, both);
 
-    const removal = await removing(builder, workflow, [b]);
+    const removal = await removing(builder, app, [b]);
     const waiting = removal.status;
     await decided(builder, removal);
 
@@ -506,9 +505,9 @@ describe("one current approval", () => {
       // request, never the replaced approval standing in for it.
       sameGraph: removal.graphHash === first.graphHash,
       waiting,
-      current: await approvedOf(builder, workflow),
-      onlyA: await builds(builder, workflow, removal.graphHash),
-      both: await builds(builder, workflow, both.graphHash),
+      current: await approvedOf(builder, app),
+      onlyA: await builds(builder, app, removal.graphHash),
+      both: await builds(builder, app, both.graphHash),
     }).toStrictEqual({
       sameGraph: true,
       waiting: "pending",
@@ -520,23 +519,23 @@ describe("one current approval", () => {
 
   it("asks again for a package removed before, never stuck on the approval that had it", async () => {
     const [a, b] = [await published("left"), await published("right")];
-    const { builder, workflow } = await workflowOfBuilder();
-    const both = await asked(builder, workflow, {
+    const { builder, app } = await appOfBuilder();
+    const both = await asked(builder, app, {
       [a]: "^1.0.0",
       [b]: "^1.0.0",
     });
     await decided(builder, both);
-    await decided(builder, await removing(builder, workflow, [b]));
+    await decided(builder, await removing(builder, app, [b]));
 
-    const again = await asked(builder, workflow, { [b]: "^1.0.0" });
+    const again = await asked(builder, app, { [b]: "^1.0.0" });
     const waiting = again.status;
     await decided(builder, again);
 
     expect({
       sameGraph: again.graphHash === both.graphHash,
       waiting,
-      current: await approvedOf(builder, workflow),
-      built: await builds(builder, workflow, again.graphHash),
+      current: await approvedOf(builder, app),
+      built: await builds(builder, app, again.graphHash),
     }).toStrictEqual({
       sameGraph: true,
       waiting: "pending",
@@ -547,19 +546,19 @@ describe("one current approval", () => {
 
   it("falls back on nothing once the current approval is revoked", async () => {
     const [a, b] = [await published("left"), await published("right")];
-    const { builder, workflow } = await workflowOfBuilder();
-    const first = await asked(builder, workflow, { [a]: "^1.0.0" });
+    const { builder, app } = await appOfBuilder();
+    const first = await asked(builder, app, { [a]: "^1.0.0" });
     await decided(builder, first);
-    const both = await asked(builder, workflow, { [b]: "^1.0.0" });
+    const both = await asked(builder, app, { [b]: "^1.0.0" });
     await decided(builder, both);
     await reportToOsv(b, "1.0.0", "MAL-2026-40005");
 
     await rescannedUntil(both.id, new Date());
 
     expect({
-      current: await approvedOf(builder, workflow),
-      before: await builds(builder, workflow, first.graphHash),
-      revoked: await builds(builder, workflow, both.graphHash),
+      current: await approvedOf(builder, app),
+      before: await builds(builder, app, first.graphHash),
+      revoked: await builds(builder, app, both.graphHash),
     }).toStrictEqual({
       current: null,
       before: "dependency.approval_required",
@@ -571,15 +570,15 @@ describe("one current approval", () => {
 describe("building approved packages", () => {
   it("builds nothing nobody approved", async () => {
     const name = await published();
-    const { builder, workflow } = await workflowOfBuilder();
-    const request = await asked(builder, workflow, { [name]: "1" });
+    const { builder, app } = await appOfBuilder();
+    const request = await asked(builder, app, { [name]: "1" });
 
     await expect(
       outcome(
         buildPackages(
           env,
           actorOf(builder),
-          { type: "workflow", id: workflow },
+          { type: "app", id: app },
           request.graphHash,
           "worker"
         )
@@ -589,14 +588,14 @@ describe("building approved packages", () => {
 
   it("builds each entry of an approved graph into one module, audited as installed", async () => {
     const name = await published();
-    const { builder, workflow, request } = await approvedPackage(name);
+    const { builder, app, request } = await approvedPackage(name);
 
     let modules: Record<string, string> = {};
     const events = await auditedDuring(async () => {
       ({ modules } = await buildPackages(
         env,
         actorOf(builder),
-        { type: "workflow", id: workflow },
+        { type: "app", id: app },
         request.graphHash,
         "worker"
       ));
@@ -619,14 +618,14 @@ describe("building approved packages", () => {
       ...plain(name, "1.0.0"),
       integrity: `sha512-${"C".repeat(86)}==`,
     });
-    const { builder, workflow, request } = await approvedPackage(name);
+    const { builder, app, request } = await approvedPackage(name);
 
     await expect(
       outcome(
         buildPackages(
           env,
           actorOf(builder),
-          { type: "workflow", id: workflow },
+          { type: "app", id: app },
           request.graphHash,
           "worker"
         )
@@ -660,7 +659,7 @@ describe("building approved packages", () => {
         { path: "package/linked.js", type: "2", linkname: "/etc/passwd" },
       ],
     });
-    const { builder, workflow, request } = await approvedPackage(
+    const { builder, app, request } = await approvedPackage(
       name,
       entries.map((entry) => `${name}/${entry}`)
     );
@@ -668,7 +667,7 @@ describe("building approved packages", () => {
     const { modules, refused } = await buildPackages(
       env,
       actorOf(builder),
-      { type: "workflow", id: workflow },
+      { type: "app", id: app },
       request.graphHash,
       "worker"
     );
@@ -715,10 +714,10 @@ describe("building approved packages", () => {
       ],
     });
     // Both in the graph, as the App's own: neither depends on the other.
-    const { builder, workflow } = await workflowOfBuilder();
+    const { builder, app } = await appOfBuilder();
     const request = await asked(
       builder,
-      workflow,
+      app,
       { [name]: "^1.0.0", [sibling]: "^1.0.0" },
       [name]
     );
@@ -727,7 +726,7 @@ describe("building approved packages", () => {
     const { modules, refused } = await buildPackages(
       env,
       actorOf(builder),
-      { type: "workflow", id: workflow },
+      { type: "app", id: app },
       request.graphHash,
       "worker"
     );
@@ -751,12 +750,12 @@ describe("building approved packages", () => {
           'export const mode = process.env.NODE_ENV === "production" ? "production" : "development";',
       },
     });
-    const { builder, workflow, request } = await approvedPackage(name);
+    const { builder, app, request } = await approvedPackage(name);
 
     const { modules } = await buildPackages(
       env,
       actorOf(builder),
-      { type: "workflow", id: workflow },
+      { type: "app", id: app },
       request.graphHash,
       "worker"
     );
@@ -766,12 +765,12 @@ describe("building approved packages", () => {
 
   it("refuses packages that stopped the builder themselves, and says the sandbox was unavailable when a crash cut it off", async () => {
     const name = await published();
-    const { builder, workflow, request } = await approvedPackage(name);
+    const { builder, app, request } = await approvedPackage(name);
     const build = async (stop: Parameters<typeof sandboxStopping>[0]) =>
       await buildPackages(
         { ...env, SANDBOX_HOST: sandboxStopping(stop).host },
         actorOf(builder),
-        { type: "workflow", id: workflow },
+        { type: "app", id: app },
         request.graphHash,
         "worker"
       );
@@ -799,7 +798,7 @@ const noticesOf = async (personId: string, type: string) => {
 describe("rescanning approved packages", () => {
   it("revokes what is later reported as malware, audited, tells its builders, and builds none of it again", async () => {
     const name = await published();
-    const { builder, workflow, request } = await approvedPackage(name);
+    const { builder, app, request } = await approvedPackage(name);
     await reportToOsv(name, "1.0.0", "MAL-2026-40003");
 
     const events = await auditedDuring(async () => {
@@ -808,15 +807,15 @@ describe("rescanning approved packages", () => {
 
     expect({
       audited: events
-        .filter(({ detail }) => detail.workflow === workflow)
+        .filter(({ detail }) => detail.app === app)
         .map(({ action }) => action),
       told: await noticesOf(builder.userId, "package_revoked"),
-      status: await approvedOf(builder, workflow),
+      status: await approvedOf(builder, app),
       build: await outcome(
         buildPackages(
           env,
           actorOf(builder),
-          { type: "workflow", id: workflow },
+          { type: "app", id: app },
           request.graphHash,
           "worker"
         )
@@ -831,7 +830,7 @@ describe("rescanning approved packages", () => {
 
   it("tells its builders once of an advisory the approval didn't know, and leaves it approved", async () => {
     const name = await published();
-    const { builder, workflow, request } = await approvedPackage(name);
+    const { builder, app, request } = await approvedPackage(name);
     await advise(name, {
       id: 1_000_002,
       url: "https://github.com/advisories/GHSA-dddd-eeee-ffff",
@@ -845,14 +844,14 @@ describe("rescanning approved packages", () => {
 
     expect({
       told: await noticesOf(builder.userId, "package_advisory"),
-      approved: await approvedOf(builder, workflow),
+      approved: await approvedOf(builder, app),
     }).toStrictEqual({
       told: [{ name, advisory: "GHSA-dddd-eeee-ffff" }],
       approved: request.id,
     });
   });
 
-  it("revokes a graph reported as malware for every workflow approved with it, at once", async () => {
+  it("revokes a graph reported as malware for every App approved with it, at once", async () => {
     const name = await published();
     const one = await approvedPackage(name);
     const other = await approvedPackage(name);
@@ -869,8 +868,8 @@ describe("rescanning approved packages", () => {
 
     expect({
       sameGraph: one.request.graphHash === other.request.graphHash,
-      one: await approvedOf(one.builder, one.workflow),
-      other: await approvedOf(other.builder, other.workflow),
+      one: await approvedOf(one.builder, one.app),
+      other: await approvedOf(other.builder, other.app),
       told: await noticesOf(other.builder.userId, "package_revoked"),
     }).toStrictEqual({
       sameGraph: true,
@@ -880,12 +879,13 @@ describe("rescanning approved packages", () => {
     });
   });
 
-  it("stops on a deleted workflow's packages: its approval is withdrawn, audited", async () => {
+  it("stops on a removed App's packages: its approval is withdrawn, audited", async () => {
     const name = await published();
-    const { builder, workflow, request } = await approvedPackage(name);
+    const { builder, app, request } = await approvedPackage(name);
+    await changeStatus(env, builder, app, "archive");
 
     const events = await auditedDuring(async () => {
-      await deleteWorkflowResource(env, builder, workflow);
+      await removeApp(env, builder, app);
     });
     const row = await env.DB.prepare(
       "SELECT status FROM dependency_requests WHERE id = ?"
@@ -901,12 +901,12 @@ describe("rescanning approved packages", () => {
 
   it("changes nothing when the sources can't be read", async () => {
     const name = await published();
-    const { builder, workflow, request } = await approvedPackage(name);
+    const { builder, app, request } = await approvedPackage(name);
     await reportToOsv(name, "1.0.0", "MAL-2026-40004");
     await osvAnswers(name, 503);
 
     await rescanPackages(env, new Date());
-    const approved = await approvedOf(builder, workflow);
+    const approved = await approvedOf(builder, app);
     await osvAnswers(name, null);
 
     expect(approved).toBe(request.id);

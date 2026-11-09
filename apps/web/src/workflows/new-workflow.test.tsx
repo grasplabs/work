@@ -55,7 +55,6 @@ const builder = "builder-1";
 const untouched: WorkflowDraft = {
   revision: 0,
   source: "{}",
-  modules: {},
   problems: [],
   checkpoint: null,
   editedBy: null,
@@ -68,7 +67,6 @@ const drawn: WorkflowDraft = {
   source: JSON.stringify({
     steps: [{ id: "receive-invoice", type: "wait", for: "1 minute" }],
   }),
-  modules: {},
   problems: [],
   checkpoint: {
     revision: 1,

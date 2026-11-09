@@ -15,7 +15,6 @@
  * the CSS for the classes in the App's sources and in the kit modules it
  * loads.
  */
-import { packageEntrySchema } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { compile } from "tailwindcss";
 
@@ -52,7 +51,6 @@ import {
   typeFileError,
   rewriteAppCodeImports,
   rewriteCodeImports,
-  computeCodeWith,
   generatedWorkflowCode,
   rewriteImports,
   rewritePackageImports,
@@ -79,7 +77,6 @@ import {
   buildFiles,
   declarationFile,
   limitErrors,
-  computeModuleErrors,
   generatedWorkflowErrors,
   isDesignLinted,
   routeTreePath,
@@ -87,7 +84,6 @@ import {
 import {
   appModuleName,
   bundledPackagesOf,
-  computePackagesFile,
   packageEntriesOf,
   kitModuleName,
   packageModulesByName,
@@ -111,12 +107,7 @@ import { callbackParameters, readsStandIns } from "./stand-ins.ts";
 import { directivesIn, referenceError } from "./steering.ts";
 import type { DirectiveSite } from "./steering.ts";
 import { parsed } from "./syntax.ts";
-import {
-  appCodeTarget,
-  computeTarget,
-  pageTarget,
-  typeCheckRequest,
-} from "./type-check.ts";
+import { appCodeTarget, pageTarget, typeCheckRequest } from "./type-check.ts";
 
 // oxc's parser and transform, started once per isolate: oxc.wasm is
 // compiled as the isolate loads, and an instance kept for every build.
@@ -808,22 +799,7 @@ const compileCodeFile = (
     return { errors: transformErrors(path, transformed, new Set()) };
   }
   const compiled = transformed.code;
-  const { imports, directives } = sitesOf(transformed);
-  // What would steer the type check of code whose types are checked
-  // (`buildComputeModules`) rather than be checked by it: a triple-slash
-  // directive reaches the whole program (a module's
-  // `/// <reference lib="dom" />` would give every module the DOM), and
-  // a suppression switches the check off.
-  const steering =
-    kind.typeChecked === true
-      ? directives.map((site) =>
-          problem(
-            "imports",
-            `${site.directive} is never in ${kind.name.toLowerCase()} code: its type check is the platform's, as it is, for all of them.`,
-            directiveAt(path, site)
-          )
-        )
-      : [];
+  const { imports } = sitesOf(transformed);
   const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
     const message = codeImportError(
       kind,
@@ -842,8 +818,8 @@ const compileCodeFile = (
           ),
         ];
   });
-  if (steering.length > 0 || errors.length > 0) {
-    return { errors: [...steering, ...errors] };
+  if (errors.length > 0) {
+    return { errors };
   }
   try {
     return { code: rewriteCodeImports(compiled, kind, path, files) };
@@ -910,86 +886,6 @@ export const buildGeneratedWorkflow = (
   return built.ok
     ? { built, typeCheck: { request: typeCheckRequest(files) } }
     : { built };
-};
-
-/**
- * A JSON workflow's compute modules, built: as modules by flat name; or
- * why they failed, each diagnostic naming its file.
- */
-export type ComputeModulesBuild =
-  | { ok: true; modules: Record<string, string> }
-  | { ok: false; diagnostics: Diagnostic[] };
-
-/**
- * The approved package entries core named among a compute build's files
- * (`computePackagesFile`), or why that list can't be read. Core writes
- * it; a workflow publishes only `code/`.
- */
-const computePackagesOf = (
-  listed: string | undefined
-): { ok: true; packages: string[] } | { ok: false; message: string } => {
-  if (listed === undefined) {
-    return { ok: true, packages: [] };
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(listed);
-  } catch {
-    return { ok: false, message: "The approved packages aren't a list." };
-  }
-  const packages = Array.isArray(value)
-    ? value.filter(
-        (entry): entry is string =>
-          typeof entry === "string" &&
-          packageEntrySchema.safeParse(entry).success
-      )
-    : [];
-  return Array.isArray(value) && packages.length === value.length
-    ? { ok: true, packages }
-    : { ok: false, message: "The approved packages aren't a list of names." };
-};
-
-/**
- * Builds a JSON workflow's compute modules (`code/<file>.ts`): compiled
- * file by file, importing only each other, the compute SDK and
- * the approved package entries their version seals, if any
- * (`computeCodeWith`, named by core in `computePackagesFile`), nothing in
- * them steering the check; and type-checked against that SDK's
- * declarations with a worker's lib (`computeTarget`), each package
- * entry as a module of no declared types (a package carries none). Their
- * errors are their author's.
- */
-export const buildComputeModules = (
-  input: Record<string, string>
-): Unchecked<ComputeModulesBuild> => {
-  const { [computePackagesFile]: listed, ...files } = input;
-  const named = computePackagesOf(listed);
-  if (!named.ok) {
-    return {
-      built: {
-        ok: false,
-        diagnostics: [
-          { rule: "limits", severity: "error", message: named.message },
-        ],
-      },
-    };
-  }
-  const wrong = computeModuleErrors(files);
-  if (wrong.length > 0) {
-    return { built: { ok: false, diagnostics: wrong } };
-  }
-  const built = compileCode(computeCodeWith(named.packages), files);
-  if (!built.ok) {
-    return { built };
-  }
-  const declared = packageDeclarations(named.packages);
-  return {
-    built,
-    typeCheck: {
-      request: typeCheckRequest({ ...files, ...declared }, computeTarget),
-      errorsOnly: true,
-    },
-  };
 };
 
 /**
@@ -1342,8 +1238,7 @@ export const checkAppCode = (
 
 /**
  * What the compiler builds: an App's pages, its server code of spec
- * 8's layout (`app`), its tests, a JSON workflow's generated module and
- * its compute modules.
+ * 8's layout (`app`), its tests and a JSON workflow's generated module.
  */
 export type CompileTarget =
   | "pages"
@@ -1351,8 +1246,7 @@ export type CompileTarget =
   | "preview-frame"
   | "app"
   | "app-tests"
-  | "generated-workflow"
-  | "compute";
+  | "generated-workflow";
 
 /** What a build of each target answers, once its type check is in (`Unchecked`). */
 export interface TargetBuilds {
@@ -1362,7 +1256,6 @@ export interface TargetBuilds {
   app: AppCodeBuild;
   "app-tests": AppCodeBuild;
   "generated-workflow": GeneratedWorkflowBuild;
-  compute: ComputeModulesBuild;
 }
 
 /**
@@ -1389,7 +1282,6 @@ const targetBuilds: {
   app: checkAppCode,
   "app-tests": (files) => ({ built: buildAppTests(files) }),
   "generated-workflow": buildGeneratedWorkflow,
-  compute: buildComputeModules,
 };
 
 /** The targets contract inspection loads, and what it builds of each. */

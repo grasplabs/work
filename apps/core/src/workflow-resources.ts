@@ -8,15 +8,11 @@ import {
   storedProcessOf,
 } from "@grasp-os/shared/business-processes";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
-import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { graspLockSchema } from "@grasp-os/shared/packages";
-import type { GraspLock } from "@grasp-os/shared/packages";
 import { isAdmin, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
-import { actionUsesSchema } from "@grasp-os/shared/workflow-modules";
 import {
   catalogBindingKinds,
   catalogKeySchema,
@@ -36,16 +32,10 @@ import type {
   WorkflowRole,
   WorkflowBinders,
   SteeredWrite,
-  WorkflowActionReview,
-  WorkflowVersionAction,
   WorkflowVersionBinding,
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
-import {
-  bindingKindOf,
-  contractKindOf,
-} from "@grasp-os/workflow-schema/catalog";
-import type { ContractUse } from "@grasp-os/workflow-schema/catalog";
+import { contractKindOf } from "@grasp-os/workflow-schema/catalog";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import type { CheckedWorkflow, Problem } from "@grasp-os/workflow-schema/check";
 import { expressionTypeRequest } from "@grasp-os/workflow-schema/expression-scope";
@@ -83,10 +73,7 @@ import { z } from "zod";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
-  dependencyRequests,
   sdkResourceBindings,
-  workflowResourceDraftInspections,
-  workflowResourceDraftModules,
   workflowResourceDrafts,
   projectItems,
   workflowResourceMembers,
@@ -97,7 +84,6 @@ import {
   workflowStateWrites,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
-import { withdrawnWith } from "./packages/approvals.ts";
 import { checkWorkflowExpressions, withinBuildWait } from "./pages.ts";
 import { namedProjectsFor, requireStillBuilt } from "./project-access.ts";
 import { projectStillBuiltSql } from "./project-sql.ts";
@@ -126,28 +112,6 @@ import {
 import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import type { ResolvedCatalogContract } from "./workflow-catalog.ts";
-import {
-  compileModules,
-  moduleLookup,
-  modulesHashOf,
-  sealedUse,
-  versionActionsOf,
-} from "./workflow-modules.ts";
-import type {
-  CompiledModules,
-  ModuleContracts,
-  ModulePackages,
-} from "./workflow-modules.ts";
-import {
-  packagesHold,
-  packagesHoldSql,
-  sealedPackagesSchema,
-} from "./workflows/package-seal.ts";
-import type {
-  PackageSealer,
-  SealedPackageManifest,
-  SealedPackages,
-} from "./workflows/package-seal.ts";
 import { quotaLimits } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
@@ -203,7 +167,7 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   and the database refuses any update, deletion or insert over either
 //   or over a version's rowid, whatever the conflict clause: migrations
 //   0080 and 0101); a publication retried on the same current version
-//   with the same definition and modules answers the version it wrote
+//   with the same definition answers the version it wrote
 //   (`savedPublication`), so a retried publication is the same
 //   publication.
 // - A version running other code than its definition's. Publication
@@ -711,17 +675,12 @@ const parsedJson = (text: string): unknown => {
 /**
  * The host catalog keys a checked document's bindings name, each once: all
  * of them, since the check holds a document to `formatLimits.bindings`
- * permissions in all (`workflow.too_many_permissions`). The workflow's own
- * modules are its code's, never the catalog's.
+ * permissions in all (`workflow.too_many_permissions`).
  */
 const namedKeys = (checked: CheckedWorkflow): string[] => {
   const keys = new Set<string>();
   for (const binding of Object.values(documentBindings(checked.document))) {
-    if (
-      binding.kind !== "compute" &&
-      binding.kind !== "action" &&
-      catalogKeySchema.safeParse(binding.contract).success
-    ) {
+    if (catalogKeySchema.safeParse(binding.contract).success) {
       keys.add(binding.contract);
     }
   }
@@ -826,8 +785,6 @@ const permissionKeys: Readonly<Record<Binding["kind"], string>> = {
   event: "events",
   files: "files",
   brain: "brain",
-  compute: "modules",
-  action: "modules",
 };
 
 /**
@@ -838,54 +795,6 @@ const permissionPointer = (binding: Binding, alias: string): string =>
   binding.kind === "model"
     ? "/permissions/ai"
     : `/permissions/${permissionKeys[binding.kind]}/${alias}`;
-
-/** The kind of the workflow's own module a `local:` binding of `kind` names. */
-const moduleKinds = { compute: "compute", action: "operation" } as const;
-
-/**
- * What keeps an action's `uses` from what the workflow declares: each a
- * binding of the kind it reaches, and each connector operation it names
- * one the connector's contract allows, as a step's must be, refused here
- * rather than at its first call.
- */
-const actionUseProblems = (
-  uses: readonly ContractUse[],
-  bindings: Readonly<Record<string, Binding>>,
-  catalog: ReadonlyMap<string, ResolvedCatalogContract>,
-  pointer: string
-): WorkflowDefinitionProblem[] => {
-  const problems: WorkflowDefinitionProblem[] = [];
-  for (const use of uses) {
-    const used = Object.hasOwn(bindings, use.alias)
-      ? bindings[use.alias]
-      : undefined;
-    // The use's kind is the catalog's (a Brain collection's `knowledge`),
-    // the binding's the format's (`brain`).
-    if (used === undefined || contractKindOf(used.kind) !== use.kind) {
-      const kind = bindingKindOf(use.kind);
-      problems.push({
-        code: "binding.use_undeclared",
-        message: `The action reaches \`${use.alias}\`, a ${kind} permission the workflow doesn't declare.`,
-        pointer,
-        remedy: `Declare \`${use.alias}\` as a ${kind} permission.`,
-      });
-      continue;
-    }
-    const allowed = catalog.get(used.contract)?.contract.operations;
-    const unknown = (use.operations ?? []).filter(
-      (operation) => allowed !== undefined && !Object.hasOwn(allowed, operation)
-    );
-    if (unknown.length > 0) {
-      problems.push({
-        code: "binding.unknown_operation",
-        message: `The action declares \`${unknown.join("`, `")}\` of \`${use.alias}\`, which its connector's contract doesn't allow.`,
-        pointer,
-        remedy: "Declare only operations the contract allows.",
-      });
-    }
-  }
-  return problems;
-};
 
 /**
  * The types event wait `step` (at `pointer`) waits for that its binding's
@@ -987,38 +896,18 @@ const fileProblems = (
 
 /**
  * What the format can't check of a document's bindings, against what
- * they resolve to: each binding's contract in the host catalog (or, for a
- * `local:` one, among the workflow's own modules, `modules`), of the kind
- * the binding says; each connector operation a step calls one its
- * contract allows; and each binding an action of the workflow's own
- * reaches declared, of the kind it reaches.
+ * they resolve to: each binding's contract in the host catalog, of the
+ * kind the binding says; and each connector operation a step calls one
+ * its contract allows.
  */
 const bindingProblems = (
   checked: CheckedWorkflow,
-  catalog: ReadonlyMap<string, ResolvedCatalogContract>,
-  modules: ModuleContracts | undefined
+  catalog: ReadonlyMap<string, ResolvedCatalogContract>
 ): WorkflowDefinitionProblem[] => {
   const problems: WorkflowDefinitionProblem[] = [];
   const bindings = documentBindings(checked.document);
-  const local = moduleLookup(modules);
   for (const [alias, binding] of Object.entries(bindings)) {
     const pointer = `${permissionPointer(binding, alias)}/contract`;
-    if (binding.kind === "compute" || binding.kind === "action") {
-      const contract = local(binding.contract);
-      if (contract?.kind !== moduleKinds[binding.kind]) {
-        problems.push({
-          code: "binding.unknown_contract",
-          message: `No ${binding.kind} of the workflow's own modules is \`${binding.contract}\`.`,
-          pointer,
-          remedy: `Export a ${binding.kind} under that name, or name one exported.`,
-        });
-        continue;
-      }
-      problems.push(
-        ...actionUseProblems(contract.uses ?? [], bindings, catalog, pointer)
-      );
-      continue;
-    }
     const contract = catalog.get(binding.contract);
     if (
       contract === undefined ||
@@ -1037,7 +926,7 @@ const bindingProblems = (
       problems.push(...eventTypeProblems(step, pointer, bindings, catalog));
       continue;
     }
-    if (step.type !== "call" || !("connection" in step)) {
+    if (step.type !== "call") {
       continue;
     }
     const binding = bindings[step.connection];
@@ -1089,21 +978,12 @@ const expressionTypeProblems = async (
   // A `call` step's result, as its call's contract answers it.
   const outputOf = (step: Step) => {
     const called =
-      step.type === "call" && ("connection" in step || "module" in step)
-        ? step
-        : undefined;
-    let alias = "";
-    if (called !== undefined) {
-      alias = "connection" in called ? called.connection : called.module;
-    }
-    const contract =
+      step.type === "call" && "connection" in step ? step : undefined;
+    const text =
       called === undefined
         ? undefined
-        : catalog.get(bindings[alias]?.contract ?? "")?.contract;
-    const text =
-      called !== undefined && "connection" in called
-        ? contract?.operations?.[called.action]?.output
-        : contract?.output;
+        : catalog.get(bindings[called.connection]?.contract ?? "")?.contract
+            .operations?.[called.action]?.output;
     // A contract whose output isn't a descriptor the SDK reads (one stated
     // as a JSON Schema) leaves the step untyped, as the check passes what
     // it can't know.
@@ -1164,7 +1044,7 @@ const expressionTypeProblems = async (
 /**
  * `definition` checked for publication by `by`: it is grasp-workflow/2
  * (`checkWorkflow`), and its bindings resolve against the host's catalog
- * and `modules`, the workflow's own (`bindingProblems`). Returns it with
+ * (`bindingProblems`). Returns it with
  * what each binding resolved to, or its problems.
  */
 const inspectDefinition = async (
@@ -1172,7 +1052,6 @@ const inspectDefinition = async (
   definition: string,
   /** Whose definition it is: the workflow's ID, or a blueprint's. */
   whose: string,
-  modules?: ModuleContracts,
   parsed: unknown = parsedJson(definition)
 ): Promise<
   | { ok: true; checked: CheckedWorkflow; bindings: PinnedBinding[] }
@@ -1197,7 +1076,7 @@ const inspectDefinition = async (
   }
   const checked = result.workflow;
   const catalog = await resolveCatalogKeys(env, namedKeys(checked));
-  const unresolved = bindingProblems(checked, catalog, modules);
+  const unresolved = bindingProblems(checked, catalog);
   if (unresolved.length > 0) {
     return { ok: false, problems: unresolved };
   }
@@ -1221,12 +1100,7 @@ const inspectDefinition = async (
   for (const [alias, binding] of Object.entries(
     documentBindings(checked.document)
   )) {
-    // A binding of the workflow's own modules is sealed with its build
-    // (workflow-builds.ts): no approval serves it, so nothing pins it here.
     const contract = catalog.get(binding.contract);
-    if (binding.kind === "compute" || binding.kind === "action") {
-      continue;
-    }
     if (contract === undefined) {
       throw new Error(`Binding ${alias} resolved outside the catalog`);
     }
@@ -1253,19 +1127,12 @@ const checkDefinition = async (
   env: Env,
   definition: string,
   whose: string,
-  modules: CompiledModules | undefined,
   parsed: unknown
 ): Promise<{
   checked: CheckedWorkflow;
   bindings: PinnedBinding[];
 }> => {
-  const inspected = await inspectDefinition(
-    env,
-    definition,
-    whose,
-    modules,
-    parsed
-  );
+  const inspected = await inspectDefinition(env, definition, whose, parsed);
   if (!inspected.ok) {
     throw definitionInvalid(inspected.problems);
   }
@@ -1290,83 +1157,6 @@ const sealedBuildOf = (
     throw corrupt(id, version);
   }
 };
-
-/**
- * Why a version's manifest is past `manifestMaxBytes`: the output shapes
- * its actions declare for their model calls (GRA-700), sealed in it, when
- * they hold most of it, pointing at the action with the largest; otherwise
- * what it pins.
- */
-const tooLargeProblem = (
-  actions: readonly WorkflowVersionAction[]
-): WorkflowDefinitionProblem => {
-  let total = 0;
-  let largest: { binding: string; bytes: number } | undefined;
-  for (const action of actions) {
-    for (const use of action.uses) {
-      if (use.kind === "model") {
-        const bytes = bytesOf(use.output);
-        total += bytes;
-        if (largest === undefined || bytes > largest.bytes) {
-          largest = { binding: action.binding, bytes };
-        }
-      }
-    }
-  }
-  if (largest === undefined || total * 2 < manifestMaxBytes) {
-    return {
-      code: "manifest.too_large",
-      message: "What the version pins is larger than a version may hold.",
-      pointer: "/permissions",
-      remedy: "Bind fewer workflows.",
-    };
-  }
-  return {
-    code: "manifest.too_large",
-    // Fixed text, as every problem's: the pointer names the action with
-    // the largest shape.
-    message:
-      "The output shapes the version's actions declare for their model calls are larger than a version may hold.",
-    pointer: `/permissions/modules/${largest.binding}`,
-    remedy: "Declare smaller output shapes for the actions' model uses.",
-  };
-};
-
-/** Where a version's manifest says what its actions may do (GRA-709). */
-const manifestActionsSchema = z.object({
-  actions: z.array(
-    z.strictObject({
-      binding: z.string(),
-      module: z.string(),
-      export: z.string(),
-      uses: actionUsesSchema,
-    })
-  ),
-});
-
-/**
- * What version `row`'s actions may do, as its manifest seals it: a
- * manifest without them is malformed, as one without its build is.
- */
-const sealedActionsOf = (
-  row: typeof workflowResourceVersions.$inferSelect
-): WorkflowVersionAction[] => {
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(row.manifest);
-  } catch {
-    throw corrupt(row.workflowResourceId, row.version);
-  }
-  const parsed = manifestActionsSchema.safeParse(manifest);
-  if (!parsed.success) {
-    throw corrupt(row.workflowResourceId, row.version);
-  }
-  return parsed.data.actions;
-};
-
-/** Whether `action` asks a model (GRA-700). */
-const asksModel = (action: WorkflowVersionAction): boolean =>
-  action.uses.some(({ kind }) => kind === "model");
 
 /** What a review reads of a version's binding: which contract it pinned. */
 type PinnedContract = Pick<
@@ -1451,25 +1241,18 @@ const catalogOnce = (env: Env): CatalogLookup => {
   };
 };
 
-/** What a version's review shows of what a model may steer. */
-interface SteeringReview {
-  readonly actions: WorkflowActionReview[];
-  /** What the workflow's own model tasks may steer (GRA-727). */
-  readonly modelSteeredWrites: SteeredWrite[];
-}
-
 /** `writes` with each alias once, a connector's operations merged. */
 const mergedWrites = (writes: readonly SteeredWrite[]): SteeredWrite[] => {
   const merged = new Map<string, SteeredWrite>();
   for (const write of writes) {
     const seen = merged.get(write.alias);
-    if (seen?.kind === "connector" && write.kind === "connector") {
+    if (seen === undefined) {
+      merged.set(write.alias, write);
+    } else {
       merged.set(write.alias, {
         ...seen,
         operations: [...new Set([...seen.operations, ...write.operations])],
       });
-    } else if (seen === undefined) {
-      merged.set(write.alias, write);
     }
   }
   return [...merged.values()];
@@ -1483,15 +1266,11 @@ const asksModelInTasks = (tasks: readonly SealedTask[]): boolean =>
 
 /**
  * What a version's review shows of the writes a model's answers may steer
- * (GRA-718, GRA-727), read from the version as sealed and the catalog,
- * never inspected again:
- *
- * - each action that asks a model: its uses that may write;
- * - the workflow, when its build holds any model task: every write its
- *   call tasks may make, a connector task's operation and the writing uses
- *   of each action a task calls. Conservative:
- *   any model task counts as reaching every call, whatever their order or
- *   the flow of data between them.
+ * (GRA-727), read from the version as sealed and the catalog, never
+ * inspected again: when its build holds any model task, every write its
+ * connector tasks may make. Conservative: any model task counts as
+ * reaching every call, whatever their order or the flow of data between
+ * them.
  *
  * A connector's operation counts as a write unless the catalog contract
  * its binding pinned states it is read-only, and only while the catalog
@@ -1501,19 +1280,18 @@ const asksModelInTasks = (tasks: readonly SealedTask[]): boolean =>
  */
 const steeringReview = async (
   lookup: CatalogLookup,
-  actions: readonly WorkflowVersionAction[],
   bindings: readonly PinnedContract[],
   tasks: readonly SealedTask[]
-): Promise<SteeringReview> => {
+): Promise<SteeredWrite[]> => {
   const connectorOf = (alias: string): PinnedContract | undefined =>
     bindings.find(
       (binding) => binding.alias === alias && binding.kind === "connector"
     );
-  const tasksAskModel = asksModelInTasks(tasks);
+  if (!asksModelInTasks(tasks)) {
+    return [];
+  }
   const keys = bindings.flatMap((binding) =>
-    binding.kind === "connector" && (tasksAskModel || actions.some(asksModel))
-      ? [binding.contractId]
-      : []
+    binding.kind === "connector" ? [binding.contractId] : []
   );
   const catalog = await lookup(keys);
   const readOnly = (alias: string, operation: string): boolean => {
@@ -1539,38 +1317,13 @@ const steeringReview = async (
       ? []
       : [{ alias, kind: "connector", operations: writes }];
   };
-  const steered = (
-    use: WorkflowVersionAction["uses"][number]
-  ): SteeredWrite[] =>
-    use.kind === "connector" ? connectorWrites(use.alias, use.operations) : [];
-  const taskWrites = (task: SealedTask): SteeredWrite[] => {
-    if (task.kind !== "call") {
-      return [];
-    }
-    const { call } = task;
-    if (call.name === "grasp.connector") {
-      return connectorWrites(call.binding, [call.operation]);
-    }
-    if (call.name === "grasp.action") {
-      const action = actions.find(({ binding }) => binding === call.binding);
-      // An action the version doesn't seal: nothing to rule out.
-      return action === undefined
-        ? [{ alias: call.binding, kind: "action" }]
-        : action.uses.flatMap(steered);
-    }
-    // A sleep, a decision, a calculation (pure), an event and a model call
-    // itself write nothing of the organization's.
-    return [];
-  };
-  return {
-    actions: actions.map((action) => ({
-      ...action,
-      modelSteeredWrites: asksModel(action) ? action.uses.flatMap(steered) : [],
-    })),
-    modelSteeredWrites: tasksAskModel
-      ? mergedWrites(tasks.flatMap(taskWrites))
-      : [],
-  };
+  const taskWrites = (task: SealedTask): SteeredWrite[] =>
+    // A sleep, a decision, an event and a model call itself write nothing
+    // of the organization's.
+    task.kind === "call" && task.call.name === "grasp.connector"
+      ? connectorWrites(task.call.binding, [task.call.operation])
+      : [];
+  return mergedWrites(tasks.flatMap(taskWrites));
 };
 
 /**
@@ -1622,8 +1375,7 @@ const removedBindingKindOf = (
 
 /**
  * A version's row, as the registry answers it: only once its manifest
- * still hashes to what was sealed, since what its actions may do and its
- * build are read from it (`workflow.version_corrupt` otherwise).
+ * still hashes to what was sealed, since its build is read from it (`workflow.version_corrupt` otherwise).
  */
 const versionOf = async (
   env: Env,
@@ -1645,7 +1397,6 @@ const versionOf = async (
       contractHash: row.contractHash,
       manifestHash: row.manifestHash,
       bindings,
-      actions: [],
       modelSteeredWrites: [],
       build: null,
       refused,
@@ -1654,9 +1405,8 @@ const versionOf = async (
     };
   }
   const sealedBindings = sealedBindingsOf(row);
-  const review = await steeringReview(
+  const modelSteeredWrites = await steeringReview(
     lookup,
-    sealedActionsOf(row),
     sealedBindings,
     await versionTasksOf(env, row, sealedBindings)
   );
@@ -1669,8 +1419,7 @@ const versionOf = async (
     contractHash: row.contractHash,
     manifestHash: row.manifestHash,
     bindings,
-    actions: review.actions,
-    modelSteeredWrites: review.modelSteeredWrites,
+    modelSteeredWrites,
     build: buildSummary(
       sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
     ),
@@ -1753,28 +1502,10 @@ export const versionContract = async (
   return storedContractSchema.parse(JSON.parse(row.contract));
 };
 
-/** Where a version's manifest says what its modules were published as. */
-const manifestModulesSchema = z.object({
-  modulesHash: z.string().nullable().optional(),
-});
-
-/** The hash of the modules version `row` was published with, null for none. */
-const sealedModulesHash = (
-  row: typeof workflowResourceVersions.$inferSelect
-): string | null => {
-  try {
-    return (
-      manifestModulesSchema.parse(JSON.parse(row.manifest)).modulesHash ?? null
-    );
-  } catch {
-    throw corrupt(row.workflowResourceId, row.version);
-  }
-};
-
 /**
  * Version `version` of workflow `id`, if it was published from the
  * definition `parsed` (its canonical JSON's hash, `definitionHashOf`, so
- * whitespace and key order aside) and the modules `modulesHash`: what a
+ * whitespace and key order aside): what a
  * retried publication that landed answers. Read off the text alone: a
  * saved version passed its checks as it was published, and nothing is
  * written for it again. Its bindings are answered as pinned;
@@ -1783,8 +1514,7 @@ const sealedModulesHash = (
 const savedPublication = async (
   env: Env,
   { id, version }: { id: string; version: number },
-  parsed: unknown,
-  modulesHash: string | null
+  parsed: unknown
 ): Promise<WorkflowResourceVersion | undefined> => {
   if (parsed === undefined) {
     return undefined;
@@ -1801,7 +1531,6 @@ const savedPublication = async (
     .get();
   if (
     row === undefined ||
-    sealedModulesHash(row) !== modulesHash ||
     row.definitionJsonHash !== (await definitionHashOf(parsed))
   ) {
     return undefined;
@@ -1839,12 +1568,6 @@ interface Publication {
   bindings: PinnedBinding[];
   /** What it runs: the code generated from it, compiled (workflow-builds.ts). */
   compiled: CompiledBuild;
-  /** The hash of the modules published with it, null for none. */
-  modulesHash: string | null;
-  /** What its own actions may do, from the contracts its build seals. */
-  actions: WorkflowVersionAction[];
-  /** The approved packages its modules import, if any (GRA-665). */
-  packages: SealedPackageManifest | undefined;
   /** Admits the write, right before it commits: throws to write nothing. */
   admit: (() => Promise<void>) | undefined;
 }
@@ -1867,9 +1590,6 @@ const writeVersion = async (
     definitionHash,
     bindings,
     compiled,
-    modulesHash,
-    actions,
-    packages,
     admit,
   } = publication;
   // Bounded when the definition was checked (`inspectDefinition`).
@@ -1892,35 +1612,27 @@ const writeVersion = async (
     definitionVersion,
     profile: definitionFormat,
     definitionHash,
-    modulesHash,
     contractHash,
     bindings: bindings.map((binding) => ({ ...binding })),
-    // What its own actions may do, as its build seals them (GRA-709): read
-    // back for review, never derived again.
-    actions: actions.map((action) => ({
-      binding: action.binding,
-      module: action.module,
-      export: action.export,
-      // Each use exactly as sealed, a model's output included (GRA-700).
-      uses: action.uses.map((use) => sealedUse(use)),
-    })),
     // What the version runs, sealed with it: its build's artifacts by
     // hash, and its executable identity (workflow-builds.ts).
     build: compiled.build,
-    // The approved graph its modules import, which every start and call
-    // admits again (workflows/sealed-packages.ts); the entries' code is
-    // among the build's artifacts.
-    ...(packages === undefined ? {} : { packages }),
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
-    throw definitionInvalid([tooLargeProblem(actions)]);
+    throw definitionInvalid([
+      {
+        code: "manifest.too_large",
+        message: "What the version pins is larger than a version may hold.",
+        pointer: "/permissions",
+        remedy: "Bind fewer workflows.",
+      },
+    ]);
   }
   const manifestHash = await sha256Hex(manifest);
   // Before anything is written: a publication that lands answers it.
-  const reviewed = await steeringReview(
+  const modelSteeredWrites = await steeringReview(
     catalogOnce(env),
-    actions,
     bindings,
     compiledTasksOf(compiled)
   );
@@ -1940,13 +1652,10 @@ const writeVersion = async (
     await auditedBatch(env, db, [
       db.insert(workflowResourceVersions).values({
         // Only while the workflow is live and still at the version this
-        // publication built on, and the graph it seals still approved (a
-        // revocation may have come since it was sealed): otherwise NULL,
-        // which fails the batch.
+        // publication built on: otherwise NULL, which fails the batch.
         workflowResourceId: sql`(SELECT id FROM workflow_resources
         WHERE id = ${workflow.id} AND deleted_at IS NULL
-          AND current_version IS ${workflow.currentVersion}
-          AND ${packages === undefined ? sql`1` : packagesHoldSql(workflow.id, packages.graphHash, true)})`,
+          AND current_version IS ${workflow.currentVersion})`,
         version,
         definitionVersion,
         definition,
@@ -2005,14 +1714,6 @@ const writeVersion = async (
     } catch (releaseError) {
       log.warn("workflow.build_release_failed", errorFields(releaseError));
     }
-    // Its graph was revoked as it was written.
-    if (
-      packages !== undefined &&
-      notNullFailed(error, "workflow_resource_versions.workflow_resource_id") &&
-      !(await packagesHold(db, workflow.id, packages.graphHash, true))
-    ) {
-      throw dependencyErrors.create("dependency.revoked");
-    }
     throw error;
   }
   return {
@@ -2024,8 +1725,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
-    actions: reviewed.actions,
-    modelSteeredWrites: reviewed.modelSteeredWrites,
+    modelSteeredWrites,
     build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
@@ -2077,100 +1777,37 @@ const requireStaffKeepsBindings = async (
   }
 };
 
-/**
- * Refuses a publication that names packages it can't seal: one whose
- * caller seals none (only a builder's own publication does, the RPC's),
- * or with no modules to import them.
- */
-const requireSealable = (
-  asked: { graphHash: string } | undefined,
-  sealer: PackageSealer | undefined,
-  sources: Readonly<Record<string, string>>
-): void => {
-  if (asked === undefined) {
-    return;
-  }
-  if (sealer === undefined) {
-    throw workflowResourceErrors.create("workflow.packages_invalid", {
-      reason: "This publication can't seal packages.",
-    });
-  }
-  if (Object.keys(sources).length === 0) {
-    throw workflowResourceErrors.create("workflow.packages_invalid", {
-      reason: "Packages are for the workflow's modules, and it has none.",
-    });
-  }
-};
-
-/** What modules of `sealed`'s may import, for their build (`compileModules`). */
-const packagesOf = (
-  sealed: SealedPackages | undefined
-): ModulePackages | undefined =>
-  sealed === undefined
-    ? undefined
-    : {
-        entries: Object.keys(sealed.manifest.entries),
-        modules: sealed.modules,
-      };
-
 /** `publishWorkflowVersion`, answering bindings as pinned. */
 const publish = async (
   env: Env,
   by: Acting,
   id: unknown,
   input: unknown,
-  sealer: PackageSealer | undefined,
   admit: (() => Promise<void>) | undefined
 ): Promise<WorkflowResourceVersion> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const {
-    definition,
-    basedOn,
-    modules: sources = {},
-    packages: asked,
-  } = workflowResourceErrors.parse(
+  const { definition, basedOn } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     publishSchema,
     input
   );
-  requireSealable(asked, sealer, sources);
-  // Its modules are part of what is published, and so are the packages
-  // they import: the same definition with other modules or packages is
-  // another publication.
-  const modulesHash =
-    Object.keys(sources).length === 0
-      ? null
-      : await modulesHashOf(sources, asked?.graphHash);
   // A retry of a publication that landed answers the version it wrote
   // before its bindings are resolved again: the builder may have lost a
   // contract it binds since, and the version still binds what it pinned
   // then. Its text read once: for this, and for the keys its bindings name.
   const parsed = parsedJson(definition);
   const landed = { id: workflow.id, version: (basedOn ?? 0) + 1 };
-  const saved = await savedPublication(env, landed, parsed, modulesHash);
+  const saved = await savedPublication(env, landed, parsed);
   if (saved !== undefined) {
     return saved;
   }
   if (basedOn !== workflow.currentVersion) {
     throw workflowResourceErrors.create("workflow.version_conflict");
   }
-  // The approved graph sealed first (admitted for this workflow as a new
-  // use, built, each entry's module read): its modules import them.
-  const sealed =
-    asked === undefined
-      ? undefined
-      : await sealer?.(env, by, workflow.id, asked.graphHash);
-  // Built and inspected first: its `local:` bindings resolve against what
-  // they export.
-  const modules =
-    modulesHash === null
-      ? undefined
-      : await compileModules(env, sources, workflow.id, packagesOf(sealed));
   const { checked, bindings } = await checkDefinition(
     env,
     definition,
     workflow.id,
-    modules,
     parsed
   );
   await requireStaffKeepsBindings(env, by, workflow, bindings);
@@ -2178,13 +1815,7 @@ const publish = async (
   // order is the same definition, and the same publication.
   const definitionHash = await definitionHashOf(checked.document);
   // Generated and built once, here: no start or resume compiles anything.
-  const compiled = await compileWorkflow(
-    env,
-    checked,
-    definition,
-    workflow.id,
-    modules
-  );
+  const compiled = await compileWorkflow(env, checked, definition, workflow.id);
   try {
     return await writeVersion(env, by, {
       workflow,
@@ -2193,12 +1824,6 @@ const publish = async (
       definitionHash,
       bindings,
       compiled,
-      modulesHash,
-      actions: versionActionsOf(
-        new Map(Object.entries(documentBindings(checked.document))),
-        modules
-      ),
-      packages: sealed?.manifest,
       admit,
     });
   } catch (error) {
@@ -2220,7 +1845,7 @@ const publish = async (
     }
     // The current version moved, or another publication of the same
     // number won: this one's, if it was this very definition.
-    const won = await savedPublication(env, landed, parsed, modulesHash);
+    const won = await savedPublication(env, landed, parsed);
     if (won === undefined) {
       throw workflowResourceErrors.create("workflow.version_conflict");
     }
@@ -2231,36 +1856,23 @@ const publish = async (
 /**
  * What a test run of a draft's checkpoint runs (workflows/candidate-runs.ts),
  * compiled and checked exactly as a publication of it would be, against
- * the host's catalog and `sources`, the draft's own modules; nothing is
- * written. Its contract is the one a version of it would seal. Refused as
+ * the host's catalog; nothing is written. Its contract is the one a version of it would seal. Refused as
  * publication refuses it (`workflow.definition_invalid` with its problems).
  */
 export const candidateBuildOf = async (
   env: Env,
   by: Acting,
   workflow: Live,
-  definition: string,
-  sources: Record<string, string>
+  definition: string
 ) => {
-  const modules =
-    Object.keys(sources).length === 0
-      ? undefined
-      : await compileModules(env, sources, workflow.id);
   const parsed = parsedJson(definition);
   const { checked, bindings } = await checkDefinition(
     env,
     definition,
     workflow.id,
-    modules,
     parsed
   );
-  const compiled = await compileWorkflow(
-    env,
-    checked,
-    definition,
-    workflow.id,
-    modules
-  );
+  const compiled = await compileWorkflow(env, checked, definition, workflow.id);
   return {
     checked,
     bindings,
@@ -2275,17 +1887,15 @@ export const candidateBuildOf = async (
  * `checkDefinition` checks it: empty when nothing does. Its refusals of
  * the definition are answered as problems, at their pointers; anything
  * else (the catalog unreachable) is thrown. What drafts are checked with
- * (workflow-drafts.ts), so a checkpoint is exactly what would publish:
- * against `modules`, the draft's own, built as a publication builds them.
+ * (workflow-drafts.ts), so a checkpoint is exactly what would publish.
  */
 export const definitionProblems = async (
   env: Env,
   definition: string,
   /** Whose definition it is: the workflow's ID, or a blueprint's. */
-  whose: string,
-  modules?: ModuleContracts
+  whose: string
 ): Promise<WorkflowDefinitionProblem[]> => {
-  const inspected = await inspectDefinition(env, definition, whose, modules);
+  const inspected = await inspectDefinition(env, definition, whose);
   return inspected.ok ? [] : inspected.problems;
 };
 
@@ -2296,7 +1906,7 @@ export const definitionProblems = async (
  * the host's catalog (refused with its problems,
  * `workflow.definition_invalid`). Its version is the next publication
  * number; it becomes the current version. A retry of a publication that
- * landed (the same definition and modules, on the same current version)
+ * landed (the same definition, on the same current version)
  * answers the version it published.
  */
 export const publishWorkflowVersion = async (
@@ -2305,19 +1915,13 @@ export const publishWorkflowVersion = async (
   id: unknown,
   input: unknown,
   /**
-   * Seals the approved packages the input names (`sealPackages`): only a
-   * builder's own publication passes it; without it, a publication that
-   * names packages is refused.
-   */
-  sealer?: PackageSealer,
-  /**
    * Admits the write, called right before the version is committed, after
    * it was compiled and its build stored: throws to publish nothing (a
    * chat's code run that ended meanwhile, agent-workflow-build.ts).
    */
   admit?: () => Promise<void>
 ): Promise<WorkflowResourceVersion> =>
-  await seenBy(env, by, await publish(env, by, id, input, sealer, admit));
+  await seenBy(env, by, await publish(env, by, id, input, admit));
 
 /** Every version of workflow `id`, newest first, for anyone with a role. */
 export const workflowVersions = async (
@@ -2389,7 +1993,7 @@ export const workflowDefinition = async (
 /**
  * The portable source of version `version` of workflow `id`, for its
  * builders (`workflowDefinition`'s checks): the SDK TypeScript generated
- * from its definition and its own modules, read back from its sealed
+ * from its definition, read back from its sealed
  * build with every hash checked. The definition stays with the version,
  * for review. It goes one way: a version is only ever published from a
  * definition, so edited generated code never comes back as one.
@@ -2404,10 +2008,7 @@ export const workflowSource = async (
   // Both checked by `workflowDefinition`: a workflow `by` builds, and a
   // version it published.
   const build = await loadWorkflowBuild(env, String(id), Number(version));
-  // Its own modules, as published, read back from the seal.
-  return {
-    files: { [generatedWorkflowEntry]: build.source, ...build.compute.sources },
-  };
+  return { files: { [generatedWorkflowEntry]: build.source } };
 };
 
 /** A binding of a version, as a definition export follows it. */
@@ -2433,73 +2034,11 @@ export type ExportedWorkflowVersion =
       readonly buildHash: string;
       /** Its definition exactly as published, its hash checked. */
       readonly definition: string;
-      /** The TypeScript generated from it, and its own modules as published. */
+      /** The TypeScript generated from it. */
       readonly files: Readonly<Record<string, string>>;
       /** The exact versions of the workflows it binds, and its catalog kinds. */
       readonly bindings: readonly ExportedBinding[];
-      /** The approved packages its modules import, if any (`exportedPackages`). */
-      readonly packages: ExportedPackages | null;
     };
-
-/** What a version seals of its approved packages, as an export carries it. */
-export interface ExportedPackages {
-  readonly graphHash: string;
-  /** The entries its modules import, sorted. */
-  readonly entries: readonly string[];
-  /** The graph's lock, from which another deployment asks for the same exact versions. */
-  readonly lock: GraspLock;
-}
-
-/** Where a version's manifest seals its packages, as an export reads it. */
-const exportedPackagesSchema = z.object({
-  packages: sealedPackagesSchema.optional(),
-});
-
-/**
- * What version manifest `manifest` of workflow `workflowId` seals of its
- * approved packages, for its export: the graph, the entries its modules
- * import, and the graph's lock. Never the approval, which is this
- * deployment's: the destination approves the graph again. Undefined for a
- * manifest, or a stored lock, that doesn't read as one, JSON or not.
- */
-const exportedPackages = async (
-  env: Env,
-  workflowId: string,
-  manifest: string
-): Promise<ExportedPackages | null | undefined> => {
-  const parsed = exportedPackagesSchema.safeParse(parsedJson(manifest));
-  if (!parsed.success) {
-    return undefined;
-  }
-  const sealed = parsed.data.packages;
-  if (sealed === undefined) {
-    return null;
-  }
-  // The lock of the request that approved it, whatever became of it since.
-  const row = await drizzle(env.DB)
-    .select({ snapshot: dependencyRequests.snapshot })
-    .from(dependencyRequests)
-    .where(
-      and(
-        eq(dependencyRequests.subjectType, "workflow"),
-        eq(dependencyRequests.subjectId, workflowId),
-        eq(dependencyRequests.graphHash, sealed.graphHash)
-      )
-    )
-    .limit(1)
-    .get();
-  const read = z
-    .object({ lock: graspLockSchema })
-    .safeParse(row === undefined ? undefined : parsedJson(row.snapshot));
-  if (!read.success) {
-    return undefined;
-  }
-  return {
-    graphHash: sealed.graphHash,
-    entries: Object.keys(sealed.entries).toSorted(),
-    lock: read.data.lock,
-  };
-};
 
 /**
  * Version `version` of workflow `id`, for a definition export by `by`, who
@@ -2563,8 +2102,7 @@ export const exportedWorkflowVersion = async (
   const manifest = parsedJson(row.manifest);
   requireServedBindingKinds(manifest);
   const pinned = manifestBindingsSchema.safeParse(manifest);
-  const packages = await exportedPackages(env, workflow.id, row.manifest);
-  if (!pinned.success || packages === undefined) {
+  if (!pinned.success) {
     throw corrupt(workflow.id, version);
   }
   const bindings: ExportedBinding[] = [];
@@ -2587,28 +2125,9 @@ export const exportedWorkflowVersion = async (
     definitionHash: row.definitionHash,
     buildHash: loaded.hash,
     definition: row.definition,
-    files: {
-      [generatedWorkflowEntry]: loaded.source,
-      ...loaded.compute.sources,
-    },
+    files: { [generatedWorkflowEntry]: loaded.source },
     bindings,
-    packages,
   };
-};
-
-/**
- * The modules version `version` of workflow `id` sealed, by path, read
- * back from its build with every hash checked: none for a version without
- * modules. For the
- * workflow's builders, whose role the caller has checked.
- */
-export const sealedModules = async (
-  env: Env,
-  workflowId: string,
-  version: number
-): Promise<Record<string, string>> => {
-  const build = await loadWorkflowBuild(env, workflowId, version);
-  return { ...build.compute.sources };
 };
 
 /**
@@ -2975,25 +2494,10 @@ const deletedOnce = async (
       )
       .returning({ id: workflowResources.id }),
     outboxedIfChanged(db, entry(by, "workflow.deleted", id)),
-    ...withdrawnWith(
-      db,
-      by.actor ?? actorOf(by),
-      { type: "workflow", id },
-      sql`EXISTS (SELECT 1 FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`,
-      now
-    ),
     // Its draft (workflow-drafts.ts) is never read again, and may hold a
     // sensitive parameter's default: it goes once it is deleted.
     db.delete(workflowResourceDrafts).where(
       sql`${workflowResourceDrafts.workflowResourceId} IN (SELECT id
-        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
-    ),
-    db.delete(workflowResourceDraftModules).where(
-      sql`${workflowResourceDraftModules.workflowResourceId} IN (SELECT id
-        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
-    ),
-    db.delete(workflowResourceDraftInspections).where(
-      sql`${workflowResourceDraftInspections.workflowResourceId} IN (SELECT id
         FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
     ),
     // Out of every project, filed or shared: a deleted workflow takes no

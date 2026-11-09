@@ -128,7 +128,7 @@ export interface StoppedScheduleItem extends ItemBase {
   notification: TriggerStoppedNotification;
 }
 
-/** Packages of an App or workflow the person builds, revoked as malware or newly advised against. */
+/** Packages of an App the person builds, revoked as malware or newly advised against. */
 export interface PackageNoticeItem extends ItemBase {
   kind: "packageNotice";
   verdicts: never[];

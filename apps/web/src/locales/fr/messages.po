@@ -1734,7 +1734,6 @@ msgstr "Action"
 #: src/apps/app-versions.tsx
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
-#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Actions"
 msgstr "Actions"
 
@@ -1866,10 +1865,6 @@ msgstr "Ajouter une connexion HTTP"
 #: src/apps/indexes-view.tsx
 msgid "Add index"
 msgstr "Ajouter l’index"
-
-#: src/workflows/module-files.tsx
-msgid "Add module"
-msgstr "Ajouter un module"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Add one so invoices are paid when they come."
@@ -4896,6 +4891,10 @@ msgstr "Chaque événement de ce type venant de la source lance une exécution, 
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Chaque facture en PDF, dès son émission."
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Each of the workflow's model tasks is taken to reach every call the workflow makes."
+msgstr "Chaque tâche de modèle du workflow est censée atteindre chaque appel du workflow."
+
 #: src/connections/http-connections.tsx
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
 msgstr "Chaque préfixe de chemin commence par /, sur sa propre ligne, sans requête ni segments de points."
@@ -6885,10 +6884,6 @@ msgstr "Ses messages sont supprimés définitivement, et chaque modification que
 msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "Ses migrations sont illisibles : elle peut réécrire les enregistrements de n'importe quelle table"
 
-#: src/routes/_shell.workflows.$workflow.tsx
-msgid "Its model tasks"
-msgstr "Ses tâches de modèle"
-
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
 msgstr "Son prochain démarrage est refusé jusqu’à ce qu’un administrateur approuve de nouveau {alias}, et les exécutions déjà démarrées échouent à leur prochain appel par cette liaison."
@@ -7691,10 +7686,6 @@ msgctxt "an advisory's severity"
 msgid "Moderate"
 msgstr "Modéré"
 
-#: src/workflows/module-files.tsx
-msgid "Modules"
-msgstr "Modules"
-
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
 msgid "Money"
@@ -8229,10 +8220,6 @@ msgstr "Aucun modèle n'est encore choisi."
 #: src/workflows/requests/request-needs.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Aucun modèle n’est encore configuré pour ce déploiement."
-
-#: src/workflows/module-files.tsx
-msgid "No modules yet. A module holds calculations a task calls through a local binding."
-msgstr "Aucun module pour l'instant. Un module contient des calculs qu'une tâche appelle par une liaison locale."
 
 #: src/people/person-picker.tsx
 msgid "No owner yet"
@@ -9546,10 +9533,6 @@ msgstr "Collez la clé depuis la console de votre fournisseur. Elle est stockée
 msgid "Path"
 msgstr "Chemin"
 
-#: src/workflows/module-files.tsx
-msgid "Path of a new module"
-msgstr "Chemin d'un nouveau module"
-
 #: src/connections/http-connections.tsx
 msgid "Path prefixes it allows, one per line"
 msgstr "Préfixes de chemin autorisés, un par ligne"
@@ -10392,7 +10375,6 @@ msgid "Remove"
 msgstr "Retirer"
 
 #: src/onboarding/document-drop.tsx
-#: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "Retirer {file}"
 
@@ -12615,10 +12597,6 @@ msgstr "Les équipes de moins de cinq personnes indiquent seulement si leur resp
 msgid "Tell me how this work runs today, step by step: who does what, in which app, and how often. I draw it as you go."
 msgstr "Dites-moi comment ce travail se déroule aujourd'hui, étape par étape : qui fait quoi, dans quelle app et à quelle fréquence. Je le dessine au fil de vos réponses."
 
-#: src/workflows/binding-approvals.tsx
-msgid "Template {templateId}, version {version}"
-msgstr "Modèle {templateId}, version {version}"
-
 #: src/settings/ai-providers.tsx
 msgid "Test"
 msgstr "Tester"
@@ -12827,12 +12805,12 @@ msgid "The App's actions can't use it until an admin binds it."
 msgstr "Les actions de l’application ne peuvent pas l'utiliser tant qu'un admin ne l'a pas liée."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "Les actions de l’application n'atteignent un modèle, une intégration, des connaissances ou un modèle de contenu que par une liaison qu'un admin approuve ici. Déclarer une ressource n'accorde rien, et révoquer une liaison arrête la requête suivante qui passe par elle."
+msgid "The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr "Les actions de l’application n'atteignent un modèle, une intégration ou des connaissances que par une liaison qu'un admin approuve ici. Déclarer une ressource n'accorde rien, et révoquer une liaison arrête la requête suivante qui passe par elle."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-msgstr "Les actions de l’application n'atteignent un modèle, une intégration, des connaissances ou un modèle de contenu que par une liaison qu'approuve un admin de votre organisation."
+msgid "The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves."
+msgstr "Les actions de l’application n'atteignent un modèle, une intégration ou des connaissances que par une liaison qu'approuve un admin de votre organisation."
 
 #: src/apps/access-view.tsx
 #: src/chat/builds.tsx
@@ -15587,12 +15565,8 @@ msgid "Write your answer"
 msgstr "Écrivez votre réponse"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer cover each action's own model uses and the workflow's own model tasks. An action's model uses reach only that action; each of the workflow's model tasks is taken to reach every call the workflow makes."
-msgstr "Les écritures qu’un modèle peut orienter couvrent les usages de modèle de chaque action et les tâches de modèle du workflow. Les usages de modèle d’une action n’atteignent que cette action ; chaque tâche de modèle du workflow est censée atteindre chaque appel du workflow."
-
-#: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer: {target}"
-msgstr "Écritures qu’un modèle peut orienter : {target}"
+msgid "Writes a model may steer"
+msgstr "Écritures qu’un modèle peut orienter"
 
 #: src/chat/thread.tsx
 msgid "Writing"

@@ -1,44 +1,32 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
-import {
-  appIdSchema,
-  identifierMaxLength,
-  workflowResourceIdSchema,
-} from "./ids.ts";
+import { appIdSchema, identifierMaxLength } from "./ids.ts";
 import type { DependencyIntent, GraspLock } from "./packages.ts";
 import { platformLimits } from "./platform-limits.ts";
 
-// npm packages an App or a workflow asks for, and its builder's decision
-// on them. The chat's agent (or a builder) asks core to resolve what the
-// source names; core resolves one exact graph from the registry and
-// proposes it as a request, which allows nothing. A builder of the App or
-// workflow approves or denies it, in their own session. A package's own
-// words (a licence, an advisory's title) are shown as text, never followed.
+// npm packages an App asks for, and its builder's decision on them. The
+// chat's agent (or a builder) asks core to resolve what the source names;
+// core resolves one exact graph from the registry and proposes it as a
+// request, which allows nothing. A builder of the App approves or denies
+// it, in their own session. A package's own words (a licence, an
+// advisory's title) are shown as text, never followed.
 
-/**
- * Whose packages a request is: an App's, or an independent workflow's
- * (its compute modules). An approval is its subject's alone.
- */
-export type DependencySubject =
-  | { type: "app"; id: string }
-  | { type: "workflow"; id: string };
+/** Whose packages a request is: an App's. An approval is its App's alone. */
+export interface DependencySubject {
+  type: "app";
+  id: string;
+}
 
-/** A subject as a caller names it: `{ app }` or `{ workflow }`, exactly one. */
-export const dependencySubjectRefSchema = z.union([
-  z.strictObject({ app: appIdSchema }),
-  z.strictObject({ workflow: workflowResourceIdSchema }),
-]);
+/** A subject as a caller names it: `{ app }`. */
+export const dependencySubjectRefSchema = z.strictObject({ app: appIdSchema });
 export type DependencySubjectRef = z.input<typeof dependencySubjectRefSchema>;
 
-/** The subject a caller's `{ app }` or `{ workflow }` names. */
-export const subjectOfRef = (ref: {
-  app?: string;
-  workflow?: string;
-}): DependencySubject =>
-  ref.workflow === undefined
-    ? { type: "app", id: ref.app ?? "" }
-    : { type: "workflow", id: ref.workflow };
+/** The subject a caller's `{ app }` names. */
+export const subjectOfRef = (ref: { app: string }): DependencySubject => ({
+  type: "app",
+  id: ref.app,
+});
 
 /** A subject as the API shows it: what it is, and its name now. */
 export interface NamedDependencySubject {
@@ -114,7 +102,7 @@ export const findingGravity: Readonly<
 
 /**
  * Where a request stands. Pending: asked, allows nothing. Approved: a
- * builder approved exactly this graph for this App or workflow. Denied:
+ * builder approved exactly this graph for this App. Denied:
  * a builder refused it. Revoked: core found it reported as malware after
  * it was approved; nothing of it runs or is built any more. A pending
  * request another one replaces is gone: only the audit log keeps it.
@@ -152,7 +140,7 @@ export interface DependencyRequest {
   revoked?: { at: string; reason: string };
 }
 
-/** How an App's or a workflow's packages stand, for its builders. */
+/** How an App's packages stand, for its builders. */
 export interface DependencyStatus {
   /** The request waiting for a decision, if any. */
   pending: DependencyRequest | null;
@@ -173,11 +161,11 @@ export const dependencyErrors = defineErrorFamily({
   "dependency.invalid": "That isn't a valid dependency request.",
   "dependency.not_found": "There's no such dependency request.",
   "dependency.forbidden":
-    "Only a builder of the App or workflow decides its packages, in their own session.",
+    "Only a builder of the App decides its packages, in their own session.",
   "dependency.stale":
     "This request was decided or replaced since you opened it. Open it again before deciding.",
   "dependency.approval_required":
-    "These packages aren't approved for this App or workflow. One of its builders decides.",
+    "These packages aren't approved for this App. One of its builders decides.",
   "dependency.malware":
     "A package is known malware, so Grasp refuses it: no approval can admit it. Remove it, and whatever brings it in.",
   "dependency.revoked":
@@ -196,11 +184,11 @@ export interface DependenciesApi {
    * that waits for a decision and allows nothing.
    */
   resolve: (intent: DependencyIntent) => Promise<DependencyRequest>;
-  /** How an App's or a workflow's packages stand, for its builders. */
+  /** How an App's packages stand, for its builders. */
   status: (subject: DependencySubjectRef) => Promise<DependencyStatus>;
   /**
-   * Approves or denies a pending request, once, as a builder of its App
-   * or workflow, never Grasp staff or an agent. Refused with
+   * Approves or denies a pending request, once, as a builder of its App,
+   * never Grasp staff or an agent. Refused with
    * `dependency.stale` when the request is no longer the one reviewed.
    */
   decide: (

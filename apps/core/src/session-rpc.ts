@@ -35,7 +35,6 @@ import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
 import { staffAudited } from "./staff-audit.ts";
 import { StephenRequestsRpc } from "./stephen-requests.ts";
-import { TemplatesRpc } from "./templates-rpc.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
 import { WaitingRpc } from "./waiting-rpc.ts";
 import { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
@@ -62,7 +61,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #uploads: UploadsRpc;
   readonly #permissions: PermissionsRpc;
   readonly #resourceBindings: ResourceBindingsRpc;
-  readonly #templates: TemplatesRpc;
   readonly #connections: ConnectionsRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #workflowResources: WorkflowResourcesRpc;
@@ -108,7 +106,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
-    this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
@@ -223,10 +220,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get resourceBindings(): ResourceBindingsRpc {
     return this.#resourceBindings;
-  }
-
-  get templates(): TemplatesRpc {
-    return this.#templates;
   }
 
   get connections(): ConnectionsRpc {

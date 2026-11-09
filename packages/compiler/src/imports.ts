@@ -8,7 +8,6 @@ import {
   kitModuleName,
   ownEntry,
   packageModuleIn,
-  packageModuleName,
   pageDataModel,
   pageReferences,
   pageRootNames,
@@ -512,9 +511,8 @@ export const rewritePackageImports = (
 
 /**
  * Code built here that runs outside the pages: a JSON workflow's
- * generated module and its compute modules. Each imports its own files
- * and a few of the platform's modules, by the flat name each is loaded
- * under.
+ * generated module. It imports its own files and a few of the platform's
+ * modules, by the flat name each is loaded under.
  */
 export interface CodeKind {
   /** What the code is, for messages, such as "Workflow". */
@@ -522,11 +520,6 @@ export interface CodeKind {
   folder: string;
   /** The modules it may import besides its own files, and their flat names. */
   imports: ReadonlyMap<string, string>;
-  /**
-   * Whether its types are checked (`buildComputeModules`): then nothing in
-   * it may steer the check, no directive, suppression or ambient module.
-   */
-  typeChecked?: boolean;
 }
 
 /**
@@ -563,55 +556,6 @@ export const generatedWorkflowCode: CodeKind = {
   ),
 };
 
-/**
- * The SDK modules a JSON workflow's own modules (`code/`) import: its
- * calculations' (`@grasp-os/sdk/compute`) and actions'
- * (`@grasp-os/sdk/action`), and nothing else of the platform: no Workers
- * runtime, no workflow engine, no server or database constructors, and
- * no packages but the approved ones a version seals (`computeCodeWith`).
- * A calculation gets only the value it is called with; an action, its
- * arguments and the bindings it declares.
- */
-export const computeSdkImports = [
-  "@grasp-os/sdk/compute",
-  "@grasp-os/sdk/action",
-] as const;
-
-/** What core's compute call loads besides them (never importable). */
-export const computeRunnerImports = ["@grasp-os/sdk/compute-runner"] as const;
-
-/**
- * Compute modules import their own files and `computeSdkImports`, and are
- * type-checked (`buildComputeModules`): nothing in them may steer it.
- */
-export const computeCode: CodeKind = {
-  name: "Compute module",
-  folder: "code/",
-  imports: new Map(
-    computeSdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
-  ),
-  typeChecked: true,
-};
-
-/**
- * Compute modules that may also import `packages`, the entries of the
- * approved graph their version seals (GRA-665), each by its own name and
- * loaded under its own flat name (`packageModuleName`). Nothing else.
- */
-export const computeCodeWith = (packages: readonly string[]): CodeKind =>
-  packages.length === 0
-    ? computeCode
-    : {
-        ...computeCode,
-        imports: new Map([
-          ...computeCode.imports,
-          ...packages.map((entry): [string, string] => [
-            entry,
-            packageModuleName(entry),
-          ]),
-        ]),
-      };
-
 const javascriptExtension = /\.js$/u;
 
 /**
@@ -646,17 +590,10 @@ export const codeImportError = (
   /** What its types may name by path: every file the build was given. */
   typeFiles: ReadonlySet<string> = files
 ): string | undefined => {
-  // An ambient module would declare, or shadow, a module by name in the
-  // type check, or `declare global` give every file globals its isolate
-  // doesn't have: code of a `typeChecked` kind (compute modules) declares
-  // none. Generated workflow code is the host's own, so there it reaches nothing.
+  // Generated workflow code is the host's own: an ambient module there
+  // reaches nothing.
   if (ambient) {
-    if (kind.typeChecked !== true) {
-      return undefined;
-    }
-    return specifier === undefined
-      ? `declare global is never in ${kind.name.toLowerCase()} code: it would declare globals its isolate doesn't have, for every file.`
-      : `declare module "${specifier}" is never in ${kind.name.toLowerCase()} code: it would declare, or shadow, a module the SDK doesn't give it.`;
+    return undefined;
   }
   if (typeOnly) {
     return (

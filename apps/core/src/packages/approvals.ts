@@ -29,13 +29,10 @@ export const ofSubject = (subject: DependencySubject): SQL =>
     eq(dependencyRequests.subjectId, subject.id)
   ) ?? sql`0`;
 
-/** What the audit log names a subject as, as every other event of either does. */
+/** What the audit log names a subject as, as every other event of an App does. */
 export const auditTargetOf = (
   subject: DependencySubject
-): { type: "app" | "workflow_resource"; id: string } => ({
-  type: subject.type === "app" ? "app" : "workflow_resource",
-  id: subject.id,
-});
+): { type: "app"; id: string } => ({ type: "app", id: subject.id });
 
 type Row = typeof dependencyRequests.$inferSelect;
 
@@ -71,15 +68,15 @@ export const requestEntry = (
 /**
  * The statuses of an approval still in force for what was built on it: the
  * subject's one current approval (`approved`), and one a later approval
- * of the subject replaced (`retired`), which a release or a workflow
- * version built before keeps running on. Only the current approval is
- * proposed against, built or sealed; malware revokes both.
+ * of the subject replaced (`retired`), which a release built before
+ * keeps running on. Only the current approval is proposed against or
+ * built; malware revokes both.
  */
 export const inForce = ["approved", "retired"] as const;
 
 /**
  * The statements that withdraw `subject`'s approvals once it is gone (an
- * App removed, a workflow deleted, as `gone` says when they run), for a
+ * App removed, as `gone` says when they run), for a
  * batch that does that: what is in force is revoked, so the clock stops
  * scanning it and nothing of it is served, audited by `actor`; a request
  * still waiting goes, as nobody can decide it now.
@@ -97,10 +94,7 @@ export const withdrawnWith = (
       .set({
         status: "revoked",
         endedAt: at,
-        endedReason:
-          subject.type === "app"
-            ? "Withdrawn: the App was removed."
-            : "Withdrawn: the workflow was deleted.",
+        endedReason: "Withdrawn: the App was removed.",
       })
       .where(
         and(
@@ -242,7 +236,7 @@ export const refuseMalware = async (
 /**
  * The lock of `subject`'s graph `graphHash` while it is the subject's
  * current approval, and that approval: the one way to a graph's packages
- * for a build, a seal or an export. `dependency.revoked` for a graph core
+ * for a build or an export. `dependency.revoked` for a graph core
  * revoked; `dependency.approval_required` for anything else, one a later
  * approval replaced too.
  */

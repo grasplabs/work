@@ -17,25 +17,14 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import {
-  workflowResourceDraftInspections,
-  workflowResourceDraftModules,
-  workflowResourceDrafts,
-} from "./db/core/schema.ts";
+import { workflowResourceDrafts } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { workflowDiagram } from "./workflow-diagram.ts";
 import {
-  compileModules,
-  contractsFromManifest,
-  modulesHashOf,
-} from "./workflow-modules.ts";
-import type { ModuleContracts } from "./workflow-modules.ts";
-import {
   definitionProblems,
   publishWorkflowVersion,
   requireWorkflowRole,
-  sealedModules,
   workflowDefinition,
 } from "./workflow-resources.ts";
 import { applyStepEdit } from "./workflow-steps.ts";
@@ -66,32 +55,6 @@ import { applyStepEdit } from "./workflow-steps.ts";
 // - Growth. A draft keeps only its latest revision and its latest
 //   checkpoint, each at most the format's 1 MiB with its problems at
 //   most 256 KiB, and an edit is bounded as a definition is.
-//
-// A revision carries the workflow's own modules too (GRA-706 has the
-// threat model in full), so a draft can call them through `local:`
-// bindings and publishes them with its definition:
-//
-// - Module code running as a draft is checked. It is built and inspected
-//   by `compileModules`, exactly as a publication does: only in the
-//   sandbox, with no env, bindings or network, and what fails is reported
-//   as the compiler's bounded diagnostics, never the module's own words.
-// - Sealing other code than was checked. A revision's modules are written
-//   in the batch that takes its revision, one row each, and never changed;
-//   every read takes a revision with its own modules in one batch, so no
-//   revision's definition is seen beside another's modules. Publishing
-//   sends the latest revision's modules, which publication builds and
-//   checks again before it seals them.
-// - Contracts kept between edits. What an inspection answered is kept
-//   with its revision, keyed by the modules' hash, and an edit that
-//   carries exactly those modules checks its definition against it instead
-//   of running them again; it is read back through the same checks as
-//   when it was answered (`contractsFromManifest`). It only ever decides
-//   what a draft reports: publishing builds and inspects the modules anew.
-// - Starting from code nobody sealed. Before anyone edits, the modules
-//   are the current version's, read back from its seal with every hash
-//   checked (`sealedModules`).
-// - Disclosure. Only the workflow's builders read them, as they read a
-//   version's sources; the audit counts them, never says what they hold.
 
 /**
  * The most a revision's problems take as stored JSON. A D1 row holds 2 MB
@@ -159,29 +122,15 @@ const checkpointOf = (
   diagram: workflowDiagram(source),
 });
 
-/** Module rows, by path. */
-const modulesOf = (
-  rows: readonly { path: string; source: string }[]
-): Record<string, string> =>
-  Object.fromEntries(rows.map(({ path, source }) => [path, source]));
-
-/**
- * The latest revision of workflow `id`'s draft, with its modules, and its
- * latest checkpoint.
- */
+/** The latest revision of workflow `id`'s draft, and its latest checkpoint. */
 const draftRows = async (
   env: Env,
   id: string
-): Promise<{
-  latest?: DraftRow;
-  modules: Record<string, string>;
-  checkpoint?: DraftRow;
-}> => {
+): Promise<{ latest?: DraftRow; checkpoint?: DraftRow }> => {
   const db = drizzle(env.DB);
-  // All in one batch, so they describe one saved state: never one
-  // revision's text beside a later revision's checkpoint, or another
-  // revision's modules.
-  const [latestRows, checkpointRows, moduleRows] = await db.batch([
+  // In one batch, so they describe one saved state: never one revision's
+  // text beside a later revision's checkpoint.
+  const [latestRows, checkpointRows] = await db.batch([
     db
       .select()
       .from(workflowResourceDrafts)
@@ -199,32 +148,18 @@ const draftRows = async (
       )
       .orderBy(desc(workflowResourceDrafts.revision))
       .limit(1),
-    db
-      .select({
-        path: workflowResourceDraftModules.path,
-        source: workflowResourceDraftModules.source,
-      })
-      .from(workflowResourceDraftModules)
-      .where(
-        and(
-          eq(workflowResourceDraftModules.workflowResourceId, id),
-          sql`${workflowResourceDraftModules.revision} = (SELECT MAX(revision)
-            FROM workflow_resource_drafts WHERE workflow_resource_id = ${id})`
-        )
-      ),
   ]);
   const [latest] = latestRows;
   const [checkpoint] = checkpointRows;
   return {
     ...(latest === undefined ? {} : { latest }),
-    modules: modulesOf(moduleRows),
     ...(checkpoint === undefined ? {} : { checkpoint }),
   };
 };
 
 /**
- * The checkpoint of workflow `id`'s draft at exactly `revision`, with its
- * modules, for a test run of it (workflows/candidate-runs.ts): only the
+ * The checkpoint of workflow `id`'s draft at exactly `revision`, for a
+ * test run of it (workflows/candidate-runs.ts): only the
  * latest revision, once it passed, as only it publishes
  * (`publishWorkflowDraft`). A revision another edit replaced conflicts
  * (`workflow.draft_conflict`); one that didn't pass, or a draft nobody
@@ -234,15 +169,15 @@ export const draftCheckpoint = async (
   env: Env,
   id: string,
   revision: number
-): Promise<{ source: string; modules: Record<string, string> }> => {
-  const { latest, modules } = await draftRows(env, id);
+): Promise<{ source: string }> => {
+  const { latest } = await draftRows(env, id);
   if (latest !== undefined && latest.revision !== revision) {
     throw workflowResourceErrors.create("workflow.draft_conflict");
   }
   if (latest === undefined || !latest.checked) {
     throw workflowResourceErrors.create("workflow.draft_unchecked");
   }
-  return { source: latest.source, modules };
+  return { source: latest.source };
 };
 
 /**
@@ -253,16 +188,11 @@ const draftReadOf = async (
   env: Env,
   by: Acting,
   workflow: Awaited<ReturnType<typeof requireWorkflowRole>>,
-  saved?: {
-    latest: DraftRow;
-    modules: Record<string, string>;
-    checkpoint?: DraftRow;
-  }
+  saved?: { latest: DraftRow; checkpoint?: DraftRow }
 ): Promise<WorkflowDraft> => {
   // An edit's own answer is the row it wrote and the checkpoint its batch
   // read, never what was saved after it.
-  const { latest, modules, checkpoint } =
-    saved ?? (await draftRows(env, workflow.id));
+  const { latest, checkpoint } = saved ?? (await draftRows(env, workflow.id));
   const published =
     workflow.currentVersion === null
       ? undefined
@@ -273,10 +203,6 @@ const draftReadOf = async (
     return {
       revision: 0,
       source: published ?? starterDefinition,
-      modules:
-        workflow.currentVersion === null
-          ? {}
-          : await sealedModules(env, workflow.id, workflow.currentVersion),
       problems: [],
       checkpoint: publishedCheckpoint,
       editedBy: null,
@@ -286,7 +212,6 @@ const draftReadOf = async (
   return {
     revision: latest.revision,
     source: latest.source,
-    modules,
     problems: storedProblems(latest.problems),
     checkpoint:
       checkpoint === undefined
@@ -311,102 +236,6 @@ export const workflowDraft = async (
   return await draftReadOf(env, by, workflow);
 };
 
-/** What a build of a draft's modules reported, as it refuses them. */
-const diagnosticsSchema = z.object({
-  diagnostics: z.array(
-    z.object({
-      file: z.string().nullable(),
-      line: z.number().nullable(),
-      message: z.string(),
-    })
-  ),
-});
-
-/**
- * The most bytes an inspection's answer takes as a row: past it, it isn't
- * kept, and the next edit with the same modules inspects them again.
- */
-const maxManifestBytes = 1024 * 1024;
-
-/** The modules' problems, from the diagnostics of a build that refused them. */
-const moduleProblems = (error: unknown): WorkflowDefinitionProblem[] => {
-  const details = diagnosticsSchema.safeParse(
-    workflowResourceErrors.codeOf(error) === "workflow.modules_invalid" &&
-      error instanceof Error &&
-      "details" in error
-      ? error.details
-      : undefined
-  );
-  if (!details.success) {
-    throw error;
-  }
-  return details.data.diagnostics.map(({ file, line, message }) => ({
-    code: "modules.invalid",
-    message:
-      file === null
-        ? message
-        : `${file}${line === null ? "" : `:${line}`}: ${message}`,
-    pointer:
-      file === null
-        ? "/modules"
-        : `/modules/${file.replaceAll("~", "~0").replaceAll("/", "~1")}`,
-    remedy: "Fix the module where the build says, then check again.",
-  }));
-};
-
-/**
- * `modules` checked for a draft, as a publication builds and inspects
- * them: none for none, and the build's diagnostics as problems when they
- * don't build. A build that couldn't finish (slow, or the sandbox
- * unavailable) is thrown, and nothing is saved. When the revision the
- * edit builds on (`previous`) carries exactly these modules, what their
- * inspection answered then is checked again instead: most edits change
- * only the definition. Answers the inspection to keep with this revision.
- */
-const checkModules = async (
-  env: Env,
-  workflowId: string,
-  previous: number,
-  modules: Record<string, string>
-): Promise<{
-  contracts?: ModuleContracts;
-  problems: WorkflowDefinitionProblem[];
-  inspection?: { modulesHash: string; manifest: string };
-}> => {
-  if (Object.keys(modules).length === 0) {
-    return { problems: [] };
-  }
-  const modulesHash = await modulesHashOf(modules);
-  const kept = await drizzle(env.DB)
-    .select({ manifest: workflowResourceDraftInspections.manifest })
-    .from(workflowResourceDraftInspections)
-    .where(
-      and(
-        eq(workflowResourceDraftInspections.workflowResourceId, workflowId),
-        eq(workflowResourceDraftInspections.revision, previous),
-        eq(workflowResourceDraftInspections.modulesHash, modulesHash)
-      )
-    )
-    .get();
-  try {
-    if (kept !== undefined) {
-      return {
-        contracts: contractsFromManifest(kept.manifest, modules),
-        problems: [],
-        inspection: { modulesHash, manifest: kept.manifest },
-      };
-    }
-    const compiled = await compileModules(env, modules, workflowId);
-    return {
-      contracts: compiled,
-      problems: [],
-      inspection: { modulesHash, manifest: compiled.manifest },
-    };
-  } catch (error) {
-    return { problems: moduleProblems(error) };
-  }
-};
-
 /**
  * Saves an edit of workflow `id`'s draft for `by`, who must build it and
  * isn't Grasp staff (`workflowDraftEditSchema`): checked against the
@@ -426,27 +255,20 @@ export const editWorkflowDraft = async (
 ): Promise<WorkflowDraft> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const { expectedRevision, source, modules } = workflowResourceErrors.parse(
+  const { expectedRevision, source } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowDraftEditSchema,
     input
   );
-  const built = await checkModules(env, workflow.id, expectedRevision, modules);
-  const problems = boundedProblems([
-    ...built.problems,
-    ...(await definitionProblems(env, source, workflow.id, built.contracts)),
-  ]);
-  const { inspection } = built;
-  const kept =
-    inspection !== undefined &&
-    new TextEncoder().encode(inspection.manifest).byteLength <=
-      maxManifestBytes;
+  const problems = boundedProblems(
+    await definitionProblems(env, source, workflow.id)
+  );
   const checked = problems.length === 0;
   const revision = expectedRevision + 1;
   const editedAt = new Date();
   const db = drizzle(env.DB);
   let checkpoint: DraftRow | undefined;
-  // After its modules were built and its text checked.
+  // After its text was checked.
   await admit?.();
   try {
     const [, checkpoints] = await auditedBatch(env, db, [
@@ -478,52 +300,12 @@ export const editWorkflowDraft = async (
         )
         .orderBy(desc(workflowResourceDrafts.revision))
         .limit(1),
-      // Its modules, with the revision they belong to: the batch fails as
-      // one when the revision does.
-      ...Object.entries(modules).map(([path, text]) =>
-        db.insert(workflowResourceDraftModules).values({
-          workflowResourceId: workflow.id,
-          revision,
-          path,
-          source: text,
-        })
-      ),
-      // What their inspection answered, for the next edit that keeps them.
-      ...(kept
-        ? [
-            db.insert(workflowResourceDraftInspections).values({
-              workflowResourceId: workflow.id,
-              revision,
-              modulesHash: inspection.modulesHash,
-              manifest: inspection.manifest,
-            }),
-          ]
-        : []),
       // Only the latest revision and the latest checkpoint stay.
       db.delete(workflowResourceDrafts).where(
         and(
           eq(workflowResourceDrafts.workflowResourceId, workflow.id),
           sql`${workflowResourceDrafts.revision} < ${revision}`,
           sql`${workflowResourceDrafts.revision} IS NOT (SELECT MAX(revision)
-              FROM workflow_resource_drafts
-              WHERE workflow_resource_id = ${workflow.id} AND checked = 1)`
-        )
-      ),
-      // And their modules and inspections, with them.
-      db.delete(workflowResourceDraftModules).where(
-        and(
-          eq(workflowResourceDraftModules.workflowResourceId, workflow.id),
-          sql`${workflowResourceDraftModules.revision} < ${revision}`,
-          sql`${workflowResourceDraftModules.revision} IS NOT (SELECT MAX(revision)
-              FROM workflow_resource_drafts
-              WHERE workflow_resource_id = ${workflow.id} AND checked = 1)`
-        )
-      ),
-      db.delete(workflowResourceDraftInspections).where(
-        and(
-          eq(workflowResourceDraftInspections.workflowResourceId, workflow.id),
-          sql`${workflowResourceDraftInspections.revision} < ${revision}`,
-          sql`${workflowResourceDraftInspections.revision} IS NOT (SELECT MAX(revision)
               FROM workflow_resource_drafts
               WHERE workflow_resource_id = ${workflow.id} AND checked = 1)`
         )
@@ -537,7 +319,6 @@ export const editWorkflowDraft = async (
           revision,
           checked,
           problems: problems.length,
-          modules: Object.keys(modules).length,
           ...(step === undefined
             ? {}
             : { step: step.kind, stepPointer: step.pointer }),
@@ -564,7 +345,6 @@ export const editWorkflowDraft = async (
       editedBy: by.userId,
       editedAt,
     },
-    modules,
     ...(checkpoint === undefined ? {} : { checkpoint }),
   });
 };
@@ -573,8 +353,7 @@ export const editWorkflowDraft = async (
  * Inserts or changes one step of workflow `id`'s draft for `by`, who must
  * build it (`workflowStepEditSchema`, workflow-steps.ts): applied to the
  * draft as it is at the revision they read, the draft before any edit
- * included, and saved as its next revision with its modules as they are,
- * exactly as `editWorkflowDraft` saves an edit. A revision another edit
+ * included, and saved as its next revision, exactly as `editWorkflowDraft` saves an edit. A revision another edit
  * replaced is `workflow.draft_conflict`. The canvas and the agent's
  * `editStep` both edit a step through this.
  */
@@ -601,11 +380,7 @@ export const editWorkflowStep = async (
     env,
     by,
     workflow.id,
-    {
-      expectedRevision,
-      source: applyStepEdit(draft.source, edit),
-      modules: draft.modules,
-    },
+    { expectedRevision, source: applyStepEdit(draft.source, edit) },
     admit,
     {
       kind: edit.kind,
@@ -641,7 +416,7 @@ export const publishWorkflowDraft = async (
     workflowDraftPublishSchema,
     input
   );
-  const { latest, modules } = await draftRows(env, workflow.id);
+  const { latest } = await draftRows(env, workflow.id);
   // A revision another edit has replaced conflicts, as an edit of it
   // would; the latest one publishes only once it passed.
   const stale = latest !== undefined && latest.revision !== revision;
@@ -651,17 +426,11 @@ export const publishWorkflowDraft = async (
   if (latest === undefined || !latest.checked) {
     throw workflowResourceErrors.create("workflow.draft_unchecked");
   }
-  // With its modules, which publication builds and checks again.
   return await publishWorkflowVersion(
     env,
     by,
     workflow.id,
-    {
-      definition: latest.source,
-      basedOn,
-      ...(Object.keys(modules).length === 0 ? {} : { modules }),
-    },
-    undefined,
+    { definition: latest.source, basedOn },
     admit
   );
 };

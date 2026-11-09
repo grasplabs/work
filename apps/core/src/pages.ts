@@ -10,8 +10,6 @@ import {
   previewRuntime,
   pageRuntime,
   limitErrors,
-  computeModuleErrors,
-  computePackagesFile,
   packageModulesFile,
   expressionTypeCheck,
   generatedWorkflowErrors,
@@ -25,7 +23,6 @@ import type {
   CompileTarget,
   Diagnostic,
   InspectTarget,
-  ComputeModulesBuild,
   ExpressionScopeTypes,
   ExpressionTypeCheck,
   IncrementalBuild,
@@ -108,12 +105,6 @@ const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
   if (kind === "generated-workflow") {
     return generatedWorkflowErrors;
   }
-  // A JSON workflow's compute modules: held to their own bounds, the list
-  // of approved packages core names beside them apart (`computePackagesFile`).
-  if (kind === "compute") {
-    return ({ [computePackagesFile]: _packages, ...modules }) =>
-      computeModuleErrors(modules);
-  }
   return limitErrors;
 };
 
@@ -162,7 +153,6 @@ const compilerCalls = {
   "app-check": ["build", "app"],
   "app-tests": ["build", "app-tests"],
   "generated-workflow": ["build", "generated-workflow"],
-  compute: ["build", "compute"],
 } as const satisfies Record<
   string,
   readonly ["build", CompileTarget] | readonly ["inspect", InspectTarget]
@@ -272,14 +262,12 @@ const compiled = async (
   try {
     return { built: await call(), cache: true };
   } catch (error) {
-    // A JSON workflow's generated module is never its author's to fix,
-    // and a stop of compute modules that the load made (a deadline, a
-    // crash) isn't either: both are thrown on, for the caller to answer
-    // as a build to try again (`workflow.build_slow`).
+    // A JSON workflow's generated module is never its author's to fix:
+    // a stop of its build is thrown on, for the caller to answer as a
+    // build to try again (`workflow.build_slow`).
     if (
       !(error instanceof PlatformBoundError) ||
-      kind === "generated-workflow" ||
-      (kind === "compute" && !error.own)
+      kind === "generated-workflow"
     ) {
       throw error;
     }
@@ -289,7 +277,7 @@ const compiled = async (
         {
           rule: "compile",
           severity: "error",
-          message: `The compiler was stopped before it finished: ${error.message} It tries again at the next build; should it stop again, simplify the ${kind === "compute" ? "modules'" : "App's"} types (a type that recurses without end holds the type checker).`,
+          message: `The compiler was stopped before it finished: ${error.message} It tries again at the next build; should it stop again, simplify the App's types (a type that recurses without end holds the type checker).`,
         },
       ],
     };
@@ -742,26 +730,6 @@ export const checkWorkflowExpressions = async (
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return checked(JSON.parse(text) as Diagnostic[]);
 };
-
-/**
- * Builds a JSON workflow's compute modules (`code/<file>.ts`,
- * workflow-modules.ts) into ES modules, in the compiler's isolate,
- * type-checked against `@grasp-os/sdk/compute`. Cached in R2 like the
- * others.
- */
-export const buildComputeModules = async (
-  env: BuildEnv,
-  files: AppFiles,
-  /** Whose build it is: the independent workflow's ID. */
-  whose: string
-): Promise<ComputeModulesBuild> =>
-  await cachedBuild<ComputeModulesBuild>(
-    env,
-    "compute",
-    files,
-    (all) => all,
-    whose
-  );
 
 /** The details of a `*.build_failed` error: the version (null for a draft), and why. */
 export const buildFailed = (

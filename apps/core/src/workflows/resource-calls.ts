@@ -22,7 +22,6 @@ import {
 } from "@grasp-os/shared/run-files";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { waitUntil } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -47,7 +46,6 @@ import type {
 } from "./resource-authority.ts";
 import {
   callKnowledge,
-  callTemplate,
   requireKnowledgeRequest,
   requireResourceRunEvidenceReadable,
 } from "./resource-reads.ts";
@@ -131,12 +129,6 @@ export interface Effect {
   /** Throws unless its attempt still holds its lease, nothing awaited. */
   readonly requireHolds: () => void;
   /**
-   * Whether one of the workflow's own actions makes it (resource-action.ts):
-   * a restricted run's action makes no connector call, whose held decision
-   * would outlive the action that can't wait for it.
-   */
-  readonly fromAction?: boolean;
-  /**
    * Hears that the call goes out now: every check of its own passed, its
    * started receipt kept, nothing awaited after (a model's: as its request
    * is sent). Where a call tried once marks that it went (sealed-run.ts).
@@ -194,11 +186,6 @@ export type BuiltCall =
       readonly arguments: Json;
     }
   | {
-      /** A pinned template version's content, by an action (GRA-700). */
-      readonly name: "grasp.template";
-      readonly binding: string;
-    }
-  | {
       /** One call on the run's own files, by an action (GRA-724). */
       readonly name: "grasp.files";
       readonly binding: string;
@@ -220,7 +207,6 @@ const kindOf = {
   "grasp.connector": "connector",
   "grasp.model": "model",
   "grasp.knowledge": "knowledge",
-  "grasp.template": "template",
   "grasp.files": "files",
 } as const;
 
@@ -847,85 +833,6 @@ const callModel = async (
   return requireShape(descriptor, answer.output, "output");
 };
 
-/**
- * Why an action's call was refused at its host's own admission
- * (resource-action.ts), before it was ever a named call: a binding its
- * sealed `uses` doesn't list, a connector operation its use doesn't
- * declare, a request of the wrong shape or past its bounds, one past the
- * attempt's calls, or a model call past the run's `maxModelCalls`
- * (sealed-run.ts, `#reserveModelCall`, GRA-700).
- */
-export type AdmissionReason =
-  | "use_undeclared"
-  | "operation_undeclared"
-  | "request_invalid"
-  | "call_limit"
-  | "model_call_limit";
-
-/** An action's call refused at admission, as its evidence names it. */
-interface AdmissionRefusal {
-  readonly build: string;
-  readonly task: string;
-  readonly attempt: number;
-  readonly generation: number;
-  readonly call: string | null;
-  readonly errorCode: string;
-  readonly reason: AdmissionReason;
-}
-
-/** Writes `refusal`'s evidence; logs, never throws, one it can't keep. */
-const writeAdmissionRefusal = async (
-  env: Env,
-  run: CallingRun,
-  refusal: AdmissionRefusal
-): Promise<void> => {
-  try {
-    await audited(env, {
-      actor: { type: "system" },
-      action: "workflow.call.refused",
-      target: { type: "workflow_run", id: run.runId },
-      detail: {
-        workflow: run.workflowId,
-        version: run.version,
-        person: run.principal,
-        // A test run's refusal says so: it was never a run of a version.
-        ...(run.candidate === undefined ? {} : { candidate: true }),
-        ...refusal,
-      },
-    });
-  } catch (error) {
-    log.error("workflow.call.audit_failed", {
-      runId: run.runId,
-      task: refusal.task,
-      errorCode: refusal.errorCode,
-      ...errorFields(error),
-    });
-  }
-};
-
-/**
- * Keeps the evidence of an action's call refused at its host's own
- * admission, as `workflow.call.refused`, the event App runs' refused calls
- * leave (workflows/host.ts): what the host knows of the run, its build,
- * task and attempt, never what the isolate sent. `call` is a declared
- * alias, or null: an undeclared one is the isolate's text. An event that
- * can't be kept is logged; the refusal stands either way.
- *
- * The write is the request's own work until it is done (`waitUntil`):
- * `callAction` waits for an action no longer than its attempt's deadline,
- * and a write it stopped waiting for still finishes rather than ending
- * with the call. Every refusal path goes through here, so none can skip it.
- */
-export const auditAdmissionRefusal = async (
-  env: Env,
-  run: CallingRun,
-  refusal: AdmissionRefusal
-): Promise<void> => {
-  const writing = writeAdmissionRefusal(env, run, refusal);
-  waitUntil(writing);
-  await writing;
-};
-
 const namesFileSchema = z.object({ file: runFileIdSchema });
 
 /**
@@ -1024,9 +931,6 @@ const candidateAnswer = async (
       requireKnowledgeRequest(call);
       return boundedAnswer(answer, "output");
     }
-    case "grasp.template": {
-      return boundedAnswer(answer, "output");
-    }
     // A test run keeps no file: its files calls answer what its start
     // gave, and nothing is written to the run's files, once their
     // arguments are what a real call would take.
@@ -1042,9 +946,7 @@ const candidateAnswer = async (
 
 /**
  * Refuses `call` of `run` through `binding` unless it may go now, before
- * anything is sent: a connector call from an action of a restricted run
- * (connect would hold it for a decision no action waits for), and any
- * call whose authority isn't decided again (`requireCallAuthority`) or
+ * anything is sent: any call whose authority isn't decided again (`requireCallAuthority`) or
  * that hands out what the run may no longer read (`handsOut`), a
  * connector call's files bindings too (`requireFilesBindings`).
  */
@@ -1052,16 +954,8 @@ const requireCallAllowed = async (
   env: Env,
   run: CallingRun,
   binding: FrozenCatalogBinding,
-  call: BoundBuiltCall,
-  effect: Effect
+  call: BoundBuiltCall
 ): Promise<void> => {
-  if (
-    effect.fromAction === true &&
-    run.restricted &&
-    call.name === "grasp.connector"
-  ) {
-    throw workflowResourceErrors.create("workflow.action_restricted");
-  }
   await requireCallAuthority(env, run, binding);
   // What the run recalled leaves with a connector call or a model call,
   // and with a file it writes: a file's name and its
@@ -1248,7 +1142,7 @@ export const makeCall = async (
     if (call.name === "grasp.files") {
       fileDetail = filesCallDetail(call.operation, call.arguments);
     }
-    await requireCallAllowed(env, run, binding, call, effect);
+    await requireCallAllowed(env, run, binding, call);
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
@@ -1280,10 +1174,6 @@ export const makeCall = async (
       }
       case "grasp.knowledge": {
         output = await callKnowledge(env, run, binding, call);
-        break;
-      }
-      case "grasp.template": {
-        output = await callTemplate(env, binding);
         break;
       }
       case "grasp.files": {

@@ -152,20 +152,20 @@ describe("checking a workflow", () => {
     });
   });
 
-  it("holds a call to a connection's action or a module, never both or neither", () => {
+  it("holds a call to a connection and its action, never a module of the workflow's own", () => {
     expect(
       codesOf(
         followedBy({
-          id: "both",
+          id: "own",
           type: "call",
           connection: "mail",
           action: "mail.send",
           module: "mail",
         })
       )
-    ).toStrictEqual(["workflow.call_kind"]);
+    ).toStrictEqual(["workflow.unknown_property"]);
     expect(codesOf(followedBy({ id: "neither", type: "call" }))).toStrictEqual([
-      "workflow.call_kind",
+      "workflow.missing_property",
     ]);
   });
 

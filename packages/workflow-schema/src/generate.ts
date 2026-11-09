@@ -18,14 +18,7 @@ import {
   takesByGuard,
   takesOf,
 } from "./format.ts";
-import type {
-  Json,
-  ModulePermission,
-  Step,
-  TryStep,
-  Value,
-  WaitForEventStep,
-} from "./format.ts";
+import type { Json, Step, TryStep, Value, WaitForEventStep } from "./format.ts";
 import type {
   SealedCall,
   SealedCatch,
@@ -151,9 +144,9 @@ export const generatedHelpersImport = "@grasp-os/sdk/workflow-generated";
  * code was generated for, which the run host's engine must fit, so a new
  * version here is a new contract between them: core loads only builds of
  * this one, and an older build is refused, to publish again
- * (`workflow.format_unsupported`), never half run. Version 5: calls
- * on the run's files and the Brain (`ctx.files`, `ctx.brain`), and a
- * connection call's `into` and `from`, which the code sends with it.
+ * (`workflow.format_unsupported`), never half run. Version 5: no
+ * workflow modules (`ctx.modules`), `JSON.parse` through `$parse`, and
+ * `run.startedAt`.
  */
 export const generatorVersion = "grasp-workflow-ts/5";
 
@@ -341,7 +334,6 @@ class Generator {
   readonly #memberPaths: ReadonlyMap<string, ReadonlyMap<string, string>>;
   readonly #decisions = new Set<string>();
   readonly #events = new Map<string, Set<string>>();
-  readonly #modules = new Map<string, ModulePermission["kind"]>();
   /** The actions each files and brain permission's steps take. */
   readonly #files = new Map<string, Set<string>>();
   readonly #brain = new Map<string, Set<string>>();
@@ -559,25 +551,8 @@ class Generator {
       member = `ctx.connections${memberOf(step.connection)}${path
         .map((segment) => memberOf(segment))
         .join("")}`;
-    } else if ("files" in step || "brain" in step) {
-      ({ call, member } = this.#resourceCall(step, args.template));
     } else {
-      const permission =
-        this.#workflow.document.permissions?.modules?.[step.module];
-      if (permission === undefined) {
-        throw new Error(`No module ${step.module}`);
-      }
-      const [, path = "", exported = ""] =
-        /^local:(?<path>.+)#(?<export>[^#]+)$/u.exec(permission.contract) ?? [];
-      call = {
-        name: permission.kind === "compute" ? "grasp.compute" : "grasp.action",
-        binding: step.module,
-        module: path,
-        export: exported,
-        arguments: args.template,
-      };
-      this.#modules.set(step.module, permission.kind);
-      member = `ctx.modules${memberOf(step.module)}`;
+      ({ call, member } = this.#resourceCall(step, args.template));
     }
     this.#task({
       id: step.id,
@@ -603,10 +578,7 @@ class Generator {
    * of the format's own fixed list, sealed as its call, and declared.
    */
   #resourceCall(
-    step: Exclude<
-      Extract<Step, { type: "call" }>,
-      { connection: string } | { module: string }
-    >,
+    step: Exclude<Extract<Step, { type: "call" }>, { connection: string }>,
     args: Template
   ): { call: SealedCall; member: string } {
     const [kind, alias, actions] =
@@ -1205,14 +1177,6 @@ class Generator {
           ),
         ]);
       }
-    }
-    if (this.#modules.size > 0) {
-      kinds.push([
-        "modules",
-        objectCode(
-          [...this.#modules].map(([alias, kind]) => [alias, literal(kind)])
-        ),
-      ]);
     }
     return kinds.length === 0 ? undefined : objectCode(kinds);
   }

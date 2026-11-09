@@ -99,9 +99,9 @@ const invalidData: ReadonlySet<string> = new Set([
 
 /**
  * The calls whose step runs its effect once (sealed-run.ts,
- * `triedOnceCalls`): a model request, one of the workflow's own actions.
+ * `triedOnceCalls`): a model request.
  */
-const onceCalls: ReadonlySet<string> = new Set(["grasp.model", "grasp.action"]);
+const onceCalls: ReadonlySet<string> = new Set(["grasp.model"]);
 
 /**
  * The calls whose timeout leaves their effect unknown: those that run it
@@ -225,7 +225,6 @@ const permanentCodes: ReadonlySet<string> = new Set([
   "connect.declined",
   "resource.limit_reached",
   "workflow.model_call_limit",
-  "workflow.action_call_limit",
   "workflow.too_many_steps",
   "workflow.too_many_attempts",
   // A step's state past what a workflow keeps: the same values, the

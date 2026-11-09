@@ -20,10 +20,10 @@
  *   oxc.wasm is built from), which reads its comments and ambient
  *   declarations for the two rules below through the platform's own
  *   steering.ts;
- * - code whose types are checked (server code, compute
- *   modules) steers nothing: no triple-slash directive, no suppression
- *   (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`), no `declare
- *   global` or `declare module` (imports.ts, `typeChecked`);
+ * - server code, whose types are checked, steers nothing: no
+ *   triple-slash directive, no suppression (`@ts-ignore`,
+ *   `@ts-expect-error`, `@ts-nocheck`), no `declare global` or
+ *   `declare module`;
  * - no App file holds a triple-slash directive but a reference path to
  *   one of the App's files (steering.ts `referenceError`);
  * - an App file resolves by name only the modules its kind may import
@@ -105,7 +105,6 @@ const kinds: Readonly<Record<string, Kind>> = {
     declares: generated,
     lenient: (file) => file.startsWith("server/migrations/"),
   },
-  compute: { reports: every, steered: every, declares: none, lenient: none },
   generated: { reports: every, steered: none, declares: every, lenient: none },
 };
 

@@ -51,7 +51,7 @@ import {
 } from "./binding-form.ts";
 
 // What an App's actions reach through its declared resources (core's
-// resource-bindings.ts): the models, integrations, knowledge and templates
+// resource-bindings.ts): the models, integrations and knowledge
 // its current version declares, whether a binding serves each now and,
 // when it doesn't, why. An admin binds each one to something that may
 // serve it, and replaces or revokes a binding. Core decides who may (the organization's own admins, never
@@ -642,16 +642,14 @@ export const ResourceBindings = ({
       <p className="text-muted-foreground max-w-prose">
         {decides ? (
           <Trans>
-            The App&apos;s actions reach a model, an integration, knowledge or a
-            template only through a binding an admin approves here. Declaring
-            one grants nothing, and revoking a binding stops the next request
-            through it.
+            The App&apos;s actions reach a model, an integration or knowledge
+            only through a binding an admin approves here. Declaring one grants
+            nothing, and revoking a binding stops the next request through it.
           </Trans>
         ) : (
           <Trans>
-            The App&apos;s actions reach a model, an integration, knowledge or a
-            template only through a binding an admin of your organization
-            approves.
+            The App&apos;s actions reach a model, an integration or knowledge
+            only through a binding an admin of your organization approves.
           </Trans>
         )}
       </p>
