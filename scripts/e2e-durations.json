@@ -137,7 +137,7 @@
   "[chromium] › connections.e2e.ts › a person reaches their account on an integration's page while the catalog or its tools don't come": 10.8,
   "[chromium] › connections.e2e.ts › an admin sees which Apps can use a shared connection, revokes a permission there, and reads a Composio connection's consent": 5.2,
   "[chromium] › dashboard.e2e.ts › a builder sees their workflows on the board, and opens them in full": 5.9,
-  "[chromium] › dashboard.e2e.ts › a person with nothing waiting finds an empty board, takes a widget off, adds it back and moves it, kept over a reload, puts the board back as it began, and finds nothing in their inbox": 5.1,
+  "[chromium] › dashboard.e2e.ts › a person with nothing waiting finds an empty board, takes a widget off, adds it back and moves it, kept over a reload, puts the board back as it began, and finds nothing in their inbox": 8,
   "[chromium] › dashboard.e2e.ts › an admin sees the latest activity, with the way to the audit trail": 4.4,
   "[chromium] › dashboard.e2e.ts › an admin sees what the models cost this month, with the way to AI spend in Settings": 3.8,
   "[chromium] › data-model.e2e.ts › a builder creates a table and its fields in the Data view, and sees them in the App's draft": 5.1,
