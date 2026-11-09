@@ -110,7 +110,7 @@ const replyWorkflow = async (aliases: readonly string[] = ["replies"]) => {
       returns: objectSchema({ subject: { kind: "string" } }),
       result: {
         subject: {
-          $expr: `reply${aliases.length}.event?.data.subject ?? ""`,
+          $expr: `reply${aliases.length}.timedOut ? "" : reply${aliases.length}.event.data.subject`,
         },
       },
       permissions: {

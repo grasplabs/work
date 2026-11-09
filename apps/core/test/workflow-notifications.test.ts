@@ -265,7 +265,7 @@ const definitionOf = (
     result: {
       status: {
         $expr:
-          '(job.event?.source ?? "") + " " + (job.event?.data.jobId ?? "")',
+          'job.timedOut ? "" : job.event.source + " " + job.event.data.jobId',
       },
     },
     permissions: { events: { jobEvents: { contract }, ...more } },

@@ -1,4 +1,3 @@
-import { kitModuleName } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
@@ -49,6 +48,7 @@ import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus, runObject } from "./runs.ts";
+import { moduleOf } from "./sealed-run-harness.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { unique } from "./sign-in.ts";
 
@@ -169,7 +169,7 @@ const inboxWorkflow = async () => {
       },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
-        listen("await-reply", emailReplyType, "replies"),
+        listen("awaitReply", emailReplyType, "replies"),
         listen("awaitJob", completed, "jobs"),
       ],
     }),
@@ -230,13 +230,8 @@ const memoryOfTest = (): SealedRunMemory => ({
   modelCalls: { count: () => 0, keep: () => {} },
 });
 
-const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
-
 /** A module of the test's own whose run answers the `inbox` it read. */
-const readsInbox = `
-import { workflow, v } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: v.object({}) }, async (step, { inbox }) => ({ ...inbox }));
-`;
+const readsInbox = moduleOf("return { ...engine.inbox };");
 
 /** Run `runId` as the dispatcher loads it, served on the run host. */
 const sealedRunOf = async (runId: string) => {

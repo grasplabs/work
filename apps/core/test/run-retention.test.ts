@@ -156,7 +156,7 @@ const approvalDefinition = (contract: string): string =>
     returns: objectSchema({ status: { kind: "string" } }),
     result: {
       status: {
-        $expr: 'review.approved ? "approved" : "rejected"',
+        $expr: '!review.timedOut && review.approved ? "approved" : "rejected"',
       },
     },
     params: {
@@ -174,7 +174,7 @@ const approvalDefinition = (contract: string): string =>
         decision: "approval",
         recipients: { $expr: "[params.reviewer]" },
         prompt: { $expr: '"Approve: " + args.who' },
-        input: { $expr: "input" },
+        input: { $expr: "args" },
       },
     ],
   });

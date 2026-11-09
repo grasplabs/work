@@ -1,4 +1,3 @@
-import { kitModuleName } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
@@ -56,6 +55,7 @@ import { allEvents } from "./audit-events.ts";
 import { endLiveResourceRuns, objectSchema } from "./json-workflow-apps.ts";
 import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus, runObject } from "./runs.ts";
+import { moduleOf as harnessModuleOf } from "./sealed-run-harness.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // Waits on an event source's events by a match (event-waits.ts), from
@@ -250,22 +250,17 @@ const sealedRunOf = async (runId: string): Promise<HostedSealedRun> => {
   return sealedRunFrom(run);
 };
 
-const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
-
 /**
  * The run's wait, as generated code runs it: its enter step records the
  * value it matches (`key`, as code: its input's invoice unless given),
  * then it waits; the run answers the invoice of the event it took, or
  * that none came.
  */
-const waiting = (key = "args.invoice"): string => `
-import { workflow, v } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: v.object({ invoice: v.string() }) }, async (step, { input }) => {
+const waiting = (key = "args.invoice"): string =>
+  harnessModuleOf(`
   await step.do("awaitPaid", { key: "enter", description: "Its match" }, async () => ({ key: ${key} }));
   const waited = await step.listen("awaitPaid", { key: "task", description: "Its payment" });
-  return waited.timedOut ? "none" : waited.event.data.invoice;
-});
-`;
+  return waited.timedOut ? "none" : waited.event.data.invoice;`);
 
 /** The engine's own record of a run, as a later activation finds it. */
 interface Kept {
@@ -1041,8 +1036,8 @@ describe(
       const unsealed = await ranAs(
         otherRun,
         waiting().replace(
-          "({ key: input.invoice })",
-          "({ value: input.invoice })"
+          "({ key: args.invoice })",
+          "({ value: args.invoice })"
         )
       );
 
