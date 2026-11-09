@@ -169,7 +169,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     const othersConfirm = await outcome(
       someoneElse.api.heldStarts.confirm(
         listed?.id ?? "",
-        listed?.inputHash ?? ""
+        listed?.argsHash ?? ""
       )
     );
     const changed = await outcome(
@@ -177,10 +177,10 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     );
     const confirmed = await person.api.heldStarts.confirm(
       listed?.id ?? "",
-      listed?.inputHash ?? ""
+      listed?.argsHash ?? ""
     );
     const twice = await outcome(
-      person.api.heldStarts.confirm(listed?.id ?? "", listed?.inputHash ?? "")
+      person.api.heldStarts.confirm(listed?.id ?? "", listed?.argsHash ?? "")
     );
     const afterConfirm = await runsOf(workflow.id);
     const standing = await workflows.start(
@@ -199,7 +199,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       beforeConfirm: beforeConfirm.length,
       listed: {
         workflow: listed?.workflow,
-        input: listed?.input,
+        args: listed?.args,
         chatId: listed?.chatId,
       },
       othersList: othersList.length,
@@ -227,7 +227,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     }).toStrictEqual({
       asked: { status: "waiting", sameHeld: true },
       beforeConfirm: 0,
-      listed: { workflow: workflow.id, input: { who: "Ada" }, chatId },
+      listed: { workflow: workflow.id, args: { who: "Ada" }, chatId },
       othersList: 0,
       othersConfirm: "workflow.start_held_gone",
       changed: "workflow.start_held_changed",
@@ -339,7 +339,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     const [toRefuse] = await person.api.heldStarts.list();
     await admin.api.permissions.revoke(grant);
     const refusedConfirm = await outcome(
-      person.api.heldStarts.confirm(refusedHeld.held, toRefuse?.inputHash ?? "")
+      person.api.heldStarts.confirm(refusedHeld.held, toRefuse?.argsHash ?? "")
     );
     // A revocation ends the code run under way: the agent asks in its next.
     workflows = await chat.inRun();
@@ -372,7 +372,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     const [open] = await person.api.heldStarts.list();
     const confirmedAgain = await person.api.heldStarts.confirm(
       stopped.held,
-      open?.inputHash ?? ""
+      open?.argsHash ?? ""
     );
     // Started, but stopped before it was noted: the agent learns it from
     // the start's receipt.
@@ -462,7 +462,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
         { ...env, DB: racing },
         by,
         raced.held,
-        racedOpen?.inputHash ?? ""
+        racedOpen?.argsHash ?? ""
       )
     );
     const runsAfterRace = await runsOf(workflow.id);
@@ -472,21 +472,21 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     const [keptOpen] = await person.api.heldStarts.list();
     const confirmed = await person.api.heldStarts.confirm(
       kept.held,
-      keptOpen?.inputHash ?? ""
+      keptOpen?.argsHash ?? ""
     );
     // As it stood before the write that notes its start and lets its
     // input go.
     await env.DB.prepare(
       "UPDATE agent_held_starts SET start_id = NULL, input = ? WHERE id = ?"
     )
-      .bind(JSON.stringify(keptOpen?.input), kept.held)
+      .bind(JSON.stringify(keptOpen?.args), kept.held)
       .run();
     const lateDecline = await outcome(person.api.heldStarts.decline(kept.held));
     // The grant revoked meanwhile: confirming again names the start made.
     await admin.api.permissions.revoke(grant);
     const again = await person.api.heldStarts.confirm(
       kept.held,
-      keptOpen?.inputHash ?? ""
+      keptOpen?.argsHash ?? ""
     );
 
     const runsAtEnd = await runsOf(workflow.id);
@@ -529,7 +529,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       kind: "heldStart",
       id: held.held,
       verdict: "confirm",
-      inputHash: item?.kind === "heldStart" ? item.start.inputHash : "",
+      argsHash: item?.kind === "heldStart" ? item.start.argsHash : "",
     });
     const runs = await runsOf(workflow.id);
 
@@ -584,7 +584,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       const shown = listed.find(({ id }) => id === held.held);
       const confirmed = await person.api.heldStarts.confirm(
         held.held,
-        shown?.inputHash ?? ""
+        shown?.argsHash ?? ""
       );
       return await endOf(confirmed.run ?? confirmed.start);
     };
@@ -623,7 +623,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
 
     await person.api.heldStarts.confirm(
       confirming.held,
-      listed.find(({ id }) => id === confirming.held)?.inputHash ?? ""
+      listed.find(({ id }) => id === confirming.held)?.argsHash ?? ""
     );
     await person.api.heldStarts.decline(declining.held);
     await env.DB.prepare(

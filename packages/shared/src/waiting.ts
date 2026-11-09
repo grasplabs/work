@@ -254,8 +254,8 @@ export const waitingVerdictSchema = z.union([
     kind: z.literal("heldStart"),
     id: identifierSchema,
     verdict: z.literal("confirm"),
-    /** The hash of exactly the input the person was shown. */
-    inputHash: identifierSchema,
+    /** The hash of exactly the args the person was shown. */
+    argsHash: identifierSchema,
   }),
   z.strictObject({
     kind: z.literal("heldStart"),
