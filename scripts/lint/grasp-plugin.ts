@@ -32,7 +32,17 @@
  * such as how long a toast stays, is not motion and passes. What is rare
  * or seen once is turned off for its files in vite.config.ts, each with
  * its reason; a stylesheet's own animations are for review.
+ *
+ * icon-has-move: every Lucide icon the app imports moves in its own parts
+ * when its control is pointed at (apps/web/src/icon-moves.css, the
+ * `table` option, from the repository's root). It refuses an import of an
+ * icon the table gives no move, one whose move names a part the icon
+ * isn't drawn with (Lucide redrew it), and one whose move makes the whole
+ * icon larger and smaller, which is no move.
  */
+import path from "node:path";
+
+import { drawIcon, iconMovesAt } from "./icon-moves.ts";
 import { findScrollbar } from "./no-scrollbars.ts";
 import { findOldProductName } from "./old-product-name.ts";
 import { durationMs, findSlowClass, LIMIT_MS } from "./slow-motion.ts";
@@ -79,6 +89,11 @@ interface Context {
     messageId: string;
     data?: Record<string, string>;
   }) => void;
+}
+
+interface IconContext extends Context {
+  filename: string;
+  options: ({ table?: string } | undefined)[];
 }
 
 interface RuleContext extends Context {
@@ -645,6 +660,89 @@ const noSlowMotion = {
   },
 };
 
+/** The repository's root, which a rule's paths are from. */
+const root = path.join(import.meta.dirname, "../..");
+
+const iconHasMove = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Every icon of a control moves in its own parts when it is pointed at.",
+    },
+    messages: {
+      missing:
+        "{{name}} (.lucide-{{icon}}) has no move in {{table}}: give it one, saying which of its parts moves, and how.",
+      beyond:
+        ".lucide-{{icon}} is drawn in {{parts}} parts, but its move in {{table}} names part {{part}}: Lucide redrew it.",
+      sized:
+        "The move of .lucide-{{icon}} itself in {{table}} makes it larger and smaller, which is no move: move its parts, or turn or place it.",
+    },
+    schema: [
+      {
+        type: "object",
+        properties: { table: { type: "string" } },
+        required: ["table"],
+        additionalProperties: false,
+      },
+    ],
+  },
+  create: (context: IconContext) => {
+    const table = context.options[0]?.table ?? "";
+    return {
+      ImportDeclaration: (node: Node): void => {
+        if (
+          node.source?.value !== "lucide-react" ||
+          node.importKind === "type"
+        ) {
+          return;
+        }
+        const moves = iconMovesAt(path.join(root, table));
+        for (const specifier of node.specifiers ?? []) {
+          const name = nameOf(specifier.imported);
+          if (
+            specifier.type !== "ImportSpecifier" ||
+            specifier.importKind === "type" ||
+            typeof name !== "string"
+          ) {
+            continue;
+          }
+          const drawn = drawIcon(context.filename, name);
+          if (drawn === undefined) {
+            continue;
+          }
+          const { icon, parts } = drawn;
+          const move = moves.get(icon);
+          if (move === undefined) {
+            context.report({
+              node: specifier,
+              messageId: "missing",
+              data: { name, icon, table },
+            });
+            continue;
+          }
+          for (const part of move.parts) {
+            if (part > parts) {
+              context.report({
+                node: specifier,
+                messageId: "beyond",
+                data: { icon, parts: String(parts), part: String(part), table },
+              });
+            }
+          }
+          if (move.sized) {
+            context.report({
+              node: specifier,
+              messageId: "sized",
+              data: { icon, table },
+            });
+          }
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "grasp" },
   rules: {
@@ -652,5 +750,6 @@ export default {
     "no-scrollbars": noScrollbars,
     "no-old-product-name": noOldProductName,
     "no-slow-motion": noSlowMotion,
+    "icon-has-move": iconHasMove,
   },
 };

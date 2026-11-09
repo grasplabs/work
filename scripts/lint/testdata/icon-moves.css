@@ -1,0 +1,30 @@
+/* A table of icon moves for grasp/icon-has-move's test. */
+
+/* The lid lifts: parts the icon has. */
+.lucide-trash {
+  overflow: visible;
+}
+.lucide-trash > :is(:nth-child(4), :nth-child(5)) {
+  --icon-move: icon-there;
+}
+
+/* The whole icon moves. */
+.lucide-check {
+  --icon-move: icon-draw;
+}
+
+/* A part a plus isn't drawn with. */
+.lucide-plus > :nth-child(9) {
+  --icon-move: icon-pop;
+}
+
+/* The whole bell made larger and smaller. */
+.lucide-bell {
+  --icon-move: icon-swing;
+  --icon-wide: 1.2;
+}
+
+/* A rule that sets no move is none. */
+.lucide-house {
+  overflow: visible;
+}
