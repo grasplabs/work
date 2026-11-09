@@ -12,7 +12,8 @@
  * core's (what it writes into the built frontend goes beside it, copied
  * in after, as the frontend's build empties its folder first), connect's
  * and the migrations. One after another they took 94 s of e2e-build on a
- * CI runner, the parts' start (November 2026). The SDK docs aren't built.
+ * CI runner, the parts' start (November 2026). The SDK docs are built
+ * too: an App's chat reads them (e2e/app-built.e2e.ts).
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -85,12 +86,6 @@ const frontendDist = "../web/dist";
  */
 const besideFrontend = path.join(import.meta.dirname, "dist/frontend");
 
-/**
- * The SDK docs' build, which writes the docs core serves at /docs: no
- * journey opens them, and it took 17 s of e2e-build (November 2026).
- */
-const docsBuild = "../docs/build.ts";
-
 if (import.meta.main) {
   // dev:build is the frontend's build, core's `build`, connect's build.
   const [frontend = "", ...afterFrontend] = stepsOf("dev:build");
@@ -98,9 +93,7 @@ if (import.meta.main) {
   if (devBuild.length === afterFrontend.length) {
     throw new Error("core's dev:build no longer runs `vp run build`");
   }
-  const coreBuild = stepsOf("build").filter(
-    (step) => !step.includes(docsBuild)
-  );
+  const coreBuild = stepsOf("build");
   rmSync(migratedStateDir, { recursive: true, force: true });
   rmSync(besideFrontend, { recursive: true, force: true });
   await run(`node ${path.join(import.meta.dirname, "connect-config.ts")}`);
