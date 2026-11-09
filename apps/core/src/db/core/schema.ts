@@ -921,8 +921,9 @@ export const blueprints = sqliteTable(
     tree: text().notNull(),
     /**
      * Its App definition (`app_versions.definition`): a marked one's
-     * version's, a built-in's from the release. Null for a row written
-     * before definitions left the tree, which no App is created from.
+     * version's, a built-in's from the release. Nullable only as the
+     * column was added (expand, then contract): every row is written with
+     * one.
      */
     definition: text(),
     appId: text("app_id").references(() => apps.id),
@@ -977,8 +978,9 @@ export const appOrigins = sqliteTable("app_origins", {
   code: text().notNull(),
   /**
    * The blueprint's definition the App last took, as `tree` its code: what
-   * an update merges the App's definition over. Null for an origin written
-   * before definitions left the tree, which no update merges over.
+   * an update merges the App's definition over. Nullable only as the
+   * column was added (expand, then contract): every row is written with
+   * one.
    */
   definition: text(),
   createdAt: timestamp("created_at").notNull(),
