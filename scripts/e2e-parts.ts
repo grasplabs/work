@@ -149,31 +149,43 @@ interface Part {
  * longest first, each to the worker with the least time yet, of every
  * part's `workersPerPart`. A file's tests in one part share a worker
  * (Playwright runs them one after another), so a test whose file already
- * runs in a part goes to that worker there. Returns the part's tests'
- * keys, sorted.
+ * runs in a part goes to that worker there. The tests of a file in
+ * `serialFiles` (`mode: "serial"`) go together, as each needs the ones
+ * before it. Returns the part's tests' keys, sorted.
  */
 export const partOf = (
   tests: readonly PartTest[],
   durations: Readonly<Record<string, number>>,
   index: number,
-  count: number
+  count: number,
+  serialFiles: ReadonlySet<string> = new Set()
 ): string[] => {
   const known = Object.values(durations).toSorted((a, b) => a - b);
   const median = known[Math.floor(known.length / 2)] ?? 1;
-  const secondsOf = (test: PartTest): number => durations[test.key] ?? median;
+  const units = new Map<
+    string,
+    { file: string; keys: string[]; seconds: number }
+  >();
+  for (const test of tests) {
+    const id = serialFiles.has(test.file) ? test.file : test.key;
+    const unit = units.get(id) ?? { file: test.file, keys: [], seconds: 0 };
+    unit.keys.push(test.key);
+    unit.seconds += durations[test.key] ?? median;
+    units.set(id, unit);
+  }
   const parts = Array.from({ length: count }, (): Part => ({
     keys: [],
     workers: Array.from({ length: workersPerPart }, () => 0),
     workerOfFile: new Map<string, number>(),
   }));
-  const longestFirst = tests.toSorted(
-    (a, b) => secondsOf(b) - secondsOf(a) || byKey(a.key, b.key)
+  const longestFirst = [...units].toSorted(
+    ([a, unitA], [b, unitB]) => unitB.seconds - unitA.seconds || byKey(a, b)
   );
-  for (const test of longestFirst) {
+  for (const [, unit] of longestFirst) {
     let best: { part: Part; worker: number } | undefined;
     let bestSeconds = Number.POSITIVE_INFINITY;
     for (const part of parts) {
-      const own = part.workerOfFile.get(test.file);
+      const own = part.workerOfFile.get(unit.file);
       const workers = own === undefined ? part.workers.keys() : [own];
       for (const worker of workers) {
         const seconds = part.workers[worker] ?? 0;
@@ -184,13 +196,16 @@ export const partOf = (
       }
     }
     if (best !== undefined) {
-      best.part.workers[best.worker] = bestSeconds + secondsOf(test);
-      best.part.workerOfFile.set(test.file, best.worker);
-      best.part.keys.push(test.key);
+      best.part.workers[best.worker] = bestSeconds + unit.seconds;
+      best.part.workerOfFile.set(unit.file, best.worker);
+      best.part.keys.push(...unit.keys);
     }
   }
   return (parts[index - 1]?.keys ?? []).toSorted(byKey);
 };
+
+/** A file's tests that run one after another (`mode: "serial"`). */
+const serialMode = /mode: "serial"|describe\.serial\(/u;
 
 /** The parallel part's Chromium tests, as Playwright lists them. */
 const listed = (): PartTest[] =>
@@ -201,7 +216,8 @@ const listed = (): PartTest[] =>
       {
         cwd: root,
         encoding: "utf-8",
-        // Its report on stdout, never where a run sends its own (PLAYWRIGHT_JSON_OUTPUT_FILE, set for the run after it).
+        // Its report on stdout, never where the run after it sends its own
+        // (PLAYWRIGHT_JSON_OUTPUT_FILE).
         env: {
           ...process.env,
           GRASP_E2E_PART: "parallel",
@@ -209,6 +225,14 @@ const listed = (): PartTest[] =>
         },
         maxBuffer: 64 * 1024 * 1024,
       }
+    )
+  );
+
+/** Which of `tests`' files run their tests one after another. */
+const serialFilesOf = (tests: readonly PartTest[]): Set<string> =>
+  new Set(
+    [...new Set(tests.map(({ file }) => file))].filter((file) =>
+      serialMode.test(readFileSync(path.join(root, "e2e", file), "utf-8"))
     )
   );
 
@@ -220,7 +244,10 @@ if (import.meta.main) {
     const durations = z
       .record(z.string(), z.number())
       .parse(JSON.parse(readFileSync(e2eDurationsFile, "utf-8")));
-    console.log(partOf(listed(), durations, index, count).join("\n"));
+    const tests = listed();
+    console.log(
+      partOf(tests, durations, index, count, serialFilesOf(tests)).join("\n")
+    );
   } else {
     console.error("Usage: node scripts/e2e-parts.ts <part>/<parts>");
     process.exitCode = 1;
