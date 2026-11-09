@@ -540,6 +540,14 @@ interface Bound {
  * What D1's `first` answers of a statement's `results`: its first row, or
  * that row's `column`, or `null` when there is none.
  */
+/**
+ * Most rows a search reads for each section a common word is in: about 28
+ * as it ranks them now (matched, joined to its document, scored, sorted).
+ * Looking each section's words up one by one read about 67, and took
+ * seconds (GRA-1668).
+ */
+const rowsPerCommonMatch = 40;
+
 const firstOf = (
   results: Record<string, unknown>[],
   column?: string
@@ -713,12 +721,58 @@ const tablesReadWhole = async ({ query, values }: Bound): Promise<string[]> => {
   });
 };
 
+/** The full-text indexes, which a search asks by word. */
+const fullTextIndexes = new Set(["search_words", "search_trigrams"]);
+
+/** A step that runs for every row of what it reads: a co-routine or a CTE. */
+const perRowStepPattern = /^(?:CO-ROUTINE|MATERIALIZE)\b/u;
+
+/**
+ * The full-text indexes `statement` asks once for each section it ranks,
+ * by SQLite's plan for it: an index looked up by rowid and MATCH (FTS5's
+ * `=` and `M`) inside a step that runs for every match (a co-routine or a
+ * materialized CTE), not only for the few rows the search returns. Each
+ * such lookup reads the word's whole posting list, so a word in thousands
+ * of sections costs thousands of reads of the index.
+ */
+const indexesAskedPerMatch = async ({
+  query,
+  values,
+}: Bound): Promise<string[]> => {
+  const { results } = await env.KNOWLEDGE.prepare(`EXPLAIN QUERY PLAN ${query}`)
+    .bind(...values)
+    .all<{ id: number; parent: number; detail: string }>();
+  const steps = new Map(results.map((step) => [step.id, step]));
+  const names = corpusNamesOf(query);
+  /** Whether the step `id` is, or runs inside, one that runs for every match. */
+  const perMatch = (id: number): boolean => {
+    const step = steps.get(id);
+    if (step === undefined) {
+      return false;
+    }
+    return perRowStepPattern.test(step.detail) || perMatch(step.parent);
+  };
+  return results.flatMap(({ detail, parent }) => {
+    const step = scanPattern.exec(detail)?.groups;
+    const table = names.get((step?.table ?? "").toLowerCase());
+    const byRow = (step?.constraints ?? "").includes("=");
+    return table !== undefined &&
+      fullTextIndexes.has(table) &&
+      byRow &&
+      perMatch(parent)
+      ? [table]
+      : [];
+  });
+};
+
 describe("search speed", { timeout: 300_000 }, () => {
   // How long a search takes depends on how busy the machine is; how it
   // finds what it finds doesn't. So this asks what keeps a search fast as
-  // the corpus grows (it answers in 3 to 25 ms on a laptop): it reaches
-  // sections only through its indexes, and a search for words few
-  // sections hold reads little, however much else there is.
+  // the corpus grows (it answers in 3 to 30 ms on a laptop): it reaches
+  // sections only through its indexes, asks them once per word rather than
+  // once per section it ranks, reads a few dozen rows for each section a
+  // common word is in, and a search for words few sections hold reads
+  // little, however much else there is.
   it("finds sections through its indexes over 5,000 sections, reading a fraction of them", async () => {
     const person = await personOf("user");
     const sectionsOf = (document: number) =>
@@ -745,8 +799,12 @@ describe("search speed", { timeout: 300_000 }, () => {
       const whole = await Promise.all(
         recording.made.statements.map(tablesReadWhole)
       );
+      const asked = await Promise.all(
+        recording.made.statements.map(indexesAskedPerMatch)
+      );
       return {
         readWhole: whole.flat(),
+        askedPerMatch: asked.flat(),
         rows: recording.made.rows,
         // Its own full-text statement was seen: what's asserted of the
         // statements is of the search's.
@@ -768,32 +826,52 @@ describe("search speed", { timeout: 300_000 }, () => {
     // Words only the handbook's few sections hold, one with a typo.
     const rare = ["vakantiedagen", "pensioenregeling", "reiskostenvergoedng"];
 
+    // A word in thousands of sections, as itself and inside compounds.
+    const common = "verzekering";
+    const holding = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS sections FROM search_trigrams WHERE search_trigrams MATCH ?"
+    )
+      .bind(`"${common}"`)
+      .first<{ sections: number }>();
+    const commonSections = holding?.sections ?? 0;
+
     const readWhole: Record<string, string[]> = {};
+    const askedPerMatch: Record<string, string[]> = {};
     const seen: Record<string, boolean> = {};
     const rows: Record<string, boolean> = {};
     for (const query of everyQuery) {
       // oxlint-disable-next-line no-await-in-loop -- one search at a time
       const found = await searched(query);
       readWhole[query] = found.readWhole;
+      askedPerMatch[query] = found.askedPerMatch;
       seen[query] = found.seen;
       if (rare.includes(query)) {
         rows[query] = found.rows < sections / 10;
+      }
+      if (query === common) {
+        rows[query] = found.rows < commonSections * rowsPerCommonMatch;
       }
     }
 
     expect({
       sections: sections >= 5000,
+      commonSections: commonSections >= sections / 2,
       seen,
       readWhole,
+      askedPerMatch,
       rows,
     }).toStrictEqual({
       sections: true,
+      commonSections: true,
       seen: Object.fromEntries(everyQuery.map((query) => [query, true])),
       // Through the indexes, however many sections match: a word in
       // thousands of them costs what they match, never the whole corpus.
       readWhole: Object.fromEntries(everyQuery.map((query) => [query, []])),
-      // A word in a handful of sections reads little of the rest.
-      rows: Object.fromEntries(rare.map((query) => [query, true])),
+      // Each word asked of an index once, never once per section ranked.
+      askedPerMatch: Object.fromEntries(everyQuery.map((query) => [query, []])),
+      // A word in a handful of sections reads little of the rest, and a
+      // word in thousands reads a few dozen rows for each.
+      rows: Object.fromEntries([...rare, common].map((query) => [query, true])),
     });
   });
 });
