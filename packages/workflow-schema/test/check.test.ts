@@ -56,6 +56,10 @@ const raise = (id: string, message: string) => ({
   error: { code: "invoice.rejected", message },
 });
 
+/** `levels` arrays, one inside another, around a string. */
+const nested = (levels: number): unknown =>
+  levels === 0 ? "x" : [nested(levels - 1)];
+
 /** A call of the mail connection's `action`, as step `id`. */
 const sending = (id: string, action: string) => ({
   id,
@@ -163,6 +167,30 @@ describe("checking a workflow", () => {
     expect(codesOf(followedBy({ id: "neither", type: "call" }))).toStrictEqual([
       "workflow.call_kind",
     ]);
+  });
+
+  it("holds every kind's permissions together to one limit, `ai` one of them", () => {
+    const document = everyStep();
+    // `everyStep` holds two: `ai` and the `mail` connection.
+    const withEvents = (count: number) => ({
+      ...document,
+      permissions: {
+        ...document.permissions,
+        events: Object.fromEntries(
+          Array.from({ length: count }, (_, index) => [
+            `replies${index}`,
+            { contract: "grasp.replies@1" },
+          ])
+        ),
+      },
+    });
+    expect({
+      most: codesAt(withEvents(62)),
+      over: codesAt(withEvents(63)),
+    }).toStrictEqual({
+      most: "ok",
+      over: { "/permissions": "workflow.too_many_permissions" },
+    });
   });
 
   it("refuses one alias under two kinds, and `ai` for anything but the model", () => {
@@ -399,6 +427,32 @@ describe("checking a workflow", () => {
         })
       )
     ).toStrictEqual({ "/steps/5/error/code": "workflow.invalid_name" });
+  });
+
+  it("refuses a raise whose error `AppError` can't build, at the part that can't be", () => {
+    const raising = (error: Record<string, unknown>) =>
+      codesAt(
+        followedBy({
+          id: "refuse",
+          type: "raise",
+          error: { code: "invoice.rejected", message: "No.", ...error },
+        })
+      );
+    expect({
+      // 250 emoji: 250 characters the schema counts, 500 code units.
+      longest: raising({ message: "\u{1F600}".repeat(250) }),
+      // 300 emoji: under the schema's 500 characters, 600 code units.
+      emoji: raising({ message: "\u{1F600}".repeat(300) }),
+      deepest: raising({ details: nested(31) }),
+      tooDeep: raising({ details: nested(32) }),
+      tooLarge: raising({ details: { note: "x".repeat(16 * 1024) } }),
+    }).toStrictEqual({
+      longest: "ok",
+      emoji: { "/steps/5/error/message": "workflow.invalid_error" },
+      deepest: "ok",
+      tooDeep: { "/steps/5/error/details": "workflow.invalid_error" },
+      tooLarge: { "/steps/5/error/details": "workflow.invalid_error" },
+    });
   });
 
   it("holds one code to one raise, so a run that fails with it is that raise", () => {

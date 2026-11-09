@@ -36,7 +36,8 @@ export {
   declaredPermissions,
   isActionPermission,
 } from "./manifest-permissions.ts";
-export { appErrorDetailsOf } from "./app-error.ts";
+export { appErrorDetailsOf, appErrorProblemOf } from "./app-error.ts";
+export type { AppErrorProblem } from "./app-error.ts";
 // Whether a function still serves what a workflow bound it as.
 export { functionBreak } from "./function-change.ts";
 export { migrationPlatformMessages } from "./migration.ts";

@@ -71,7 +71,8 @@ const sourceOf = (expression: unknown): string | undefined =>
  * around its call (`<if> ? await … : null`), an `if` step's condition
  * around its `then` and its negation around its `else`, a loop's `while`
  * around its steps (`if (!<while>) break;`), a catch's code and `when`
- * around its `do`. A callback the code passes (a retry's `when`, a step's
+ * around its `do`, and a retry's `when` under the catch's `when`, as its
+ * guard function joins them. Any other callback the code passes (a step's
  * `state`) is checked under none: narrowing may not reach a closure, and
  * a condition left out only makes the check stricter than the build.
  */
@@ -108,7 +109,11 @@ const guardsOf = (
       );
     } else if (step.type === "try") {
       guardsOf(step.try, `${at}/try`, inside, guards);
-      guards.set(`${at}/catch/retry`, []);
+      const when = sourceOf(step.catch.when);
+      // The retry's guard is `Boolean(<catch.when> && <retry.when>)`
+      // (generate.ts, `retriesOf`): its `when` reads under the catch's
+      // `when` alone, the code filter being the host's.
+      guards.set(`${at}/catch/retry`, when === undefined ? [] : [when]);
       const caught = [
         ...inside,
         ...(step.catch.code === undefined
@@ -116,7 +121,6 @@ const guardsOf = (
           : [`error.code === ${JSON.stringify(step.catch.code)}`]),
       ];
       guards.set(`${at}/catch/when`, caught);
-      const when = sourceOf(step.catch.when);
       guardsOf(
         step.catch.do ?? [],
         `${at}/catch/do`,

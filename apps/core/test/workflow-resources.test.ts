@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/sdk";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
@@ -107,6 +108,27 @@ const definitionOf = ({
     permissions,
     steps,
   });
+
+/** A new admin, signed in as the catalog's publications need. */
+const catalogAdmin = async () => {
+  const admin = await person("admin");
+  return {
+    ...admin,
+    email: `${admin.userId}@acme.test`,
+    name: "Admin",
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+};
+
+/** A model contract of the catalog's, published by an admin: its key. */
+const modelContract = async (): Promise<string> => {
+  const key = `model-${unique()}`;
+  await publishCatalogContract(env, await catalogAdmin(), {
+    key,
+    kind: "model",
+  });
+  return key;
+};
 
 /** A workflow `by` created, under a name of its own. */
 const workflowOf = async (by: Acting, prefix = "greet") =>
@@ -299,6 +321,46 @@ describe("publishing a version", () => {
       0
     );
   });
+
+  it("resolves every permission of the most a definition holds, all kinds together, and refuses one more", async () => {
+    const admin = await catalogAdmin();
+    const model = await modelContract();
+    // The model and 63 events, each its own contract, are the most (64);
+    // a 64th event is one more.
+    const events = Array.from({ length: 64 }, () => `events-${unique()}`);
+    for (const key of events) {
+      // oxlint-disable-next-line no-await-in-loop -- one admin's publications, in order
+      await publishCatalogContract(env, admin, {
+        key,
+        kind: "event",
+        events: {
+          "grasp.job.completed": {
+            data: JSON.stringify(v.object({ note: v.string() }).descriptor),
+            browser: false,
+          },
+        },
+      });
+    }
+    const holding = (count: number) =>
+      definitionOf({
+        permissions: {
+          ai: { contract: model },
+          events: Object.fromEntries(
+            events
+              .slice(0, count)
+              .map((key, index) => [`events${index}`, { contract: key }])
+          ),
+        },
+      });
+    const workflow = await workflowOf(admin);
+    const published = await publish(admin, workflow.id, holding(63));
+    await expect(
+      problemCodes(publish(admin, workflow.id, holding(64), 1))
+    ).resolves.toStrictEqual(["workflow.too_many_permissions /permissions"]);
+    expect(
+      published.bindings.map(({ contractId }) => contractId).toSorted()
+    ).toStrictEqual([model, ...events.slice(0, 63)].toSorted());
+  });
 });
 
 describe("roles in a workflow", () => {
@@ -478,23 +540,6 @@ describe("Apps and workflows", () => {
     });
   });
 });
-
-/** A model contract of the catalog's, published by an admin: its key. */
-const modelContract = async (): Promise<string> => {
-  const admin = await person("admin");
-  const key = `model-${unique()}`;
-  await publishCatalogContract(
-    env,
-    {
-      ...admin,
-      email: `${admin.userId}@acme.test`,
-      name: "Admin",
-      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    },
-    { key, kind: "model" }
-  );
-  return key;
-};
 
 /** A definition asking model `key` through binding `greeting`. */
 const bindingDefinition = (key: string, status = "done") =>

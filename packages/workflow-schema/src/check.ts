@@ -7,14 +7,11 @@ import type {
   ExpressionRead,
 } from "@grasp-os/sdk/expression-check";
 import {
+  appErrorProblemOf,
   CompactDescriptorError,
   descriptorFromCompact,
   schemaFromDescriptor,
 } from "@grasp-os/sdk/host";
-import {
-  appErrorDetailsMaxBytes,
-  isAppErrorCode,
-} from "@grasp-os/shared/function-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { passedBound, plainDataBounds } from "@grasp-os/shared/value-bounds";
 
@@ -130,6 +127,7 @@ export type ProblemCode =
   | "workflow.unknown_permission"
   | "workflow.permission_kind"
   | "workflow.duplicate_alias"
+  | "workflow.too_many_permissions"
   | "workflow.no_result"
   | "workflow.retry_nested"
   | "workflow.unreadable"
@@ -140,7 +138,7 @@ export type ProblemCode =
   | "workflow.too_many_expressions"
   | "workflow.duration_too_long"
   | "workflow.reserved_error_code"
-  | "workflow.details_too_large";
+  | "workflow.invalid_error";
 
 /** A problem with a workflow: what, where it is, and how to fix it. */
 export interface Problem {
@@ -1043,16 +1041,20 @@ const checkState = (
 };
 
 /**
- * A raise's error must be the workflow's own `AppError`: its code in no
- * platform namespace (`connect.*`, `workflow.*`, ...), which a catch reads
- * as the platform's, and its details as large as an `AppError`'s.
+ * A raise's error must be one `AppError` builds, by `AppError`'s own rules:
+ * its code in no platform namespace (`connect.*`, `workflow.*`, ...),
+ * which a catch reads as the platform's, its message and details within
+ * their bounds. One it can't build would throw a `TypeError` in the run
+ * instead of the declared error, which no catch of its code takes.
  */
 const checkRaise = (
   walk: Walk,
   step: Extract<Step, { type: "raise" }>,
   pointer: string
 ): void => {
-  if (!isAppErrorCode(step.error.code)) {
+  const { code, message, details } = step.error;
+  const invalid = appErrorProblemOf(code, message, details);
+  if (invalid?.part === "code") {
     problem(
       walk,
       join(pointer, "error", "code"),
@@ -1060,8 +1062,17 @@ const checkRaise = (
       "A raise names an error code in one of the platform's namespaces.",
       "Name the workflow's own code, such as `invoice.rejected`."
     );
+  } else if (invalid !== undefined) {
+    problem(
+      walk,
+      join(pointer, "error", invalid.part),
+      "workflow.invalid_error",
+      `A raise's error ${invalid.reason}`,
+      invalid.part === "message"
+        ? "Shorten the message: it is counted in UTF-16 code units, so an emoji counts as two."
+        : "Keep only what a catch needs to decide, as plain JSON."
+    );
   }
-  const { code, details } = step.error;
   if (walk.raises.has(code)) {
     problem(
       walk,
@@ -1072,19 +1083,6 @@ const checkRaise = (
     );
   }
   walk.raises.add(code);
-  if (
-    details !== undefined &&
-    new TextEncoder().encode(JSON.stringify(details)).byteLength >
-      appErrorDetailsMaxBytes
-  ) {
-    problem(
-      walk,
-      join(pointer, "error", "details"),
-      "workflow.details_too_large",
-      `An error's details are at most ${appErrorDetailsMaxBytes} bytes.`,
-      "Keep only what a catch needs to decide."
-    );
-  }
 };
 
 const checkCall = (
@@ -1413,7 +1411,20 @@ const checkRetryNames = (walk: Walk): void => {
 const checkAliases = (walk: Walk): void => {
   const permissions = walk.document.permissions ?? {};
   const seen = new Set<string>(permissions.ai === undefined ? [] : [aiAlias]);
-  for (const { kind, alias } of aliasedPermissions(permissions)) {
+  const aliased = aliasedPermissions(permissions);
+  // The schema bounds each kind; the run binds them all together, and the
+  // host looks up no more contracts than this for one document.
+  const count = aliased.length + seen.size;
+  if (count > formatLimits.bindings) {
+    problem(
+      walk,
+      "/permissions",
+      "workflow.too_many_permissions",
+      `The workflow declares ${count} permissions, every kind's together (\`ai\` is one); at most ${formatLimits.bindings} are allowed.`,
+      "Drop the permissions its steps don't use, or split the workflow."
+    );
+  }
+  for (const { kind, alias } of aliased) {
     if (seen.has(alias) || alias === aiAlias) {
       problem(
         walk,

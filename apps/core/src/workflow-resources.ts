@@ -55,7 +55,6 @@ import {
   eachStep,
   formatLimits,
   isSensitive,
-  permissionKinds,
 } from "@grasp-os/workflow-schema/format";
 import type {
   Binding,
@@ -699,14 +698,6 @@ const storedContractSchema = z.strictObject({
 });
 type StoredContract = z.infer<typeof storedContractSchema>;
 
-/** Where a document declares its permissions, as far as a lookup needs. */
-const declaredPermissionsSchema = z.object({
-  permissions: z.partialRecord(z.enum(permissionKinds), z.unknown()),
-});
-
-/** A permission that names a contract of the catalog. */
-const catalogPermissionSchema = z.object({ contract: catalogKeySchema });
-
 /** `text` read as JSON, or undefined when it isn't. */
 const parsedJson = (text: string): unknown => {
   try {
@@ -717,33 +708,23 @@ const parsedJson = (text: string): unknown => {
 };
 
 /**
- * The host catalog keys a document's bindings name, read from its text
- * only to know what to look up before it is checked: what the check then
- * resolves is all that counts. Text that isn't JSON (`parsed` undefined)
- * names none, and the check refuses it.
+ * The host catalog keys a checked document's bindings name, each once: all
+ * of them, since the check holds a document to `formatLimits.bindings`
+ * permissions in all (`workflow.too_many_permissions`). The workflow's own
+ * modules are its code's, never the catalog's.
  */
-const namedKeys = (parsed: unknown): string[] => {
-  const declared = declaredPermissionsSchema.safeParse(parsed);
-  if (!declared.success) {
-    return [];
-  }
+const namedKeys = (checked: CheckedWorkflow): string[] => {
   const keys = new Set<string>();
-  for (const [kind, held] of Object.entries(declared.data.permissions)) {
-    // The workflow's own modules are its code's, never the catalog's.
-    if (kind === "modules" || typeof held !== "object" || held === null) {
-      continue;
-    }
-    // `ai` is one permission; every other kind holds them by alias.
-    const permissions: unknown[] = kind === "ai" ? [held] : Object.values(held);
-    for (const permission of permissions) {
-      const contract = catalogPermissionSchema.safeParse(permission);
-      if (contract.success) {
-        keys.add(contract.data.contract);
-      }
+  for (const binding of Object.values(documentBindings(checked.document))) {
+    if (
+      binding.kind !== "compute" &&
+      binding.kind !== "action" &&
+      catalogKeySchema.safeParse(binding.contract).success
+    ) {
+      keys.add(binding.contract);
     }
   }
-  // No more than a document may bind: the check refuses the rest.
-  return [...keys].slice(0, formatLimits.bindings);
+  return [...keys];
 };
 
 const problemsOf = (
@@ -1166,7 +1147,7 @@ const inspectDefinition = async (
     return { ok: false, problems: problemsOf(result.problems) };
   }
   const checked = result.workflow;
-  const catalog = await resolveCatalogKeys(env, namedKeys(parsed));
+  const catalog = await resolveCatalogKeys(env, namedKeys(checked));
   const unresolved = bindingProblems(checked, catalog, modules);
   if (unresolved.length > 0) {
     return { ok: false, problems: unresolved };

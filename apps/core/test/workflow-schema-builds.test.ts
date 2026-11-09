@@ -266,6 +266,45 @@ const checkedAndBuilt = async (document: unknown) => {
   };
 };
 
+/**
+ * A decision, then a mail retried when `retryWhen` holds, its catch taking
+ * the failure when `when` does.
+ */
+const retryingAfterDecision = (when: string | undefined, retryWhen: string) =>
+  withDecisions(decision(), {
+    id: "followUp",
+    type: "try",
+    try: [keeping({ id: "mailed" })],
+    catch: {
+      ...(when === undefined ? {} : { when: { $expr: when } }),
+      retry: {
+        attempts: 2,
+        delay: "1 minute",
+        backoff: "constant",
+        when: { $expr: retryWhen },
+      },
+    },
+  });
+
+describe("a retry's `when`", () => {
+  it("reads under its catch's `when`, as its guard joins them, and builds", async () => {
+    await expect(
+      checkedAndBuilt(
+        retryingAfterDecision("!approve.timedOut", "approve.approved")
+      )
+    ).resolves.toStrictEqual({ problems: [], builds: true });
+  });
+
+  it("fails the typed check where nothing narrows its read, as its build would", async () => {
+    await expect(
+      checkedAndBuilt(retryingAfterDecision(undefined, "approve.approved"))
+    ).resolves.toStrictEqual({
+      problems: ["/steps/6/catch/retry/when TS2339"],
+      builds: false,
+    });
+  });
+});
+
 describe("a skipped step's result", () => {
   it("passes the typed check where its read is narrowed, and then builds", async () => {
     expect([

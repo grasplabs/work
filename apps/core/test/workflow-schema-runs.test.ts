@@ -807,12 +807,14 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
     });
   });
 
-  it("fails the run with a raise no catch takes", async () => {
+  it("fails the run with a raise no catch takes, its error as long as an `AppError`'s may be", async () => {
+    // 250 emoji: the most code units an `AppError`'s message holds.
+    const message = "\u{1F600}".repeat(250);
     const { source, sealed: withTable } = await generated([
       {
         id: "stop",
         type: "raise",
-        error: { code: "test.stop", message: "Failed." },
+        error: { code: "test.stop", message, details: { note: "x" } },
       },
     ]);
     const ran = await ranAs(await waitingRun(sealed), source, {
@@ -821,7 +823,7 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
     });
     expect(ran).toStrictEqual({
       ended: "test.stop",
-      why: "Failed.",
+      why: message,
       tampered: [],
     });
   });
