@@ -1,5 +1,5 @@
 /**
- * Microsoft Graph for Stephen's eval (stephen-eval.test.ts): a person's
+ * Microsoft Graph for Stephen's eval (stephen-eval-*-of-*.test.ts): a person's
  * Outlook calendar and mail, their OneDrive's files, and a company's Excel
  * workbooks, as the
  * Microsoft 365 connector's reads ask for them, in the shapes Graph's v1.0

@@ -1,7 +1,8 @@
 # Stephen's eval against a real model (GRA-739), by hand only: from the
 # Actions tab, on the branch picked there. It costs money and takes a while,
 # so no push or pull request runs it; CI checks the hard rules on every
-# change against the scripted model (apps/core/test/stephen-eval.test.ts).
+# change against the scripted model
+# (apps/core/test/stephen-eval-*-of-*.test.ts).
 # The model (`STEPHEN_EVAL_MODEL`) is reached at its provider's own API
 # with the stephen-eval 1Password Environment's key for that provider
 # (`STEPHEN_EVAL_MODEL_KEY`). The run's budget (`STEPHEN_EVAL_BUDGET_USD`)

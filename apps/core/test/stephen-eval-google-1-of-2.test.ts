@@ -10,8 +10,7 @@ import {
   stephenCaseTests,
   stephenEvalRun,
   stephenEvalTimeout,
-  stephenHalves,
-  stephenHalvesTest,
+  stephenPart,
 } from "./stephen-eval-parts.ts";
 
 // Stephen's eval on Google Workspace (GRA-756), as CI runs it: the
@@ -19,14 +18,16 @@ import {
 // and the register in Google Sheets, through the same harness, connect
 // with Google played by core's fake (stephen-google-fake.ts), the
 // permissions, the model gateway and the ledger, with only the model
-// provider stubbed, in halves (stephen-eval-parts.ts): the first here,
-// the second in stephen-eval-google-2.test.ts. The cases that need a tool
+// provider stubbed, in parts, a file each named for its part
+// (stephen-eval-parts.ts): the first here, the second in
+// stephen-eval-google-2-of-2.test.ts. The cases that need a tool
 // Google's connector lacks (moving an event, a reply draft, writing a
 // sheet) are left out (`notOnGoogle`). A case built to break each hard
 // rule proves the rule would fail the run, but one: no Google tool moves
 // an event, so no turn can move a meeting of others there
 // (`noMeetingOfOthersMoved`); they run in
-// stephen-eval-google-breakers.test.ts.
+// stephen-eval-google-breakers.test.ts, which also checks that the parts'
+// files run every case.
 //
 // Under `gmail.modify`, which reading and labelling need, a grant can
 // send: sending can't be split off by right, so Reach others holds by its
@@ -36,7 +37,8 @@ import {
 
 const idp = mockIdp();
 
-const [cases] = stephenHalves("google");
+// The part of the cases this file's name says.
+const { suite, cases } = stephenPart(import.meta.url);
 
 describe(
   "Stephen's eval on Google Workspace",
@@ -55,8 +57,6 @@ describe(
       });
     });
 
-    stephenHalvesTest("google");
-
-    stephenCaseTests("google", cases, stephenEvalRun(idp, "google", cases));
+    stephenCaseTests(suite, cases, stephenEvalRun(idp, suite, cases));
   }
 );

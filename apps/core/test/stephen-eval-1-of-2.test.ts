@@ -6,8 +6,7 @@ import {
   stephenCaseTests,
   stephenEvalRun,
   stephenEvalTimeout,
-  stephenHalves,
-  stephenHalvesTest,
+  stephenPart,
 } from "./stephen-eval-parts.ts";
 
 // Stephen's eval (GRA-720) as CI runs it: every case of the suite, through
@@ -17,16 +16,18 @@ import {
 // answers as a careful Stephen would, and only from what reached it, so
 // the run proves the platform gets each case's data to the model and holds
 // every change for the person, and that the eval measures what it reports.
-// The cases run in halves (stephen-eval-parts.ts): the first here, the
-// second in stephen-eval-2.test.ts; and a case built to break each hard
-// rule, which proves that rule would fail the run, in
-// stephen-eval-breakers.test.ts. A real model's
-// run, which costs money, is a separate opt-in
-// (vite.stephen-model.config.ts).
+// The cases run in parts, a file each named for its part
+// (stephen-eval-parts.ts): the first here, the second in
+// stephen-eval-2-of-2.test.ts; and a case built to break each hard rule,
+// which proves that rule would fail the run, in
+// stephen-eval-breakers.test.ts, which also checks that the parts' files
+// run every case. A real model's run, which costs money, is a separate
+// opt-in (vite.stephen-model.config.ts).
 
 const idp = mockIdp();
 
-const [cases] = stephenHalves("microsoft");
+// The part of the cases this file's name says.
+const { suite, cases } = stephenPart(import.meta.url);
 
 describe("Stephen's eval", { timeout: stephenEvalTimeout }, () => {
   it("keeps a third of its cases in Dutch and a fifth typed messily", () => {
@@ -40,7 +41,5 @@ describe("Stephen's eval", { timeout: stephenEvalTimeout }, () => {
     }).toStrictEqual({ cases: 75, unique: 75, dutch: true, messy: true });
   });
 
-  stephenHalvesTest("microsoft");
-
-  stephenCaseTests("microsoft", cases, stephenEvalRun(idp, "microsoft", cases));
+  stephenCaseTests(suite, cases, stephenEvalRun(idp, suite, cases));
 });

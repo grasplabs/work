@@ -220,7 +220,7 @@ const everyRight =
  * What Google grants the eval's Google connections: every right a class
  * may ask of Google, so turning a class on asks no one to connect again.
  * `gmail.modify` among them can send: under it, only the class keeps
- * Stephen from sending (stephen-eval-google.test.ts).
+ * Stephen from sending (stephen-eval-google-breakers.test.ts).
  */
 export const everyGoogleRight = [
   "openid",

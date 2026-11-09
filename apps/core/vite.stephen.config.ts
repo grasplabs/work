@@ -11,13 +11,7 @@ import { coreProject } from "./vite.config.ts";
 // (scripts/test-shards.ts).
 export default coreProject({
   name: "@grasp-os/core:stephen",
-  include: [
-    "test/stephen-eval.test.ts",
-    "test/stephen-eval-2.test.ts",
-    "test/stephen-eval-breakers.test.ts",
-    "test/stephen-eval-google.test.ts",
-    "test/stephen-eval-google-2.test.ts",
-    "test/stephen-eval-google-breakers.test.ts",
-  ],
+  // Every one of them, as the root config's core project leaves out.
+  include: ["test/stephen-eval*.test.ts"],
   sequence: { groupOrder: 4 },
 });

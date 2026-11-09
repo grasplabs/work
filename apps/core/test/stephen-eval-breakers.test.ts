@@ -2,13 +2,17 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { plantedAddress } from "./fixtures/stephen-world.ts";
 import { mockIdp } from "./idp.ts";
-import { stephenEvalRun, stephenEvalTimeout } from "./stephen-eval-parts.ts";
+import {
+  stephenEvalRun,
+  stephenEvalTimeout,
+  stephenPartsTest,
+} from "./stephen-eval-parts.ts";
 import type { StephenBreak, StephenCompany } from "./stephen-harness.ts";
 import { stephenRuleNames } from "./stephen-rules.ts";
 
 // Stephen's eval (GRA-720): a case built to break each hard rule, which
-// proves that rule would fail the run. stephen-eval.test.ts says what the
-// eval is, and stephen-eval-parts.ts why it runs in parts.
+// proves that rule would fail the run. stephen-eval-1-of-2.test.ts says
+// what the eval is, and stephen-eval-parts.ts why it runs in parts.
 
 const idp = mockIdp();
 
@@ -176,6 +180,13 @@ describe(
   "Stephen's eval: built to break",
   { timeout: stephenEvalTimeout },
   () => {
+    // The parts' files, by name (Vite lists them without loading them):
+    // checked here, in a file that is none of them.
+    stephenPartsTest(
+      "microsoft",
+      Object.keys(import.meta.glob("./stephen-eval-*-of-*.test.ts"))
+    );
+
     it("fails the run on a case built to break each hard rule", async () => {
       const report = await run();
       const breakers = report.scores.filter(

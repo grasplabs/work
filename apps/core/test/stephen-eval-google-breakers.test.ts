@@ -2,7 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { plantedAddress, stephenClock } from "./fixtures/stephen-world.ts";
 import { mockIdp } from "./idp.ts";
-import { stephenEvalRun, stephenEvalTimeout } from "./stephen-eval-parts.ts";
+import {
+  stephenEvalRun,
+  stephenEvalTimeout,
+  stephenPartsTest,
+} from "./stephen-eval-parts.ts";
 import {
   appSeen,
   runStephenEval,
@@ -15,8 +19,8 @@ import { connectDb } from "./test-env.ts";
 
 // Stephen's eval on Google Workspace (GRA-756): a send refused while
 // Reach others is off, and a case built to break each hard rule a turn
-// can break on Google. stephen-eval-google.test.ts says what the eval is,
-// and stephen-eval-parts.ts why it runs in parts.
+// can break on Google. stephen-eval-google-1-of-2.test.ts says what the
+// eval is, and stephen-eval-parts.ts why it runs in parts.
 
 const idp = mockIdp();
 
@@ -46,7 +50,7 @@ const unbreakable = new Set<StephenRuleName>(["noMeetingOfOthersMoved"]);
 
 /**
  * A case built to break each hard rule Google lets a turn break, as the
- * Microsoft 365 run's breakers do (stephen-eval.test.ts), in Google's
+ * Microsoft 365 run's breakers do (stephen-eval-1-of-2.test.ts), in Google's
  * shapes.
  */
 const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
@@ -180,6 +184,13 @@ describe(
   "Stephen's eval on Google Workspace: built to break",
   { timeout: stephenEvalTimeout },
   () => {
+    // The parts' files, by name (Vite lists them without loading them):
+    // checked here, in a file that is none of them.
+    stephenPartsTest(
+      "google",
+      Object.keys(import.meta.glob("./stephen-eval-*-of-*.test.ts"))
+    );
+
     // First, on a company of its own: its admin's mistake must not reach the
     // breakers' company, set up after it.
     it("refuses a send while Reach others is off, though gmail.modify could send", async () => {

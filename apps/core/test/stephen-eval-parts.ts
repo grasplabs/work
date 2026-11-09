@@ -3,21 +3,23 @@
  * CI runs it. One run of every case, each judged, and then the cases built
  * to break each hard rule took close to a minute in CI: more than a shard
  * should wait for one file. So each suite runs in three files, on a
- * company of its own each: the first half of its cases in
- * stephen-eval.test.ts (stephen-eval-google.test.ts), the second half in
- * stephen-eval-2.test.ts (stephen-eval-google-2.test.ts), and the cases
- * built to break each rule, in the order they ran after the cases, in
+ * company of its own each: its cases in two parts, each file named for its
+ * part (`stephenPart`): stephen-eval-1-of-2.test.ts and -2-of-2
+ * (stephen-eval-google-1-of-2.test.ts and -2-of-2); and the cases built to
+ * break each rule, in the order they ran after the cases, in
  * stephen-eval-breakers.test.ts (stephen-eval-google-breakers.test.ts).
  * Each case asks in a chat of its own and its changes wait on a card, so
- * no case reads what another left: each half holds every rule and check as
- * the whole run did, and the first file checks that the halves are every
- * case.
+ * no case reads what another left: each part holds every rule and check as
+ * the whole run did, and the breakers' file, which is no part, checks that
+ * the parts' files are every case.
  */
-import { expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
+import { filePart, partOf } from "../../../scripts/test-file-parts.ts";
 import { stephenCasesOn } from "./fixtures/stephen-cases.ts";
 import type { StephenCase } from "./fixtures/stephen-cases.ts";
 import { crmTools, stephenClock } from "./fixtures/stephen-world.ts";
+import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
 import { runStephenEval, setUpStephenCompany } from "./stephen-harness.ts";
 import type {
@@ -32,13 +34,50 @@ type StephenSuite = StephenCompany["suite"];
 /** Each test of a file may wait for its run: the whole run, at worst. */
 export const stephenEvalTimeout = 900_000;
 
-/** The cases of `suite` in halves, in the suite's order. */
-export const stephenHalves = (
-  suite: StephenSuite
-): [readonly StephenCase[], readonly StephenCase[]] => {
-  const all = stephenCasesOn(suite);
-  const middle = Math.ceil(all.length / 2);
-  return [all.slice(0, middle), all.slice(middle)];
+/** Each suite by the name of its parts' files. */
+const suitesByRun: Readonly<Record<string, StephenSuite>> = {
+  "stephen-eval": "microsoft",
+  "stephen-eval-google": "google",
+};
+
+/** What each suite's eval is called in its tests' names. */
+export const stephenEvalNames: Readonly<Record<StephenSuite, string>> = {
+  microsoft: "Stephen's eval",
+  google: "Stephen's eval on Google Workspace",
+};
+
+/** A file's part of a suite's cases, which its name says. */
+export interface StephenPart {
+  suite: StephenSuite;
+  part: number;
+  parts: number;
+  cases: readonly StephenCase[];
+}
+
+/**
+ * The part of a suite's cases the file `file` (a path or URL) runs, from
+ * its own name (scripts/test-file-parts.ts):
+ * `stephen-eval-<part>-of-<parts>.test.ts` for Microsoft 365's,
+ * `stephen-eval-google-<part>-of-<parts>.test.ts` for Google Workspace's;
+ * that part of the suite's cases, in its order. Throws on a name of no
+ * suite, or a part that would hold no case. Each suite's breakers file
+ * reads every such file's name and checks that together they run every
+ * case once (`stephenPartsTest`).
+ */
+export const stephenPart = (file: string): StephenPart => {
+  const { run, part, parts } = filePart(file);
+  const suite = suitesByRun[run];
+  if (suite === undefined) {
+    throw new Error(
+      `${run} names no suite: stephen-eval[-google]-<part>-of-<parts>.test.ts`
+    );
+  }
+  return {
+    suite,
+    part,
+    parts,
+    cases: partOf(stephenCasesOn(suite), { part, parts }),
+  };
 };
 
 /**
@@ -181,14 +220,37 @@ export const stephenCaseTests = (
 };
 
 /**
- * That the halves of `suite` are its cases, each once: the two files
- * together run the whole suite.
+ * That the parts `files` (the parts' files themselves, by name) run of
+ * `suite` are its cases, each once: together they run the whole suite,
+ * and a file deleted or renamed leaves its cases unrun, and this fails.
  */
-export const stephenHalvesTest = (suite: StephenSuite): void => {
-  it("runs every case of the suite in its two halves, each once", () => {
-    const halves = stephenHalves(suite).flat();
-    expect(halves.map(({ id }) => id)).toStrictEqual(
-      stephenCasesOn(suite).map(({ id }) => id)
-    );
+export const stephenPartsTest = (
+  suite: StephenSuite,
+  files: readonly string[]
+): void => {
+  it("runs every case of the suite in its parts' files, each once", () => {
+    const ran = files
+      .map((file) => stephenPart(file))
+      .filter((part) => part.suite === suite)
+      .toSorted((a, b) => a.part - b.part)
+      .flatMap(({ cases }) => cases.map(({ id }) => id));
+    expect(ran).toStrictEqual(stephenCasesOn(suite).map(({ id }) => id));
   });
+};
+
+/**
+ * The part of a suite's cases the file `file` (its `import.meta.url`)
+ * names (`stephenPart`), on a company of its own, held to what every case
+ * must show.
+ */
+export const stephenPartFile = (file: string): void => {
+  const { suite, part, parts, cases } = stephenPart(file);
+  const idp = mockIdp();
+  describe(
+    `${stephenEvalNames[suite]}: part ${part} of ${parts}`,
+    { timeout: stephenEvalTimeout },
+    () => {
+      stephenCaseTests(suite, cases, stephenEvalRun(idp, suite, cases));
+    }
+  );
 };
