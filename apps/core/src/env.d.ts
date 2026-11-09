@@ -128,8 +128,8 @@ interface __BaseEnv_Env {
   APP_CALL_TIMEOUT_MS?: string;
   /**
    * Tests only: shorter limits on an App's tests, in milliseconds,
-   * `test/suite/run/cleanup` (src/app-tests.ts): never longer than the
-   * defaults.
+   * `test/suite/run/cleanup/cpu` (src/app-tests.ts): never longer than
+   * the defaults; a part left empty keeps its default.
    */
   APP_TEST_LIMITS_MS?: string;
   /** Tests only: a shorter bound on one build of a save (src/save-builds.ts). */
@@ -149,6 +149,11 @@ interface __BaseEnv_Env {
    * perMinute` (src/app.ts, `claimStatisticMinute`).
    */
   STATISTICS_READ_LIMITS?: string;
+  /**
+   * Tests only: a lower live-read budget of a person's pages,
+   * `burst/perMinute` (`liveReadLimitsOf`, src/app.ts); never higher.
+   */
+  LIVE_READ_LIMITS?: string;
   /** The router secret before the current one, while rotating (src/router-secret.ts). */
   ROUTER_SECRET_PREVIOUS?: string;
   /** Local dev only (src/router-secret.ts). */

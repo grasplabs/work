@@ -2,16 +2,21 @@
  * One arm of the Brain baseline at scale as CI runs it (GRA-678): the
  * smallest scale size, the frozen company grown by its generated
  * distractor chunks, over a cold and a warm repeat, with the gate reading
- * Knowledge by its row counts. Each arm runs in a file of its own
- * (brain-scale.test.ts, brain-scale-agent.test.ts,
- * brain-scale-full-context.test.ts), on a company of its own: one run of
- * all three took over three minutes in CI, a shard's floor (GRA-1094).
- * The arms' trials don't share state: each checks that its own trial left
- * every stored row as it found it, so each arm holds its gate alone as it
- * did beside the others.
+ * Knowledge by its row counts. Each arm runs in files of its own, on a
+ * company of its own: one run of all three took over three minutes in CI,
+ * a shard's floor (GRA-1094), and one arm alone up to a minute and a half.
+ * So each arm's tasks run in parts, the baseline's
+ * (brain-baseline-parts.ts): full text's and the agent's in halves
+ * (brain-scale.test.ts and brain-scale-2.test.ts, brain-scale-agent.test.ts
+ * and brain-scale-agent-2.test.ts), full context's, whose every question
+ * reads every document, in quarters (brain-scale-full-context.test.ts and
+ * brain-scale-full-context-2.test.ts to -4). The trials don't share state:
+ * each checks that its own trial left every stored row as it found it, so
+ * each part holds its gate alone as it did beside the others.
  */
 import { expect, it } from "vite-plus/test";
 
+import { brainBaselineParts } from "./brain-baseline-parts.ts";
 import { setUpBrainCompany } from "./brain-harness.ts";
 import type { BrainArm, BrainControl } from "./brain-harness.ts";
 import { runBrainScale } from "./brain-scale.ts";
@@ -23,7 +28,6 @@ import {
   brainScaleSizes,
   distractorReaders,
 } from "./fixtures/brain-distractors.ts";
-import { brainTasks } from "./fixtures/brain-tasks.ts";
 import type { Idp } from "./idp.ts";
 
 /** Distractor chunks: the smallest scale size. */
@@ -31,7 +35,16 @@ export const [scaleChunks] = brainScaleSizes;
 
 const repeats = 2;
 
-const devTasks = brainTasks.filter(({ split }) => split === "dev").length;
+const [first, second, third, fourth] = brainBaselineParts;
+
+/** The dev split in halves, two of the baseline's parts each. */
+export const scaleHalves: readonly (readonly string[])[] = [
+  [...first, ...second],
+  [...third, ...fourth],
+];
+
+/** The dev split in quarters: the baseline's parts. */
+export const scaleQuarters: readonly (readonly string[])[] = brainBaselineParts;
 
 /** The arms whose sources come from a search: the agent's and full text's. */
 const searchingArms: ReadonlySet<BrainArm> = new Set(["agent", "fullText"]);
@@ -40,12 +53,14 @@ const searchingArms: ReadonlySet<BrainArm> = new Set(["agent", "fullText"]);
 export const scaleTimeout = 300_000;
 
 /**
- * The scale run of `arm`, started by the first test that asks for it and
- * shared by the others; `controls` run on `controlTasks` after its trials.
+ * The scale run of `arm` on `tasks`, started by the first test that asks
+ * for it and shared by the others; `controls` run on `controlTasks` after
+ * its trials.
  */
 export const brainScaleRun = (
   idp: Idp,
   arm: BrainArm,
+  tasks: readonly string[],
   {
     controls = [],
     controlTasks = [],
@@ -61,6 +76,7 @@ export const brainScaleRun = (
         chunks: scaleChunks,
         distractorSeed: brainDistractorSeed,
         split: "dev",
+        tasks,
         repeats,
         arms: [arm],
         knowledgeState: "counts",
@@ -72,12 +88,13 @@ export const brainScaleRun = (
 };
 
 /**
- * What every arm must show at scale: its gate, and what it records. Full
- * context is truncated past its budget on every trial (`truncatedShare`
- * 1), the searching arms never.
+ * What every arm must show at scale on `tasks`, from `run`: its gate, and
+ * what it records. Full context is truncated past its budget on every
+ * trial (`truncatedShare` 1), the searching arms never.
  */
 export const scaleArmTests = (
   arm: BrainArm,
+  tasks: readonly string[],
   run: () => Promise<BrainScaleReport>,
   truncatedShare: number
 ): void => {
@@ -105,7 +122,7 @@ export const scaleArmTests = (
       distractorLeaks: [],
       ownTeams: searching ? brainPersonas.map(() => true) : [],
       failures: [0],
-      trials: [repeats * devTasks],
+      trials: [repeats * tasks.length],
     });
   });
 
@@ -125,4 +142,22 @@ export const scaleArmTests = (
       }))
     ).toStrictEqual([{ arm, recall: true, ordered: true, truncatedShare }]);
   });
+};
+
+/**
+ * A file's part of `arm`'s scale run: `part` (counted from 1) of `parts`,
+ * on a company of its own, held to what every arm must show.
+ */
+export const scaleArmPart = (
+  idp: Idp,
+  arm: BrainArm,
+  parts: readonly (readonly string[])[],
+  part: number,
+  truncatedShare: number
+): void => {
+  const tasks = parts.at(part - 1);
+  if (tasks === undefined) {
+    throw new RangeError(`The scale run has no part ${part}`);
+  }
+  scaleArmTests(arm, tasks, brainScaleRun(idp, arm, tasks), truncatedShare);
 };

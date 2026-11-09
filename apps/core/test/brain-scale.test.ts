@@ -4,6 +4,7 @@ import {
   brainScaleRun,
   scaleArmTests,
   scaleChunks as chunks,
+  scaleHalves,
   scaleTimeout,
 } from "./brain-scale-arm.ts";
 import { distractorDigest, distractorLeaksIn } from "./brain-scale.ts";
@@ -25,11 +26,12 @@ import { mockIdp } from "./idp.ts";
 
 // The Brain baseline at scale (GRA-678) as CI runs it: the smallest scale
 // size, the frozen company grown by 1,000 generated distractor chunks, the
-// dev split's three arms over a cold and a warm repeat, one arm per file
-// (brain-scale-arm.ts says why): full text's here, with the distractors'
-// generator, the run's identity and build, and the control; the agent's in
-// brain-scale-agent.test.ts, full context's in
-// brain-scale-full-context.test.ts. Its gate reads Knowledge as the larger
+// dev split's three arms over a cold and a warm repeat, each arm in parts,
+// a file each (brain-scale-arm.ts says why): full text's first half here,
+// with the distractors' generator, the run's identity and build, and the
+// control; its second half in brain-scale-2.test.ts, the agent's in
+// brain-scale-agent*.test.ts, full context's in
+// brain-scale-full-context*.test.ts. Its gate reads Knowledge as the larger
 // sizes do, by each table's row count (every row, twice a trial, would take
 // hours there), and a control shows that this still catches a change to
 // Knowledge; core, R2 and the Workspace object are read row by row at
@@ -39,8 +41,11 @@ import { mockIdp } from "./idp.ts";
 
 const idp = mockIdp();
 
+// Full text's first half: the second is brain-scale-2.test.ts.
+const [tasks = []] = scaleHalves;
+
 // The control runs after the arm's trials, as it ran after all three.
-const run = brainScaleRun(idp, "fullText", {
+const run = brainScaleRun(idp, "fullText", tasks, {
   controls: ["changesKnowledge"],
   controlTasks: ["dev-fleet-size"],
 });
@@ -101,7 +106,7 @@ describe("the Brain baseline at scale", { timeout: scaleTimeout }, () => {
   });
 
   describe("full text", () => {
-    scaleArmTests("fullText", run, 0);
+    scaleArmTests("fullText", tasks, run, 0);
   });
 
   it("would see a change to Knowledge by its row counts alone", async () => {

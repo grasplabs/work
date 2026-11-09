@@ -16,7 +16,7 @@ import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // A team on its way through the onboarding into the brain, as the tests
-// of the brain's intake (brain-intake.test.ts) and of deleting an
+// of the brain's intake (brain-intake*.test.ts) and of deleting an
 // interview (interview-deletion.test.ts) share it: Lea leads Ops, with
 // Max, Mia, Mo, Noor, Pim and Rik; her map, their agreements, and the drawing of
 // their tickets, with the model provider faked behind connect.

@@ -61,8 +61,9 @@ import { testBinding } from "./test-env.ts";
 
 // The run host's harness for a sealed build's run (sealed-run.ts), shared
 // by the tests that run a module of their own against a real published
-// workflow's sealed build: sealed-runs.test.ts, and the runs of
-// grasp-workflow/1's generated code (workflow-schema-runs.test.ts).
+// workflow's sealed build: sealed-run*.test.ts, and the runs of
+// grasp-workflow/1's generated code (workflow-schema-runs.test.ts,
+// workflow-schema-waits.test.ts).
 
 /** The model the organization chose, the one the model binding names. */
 export const allowedModel = "mistral/mistral-large-latest";

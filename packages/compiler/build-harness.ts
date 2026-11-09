@@ -5,12 +5,15 @@
  * matters is that the two always agree, whoever builds and when.
  *
  * Shared by the build's test files (build-*.test.ts), split so they can
- * run apart: each starts several builds. Each file removes its scratch
- * directories after each test, with `afterEach(removeScratch)`.
+ * run apart, in CI's shards too: each starts a build or two of its own,
+ * on top of the one release they share (`baseline`). Each file removes
+ * its scratch directories after each test, with `afterEach(removeScratch)`.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -53,6 +56,45 @@ export const build = (
     env: { ...process.env, NODE_ENV: mode },
     stdio: "pipe",
   });
+};
+
+/** Where build-baseline-setup.ts tells the tests the shared release goes. */
+export const baselineVariable = "GRASP_COMPILER_BASELINE";
+
+/**
+ * The release a production build makes of these sources, with its version
+ * module: built by the first test of the run that asks, and the same for
+ * every test after it. A test reads it as it is, or builds on a copy
+ * (`copyOfBaseline`): it is never built into again. Run without the
+ * project's setup, each call builds one into a scratch directory.
+ */
+export const baseline = (): { assets: string; versionModule: string } => {
+  const dir = process.env[baselineVariable] ?? scratch();
+  const assets = path.join(dir, "assets");
+  const versionModule = path.join(dir, "version.js");
+  // The version module is written last, once its release is whole.
+  if (!existsSync(versionModule)) {
+    build(assets, versionModule, "production");
+  }
+  return { assets, versionModule };
+};
+
+/**
+ * A copy of `baseline` in a scratch directory of this test's own, as a
+ * build there would have left it: assets and version module.
+ */
+export const copyOfBaseline = (): {
+  dir: string;
+  assets: string;
+  versionModule: string;
+} => {
+  const built = baseline();
+  const dir = scratch();
+  const assets = path.join(dir, "assets");
+  const versionModule = path.join(dir, "version.js");
+  cpSync(built.assets, assets, { recursive: true });
+  cpSync(built.versionModule, versionModule);
+  return { dir, assets, versionModule };
 };
 
 export const versionIn = (versionModule: string): string =>

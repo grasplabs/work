@@ -1,23 +1,23 @@
 import { describe } from "vite-plus/test";
 
 import {
-  brainScaleRun,
-  scaleArmTests,
+  scaleQuarters,
+  scaleArmPart,
   scaleTimeout,
 } from "./brain-scale-arm.ts";
 import { mockIdp } from "./idp.ts";
 
-// The Brain baseline at scale (GRA-678), full context's arm:
+// The Brain baseline at scale (GRA-678), full context's part 1 of 4, in
+// which every person reads more than the budget holds already:
 // brain-scale.test.ts says what the run is, and brain-scale-arm.ts why
-// each arm has a file.
+// each arm runs in parts.
 
 const idp = mockIdp();
 
 describe(
-  "the Brain baseline at scale: full context",
+  "the Brain baseline at scale: full context, part 1 of 4",
   { timeout: scaleTimeout },
   () => {
-    // Every person reads more than the budget holds at this size already.
-    scaleArmTests("fullContext", brainScaleRun(idp, "fullContext"), 1);
+    scaleArmPart(idp, "fullContext", scaleQuarters, 1, 1);
   }
 );

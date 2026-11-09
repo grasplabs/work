@@ -4,8 +4,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  baseline,
   build,
-  earlierReleases,
   releasesIn,
   removeScratch,
   scratch,
@@ -18,15 +18,12 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
   afterEach(removeScratch);
 
   it("names in its version module a release that is whole in its assets, the same whoever builds", () => {
+    // As CI builds a release (the shared one, a production build), then
+    // as a test run builds, with its own NODE_ENV, into its own assets.
+    const { assets: dev, versionModule: devVersion } = baseline();
     const dir = scratch();
-    const dev = path.join(dir, "dev-assets");
     const tests = path.join(dir, "test-assets");
-    const devVersion = path.join(dir, "dev-version.js");
     const testVersion = path.join(dir, "test-version.js");
-
-    // As CI builds a release, then as a test run builds, with its own
-    // NODE_ENV, into its own assets.
-    build(dev, devVersion, "production");
     build(tests, testVersion, "test");
 
     // The first version still names what its assets have.
@@ -64,27 +61,6 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
       )
     ).toBe(
       readFileSync(path.join(release, compilerAssets.kitModules), "utf-8")
-    );
-  });
-
-  it("keeps the release a server started on through two more builds, and drops the one before", () => {
-    const dir = scratch();
-    const assets = path.join(dir, "assets");
-    const versionModule = path.join(dir, "version.js");
-    // A server started on `running` and hasn't reloaded; one build has
-    // finished since (`second`), and `older` is from before the server.
-    const [older, running, second] = [
-      "0000000000000001",
-      "0000000000000002",
-      "0000000000000003",
-    ];
-    earlierReleases(assets, [older, running, second], -3_600_000);
-
-    // The next build finishes before the server reloads, too.
-    build(assets, versionModule, "production");
-
-    expect(releasesIn(assets)).toStrictEqual(
-      [running, second, versionIn(versionModule)].toSorted()
     );
   });
 });

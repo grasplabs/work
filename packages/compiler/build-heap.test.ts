@@ -5,7 +5,12 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { build, removeScratch, scratch, versionIn } from "./build-harness.ts";
+import {
+  baseline,
+  removeScratch,
+  scratch,
+  versionIn,
+} from "./build-harness.ts";
 import { compilerAssets } from "./src/kit.ts";
 
 // Every built-in blueprint's pages, its preview and its server code,
@@ -69,10 +74,9 @@ const every = <T>(each: (blueprint: string, target: string) => T): T[] =>
 
 describe("a release's compiler and type checker", { timeout: 300_000 }, () => {
   beforeAll(() => {
+    // The release of these sources, as a production build makes it.
+    const { assets, versionModule } = baseline();
     const dir = scratch();
-    const assets = path.join(dir, "assets");
-    const versionModule = path.join(dir, "version.js");
-    build(assets, versionModule, "production");
     release = path.join(
       assets,
       compilerAssets.directory(versionIn(versionModule))

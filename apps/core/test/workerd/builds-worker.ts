@@ -14,7 +14,7 @@ import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 
 // The package builder on plain workerd
-// (scripts/workerd-sandbox-builds.test.ts): the same `runBuilder` a
+// (scripts/workerd-sandbox-builds*.test.ts): the same `runBuilder` a
 // build runs, with `SANDBOX_HOST` bound to the sandbox
 // supervisor as on-prem binds it. The builder's code is the one core's
 // build makes, given as the static assets give it, or one a package that

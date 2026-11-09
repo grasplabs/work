@@ -262,6 +262,9 @@ export const coreProject = (
             SLACK_SIGNING_SECRET: slackApp.signingSecret,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_READ_LIMITS: "20/60",
+            // A live-read budget a test spends in dozens of reads
+            // (src/app.ts, test/page-client-load.test.ts).
+            LIVE_READ_LIMITS: "50/300",
             // The gateway runs call the model through; tests fake the AI binding.
             // Who core's mail is from (src/mail.ts); tests capture what
             // the EMAIL binding is given (test/mail-capture.ts).
@@ -404,14 +407,14 @@ export default coreProject({
     "test/brain-recall-real-model.test.ts",
     // The Brain baseline, its CI scale size and experiment E02, in a group
     // of their own: vite.brain.config.ts.
-    "test/brain-baseline.test.ts",
+    "test/brain-baseline*.test.ts",
     "test/brain-recall-e02.test.ts",
     "test/brain-scale.test.ts",
-    "test/brain-scale-agent.test.ts",
-    "test/brain-scale-full-context.test.ts",
+    "test/brain-scale-2.test.ts",
+    "test/brain-scale-agent*.test.ts",
+    "test/brain-scale-full-context*.test.ts",
     // Stephen's eval, in a group of its own: vite.stephen.config.ts.
-    "test/stephen-eval.test.ts",
-    "test/stephen-eval-google.test.ts",
+    "test/stephen-eval*.test.ts",
     // Stephen's eval against a real model, which costs money, on request
     // only: vite.stephen-model.config.ts.
     "test/stephen-real-model.test.ts",
