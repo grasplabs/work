@@ -201,7 +201,12 @@ const listed = (): PartTest[] =>
       {
         cwd: root,
         encoding: "utf-8",
-        env: { ...process.env, GRASP_E2E_PART: "parallel" },
+        // Its report on stdout, never where a run sends its own (PLAYWRIGHT_JSON_OUTPUT_FILE, set for the run after it).
+        env: {
+          ...process.env,
+          GRASP_E2E_PART: "parallel",
+          PLAYWRIGHT_JSON_OUTPUT_FILE: "",
+        },
         maxBuffer: 64 * 1024 * 1024,
       }
     )

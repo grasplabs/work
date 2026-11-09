@@ -5,9 +5,9 @@
  * leaves behind straight into connect's local database: the connection
  * rows only, with no tokens, which nothing here uses. The flows themselves,
  * through a fake Entra and Composio, are core's tests
- * (apps/core/test/connections.test.ts). Written up front in one write, once
- * for each attempt a test may get, before any test runs; tests only look
- * theirs up.
+ * (apps/core/test/connections.test.ts). Written in one write before any
+ * test runs, and again for each retry's own cast; tests only look theirs
+ * up.
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -174,71 +174,77 @@ const newConnection = (account: string): SeededConnection => ({
   account,
 });
 
+/** The connections seeded so far, by attempt. */
+const seededSoFar = (): (SeededConnections | null)[] => {
+  const json = process.env[seededVariable];
+  if (json === undefined) {
+    return [];
+  }
+  // SAFETY: seedConnections wrote it, by attempt.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return JSON.parse(json) as (SeededConnections | null)[];
+};
+
 /**
- * Writes the connections scene's connections for every attempt in `cast`,
- * in one write. The global setup (e2e/setup.ts) runs it right after it
- * signs everyone in.
+ * Writes the connections scene's connections for one attempt's cast
+ * (`scenes`), in one write. The global setup (e2e/setup.ts) runs it for the
+ * first attempt right after it signs everyone in, and a retry for its own
+ * (`signInRetry`, e2e/people.ts).
  */
-export const seedConnections = async (cast: Cast): Promise<void> => {
+export const seedConnections = async (
+  scenes: Cast[number],
+  attempt: number
+): Promise<void> => {
+  const admin = scenes.connections?.admin;
+  const user = scenes.connections?.user;
+  if (admin === undefined || user === undefined) {
+    throw new Error("Nobody is signed in for the connections scene");
+  }
+  // Accounts are unique to an attempt, so each finds its own.
+  const tag = crypto.randomUUID().slice(0, 8);
+  const connections: SeededConnections = {
+    mine: newConnection(`mine-${tag}@acme.test`),
+    expired: newConnection(`expired-${tag}@acme.test`),
+    mailbox: newConnection(`mailbox-${tag}@acme.test`),
+    toolkit: newConnection(`hubspot-${tag}`),
+  };
+  const personal = {
+    provider: "microsoft",
+    scope: "personal",
+    owner: user.userId,
+    connectedBy: user.userId,
+  } as const;
+  const shared = {
+    scope: "shared",
+    owner: null,
+    status: "active",
+    connectedBy: admin.userId,
+  } as const;
+  const rows: Row[] = [
+    { ...personal, connection: connections.mine, status: "active" },
+    { ...personal, connection: connections.expired, status: "needs_reauth" },
+    { ...shared, connection: connections.mailbox, provider: "microsoft" },
+    { ...shared, connection: connections.toolkit, provider: "hubspot" },
+  ];
   const now = Date.now();
-  const written = cast.map((scenes) => {
-    const admin = scenes.connections?.admin;
-    const user = scenes.connections?.user;
-    if (admin === undefined || user === undefined) {
-      throw new Error("Nobody is signed in for the connections scene");
-    }
-    // Accounts are unique to an attempt, so each finds its own.
-    const tag = crypto.randomUUID().slice(0, 8);
-    const connections: SeededConnections = {
-      mine: newConnection(`mine-${tag}@acme.test`),
-      expired: newConnection(`expired-${tag}@acme.test`),
-      mailbox: newConnection(`mailbox-${tag}@acme.test`),
-      toolkit: newConnection(`hubspot-${tag}`),
-    };
-    const personal = {
-      provider: "microsoft",
-      scope: "personal",
-      owner: user.userId,
-      connectedBy: user.userId,
-    } as const;
-    const shared = {
-      scope: "shared",
-      owner: null,
-      status: "active",
-      connectedBy: admin.userId,
-    } as const;
-    const rows: Row[] = [
-      { ...personal, connection: connections.mine, status: "active" },
-      { ...personal, connection: connections.expired, status: "needs_reauth" },
-      { ...shared, connection: connections.mailbox, provider: "microsoft" },
-      { ...shared, connection: connections.toolkit, provider: "hubspot" },
-    ];
-    return { connections, rows };
-  });
-  await execute(
-    written
-      .flatMap(({ rows }) => rows.map((row) => insert(row, now)))
-      .join("; ")
-  );
+  await execute(rows.map((row) => insert(row, now)).join("; "));
+  const seeded = seededSoFar();
+  while (seeded.length < attempt) {
+    seeded.push(null);
+  }
+  seeded[attempt] = connections;
   // Playwright hands the global setup's environment to the test workers.
-  process.env[seededVariable] = JSON.stringify(
-    written.map(({ connections }) => connections)
-  );
+  process.env[seededVariable] = JSON.stringify(seeded);
 };
 
 /** The connections scene's connections, for this attempt at the test. */
 export const seededConnections = (): SeededConnections => {
-  const json = process.env[seededVariable];
-  if (json === undefined) {
+  const { retry } = test.info();
+  const seeded = seededSoFar()[retry];
+  if (seeded === undefined || seeded === null) {
     throw new Error(
-      `${seededVariable} is unset: the global setup in playwright.config.ts writes the connections`
+      `No connections for attempt ${retry + 1}: the global setup in playwright.config.ts writes the first's, and signInRetry a retry's`
     );
-  }
-  // SAFETY: seedConnections wrote it, one for each attempt.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const seeded = (JSON.parse(json) as SeededConnections[])[test.info().retry];
-  if (seeded === undefined) {
-    throw new Error(`No connections for attempt ${test.info().retry + 1}`);
   }
   return seeded;
 };
