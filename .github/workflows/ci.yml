@@ -72,7 +72,6 @@ jobs:
       - run: vp run check:product-name
       - run: vp run check:migrations
       - run: vp run check:wrangler-configs
-      - run: vp run check:playwright-image
       - run: vp run check:vite-plus-oxc
       # Generated files (Worker types, migrations, the
       # frontend's translation catalogs) must be committed.
@@ -437,7 +436,7 @@ jobs:
             apps/core/dist
             apps/connect/dist
             packages/compiler/dist
-            apps/core/.wrangler/e2e-state
+            apps/core/.wrangler/e2e-state-migrated
           if-no-files-found: error
           # The state sits under .wrangler.
           include-hidden-files: true
@@ -474,9 +473,7 @@ jobs:
   # cache: the runner's image has the system packages Chromium needs.
   # Playwright's image took 28 s to start, and its own install 31 s, as the
   # install cache lives elsewhere in it (November 2026). Firefox and WebKit
-  # need packages the runner lacks, which `playwright install --with-deps`
-  # fetched from the Ubuntu mirror, up to 12 minutes when it was slow
-  # (October 2026, GRA-1016): their part runs in Playwright's image
+  # need packages the runner lacks: their part caches them
   # (e2e-browsers, below).
   #
   # Only when the plan finds the change reaches its stack
@@ -589,40 +586,62 @@ jobs:
           retention-days: 14
 
   # The parallel part's Firefox and WebKit tests (playwright.config.ts's
-  # browser policy tests), on the stack e2e-build built, in Playwright's
-  # image, which has those browsers and their system packages installed.
-  # Its tag must be the catalog's @playwright/test, whose browser builds it
-  # carries: check:playwright-image (static) holds the two together, and
-  # Renovate moves them in one pull request. When and why as e2e, above.
+  # browser policy tests), on the stack e2e-build built, on the runner as
+  # e2e's parts. Their builds are cached by Playwright's version, and the
+  # system packages they need beyond the runner's image as the .deb files
+  # apt fetched, by the image's version: installing them from the Ubuntu
+  # mirror took up to 12 minutes when it was slow (October 2026, GRA-1016),
+  # and Playwright's image, which has them, took 55 s to start and install
+  # in (November 2026). When and why as e2e, above.
   e2e-browsers:
     name: e2e (firefox, webkit)
     needs: [plan, e2e-build]
     if: needs.plan.outputs.e2e == 'true' && github.event_name != 'merge_group'
-    container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
-      # The runner's own user, which owns the checkout, the caches and
-      # $HOME, as Playwright's CI guide has it: Firefox won't start as root
-      # in a home it doesn't own. A host IPC namespace, so Chromium's shared
-      # memory isn't held to Docker's 64 MB /dev/shm.
-      options: --user 1001 --ipc=host
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Without the pnpm store cache: in the image the store sits at
-      # another path and is packed with gzip, not zstd, so it is another
-      # cache from the one the other jobs restore, which only this job
-      # would fill. A restore that hit was 12 s slower than the install
-      # fetching every package (October 2026).
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      - uses: ./.github/actions/setup
+      - id: playwright
+        run: |
+          echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+          echo "image=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+      - id: browsers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: .node-version
-          cache: false
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - uses: ./.github/actions/oxc-wasm
+          path: ~/.cache/ms-playwright
+          key: playwright-firefox-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: vp exec playwright install firefox webkit
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-firefox-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - id: debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/playwright-debs
+          key: playwright-debs-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}
+      # Installed from the cached files, offline: dpkg needs nothing else, as
+      # they are every package apt fetched for them on this image.
+      - if: steps.debs.outputs.cache-hit == 'true'
+        run: sudo dpkg -i ~/playwright-debs/*.deb > /dev/null
+      # apt keeps what it fetched, here only, so it can be cached.
+      - if: steps.debs.outputs.cache-hit != 'true'
+        run: |
+          sudo rm -f /var/cache/apt/archives/*.deb
+          echo 'Binary::apt-get::APT::Keep-Downloaded-Packages "true";' | sudo tee /etc/apt/apt.conf.d/99-keep-downloads > /dev/null
+          vp exec playwright install-deps firefox webkit
+          mkdir -p ~/playwright-debs
+          cp /var/cache/apt/archives/*.deb ~/playwright-debs/
+      - if: steps.debs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/playwright-debs
+          key: playwright-debs-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
