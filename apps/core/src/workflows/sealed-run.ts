@@ -173,6 +173,16 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   there, which no save can check, so that is the step's own failure
 //   (`workflow.arguments_too_deep`), which a catch may take, not
 //   tampering.
+// - An App's function the build didn't seal (GRA-1663). The isolate names
+//   an App call by its App permission's alias and the function's stable
+//   ID, held to the task's sealed `grasp.app` call like any operation;
+//   the App's ID is the sealed call's alone, so code can't point a
+//   granted function's ID at another App, nor call a function its
+//   document doesn't list. What the call may do is then the workflow's
+//   own grant on exactly that function, decided as it is made
+//   (workflows/app-calls.ts): revoked, the App removed or the function
+//   gone, the call fails, whichever version of the workflow runs. A
+//   sensitive parameter is never an App call's argument.
 // - A sensitive value reaching the isolate, or leaving where it mustn't.
 //   The isolate gets only the parameters that aren't sensitive
 //   (`sealedRunStart`). Where the build seals a sensitive parameter as a
@@ -706,7 +716,12 @@ const matchesBy = (
 type BoundCall = Extract<
   SealedCall,
   {
-    name: "grasp.connector" | "grasp.model" | "grasp.files" | "grasp.brain";
+    name:
+      | "grasp.connector"
+      | "grasp.app"
+      | "grasp.model"
+      | "grasp.files"
+      | "grasp.brain";
   }
 >;
 
@@ -728,6 +743,11 @@ const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
     case "grasp.files":
     case "grasp.brain": {
       return { call, operation: call.operation, arguments: call.arguments };
+    }
+    // An App's function: the isolate names it by its stable ID alone; its
+    // App's ID is the sealed call's, never the isolate's to say.
+    case "grasp.app": {
+      return { call, operation: call.function, arguments: call.arguments };
     }
     case "grasp.model": {
       return {
@@ -2960,6 +2980,25 @@ class SealedRun implements SealedRunKind {
           attempt.aiTrouble = unbilledAiWaitOf(error);
           throw error;
         }
+      }
+      case "grasp.app": {
+        // The App and the function by the IDs the build seals; the run's
+        // grant on that function is decided as the call is made, and
+        // again before each protected step of it (workflows/app-calls.ts).
+        // Its effect's key is its step's, the same in every attempt, so a
+        // mutation retried answers its stored receipt.
+        return await makeCall(
+          this.#env,
+          calling,
+          task.id,
+          {
+            name: "grasp.app",
+            app: call.app,
+            function: call.function,
+            arguments: value,
+          },
+          effect
+        );
       }
       case "grasp.files": {
         return await makeCall(

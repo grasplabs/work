@@ -4,7 +4,9 @@ import {
   appErrorMessageMaxLength,
   isAppErrorCode,
 } from "@grasp-os/shared/function-limits";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import {
   workflowEventTypeSchema,
   workflowStateKeySchema,
@@ -121,6 +123,17 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     input: templateSchema,
     /** Its output's descriptor: the SDK's native validator reads it. */
     outputSchema: z.json(),
+  }),
+  z.strictObject({
+    // One of an App's queries or mutations (core's workflows/app-calls.ts):
+    // the App by its ID and the function by its stable ID, both the
+    // document's, never the isolate's; `binding` is the App permission's
+    // alias the isolate calls it through.
+    name: z.literal("grasp.app"),
+    binding: aliasSchema,
+    app: z.string().min(1).max(identifierMaxLength),
+    function: z.string().regex(stableIdPattern),
+    arguments: templateSchema,
   }),
   z.strictObject({
     name: z.literal("grasp.sleepUntil"),

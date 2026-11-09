@@ -5,17 +5,21 @@ import {
   appErrorCodeMaxLength,
   appErrorCodePattern,
   appErrorMessageMaxLength,
+  operationPathMaxLength,
 } from "@grasp-os/shared/function-limits";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import {
   eventTypePattern,
   sealedBuildLimits,
 } from "@grasp-os/shared/sealed-builds";
+import { stableIdPattern } from "@grasp-os/shared/store-limits";
 
 import {
   actionPattern,
   aliasPattern,
   forEachDescription,
   formatLimits,
+  functionPathPattern,
   paramNamePattern,
   recipientPattern,
   reservedStepIds,
@@ -71,7 +75,9 @@ const callTargets = [
   "connection",
   "files",
   "brain",
+  "app",
   "action",
+  "function",
   "into",
   "from",
 ] as const;
@@ -94,6 +100,8 @@ const stepKinds = {
         action: { type: "string", pattern: actionPattern, maxLength: 256 },
         into: ref("alias"),
         from: ref("alias"),
+        app: ref("alias"),
+        function: ref("functionId"),
         args: ref("value"),
         timeout: ref("duration"),
         state: ref("state"),
@@ -102,7 +110,7 @@ const stepKinds = {
     ),
     // One member: a connection's action (which alone keeps a file `into`
     // or attaches files `from` a files permission), an action on the run's
-    // files, or an action on a Brain collection.
+    // files, an action on a Brain collection, or an App's function.
     oneOf: [
       {
         required: ["connection", "action"],
@@ -115,6 +123,10 @@ const stepKinds = {
       {
         required: ["brain", "action"],
         not: callTargetsBut("brain", "action"),
+      },
+      {
+        required: ["app", "function"],
+        not: callTargetsBut("app", "function"),
       },
     ],
   },
@@ -320,6 +332,7 @@ export const workflowSchema: Schema = {
       type: "object",
       properties: {
         ai: ref("permission"),
+        apps: byAlias(ref("appPermission")),
         connections: byAlias(ref("permission")),
         decisions: byAlias(ref("permission")),
         events: byAlias(ref("permission")),
@@ -460,6 +473,38 @@ export const workflowSchema: Schema = {
           minLength: 1,
           maxLength: 256,
           not: { pattern: "^local:" },
+        },
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: formatLimits.titleLength,
+        },
+      },
+      additionalProperties: false,
+    },
+    // A function's stable ID, as an App's definition gives it.
+    functionId: {
+      type: "string",
+      pattern: stableIdPattern.source,
+      not: { enum: ["__proto__", "constructor", "prototype"] },
+    },
+    // An App whose functions the workflow calls: by the App's ID, each
+    // function by its stable ID with its path as a hint.
+    appPermission: {
+      type: "object",
+      required: ["app", "functions"],
+      properties: {
+        app: { type: "string", minLength: 1, maxLength: identifierMaxLength },
+        functions: {
+          type: "object",
+          minProperties: 1,
+          maxProperties: formatLimits.bindings,
+          propertyNames: ref("functionId"),
+          additionalProperties: {
+            type: "string",
+            maxLength: operationPathMaxLength,
+            pattern: functionPathPattern,
+          },
         },
         title: {
           type: "string",

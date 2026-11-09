@@ -3,6 +3,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { WorkflowCandidateTrace } from "@grasp-os/shared/workflow-diagrams";
 import {
@@ -67,6 +68,7 @@ import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
+import type { CandidateBinding } from "./resource-authority.ts";
 import { tracedSteps } from "./resource-run-trace.ts";
 import {
   engineResultOf,
@@ -274,6 +276,40 @@ const candidateManifestSchema = z.object({
 type CandidateRow = typeof workflowCandidateRuns.$inferSelect;
 
 const jsonObjectSchema = z.record(z.string(), z.json());
+
+/**
+ * What a test run answers its App calls with (GRA-1663): one answer for
+ * each App function its build seals a call of, under the key the host
+ * looks an App call's answer up by (app-calls.ts, `appCallKey`), given by
+ * its start as `<alias>/<function ID>`. The App and function are the
+ * build's, never the start's, so a start answers only what the build
+ * calls; the host still checks each answer against what the function
+ * returns in the App's current version.
+ */
+const appCandidatesOf = (
+  keyOf: (call: { app: string; function: string }) => string,
+  build: Pick<HostedResourceRun["build"], "tasks">,
+  fixtures: Readonly<Record<string, { readonly output: Json }>>
+): (readonly [string, CandidateBinding])[] =>
+  build.tasks.flatMap((task) => {
+    if (task.kind !== "call" || task.call.name !== "grasp.app") {
+      return [];
+    }
+    const given = `${task.call.binding}/${task.call.function}`;
+    return [
+      [
+        keyOf(task.call),
+        {
+          kind: "app",
+          contractId: "",
+          fingerprint: "",
+          answer: Object.hasOwn(fixtures, given)
+            ? fixtures[given]?.output
+            : undefined,
+        },
+      ] as const,
+    ];
+  });
 
 const rowOf = async (env: Env, id: string): Promise<CandidateRow | undefined> =>
   await drizzle(env.DB)
@@ -494,6 +530,9 @@ const loadedCandidateRun = async (
   const fixtures = z
     .record(z.string(), z.object({ output: z.json() }))
     .parse(JSON.parse(row.fixtures));
+  // Imported here, as resource-calls.ts does: app-calls.ts reaches the
+  // App's functions, which start workflows, whose runs reach back here.
+  const { appCallKey } = await import("./app-calls.ts");
   const modelCalls = modelCallLimitOf(env);
   return {
     run: {
@@ -519,19 +558,23 @@ const loadedCandidateRun = async (
         // None frozen: every call is answered from its fixtures.
         bindings: new Map(),
         restricted: false,
-        candidate: new Map(
-          sealed.bindings.map(({ alias, kind, contractId, fingerprint }) => [
-            alias,
-            {
-              kind,
-              contractId,
-              fingerprint,
-              answer: Object.hasOwn(fixtures, alias)
-                ? fixtures[alias]?.output
-                : undefined,
-            },
-          ])
-        ),
+        candidate: new Map([
+          ...sealed.bindings.map(
+            ({ alias, kind, contractId, fingerprint }) =>
+              [
+                alias,
+                {
+                  kind,
+                  contractId,
+                  fingerprint,
+                  answer: Object.hasOwn(fixtures, alias)
+                    ? fixtures[alias]?.output
+                    : undefined,
+                },
+              ] as const
+          ),
+          ...appCandidatesOf(appCallKey, build, fixtures),
+        ]),
       },
       maxModelCalls: modelCalls,
       // A test run waits only briefly: one waiting longer fails.

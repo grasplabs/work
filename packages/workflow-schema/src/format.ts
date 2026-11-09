@@ -1,6 +1,7 @@
 import { memberName } from "@grasp-os/sdk/host";
 import type { CompactDescriptor } from "@grasp-os/sdk/host";
 import { decidersPattern } from "@grasp-os/shared/decisions";
+import { operationPathMaxSegments } from "@grasp-os/shared/function-limits";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   maxWorkflowParams,
@@ -143,10 +144,13 @@ export const isSensitive = (param: Param): boolean => !isPlain(param);
  * whose alias is `ai`; `connections`, `decisions` and `events` are the
  * catalog's connectors, decision contracts and event contracts; `files`
  * are the run's own files and `brain` one Brain collection each, which a
- * `call` step reaches as `ctx.files.<alias>` and `ctx.brain.<alias>`.
+ * `call` step reaches as `ctx.files.<alias>` and `ctx.brain.<alias>`;
+ * `apps` are Apps whose queries and mutations it calls, each by the App's
+ * ID and each function's stable ID (`AppPermission`).
  */
 export const permissionKinds = [
   "ai",
+  "apps",
   "connections",
   "decisions",
   "events",
@@ -180,9 +184,29 @@ export interface Permission {
   readonly title?: string;
 }
 
+/**
+ * An App whose functions the workflow calls (GRA-1663): the App by its
+ * ID, and each function it calls by the stable ID the App's definition
+ * gives it, with the function's path as a readable hint
+ * (`{ "fn_1": "notes.create" }`). The ID is what is sealed and called,
+ * so a rename of the function breaks nothing; the hint only names the
+ * member the generated code calls (`ctx.apps.<alias>.notes.create`), and
+ * saving the draft names it afresh from the App's current version. No
+ * contract: the workflow's own grant on each function, an admin's, is
+ * what lets a run call it, decided as each call is made, never a catalog
+ * binding.
+ */
+export interface AppPermission {
+  readonly app: string;
+  readonly functions: Readonly<Record<string, string>>;
+  /** What it is called where people see it: a label, renamed freely. */
+  readonly title?: string;
+}
+
 /** What a workflow may reach, each kind by alias (`permissionKinds`). */
 export interface Permissions {
   readonly ai?: Permission;
+  readonly apps?: Readonly<Record<string, AppPermission>>;
   readonly connections?: Readonly<Record<string, Permission>>;
   readonly decisions?: Readonly<Record<string, Permission>>;
   readonly events?: Readonly<Record<string, Permission>>;
@@ -323,15 +347,18 @@ export interface ConnectionCallStep extends CallBase {
 
 /**
  * A call of a workflow's typed member: a connection's action
- * (`ctx.connections`), the run's own files (`ctx.files`) or a Brain
- * collection (`ctx.brain`). One step type for every member call: the key
- * that names its permission says which kind it is, as `ctx.<kind>.<alias>`
+ * (`ctx.connections`), the run's own files (`ctx.files`), a Brain
+ * collection (`ctx.brain`), or a query or mutation of an App
+ * (`ctx.apps.<app>.<path>`, `function` its stable ID, which the App's
+ * permission lists). One step type for every member call: the key that
+ * names its permission says which kind it is, as `ctx.<kind>.<alias>`
  * does.
  */
 export type CallStep =
   | ConnectionCallStep
   | (CallBase & { readonly files: string; readonly action: FilesAction })
-  | (CallBase & { readonly brain: string; readonly action: BrainAction });
+  | (CallBase & { readonly brain: string; readonly action: BrainAction })
+  | (CallBase & { readonly app: string; readonly function: string });
 
 /**
  * Asks the workflow's model (`permissions.ai`) for an answer of
@@ -724,6 +751,14 @@ export const aliasPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
  */
 export const actionPattern =
   "^[A-Za-z][A-Za-z0-9_-]{0,63}(?:\\.[A-Za-z][A-Za-z0-9_-]{0,63}){0,3}$";
+
+/**
+ * An App function's path, as its App's definition names it and an App
+ * calls it (`notes.create`): 2 to 4 dotted segments, each a letter, then
+ * letters, digits and `_`, so `__proto__` is never one. The hint
+ * `ctx.apps.<alias>.<path>` reads by.
+ */
+export const functionPathPattern = `^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*){1,${operationPathMaxSegments - 1}}$`;
 
 /**
  * The lists of steps a step of each type may hold, each by the path it is

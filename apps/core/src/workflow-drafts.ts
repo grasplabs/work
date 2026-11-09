@@ -20,6 +20,7 @@ import type { Acting } from "./auth/identity.ts";
 import { workflowResourceDrafts } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
+import { withCurrentFunctionNames } from "./workflow-app-functions.ts";
 import { workflowDiagram } from "./workflow-diagram.ts";
 import {
   definitionProblems,
@@ -255,13 +256,16 @@ export const editWorkflowDraft = async (
 ): Promise<WorkflowDraft> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const { expectedRevision, source } = workflowResourceErrors.parse(
+  const { expectedRevision, source: given } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowDraftEditSchema,
     input
   );
+  // Each App function it calls named as its App names it now: the hint
+  // its code's member is named by (workflow-app-functions.ts).
+  const source = await withCurrentFunctionNames(env, by, given);
   const problems = boundedProblems(
-    await definitionProblems(env, source, workflow.id)
+    await definitionProblems(env, by, source, workflow.id)
   );
   const checked = problems.length === 0;
   const revision = expectedRevision + 1;

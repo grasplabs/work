@@ -967,7 +967,7 @@ export const workflowDraftPublishSchema = z.strictObject({
 });
 
 /** Most bindings a test run's start answers for. */
-const maxCandidateFixtures = 64;
+export const maxCandidateFixtures = 64;
 
 /** Most bytes of a test run's fixtures, as JSON text, all answers together. */
 export const maxCandidateFixtureBytes = 256 * 1024;
@@ -1014,16 +1014,20 @@ export const maxCandidateLifetimeMs = 60 * 60 * 1000;
  * A test run of a draft's checkpoint (GRA-815): the checkpoint's exact
  * revision, the run's input, the parameter values it runs with (each
  * left out takes its default; the workflow's own values never count),
- * and what each binding it calls answers, by alias. A test run never
- * calls anything: a call through a binding with no answer here fails
- * (`workflow.candidate_unfixtured`).
+ * and what each binding it calls answers, by alias, and each App
+ * function by `<alias>/<function ID>`. A test run never calls anything:
+ * a call with no answer here fails (`workflow.candidate_unfixtured`).
  */
 export const workflowCandidateStartSchema = z.strictObject({
   revision: z.int().min(1),
   input: z.json(),
   params: z.record(z.string().max(64), z.json()).optional(),
   fixtures: z
-    .record(z.string().min(1).max(64), z.strictObject({ output: z.json() }))
+    .record(
+      // An alias, or an App permission's alias and a function's ID.
+      z.string().min(1).max(129),
+      z.strictObject({ output: z.json() })
+    )
     .refine(
       (fixtures) => Object.keys(fixtures).length <= maxCandidateFixtures,
       { message: `At most ${maxCandidateFixtures} bindings.` }

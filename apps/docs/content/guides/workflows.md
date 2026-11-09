@@ -147,7 +147,7 @@ Grasp works the value out as the wait is reached, and hands the run only the eve
 
 ## What a workflow is made of
 
-A workflow is saved as JSON in the `grasp-workflow/2` format, which the canvas draws and the chat edits. It uses the same words as an App: the run's `args` and what it `returns` (with its `result`), its `params`, and the `permissions` it needs, by kind (`ai`, `connections`, `decisions`, `events`, `files`, `brain`), each of which an admin approves. Its steps are `call` (a connection's action, the run's own files, or a Brain collection), `generate` (an answer from the workflow's model), `decide` (a person's decision), `waitForEvent`, `wait`, `forEach`, `if`, `try` and `raise`.
+A workflow is saved as JSON in the `grasp-workflow/2` format, which the canvas draws and the chat edits. It uses the same words as an App: the run's `args` and what it `returns` (with its `result`), its `params`, and the `permissions` it needs, by kind (`ai`, `apps`, `connections`, `decisions`, `events`, `files`, `brain`), each of which an admin approves. Its steps are `call` (a connection's action, an App's function, the run's own files, or a Brain collection), `generate` (an answer from the workflow's model), `decide` (a person's decision), `waitForEvent`, `wait`, `forEach`, `if`, `try` and `raise`.
 
 A value a step passes may be an expression in JavaScript, `{ "$expr": "invoice.total > params.limit" }`. It reads the run's `args`, `params`, `state` and `run` (`run.id`, and `run.startedAt`, when the run started in milliseconds since the epoch, so a scheduled run finds its week without a clock), and each earlier step's result by the step's ID. Expressions only read: they can't reach an object's prototype (`constructor`, `prototype`, `__proto__`), use a computed name such as `lines[index]`, or call anything but the methods of strings, numbers and lists, and `JSON.stringify(value)` and `JSON.parse(text)` to write and read JSON text, such as an HTTP request's body.
 
@@ -190,3 +190,31 @@ A `call` step reaches the run's own files through a `files` permission: `read` (
 Its result names the kept file (`invoice.file`) in place of its content, which a later step reads (`{ "files": "runFiles", "action": "read", "args": { "file": { "$expr": "invoice.file.file" } } }`) or attaches.
 
 Each `ctx` call is a durable step: its result is recorded, and a run that picks up again after a failure gets it back rather than calling again. `{ step: "send" }` names the canvas step it belongs to. A step fails with an error that has a `code`, such as `connect.rate_limited`, a `message` and sometimes `details`; a `try` step's `catch` takes errors by `code`, and a `raise` step fails the run with an error of the workflow's own, in its own namespace (`billing.too_large`), never the platform's.
+
+### Calling an App's functions
+
+A workflow can call an App's queries and mutations, never its actions. Its `apps` permission names the App by its ID, and each function by the ID the App's definition gives it, with the function's path as a readable hint:
+
+```json
+{
+  "permissions": {
+    "apps": {
+      "notes": {
+        "app": "<App ID>",
+        "functions": { "<function ID>": "notes.create" }
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "made",
+      "type": "call",
+      "app": "notes",
+      "function": "<function ID>",
+      "args": { "title": { "$expr": "args.title" } }
+    }
+  ]
+}
+```
+
+The generated code calls it as `ctx.apps.notes.notes.create({ title: args.title }, { step: "made" })`, named by the path in its `functions` hint, which Grasp updates to the function's current path each time the draft is saved. The call itself goes by the function's ID, so renaming the function in the App never breaks the workflow, and a run already under way keeps calling the same function. A run calls a function only once an admin has granted the workflow `call` on exactly that function, and it acts as the run's person, within the App's roles and row rules. Publishing refuses a function the App no longer offers, and a run calling one that was removed since, or whose grant was revoked, fails that step (`workflow.app_function_unavailable`, `workflow.call_denied`). A test run answers an App call from its fixtures, under `<alias>/<function ID>`, and never reaches the App.

@@ -277,6 +277,7 @@ const createShippedWorkflows = async (
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
     const problems = await definitionProblems(
       env,
+      undefined,
       definition,
       `blueprint:${blueprint}`
     );
