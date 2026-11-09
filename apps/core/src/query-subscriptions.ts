@@ -207,12 +207,8 @@ interface Snapshot {
 interface Shown {
   readonly roles: string;
   readonly seq: number;
-  /** The revision the push named. */
-  readonly revision: number;
   /** The SHA-256 of the result read's canonical JSON (`digestOf`). */
   readonly digest: string;
-  /** Whether it pushed the value read, not a refusal in its place. */
-  readonly value: boolean;
 }
 
 /**
@@ -280,20 +276,12 @@ interface Evaluation {
   readonly build: PageLease | undefined;
   readonly request: string;
   readonly listeners: Set<Listener>;
-  /** How many pushes it made: each push's `Snapshot.seq`. */
+  /** How many pushes it made: each push's `Snapshot.seq` and revision. */
   revision: number;
   /**
-   * The latest revision a value it read carried (`LiveRead.revision`), 0
-   * before any: what a push of its names, refusals included, and what a
-   * value read later is compared with. Kept apart from the count of its
-   * pushes, so no refusal ever moves it.
-   */
-  carried: number;
-  /**
    * What its latest push showed: a read again that finds the same result
-   * under the same roles (or, for a value carrying its own revision, that
-   * revision) only offers it again, to subscriptions that haven't had it
-   * yet, never pushing it twice.
+   * under the same roles only offers it again, to subscriptions that
+   * haven't had it yet, never pushing it twice.
    */
   shown: Shown | undefined;
   /** The latest result, while a subscription still needs it. */
@@ -367,13 +355,6 @@ export interface Reader {
 export interface LiveRead {
   readonly result: Result;
   readonly reads: EvaluatedQuery["reads"];
-  /**
-   * The revision its value carries, when it carries its own (a workflow
-   * run's snapshot, page-workflows.ts): pushed under that revision, so a
-   * control's receipt names the snapshot that settles it. Otherwise each
-   * push is numbered after the last.
-   */
-  readonly revision?: number;
 }
 
 /**
@@ -480,7 +461,7 @@ export const pageReads = (
     check.forget?.();
   },
   evaluate: async (by, app, build, request, deadline) => {
-    const { answer, reads, revision } = await evaluatePage(
+    const { answer, reads } = await evaluatePage(
       env,
       by,
       app,
@@ -488,11 +469,7 @@ export const pageReads = (
       request,
       deadline
     );
-    return {
-      result: answer.result,
-      reads,
-      ...(revision === undefined ? {} : { revision }),
-    };
+    return { result: answer.result, reads };
   },
 });
 
@@ -710,9 +687,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       this.#follow(by.userId, app);
     }
     // Only a result read for another subscription that hasn't taken it
-    // yet: never the carried value a watch last showed, which may have
-    // aged since (a run's output past its retention, say), so a
-    // subscription that has had nothing is answered by a read of its own.
+    // yet: never the value last shown, which may have aged since (a run's
+    // output past its retention, say), so a subscription that has had
+    // nothing is answered by a read of its own.
     const kept = evaluation.latest;
     if (kept !== undefined) {
       // A result kept for another subscription that hasn't taken it yet
@@ -744,7 +721,6 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       request,
       listeners: new Set(),
       revision: 0,
-      carried: 0,
       shown: undefined,
       latest: undefined,
       watch: undefined,
@@ -928,13 +904,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     // Waited for the budget no more once a read went through.
     evaluation.budgetWaitMs = 0;
-    this.#publish(
-      evaluation,
-      result,
-      await digestOf(result),
-      before.roles,
-      evaluated.revision
-    );
+    this.#publish(evaluation, result, await digestOf(result), before.roles);
   }
 
   /**
@@ -1223,26 +1193,18 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     result: Result,
     /** `result`'s digest (`digestOf`). */
     digest: string,
-    roles: string,
-    /** The revision the value carries, if its own (`LiveRead.revision`). */
-    carried?: number
+    roles: string
   ): void {
     if (evaluation.closed) {
       return;
     }
     const { shown } = evaluation;
     // Only one read under the same roles: one read under others is never
-    // pushed under these (`#send`). A value carrying its own revision is
-    // the same by that revision, which a control's receipt names; any
-    // other by its content, so a write that changed nothing the person
-    // reads (a row their rules hide, say) pushes nothing, and so never
-    // tells them the table was written.
+    // pushed under these (`#send`). The same by its content, so a write
+    // that changed nothing the person reads (a row their rules hide, say)
+    // pushes nothing, and so never tells them the table was written.
     const same =
-      shown !== undefined &&
-      shown.roles === roles &&
-      (carried !== undefined && result.ok
-        ? carried === evaluation.carried && shown.value
-        : shown.digest === digest);
+      shown !== undefined && shown.roles === roles && shown.digest === digest;
     if (same) {
       // Nothing new, but whoever hasn't had it yet gets it: as the push
       // still held for one, or else as this read, numbered as shown.
@@ -1251,7 +1213,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         held?.seq === shown.seq
           ? held
           : {
-              ...pushOf(result, shown.revision),
+              ...pushOf(result, shown.seq),
               roles,
               seq: shown.seq,
             };
@@ -1262,23 +1224,8 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       QuerySubscriptions.#forgetDelivered(evaluation);
       return;
     }
-    let named: number;
-    if (carried !== undefined && result.ok) {
-      if (carried < evaluation.carried) {
-        // Older than one pushed already: a read overtaken by a newer one.
-        return;
-      }
-      evaluation.carried = carried;
-      named = carried;
-    } else {
-      // A refusal of one that carries revisions names the revision it
-      // last showed (a refusal is heard whatever revision it names), so
-      // the value read once it clears is shown again: never one past it.
-      named =
-        evaluation.carried > 0 ? evaluation.carried : evaluation.revision + 1;
-    }
     evaluation.revision += 1;
-    const { push, bytes } = pushOf(result, named);
+    const { push, bytes } = pushOf(result, evaluation.revision);
     const snapshot: Snapshot = {
       push,
       bytes,
@@ -1286,13 +1233,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       seq: evaluation.revision,
     };
     evaluation.latest = snapshot;
-    evaluation.shown = {
-      roles,
-      seq: snapshot.seq,
-      revision: named,
-      digest,
-      value: result.ok && push.result === result,
-    };
+    evaluation.shown = { roles, seq: snapshot.seq, digest };
     evaluation.roles = roles;
     for (const listener of evaluation.listeners) {
       this.#offer(evaluation, listener, snapshot);
@@ -1370,7 +1311,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         if (evaluation.shown?.seq === snapshot.seq) {
           evaluation.shown = undefined;
         }
-        // Not sent: the read again may carry the same revision, and still
+        // Not sent: the read again may find the same result, and still
         // goes to it.
         listener.sent = sentBefore;
         listener.behind = true;

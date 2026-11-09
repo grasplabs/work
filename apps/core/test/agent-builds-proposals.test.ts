@@ -9,7 +9,6 @@ import {
   fixed,
   idp,
   intake,
-  layout,
   ledgerDefinition,
   noWorkflows,
   restyled,
@@ -112,12 +111,10 @@ export const titles = action({
         await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": mistyped })});
         const proposal = await env.build.propose(app.id, "Notes");
         const mistyped = server(proposal);
-        await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": operations, "app/server.ts": "export const leftover = 1;\n", "app/exports.json": "{}" })});
-        const leftover = server(await env.build.propose(app.id, "Notes"));
-        return { wrongCall, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover };
+        return { wrongCall, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status } };
       };`),
       says("Checked."),
-      says("The leftovers fail."),
+      says("The wrong call fails."),
     ]);
     await grant();
 
@@ -134,9 +131,6 @@ export const titles = action({
         diagnostics: [{ file: "server/notes.ts", rule: "TS2322" }],
       },
       proposed: { version: null, passed: false, server: "failed" },
-      leftover: {
-        diagnostics: [layout("app/exports.json"), layout("app/server.ts")],
-      },
     });
     const app = await createdApp(person.api);
     await expect(person.api.apps.versions.list(app.id)).resolves.toStrictEqual(

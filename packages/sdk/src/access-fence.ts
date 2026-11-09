@@ -18,7 +18,7 @@ export class AccessFence {
   #generation = 0;
   /** What the latest fence was for. */
   #fencedBy: GraspError | undefined;
-  /** Told of every fence (`WorkflowLink.onFence`). */
+  /** Told of every fence (`ClientInternals.onFence`). */
   readonly #fenceListeners = new Set<(refusal: GraspError) => void>();
 
   constructor(
@@ -77,7 +77,7 @@ export class AccessFence {
     return settled;
   }
 
-  /** Tells the fence's listeners (`WorkflowLink.onFence`) of `refusal`. */
+  /** Tells the fence's listeners (`ClientInternals.onFence`) of `refusal`. */
   #tellFence(refusal: GraspError): void {
     for (const listener of this.#fenceListeners) {
       listener(refusal);

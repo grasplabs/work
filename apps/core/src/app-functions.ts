@@ -1,4 +1,5 @@
 import { declaredPermission } from "@grasp-os/sdk/host";
+import type { WorkflowQueryName } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
@@ -51,11 +52,8 @@ import { openStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation, ProgressSink, UseRefusal } from "./operations.ts";
 import {
-  answerWorkflowCommand,
-  isWorkflowRequest,
-  readWorkflowRequest,
-  readWorkflowWatch,
-  watchesWorkflow,
+  answerWorkflowMutation,
+  isWorkflowMutationPath,
 } from "./page-workflows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
@@ -405,6 +403,13 @@ interface FunctionCallOptions {
    * A query, an action or what the mutation calls is never told.
    */
   readonly tellsForm?: boolean;
+  /**
+   * Whether a person's page calls, or follows it live: only a page reads a
+   * run of a workflow reference (`run`, `canStart`, page-workflows.ts),
+   * as only a page starts or controls one; an agent's, a Code Mode run's
+   * or the App's own server code's call reads no run's output.
+   */
+  readonly page?: boolean;
   readonly stillAllowed?: () => Promise<void>;
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   readonly parentSession?: string;
@@ -658,6 +663,10 @@ const currentResolution = async (
   return { release, appId: found.id, ...resolved };
 };
 
+/** A workflow reference's queries only a page reads (`FunctionCallOptions.page`). */
+const isPageOnlyQuery = (name: WorkflowQueryName): boolean =>
+  name === "run" || name === "canStart";
+
 const callFunction = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams"> &
@@ -709,6 +718,9 @@ const callFunction = async (
   }
   const { release, path, appId, workflowQuery } = resolved;
   if (workflowQuery !== undefined) {
+    if (isPageOnlyQuery(workflowQuery.name) && options.page !== true) {
+      return refused(operationErrors.create("function.not_found"));
+    }
     return await answeredWorkflowQuery(env, {
       by,
       // Staff are asked no client's decision (decisions.ts), whatever
@@ -913,7 +925,11 @@ export const callVisitorFunction = async (
     }
     // Never granted, whatever the grants say: refused, and recorded, before
     // anything of the release is read.
-    if (call.reference.kind === "action" || isWorkflowQueryPath(contractId)) {
+    if (
+      call.reference.kind === "action" ||
+      isWorkflowQueryPath(contractId) ||
+      isWorkflowMutationPath(contractId)
+    ) {
       return refused(await caller.notGranted(contractId));
     }
     const release = await loadRelease(env, caller.app, caller.version);
@@ -977,27 +993,37 @@ export const callAppFunction = async (
   });
 
 /**
- * A page's command of a workflow its App binds (page-workflows.ts),
- * answered as a call is: a watch sent as a call is no call.
+ * The call `request` is, if it calls one of a workflow reference's
+ * mutations (page-workflows.ts): core answers those itself, and only for
+ * a page.
  */
-const workflowCommandAnswer = async (
+const workflowMutationOf = (request: unknown): FunctionRequest | undefined => {
+  try {
+    const call = readFunctionRequest(request);
+    return isWorkflowMutationPath(call.reference.name) ? call : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * A page's call of a workflow reference's mutation (page-workflows.ts),
+ * answered as a call is.
+ */
+const workflowMutationAnswer = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams"> &
     Partial<Pick<Identity, "staff">>,
   app: unknown,
-  request: unknown
+  call: FunctionRequest
 ): Promise<FunctionAnswer> => {
   const requestId = crypto.randomUUID();
   try {
-    const read = readWorkflowRequest(request);
-    if (!("command" in read)) {
-      throw operationErrors.create("contract.invalid_request");
-    }
-    const { value, manifestHash } = await answerWorkflowCommand(
+    const { value, manifestHash } = await answerWorkflowMutation(
       env,
       by,
       app,
-      read
+      call
     );
     return {
       result: { ok: true, value },
@@ -1014,53 +1040,9 @@ const workflowCommandAnswer = async (
 };
 
 /**
- * A page's watch of a workflow its App binds (page-workflows.ts), read
- * as a live query is, with the revision a run's snapshot carries: a
- * command sent as a watch is no query.
- */
-const workflowWatchRead = async (
-  env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams"> &
-    Partial<Pick<Identity, "staff">>,
-  app: unknown,
-  request: string
-): Promise<EvaluatedQuery> => {
-  const requestId = crypto.randomUUID();
-  try {
-    const read = readWorkflowRequest(request);
-    if (!("watch" in read)) {
-      throw operationErrors.create("contract.invalid_request");
-    }
-    const { value, revision, manifestHash } = await readWorkflowWatch(
-      env,
-      by,
-      app,
-      read
-    );
-    return {
-      answer: {
-        result: { ok: true, value },
-        provenance: null,
-        manifestHash,
-      },
-      reads: undefined,
-      ...(revision === undefined ? {} : { revision }),
-    };
-  } catch (error) {
-    return {
-      answer: {
-        result: { ok: false, error: refusalOf(error, requestId) },
-        provenance: null,
-        manifestHash: null,
-      },
-      reads: undefined,
-    };
-  }
-};
-
-/**
  * Calls a public function of App `app` for a page of `by`'s, as
- * `callAppFunction` calls it. Never throws.
+ * `callAppFunction` calls it, or one of a workflow reference's mutations,
+ * which only a page calls. Never throws.
  */
 export const callPageFunction = async (
   env: Env,
@@ -1070,21 +1052,23 @@ export const callPageFunction = async (
   request: unknown,
   deadline: number,
   options: Pick<FunctionCallOptions, "tellsForm"> = {}
-): Promise<FunctionAnswer> =>
-  isWorkflowRequest(request)
-    ? await workflowCommandAnswer(env, by, app, request)
-    : await callFunction(env, by, app, request, { deadline, ...options });
+): Promise<FunctionAnswer> => {
+  const mutation = workflowMutationOf(request);
+  return mutation === undefined
+    ? await callFunction(env, by, app, request, {
+        deadline,
+        page: true,
+        ...options,
+      })
+    : await workflowMutationAnswer(env, by, app, mutation);
+};
 
 /**
  * Whether `request` calls one of a workflow reference's queries
- * (workflow-reference-queries.ts), or watches a workflow's run or binding
- * (page-workflows.ts): they read no store, so a live one is read again
- * when the person's runs of the App change, not on a write.
+ * (workflow-reference-queries.ts): they read no store, so a live one is
+ * read again when the person's runs of the App change, not on a write.
  */
 export const callsWorkflowQuery = (request: unknown): boolean => {
-  if (watchesWorkflow(request)) {
-    return true;
-  }
   try {
     return isWorkflowQueryPath(readFunctionRequest(request).reference.name);
   } catch {
@@ -1093,16 +1077,14 @@ export const callsWorkflowQuery = (request: unknown): boolean => {
 };
 
 /**
- * Whether `request` calls a workflow reference's decision queries, or
- * watches a run (page-workflows.ts), which a reviewer may watch only
- * while one of its decisions asks them: read again when a decision of one
- * of the App's runs changes, for whomever it asks (run-changes.ts,
+ * Whether `request` calls a workflow reference's query a decision's
+ * change may change for people other than its run's (its decision
+ * queries, and `run`, which a reviewer reads only while one of its
+ * decisions asks them): read again when a decision of one of the App's
+ * runs changes, for whomever it asks (run-changes.ts,
  * `tellDecisionFollowers`).
  */
 export const callsDecisionQuery = (request: unknown): boolean => {
-  if (watchesWorkflow(request)) {
-    return true;
-  }
   try {
     return isDecisionQueryPath(readFunctionRequest(request).reference.name);
   } catch {
@@ -1121,11 +1103,6 @@ export interface EvaluatedQuery {
   readonly reads:
     | { readonly storeId: StoreId; readonly readSet: Record<string, number> }
     | undefined;
-  /**
-   * The revision of what it answered, when its value carries its own (a
-   * workflow run's snapshot): each push of it is numbered so.
-   */
-  readonly revision?: number;
 }
 
 /**
@@ -1142,13 +1119,11 @@ export const evaluateAppQuery = async (
   request: string,
   deadline: number
 ): Promise<EvaluatedQuery> => {
-  if (isWorkflowRequest(request)) {
-    return await workflowWatchRead(env, by, app, request);
-  }
   let reads: EvaluatedQuery["reads"];
   const answer = await callFunction(env, by, app, request, {
     deadline,
     kind: "query",
+    page: true,
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },

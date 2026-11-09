@@ -25,7 +25,6 @@ import {
   installBuiltinBlueprint,
 } from "../src/app-blueprints.ts";
 import { startAppBinding } from "../src/app-workflow-bindings.ts";
-import { storeTree, versionTree } from "../src/apps.ts";
 import { blueprintsDigestText } from "../src/builtin-digest.ts";
 import {
   builtins,
@@ -989,62 +988,6 @@ describe("the built-in blueprints", () => {
       conflicts: [],
       definitionConflict: true,
       taken: version,
-    });
-
-    await reinstall();
-  });
-
-  it("drop the v1 server's files a copy still holds as its builder takes an update, which commits", async () => {
-    await reinstall();
-    const builder = await signedInApi(idp, "builder");
-    const { app } = await builder.api.apps.blueprints.create("hello", {
-      name: "Kept a server",
-    });
-    // Copied before the v1 server went, with a server of its own added:
-    // its version still holds it, which no commit may write now.
-    const legacy = new Map(
-      Object.entries({
-        ...(await builder.api.apps.files.read(app.id, 1)),
-        "app/server.ts": "export class App {}\n",
-      })
-    );
-    const tree = await versionTree(legacy);
-    await storeTree(env, appIdSchema.parse(app.id), tree);
-    await env.DB.prepare(
-      "UPDATE app_versions SET tree = ? WHERE app_id = ? AND version = 1"
-    )
-      .bind(tree.tree, app.id)
-      .run();
-
-    const helper =
-      "export const shout = (text: string) => text.toUpperCase();\n";
-    await install(
-      releaseWith({ files: { ...hello().files, [helperPath]: helper } })
-    );
-    const offered = await builder.api.apps.blueprints.update(app.id);
-    if (!offered) {
-      throw new Error("No update was offered");
-    }
-    const { version } = await builder.api.apps.blueprints.acceptUpdate(app.id, {
-      to: offered.to,
-      definition: offered.definition,
-      over: 1,
-    });
-    const taken = await builder.api.apps.files.read(app.id, version);
-
-    expect({
-      changes: offered.changes.map(({ path, change }) => [path, change]),
-      conflicts: offered.conflicts,
-      v1: Object.keys(taken).filter((path) => path.startsWith("app/")),
-      helper: taken[helperPath],
-    }).toStrictEqual({
-      changes: [
-        ["app/server.ts", "deleted"],
-        [helperPath, "added"],
-      ],
-      conflicts: [],
-      v1: [],
-      helper,
     });
 
     await reinstall();

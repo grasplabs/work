@@ -1032,8 +1032,8 @@ export const capturedCode = <Code extends QuietableCode>(code: Code): Code => {
  * `webSocketMessage`, `webSocketClose`, `webSocketError`) or builds (the
  * constructor) throws nothing to it (a facet can set no alarm today, so
  * `alarm` is caught for when it can). With a tail (on Cloudflare) its
- * console stays as it is; without one (core's v1 server off Cloudflare,
- * apps/core/src/app.ts) it is silenced like any other isolate's.
+ * console stays as it is; without one (off Cloudflare) it is silenced
+ * like any other isolate's.
  */
 export const quietLoader = <
   Code extends QuietableCode,

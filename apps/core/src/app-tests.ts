@@ -1028,8 +1028,8 @@ class FixtureSession extends TestTarget {
   }
 
   /**
-   * Starts, as principal `name`, the workflow `request` names (a page's
-   * start's JSON text): the run, a real one of the workflow version the
+   * Starts, as principal `name`, the workflow `request` names (a call of
+   * its reference's `start` mutation): the run, a real one of the workflow version the
    * release under test binds, with nothing of the organization's around it
    * (fixture-runs.ts). Answers the JSON text of an `OperationResult`: the
    * run's number in this session, or why it was refused.

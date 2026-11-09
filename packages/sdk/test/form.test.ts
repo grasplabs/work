@@ -1,15 +1,15 @@
 import { FormApi } from "@tanstack/react-form";
 import { describe, expect, it } from "vite-plus/test";
 
-import { GraspClient } from "../src/client-core.ts";
+import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
 import type { ClientTransport } from "../src/client-transport.ts";
-import { workflowChannel } from "../src/client-workflow.ts";
 import { bindForm } from "../src/form.ts";
 import type { FormApiOf, FormBinding, FormOptionsInput } from "../src/form.ts";
 import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
 import { readWorkflowReference } from "../src/workflow-reference-read.ts";
+import { respondToDecision } from "../src/workflow-respond.ts";
 import { api, workflows } from "./notes/server/_generated/api.ts";
 
 // A form's submission state through the real session client, against the
@@ -685,7 +685,7 @@ const refusedWith = async (promise: Promise<unknown>): Promise<string> => {
 /**
  * A decision form (spec 10.7.2) as an App composes one: a local form of an
  * explicit approval and the decision's own value schema, whose submit
- * answers the exact wait through the workflow channel; and what the
+ * answers the exact wait as `useWorkflow`'s `respond` does; and what the
  * page's trusted decision UI was asked, each answer in order.
  */
 const decisionForm = (
@@ -724,7 +724,13 @@ const decisionForm = (
     defaultValues: { approved: false, value: { comment: "" } },
     onSubmit: async (response: unknown) => {
       onSubmitted();
-      await workflowChannel(client).respond(read, "run-1", wait, response);
+      await respondToDecision(
+        clientInternals(client),
+        read,
+        "run-1",
+        wait,
+        response
+      );
     },
   });
   return { binding, form, asked };

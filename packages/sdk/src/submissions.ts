@@ -9,7 +9,6 @@ import { waitAfter, waitFor } from "./client-retry.ts";
 import { freshKey, sleep } from "./client-shared.ts";
 import { settlesSubmission } from "./refusals.ts";
 import {
-  readSettled,
   showsStale,
   submissionVerdict,
   uncertainScope,
@@ -98,7 +97,7 @@ export class Submissions {
     const done =
       joined?.input === inputText
         ? joined.done
-        : this.send(reference, request, key, {
+        : this.#send(reference, request, key, {
             scoped,
             input: inputText,
           });
@@ -113,17 +112,13 @@ export class Submissions {
    * nothing a few times. Kept among the submissions in flight until it
    * settles.
    */
-  async send(
+  async #send(
     reference: ReadReference,
     request: string,
     key: string,
     held: {
       readonly scoped: string;
       readonly input: string;
-    },
-    events?: {
-      readonly onRecovering: () => void;
-      readonly read: (value: unknown) => unknown;
     }
   ): Promise<unknown> {
     const isAction = reference.kind === "action";
@@ -135,11 +130,7 @@ export class Submissions {
       let lostSince: number | undefined;
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        const answered = await this.#fence.call(request, generation);
-        // An answer that isn't one says nothing of the outcome: it is
-        // recovered under the same key, as a lost one is, never taken for
-        // a refusal that would leave the caller to send it afresh.
-        const settled = readSettled(answered, events?.read);
+        const settled = await this.#fence.call(request, generation);
         if (showsStale(settled, isAction)) {
           this.#changed();
         }
@@ -165,7 +156,6 @@ export class Submissions {
         }
         if (verdict.unknown) {
           lostSince ??= now;
-          events?.onRecovering();
         }
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         await sleep(waitAfter(settled, tries));

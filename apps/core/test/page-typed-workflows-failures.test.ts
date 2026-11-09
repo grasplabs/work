@@ -1,4 +1,3 @@
-import { readWorkflowReference, workflowChannel } from "@grasp-os/sdk/host";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -18,22 +17,26 @@ import {
 import { mockIdpWith } from "./idp.ts";
 import {
   called,
+  controlCommand,
   endLiveResourceRuns,
   following,
   greetingOf,
   keyOf,
   outcomeOf,
-  pageClient,
   pageOf,
+  queryCall,
   settles,
   staged,
-  wireOf,
+  startCommand,
+  startedOf,
+  workflowQuery,
 } from "./json-workflow-apps.ts";
 import {
   boundApp,
   failingOf,
   failureShown,
   idp,
+  pageRuns,
   shownOf,
 } from "./page-typed-workflows-harness.ts";
 import { sleeping, whileEngineRefuses } from "./runs.ts";
@@ -42,11 +45,11 @@ import { auditedDuring, outcome } from "./sign-in.ts";
 
 // A page's typed `useWorkflow` through the real host (spec 10.4,
 // page-workflows.ts; the threat model is on GRA-626): its starts and
-// cancels as the page relays a page's calls, over core's function
-// route, and its run and binding snapshots as the page follows a live
-// query through the frame's own capability (`pages.frame`). The SDK's
-// own channel speaks to both, so each answer and push passes the
-// validators the hook reads them with.
+// controls as calls of the workflow reference's mutations, relayed over
+// core's function route, and its run and whether it may start one as the
+// reference's `run` and `canStart` queries, followed live through the
+// frame's own capability (`pages.frame`), each answer and push checked by
+// the descriptors the SDK generates.
 
 mockIdpWith(idp);
 
@@ -56,26 +59,23 @@ describe(
   () => {
     afterEach(endLiveResourceRuns);
 
-    it("shows nothing of a page's run but why while its alias is bound elsewhere, and the run again once bound back", async () => {
+    it("shows nothing of a page's run while its alias is bound elsewhere, and the run again once bound back", async () => {
       const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const lease = await pageOf(builder, app);
-      const channel = workflowChannel(pageClient(builder, app, lease));
-      const read = readWorkflowReference(reference);
-      const watched = await channel.start(read, { who: "Ada" });
-      const other = await channel.start(read, { who: "Bo" });
-      const stopRun = channel.followRun(read, watched.runId, () => {
+      const channel = pageRuns(builder, app, lease, reference);
+      const watched = await channel.start({ who: "Ada" });
+      const other = await channel.start({ who: "Bo" });
+      const stopRun = channel.followRun(watched.runId, () => {
         // Read below.
       });
-      const shown = () => channel.peekRun(read, watched.runId);
+      const shown = () => channel.peekRun(watched.runId);
       await vi.waitFor(() => {
-        expect(shown()).toMatchObject({
-          fresh: true,
-          value: { status: "running" },
-        });
+        expect(shown().value?.status).toBe("running");
       }, settles);
       const before = shown();
-      // Bound away: the next read, which another run's end causes, refuses.
+      // Bound away: the next read, which another run's end causes, shows
+      // nothing of it.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
         definition: greetingOf("1 hour", "Version 2"),
         basedOn: 1,
@@ -92,7 +92,7 @@ describe(
         other.runId
       );
       await vi.waitFor(() => {
-        expect(shown().unavailable).toBeTruthy();
+        expect(shown().value).toBeNull();
       }, settles);
       const away = shown();
       // Bound back, and read again as a new run starts: shown again.
@@ -101,40 +101,27 @@ describe(
         alias: "followUp",
         version: 1,
       });
-      await channel.start(read, { who: "Cy" });
+      await channel.start({ who: "Cy" });
       await vi.waitFor(() => {
-        expect(shown().fresh).toBeTruthy();
+        expect(shown().value).not.toBeNull();
       }, settles);
       const back = shown();
       stopRun();
 
       expect({
-        before: { revision: before.revision, control: before.value?.control },
-        away: {
-          value: away.value,
-          fresh: away.fresh,
-          error: away.error,
-          unavailable: away.unavailable,
-        },
-        back: { revision: back.revision, control: back.value?.control },
+        before: before.value?.control,
+        // Losing it is a state, no error.
+        away: { value: away.value, error: away.error },
+        back: back.value?.control,
       }).toStrictEqual({
         before: {
-          revision: before.revision,
-          control: {
-            canPause: true,
-            canResume: false,
-            canCancel: true,
-            pendingControl: null,
-          },
+          canPause: true,
+          canResume: false,
+          canCancel: true,
+          pendingControl: null,
         },
-        // Shown before: losing it is a state, no error.
-        away: {
-          value: undefined,
-          fresh: false,
-          error: undefined,
-          unavailable: true,
-        },
-        back: { revision: before.revision, control: before.value?.control },
+        away: { value: null, error: undefined },
+        back: before.value?.control,
       });
     });
 
@@ -143,18 +130,15 @@ describe(
         definition: failingOf,
       });
       const lease = await pageOf(builder, app);
-      const channel = workflowChannel(pageClient(builder, app, lease));
-      const read = readWorkflowReference(reference);
-      const handle = await channel.start(read, { who: "Ada" });
-      const stop = channel.followRun(read, handle.runId, () => {
+      const channel = pageRuns(builder, app, lease, reference);
+      const handle = await channel.start({ who: "Ada" });
+      const stop = channel.followRun(handle.runId, () => {
         // Read below.
       });
       await vi.waitFor(() => {
-        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
-          "failed"
-        );
+        expect(channel.peekRun(handle.runId).value?.status).toBe("failed");
       }, settles);
-      const { error } = channel.peekRun(read, handle.runId).value ?? {};
+      const { error } = channel.peekRun(handle.runId).value ?? {};
       stop();
       // A code the platform defines, in the platform's own words: nothing
       // of what the run read.
@@ -204,16 +188,16 @@ describe(
       // Restricted as the start is decided, so its run is restricted for good.
       await appHost(env, appIdSchema.parse(app)).restrict();
       const lease = await pageOf(builder, app);
-      const read = readWorkflowReference(reference);
-      const handle = await workflowChannel(
-        pageClient(builder, app, lease)
-      ).start(read, { who: "Ada" });
+      const handle = await pageRuns(builder, app, lease, reference).start({
+        who: "Ada",
+      });
       const shownOnce = async () => {
-        const watched = await following(builder, app, lease, {
-          workflow: wireOf(reference),
-          watch: "run",
-          runId: handle.runId,
-        });
+        const watched = await following(
+          builder,
+          app,
+          lease,
+          workflowQuery(reference, "run", { runId: handle.runId })
+        );
         // Until it shows the run ended, or is refused.
         await vi.waitFor(() => {
           const last = watched.received.at(-1);
@@ -249,15 +233,19 @@ describe(
       const appB = await boundApp({ sharing: appA.sharing });
       const { builder } = appA;
       const leaseA = await pageOf(builder, appA.app);
-      const handle = await workflowChannel(
-        pageClient(builder, appA.app, leaseA)
-      ).start(readWorkflowReference(appA.reference), { who: "Ada" });
+      const handle = await pageRuns(
+        builder,
+        appA.app,
+        leaseA,
+        appA.reference
+      ).start({ who: "Ada" });
       const leaseB = await pageOf(builder, appB.app);
-      const watched = await following(builder, appB.app, leaseB, {
-        workflow: wireOf(appB.reference),
-        watch: "run",
-        runId: handle.runId,
-      });
+      const watched = await following(
+        builder,
+        appB.app,
+        leaseB,
+        workflowQuery(appB.reference, "run", { runId: handle.runId })
+      );
       await vi.waitFor(() => {
         expect(watched.received.length).toBeGreaterThan(0);
       }, settles);
@@ -269,17 +257,49 @@ describe(
             builder,
             appB.app,
             leaseB,
-            JSON.stringify({
-              workflow: wireOf(appB.reference),
-              command: "cancel",
-              runId: handle.runId,
-              idempotencyKey: keyOf(),
-            })
+            controlCommand(appB.reference, "cancel", handle.runId, keyOf())
           )
         ),
       }).toStrictEqual({
-        seen: "workflow.run_unavailable",
+        seen: null,
         cancel: "workflow.run_unavailable",
+      });
+    });
+
+    it("shows a chat's preview no run and nothing it may start, and starts nothing from it", async () => {
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
+      // A real run of the App's, which the preview never shows.
+      const live = await pageOf(builder, app);
+      const { runId } = startedOf(
+        await called(builder, app, live, startCommand(reference))
+      );
+      const { id: chat } = await builder.api.chats.forApp(app);
+      const { lease } = await builder.api.chats.preview(chat, app);
+      if (lease === undefined) {
+        throw new Error("The preview opened with no lease.");
+      }
+      const previewed = async (request: string) =>
+        outcomeOf(await called(builder, app, lease, request));
+      expect({
+        // As `useWorkflow` reads them before a first start: the page
+        // renders as it does published, never at its error boundary.
+        canStart: await previewed(queryCall(reference, "canStart", {})),
+        run: await previewed(queryCall(reference, "run", { runId })),
+        runs: await previewed(
+          queryCall(reference, "runs", { pagination: { cursor: null } })
+        ),
+        start: await previewed(startCommand(reference)),
+        runsStarted: await env.DB.prepare(
+          "SELECT COUNT(*) AS runs FROM workflow_start_receipts WHERE invoker_id = ?"
+        )
+          .bind(app)
+          .first<number>("runs"),
+      }).toStrictEqual({
+        canStart: false,
+        run: null,
+        runs: "resource.unavailable",
+        start: "app.preview_side_effect",
+        runsStarted: 1,
       });
     });
 
@@ -287,16 +307,21 @@ describe(
       const { builder, app, reference } = await boundApp({
         hold: "1 hour",
       });
-      const start = JSON.stringify({
-        workflow: wireOf(reference),
-        command: "start",
-        input: { who: "Ada" },
-        idempotencyKey: keyOf(),
-      });
+      const start = startCommand(reference, { who: "Ada" });
       expect({
-        // An agent's or another App's call of the App, as its server takes it.
+        // An agent's or another App's call of the App, as its server takes it:
+        // a workflow's mutations, and the run and whether one may start, are
+        // a page's alone, no function of the App's.
         agent: outcomeOf(
           await callAppFunction(env, builder.acting, app, start)
+        ),
+        read: await Promise.all(
+          [
+            queryCall(reference, "run", { runId: "run-1" }),
+            queryCall(reference, "canStart", {}),
+          ].map(async (read) =>
+            outcomeOf(await callAppFunction(env, builder.acting, app, read))
+          )
         ),
         runs: await env.DB.prepare(
           "SELECT COUNT(*) AS runs FROM workflow_start_receipts WHERE invoker_id = ?"
@@ -304,7 +329,8 @@ describe(
           .bind(app)
           .first<number>("runs"),
       }).toStrictEqual({
-        agent: "contract.invalid_request",
+        agent: "function.not_found",
+        read: ["function.not_found", "function.not_found"],
         runs: 0,
       });
     });
@@ -313,16 +339,13 @@ describe(
       const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const { lease, version } = await builder.api.pages.open(app);
-      const channel = workflowChannel(pageClient(builder, app, lease));
-      const read = readWorkflowReference(reference);
-      const handle = await channel.start(read, { who: "Ada" });
-      const stop = channel.followRun(read, handle.runId, () => {
+      const channel = pageRuns(builder, app, lease, reference);
+      const handle = await channel.start({ who: "Ada" });
+      const stop = channel.followRun(handle.runId, () => {
         // Read below.
       });
       await vi.waitFor(() => {
-        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
-          "running"
-        );
+        expect(channel.peekRun(handle.runId).value?.status).toBe("running");
       }, settles);
       await revokeRelease(
         env,
@@ -337,11 +360,9 @@ describe(
         handle.runId
       );
       await vi.waitFor(() => {
-        expect(channel.peekRun(read, handle.runId).error?.code).toBe(
-          "page.revoked"
-        );
+        expect(channel.peekRun(handle.runId).error?.code).toBe("page.revoked");
       }, settles);
-      const fenced = channel.peekRun(read, handle.runId);
+      const fenced = channel.peekRun(handle.runId);
       stop();
       expect({ value: fenced.value, code: fenced.error?.code }).toStrictEqual({
         value: undefined,
@@ -352,16 +373,13 @@ describe(
     it("applies a cancel whose stop never went out at the next repair, settling its receipt", async () => {
       const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await pageOf(builder, app);
-      const channel = workflowChannel(pageClient(builder, app, lease));
-      const read = readWorkflowReference(reference);
-      const handle = await channel.start(read, { who: "Ada" });
-      const stop = channel.followRun(read, handle.runId, () => {
+      const channel = pageRuns(builder, app, lease, reference);
+      const handle = await channel.start({ who: "Ada" });
+      const stop = channel.followRun(handle.runId, () => {
         // Read below.
       });
       await vi.waitFor(() => {
-        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
-          "running"
-        );
+        expect(channel.peekRun(handle.runId).value?.status).toBe("running");
       }, settles);
       // Admitted a while ago, its request ended before it asked the engine.
       await env.DB.prepare(
@@ -380,9 +398,7 @@ describe(
       const events = await auditedDuring(async () => {
         await repairResourceTerminations(env, new Date());
         await vi.waitFor(() => {
-          expect(channel.peekRun(read, handle.runId).value?.status).toBe(
-            "cancelled"
-          );
+          expect(channel.peekRun(handle.runId).value?.status).toBe("cancelled");
         }, settles);
         // A repair again, well after: nothing more is stopped or audited.
         await repairResourceTerminations(env, new Date(Date.now() + 3_600_000));
@@ -420,10 +436,9 @@ describe(
       // Its wait is over well before a minute's repair would come.
       const { builder, app, reference } = await boundApp({ hold: "2 seconds" });
       const lease = await pageOf(builder, app);
-      const channel = workflowChannel(pageClient(builder, app, lease));
-      const read = readWorkflowReference(reference);
-      const handle = await channel.start(read, { who: "Ada" });
-      const stop = channel.followRun(read, handle.runId, () => {
+      const channel = pageRuns(builder, app, lease, reference);
+      const handle = await channel.start({ who: "Ada" });
+      const stop = channel.followRun(handle.runId, () => {
         // Read below.
       });
       await sleeping(handle.runId, "hold:task");
@@ -431,7 +446,7 @@ describe(
         const answered = await whileEngineRefuses(
           (method) => method === "terminate",
           async () =>
-            await channel.control(read, handle.runId, "cancel", () => {
+            await channel.control(handle.runId, "cancel", () => {
               // Never recovering.
             })
         );
@@ -441,14 +456,12 @@ describe(
         });
         // No repair of core's runs: the run's own object ends it.
         await vi.waitFor(() => {
-          expect(channel.peekRun(read, handle.runId).value?.status).toBe(
-            "cancelled"
-          );
+          expect(channel.peekRun(handle.runId).value?.status).toBe("cancelled");
         }, settles);
         // And past its wait again: it never comes back.
         await scheduler.wait(2500);
       });
-      const shown = channel.peekRun(read, handle.runId).value;
+      const shown = channel.peekRun(handle.runId).value;
       stop();
       expect({
         shown: { status: shown?.status, output: shown?.output },
@@ -483,16 +496,13 @@ describe(
     it("settles a cancel as superseded, auditing no stop, when its run completed before the stop went out", async () => {
       const { builder, app, reference } = await boundApp();
       const lease = await pageOf(builder, app);
-      const channel = workflowChannel(pageClient(builder, app, lease));
-      const read = readWorkflowReference(reference);
-      const handle = await channel.start(read, { who: "Ada" });
-      const stop = channel.followRun(read, handle.runId, () => {
+      const channel = pageRuns(builder, app, lease, reference);
+      const handle = await channel.start({ who: "Ada" });
+      const stop = channel.followRun(handle.runId, () => {
         // Read below.
       });
       await vi.waitFor(() => {
-        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
-          "completed"
-        );
+        expect(channel.peekRun(handle.runId).value?.status).toBe("completed");
       }, settles);
       stop();
       // Admitted while it ran, its request ended before it asked the engine.
@@ -528,24 +538,14 @@ describe(
     it("starts one run for a key sent twice at once, and keeps one cancel receipt for a run however many keys ask, never changed after", async () => {
       const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await pageOf(builder, app);
-      const start = JSON.stringify({
-        workflow: wireOf(reference),
-        command: "start",
-        input: { who: "Ada" },
-        idempotencyKey: keyOf(),
-      });
+      const start = startCommand(reference, { who: "Ada" });
       const [one, two] = await Promise.all([
         called(builder, app, lease, start),
         called(builder, app, lease, start),
       ]);
       const handle = z.object({ runId: z.string() }).parse(outcomeOf(one));
       const cancel = () =>
-        JSON.stringify({
-          workflow: wireOf(reference),
-          command: "cancel",
-          runId: handle.runId,
-          idempotencyKey: keyOf(),
-        });
+        controlCommand(reference, "cancel", handle.runId, keyOf());
       const cancels = await Promise.all([
         called(builder, app, lease, cancel()),
         called(builder, app, lease, cancel()),

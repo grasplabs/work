@@ -1,10 +1,5 @@
 import { v } from "@grasp-os/sdk";
-import {
-  declaredPermission,
-  declaredWorkflows,
-  generatedPaths,
-  workflowFingerprint,
-} from "@grasp-os/sdk/host";
+import { declaredPermission, generatedPaths } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -27,7 +22,6 @@ import { decisionOutcome } from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { withPageReferences } from "../src/page-references.ts";
-import { readWorkflowWatch } from "../src/page-workflows.ts";
 import { buildPages } from "../src/pages.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -51,6 +45,11 @@ import { repairWakes } from "../src/workflows/wakes.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
+import {
+  controlCommand,
+  queryCall,
+  startCommand,
+} from "./json-workflow-apps.ts";
 import {
   resumed,
   runInstance,
@@ -1202,46 +1201,28 @@ describe(
     });
 
     it("let a reviewer watch the run a decision asks them about, its decisions to them alone and no control, until it no longer asks them", async () => {
-      const {
-        fixture,
-        release,
-        opened,
-        reviewer,
-        starter,
-        outsider,
-        runAsking,
-      } = await decisionInbox();
+      const { fixture, opened, reviewer, starter, outsider, runAsking } =
+        await decisionInbox();
       const { app } = fixture;
-      const declared = declaredWorkflows(release.app, release.workflows).find(
-        ({ alias }) => alias === "review"
-      );
-      if (declared === undefined) {
-        throw new Error("The release declares no review");
-      }
-      const workflow = {
-        resourceId: release.manifest.resourceId,
-        resourceVersion: release.manifest.resourceVersion,
-        contractId: "workflows.review",
-        fingerprint: await workflowFingerprint(declared),
-        kind: "workflow" as const,
-      };
-      /** `who`'s snapshot of run `runId`, or the code it was refused with. */
+      const workflow = { contractId: "workflows.review" };
+      /**
+       * `who`'s snapshot of run `runId` through the reference's `run`
+       * query, as `useWorkflow` reads it (null for a run they may not
+       * see), or the code it was refused with.
+       */
       const watched = async (
-        who: Parameters<typeof readWorkflowWatch>[1],
-        runId: string
+        who: Parameters<typeof callAppFunction>[1],
+        runId: string,
+        on: Env = env
       ): Promise<unknown> => {
-        try {
-          const read = await readWorkflowWatch(env, who, app, {
-            workflow,
-            watch: "run",
-            runId,
-          });
-          return read.value;
-        } catch (error) {
-          return error instanceof Error && "code" in error
-            ? error.code
-            : String(error);
-        }
+        const { result } = await callPageFunction(
+          on,
+          who,
+          app,
+          queryCall(workflow, "run", { runId }),
+          Date.now() + 30_000
+        );
+        return answerOf(result);
       };
       const shownTo = async (who: typeof reviewer, runId: string) => {
         const snapshot = await watched(who, runId);
@@ -1269,12 +1250,7 @@ describe(
         env,
         reviewer,
         app,
-        JSON.stringify({
-          workflow,
-          command: "cancel",
-          runId: asked.runId,
-          idempotencyKey: "0".repeat(32),
-        }),
+        controlCommand(workflow, "cancel", asked.runId, "0".repeat(32)),
         Date.now() + 30_000
       );
       const before = {
@@ -1306,20 +1282,7 @@ describe(
         ...env,
         DB: endsRunAfterAdmission(env.DB, endingRun.runId),
       };
-      let ending: unknown;
-      try {
-        const read = await readWorkflowWatch(racing, reviewer, app, {
-          workflow,
-          watch: "run",
-          runId: endingRun.runId,
-        });
-        ending = read.value;
-      } catch (error) {
-        ending =
-          error instanceof Error && "code" in error
-            ? error.code
-            : String(error);
-      }
+      const ending = await watched(reviewer, endingRun.runId, racing);
       // Read before restricting the App, which refuses these on its own.
       const stopped = {
         answered: await watched(reviewer, answeredRun.runId),
@@ -1333,7 +1296,8 @@ describe(
 
       expect({
         ...before,
-        unrestrictedBefore: typeof unrestrictedBefore,
+        unrestrictedBefore:
+          unrestrictedBefore === null ? null : typeof unrestrictedBefore,
         afterRestricting: await watched(reviewer, asked.runId),
         ...stopped,
         ending,
@@ -1344,7 +1308,6 @@ describe(
           // back after), however the snapshot grows.
           fields: [
             "control",
-            "fingerprint",
             "finishedAt",
             "manifestHash",
             "runId",
@@ -1365,15 +1328,16 @@ describe(
             pendingControl: null,
           },
         },
-        outsider: "workflow.run_unavailable",
-        staff: "workflow.run_unavailable",
+        // Not seen, as a run that doesn't exist: no snapshot at all.
+        outsider: null,
+        staff: null,
         cancel: "workflow.run_unavailable",
         unrestrictedBefore: "object",
-        afterRestricting: "workflow.run_unavailable",
-        ending: "workflow.run_unavailable",
-        answered: "workflow.run_unavailable",
-        closed: "workflow.run_unavailable",
-        reassigned: "workflow.run_unavailable",
+        afterRestricting: null,
+        ending: null,
+        answered: null,
+        closed: null,
+        reassigned: null,
       });
     });
 
@@ -1408,29 +1372,16 @@ describe(
       await grantPermission(env, admin, asked.id, {
         version: release.manifest.resourceVersion,
       });
-      const declared = declaredWorkflows(release.app, release.workflows).find(
-        ({ alias }) => alias === "review"
-      );
-      if (declared === undefined) {
-        throw new Error("The release declares no review");
-      }
       // The App's page starts a run on the real engine, as its owner.
       const { result } = await callPageFunction(
         env,
         owner,
         app,
-        JSON.stringify({
-          workflow: {
-            resourceId: release.manifest.resourceId,
-            resourceVersion: release.manifest.resourceVersion,
-            contractId: "workflows.review",
-            fingerprint: await workflowFingerprint(declared),
-            kind: "workflow",
-          },
-          command: "start",
-          input: { amount: 5 },
-          idempotencyKey: "1".repeat(32),
-        }),
+        startCommand(
+          { contractId: "workflows.review" },
+          { amount: 5 },
+          "1".repeat(32)
+        ),
         Date.now() + 30_000
       );
       const { runId } = z.object({ runId: z.string() }).parse(answerOf(result));

@@ -90,8 +90,8 @@ const Tasks = () => {
       {tasks.map((task) => (
         <Button
           key={task._id}
-          disabled={!review.canRun}
-          onClick={async () => await review.run({ task: task._id })}
+          disabled={!review.canStart}
+          onClick={async () => await review.start({ task: task._id })}
         >
           Review {task.title}
         </Button>
@@ -110,6 +110,8 @@ export const Route = createFileRoute("/")({ component: Tasks });
 Before its first start, `useWorkflow` is `idle`, and `loading` while the run you gave it by ID loads. A run is `queued`, `running`, `waiting` (for time, an event or a decision) or `paused`; `compensating` while it undoes its work after a failure or a cancellation; and it ends `completed` with its output, `failed` with its error, or `cancelled`. A run the person may no longer see, such as one whose decision someone else answered, is `unavailable`.
 
 `pause`, `resume` and `cancel` control the run, for whoever may. `send` sends it an event its workflow declares, typed by that event: `review.send(workflows.review.events.<name>, data)`.
+
+`useWorkflow` is built on the workflow reference's own queries and mutations, which a Page can also use directly: `useQuery(workflows.review.queries.run, { runId })` follows one run (`null` for a run the person may not see), `useQuery(workflows.review.queries.canStart)` says whether they may start one, and `useMutation(workflows.review.mutations.start)` starts one with `{ input }`. `mutations.pause`, `.resume` and `.cancel` take `{ runId }`, and `mutations.send` takes `{ runId, event, data }`, the event by its name. `queries.runs` lists the person's runs, and `queries.history` one run's history.
 
 ## Events from outside
 

@@ -65,32 +65,23 @@ const numberOf = (test: RunningTest, run: unknown): number => {
   return started.number;
 };
 
-/** A key for one start, as a page makes one: 16 random bytes in hex. */
-const startKey = (): string =>
-  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-
-/** The start request for `reference` with `input`, as a page sends it. */
+/**
+ * The start request for `reference` with `input`, as a page's
+ * `useWorkflow` sends it: a call of the reference's `start` mutation.
+ */
 const startRequestFor = (reference: unknown, input: unknown): string => {
-  if (!isRecord(reference) || reference.kind !== "workflow") {
+  const start =
+    isRecord(reference) &&
+    reference.kind === "workflow" &&
+    isRecord(reference.mutations)
+      ? reference.mutations.start
+      : undefined;
+  if (!isRecord(start)) {
     throw new TestAssertionError(
       "expected a reference to one of the App's workflows, from @server/_generated/api"
     );
   }
-  const { resourceId, resourceVersion, contractId, fingerprint } = reference;
-  return JSON.stringify({
-    workflow: {
-      resourceId,
-      resourceVersion,
-      contractId,
-      fingerprint,
-      kind: "workflow",
-    },
-    command: "start",
-    input,
-    idempotencyKey: startKey(),
-  });
+  return requestFor(start, "mutation", { input });
 };
 
 /** What a start answers: the run's number in the session. */

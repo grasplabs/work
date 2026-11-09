@@ -1,6 +1,6 @@
 # Vite+, Node.js and the workspace's installed dependencies: every job's
-# setup but the journeys' (their image packs caches another way, see e2e in
-# ci.yml). The installed node_modules are cached whole, by the lockfile:
+# setup, the journeys' too. The installed node_modules are cached whole, by
+# the lockfile:
 # restoring them skips the install, which with pnpm's store restored (still
 # restored, for the tests that install offline from it) linked 1,200
 # packages, checked the lockfile against the supply-chain

@@ -1,7 +1,7 @@
 import type { GraspError } from "./client-error.ts";
 import type { QueryEntry } from "./client-query-entry.ts";
 import type { ReadReference } from "./client-request.ts";
-import type { ClientTransport, DecisionTransport } from "./client-transport.ts";
+import type { DecisionTransport } from "./client-transport.ts";
 import type { ReferenceKind } from "./function-references.ts";
 import type { Pager } from "./pager.ts";
 import type { StreamEvents } from "./streams.ts";
@@ -55,8 +55,18 @@ export interface ClientInternals {
     options: unknown,
     events: StreamEvents
   ) => Promise<unknown>;
-  /** How workflow runs reach the host (client-workflow.ts). */
-  readonly workflowLink: WorkflowLink;
+  /**
+   * How decisions are answered through the trusted host
+   * (workflow-respond.ts); none without one.
+   */
+  readonly decisions: DecisionTransport | undefined;
+  /**
+   * Clears everything the client holds: the person or build lost access.
+   * Given `startedUnder`, the fence count a request began under
+   * (`fences`), only if no fence came since: a late refusal of an older
+   * request would clear what was recovered after it.
+   */
+  fence: (refusal: GraspError, startedUnder?: number) => void;
   /** How many times the client was fenced: what a file preview follows. */
   fences: () => number;
   /** What the latest fence was for, if there was one. */
@@ -74,45 +84,4 @@ export interface ClientInternals {
    * asked for it later shows it gone, never reading it again.
    */
   fileDeleted: (id: string) => boolean;
-}
-
-/**
- * What the workflow channel (client-workflow.ts) reaches of the client:
- * the transport's subscriptions, submissions under the client's own key
- * and fence rules, and its fences.
- */
-export interface WorkflowLink {
-  /** Follows a request, as queries are followed. */
-  readonly watch: ClientTransport["watch"];
-  /**
-   * Sends `request`, a command of the workflow `target` names, as a
-   * mutation is sent: under `key`, sent again under it while its answer
-   * is lost (`onRecovering` told each time) or isn't one `read` accepts,
-   * resolving with what `read` made of the host's answer once it is
-   * durable, or rejecting with the host's refusal, or as uncertain with
-   * the key.
-   */
-  readonly command: (
-    target: ReadReference,
-    request: string,
-    key: string,
-    events: {
-      readonly onRecovering: () => void;
-      /** The answer, read; undefined for one that isn't an answer. */
-      readonly read: (value: unknown) => unknown;
-    }
-  ) => Promise<unknown>;
-  /** How decisions are answered through the trusted host; none without one. */
-  readonly decisions: DecisionTransport | undefined;
-  /**
-   * Clears everything the client holds: the person or build lost access.
-   * Given `startedUnder`, the generation a request began under
-   * (`generation`), only if no fence came since: a late refusal of an
-   * older request would clear what was recovered after it.
-   */
-  readonly fence: (refusal: GraspError, startedUnder?: number) => void;
-  /** The fence generation now: what a request begins under. */
-  readonly generation: () => number;
-  /** Calls `listener` at every fence; answers what stops calling it. */
-  readonly onFence: (listener: (refusal: GraspError) => void) => () => void;
 }

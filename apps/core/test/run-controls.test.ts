@@ -18,7 +18,6 @@ import {
   jsonWorkflowAppsOf,
   keyOf,
   outcomeOf,
-  wireOf,
   runFor,
   pageOf,
   settles,
@@ -367,7 +366,7 @@ describe(
       });
     });
 
-    it("refuses a control verb the host doesn't know as invalid, keeping no receipt and auditing nothing of the run", async () => {
+    it("refuses a control the workflow has no mutation for, keeping no receipt and auditing nothing of the run", async () => {
       const { builder, app, reference, page, runId } = await holding();
       const lease = await pageOf(builder, app);
       let answer: unknown;
@@ -378,9 +377,11 @@ describe(
             app,
             lease,
             JSON.stringify({
-              workflow: wireOf(reference),
-              command: "restart",
-              runId,
+              reference: {
+                name: `${reference.contractId}.mutations.restart`,
+                kind: "mutation",
+              },
+              input: { runId },
               idempotencyKey: keyOf(),
             })
           )
@@ -395,7 +396,7 @@ describe(
         // The page's real controls still work after it.
         pause: staged(await page.control("pause", runId)),
       }).toStrictEqual({
-        answer: "contract.invalid_request",
+        answer: "function.not_found",
         receipts: [],
         audited: [],
         stillPaused: false,

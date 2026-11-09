@@ -133,6 +133,18 @@ export default defineConfig({
         rules: { "grasp/no-scrollbars": "error" },
       },
       {
+        // Every icon of a control moves in its own parts when pointed at
+        // (icon-moves.css): the app's icons, not its tests'.
+        files: ["apps/web/src/**"],
+        excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
+        rules: {
+          "grasp/icon-has-move": [
+            "error",
+            { table: "apps/web/src/icon-moves.css" },
+          ],
+        },
+      },
+      {
         // Every answer of the interface is over within 300 ms (AGENTS.md,
         // Design), in the frontend, the admin and the kit alike.
         files: ["apps/web/src/**", "apps/admin/src/**", "packages/ui/src/**"],

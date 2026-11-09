@@ -14,7 +14,7 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { frameBridge, FrameRpcTarget, openBridge } from "./page-bridge.ts";
+import { openBridge } from "./page-bridge.ts";
 import type { FrameTarget } from "./page-bridge.ts";
 
 // The page's bridge, from the frame's end of a real `MessagePort`: a
@@ -103,17 +103,17 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
       return await Promise.resolve(subscription);
     },
   };
-  // What a v1 server call would reach, were the bridge to pass one on: a
-  // target's `call`, which no target has any more.
-  const serverCalls: unknown[] = [];
+  // A method of the target the bridge doesn't serve: what a frame would
+  // reach, were the bridge to pass on any name it is sent.
+  const unservedCalls: unknown[] = [];
   Object.assign(target, {
-    call: async (...args: unknown[]) => {
-      serverCalls.push(args);
+    internal: async (...args: unknown[]) => {
+      unservedCalls.push(args);
       return await Promise.resolve("answered");
     },
   });
   return {
-    serverCalls,
+    unservedCalls,
     functionCalls,
     decided,
     guards,
@@ -283,17 +283,6 @@ describe("the page's bridge to a page", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it("serves the frame only an object that holds each call to the frame's bounds", () => {
-    // What `openBridge` serves, and what every call of a frame's lands on
-    // first. Its answers are its target's: `watchQuery` passes on core's
-    // stub of the subscription, whose calls go back to core over the
-    // page's own connection, to a target core bounds (Subscription, a
-    // CoreRpcTarget: core's rpc-targets.test.ts).
-    expect(frameBridge(coreStandIn().target, [])).toBeInstanceOf(
-      FrameRpcTarget
-    );
   });
 
   it("passes a function call's request on as the text the frame sent, and nothing else", async () => {
@@ -617,10 +606,10 @@ describe("the page's bridge to a page", () => {
     });
   });
 
-  it("serves a frame no call of its App's server, and passes it on nowhere", async () => {
+  it("serves a frame no method of the page's target the bridge doesn't serve, and passes it on nowhere", async () => {
     const frame = rawFramed();
     const called = await frame.pull(
-      frame.push(["pipeline", 0, ["call"], ["notes", [["a"]]]])
+      frame.push(["pipeline", 0, ["internal"], ["notes", [["a"]]]])
     );
     // The session goes on.
     const after = await frame.pull(
@@ -633,14 +622,14 @@ describe("the page's bridge to a page", () => {
         typeof called === "object" && called !== null && "answered" in called,
       after,
       reached: {
-        server: frame.serverCalls,
+        unserved: frame.unservedCalls,
         decisions: frame.decided,
         functions: frame.functionCalls,
       },
     }).toStrictEqual({
       called: false,
       after: { answered: nullAnswer },
-      reached: { server: [], decisions: [], functions: ["{}"] },
+      reached: { unserved: [], decisions: [], functions: ["{}"] },
     });
   });
 

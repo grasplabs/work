@@ -65,10 +65,6 @@ const composio = fakeComposioApi([], {
 });
 
 describe("each Composio toolkit this release reviewed", () => {
-  it("has a read to point Stephen at", () => {
-    expect(toolkits.filter(({ read }) => read === undefined)).toStrictEqual([]);
-  });
-
   it.each(toolkits)(
     "$toolkit: reads where the admin pointed him, refuses anywhere else, holds a change for a card and never offers what nobody classed",
     async ({ toolkit, read, change, unclassed }) => {

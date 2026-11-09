@@ -404,7 +404,7 @@ const parseId = (id: unknown): PermissionId => {
 /**
  * Tells App `subject`'s pages that what it may start changed, after a
  * grant or revoke of one of its permissions, so their live workflow
- * watches read again (page-workflows.ts). Best effort: the change
+ * queries read again (page-workflows.ts). Best effort: the change
  * stands if the App's host can't be reached.
  */
 const tellPolicyChanged = async (

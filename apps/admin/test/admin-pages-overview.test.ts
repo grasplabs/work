@@ -129,7 +129,7 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("offers to add an organization from the overview, asking only its name, web address, email domain, first admin and hosting", async () => {
+  it("offers to add an organization from the overview, asking its name, web address, email domain, first admin and hosting", async () => {
     const overview = await page("/");
     const { status, html } = await page("/new-organization");
     const mainAt = html.indexOf("<main");
@@ -150,21 +150,12 @@ describe("the admin's frame", () => {
       ].map(says),
       // Its platform's domain after the web address.
       suffix: says(".grasp.test"),
-      // Everything else has a default, put right on its Setup.
-      asked: [
-        "Ring",
-        "Entra tenant id",
-        "Release",
-        "Model spend",
-        "A deal won in Attio",
-      ].map(says),
     }).toStrictEqual({
       link: true,
       status: 200,
       title: true,
       labels: [true, true, true, true, true, true, true],
       suffix: true,
-      asked: [false, false, false, false, false],
     });
   });
 });

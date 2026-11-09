@@ -814,7 +814,12 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     const mail = await mailbox();
     const ana = await visitor(mail, link, `ana@${domain}`);
     await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
-    const refusedPaths = ["portal.shout", "workflows.followUp.queries.runs"];
+    // A workflow's queries and mutations are a member's page's alone.
+    const refusedPaths = [
+      "portal.shout",
+      "workflows.followUp.queries.runs",
+      "workflows.followUp.mutations.start",
+    ];
 
     let answers: unknown[] = [];
     const events = await auditedDuring(async () => {

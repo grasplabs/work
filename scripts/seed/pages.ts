@@ -94,7 +94,7 @@ ${workflows
             onClick={async () => {
               setProblem("");
               try {
-                const { runId } = await ${alias}.run(${JSON.stringify(sample)});
+                const { runId } = await ${alias}.start(${JSON.stringify(sample)});
                 set${componentOf(alias)}(runId);
               } catch (error) {
                 setProblem(error instanceof Error ? error.message : "That didn't start.");

@@ -220,9 +220,7 @@ describe("an upload's transfer", () => {
     const { client, upload } = page();
     const transfer = new UploadTransfer(clientInternals(client));
     const running = transfer.upload(client.files, resource, photo);
-    clientInternals(client).workflowLink.fence(
-      clientError("auth.principal_changed")
-    );
+    clientInternals(client).fence(clientError("auth.principal_changed"));
     const cancelSent = upload(0).cancel.aborted;
     // Core published it before the cancellation reached it.
     upload(0).publish("file-1");
@@ -237,9 +235,7 @@ describe("an upload's transfer", () => {
     const { client, upload } = page();
     const transfer = new UploadTransfer(clientInternals(client));
     const running = transfer.upload(client.files, resource, photo);
-    clientInternals(client).workflowLink.fence(
-      clientError("auth.principal_changed")
-    );
+    clientInternals(client).fence(clientError("auth.principal_changed"));
     upload(0).refuse("file.cancelled");
     await expect(codeOf(running)).resolves.toBe("auth.principal_changed");
     expect(transfer.view()).toMatchObject({

@@ -1,5 +1,4 @@
 import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
-import { toolClassOf } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -7,7 +6,6 @@ import { drizzle } from "drizzle-orm/d1";
 
 import bundled from "#connectors";
 
-import { nativeConnector } from "../src/bundled-connectors.ts";
 import { connections } from "../src/db/schema.ts";
 import type { EgressProps } from "../src/egress.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
@@ -112,14 +110,6 @@ export const probe = async (
 
 /** A probe's report of a request the egress handler refused. */
 export const refused = { status: 403, error: null };
-
-/** Each tool of a bundled suite, by its class. */
-export const classesOf = (suite: string) =>
-  Object.fromEntries(
-    Object.entries(nativeConnector(suite)?.manifest.actions ?? {}).map(
-      ([action, declared]) => [action, toolClassOf(declared)]
-    )
-  );
 
 /** Props for the egress handler, as connect sets them for one call. */
 export const egressProps = (

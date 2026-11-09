@@ -1,93 +1,103 @@
 /**
  * The split between CI's e2e parts (e2e-parts.ts) and the times it reads
- * (e2e-durations.ts): every parallel file runs in exactly one part, the
- * same way on every runner, and the long files spread out.
+ * (e2e-durations.ts): every parallel test runs in exactly one part, the
+ * same way on every runner, the long tests spread out, and a file's tests
+ * in one part share a worker, as Playwright runs them.
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { fileSecondsIn, updatedDurations } from "./e2e-durations.ts";
-import { filterOf, parallelFiles, partOf } from "./e2e-parts.ts";
+import { testSecondsIn, updatedDurations } from "./e2e-durations.ts";
+import { listable, partOf, testsIn } from "./e2e-parts.ts";
 
-const files = [
-  "e2e/catalog.e2e.ts",
-  "e2e/notes-app.e2e.ts",
-  "e2e/chat.e2e.ts",
-  "e2e/web.e2e.ts",
-  "e2e/apps.e2e.ts",
-  "e2e/new.e2e.ts",
+const test = (file: string, title: string) => ({
+  key: `[chromium] › ${file} › ${title}`,
+  file,
+});
+
+const tests = [
+  test("catalog.e2e.ts", "alert"),
+  test("catalog.e2e.ts", "badge"),
+  test("catalog.e2e.ts", "button"),
+  test("notes-app.e2e.ts", "creates"),
+  test("notes-app.e2e.ts", "attaches"),
+  test("chat.e2e.ts", "asks"),
+  test("web.e2e.ts", "signs in"),
+  test("new.e2e.ts", "untimed"),
 ];
-const durations = {
-  "e2e/catalog.e2e.ts": 200,
-  "e2e/notes-app.e2e.ts": 140,
-  "e2e/chat.e2e.ts": 60,
-  "e2e/web.e2e.ts": 70,
-  "e2e/apps.e2e.ts": 90,
+const durations: Record<string, number> = {
+  "[chromium] › catalog.e2e.ts › alert": 10,
+  "[chromium] › catalog.e2e.ts › badge": 10,
+  "[chromium] › catalog.e2e.ts › button": 10,
+  "[chromium] › notes-app.e2e.ts › creates": 80,
+  "[chromium] › notes-app.e2e.ts › attaches": 40,
+  "[chromium] › chat.e2e.ts › asks": 30,
+  "[chromium] › web.e2e.ts › signs in": 20,
 };
 
 const partsOf = (count: number): string[][] =>
   Array.from({ length: count }, (_, index) =>
-    partOf(files, durations, index + 1, count)
+    partOf(tests, durations, index + 1, count)
   );
 
-describe("splitting the e2e files between CI's parts", () => {
-  it("runs every file in exactly one part, the untimed one too", () => {
-    expect(partsOf(3).flat().toSorted()).toStrictEqual(files.toSorted());
+describe("splitting the e2e tests between CI's parts", () => {
+  it("runs every test in exactly one part, the untimed one too", () => {
+    expect(partsOf(3).flat().toSorted()).toStrictEqual(
+      tests.map(({ key }) => key).toSorted()
+    );
   });
 
-  it("splits the same files the same way, whatever order they come in", () => {
+  it("splits the same tests the same way, whatever order they come in", () => {
     expect(
       Array.from({ length: 3 }, (_, index) =>
-        partOf(files.toReversed(), durations, index + 1, 3)
+        partOf(tests.toReversed(), durations, index + 1, 3)
       )
     ).toStrictEqual(partsOf(3));
   });
 
-  it("gives the longest files parts of their own, and fills the rest by time", () => {
-    expect(partsOf(3)).toStrictEqual([
-      ["e2e/catalog.e2e.ts"],
-      ["e2e/notes-app.e2e.ts", "e2e/web.e2e.ts"],
-      ["e2e/apps.e2e.ts", "e2e/chat.e2e.ts", "e2e/new.e2e.ts"],
-    ]);
-  });
+  it("splits a long file's tests between parts, and fills the rest by time", () => {
+    const parts = partsOf(2);
+    const partOfTest = (title: string): number =>
+      parts.findIndex((keys) =>
+        keys.includes(`[chromium] › notes-app.e2e.ts › ${title}`)
+      );
+    const seconds = parts.map((keys) =>
+      keys.reduce((sum, key) => sum + (durations[key] ?? 20), 0)
+    );
 
-  it("leaves the serial projects' files to parts of their own", () => {
-    expect(
-      parallelFiles([
-        "chat.e2e.ts",
-        "onboarding.e2e.ts",
-        "interview.e2e.ts",
-        "spoken-interview.e2e.ts",
-        "admin-journey.e2e.ts",
-        "people.ts",
-      ])
-    ).toStrictEqual(["e2e/chat.e2e.ts"]);
-  });
+    const longest = Math.max(...Object.values(durations));
 
-  it("filters for a file's path only, never another's that ends alike", () => {
-    const filter = new RegExp(filterOf("e2e/chat.e2e.ts"), "u");
-
-    expect(filter.test("/repo/e2e/chat.e2e.ts")).toBeTruthy();
-    expect(filter.test("/repo/e2e/admin-chat.e2e.ts")).toBeFalsy();
-    expect(filter.test("/repo/e2e/chatXe2eXts")).toBeFalsy();
+    expect(partOfTest("creates")).not.toBe(partOfTest("attaches"));
+    expect(Math.max(...seconds) - Math.min(...seconds)).toBeLessThanOrEqual(
+      longest
+    );
   });
 });
 
-/** A Playwright JSON report of `tests`: file, then each attempt's ms and status. */
+/** A Playwright JSON report of `specs`: file, title, then each attempt's ms and status. */
 const report = (
-  tests: readonly [string, readonly [number, string][]][]
+  specs: readonly [string, string, readonly [number, string][]][]
 ): string =>
   JSON.stringify({
-    suites: tests.map(([file, results]) => ({
+    suites: specs.map(([file, title, results]) => ({
+      title: file,
       file,
-      specs: [
+      suites: [
         {
+          title: "a describe block",
           file,
-          tests: [
+          specs: [
             {
-              results: results.map(([duration, status]) => ({
-                duration,
-                status,
-              })),
+              title,
+              file,
+              tests: [
+                {
+                  projectName: "chromium",
+                  results: results.map(([duration, status]) => ({
+                    duration,
+                    status,
+                  })),
+                },
+              ],
             },
           ],
         },
@@ -95,13 +105,95 @@ const report = (
     })),
   });
 
-describe("recording the e2e files' times", () => {
+describe("keeping a serial file's tests together", () => {
+  it("puts a file whose tests run one after another in one part", () => {
+    const serial = new Set(["notes-app.e2e.ts"]);
+    const parts = Array.from({ length: 3 }, (_, index) =>
+      partOf(tests, durations, index + 1, 3, serial)
+    );
+
+    expect(
+      parts.filter((keys) => keys.some((key) => key.includes("notes-app")))
+    ).toHaveLength(1);
+    expect(parts.flat().toSorted()).toStrictEqual(
+      tests.map(({ key }) => key).toSorted()
+    );
+  });
+});
+
+describe("naming the tests in a test list", () => {
+  it("refuses a title a test list can't name, rather than run it in no part", () => {
+    const named = (title: string) =>
+      testsIn(report([["chat.e2e.ts", title, []]]));
+
+    expect(() => listable(named("asks › answers"))).toThrow(/asks › answers/u);
+    expect(() => listable(named("asks "))).toThrow(/asks /u);
+    expect(() => listable(named("asks\nagain"))).toThrow(/line break/u);
+    expect(listable(named("asks"))).toStrictEqual(named("asks"));
+  });
+});
+
+describe("naming each test once in a test list", () => {
+  it("refuses a test whose key starts another's, which its line would run too", () => {
+    const nested = testsIn(
+      JSON.stringify({
+        suites: [
+          {
+            title: "chat.e2e.ts",
+            file: "chat.e2e.ts",
+            specs: [
+              {
+                title: "asks",
+                file: "chat.e2e.ts",
+                tests: [{ projectName: "chromium", results: [] }],
+              },
+            ],
+            suites: [
+              {
+                title: "asks",
+                file: "chat.e2e.ts",
+                specs: [
+                  {
+                    title: "again",
+                    file: "chat.e2e.ts",
+                    tests: [{ projectName: "chromium", results: [] }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    expect(() => listable(nested)).toThrow(/would run both/u);
+  });
+});
+
+describe("reading Playwright's tests", () => {
+  it("names each test as a test list does: project, file, describe blocks and title", () => {
+    expect(
+      testsIn(report([["chat.e2e.ts", "asks", []]])).map(({ key, file }) => ({
+        key,
+        file,
+      }))
+    ).toStrictEqual([
+      {
+        key: "[chromium] › chat.e2e.ts › a describe block › asks",
+        file: "chat.e2e.ts",
+      },
+    ]);
+  });
+});
+
+describe("recording the e2e tests' times", () => {
   it("counts a test's passing attempt, or its last when none passed", () => {
     expect(
-      fileSecondsIn(
+      testSecondsIn(
         report([
           [
             "chat.e2e.ts",
+            "asks",
             [
               [30_000, "failed"],
               [10_000, "passed"],
@@ -109,6 +201,7 @@ describe("recording the e2e files' times", () => {
           ],
           [
             "web.e2e.ts",
+            "signs in",
             [
               [5000, "failed"],
               [7000, "failed"],
@@ -118,24 +211,24 @@ describe("recording the e2e files' times", () => {
       )
     ).toStrictEqual(
       new Map([
-        ["e2e/chat.e2e.ts", 10],
-        ["e2e/web.e2e.ts", 7],
+        ["[chromium] › chat.e2e.ts › a describe block › asks", 10],
+        ["[chromium] › web.e2e.ts › a describe block › signs in", 7],
       ])
     );
   });
 
-  it("adds a run's parts up, takes the median of runs, and keeps files no run named", () => {
+  it("takes the median of runs, and keeps tests no run named", () => {
+    const asks = "[chromium] › chat.e2e.ts › a describe block › asks";
     const run = (seconds: number): string[] => [
-      report([["chat.e2e.ts", [[seconds * 1000, "passed"]]]]),
-      report([["chat.e2e.ts", [[1000, "passed"]]]]),
+      report([["chat.e2e.ts", "asks", [[seconds * 1000, "passed"]]]]),
     ];
 
     expect(
-      updatedDurations({ "e2e/old.e2e.ts": 9, "e2e/chat.e2e.ts": 99 }, [
+      updatedDurations({ "[chromium] › old.e2e.ts › gone": 9, [asks]: 99 }, [
         run(10),
         run(20),
         run(40),
       ])
-    ).toStrictEqual({ "e2e/chat.e2e.ts": 21, "e2e/old.e2e.ts": 9 });
+    ).toStrictEqual({ "[chromium] › old.e2e.ts › gone": 9, [asks]: 20 });
   });
 });

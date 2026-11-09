@@ -1,4 +1,3 @@
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -10,13 +9,7 @@ import { z } from "zod";
 
 import type { Release } from "../app-releases.ts";
 import { appTestRuns } from "../db/core/schema.ts";
-import {
-  failureOf,
-  outputOf,
-  pinOf,
-  readWorkflowRequest,
-  resolveIn,
-} from "../page-workflows.ts";
+import { failureOf, outputOf, pinOf, startCallIn } from "../page-workflows.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { fixtureParams } from "../workflow-params.ts";
 import { versionContract } from "../workflow-resources.ts";
@@ -44,7 +37,7 @@ import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 //   reader of runs, notification or control of the organization's knows.
 // - It starts what the release doesn't bind: the reference is resolved
 //   against the release under test exactly as a page's against the
-//   current release (`resolveIn`), to the workflow version its seal pinned,
+//   current release (`startCallIn`), to the workflow version its seal pinned,
 //   and nothing else; input is checked against the declaration and the
 //   version's contract, as a start's.
 // - It reaches what a test may not: the run acts for the fixture's
@@ -157,10 +150,11 @@ export interface FixtureRunStarted {
 }
 
 /**
- * Starts the run of the workflow `request` (a page's start's text)
- * names, as `principal` of the test of `release`: its run's ID. Refused as
- * a page's start would be, for anything the release doesn't bind. A
- * start that fails once its run is recorded removes the run again.
+ * Starts the run of the workflow `request` (a call of its reference's
+ * `start` mutation, as a page's) names, as `principal` of the test of
+ * `release`: its run's ID. Refused as a page's start would be, for
+ * anything the release doesn't bind. A start that fails once its run is
+ * recorded removes the run again.
  */
 export const startFixtureRun = async (
   env: Env,
@@ -169,21 +163,11 @@ export const startFixtureRun = async (
   request: unknown,
   test: FixtureStart
 ): Promise<FixtureRunStarted> => {
-  const command = readWorkflowRequest(request);
-  if (!("command" in command) || command.command !== "start") {
-    throw operationErrors.create("contract.invalid_request");
-  }
-  const resolved = await resolveIn(release, command.workflow);
+  const { resolved, input: declared } = await startCallIn(release, request);
   const pin = pinOf(resolved);
-  const declared = schemaFromDescriptor(
-    JSON.stringify(resolved.declared.input)
-  )["~standard"].validate(command.input);
-  if (declared instanceof Promise || declared.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_args");
-  }
   const workflow = workflowResourceIdSchema.parse(pin.workflowId);
   const found = await pinned(env, workflow, pin.version);
-  const input = acceptedInput(found.inputDescriptor, declared.value);
+  const input = acceptedInput(found.inputDescriptor, declared);
   const params = await fixtureParams(
     env,
     workflow,

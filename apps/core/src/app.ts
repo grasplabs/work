@@ -532,8 +532,8 @@ export class App extends DurableObject<Env> {
   /**
    * Tells every connection that follows the App's live queries that what
    * the App may start may have changed (a permission of the App granted or
-   * revoked, permissions.ts): each reads its workflow queries and watches
-   * of the App again, as its person, so a page's `canRun` and
+   * revoked, permissions.ts): each reads its workflow queries
+   * of the App again, as its person, so a page's `canStart` and
    * `canCancel` follow the grant (page-workflows.ts). Returns at once,
    * with how many connections it told.
    */

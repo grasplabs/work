@@ -82,9 +82,6 @@ export default workflowTests(definition, [
 /** Code that finds the App the agent created, by its name, as `app`. */
 export const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
 
-/** A diagnostic of the App's layout about `file`, as a write reports it. */
-export const layout = (file: string | null) => ({ file, rule: "server" });
-
 /** What a code step returned, as JSON. */
 export const returned = (text: string | undefined): unknown =>
   z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));

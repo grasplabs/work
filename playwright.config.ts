@@ -8,13 +8,17 @@ import {
   testTokenKey,
 } from "./e2e/people.ts";
 import {
+  coreInspectorPort,
   corePort,
   connectConfig,
+  idpInspectorPort,
   idpOrigin,
   idpPort,
+  migratedStateDir,
   modelFakePort,
   origin,
   stateDir,
+  workersPerStack,
 } from "./e2e/stack.ts";
 
 /**
@@ -48,6 +52,14 @@ export const journeyTests = /journey\.e2e\.ts$/u;
  */
 const adminTests = /\/e2e\/admin\//u;
 const ci = process.env.CI === "true";
+/**
+ * Whether the stack's code and its migrated empty state are built already
+ * (`GRASP_E2E_PREBUILT=true`): CI builds them once, in a job of its own,
+ * for every part's stack (`vp run e2e:build`, e2e/build.ts), so a part
+ * only starts it. Locally it builds each time, as the checkout changes
+ * between runs.
+ */
+const prebuilt = process.env.GRASP_E2E_PREBUILT === "true";
 
 /** A `--var` for wrangler dev, quoted once for the shell. */
 const devVar = (name: string, value: string): string =>
@@ -120,7 +132,9 @@ const serialProjects = (before: string[]): Project[] => [
  * stack, unless CI splits it. Playwright runs a project's dependencies in
  * full on every shard, so `--shard` alone can't split a suite whose
  * serial tail depends on everything before it. CI runs the parallel part
- * in parts (`parallel`, with the files of each), and each serial project
+ * in parts (`parallel`, with a test list of each, scripts/e2e-parts.ts:
+ * Chromium's tests in fourteen, Firefox's and WebKit's a part each), and
+ * each serial project
  * on a stack of its own (`onboarding`, `interview`, `journeys`, the
  * journeys a file a stack with `--shard`): they run one after another
  * only so that what one does can't change what the next sees, and a
@@ -162,9 +176,7 @@ export default defineConfig({
   timeout: 180_000,
   forbidOnly: ci,
   retries: ci ? 2 : 0,
-  // Two workers, locally as in CI: one local dev server serves every test,
-  // and more at once slow it past the tests' waits (pages, live updates).
-  workers: 2,
+  workers: workersPerStack,
   globalSetup: "./e2e/setup.ts",
   reporter: ci ? "github" : "list",
   use: {
@@ -187,9 +199,20 @@ export default defineConfig({
         // Connect's config, which sends the AI providers' requests to the
         // fake ones below (e2e/connect-config.ts).
         "node e2e/connect-config.ts &&",
-        // The dir comes from `env` below, so no path is ever shell syntax.
-        'rm -rf "$DEV_PERSIST_TO" &&',
-        `vp run --filter @grasp-os/core dev --local --port ${corePort}`,
+        // Prebuilt, the state is a copy of the migrated empty one
+        // e2e/build.ts made. The dirs come from `env` below, so no path is
+        // ever shell syntax.
+        ...(prebuilt
+          ? [
+              'rm -rf "$DEV_PERSIST_TO" &&',
+              'cp -R "$E2E_MIGRATED_STATE" "$DEV_PERSIST_TO" &&',
+              "vp run --filter @grasp-os/core dev:start",
+            ]
+          : [
+              'rm -rf "$DEV_PERSIST_TO" &&',
+              "vp run --filter @grasp-os/core dev",
+            ]),
+        `--local --port ${corePort} --inspector-port ${coreInspectorPort}`,
         devVar("BETTER_AUTH_SECRET", testAuthSecret),
         ...Object.entries(localSignIn(origin, idpOrigin)).map(([name, value]) =>
           devVar(
@@ -213,6 +236,7 @@ export default defineConfig({
       ].join(" "),
       env: {
         DEV_PERSIST_TO: stateDir,
+        E2E_MIGRATED_STATE: migratedStateDir,
         // Core's dev script runs connect with it (e2e/connect-config.ts).
         CONNECT_WRANGLER_CONFIG: connectConfig,
         // Core signs each connector call's capability and connect checks
@@ -239,7 +263,7 @@ export default defineConfig({
     },
     // Stands in for the client's Entra tenant.
     {
-      command: `node_modules/.bin/wrangler dev -c apps/core/test/idp.wrangler.jsonc --port ${idpPort}`,
+      command: `node_modules/.bin/wrangler dev -c apps/core/test/idp.wrangler.jsonc --port ${idpPort} --inspector-port ${idpInspectorPort}`,
       port: idpPort,
       reuseExistingServer: false,
       timeout: 60_000,

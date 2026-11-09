@@ -1,4 +1,3 @@
-import { notesOf } from "./onboarding-admin.ts";
 import type { Org, OrgState } from "./onboarding-admin.ts";
 
 /**
@@ -12,8 +11,6 @@ export const stateWith = (org: Org, done: Partial<OrgState>): OrgState => ({
   ...done,
   agreed: { ...org.seed.agreed, ...done.agreed },
   rules: { ...org.seed.rules, ...done.rules },
-  // Notes kept as one text before they were a list become the first of the list.
-  notes: notesOf(done.notes ?? org.seed.notes),
   client: org.seed.client,
   day: org.seed.day,
   away: org.seed.away,
