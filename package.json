@@ -19,7 +19,6 @@
     "check:product-name": "node scripts/check-product-name.ts",
     "check:migrations": "node scripts/check-migrations.ts",
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",
-    "check:playwright-image": "node scripts/check-playwright-image.ts",
     "check:vite-plus-oxc": "node scripts/check-vite-plus-oxc.ts",
     "github:setup": "node scripts/github-setup.ts",
     "check:attribution": "node scripts/check-attribution.ts",
