@@ -10,7 +10,7 @@
 # with the Deploy platform workflow. Jobs with secrets never run for pull
 # requests from forks. CI deploys no client: the admins roll releases out.
 #
-# A draft pull request runs only the fast checks (static): the tests,
+# A draft pull request runs only the fast checks (static, generated): the tests,
 # workerd, the release build and the journeys wait until it is ready for
 # review, which runs them all (`ready_for_review`). A draft can't be
 # merged.
@@ -76,16 +76,7 @@ jobs:
         with:
           save: true
       - run: vp check
-      - run: vp run check:secrets
-      - run: vp run check:docs
-      - run: vp run check:product-name
       - run: vp run check:migrations
-      - run: vp run check:wrangler-configs
-      - run: vp run check:vite-plus-oxc
-      # Generated files (Worker types, migrations, the
-      # frontend's translation catalogs) must be committed.
-      - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
-      - run: git diff --exit-code && test -z "$(git status --porcelain)"
       # The merge queue has no branch or title of its own: the pull
       # request's were checked before it joined.
       - if: github.event_name == 'pull_request'
@@ -106,6 +97,29 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+
+  # static's other half, beside it: the repo checks that read only the
+  # tree, and that generated files (Worker types, migrations, the
+  # frontend's translation catalogs) are committed. In static, after `vp
+  # check`, they added about 40 s to the run's longest check job
+  # (November 2026). Part of the required `check` (below).
+  generated:
+    name: generated
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: vp run check:secrets
+      - run: vp run check:docs
+      - run: vp run check:product-name
+      - run: vp run check:wrangler-configs
+      - run: vp run check:vite-plus-oxc
+      - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
+      - run: git diff --exit-code && test -z "$(git status --porcelain)"
 
   # `vp test` in shards, a runner each: unsharded, one passing run reached
   # 16 minutes at about 5,300 tests (October 2026). Each shard gets its part
@@ -344,13 +358,14 @@ jobs:
   # however they ended, and passes only if all of them passed: GitHub
   # counts a skipped required check as passing, so this job mustn't be
   # skipped when one of them failed, was cancelled or was skipped. One skip
-  # passes: on a draft, everything but static (a draft can't be merged;
-  # marking it ready runs it all, and this check again).
+  # passes: on a draft, everything but static and generated (a draft
+  # can't be merged; marking it ready runs it all, and this check again).
   check:
     name: check
     needs:
       [
         static,
+        generated,
         test,
         release,
         workerd,
@@ -365,11 +380,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, e2e-build: $E2E_BUILD, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
-          if [ "$STATIC" != success ]; then
-            echo "::error title=check::static ended as $STATIC; check passes only when it succeeds."
-            exit 1
-          fi
+          echo "static: $STATIC, generated: $GENERATED, test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, e2e-build: $E2E_BUILD, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
+          for fast in "static=$STATIC" "generated=$GENERATED"; do
+            if [ "${fast#*=}" != success ]; then
+              echo "::error title=check::${fast%%=*} ended as ${fast#*=}; check passes only when it succeeds."
+              exit 1
+            fi
+          done
           if [ "$DRAFT" = true ]; then
             echo "A draft runs only the fast checks; marking it ready for review runs the rest."
             exit 0
@@ -386,6 +403,7 @@ jobs:
           fi
         env:
           STATIC: ${{ needs.static.result }}
+          GENERATED: ${{ needs.generated.result }}
           RELEASE: ${{ needs.release.result }}
           WORKERD: ${{ needs.workerd.result }}
           # A matrix job's result: a failure if any shard or part failed.
