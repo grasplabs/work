@@ -7,16 +7,21 @@ import type {
 
 import { seedConnections } from "./connections-seed.ts";
 import { signInRetry, signInTo } from "./people.ts";
-import type { Person } from "./people.ts";
+import type { Cast, Person } from "./people.ts";
 
 /**
  * A retry's own cast, signed in before the test (`signInRetry`); a first
  * attempt's the global setup signed in. A file whose `beforeAll` looks
  * people up calls `signInRetry` there, as it runs before any fixture.
  */
-export const retryCast = async (): Promise<void> => {
+export const retryCast = async (): Promise<Cast[number]> =>
   await signInRetry(seedConnections);
-};
+
+/**
+ * How long a retry's cast may take to sign in, apart from its test's own
+ * time: over a hundred sign-ins on a loaded stack.
+ */
+const castSignInMs = 120_000;
 
 /**
  * Playwright's `test`, with the browser contexts a test opens beyond its
@@ -27,8 +32,8 @@ export const retryCast = async (): Promise<void> => {
  * into later tests (a person's watch caps, "signed in elsewhere" fences).
  */
 export const test = base.extend<{
-  /** The attempt, its cast signed in before the test (`retryCast`). */
-  cast: number;
+  /** The attempt's people, signed in before the test (`retryCast`). */
+  attemptCast: Cast[number];
   /** A browser context of the test's own, closed when the test ends. */
   newContext: (options?: BrowserContextOptions) => Promise<BrowserContext>;
   /**
@@ -37,13 +42,13 @@ export const test = base.extend<{
    */
   pageOf: (person: Person, options?: BrowserContextOptions) => Promise<Page>;
 }>({
-  cast: [
+  attemptCast: [
     // oxlint-disable-next-line no-empty-pattern -- Playwright reads a fixture's dependencies from its first parameter's pattern, and this one has none
-    async ({}, provide, testInfo) => {
-      await retryCast();
-      await provide(testInfo.retry);
+    async ({}, provide) => {
+      await provide(await retryCast());
     },
-    { auto: true },
+    // Its own time, not the test's: a retry signs in a whole cast.
+    { auto: true, timeout: castSignInMs },
   ],
   newContext: async ({ browser }, provide) => {
     const opened: BrowserContext[] = [];

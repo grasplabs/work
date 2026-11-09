@@ -500,19 +500,20 @@ export const signInCast = async (): Promise<Cast> => {
 };
 
 /**
- * Signs in a cast for the running test's attempt, when it is a retry the
- * worker has no cast for yet, and calls `seed` with it (the connections
+ * The running test's attempt's cast: signed in when it is a retry the
+ * worker has no cast for yet, and `seed` called with it (the connections
  * the scenes expect, e2e/connections-seed.ts). A retry runs in a worker of
  * its own, so this runs once per retried attempt, before the test, or in
  * the `beforeAll` of a file whose tests share people.
  */
 export const signInRetry = async (
   seed: (scenes: Cast[number], attempt: number) => Promise<void>
-): Promise<void> => {
+): Promise<Cast[number]> => {
   const { retry } = test.info();
   const casts = castsSoFar();
-  if (casts[retry] !== undefined) {
-    return;
+  const signedIn = casts[retry];
+  if (signedIn !== undefined) {
+    return signedIn;
   }
   const adminCookie = process.env[adminVariable];
   if (adminCookie === undefined) {
@@ -524,6 +525,7 @@ export const signInRetry = async (
   await seed(scenes, retry);
   casts[retry] = scenes;
   process.env[castVariable] = JSON.stringify(casts);
+  return scenes;
 };
 
 /** The scene's people, signed in for this attempt at the running test. */
