@@ -57,7 +57,6 @@ import {
 } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { Release } from "./app-releases.ts";
-import { refuseV1Server } from "./app-v1-server.ts";
 import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
 import {
   auditedBatch,
@@ -931,7 +930,6 @@ export const commitFiles = async (
     throw appErrors.create("app.nothing_to_commit");
   }
   const { tree, json } = stored;
-  refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
   await storeTree(env, appId, { tree, json });
 
@@ -1173,7 +1171,6 @@ export const proposeDraft = async (
     throw appErrors.create("app.nothing_to_commit");
   }
   const { tree, json } = stored;
-  refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
   await storeTree(env, appId, { tree, json });
   const row: VersionRow = {

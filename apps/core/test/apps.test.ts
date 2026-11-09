@@ -725,61 +725,6 @@ export const Route = createFileRoute("/archive")({ component: Page });
     );
   });
 
-  it("refuses to commit the v1 server's files under app/, naming them, and keeps nothing of the commit", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    const v1Files: Record<string, string>[] = [
-      { "app/server.ts": "export class App {}\n" },
-      { "app/exports.json": "{}" },
-      { "app/lib/books.ts": "export const books = 1;\n" },
-    ];
-    const refusals = await Promise.all(
-      v1Files.map(
-        async (files) =>
-          await commit(
-            apps,
-            app.id,
-            withFiles(first, {
-              ...files,
-            })
-          ).then(
-            () => ({ code: "committed" }),
-            (error: unknown) => error
-          )
-      )
-    );
-
-    expect(refusals).toMatchObject([
-      { code: "app.v1_server", details: { issues: ["app/server.ts"] } },
-      { code: "app.v1_server", details: { issues: ["app/exports.json"] } },
-      { code: "app.v1_server", details: { issues: ["app/lib/books.ts"] } },
-    ]);
-    await expect(apps.versions.list(app.id)).resolves.toStrictEqual([]);
-    // Without them, the same files commit.
-    await expect(commit(apps, app.id, first)).resolves.toMatchObject({
-      version: 1,
-    });
-  });
-
-  it("never marks a version still holding the v1 server's files as a blueprint", async () => {
-    const { apps, userId } = await appsApi("builder");
-    const app = await newApp(apps);
-    await storedUnchecked(
-      app.id,
-      userId,
-      withFiles(first, {
-        "app/server.ts": "export class App {}\n",
-      }).files
-    );
-
-    await expect(apps.blueprints.mark(app.id, 1)).rejects.toMatchObject({
-      code: "app.v1_server",
-      details: { issues: ["app/server.ts"] },
-    });
-    const marked = await apps.blueprints.list();
-    expect(marked.filter(({ app: of }) => of === app.id)).toStrictEqual([]);
-  });
-
   it("audits every commit and version change, by identifiers only", async () => {
     const aHash: unknown = expect.any(String);
     const { apps, userId } = await appsApi("admin");

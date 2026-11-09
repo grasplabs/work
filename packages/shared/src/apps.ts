@@ -480,9 +480,7 @@ export interface AppFilesApi {
    * building. Its `grasp.config.ts` and `server/schema.ts` are always
    * what its definition generates, whatever `changes` hold of them.
    * Answers once they are done with how they went (`builds`).
-   * A build never fails the commit. Files under `app/` (the v1 server's,
-   * `appV1ServerFolder`) do: the commit is refused with `app.v1_server`,
-   * naming them.
+   * A build never fails the commit.
    * Changes that leave the files and the definition as they are:
    * `app.nothing_to_commit`.
    * Of two commits at once, one is refused with `app.conflict`: read the
@@ -996,8 +994,6 @@ export const appErrors = defineErrorFamily({
   "app.version_not_found": "The App has no such version.",
   "app.too_large": "The App's files would be over its limits.",
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
-  "app.v1_server":
-    "An App no longer has files under app/: its server code is grasp.config.ts, server/schema.ts and its functions in server/. Delete the files under app/ and commit again.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.no_version": "Make a version of the App current before publishing it.",
@@ -1040,13 +1036,6 @@ export const appErrors = defineErrorFamily({
   "app.preview_side_effect":
     "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to Knowledge.",
 });
-
-/**
- * The folder the v1 App server's code and exports were in (`app/server.ts`,
- * `app/exports.json`). Nothing reads it any more, so a commit holding a
- * file there is refused (`app.v1_server`).
- */
-export const appV1ServerFolder = "app/";
 
 /**
  * The most an App's error carries to its caller besides its code (its
