@@ -808,7 +808,8 @@ describe("pages ended at a cursor", () => {
       grown: grown.items.length,
       // After the records within the first half of their bytes.
       split: grown.splitCursor,
-    }).toStrictEqual({ grown: 4, split: half.nextCursor });
+      // Answered as far as half an answer holds, and split there.
+    }).toStrictEqual({ grown: 2, split: half.nextCursor });
   });
 
   it("stop at their end before any filter, never scanning on past it", async () => {
@@ -840,6 +841,61 @@ describe("pages ended at a cursor", () => {
       })
     );
     expect(pageIds(ended)).toStrictEqual(idsOf(first.items));
+  });
+
+  it("say where to split them once they grow past what one read may examine, never failing", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: "a" },
+      { title: "z" },
+      { title: "zz" },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const first = await byTitle().paginate({ pageSize: 2 });
+    const end = first.nextCursor ?? "";
+    // A bulk import lands inside the page: more records than one read may
+    // examine between its start and its end.
+    await insertNotes(
+      fixture,
+      Array.from({ length: queryMaxScannedEntries + 1 }, (_, index) => ({
+        title: `m${String(index).padStart(6, "0")}`,
+      })),
+      "ada",
+      100
+    );
+    // Each page from where the last split it, as a live list splits them.
+    const titles: string[] = [];
+    let splits = 0;
+    let from: string | null = null;
+    do {
+      // Large enough a page that only the scan and answer bounds cut
+      // it: each answer ends where it says to split.
+      // oxlint-disable-next-line no-await-in-loop -- each from the split before
+      const page = await byTitle().paginate({
+        pageSize: 5000,
+        cursor: from,
+        endCursor: end,
+      });
+      titles.push(...page.items.map(({ title }) => title));
+      from = page.splitCursor ?? null;
+      if (from !== null) {
+        splits += 1;
+      }
+    } while (from !== null);
+    expect({
+      split: splits > 0,
+      count: titles.length,
+      first: titles[0],
+      last: titles.at(-1),
+      unique: new Set(titles).size,
+    }).toStrictEqual({
+      split: true,
+      count: queryMaxScannedEntries + 3,
+      first: "a",
+      last: "z",
+      unique: queryMaxScannedEntries + 3,
+    });
   });
 
   it("expire with an end of its ID alone whose record moved to or before their start", async () => {

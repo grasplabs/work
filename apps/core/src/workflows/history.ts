@@ -1,4 +1,5 @@
 import { isExpectedCode } from "@grasp-os/shared/errors";
+import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
   RunHistoryEntry,
@@ -711,6 +712,11 @@ export const historyEntries = async (
   }
   const stoppedAt =
     until !== undefined && more && after < until ? after : undefined;
+  // Stopped without getting past its start: no split could make progress,
+  // so the page's cursors no longer describe a span it can read.
+  if (stoppedAt !== undefined && stoppedAt <= from) {
+    throw dataErrors.create("data.cursor_expired");
+  }
   const page: HistoryEntries = more
     ? { items, nextCursor: String(after), hasMore: true }
     : { items, nextCursor: null, hasMore: false };

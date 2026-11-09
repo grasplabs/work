@@ -589,7 +589,8 @@ describe("related records", () => {
     expect({
       grown: grown.items.length,
       split: grown.splitCursor,
-    }).toStrictEqual({ grown: 4, split: half.nextCursor });
+      // Answered as far as half an answer holds, and split there.
+    }).toStrictEqual({ grown: 2, split: half.nextCursor });
   });
 
   it("are refused past their bounds, clearly", async () => {

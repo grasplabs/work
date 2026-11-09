@@ -524,7 +524,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     );
   });
 
-  it("refuse a page of runs whose end lies past what one read may examine, never loading them all", async () => {
+  it("split a page of runs whose end lies past what one read may examine, and past half an answer, every run once", async () => {
     const admin = await person("admin");
     const bob = await person("user");
     const owner = await person("builder");
@@ -549,10 +549,36 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     };
     // An end at the oldest of them (runs list newest first): a cursor is
     // a place, its time then an ID, which anyone may write.
-    const cursor = `${Date.UTC(2026, 0, 1)}:0`;
-    expect(
-      codeOf(await ask({ pagination: { pageSize: 1, endCursor: cursor } }))
-    ).toBe("data.scan_limit");
+    const end = `${Date.UTC(2026, 0, 1)}:0`;
+    const page = z.object({
+      items: z.array(z.object({ run: z.object({ runId: z.string() }) })),
+      splitCursor: z.string().optional(),
+    });
+    // Each page from where the last split it, as a live list splits them.
+    const ids: string[] = [];
+    let splits = 0;
+    let from: string | null = null;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- each from the split before
+      const answered = await ask({
+        pagination: { pageSize: 100, cursor: from, endCursor: end },
+      });
+      const read = page.parse(answered.ok ? answered.value : answered);
+      ids.push(...read.items.map(({ run }) => run.runId));
+      from = read.splitCursor ?? null;
+      if (from !== null) {
+        splits += 1;
+      }
+    } while (from !== null);
+    expect({
+      split: splits > 1,
+      runs: ids.length,
+      unique: new Set(ids).size,
+    }).toStrictEqual({
+      split: true,
+      runs: queryMaxScannedEntries + 2,
+      unique: queryMaxScannedEntries + 2,
+    });
   });
 
   it("keep each App's runs its own, end a page where the next starts, and follow access, revocation and rebinding", async () => {
@@ -1094,10 +1120,13 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ],
       ascending: true,
       paged: whole.items,
+      // Three entries past twice its size of one: it says to split after
+      // its first, as any page with an end does.
       ended: {
         items: whole.items.slice(0, 3),
         nextCursor: cursors[2],
         hasMore: true,
+        splitCursor: String(whole.items[0]?.sequence),
       },
     });
 

@@ -217,7 +217,14 @@ const unionOf = (members: readonly AnySchema[]): AnySchema => {
   return rest.length === 0 ? first : v.union(first, ...rest);
 };
 
-/** The schemas of `workflow`'s queries, by name. */
+/**
+ * The schemas of `workflow`'s queries, by name. `runs`, `history` and
+ * `decisions` page as an App's own queries do. A caller that passes
+ * `endCursor` (as `usePaginatedQuery` does for a loaded page) must read
+ * `splitCursor`: a page with an end that grew past its bounds answers
+ * only its first records and says where to split it, so the records after
+ * that place are in no answer until the caller reads from it.
+ */
 const querySchemas = (
   workflow: BoundWorkflow
 ): Partial<

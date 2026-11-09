@@ -47,6 +47,7 @@ import {
   resourceDecisionPending,
 } from "./decisions/decisions.ts";
 import { appHost } from "./durable-objects.ts";
+import { answerSize, pageCut } from "./page-splits.ts";
 import { followableOrigins } from "./page-workflows.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
 import { historyEntries } from "./workflows/history.ts";
@@ -247,31 +248,35 @@ const defaultPageSize = 50;
 
 const cursorPattern = /^(?<at>\d{1,16}):(?<id>[\w-]{1,128})$/u;
 
-/**
- * The rows of a page of runs or decisions with an end, as read: every row
- * up to it, refused past what one read may examine (`data.scan_limit`),
- * never answered in part.
- */
-const endedRows = <Row>(rows: readonly Row[]): Row[] => {
-  if (rows.length > queryMaxScannedEntries) {
-    throw dataErrors.create("data.scan_limit", {
-      scanned: queryMaxScannedEntries,
-    });
-  }
-  return [...rows];
-};
+/** Whether a row shows an item. */
+const shows = (item: Json | undefined): item is Json => item !== undefined;
 
 /**
- * Where a page of runs or decisions with an end is split, as a store's
- * pages are (store-queries.ts, `readPage`): after its first `size` rows
- * once it holds more than twice that.
+ * A page of runs or decisions with an end (`until`), cut as a store's
+ * pages are (page-splits.ts): its rows (`shown`, read up to one past the
+ * scan bound) and each one's item, if it shows one (`told`). Past the
+ * bound, or past half an answer, or past twice its size, it answers its
+ * first rows' items and says to split after the last of them, or after
+ * the last row it read. Without an end, it is answered as read.
  */
-const splitRowOf = <Row>(
+const cutPage = <Row>(
   shown: readonly Row[],
+  told: readonly (Json | undefined)[],
   until: Place | undefined,
   size: number
-): Row | undefined =>
-  until !== undefined && shown.length > 2 * size ? shown[size - 1] : undefined;
+): { items: Json[]; splitAfter: Row | undefined } => {
+  if (until === undefined) {
+    return { items: told.filter(shows), splitAfter: undefined };
+  }
+  const stopped = shown.length > queryMaxScannedEntries;
+  const read = shown.slice(0, queryMaxScannedEntries);
+  const sizes = read.map((_row, at) => answerSize(told[at]));
+  const { keep, split } = pageCut(sizes, size, stopped);
+  return {
+    items: told.slice(0, keep).filter(shows),
+    splitAfter: split === "stopped" ? read.at(-1) : read[split ?? -1],
+  };
+};
 
 /** A place in a list of runs or decisions: a time, then an ID. */
 interface Place {
@@ -500,12 +505,11 @@ const runsPage = async (
       desc(workflowResourceRuns.id)
     )
     // Up to its end, a page holds every run there, within the bound of
-    // one read (`endedRows`).
+    // one read (`cutPage`).
     .limit(until === undefined ? options.size + 1 : queryMaxScannedEntries + 1);
-  const shown =
-    until === undefined ? rows.slice(0, options.size) : endedRows(rows);
+  const shown = until === undefined ? rows.slice(0, options.size) : rows;
   const watchable = await followable(env, caller, from, shown);
-  const items: Json[] = shown.map((row) => {
+  const told: Json[] = shown.map((row) => {
     const status = publicStatus[row.status];
     const compensation =
       row.status === "running" && row.compensation !== null
@@ -534,8 +538,13 @@ const runsPage = async (
       canWatch: watchable.has(row.id),
     };
   });
+  const { items, splitAfter: splitRow } = cutPage(
+    shown,
+    told,
+    until,
+    options.size
+  );
   const lastRow = shown.at(-1);
-  const splitRow = splitRowOf(shown, until, options.size);
   return {
     items,
     hasMore: until === undefined && rows.length > options.size,
@@ -733,6 +742,12 @@ const declaredTasks = async (
   }
 };
 
+/** The engine event a history row tells, as its cursor names it. */
+const sequenceAt = (row: Json | undefined): number | undefined => {
+  const sequence = isRecord(row) ? row.sequence : undefined;
+  return typeof sequence === "number" ? sequence : undefined;
+};
+
 /**
  * Up to `size` rows of run `runId`'s history after the event `after`, for
  * `caller` through the release's pin while the binding names `bound`,
@@ -787,20 +802,28 @@ const historyPage = async (
       taskOf: (engineStep) => sealedStepOf(engineStep, declared)?.task ?? null,
     }
   );
-  const items = page.items.flatMap((entry) => historyRowOf(entry) ?? []);
-  // Given an end, a page answers it as its next cursor (`pageAnswer`). A
-  // span longer than one page's reads reach holds only its entries up to
-  // where they stopped, and says to split there: never a gap.
-  return typeof endCursor === "string"
-    ? {
-        items,
-        nextCursor: endCursor,
-        hasMore: true,
-        ...(page.stoppedAt === undefined
-          ? {}
-          : { splitCursor: String(page.stoppedAt) }),
-      }
-    : { items, nextCursor: page.nextCursor, hasMore: page.hasMore };
+  const rows = page.items.flatMap((entry) => historyRowOf(entry) ?? []);
+  if (typeof endCursor !== "string") {
+    return { items: rows, nextCursor: page.nextCursor, hasMore: page.hasMore };
+  }
+  // Given an end, a page answers it as its next cursor (`pageAnswer`),
+  // cut as any page with an end is (page-splits.ts): a span longer than
+  // one page's reads reach holds only its entries up to where they
+  // stopped, and says to split there, never leaving a gap; past half an
+  // answer or twice its size, its first entries, split after them.
+  const { keep, split } = pageCut(
+    rows.map(answerSize),
+    size,
+    page.stoppedAt !== undefined
+  );
+  const splitAfter =
+    split === "stopped" ? page.stoppedAt : sequenceAt(rows[split ?? -1]);
+  return {
+    items: rows.slice(0, keep),
+    nextCursor: endCursor,
+    hasMore: true,
+    ...(splitAfter === undefined ? {} : { splitCursor: String(splitAfter) }),
+  };
 };
 
 /** The version the release pins, while the App's binding still names it. */
@@ -1034,10 +1057,9 @@ const decisionsPage = async (
   )
     .orderBy(asc(workflowDecisions.openedAt), asc(workflowDecisions.id))
     // Up to its end, a page holds every decision there, within the bound
-    // of one read (`endedRows`).
+    // of one read (`cutPage`).
     .limit(until === undefined ? options.size + 1 : queryMaxScannedEntries + 1);
-  const shown =
-    until === undefined ? rows.slice(0, options.size) : endedRows(rows);
+  const shown = until === undefined ? rows.slice(0, options.size) : rows;
   // One build a manifest: the pinned version's runs share it.
   const manifests = [...new Set(shown.map((row) => row.manifestHash))];
   const builds = new Map(
@@ -1048,26 +1070,30 @@ const decisionsPage = async (
       )
     )
   );
-  const items: Json[] = [];
-  for (const row of shown) {
+  const told = shown.map((row): Json | undefined => {
     const named = keyOf(row, builds.get(row.manifestHash), query.decisionKeys);
-    if (named !== undefined) {
-      items.push({
-        run: {
-          runId: row.runId,
-          workflowId: row.workflowId,
-          workflowVersion: row.version,
-          manifestHash: row.manifestHash,
-        },
-        // Listed only while the caller may answer it and it takes answers.
-        // Answerable only where the run's restricted mode is the App's
-        // (workflows/page-decisions.ts, `appDecision`).
-        wait: decisionWaitOf(row, named, row.restricted === appRestricted),
-      });
-    }
-  }
+    return named === undefined
+      ? undefined
+      : {
+          run: {
+            runId: row.runId,
+            workflowId: row.workflowId,
+            workflowVersion: row.version,
+            manifestHash: row.manifestHash,
+          },
+          // Listed only while the caller may answer it and it takes
+          // answers. Answerable only where the run's restricted mode is
+          // the App's (workflows/page-decisions.ts, `appDecision`).
+          wait: decisionWaitOf(row, named, row.restricted === appRestricted),
+        };
+  });
+  const { items, splitAfter: splitRow } = cutPage(
+    shown,
+    told,
+    until,
+    options.size
+  );
   const lastRow = shown.at(-1);
-  const splitRow = splitRowOf(shown, until, options.size);
   return {
     items,
     hasMore: until === undefined && rows.length > options.size,

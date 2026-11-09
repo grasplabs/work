@@ -10,19 +10,22 @@ import { historyEntries } from "../src/workflows/history.ts";
 // run of the platform's own can't reach in a test (a run takes at most
 // 1,000 steps). The journal stands in for the run object's `history`.
 
-/** A journal of `total` events, as the run object answers its reads. */
-const journal = (total: number) => {
+/**
+ * A journal of `total` events, as the run object answers its reads; one
+ * that `stalls` answers no event however often it says more follow.
+ */
+const journal = (total: number, stalls = false) => {
   const stub = {
     history: async ({ after, limit }: { after: number; limit: number }) => {
       await Promise.resolve();
-      const last = Math.min(total, after + limit);
+      const last = stalls ? after : Math.min(total, after + limit);
       return {
         records: Array.from({ length: Math.max(0, last - after) }, (_, at) => ({
           eventId: after + at + 1,
           at: after + at + 1,
           unreadable: true,
         })),
-        more: last < total,
+        more: stalls || last < total,
         steps: [[]],
       };
     },
@@ -65,5 +68,20 @@ describe("a run's history read up to an end", () => {
       withinStoppedAt: undefined,
       withinEntries: 300,
     });
+  });
+
+  it("expires a span whose reads got no further than its start, rather than split it where it began", async () => {
+    let code: unknown = "read";
+    try {
+      await historyEntries(
+        journal(5000, true),
+        "run",
+        { after: 10, pageSize: 1, until: 4000 },
+        telling
+      );
+    } catch (error) {
+      code = error instanceof Error && "code" in error ? error.code : error;
+    }
+    expect(code).toBe("data.cursor_expired");
   });
 });

@@ -204,7 +204,9 @@ export const v = Object.freeze({
  * `endCursor`, the page ends at the record that cursor ends at, however
  * many records that is, and answers `endCursor` as its own next cursor:
  * how a live list (`usePaginatedQuery`) keeps each loaded page's bounds
- * fixed while records move in and out of it, as Convex does.
+ * fixed while records move in and out of it, as Convex does. A caller
+ * that passes `endCursor` must read the answer's `splitCursor`: a page
+ * that grew past a bound answers only its records up to that place.
  */
 export const paginationOptionsValidator = v.object({
   pageSize: v

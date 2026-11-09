@@ -605,8 +605,16 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
         hasMore: list.view().hasMore,
       }).toStrictEqual({ shown: 2, error: undefined, hasMore: true });
     });
+    // Its first page, ended now, is past half an answer too: it is split,
+    // and settles once both halves answer.
     await list.pager.loadMore(2);
-    expect(list.titles()).toHaveLength(4);
+    await eventually(() => {
+      expect({
+        titles: list.titles().length,
+        unique: new Set(list.titles()).size,
+        error: list.pager.snapshot.error,
+      }).toStrictEqual({ titles: 4, unique: 4, error: undefined });
+    });
     list.stop();
   });
 
