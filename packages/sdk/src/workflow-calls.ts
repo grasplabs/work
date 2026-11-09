@@ -23,10 +23,14 @@ import { showsControl } from "./workflow-view.ts";
 // - The commands are the same functions for the hook's life, so a page
 //   may keep one in a handler or a callback. Each addresses the run the
 //   hook selects when it is called (the run ID it committed, else its
-//   latest admitted start's), once that run's snapshot loaded
-//   (`workflow.not_attached` otherwise), never one a render saw before; a
-//   selection changed while one is under way doesn't redirect it, and one
-//   asked of another run shows nothing on this one.
+//   latest admitted start's; `workflow.not_attached` for none), never one
+//   a render saw before, whether or not its snapshot loaded yet: a start
+//   and then a cancel in one handler cancel the run just started, and the
+//   host checks every one as it would any. A selection changed while one
+//   is under way doesn't redirect it, and one asked of another run shows
+//   nothing on this one. A start admitted late, or a run ID a child's
+//   effect sees before the hook's own commits, is addressed as soon as it
+//   is selected, a render before the page shows it.
 // - An event is sent only by a reference this very workflow's reference
 //   holds, never another workflow's, a stale release's or one made up; the
 //   host checks it, and its data, again.
@@ -37,8 +41,10 @@ import { showsControl } from "./workflow-view.ts";
 //   up, its last if nothing changes after (equal reads push nothing), so
 //   the control is then left to the host's snapshot (`pendingControl`).
 //   And as a host that ends up where it was pushes nothing either,
-//   `applying` ends after `applyingAtMostMs` whatever comes. A control
-//   asked again meanwhile joins the first or is done, never a second.
+//   `applying` ends after `applyingAtMostMs` whatever comes. Either way a
+//   push read before the control was written can make it look settled
+//   for as long as the next read takes; the same control asked again
+//   meanwhile joins the first on the host, or finds it done.
 // - Capabilities are the host's alone: what a snapshot of the `run` query
 //   says may be done, narrowed by this hook's own controls. As any live
 //   query's, a snapshot kept through a lost connection stays shown, and
@@ -143,13 +149,7 @@ export class WorkflowCalls {
   /** The run the hook selects now, once loaded: what a command addresses. */
   #attached(): string {
     const runId = this.#selected ?? this.#local.startedRunId;
-    const shown = runId === undefined ? undefined : this.#entry(runId);
-    if (
-      runId === undefined ||
-      shown === undefined ||
-      shown.snapshot.value === undefined ||
-      shown.snapshot.value === null
-    ) {
+    if (runId === undefined) {
       throw clientError("workflow.not_attached");
     }
     return runId;

@@ -286,9 +286,9 @@ const resolvedWaits = (
 
 /**
  * A control of this hook's: `submitting` while its request is unanswered;
- * once the host admitted it, `applying` for as long as the run's query
- * still shows `before`, the snapshot it showed when the answer came, so
- * the control never looks settled before a snapshot read after it does.
+ * once the host admitted it, `applying` while the run's query still shows
+ * `before`, the snapshot it showed when the answer came, within the
+ * bounds workflow-calls.ts sets (`WorkflowCalls`, its header).
  */
 export type Submitting =
   | {

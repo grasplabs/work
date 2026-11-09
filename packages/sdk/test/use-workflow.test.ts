@@ -489,13 +489,22 @@ describe("useWorkflow", () => {
   });
 
   describe("controlling the run shown", () => {
-    it("refuses to control a run whose snapshot hasn't loaded, sending nothing", async () => {
+    it("refuses to control, send or answer while no run is selected, sending nothing", async () => {
       const page = host();
-      const hook = mount(page, "run-1");
-      await expect(codeOf(hook.view().pause())).resolves.toBe(
-        "workflow.not_attached"
-      );
-      expect(page.calls).toStrictEqual([]);
+      const hook = mount(page);
+      const { pause, send } = hook.view();
+      expect({
+        codes: [
+          await codeOf(pause()),
+          await codeOf(
+            send(workflows.summarizeNote.events.styleChosen, { style: "long" })
+          ),
+        ],
+        calls: page.calls,
+      }).toStrictEqual({
+        codes: ["workflow.not_attached", "workflow.not_attached"],
+        calls: [],
+      });
     });
 
     it("calls the control's mutation for the run, submitting until answered, applying until a newer snapshot shows where it stands", async () => {
@@ -618,9 +627,6 @@ describe("useWorkflow", () => {
       // Kept while idle, as a handler that starts a run and then cancels it.
       const { cancel, send } = hook.view();
       await hook.view().start({ noteId });
-      hook.view();
-      await flush();
-      page.run("run-1").push(snapshotOf());
       await cancel();
       await send(workflows.summarizeNote.events.styleChosen, { style: "long" });
       // Kept while run-1 was selected, called once run-2 is.
