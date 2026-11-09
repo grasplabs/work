@@ -10,6 +10,7 @@ import {
 import buildExtractor from "../build-extractor.ts";
 import { bundleConnect, connectBundle } from "./build-connect.ts";
 import { testVersionModule } from "./compiler-version.ts";
+import { prebuiltKey, restorePrebuilt, savePrebuilt } from "./prebuilt.ts";
 import { runNode } from "./run-node.ts";
 import { removeEndedRuns, removeTestRun, testAssets } from "./test-run.ts";
 
@@ -56,10 +57,24 @@ const prepare = async (): Promise<void> => {
   );
   // The guides the agent reads, as core's build embeds them.
   writeAgentDocs();
+  // The builds below, reused when their inputs are those of a build kept
+  // earlier (prebuilt.ts).
+  const files = {
+    assets: testAssets,
+    versionModule: testVersionModule,
+    connectBundle,
+  };
+  const key = prebuiltKey();
+  if (key !== null && restorePrebuilt(key, files)) {
+    return;
+  }
   // At once: the compiler's build and Wrangler's bundle of connect run in
   // processes of their own, and each took over 10 s of a CI runner's
   // start, one after the other.
   await Promise.all([writeTestAssets(), writeConnectBundle()]);
+  if (key !== null) {
+    savePrebuilt(key, files);
+  }
 };
 
 declare global {
