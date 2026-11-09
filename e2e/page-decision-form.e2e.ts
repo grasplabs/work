@@ -47,23 +47,21 @@ const stringsDescriptor = (names: readonly string[]) =>
 const definitionOf = (contract: string) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({
+    args: objectSchema({
       who: { kind: "string" },
       reviewer: { kind: "string" },
     }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: '"Hello, " + input.who' } },
-    },
-    bindings: { approval: { kind: "decision", contract } },
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: '"Hello, " + args.who' } },
+    permissions: { decisions: { approval: { contract } } },
     steps: [
       {
         id: "ask",
-        type: "decision",
-        binding: "approval",
-        recipients: { $expr: '["person:" + input.reviewer]' },
+        type: "decide",
+        decision: "approval",
+        recipients: { $expr: '["person:" + args.reviewer]' },
         prompt: "Greet them?",
-        input: { who: { $expr: "input.who" } },
+        input: { who: { $expr: "args.who" } },
       },
     ],
   });

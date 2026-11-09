@@ -32,11 +32,9 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const countingDefinition = (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: "counted" },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "counted" },
     steps: [],
   });
 

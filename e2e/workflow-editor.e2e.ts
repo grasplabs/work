@@ -8,7 +8,7 @@ import { modelScripts } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
 // A builder writes an independent workflow's definition in the editor:
-// core checks each save against grasp-workflow/1 and says what to fix at
+// core checks each save against grasp-workflow/2 and says what to fix at
 // its JSON Pointer, only a revision that passes publishes, and of two
 // people saving the same revision, the second is told and keeps their text.
 // The page opens on its Flow, the revision that passed drawn, where a step
@@ -33,11 +33,9 @@ const definition = (
   JSON.stringify(
     {
       $schema: workflowSchemaUrl,
-      input: objectOf({}),
-      output: {
-        schema: objectOf({ status: { kind: "string" } }),
-        value: { status },
-      },
+      args: objectOf({}),
+      returns: objectOf({ status: { kind: "string" } }),
+      result: { status },
       steps: [{ id: "finish", type: "wait", for: "1 second", ...extra }],
     },
     null,
@@ -194,21 +192,19 @@ const routing = (): string =>
   JSON.stringify(
     {
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { kind: "string" } }),
-      output: {
-        schema: objectOf({ status: { kind: "string" } }),
-        value: {
-          status: { $expr: 'input.who === "Ada" ? "ada" : "other"' },
-        },
+      args: objectOf({ who: { kind: "string" } }),
+      returns: objectOf({ status: { kind: "string" } }),
+      result: {
+        status: { $expr: 'args.who === "Ada" ? "ada" : "other"' },
       },
       steps: [
         {
           id: "route",
           type: "if",
-          condition: { $expr: 'input.who === "Ada"' },
+          condition: { $expr: 'args.who === "Ada"' },
           // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
-          then: [pause("greet-ada")],
-          else: [pause("greet-other")],
+          then: [pause("greetAda")],
+          else: [pause("greetOther")],
         },
         pause("finished"),
       ],
@@ -235,7 +231,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   const route = diagram.getByRole("listitem", { name: "route" });
   await expect(route.getByText("When it holds")).toBeVisible();
   await expect(route.getByText("Otherwise")).toBeVisible();
-  for (const task of ["greet-ada", "greet-other", "finished"]) {
+  for (const task of ["greetAda", "greetOther", "finished"]) {
     // oxlint-disable-next-line no-await-in-loop -- one task at a time
     await expect(diagram.getByRole("listitem", { name: task })).toBeVisible();
   }
@@ -265,7 +261,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   });
   // Each task's own mark: `route` holds its branches' tasks, and their
   // marks, inside it.
-  for (const task of ["route", "greet-ada", "finished"]) {
+  for (const task of ["route", "greetAda", "finished"]) {
     // oxlint-disable-next-line no-await-in-loop -- one task at a time
     await expect(ran.getByRole("listitem", { name: task })).toHaveAttribute(
       "data-state",
@@ -273,10 +269,10 @@ test("a builder sees every declared branch of the checked definition, and a test
     );
   }
   await expect(
-    ran.getByRole("listitem", { name: "greet-ada" }).getByText("Reached")
+    ran.getByRole("listitem", { name: "greetAda" }).getByText("Reached")
   ).toBeVisible();
   await expect(
-    ran.getByRole("listitem", { name: "greet-other" })
+    ran.getByRole("listitem", { name: "greetOther" })
   ).toHaveAttribute("data-state", "none");
 
   // A second version, which goes live below.
@@ -299,7 +295,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   await expect(
     steps
       .getByRole("region", { name: "What the run of version 1 did" })
-      .getByRole("listitem", { name: "greet-ada" })
+      .getByRole("listitem", { name: "greetAda" })
       .getByText("Reached")
   ).toBeVisible();
   await page.keyboard.press("Escape");
@@ -350,7 +346,7 @@ test("a builder changes one step on the Flow, saved as the draft's next revision
   ).toBeVisible();
 
   await page.getByRole("tab", { name: "Flow" }).click();
-  await page.getByRole("button", { name: "Change step greet-ada" }).click();
+  await page.getByRole("button", { name: "Change step greetAda" }).click();
   const step = page.getByRole("dialog");
   await expect(step.getByLabel("The step, as JSON")).toHaveValue(
     JSON.stringify({ type: "wait", for: "1 second" }, null, 2)
@@ -384,17 +380,15 @@ const totalling = (): string =>
   JSON.stringify(
     {
       $schema: workflowSchemaUrl,
-      input: objectOf({}),
-      output: {
-        schema: objectOf({ sum: { kind: "number" } }),
-        value: { sum: { $expr: "steps.add.output" } },
+      args: objectOf({}),
+      returns: objectOf({ sum: { kind: "number" } }),
+      result: { sum: { $expr: "add" } },
+      permissions: {
+        modules: {
+          total: { kind: "compute", contract: "local:code/total.ts#total" },
+        },
       },
-      bindings: {
-        total: { kind: "compute", contract: "local:code/total.ts#total" },
-      },
-      steps: [
-        { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
-      ],
+      steps: [{ id: "add", type: "call", module: "total", args: [1, 2, 3] }],
     },
     null,
     2
