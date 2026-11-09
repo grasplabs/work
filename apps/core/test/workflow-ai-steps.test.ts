@@ -135,7 +135,7 @@ const checkedTasks = [
 /** The greeting with the check's comment, or `declined`. */
 const checkedStatus = {
   $expr:
-    'check.approved ? draft.line + " / " + check.payload.comment : "declined"',
+    '!check.timedOut && check.approved ? draft.line + " / " + check.payload.comment : "declined"',
 };
 
 describe("the release's general contracts", { timeout: 60_000 }, () => {
