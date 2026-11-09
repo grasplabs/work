@@ -1,17 +1,13 @@
 import { clientInternals } from "./client-core.ts";
 import type { GraspClient } from "./client-core.ts";
 import { clientError } from "./client-error.ts";
+import type { QueryEntry } from "./client-query-entry.ts";
 import { deepFreeze } from "./declaration.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ReadWorkflow } from "./workflow-reference-read.ts";
 import { respondToDecision } from "./workflow-respond.ts";
 import type { RunHandle } from "./workflow-runs.ts";
-import type {
-  PendingControl,
-  RunSnapshot,
-  Submitting,
-  ViewParts,
-} from "./workflow-view.ts";
+import type { PendingControl, Submitting, ViewParts } from "./workflow-view.ts";
 import { showsControl } from "./workflow-view.ts";
 
 // What one `useWorkflow` keeps beside its two live queries (`run` and
@@ -24,26 +20,32 @@ import { showsControl } from "./workflow-view.ts";
 // - Selection: without a run ID, the hook shows the run of its latest
 //   admitted start: a start admitted late never replaces a newer one's
 //   run, and a failed one keeps what was shown.
-// - A command addresses the run the hook showed when the command was
-//   made, once that run's snapshot loaded (`workflow.not_attached`
-//   otherwise): a selection changed while it is under way doesn't
-//   redirect it, and one asked of another run shows nothing on this one.
+// - The commands are the same functions for the hook's life, so a page
+//   may keep one in a handler or a callback. Each addresses the run the
+//   hook selects when it is called (the run ID it committed, else its
+//   latest admitted start's), once that run's snapshot loaded
+//   (`workflow.not_attached` otherwise), never one a render saw before; a
+//   selection changed while one is under way doesn't redirect it, and one
+//   asked of another run shows nothing on this one.
 // - An event is sent only by a reference this very workflow's reference
 //   holds, never another workflow's, a stale release's or one made up; the
 //   host checks it, and its data, again.
 // - A control looks settled before it is: once admitted, it stays
-//   `applying` until the run's query shows a snapshot other than the one
-//   it showed as the answer came (`Submitting`), unless that one already
-//   shows it; the host's snapshot says the rest (`pendingControl`). A
-//   read the host began before the control was written, and pushes after
-//   its answer, can still end that early, for as long as the next read
-//   takes: a control asked again meanwhile joins the first or is done,
-//   never a second. Waiting for the snapshot to show it instead could
-//   wait for good, for a control another page overtook.
+//   `applying` while the run's query still shows what it showed when the
+//   control was sent, unless that already shows it. A push that arrived
+//   while the control was under way may already be where the host ended
+//   up, its last if nothing changes after (equal reads push nothing), so
+//   the control is then left to the host's snapshot (`pendingControl`).
+//   And as a host that ends up where it was pushes nothing either,
+//   `applying` ends after `applyingAtMostMs` whatever comes. A control
+//   asked again meanwhile joins the first or is done, never a second.
 // - Capabilities are the host's alone: what a snapshot of the `run` query
 //   says may be done, narrowed by this hook's own controls. As any live
 //   query's, a snapshot kept through a lost connection stays shown, and
 //   the host refuses what is no longer allowed; nothing here is a grant.
+
+/** The longest a control of this hook's shows `applying` on its own. */
+export const applyingAtMostMs = 10_000;
 
 /** What one hook has under way itself. */
 export interface LocalCalls {
@@ -68,6 +70,8 @@ export class WorkflowCalls {
   };
   #startSeq = 0;
   #admittedSeq = 0;
+  /** The run ID the hook committed, if it was given one. */
+  #selected: string | undefined;
 
   constructor(client: GraspClient, read: ReadWorkflow) {
     this.#client = client;
@@ -82,6 +86,14 @@ export class WorkflowCalls {
   };
 
   readonly local = (): LocalCalls => this.#local;
+
+  /**
+   * The run ID the hook committed (`undefined` for its latest start's),
+   * which its commands address from now on.
+   */
+  readonly select = (runId: string | undefined): void => {
+    this.#selected = runId;
+  };
 
   /** Starts a run with `input`: its handle, once the host admitted it. */
   readonly start = async (input: unknown): Promise<RunHandle> => {
@@ -102,66 +114,77 @@ export class WorkflowCalls {
     }
   };
 
-  /**
-   * The commands of a hook showing `runId`, whose `run` query answered
-   * `snapshot`: each addresses that run, once it loaded.
-   */
-  commandsFor(
-    runId: string | undefined,
-    snapshot: RunSnapshot | null | undefined
-  ): ViewParts["commands"] {
-    const shown = (): string => {
-      if (runId === undefined || snapshot === undefined || snapshot === null) {
-        throw clientError("workflow.not_attached");
-      }
-      return runId;
-    };
-    return {
-      start: this.start,
-      pause: async () => {
-        await this.#control("pause", shown());
-      },
-      resume: async () => {
-        await this.#control("resume", shown());
-      },
-      cancel: async () => {
-        await this.#control("cancel", shown());
-      },
-      send: async (event: unknown, data: unknown) => {
-        await this.#send(shown(), event, data);
-      },
-      respond: async (wait: unknown, response: unknown) => {
-        await respondToDecision(
-          clientInternals(this.#client),
-          this.#read,
-          shown(),
-          wait,
-          response
-        );
-      },
-    };
+  /** The hook's commands, the same for its life (see the header). */
+  readonly commands: ViewParts["commands"] = {
+    start: this.start,
+    pause: async () => {
+      await this.#control("pause");
+    },
+    resume: async () => {
+      await this.#control("resume");
+    },
+    cancel: async () => {
+      await this.#control("cancel");
+    },
+    send: async (event: unknown, data: unknown) => {
+      await this.#send(this.#attached(), event, data);
+    },
+    respond: async (wait: unknown, response: unknown) => {
+      await respondToDecision(
+        clientInternals(this.#client),
+        this.#read,
+        this.#attached(),
+        wait,
+        response
+      );
+    },
+  };
+
+  /** The run the hook selects now, once loaded: what a command addresses. */
+  #attached(): string {
+    const runId = this.#selected ?? this.#local.startedRunId;
+    const shown = runId === undefined ? undefined : this.#entry(runId);
+    if (
+      runId === undefined ||
+      shown === undefined ||
+      shown.snapshot.value === undefined ||
+      shown.snapshot.value === null
+    ) {
+      throw clientError("workflow.not_attached");
+    }
+    return runId;
   }
 
   /**
-   * Asks the host for `kind` of run `runId`: resolves once admitted, the
-   * control shown applying until a newer snapshot of the run (see the
-   * header).
+   * Asks the host for `kind` of the run selected now: resolves once
+   * admitted, the control shown applying until the host shows it (see
+   * the header).
    */
-  async #control(kind: PendingControl["kind"], runId: string): Promise<void> {
+  async #control(kind: PendingControl["kind"]): Promise<void> {
+    const runId = this.#attached();
     const asked: Submitting = { kind, runId, stage: "submitting" };
     // What a newer snapshot has settled no longer counts.
     const kept = this.#local.submitting.filter(
       (each) =>
-        each.stage === "submitting" || each.before === this.#shown(each.runId)
+        each.stage === "submitting" ||
+        each.before === this.#entry(each.runId).snapshot.value
     );
     this.#set({ submitting: [...kept, asked] });
+    const sent = this.#entry(runId);
+    const shownWhenSent = sent.settled;
     let applying: Submitting | undefined;
     try {
       const receipt = await this.#client.mutation(this.#read.functions[kind], {
         runId,
       });
-      const before = this.#shown(runId);
-      if (receipt.state === "admitted" && !showsControl(kind, before)) {
+      const now = this.#entry(runId);
+      const overtaken = now !== sent || now.settled !== shownWhenSent;
+      const before = now.snapshot.value;
+      if (
+        receipt.state === "admitted" &&
+        !overtaken &&
+        !showsControl(kind, before)
+      ) {
         applying = { kind, runId, stage: "applying", before };
       }
     } finally {
@@ -174,13 +197,23 @@ export class WorkflowCalls {
         }),
       });
     }
+    if (applying !== undefined) {
+      const shown = applying;
+      setTimeout(() => {
+        if (this.#local.submitting.includes(shown)) {
+          this.#set({
+            submitting: this.#local.submitting.filter((each) => each !== shown),
+          });
+        }
+      }, applyingAtMostMs);
+    }
   }
 
-  /** What the run query of `runId` shows now, as the hook reads it. */
-  #shown(runId: string): unknown {
+  /** The run query of `runId`'s entry, as the hook reads it. */
+  #entry(runId: string): QueryEntry {
     return clientInternals(this.#client).entry(this.#read.functions.run, {
       runId,
-    }).snapshot.value;
+    });
   }
 
   /** Sends run `runId` the event `event` refers to, with `data`. */

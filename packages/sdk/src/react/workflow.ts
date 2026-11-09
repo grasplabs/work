@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useState, useSyncExternalStore } from "react";
 
 import { WorkflowCalls } from "../workflow-calls.ts";
 import { readWorkflowReference } from "../workflow-reference-read.ts";
@@ -85,7 +85,13 @@ export const useWorkflow = <Reference extends AnyWorkflowReference>(
   }
   const { calls } = current;
   const local = useSyncExternalStore(calls.subscribe, calls.local);
-  const runId = options?.runId ?? local.startedRunId;
+  const selected = options?.runId;
+  // Committed, so a command the page kept addresses what the hook shows
+  // now, never what a render it was made in showed (workflow-calls.ts).
+  useLayoutEffect(() => {
+    calls.select(selected);
+  }, [calls, selected]);
+  const runId = selected ?? local.startedRunId;
   const snapshot = useQuery(
     read.functions.run,
     runId === undefined ? "skip" : { runId }
@@ -98,7 +104,7 @@ export const useWorkflow = <Reference extends AnyWorkflowReference>(
     canStart,
     starting: local.starting > 0,
     submitting: local.submitting,
-    commands: calls.commandsFor(runId, snapshot),
+    commands: calls.commands,
   });
   // SAFETY: the view holds what the host sent, checked against the
   // reference's own descriptors, which `Reference` carries as its types.

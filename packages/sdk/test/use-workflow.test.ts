@@ -13,7 +13,7 @@ import type { ClientTransport } from "../src/client-transport.ts";
 import type { Id } from "../src/index.ts";
 import type { WorkflowViewOf } from "../src/react.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
-import { WorkflowCalls } from "../src/workflow-calls.ts";
+import { applyingAtMostMs, WorkflowCalls } from "../src/workflow-calls.ts";
 import { readWorkflowReference } from "../src/workflow-reference-read.ts";
 import { workflowView } from "../src/workflow-view.ts";
 import type { RunSnapshot } from "../src/workflow-view.ts";
@@ -219,10 +219,12 @@ const unheard = (): void => {
  * as `useWorkflow` composes it: its calls, its live `run` query (while a
  * run is selected) and `canStart`, read and followed as `useQuery` does.
  */
-const mount = (page: Host, selection?: string) => {
+const mount = (page: Host, initial?: string) => {
+  let selection = initial;
   const internals = clientInternals(page.client);
   const read = readWorkflowReference(workflows.summarizeNote);
   const calls = new WorkflowCalls(page.client, read);
+  calls.select(selection);
   const stops = new Map<string, () => void>();
   /** What `reference` with `args` shows now, followed from now on. */
   const follow = (reference: unknown, args: unknown) => {
@@ -254,12 +256,17 @@ const mount = (page: Host, selection?: string) => {
       canStart: typeof canStart === "boolean" ? canStart : undefined,
       starting: local.starting > 0,
       submitting: local.submitting,
-      commands: calls.commandsFor(runId, snapshot),
+      commands: calls.commands,
     }) as WorkflowViewOf<typeof workflows.summarizeNote>;
   };
   return {
     calls,
     view,
+    /** Selects run `runId` as the hook commits a new `{ runId }`. */
+    select: (runId: string) => {
+      selection = runId;
+      calls.select(runId);
+    },
     unmount: () => {
       for (const stop of stops.values()) {
         stop();
@@ -602,6 +609,82 @@ describe("useWorkflow", () => {
       expect(hook.view()).toMatchObject({
         pendingControl: { kind: "cancel", stage: "submitting" },
         canCancel: false,
+      });
+    });
+
+    it("keeps its commands, each addressing the run selected when it is called, never the one a render saw", async () => {
+      const page = host();
+      const hook = mount(page);
+      // Kept while idle, as a handler that starts a run and then cancels it.
+      const { cancel, send } = hook.view();
+      await hook.view().start({ noteId });
+      hook.view();
+      await flush();
+      page.run("run-1").push(snapshotOf());
+      await cancel();
+      await send(workflows.summarizeNote.events.styleChosen, { style: "long" });
+      // Kept while run-1 was selected, called once run-2 is.
+      const watching = await showing(host(), snapshotOf());
+      const { pause } = watching.view();
+      const second = host();
+      const other = mount(second, "run-1");
+      other.view();
+      await flush();
+      second.run("run-1").push(snapshotOf());
+      const kept = other.view().pause;
+      other.select("run-2");
+      other.view();
+      await flush();
+      second.run("run-2").push(snapshotOf(handleOf("run-2")));
+      await kept();
+      expect({
+        same: pause === watching.view().pause,
+        first: page.calls.map(({ name, input }) => ({ name, input })),
+        second: second.calls.map(({ input }) => input),
+      }).toStrictEqual({
+        same: true,
+        first: [
+          { name: path("mutations.start"), input: { input: { noteId } } },
+          { name: path("mutations.cancel"), input: { runId: "run-1" } },
+          {
+            name: path("mutations.send"),
+            input: {
+              runId: "run-1",
+              event: "styleChosen",
+              data: { style: "long" },
+            },
+          },
+        ],
+        second: [{ runId: "run-2" }],
+      });
+    });
+
+    it("leaves a control to the host's snapshot when a push overtook it, which may be the last", async () => {
+      const page = host();
+      const hook = await showing(page);
+      const answers = page.holdAnswers();
+      const paused = hook.view().pause();
+      await flush();
+      // Another page resumed the run while this pause was under way: the
+      // host ends where it began, and pushes nothing more.
+      page.run("run-1").push(snapshotOf());
+      answers[0]?.({ value: { kind: "pause", state: "admitted" } });
+      await paused;
+      expect({
+        pendingControl: hook.view().pendingControl,
+        canPause: hook.view().canPause,
+      }).toStrictEqual({ pendingControl: null, canPause: true });
+    });
+
+    it("shows a control applying no longer than the most it waits, if the host never pushes again", async () => {
+      const page = host();
+      const hook = await showing(page);
+      await hook.view().pause();
+      const applying = hook.view().pendingControl;
+      await vi.advanceTimersByTimeAsync(applyingAtMostMs);
+      expect({ applying, after: hook.view().pendingControl }).toStrictEqual({
+        applying: { kind: "pause", stage: "applying" },
+        after: null,
       });
     });
 
