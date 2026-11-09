@@ -1,0 +1,12 @@
+/*
+ * The kit as the gallery shows it (apps/web, `/kit/…`), for its component
+ * tests in a real browser (kit.browser.test.tsx): the kit's theme, the
+ * theme's fonts, and the utilities its demos and examples use.
+ */
+@import "../src/styles.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/newsreader/opsz.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+@source "../catalog";
+@source "../src";

@@ -113,8 +113,8 @@ const start = async (): Promise<void> => {
     },
   }).render(
     <StrictMode>
-      {/* The CSP allows no inline <style>, so Base UI renders none of its
-          own; styles.css carries the rule they held. */}
+      {/* Base UI renders no <style> of its own: the kit's styles.css
+          carries the rule it held. */}
       <CSPProvider disableStyleElements>
         {/* Lingui draws nothing until a language is active. */}
         {worded ? (

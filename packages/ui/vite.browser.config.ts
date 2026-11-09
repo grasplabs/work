@@ -1,5 +1,6 @@
+import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineProject } from "vite-plus";
 import { playwright } from "vite-plus/test/browser-playwright";
 
@@ -10,7 +11,13 @@ import { playwright } from "vite-plus/test/browser-playwright";
 // start: they read nothing from core. Core's Content Security Policy over
 // the kit's pages is held on the stack (e2e/catalog.e2e.ts).
 export default defineProject({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    // The components compiled as the frontend compiles them, failing on
+    // anything the React Compiler can't compile (apps/web/vite.config.ts).
+    babel({ presets: [reactCompilerPreset({ panicThreshold: "all_errors" })] }),
+    tailwindcss(),
+  ],
   test: {
     name: "@grasp-os/ui:browser",
     root: import.meta.dirname,

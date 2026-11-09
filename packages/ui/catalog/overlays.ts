@@ -1,10 +1,7 @@
 /**
  * The overlays on the gallery's pages (apps/web, `/kit/…`), by page: how
  * each opens and what then shows. The kit's component tests open every one
- * (test/kit.browser.test.tsx), and so does the check of core's Content
- * Security Policy over the gallery (e2e/catalog.e2e.ts): some of Base UI's
- * popups write a <style> of their own only once they open. Data only, so
- * both the browser and Node read it.
+ * and close it with Escape (test/kit.browser.test.tsx).
  */
 
 /** An element found by its role and accessible name, or by its text. */
@@ -142,6 +139,12 @@ const examples: Record<string, readonly Overlay[]> = {
       viewport: phone,
     },
   ],
+};
+
+/** The components and examples the overlays above belong to, by name. */
+export const overlayNames = {
+  components: Object.keys(components),
+  examples: Object.keys(examples),
 };
 
 /** A component's overlays (`/kit/components/<name>`). */

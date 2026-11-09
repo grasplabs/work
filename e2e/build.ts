@@ -96,7 +96,8 @@ if (import.meta.main) {
   const coreBuild = stepsOf("build");
   rmSync(migratedStateDir, { recursive: true, force: true });
   rmSync(besideFrontend, { recursive: true, force: true });
-  await run(`node ${path.join(import.meta.dirname, "connect-config.ts")}`);
+  // From core's folder, as every step of core's scripts runs.
+  await run("node ../../e2e/connect-config.ts");
   await Promise.all([
     run(frontend),
     ...coreBuild.map(async (step) => {

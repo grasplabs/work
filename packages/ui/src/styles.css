@@ -648,3 +648,18 @@
     @apply font-sans;
   }
 }
+
+/*
+ * Base UI hides native scrollbars (a Select's list, a scroll area) with
+ * this class, and the rule in an inline <style> it renders. The frontend
+ * renders Base UI with that element turned off (CSPProvider's
+ * `disableStyleElements`, apps/web/src/main.tsx), which keeps its document
+ * free of style elements nobody wrote; the rule lives here instead.
+ */
+.base-ui-disable-scrollbar {
+  scrollbar-width: none;
+}
+
+.base-ui-disable-scrollbar::-webkit-scrollbar {
+  display: none;
+}

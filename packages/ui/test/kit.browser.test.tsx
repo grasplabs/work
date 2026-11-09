@@ -1,6 +1,6 @@
-// The gallery's own stylesheet: the kit's theme, the fonts, the icons'
-// moves and Base UI's scrollbar rule, so layouts measure as the gallery's.
-import "../../../apps/web/src/styles.css";
+// The kit as the gallery shows it: its theme, the fonts and the utilities
+// its demos use, so layouts measure as the gallery's.
+import "./kit.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
 import type { ComponentType } from "react";
 import { StrictMode } from "react";
@@ -74,7 +74,7 @@ const render = (heading: string, Content: ComponentType): void => {
   flushSync(() => {
     mounted?.render(
       <StrictMode>
-        {/* As the frontend renders: its CSP allows no inline <style>. */}
+        {/* As the frontend renders: Base UI writes no <style> of its own. */}
         <CSPProvider disableStyleElements>
           <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
             <PageHeaderTitle>{heading}</PageHeaderTitle>
@@ -264,18 +264,6 @@ const openOverlay = async (
   }
 };
 
-/**
- * The <style> elements Base UI wrote of its own (React hoists them into
- * the head, under a `base-ui` precedence): the select's and the scroll
- * area's, which hide their scrollbars. The gallery renders in
- * CSPProvider's `disableStyleElements` (apps/web/src/main.tsx), and
- * apps/web/src/styles.css carries the rule instead, so there are none.
- */
-const baseUiStyles = (): string[] =>
-  [...document.querySelectorAll('style[data-precedence^="base-ui"]')].map(
-    (style) => style.textContent
-  );
-
 const expectOverlayOpensAndCloses = async (overlay: Overlay): Promise<void> => {
   if (overlay.viewport !== undefined) {
     await page.viewport(overlay.viewport.width, overlay.viewport.height);
@@ -284,9 +272,6 @@ const expectOverlayOpensAndCloses = async (overlay: Overlay): Promise<void> => {
   await openOverlay(trigger, overlay.open);
   const opened = locate(overlay.opened);
   await expect.element(opened).toBeVisible();
-  // Open, it writes no <style> of its own: Base UI's select and scroll
-  // area write one unless told not to.
-  expect(baseUiStyles()).toStrictEqual([]);
   await expectNamedControls(opened);
   await userEvent.keyboard("{Escape}");
   await expectHidden(opened);
@@ -443,8 +428,6 @@ describe("the UI kit", () => {
       await keyboardChecks[name]?.();
 
       const light = bodyBackground();
-      // Nothing on the page, open or not, wrote a <style> of its own.
-      expect(baseUiStyles()).toStrictEqual([]);
       setDark(true);
       await expect.poll(bodyBackground).not.toBe(light);
       await expectNamedControls(main);
