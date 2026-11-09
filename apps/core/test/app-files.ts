@@ -18,7 +18,8 @@ import { env } from "cloudflare:workers";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { StoreHost } from "../src/store-host.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
@@ -31,8 +32,8 @@ import { routed, signedInApi } from "./sign-in.ts";
 // them, its page's file channel, and the ways the tests break core's
 // side of it. Each file calls `appsOf(mockIdp())` once, for its people.
 
-export const files: Record<string, string> = {
-  ...appDefinition({
+export const files: TestApp = testApp(
+  {
     name: "Notes",
     tables: {
       notes: {
@@ -54,8 +55,9 @@ export const files: Record<string, string> = {
     permissions: [
       'permission.files({\n  operations: ["upload", "read", "attach", "delete"],\n})',
     ],
-  }),
-  "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 
 export const get = query({
@@ -175,7 +177,7 @@ export const unpin = mutation({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useFile, useUpload } from "@grasp-os/sdk/react";
 import { permissions } from "@server/_generated/api";
 
@@ -187,7 +189,8 @@ function Notes() {
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-};
+  }
+);
 
 /** A note as the App's queries return it. */
 interface Note {
@@ -357,7 +360,12 @@ export const appsOf = (idp: Idp) => {
     const admin = await personApi("admin");
     const { id } = await builder.api.apps.create({ name: "Notes" });
     await publishedApp(id);
-    const { version } = await builder.api.apps.files.commit(id, files, "First");
+    const { version } = await commitApp(
+      builder.api.apps.files,
+      id,
+      files,
+      "First"
+    );
     await builder.api.apps.versions.setCurrent(id, version);
     return {
       app: id,

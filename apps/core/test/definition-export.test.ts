@@ -1,5 +1,7 @@
 import { generatedWorkflowEntry } from "@grasp-os/compiler";
+import { definitionText, readDefinition } from "@grasp-os/sdk/definition";
 import { readAppManifest } from "@grasp-os/sdk/host";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -20,7 +22,8 @@ import {
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { sealPackages } from "../src/workflows/sealed-packages.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { publish } from "./npm.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -34,32 +37,34 @@ import { auditedDuring, outcome, refusal, unique } from "./sign-in.ts";
 const workflowShape = `v.object({ who: v.string() })`;
 
 /** An App that declares three workflows and a model, with a store. */
-const files = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+const files = (): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        "permission.ai({ maxOutputTokens: 100 })",
+        `permission.workflow("followUp", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+        `permission.workflow("remind", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+        `permission.workflow("later", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+      ],
     },
-    permissions: [
-      "permission.ai({ maxOutputTokens: 100 })",
-      `permission.workflow("followUp", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-})`,
-      `permission.workflow("remind", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-})`,
-      `permission.workflow("later", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-})`,
-    ],
-  }),
-  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -77,7 +82,8 @@ export const kickOff = action({
   },
 });
 `,
-});
+    }
+  );
 
 const objectSchema = (fields: Record<string, unknown>) => ({
   kind: "object",
@@ -254,6 +260,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       root: ["app", "formatVersion", "unresolved", "workflows"],
       app: [
         "bindings",
+        "definition",
         "files",
         "manifest",
         "provenance",
@@ -265,6 +272,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       provenance: [
         "compilerVersion",
         "contractHash",
+        "definitionHash",
         "dependencyLockHash",
         "generated",
         "manifestHash",
@@ -294,12 +302,19 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     });
     // The source, and the registration the seal read from it, which the
     // SDK reads back as it was sealed.
+    // The definition, apart from the files, which hashes as sealed.
     expect({
       files: keys(exported.app.files),
       manifest: canonicalText(readAppManifest(exported.app.manifest)),
+      definitionHash: await sha256Hex(
+        definitionText(readDefinition(exported.app.definition))
+      ),
+      provenance: exported.app.provenance.definitionHash,
     }).toStrictEqual({
-      files: keys(files()),
+      files: keys(files().files),
       manifest: canonicalText(release.app),
+      definitionHash: release.manifest.definitionHash,
+      provenance: release.manifest.definitionHash,
     });
 
     // Both aliases name the one version, packaged once; the unbound alias
@@ -494,10 +509,9 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     // Built here, so no file of the repository holds one.
     const token = ["ghp", "_", "Q".repeat(36)].join("");
     const leaky = await appWith(
-      {
-        ...files(),
-        "server/requests.ts": `// Deploy with ${token}\n${files()["server/requests.ts"] ?? ""}`,
-      },
+      withFiles(files(), {
+        "server/requests.ts": `// Deploy with ${token}\n${files().files["server/requests.ts"] ?? ""}`,
+      }),
       "Requests"
     );
     await seal(leaky);

@@ -19,7 +19,8 @@ import { findApp } from "../src/apps.ts";
 import { callMaxNested } from "../src/call-limits.ts";
 import { classifyOutput } from "../src/data-policy-rpc.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -180,8 +181,8 @@ export const failing = action({
 });
 `;
 
-const appCode = {
-  ...appDefinition({
+const appCode = testApp(
+  {
     name: "Notes",
     tables: {
       steps: {
@@ -189,9 +190,11 @@ const appCode = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": operationsCode,
-};
+  },
+  {
+    "server/notes.ts": operationsCode,
+  }
+);
 
 const pageOf = (
   label: string
@@ -207,10 +210,9 @@ function Notes() {
 export const Route = createFileRoute("/")({ component: Notes });
 `;
 
-const sampleFiles = {
-  ...appCode,
+const sampleFiles = withFiles(appCode, {
   "src/routes/index.tsx": pageOf("Notes"),
-};
+});
 
 /**
  * A page that imports none of the App's references (`@server/_generated/api`): what it
@@ -235,9 +237,10 @@ type Person = Awaited<ReturnType<typeof personApi>>;
 const release = async (
   builder: Person,
   app: string,
-  files: Record<string, string | null>
+  files: TestSource
 ): Promise<number> => {
-  const { version } = await builder.api.apps.files.commit(
+  const { version } = await commitApp(
+    builder.api.apps.files,
     app,
     files,
     "Release"
@@ -728,10 +731,13 @@ describe("page delivery", { timeout: 60_000 }, () => {
     const plainApp = async (): Promise<string> => {
       const { id } = await builder.api.apps.create({ name: "Notes" });
       await published(id);
-      await release(builder, id, {
-        ...appCode,
-        "src/routes/index.tsx": plainPageOf("Notes"),
-      });
+      await release(
+        builder,
+        id,
+        withFiles(appCode, {
+          "src/routes/index.tsx": plainPageOf("Notes"),
+        })
+      );
       return id;
     };
     const first = await plainApp();

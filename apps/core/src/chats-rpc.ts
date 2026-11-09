@@ -64,6 +64,7 @@ import {
 } from "./app-definition.ts";
 import {
   appFor,
+  changesAnything,
   createApp,
   draftFiles,
   editableApp,
@@ -655,7 +656,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         scope,
         found,
         operation,
-        async (draft, files, changes) => {
+        async (draft, files, changes, definition) => {
           if (!preview) {
             await saveDraftChanges(
               this.#env,
@@ -666,7 +667,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
                 detail: operationDetail(operation),
               },
               found,
-              { draft, files, changes }
+              { draft, files, changes, definition }
             );
           }
         }
@@ -891,9 +892,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     }
     const draft = await chats.previewDraft(chat, by.userId, id, { fallback });
     const shows =
-      draft.base !== null && Object.keys(draft.changes).length === 0
-        ? draft.base
-        : undefined;
+      draft.base !== null && !changesAnything(draft) ? draft.base : undefined;
     return {
       files: await draftFiles(this.#env, id, draft),
       // Of the very build its files are of, or the last that built.

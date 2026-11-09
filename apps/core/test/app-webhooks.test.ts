@@ -26,7 +26,8 @@ import {
 } from "../src/app-webhook-queue.ts";
 import { drainWebhookDeliveries } from "../src/app-webhooks.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -67,8 +68,8 @@ const deepValidator = (() => {
   return validator;
 })();
 
-const files: Record<string, string> = {
-  ...appDefinition({
+const files: TestApp = testApp(
+  {
     name: "Notes",
     tables: {
       notes: {
@@ -80,8 +81,9 @@ const files: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": `import { action, mutation, query } from "@server/_generated/server";
+  },
+  {
+    "server/notes.ts": `import { action, mutation, query } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
 export const count = query({
@@ -143,14 +145,15 @@ export const add = action({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Notes() {
   return <p>Notes</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-};
+  }
+);
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -160,7 +163,12 @@ const personApi = async (role: Role): Promise<Person> =>
 /** A builder's Notes App, its first version current, left a draft. */
 const notesApp = async (builder: Person) => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await builder.api.apps.files.commit(id, files, "First");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    id,
+    files,
+    "First"
+  );
   await builder.api.apps.versions.setCurrent(id, version);
   return { app: id, version };
 };
@@ -678,9 +686,12 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     });
 
     await builder.api.apps.publish(app);
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
-      { ...files, "notes.md": "Second\n" },
+      withFiles(files, {
+        "notes.md": "Second\n",
+      }),
       "Second"
     );
     await builder.api.apps.versions.setCurrent(app, version);

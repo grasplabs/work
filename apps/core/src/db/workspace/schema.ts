@@ -221,6 +221,12 @@ export const chatDrafts = sqliteTable(
     appId: text("app_id").notNull(),
     base: integer(),
     revision: integer().notNull(),
+    /**
+     * The draft's own App definition, as its text (`definitionText`), next to its
+     * changed files: what the definition tools change. Null while it is
+     * its base's (none for an App without a version).
+     */
+    definition: text(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /**
      * The code step or tool call (its tool call's ID: `ChatCode.callId`,
@@ -259,9 +265,9 @@ export const chatDraftFiles = sqliteTable(
  * Each agent turn that wrote a chat's draft of an App, kept as the turn
  * left the draft, and each restore: its `number`, counting up from 1 per
  * chat and App in the order they landed, the draft's revision it made,
- * the version it is over (`base`), and the SHA-256 of what it holds
- * (`contentHash`, of the canonical JSON of `base` and each path's content
- * hash). Who wrote it: the chat's agent, in turn `turnId` (its last write
+ * the version it is over (`base`), its definition, and the SHA-256 of
+ * what it holds (`contentHash`, of the canonical JSON of `base`, each
+ * path's content hash and its definition's). Who wrote it: the chat's agent, in turn `turnId` (its last write
  * in the code step `callId`), or the chat's person, restoring version
  * `restoredFrom`. The draft's row and files hold only the latest; these
  * hold every one, to list, preview and restore. Deleted with the chat,
@@ -278,6 +284,8 @@ export const chatDraftVersions = sqliteTable(
     number: integer().notNull(),
     revision: integer().notNull(),
     base: integer(),
+    /** Its definition, as the draft's was (`chatDrafts.definition`). */
+    definition: text(),
     contentHash: text("content_hash").notNull(),
     turnId: text("turn_id"),
     callId: text("call_id"),

@@ -9,7 +9,7 @@ import { env } from "cloudflare:workers";
 import { callAppFunction } from "../src/app-functions.ts";
 import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, createApp } from "../src/apps.ts";
+import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appStoreFor } from "../src/data-stores.ts";
 import {
@@ -18,7 +18,8 @@ import {
   sweepReleases,
 } from "../src/release-retention.ts";
 import { artifactKey as keyOf } from "../src/sealed-artifacts.ts";
-import { published } from "./apps.ts";
+import type { TestSource } from "./app-definitions.ts";
+import { commitDefined, published } from "./apps.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
 // App committed with given files, its store, and its seal.
@@ -56,7 +57,7 @@ export interface Fixture {
 
 /** A builder's App `name` with `files` as its first version, and its store. */
 export const appWith = async (
-  files: Record<string, string>,
+  files: TestSource,
   name = "Notes",
   /** Who creates it: a new builder unless given. */
   by?: Identity
@@ -66,7 +67,7 @@ export const appWith = async (
   // Published, for the people it is shared with: a draft is its builders'
   // alone (app-status.ts), and these tests aren't about its status.
   await published(id);
-  await commitFiles(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files, "First version");
   return { owner, app: id, store: await appStoreFor(env, owner, id) };
 };
 

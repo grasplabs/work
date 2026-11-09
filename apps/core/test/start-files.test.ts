@@ -39,7 +39,8 @@ import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";
 import { handFiles } from "../src/workflows/start-files.ts";
 import type { StartFile } from "../src/workflows/start-files.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, seal } from "./sealed-apps.ts";
@@ -66,22 +67,24 @@ const files = ({
   operations?: string;
   doc?: string;
   workflows?: readonly string[];
-} = {}): Record<string, string> => ({
-  ...appDefinition({
-    name: "Reviews",
-    tables: {
-      notes: {
-        fields: { title: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+} = {}): TestApp =>
+  testApp(
+    {
+      name: "Reviews",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        `permission.files({ operations: ${operations} })`,
+        `permission.workflow("review", { input: v.object({ doc: ${doc} }), output: v.object({ status: v.string() }) })`,
+        ...workflows,
+      ],
     },
-    permissions: [
-      `permission.files({ operations: ${operations} })`,
-      `permission.workflow("review", { input: v.object({ doc: ${doc} }), output: v.object({ status: v.string() }) })`,
-      ...workflows,
-    ],
-  }),
-  "server/review.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/review.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -106,14 +109,15 @@ export const stageReview = mutation({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Desk() {
   return <main>Reviews</main>;
 }
 
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-});
+    }
+  );
 
 /** A workflow taking a file, whose run says which file it was handed. */
 const definition = JSON.stringify({
@@ -860,7 +864,8 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       1
     );
     const withoutRead = files({ operations: '["upload", "delete"]' });
-    const { version } = await fixture.builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      fixture.builder.api.apps.files,
       fixture.app,
       withoutRead,
       "Uploads only"
@@ -881,7 +886,8 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
     // The same `{ id }` reaches the bound workflow, which takes it as a
     // file: copied all the same (`handFiles`).
     const aliased = files({ doc: "v.object({ id: v.string() })" });
-    const { version } = await fixture.builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      fixture.builder.api.apps.files,
       fixture.app,
       aliased,
       "Doc as an object"
@@ -906,7 +912,8 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
           `permission.workflow("${name}", { input: v.object({ note: v.string() }), output: v.null() })`
       ),
     });
-    const { version } = await fixture.builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      fixture.builder.api.apps.files,
       fixture.app,
       many,
       "Many workflows"

@@ -2,6 +2,7 @@ import type { WaitingFeed, WaitingKind } from "@grasp-os/shared/waiting";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { chatOf, codeStep, says } from "./agent-chat.ts";
+import { commitApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -196,7 +197,8 @@ describe("what waits", slow, () => {
     const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");
     const { id } = await builder.api.apps.create({ name: "Invoices" });
-    await builder.api.apps.files.commit(
+    await commitApp(
+      builder.api.apps.files,
       id,
       { "AGENTS.md": "# Invoices\n" },
       "First"

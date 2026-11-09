@@ -1,7 +1,13 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import {
+  changesOf,
+  commitApp,
+  testApp,
+  withFiles,
+} from "../apps/core/test/app-definitions.ts";
+import type { TestApp, TestSource } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -48,19 +54,22 @@ export const Route = createFileRoute("/")({ component: Counter });
 `;
 
 /** The counter App's code: its definition, functions and one page, its `/`. */
-const counterApp = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Counter",
-    tables: {
-      clicks: {
-        fields: { at: "v.number()" },
-        access: { read: "appMembers", write: "appMembers" },
+const counterApp = (): TestApp =>
+  testApp(
+    {
+      name: "Counter",
+      tables: {
+        clicks: {
+          fields: { at: "v.number()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
     },
-  }),
-  "server/counter.ts": operations,
-  "src/routes/index.tsx": appPage,
-});
+    {
+      "server/counter.ts": operations,
+      "src/routes/index.tsx": appPage,
+    }
+  );
 
 /** Runs `run` with `person`'s API over `/rpc`, closed after. */
 const withApi = async <T>(
@@ -82,7 +91,7 @@ const withApi = async <T>(
 const newApp = async (
   person: Person,
   appName: string,
-  files: Record<string, string> = counterApp()
+  files: TestSource = counterApp()
 ): Promise<string> =>
   await withApi(person, async (api) => {
     const { id } = await api.apps.create({
@@ -107,13 +116,13 @@ const counterPage = async (page: Page) => {
 };
 
 /** The counter with a second page, `/home`, of the counter's code. */
-const twoPages = (): Record<string, string> => ({
-  ...counterApp(),
-  "src/routes/home.tsx": appPage.replace(
-    'createFileRoute("/")',
-    'createFileRoute("/home")'
-  ),
-});
+const twoPages = (): TestApp =>
+  withFiles(counterApp(), {
+    "src/routes/home.tsx": appPage.replace(
+      'createFileRoute("/")',
+      'createFileRoute("/home")'
+    ),
+  });
 
 let builder: Person;
 let user: Person;
@@ -154,7 +163,8 @@ test("a builder finds an App in the list, opens it and uses its page with live d
       }),
       ...drafts.map(async (each) => {
         const { id } = await api.apps.create({ name: `${each} ${run}` });
-        const { version } = await api.apps.files.commit(
+        const { version } = await commitApp(
+          api.apps.files,
           id,
           counterApp(),
           "First"
@@ -414,7 +424,9 @@ test("loading a page again after a new version shows that version, and the App's
     await release(
       api,
       swapped,
-      { ...twoPages(), "src/routes/home.tsx": null },
+      changesOf(twoPages(), {
+        "src/routes/home.tsx": null,
+      }),
       "Drop the second page"
     );
   });

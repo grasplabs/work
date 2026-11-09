@@ -24,7 +24,8 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, queryReference, seal } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -40,20 +41,22 @@ import { signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+const files = (): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -70,14 +73,15 @@ export const kickOff = action({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Desk() {
   return <main>Requests</main>;
 }
 
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-});
+    }
+  );
 
 const objectSchema = (fields: Record<string, unknown>) => ({
   kind: "object",

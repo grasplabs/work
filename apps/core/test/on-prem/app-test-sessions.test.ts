@@ -9,7 +9,7 @@ import {
   fixtureHostFor,
   suiteCapability,
 } from "../../src/app-tests.ts";
-import { commitFiles, createApp, findApp } from "../../src/apps.ts";
+import { createApp, findApp, releaseIdsOf } from "../../src/apps.ts";
 import { platformPlaceWaitMs } from "../../src/platform-sandbox.ts";
 import {
   sandboxOwnerHeader,
@@ -17,6 +17,7 @@ import {
 } from "../../src/sandbox-headers.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
+import { commitDefined } from "../apps.ts";
 import { person } from "../sealed-apps.ts";
 import {
   activation,
@@ -73,7 +74,7 @@ const slowToAdmit = (
 const notesRelease = async (): Promise<Release> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitFiles(env, owner, id, appFiles, "First version");
+  await commitDefined(env, owner, id, appFiles, "First version");
   await publishVersion(env, owner, id, 1);
   return await loadRelease(env, id, 1);
 };
@@ -98,9 +99,15 @@ const inSuiteSession = async (
   if (host === undefined) {
     throw new Error("These tests run with SANDBOX_HOST bound.");
   }
-  const suiteHost = fixtureHostFor(env, release, appFiles, {
-    parent: () => {},
-  });
+  const suiteHost = fixtureHostFor(
+    env,
+    release,
+    appFiles.files,
+    await releaseIdsOf(env, release),
+    {
+      parent: () => {},
+    }
+  );
   try {
     const answer = await runInSession(host, {
       mainModule: "probe.js",

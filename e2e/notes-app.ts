@@ -1,5 +1,5 @@
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
-import type { AppSpec } from "../apps/core/test/app-definitions.ts";
+import { testApp, withFiles } from "../apps/core/test/app-definitions.ts";
+import type { AppSpec, TestApp } from "../apps/core/test/app-definitions.ts";
 
 /**
  * The Notes App of spec 8 and 9.4, as a builder writes it: a schema, its
@@ -430,9 +430,9 @@ export function ImportNote() {
 `;
 
 /** The Notes App's files. */
-export const notesAppFiles = (): Record<string, string> => ({
-  ...appDefinition(notesSpec),
-  "values.ts": `import { v } from "@grasp-os/sdk";
+export const notesAppFiles = (): TestApp =>
+  testApp(notesSpec, {
+    "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
@@ -440,13 +440,13 @@ export const noteFields = {
   attachments: v.array(v.file()).max(20).default([]),
 };
 `,
-  "server/notes.ts": operations,
-  "src/components/import-note.tsx": importNote,
-  "src/components/create-note.tsx": createNote,
-  "src/components/note-editor.tsx": noteEditor,
-  "src/components/attachments.tsx": attachmentsList,
-  "src/routes/index.tsx": appPage,
-});
+    "server/notes.ts": operations,
+    "src/components/import-note.tsx": importNote,
+    "src/components/create-note.tsx": createNote,
+    "src/components/note-editor.tsx": noteEditor,
+    "src/components/attachments.tsx": attachmentsList,
+    "src/routes/index.tsx": appPage,
+  });
 
 const unaskedPage = `import { createFileRoute } from "@tanstack/react-router";
 import { GraspError, useClient } from "@grasp-os/sdk/react";
@@ -598,19 +598,19 @@ export const Route = createFileRoute("/")({ component: Notes });
  * The Notes App with a page that shows an uploaded file, for what
  * `useFile` shows as it renders, hides and deletes it.
  */
-export const fileViewFiles = (): Record<string, string> => ({
-  ...notesAppFiles(),
-  "src/routes/index.tsx": fileViewPage,
-});
+export const fileViewFiles = (): TestApp =>
+  withFiles(notesAppFiles(), {
+    "src/routes/index.tsx": fileViewPage,
+  });
 
 /**
  * The Notes App with a page that downloads unasked, for what a download
  * needs: a click.
  */
-export const unaskedDownloadFiles = (): Record<string, string> => ({
-  ...notesAppFiles(),
-  "src/routes/index.tsx": unaskedPage,
-});
+export const unaskedDownloadFiles = (): TestApp =>
+  withFiles(notesAppFiles(), {
+    "src/routes/index.tsx": unaskedPage,
+  });
 
 const linksPage = `import { createFileRoute } from "@tanstack/react-router";
 import { GraspError, useClient } from "@grasp-os/sdk/react";
@@ -660,27 +660,29 @@ export const Route = createFileRoute("/")({ component: Notes });
  * The Notes App with a page that opens links through a help site it
  * declares, for what opening one needs: a click, or the person's say.
  */
-export const linksFiles = (): Record<string, string> => ({
-  ...notesAppFiles(),
-  // The help site its pages may link to, and nothing else.
-  ...appDefinition({
-    ...notesSpec,
-    permissions: [
-      ...notesSpec.permissions,
-      'permission.links({ origins: ["https://help.example.com"] })',
-    ],
-  }),
-  "src/routes/index.tsx": linksPage,
-});
+export const linksFiles = (): TestApp =>
+  testApp(
+    {
+      ...notesSpec,
+      permissions: [
+        ...notesSpec.permissions,
+        'permission.links({ origins: ["https://help.example.com"] })',
+      ],
+    },
+    withFiles(notesAppFiles(), {
+      // The help site its pages may link to, and nothing else.
+      "src/routes/index.tsx": linksPage,
+    }).files
+  );
 
 /**
  * The Notes App with two more pages to move between: a start page that
  * links to a note, and the note's page at `/notes/$id`, which gets the
  * note's ID from its address, holds a form, and links back.
  */
-export const navigationFiles = (): Record<string, string> => ({
-  ...notesAppFiles(),
-  "src/routes/start.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
+export const navigationFiles = (): TestApp =>
+  withFiles(notesAppFiles(), {
+    "src/routes/start.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
 
 function Start() {
   return (
@@ -692,7 +694,7 @@ function Start() {
 }
 export const Route = createFileRoute("/start")({ component: Start });
 `,
-  "src/routes/notes.$id.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
+    "src/routes/notes.$id.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
 import { useForm } from "@grasp-os/sdk/react";
 import { Form, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
@@ -712,20 +714,19 @@ function Note() {
 }
 export const Route = createFileRoute("/notes/$id")({ component: Note });
 `,
-});
+  });
 
 /**
  * The navigation fixture with surfaces: the start page as a panel, the
  * list in the sidebar, and preferences as the App's settings.
  */
-export const surfaceFiles = (): Record<string, string> => {
+export const surfaceFiles = (): TestApp => {
   const files = navigationFiles();
-  return {
-    ...files,
-    "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}
+  return withFiles(files, {
+    "src/routes/index.tsx": `${files.files["src/routes/index.tsx"] ?? ""}
 export const surface = { kind: "sidebar", title: "All notes" };
 `,
-    "src/routes/start.tsx": `${files["src/routes/start.tsx"] ?? ""}
+    "src/routes/start.tsx": `${files.files["src/routes/start.tsx"] ?? ""}
 export const surface = { kind: "panel", title: "Start beside" };
 `,
     "src/routes/prefs.tsx": `import { createFileRoute } from "@tanstack/react-router";
@@ -740,7 +741,7 @@ function Prefs() {
 export const Route = createFileRoute("/prefs")({ component: Prefs });
 export const surface = { kind: "settings", title: "Options" };
 `,
-  };
+  });
 };
 
 /** A hop that opens the next as it mounts, up to `hopLimit`. */
@@ -753,9 +754,9 @@ const hopLimit = 5;
  * plain, focusing themselves, or forging every sign of the person acting
  * they can.
  */
-export const hoppingFiles = (): Record<string, string> => ({
-  ...notesAppFiles(),
-  "src/routes/takeoff.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
+export const hoppingFiles = (): TestApp =>
+  withFiles(notesAppFiles(), {
+    "src/routes/takeoff.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 function Takeoff() {
@@ -767,10 +768,10 @@ function Takeoff() {
 }
 export const Route = createFileRoute("/takeoff")({ component: Takeoff });
 `,
-  // A page that moves on a press and again on its release, and on a key's
-  // first press and again on each of its repeats: one act each, the
-  // press's, whatever the rest asks.
-  "src/routes/keys.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
+    // A page that moves on a press and again on its release, and on a key's
+    // first press and again on each of its repeats: one act each, the
+    // press's, whatever the rest asks.
+    "src/routes/keys.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "@grasp-os/ui/components/button";
 
 function Keys() {
@@ -795,7 +796,7 @@ function Keys() {
 }
 export const Route = createFileRoute("/keys")({ component: Keys });
 `,
-  "src/routes/launch.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
+    "src/routes/launch.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
 
 function Launch() {
   return (
@@ -809,7 +810,7 @@ function Launch() {
 }
 export const Route = createFileRoute("/launch")({ component: Launch });
 `,
-  "src/routes/hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
+    "src/routes/hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 function Hop() {
@@ -824,10 +825,10 @@ function Hop() {
 }
 export const Route = createFileRoute("/hops/$n")({ component: Hop });
 `,
-  // A hop that focuses its own field as it mounts, while the click that
-  // opened the first is still active, so the page sees the person acting
-  // in its frame, then navigates.
-  "src/routes/focus-hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
+    // A hop that focuses its own field as it mounts, while the click that
+    // opened the first is still active, so the page sees the person acting
+    // in its frame, then navigates.
+    "src/routes/focus-hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 function FocusHop() {
@@ -849,13 +850,13 @@ function FocusHop() {
 }
 export const Route = createFileRoute("/focus-hops/$n")({ component: FocusHop });
 `,
-  // A hop that tries every way its code has to pass for the person
-  // acting: it patches the prototypes the frame's document reports acts
-  // with (dropping what an act report looks like), listens first to stop
-  // input reaching anyone else, dispatches input of its own, posts
-  // act-shaped messages to the page, and focuses itself, then navigates.
-  // Its "Go back" link is the person's own act, which must still count.
-  "src/routes/forges.$n.tsx": `import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+    // A hop that tries every way its code has to pass for the person
+    // acting: it patches the prototypes the frame's document reports acts
+    // with (dropping what an act report looks like), listens first to stop
+    // input reaching anyone else, dispatches input of its own, posts
+    // act-shaped messages to the page, and focuses itself, then navigates.
+    // Its "Go back" link is the person's own act, which must still count.
+    "src/routes/forges.$n.tsx": `import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 const forge = () => {
@@ -897,4 +898,4 @@ function Forge() {
 }
 export const Route = createFileRoute("/forges/$n")({ component: Forge });
 `,
-});
+  });

@@ -15,7 +15,8 @@ import { z } from "zod";
 
 import { appVisitorResponse, sweepAppVisitors } from "../src/app-visitors.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp } from "./app-definitions.ts";
+import type { TestApp, TestSource } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
@@ -65,8 +66,8 @@ const visitedApp = async (
 };
 
 /** A Notes App's files: one function, one page. */
-const notesFiles: Record<string, string> = {
-  ...appDefinition({
+const notesFiles: TestApp = testApp(
+  {
     name: "Notes",
     tables: {
       notes: {
@@ -74,8 +75,9 @@ const notesFiles: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const titles = query({
@@ -85,22 +87,28 @@ export const titles = query({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Notes() {
   return <p>Notes</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-};
+  }
+);
 
 /** Makes `files` the App's current version. */
 const releasedNotes = async (
   builder: Person,
   app: string,
-  files: Record<string, string> = notesFiles
+  files: TestSource = notesFiles
 ): Promise<void> => {
-  const { version } = await builder.api.apps.files.commit(app, files, "First");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    app,
+    files,
+    "First"
+  );
   await builder.api.apps.versions.setCurrent(app, version);
 };
 

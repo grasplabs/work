@@ -6,9 +6,34 @@ import type {
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 
+import { commitFiles } from "../src/apps.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
+import { commitApp, definitionInput, sourceParts } from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
 import type { Idp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
+
+/**
+ * `commitFiles` of a test's `source`: its files, with its definition when
+ * it is a test's App, as `commitApp` commits them over RPC.
+ */
+export const commitDefined = async (
+  on: Env,
+  by: Parameters<typeof commitFiles>[1],
+  app: string,
+  source: TestSource,
+  message: string
+): ReturnType<typeof commitFiles> => {
+  const { files, definition } = sourceParts(source);
+  return await commitFiles(
+    on,
+    by,
+    app,
+    files,
+    message,
+    definition === undefined ? undefined : definitionInput(definition)
+  );
+};
 
 /**
  * What `run` returns, run with core's clock `sessionRecheckMs` on: past
@@ -67,9 +92,10 @@ export const published = async (app: string): Promise<void> => {
 export const release = async (
   builder: Builder,
   app: string,
-  files: Record<string, string | null>
+  files: TestSource
 ): Promise<number> => {
-  const { version } = await builder.api.apps.files.commit(
+  const { version } = await commitApp(
+    builder.api.apps.files,
     app,
     files,
     "Release"

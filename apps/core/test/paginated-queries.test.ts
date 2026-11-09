@@ -20,6 +20,8 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { DataStore } from "../src/data-store.ts";
 import { appHost, inJurisdiction } from "../src/durable-objects.ts";
 import { windowPages } from "../src/query-windows.ts";
+import { commitApp, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { pastAccessRecheck } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles, referenceTo } from "./notes-client-app.ts";
@@ -44,9 +46,8 @@ const personApi = async (role: Role) => await signedInApi(idp, role);
  * saves many notes in one commit, and one that moves the oldest note to
  * the top of the list (its update time changes).
  */
-const files: Record<string, string> = {
-  ...notesFiles,
-  "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}
+const files: TestApp = withFiles(notesFiles, {
+  "server/notes.ts": `${notesFiles.files["server/notes.ts"] ?? ""}
 export const seed = mutation({
   args: {
     prefix: v.string(),
@@ -89,7 +90,7 @@ export const touchOldest = mutation({
   },
 });
 `,
-};
+});
 
 /**
  * A builder's Notes App, made current and opened: the release, the
@@ -98,7 +99,12 @@ export const touchOldest = mutation({
 const openedApp = async () => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await builder.api.apps.files.commit(id, files, "First");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    id,
+    files,
+    "First"
+  );
   await builder.api.apps.versions.setCurrent(id, version);
   await builder.api.apps.publish(id);
   const { lease } = await builder.api.pages.open(id);

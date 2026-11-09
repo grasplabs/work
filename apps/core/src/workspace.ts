@@ -106,7 +106,7 @@ import type {
 } from "./agent-scope.ts";
 import { inOwnWords } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
-import { latestVersion } from "./apps.ts";
+import { changesAnything, latestVersion } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
@@ -232,12 +232,14 @@ interface LiveTurn {
 
 /**
  * A chat's draft of an App (agent-builds.ts): the version it started
- * from, and the changes its agent wrote over it, by path (null deletes a
- * file). `revision` is 0 while there is none.
+ * from, the changes its agent wrote over it, by path (null deletes a
+ * file), and its own definition, as stored (`definitionText`), null
+ * while it is its base's. `revision` is 0 while there is none.
  */
 export interface Draft {
   base: number | null;
   changes: Record<string, string | null>;
+  definition: string | null;
   revision: number;
 }
 
@@ -3838,7 +3840,7 @@ export class Workspace extends DurableObject<Env> {
       .where(and(eq(chatDrafts.chatId, chatId), eq(chatDrafts.appId, appId)))
       .get();
     if (row === undefined) {
-      return { base: null, changes: {}, revision: 0 };
+      return { base: null, changes: {}, definition: null, revision: 0 };
     }
     const files = this.#db
       .select({ path: chatDraftFiles.path, content: chatDraftFiles.content })
@@ -3852,6 +3854,7 @@ export class Workspace extends DurableObject<Env> {
       changes: Object.fromEntries(
         files.map(({ path, content }) => [path, content])
       ),
+      definition: row.definition,
       revision: row.revision,
     };
   }
@@ -3905,18 +3908,23 @@ export class Workspace extends DurableObject<Env> {
     // A draft whose changes are all gone (proposed, or discarded) keeps
     // its row and its revision, which its preview, of the App's latest
     // version now (`previewDraft`), goes on following.
-    return rows.map(({ appId, base, revision, updatedAt, callId }) => {
-      const files = paths.filter((row) => row.appId === appId);
-      return {
-        app: appId,
-        base,
-        changed: files.map(({ path }) => path),
-        deleted: files.filter(({ deleted }) => deleted).map(({ path }) => path),
-        revision,
-        updatedAt: updatedAt.toISOString(),
-        callId,
-      };
-    });
+    return rows.map(
+      ({ appId, base, revision, updatedAt, callId, definition }) => {
+        const files = paths.filter((row) => row.appId === appId);
+        return {
+          app: appId,
+          base,
+          changed: files.map(({ path }) => path),
+          deleted: files
+            .filter(({ deleted }) => deleted)
+            .map(({ path }) => path),
+          definitionChanged: definition !== null,
+          revision,
+          updatedAt: updatedAt.toISOString(),
+          callId,
+        };
+      }
+    );
   }
 
   /**
@@ -3928,7 +3936,9 @@ export class Workspace extends DurableObject<Env> {
    * chat's code run, refused in the same transaction once it has closed;
    * or the chat's own person, audited as theirs. Kept as the version of
    * the run's turn, too (draft-versions.ts): the preview follows every
-   * write, the versions one per turn.
+   * write, the versions one per turn. With `definition`, the draft's own
+   * definition after the write (null: back to its base's), next to its
+   * files in the same transaction; without, the one it has stays.
    */
   saveDraft(
     chatId: ChatId,
@@ -3937,7 +3947,8 @@ export class Workspace extends DurableObject<Env> {
     changes: Record<string, string | null>,
     unchanged: readonly string[],
     revision: number,
-    writer: DraftWriter
+    writer: DraftWriter,
+    definition?: string | null
   ): boolean {
     const saved = this.ctx.storage.transactionSync(() => {
       if ("runId" in writer) {
@@ -3971,6 +3982,7 @@ export class Workspace extends DurableObject<Env> {
               .get()
           : undefined;
       const callId = run?.callId ?? null;
+      const defined = definition === undefined ? {} : { definition };
       this.#db
         .insert(chatDrafts)
         .values({
@@ -3980,10 +3992,11 @@ export class Workspace extends DurableObject<Env> {
           revision: revision + 1,
           updatedAt,
           callId,
+          ...defined,
         })
         .onConflictDoUpdate({
           target: [chatDrafts.chatId, chatDrafts.appId],
-          set: { base, revision: revision + 1, updatedAt, callId },
+          set: { base, revision: revision + 1, updatedAt, callId, ...defined },
         })
         .run();
       for (const [path, content] of Object.entries(changes)) {
@@ -4087,12 +4100,18 @@ export class Workspace extends DurableObject<Env> {
           appId,
           base: null,
           revision: now.revision + 1,
+          definition: null,
           updatedAt,
           callId: null,
         })
         .onConflictDoUpdate({
           target: [chatDrafts.chatId, chatDrafts.appId],
-          set: { revision: now.revision + 1, updatedAt, callId: null },
+          set: {
+            revision: now.revision + 1,
+            definition: null,
+            updatedAt,
+            callId: null,
+          },
         })
         .run();
       return true;
@@ -4157,12 +4176,19 @@ export class Workspace extends DurableObject<Env> {
           appId,
           base: draft.base,
           revision,
+          definition: draft.definition,
           updatedAt,
           callId: null,
         })
         .onConflictDoUpdate({
           target: [chatDrafts.chatId, chatDrafts.appId],
-          set: { base: draft.base, revision, updatedAt, callId: null },
+          set: {
+            base: draft.base,
+            revision,
+            definition: draft.definition,
+            updatedAt,
+            callId: null,
+          },
         })
         .run();
       this.#db
@@ -4555,7 +4581,7 @@ export class Workspace extends DurableObject<Env> {
   ): { id: ChatId; draft: Draft } {
     const { id } = this.#ownChat(chatId, personId);
     const draft = this.draft(id, appId);
-    if (!fallback && Object.keys(draft.changes).length > 0) {
+    if (!fallback && changesAnything(draft)) {
       return { id, draft };
     }
     if (latest === undefined) {
@@ -4566,7 +4592,12 @@ export class Workspace extends DurableObject<Env> {
     }
     return {
       id,
-      draft: { base: latest, changes: {}, revision: draft.revision },
+      draft: {
+        base: latest,
+        changes: {},
+        definition: null,
+        revision: draft.revision,
+      },
     };
   }
 

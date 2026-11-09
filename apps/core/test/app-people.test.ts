@@ -19,7 +19,8 @@ import {
 } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -38,18 +39,20 @@ import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 /** The Directory App's files: it declares the directory unless `people` is false. */
-const peopleFiles = (people = true): Record<string, string> => ({
-  ...appDefinition({
-    name: "Directory",
-    tables: {
-      notes: {
-        fields: { text: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const peopleFiles = (people = true): TestApp =>
+  testApp(
+    {
+      name: "Directory",
+      tables: {
+        notes: {
+          fields: { text: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
+      permissions: people ? ["people"] : [],
     },
-    permissions: people ? ["people"] : [],
-  }),
-  "server/dir.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/dir.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 /** Who calls, as the function sees it. */
@@ -134,7 +137,8 @@ export const team = query({
   },
 });
 `,
-});
+    }
+  );
 
 type Sealed = Fixture & { release: Release };
 
@@ -620,7 +624,8 @@ describe("a chat's agent and who calls an App", { timeout: 180_000 }, () => {
   it("is its person to the App, and is recorded as the agent when it reads the directory itself", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id } = await builder.api.apps.create({ name: "Directory" });
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       id,
       peopleFiles(),
       "First"

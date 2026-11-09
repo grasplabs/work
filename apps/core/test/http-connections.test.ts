@@ -11,7 +11,8 @@ import { loadRelease } from "../src/app-releases.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { httpContract, httpReadContract } from "../src/release-contracts.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { requestGranted } from "./apps.ts";
 import {
   httpApiInsideOrigin,
@@ -39,20 +40,22 @@ const idp = mockIdp();
 const secret = "the-billing-api-test-credential";
 
 /** An App whose actions read and create invoices at the billing API. */
-const billingFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Invoices",
-    tables: {
-      notes: {
-        fields: { title: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const billingFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Invoices",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
+      permissions: [
+        'permission.connection("billing", {\n  contract: "http.request@1",\n  actions: ["get", "send"],\n})',
+      ],
     },
-    permissions: [
-      'permission.connection("billing", {\n  contract: "http.request@1",\n  actions: ["get", "send"],\n})',
-    ],
-  }),
-  "server/billing.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/billing.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -97,7 +100,8 @@ export const stray = action({
   },
 });
 `,
-});
+    }
+  );
 
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
@@ -143,7 +147,7 @@ const invoicesApp = async () => {
     credential: { kind: "bearer", token: secret },
   });
   const created = await builder.api.apps.create({ name: "Invoices" });
-  await builder.api.apps.files.commit(created.id, billingFiles(), "First");
+  await commitApp(builder.api.apps.files, created.id, billingFiles(), "First");
   await builder.api.apps.versions.setCurrent(created.id, 1);
   const requested = await builder.api.permissions.request({
     subject: { type: "app", appId: created.id },

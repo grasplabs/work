@@ -1,4 +1,5 @@
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp } from "../apps/core/test/app-definitions.ts";
 
 /**
  * A Writer App whose one page follows a streaming action (spec 10.7.6)
@@ -96,16 +97,19 @@ export const Route = createFileRoute("/")({ component: Writer });
 `;
 
 /** The Writer App's files. */
-export const writerAppFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Writer",
-    tables: {
-      drafts: {
-        fields: { text: "v.string().max(2000)" },
-        access: { read: "owner", write: "owner" },
+export const writerAppFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Writer",
+      tables: {
+        drafts: {
+          fields: { text: "v.string().max(2000)" },
+          access: { read: "owner", write: "owner" },
+        },
       },
     },
-  }),
-  "server/writer.ts": operations,
-  "src/routes/index.tsx": appPage,
-});
+    {
+      "server/writer.ts": operations,
+      "src/routes/index.tsx": appPage,
+    }
+  );

@@ -1,4 +1,5 @@
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp } from "../apps/core/test/app-definitions.ts";
 
 /**
  * A contact list, as an App's chat writes one into its draft (the fake
@@ -6,8 +7,8 @@ import { appDefinition } from "../apps/core/test/app-definitions.ts";
  * contacts, a query that lists them and a mutation that adds one, and a
  * page that adds a contact by name and lists them live.
  */
-export const contactsApp: Record<string, string> = {
-  ...appDefinition({
+export const contactsApp: TestApp = testApp(
+  {
     name: "Contacts",
     tables: {
       contacts: {
@@ -15,8 +16,9 @@ export const contactsApp: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/contacts.ts": `import { v } from "@grasp-os/sdk";
+  },
+  {
+    "server/contacts.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const list = query({
@@ -34,7 +36,7 @@ export const add = mutation({
   handler: async (ctx, args) => await ctx.db.insert("contacts", args),
 });
 `,
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
@@ -77,4 +79,5 @@ const Contacts = () => {
 
 export const Route = createFileRoute("/")({ component: Contacts });
 `,
-};
+  }
+);

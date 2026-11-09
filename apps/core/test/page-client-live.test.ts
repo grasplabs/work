@@ -7,7 +7,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { definedWith } from "./app-definitions.ts";
+import { definedWith, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { pastAccessRecheck } from "./apps.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import type { Opened, Push } from "./page-client.ts";
@@ -729,8 +730,8 @@ describe("live queries and a person's roles", { timeout: 180_000 }, () => {
  */
 const teamSecrets = async () => {
   const secretFiles = withSecrets();
-  const teamFiles: Record<string, string> = {
-    ...definedWith(
+  const teamFiles: TestApp = withFiles(
+    definedWith(
       secretFiles,
       { op: "addField", table: "secrets", name: "team", type: "v.string()" },
       {
@@ -743,11 +744,13 @@ const teamSecrets = async () => {
         },
       }
     ),
-    "server/notes.ts": (secretFiles["server/notes.ts"] ?? "").replace(
-      "export const tell = mutation({\n  args: { text: v.string() },",
-      "export const tell = mutation({\n  args: { text: v.string(), team: v.string() },"
-    ),
-  };
+    {
+      "server/notes.ts": (secretFiles.files["server/notes.ts"] ?? "").replace(
+        "export const tell = mutation({\n  args: { text: v.string() },",
+        "export const tell = mutation({\n  args: { text: v.string(), team: v.string() },"
+      ),
+    }
+  );
   const opened = await openedApp(teamFiles);
   const member = await personApi("user");
   await opened.builder.api.apps.members.add(opened.app, {

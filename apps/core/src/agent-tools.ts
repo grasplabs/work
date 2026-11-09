@@ -205,7 +205,7 @@ const answersWithDiagnostics =
 
 /** What the file tools say of the files the definition tools write. */
 const generatedNote =
-  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts), never by writing them.";
+  "grasp.config.ts and server/schema.ts are the code generated from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts), never by writing them.";
 
 /** What the definition tools say of what they answer with (`env.build.define`). */
 const definitionAnswer =

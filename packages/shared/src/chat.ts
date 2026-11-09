@@ -177,6 +177,11 @@ export interface ChatDraft {
   changed: string[];
   /** Those of `changed` it deletes, sorted: nothing to open or preview. */
   deleted: string[];
+  /**
+   * Whether it changes the App's definition: a change of its stable IDs
+   * alone changes no file, yet is a change of the App all the same.
+   */
+  definitionChanged: boolean;
   /** Which write of the draft this is: a preview of an earlier one is out of date. */
   revision: number;
   /** When it was last written (ISO 8601). */

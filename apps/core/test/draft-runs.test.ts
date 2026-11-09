@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { holdThrowawayStore } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { livePushes, notesFiles, previewDraftsOf } from "./preview-drafts.ts";
 import {
@@ -140,14 +140,13 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
     const broken = await write(
       {
         // Past what a query takes at once: it fails its type check.
-        "server/notes.ts": (drafted["server/notes.ts"] ?? "").replace(
+        "server/notes.ts": (drafted.files["server/notes.ts"] ?? "").replace(
           'ctx.db.query("notes").take(100)).map',
           'ctx.db.query("notes").take(1000)).map'
         ),
-        "src/routes/index.tsx": (drafted["src/routes/index.tsx"] ?? "").replace(
-          '"Loading"',
-          '"Waiting"'
-        ),
+        "src/routes/index.tsx": (
+          drafted.files["src/routes/index.tsx"] ?? ""
+        ).replace('"Loading"', '"Waiting"'),
       },
       revision
     );
@@ -190,7 +189,7 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
     await previewCall(builder, chatId, app, create);
     // The same App, with a table more.
     const next = await write(
-      appDefinition({
+      testApp({
         name: "Notes",
         tables: {
           notes: {
@@ -281,7 +280,7 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
       app
     );
     await write(
-      { "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "" },
+      { "server/notes.ts": notesFiles("again").files["server/notes.ts"] ?? "" },
       revision
     );
     expect({ before, after: await titles() }).toStrictEqual({
@@ -337,7 +336,7 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
       app
     );
     await write(
-      { "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "" },
+      { "server/notes.ts": notesFiles("again").files["server/notes.ts"] ?? "" },
       now
     );
     const titles = outcome(

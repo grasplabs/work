@@ -18,8 +18,15 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { definitionPlan } from "./app-definition.ts";
 import { sealedEvidence, versionManifest } from "./app-releases.ts";
-import { appFor, findVersion, toVersion, versionFiles } from "./apps.ts";
+import {
+  appFor,
+  findVersion,
+  readStored,
+  toVersion,
+  versionFiles,
+} from "./apps.ts";
 import type { VersionRow } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
 import {
@@ -343,6 +350,36 @@ const proposerOf = async (
   return { ...proposedBy, ownChat, chatTitle };
 };
 
+/**
+ * Whether version `row`'s definition differs from the current version's
+ * (`current`, none while none is), and what that does to the records
+ * (`schema`, the store's plan). The definition is no file: a change of it
+ * alone (two fields' IDs swapped, say) changes no code, yet moves the
+ * records' values as the version is made current, so it counts as a
+ * change of the server code. A version committed before definitions left
+ * the tree has none: the current one, if so, is planned from as no
+ * definition, and this one, if so, plans nothing (it can't be made
+ * current anyway).
+ */
+const definitionReviewOf = async (
+  row: VersionRow,
+  current: VersionRow | undefined
+): Promise<{ changed: boolean; schema: VersionReview["schema"] }> => {
+  const changed = row.definitionHash !== current?.definitionHash;
+  if (!changed || row.definition === null) {
+    return { changed, schema: null };
+  }
+  const { definition } = await readStored(row);
+  const held =
+    current === undefined || current.definition === null
+      ? null
+      : await readStored(current);
+  return {
+    changed,
+    schema: definitionPlan(held?.definition ?? null, definition),
+  };
+};
+
 /** What version `version` of App `app` changes, for its builders. */
 export const reviewVersion = async (
   env: Env,
@@ -374,17 +411,27 @@ export const reviewVersion = async (
     new Map(Object.entries(appCodeFiles(files))),
     (one, other) => one === other
   );
-  const server = serverChangeOf(
+  const { changed: definitionChanged, schema } = await definitionReviewOf(
+    row,
+    currentRow
+  );
+  const codeChange = serverChangeOf(
     serverChanges,
     Object.keys(appCodeFiles(before?.files ?? {})).length,
     Object.keys(appCodeFiles(files)).length
   );
+  let definitionChange: ReviewChange | null = null;
+  if (definitionChanged) {
+    definitionChange = currentRow === undefined ? "added" : "modified";
+  }
+  const server = codeChange ?? definitionChange;
   const migrations = await migrationsOf(
     env,
     found.id,
     { version: row.version, files },
     before,
     server !== null ||
+      definitionChanged ||
       fileChanges.some(
         ({ name }) =>
           name === "grasp.config.ts" ||
@@ -413,6 +460,7 @@ export const reviewVersion = async (
       change,
     })),
     migrations,
+    schema,
     handsFilesToWorkflows: await handsFilesOf(env, found.id, {
       version: row.version,
       files,

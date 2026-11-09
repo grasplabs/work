@@ -1,8 +1,8 @@
 import type { Id, FunctionReference, ReferenceKind } from "@grasp-os/sdk";
 
 import type { Release } from "../src/app-releases.ts";
-import { appDefinition, withoutDefinition } from "./app-definitions.ts";
-import type { AppSpec } from "./app-definitions.ts";
+import { testApp, withoutDefinition } from "./app-definitions.ts";
+import type { AppSpec, TestApp } from "./app-definitions.ts";
 
 // A Notes App on the accepted SDK, and its `api` as its pages import it
 // from `@server/_generated/api`: what the session client's tests call,
@@ -23,8 +23,7 @@ export const notesSpec = {
   },
 } satisfies AppSpec;
 
-export const notesFiles: Record<string, string> = {
-  ...appDefinition(notesSpec),
+export const notesFiles: TestApp = testApp(notesSpec, {
   "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
@@ -163,7 +162,7 @@ const Notes = () => {
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-};
+});
 
 /** The Notes App's definition, as the chat's definition tools make it. */
 export const notesDefinition = [

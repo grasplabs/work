@@ -16,7 +16,7 @@ import {
   deleteWorkflowResource,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import { racingDb, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
@@ -58,15 +58,20 @@ const workflowOf = async (owner: Person): Promise<string> => {
 /** A published App `owner` creates, with one page. */
 const appOf = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Desk ${unique()}` });
-  await release(owner, id, {
-    ...appDefinition({ name: "Desk", tables: {} }),
-
-    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+  await release(
+    owner,
+    id,
+    testApp(
+      { name: "Desk", tables: {} },
+      {
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => <p>Desk</p>;
 
 export const Route = createFileRoute("/")({ component: Page });
 `,
-  });
+      }
+    )
+  );
   return id;
 };
 

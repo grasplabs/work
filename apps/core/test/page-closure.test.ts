@@ -1,7 +1,7 @@
 import { kitModuleName } from "@grasp-os/compiler";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDefinition } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -26,11 +26,12 @@ const idp = mockIdp();
  */
 const entryBudget = 1024 * 1024;
 
-const files = {
-  // An App of spec 8's layout with nothing to call: what is measured is
-  // the pages, which call nothing of it.
-  ...appDefinition({ name: "Closure", tables: {} }),
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const files = testApp(
+  { name: "Closure", tables: {} },
+  {
+    // An App of spec 8's layout with nothing to call: what is measured is
+    // the pages, which call nothing of it.
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
 import { useState } from "react";
@@ -47,7 +48,7 @@ function Small() {
 }
 export const Route = createFileRoute("/")({ component: Small });
 `,
-  "src/routes/heavy.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/heavy.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@grasp-os/ui/components/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@grasp-os/ui/components/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@grasp-os/ui/components/select";
@@ -85,7 +86,8 @@ function Heavy() {
 }
 export const Route = createFileRoute("/heavy")({ component: Heavy });
 `,
-};
+  }
+);
 
 /** Everything a frame loads for a page: its modules, the kit's, its CSS. */
 const loaded = ({ modules, page }: LoadedFrame): string =>
@@ -133,7 +135,7 @@ const opened = async (): Promise<{
   const builder = await signedInApi(idp, "builder");
   const { id: small } = await builder.api.apps.create({ name: "Small" });
   const { id: heavy } = await builder.api.apps.create({ name: "Heavy" });
-  const { "src/routes/heavy.tsx": _heavy, ...smallFiles } = files;
+  const smallFiles = withFiles(files, { "src/routes/heavy.tsx": null });
   await release(builder, small, smallFiles);
   await release(builder, heavy, files);
   return {

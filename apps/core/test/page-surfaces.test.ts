@@ -5,6 +5,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { revokeRelease } from "../src/release-retention.ts";
+import { commitApp, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import {
@@ -25,12 +27,12 @@ const idp = mockIdp();
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
 /** Notes whose list is a sidebar surface, with a settings page of its own. */
-const surfacedFiles = (): Record<string, string> => ({
-  ...notesFiles,
-  "src/routes/index.tsx": `${notesFiles["src/routes/index.tsx"] ?? ""}
+const surfacedFiles = (): TestApp =>
+  withFiles(notesFiles, {
+    "src/routes/index.tsx": `${notesFiles.files["src/routes/index.tsx"] ?? ""}
 export const surface = { kind: "sidebar", title: "All notes" } as const;
 `,
-  "src/routes/settings.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/settings.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
 export const surface = { kind: "settings", title: "Preferences" } as const;
 
@@ -40,7 +42,7 @@ function Settings() {
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 `,
-});
+  });
 
 /** A route at `path` whose page says `text`, placed as `surface` says. */
 const route = (path: string, text: string, surface?: string) =>
@@ -58,7 +60,8 @@ const surfacedApp = async (name = "Notes") => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name });
-  const { version } = await builder.api.apps.files.commit(
+  const { version } = await commitApp(
+    builder.api.apps.files,
     id,
     surfacedFiles(),
     "First"
@@ -72,7 +75,8 @@ describe("an App's surfaces", () => {
     const { app, builder } = await surfacedApp();
     // An App of theirs that declares no surfaces: no sidebar entry.
     const { id: plain } = await builder.api.apps.create({ name: "Plain" });
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       plain,
       notesFiles,
       "First"
@@ -81,7 +85,8 @@ describe("an App's surfaces", () => {
     // Another of theirs whose sealed release no longer passes its checks:
     // it drops out of the sidebar, the others' entries stay.
     const { id: broken } = await builder.api.apps.create({ name: "Broken" });
-    const second = await builder.api.apps.files.commit(
+    const second = await commitApp(
+      builder.api.apps.files,
       broken,
       surfacedFiles(),
       "First"
@@ -124,10 +129,10 @@ describe("an App's surfaces", () => {
   it("are saved, built and listed at their route's address, however TanStack's file naming names the route", async () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Routed" });
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
-      {
-        ...notesFiles,
+      withFiles(notesFiles, {
         // A route group: a folder that adds nothing to the address.
         "src/routes/(admin)/settings.tsx": route(
           "/(admin)/settings",
@@ -151,7 +156,7 @@ export const Route = createFileRoute("/_layout")({ component: Outlet });
           "New task",
           '{ kind: "panel", title: "New task" }'
         ),
-      },
+      }),
       "First"
     );
     await builder.api.apps.versions.setCurrent(app, version);
@@ -232,15 +237,14 @@ export const Route = createFileRoute("/_layout")({ component: Outlet });
     // Surfaces of its own: artifacts are stored by their hash, so the
     // same ones would be the readable App's too.
     const files = surfacedFiles();
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       unreadable,
-      {
-        ...files,
-        "src/routes/index.tsx": (files["src/routes/index.tsx"] ?? "").replace(
-          "All notes",
-          "Every note"
-        ),
-      },
+      withFiles(files, {
+        "src/routes/index.tsx": (
+          files.files["src/routes/index.tsx"] ?? ""
+        ).replace("All notes", "Every note"),
+      }),
       "First"
     );
     await builder.api.apps.versions.setCurrent(unreadable, version);

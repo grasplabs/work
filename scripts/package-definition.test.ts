@@ -132,6 +132,7 @@ const definitionOf = (
     provenance: {
       manifestHash: hash("a"),
       sourceTreeHash: hash("b"),
+      definitionHash: hash("f"),
       contractHash: hash("c"),
       schemaHash: hash("d"),
       dependencyLockHash: hash("e"),
@@ -141,6 +142,7 @@ const definitionOf = (
       generated: {},
     },
     files,
+    definition: { name: "Notes", permissions: [], tables: [], answers: [] },
     manifest: canonicalText(inspectApp(notes).manifest),
     store: null,
     bindings: {},

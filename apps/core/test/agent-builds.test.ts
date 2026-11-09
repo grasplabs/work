@@ -1,3 +1,5 @@
+import { definitionText, readDefinition } from "@grasp-os/sdk/definition";
+import type { AppDefinition } from "@grasp-os/sdk/definition";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -22,7 +24,13 @@ import {
   turnChecks,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
-import { appDefinition, definedWith, redefined } from "./app-definitions.ts";
+import {
+  commitApp,
+  definedWith,
+  redefined,
+  testApp,
+  withFiles,
+} from "./app-definitions.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -59,7 +67,7 @@ const rates = (at: number): string =>
 const appName = "Invoice desk";
 
 /** The Ledger's definition, which its first version got: empty, as it has pages alone. */
-const ledgerDefinition = appDefinition({ name: "Ledger" });
+const ledgerDefinition = testApp({ name: "Ledger" });
 
 /** A page whose button is restyled, which the design system's class checks refuse. */
 const restyled = `import { Button } from "@grasp-os/ui/components/button";
@@ -157,6 +165,18 @@ const setUp = async (
     });
   };
   return { admin, builder, person, existing, chat, grant };
+};
+
+/**
+ * The definition `chat`'s draft of `app` holds, as its Workspace object
+ * keeps it beside the draft's files: the one the definition tools change.
+ */
+const draftDefinitionOf = async (
+  chat: Awaited<ReturnType<typeof setUp>>["chat"],
+  app: string
+): Promise<AppDefinition> => {
+  const draft = await chat.stub.draft(chatIdSchema.parse(chat.chat.id), app);
+  return readDefinition(JSON.parse(draft.definition ?? "null"));
 };
 
 /**
@@ -314,7 +334,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     await chat.ask("Add notes to the Ledger");
     // A builder commits meanwhile, the same file too.
-    await builder.api.apps.files.commit(
+    await commitApp(
+      builder.api.apps.files,
       existing,
       { "notes.md": "the builder's", "builder.md": "mine" },
       "Mine"
@@ -326,22 +347,22 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       base: 1,
       revision: 1,
       changed: ["notes.md"],
-      files: {
-        ...ledgerDefinition,
+      files: withFiles(ledgerDefinition, {
         "AGENTS.md": "# Ledger\n",
         "notes.md": "the agent's",
-      },
+      }).files,
     });
     expect(returned(after?.text)).toStrictEqual({
       notes: "the agent's",
       builder: null,
     });
-    await expect(builder.api.apps.files.read(existing)).resolves.toStrictEqual({
-      ...ledgerDefinition,
-      "AGENTS.md": "# Ledger\n",
-      "notes.md": "the builder's",
-      "builder.md": "mine",
-    });
+    await expect(builder.api.apps.files.read(existing)).resolves.toStrictEqual(
+      withFiles(ledgerDefinition, {
+        "AGENTS.md": "# Ledger\n",
+        "notes.md": "the builder's",
+        "builder.md": "mine",
+      }).files
+    );
     // The chat's page lists what the agent is changing, for its person only.
     // In the object itself: a refusal over RPC is also reported as
     // uncaught by the object, which fails the run.
@@ -608,13 +629,19 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { id: app } = await person.api.apps.create({ name: appName });
     const chatId = chatIdSchema.parse(chat.chat.id);
     // Never inspected before, so no kept registration serves it.
-    const files = {
-      ...notesFiles,
-      "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
-    };
-    await chat.stub.saveDraft(chatId, app, null, files, [], 0, {
-      runId: await openTestRun(chat.stub, chatId),
+    const files = withFiles(notesFiles, {
+      "server/notes.ts": `${notesFiles.files["server/notes.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
     });
+    await chat.stub.saveDraft(
+      chatId,
+      app,
+      null,
+      files.files,
+      [],
+      0,
+      { runId: await openTestRun(chat.stub, chatId) },
+      definitionText(files.definition)
+    );
     // The sandbox ends the first inspection only, as its deadline would.
     const { LOADER: loader } = env;
     let inspections = 0;
@@ -700,7 +727,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { builder, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
-        const definition = async () => JSON.parse((await env.build.files(app.id)).files["definition.json"]);
         const steps = {};
         // A field the released version has: renamed by its ID, its values
         // following it as the version is published, and back.
@@ -715,10 +741,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         // An answer belongs to the version it is committed with: the
         // draft starts with none of the released version's, and keeps its
         // own through a rename of its field, which this draft added.
-        steps.answers = (await definition()).answers.length;
         const renamed = await env.build.define(app.id, { op: "renameField", table: "notes", field: "category", name: "topic" });
         steps.renamed = renamed.ok && renamed.plan.checks;
-        steps.afterRename = (await definition()).answers.length;
         const sensitive = await env.build.define(app.id, { op: "setAccess", table: "notes", access: { read: "owner", write: "owner" }, sensitive: true });
         steps.sensitive = sensitive.ok && sensitive.plan.sensitiveTables;
         return steps;
@@ -763,16 +787,17 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         detail.chat === chat.chat.id &&
         detail.method === "build.define"
     );
+    const { answers } = await draftDefinitionOf(chat, app);
     expect({
       ...steps,
+      answers: answers.map(({ value }) => value),
       audited: defined.map(({ detail }) => [detail.op, detail.table]),
     }).toStrictEqual({
       released: true,
       unanswered: [{ table: "notes", field: "category", answer: null }],
       answered: [{ table: "notes", field: "category", answer: "general" }],
-      answers: 1,
       renamed: [{ table: "notes", field: "topic", answer: "general" }],
-      afterRename: 1,
+      answers: ["general"],
       sensitive: ["notes"],
       audited: [
         ["renameField", "notes"],
@@ -800,9 +825,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
           await define({ op: "removePermission", alias: "people" }),
           await define({ op: "removeTable", table: "notes" }),
         ];
-        const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
         const schema = (await env.build.files(app.id)).files["server/schema.ts"];
-        return { steps, definition: [definition.tables.length, definition.permissions.length], schema: schema.includes("notes") };
+        return { steps, schema: schema.includes("notes") };
       };`),
       says("Removed."),
     ]);
@@ -820,8 +844,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         detail.chat === chat.chat.id &&
         detail.method === "build.define"
     );
+    const held = await draftDefinitionOf(chat, app);
     expect({
       ...z.object({}).loose().parse(returned(result?.text)),
+      definition: [held.tables.length, held.permissions.length],
       audited: defined.map(({ detail }) => [
         detail.op,
         detail.table,
@@ -857,7 +883,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     const files = [
-      "definition.json",
       "grasp.config.ts",
       "server/schema.ts",
       "src/routes/index.tsx",
@@ -871,8 +896,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const indexed = await env.build.define(app.id, { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] });
         const answered = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: "v.string()", answer: "general" });
-        const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
-        return { indexed: indexed.ok && indexed.plan.checks, answered: answered.ok && answered.plan.checks, answers: definition.answers.length };
+        return { indexed: indexed.ok && indexed.plan.checks, answered: answered.ok && answered.plan.checks };
       };`),
       says("Indexed."),
     ]);
@@ -881,7 +905,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Version 1 runs; version 2 adds a category its notes lack, answered,
     // and isn't current yet.
     await release(builder, app, notesFiles);
-    await builder.api.apps.files.commit(
+    await commitApp(
+      builder.api.apps.files,
       app,
       definedWith(notesFiles, {
         op: "addField",
@@ -900,7 +925,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Released from version 1, the notes still lack the category: the
     // plan of that move checks them for it, unanswered, as version 2's
     // answer was version 2's; answered again, it is the draft's own.
-    expect(returned(result?.text)).toStrictEqual({
+    const { answers } = await draftDefinitionOf(chat, app);
+    expect({
+      ...z.object({}).loose().parse(returned(result?.text)),
+      answers: answers.length,
+    }).toStrictEqual({
       indexed: [{ table: "notes", field: "category", answer: null }],
       answered: [{ table: "notes", field: "category", answer: "general" }],
       answers: 1,
@@ -949,8 +978,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const changed = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: 'v.string().default("general")', answer: "general" });
         const indexed = await env.build.define(app.id, { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] });
-        const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
-        return { changed: changed.ok, checks: indexed.ok && indexed.plan.checks, answers: definition.answers.map(({ value }) => value) };
+        return { changed: changed.ok, checks: indexed.ok && indexed.plan.checks };
       };`),
       says("Changed."),
     ]);
@@ -975,7 +1003,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const [result] = await codeResults(chat.stub, chat.chat.id);
     // The draft's own answer stays through a later change: the notes
     // holding null need it to fit the category that can't be null.
-    expect(returned(result?.text)).toStrictEqual({
+    const { answers } = await draftDefinitionOf(chat, app);
+    expect({
+      ...z.object({}).loose().parse(returned(result?.text)),
+      answers: answers.map(({ value }) => value),
+    }).toStrictEqual({
       changed: true,
       checks: [{ table: "notes", field: "category", answer: "general" }],
       answers: ["general"],
@@ -1006,7 +1038,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     }));
 
     await expect(
-      builder.api.apps.files.commit(app, renamed, "Rename")
+      commitApp(builder.api.apps.files, app, renamed, "Rename")
     ).resolves.toMatchObject({ version: 2 });
   });
 
@@ -1476,7 +1508,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
     await expect(
       chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing)
-    ).resolves.toStrictEqual({ base: null, changes: {}, revision: 0 });
+    ).resolves.toStrictEqual({
+      base: null,
+      changes: {},
+      definition: null,
+      revision: 0,
+    });
   });
 
   it("lands no file write the person stopped while it was under way", async () => {
@@ -1544,7 +1581,12 @@ export const Route = createFileRoute("/late")({ component: Page });
     );
     await expect(
       chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing)
-    ).resolves.toStrictEqual({ base: null, changes: {}, revision: 0 });
+    ).resolves.toStrictEqual({
+      base: null,
+      changes: {},
+      definition: null,
+      revision: 0,
+    });
   });
 
   it("commits no proposal whose run ran out of time while it was checked", async () => {
@@ -1649,6 +1691,7 @@ export const Route = createFileRoute("/late")({ component: Page });
       {
         base: null,
         changes: { "a.md": "a", "b.md": "b" },
+        definition: null,
         revision: 2,
       },
     ]);
@@ -1696,13 +1739,13 @@ export const Route = createFileRoute("/late")({ component: Page });
     expect(saved).toStrictEqual([
       true,
       true,
-      { base: null, changes: {}, revision: 2 },
+      { base: null, changes: {}, definition: null, revision: 2 },
       false,
       true,
       true,
       false,
       false,
-      { base: null, changes: {}, revision: 4 },
+      { base: null, changes: {}, definition: null, revision: 4 },
     ]);
   });
 
@@ -1729,7 +1772,7 @@ export const Route = createFileRoute("/late")({ component: Page });
     expect(saved).toStrictEqual([
       true,
       false,
-      { base: null, changes: {}, revision: 1 },
+      { base: null, changes: {}, definition: null, revision: 1 },
     ]);
   });
 
@@ -2179,11 +2222,12 @@ export const titles = action({
     expect(returned(results[3]?.text)).toBe(3);
     await expect(
       builder.api.apps.files.read(existing, 3)
-    ).resolves.toStrictEqual({
-      ...ledgerDefinition,
-      "AGENTS.md": "# Ledger\n\nWith notes.\n",
-      "board.md": "the builder's",
-      "notes.md": "the agent's",
-    });
+    ).resolves.toStrictEqual(
+      withFiles(ledgerDefinition, {
+        "AGENTS.md": "# Ledger\n\nWith notes.\n",
+        "board.md": "the builder's",
+        "notes.md": "the agent's",
+      }).files
+    );
   });
 });

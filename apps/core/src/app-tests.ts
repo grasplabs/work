@@ -38,7 +38,6 @@ import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { schemaIdsOf } from "./app-definition.ts";
 import {
   publicOperationOf,
   readFunctionRequest,
@@ -47,6 +46,7 @@ import {
 import { fixturePeople } from "./app-people.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
+import { releaseIdsOf } from "./apps.ts";
 import { discardFixtureStore, openFixtureStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { appTestFixtures } from "./db/core/schema.ts";
@@ -1390,13 +1390,15 @@ const noParent = (): string | undefined => undefined;
 
 /**
  * Core's side of one suite's run of `release`'s tests, with the App's
- * `files`: the host the suite's isolate calls (`AppTestHost`), each
- * session's store discarded within `cleanupMs`.
+ * `files` and the stable IDs its schema is applied by (`ids`, apps.ts's
+ * `releaseIdsOf`): the host the suite's isolate calls (`AppTestHost`),
+ * each session's store discarded within `cleanupMs`.
  */
 export const fixtureHostFor = (
   env: Env,
   release: Release,
   files: AppFiles,
+  ids: SchemaIds,
   {
     cleanupMs = defaultLimits.cleanupMs,
     testMs = defaultLimits.testMs,
@@ -1415,7 +1417,7 @@ export const fixtureHostFor = (
     {
       env,
       release,
-      ids: release.store === null ? {} : schemaIdsOf(files, release.app.schema),
+      ids,
       cleanupMs,
       testMs,
       parent: parent ?? noParent,
@@ -1707,6 +1709,7 @@ const suiteFailures = async (
   sandboxHost: Fetcher | undefined,
   release: Release,
   files: AppFiles,
+  ids: SchemaIds,
   path: string,
   modules: Record<string, string>,
   {
@@ -1721,7 +1724,7 @@ const suiteFailures = async (
   }
 ): Promise<string[]> => {
   let parent: string | undefined;
-  const host = fixtureHostFor(env, release, files, {
+  const host = fixtureHostFor(env, release, files, ids, {
     cleanupMs,
     testMs,
     ...(sandboxHost === undefined ? {} : { parent: () => parent }),
@@ -1878,6 +1881,7 @@ export const appTestFailures = async (
       );
   }
   const sdk = await workflowSdkModules(env.ASSETS);
+  const ids = release.store === null ? {} : await releaseIdsOf(env, release);
   // The platform's modules last: no App module takes one's name.
   const modules = {
     ...build.modules,
@@ -1913,6 +1917,7 @@ export const appTestFailures = async (
           sandboxHost,
           release,
           files,
+          ids,
           path,
           modules,
           { ...limits, runEndsAt: started + limits.runMs }

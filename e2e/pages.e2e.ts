@@ -363,7 +363,7 @@ test("a page with nothing unsaved switches to a new current version by itself", 
       api,
       app,
       {
-        "src/routes/index.tsx": `${pageAppFiles(attacker.url)["src/routes/index.tsx"]}// v2\n`,
+        "src/routes/index.tsx": `${pageAppFiles(attacker.url).files["src/routes/index.tsx"]}// v2\n`,
       },
       "v2"
     );

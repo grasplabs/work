@@ -25,10 +25,12 @@ import type { AnySchema } from "./value-schema.ts";
 // An App's definition: what it is, as data. Its name, the
 // permissions it needs, and its data model:
 // tables, their fields, indexes and access, and its answers for a change
-// of the schema. Grasp stores it with the App's files (`definition.json`)
-// and generates the App's config (`grasp.config.ts`) and schema
-// (`server/schema.ts`) from it (definition-source.ts): what it does is
-// code, and only code runs, is sealed and is exported.
+// of the schema. Grasp keeps it apart from the App's files, as each
+// version's metadata (its text, `definitionText`), and
+// generates the App's config (`grasp.config.ts`) and schema
+// (`server/schema.ts`) from it (definition-source.ts), one way only: what
+// the App does is code, and only code runs, is sealed and is exported.
+// Its IDs never appear in code.
 //
 // Every type in it, a field's or a permission's, is a descriptor in its
 // compact form (value-compact.ts) as the text holds it, and the full
@@ -104,9 +106,6 @@ export interface AppDefinition {
   readonly tables: readonly DefinedTable[];
   readonly answers: readonly DefinedAnswer[];
 }
-
-/** Where an App's definition is, among its files. */
-export const definitionPath = "definition.json";
 
 /** The files generated from an App's definition, which only Grasp writes. */
 export const generatedFiles = {
@@ -335,47 +334,6 @@ export const answersOf = (definition: AppDefinition) =>
     };
   });
 
-/** The App a definition declares: its config and its schema, as code would. */
-export const definitionApp = (
-  definition: AppDefinition
-): { config: App; schema: SchemaDefinition } => {
-  requireUniqueIds(definition.tables, "tables");
-  for (const table of definition.tables) {
-    requireUniqueIds(table.fields, `fields of \`${table.name}\``);
-  }
-  const tables: Record<string, AnyTable> = {};
-  for (const table of definition.tables) {
-    if (Object.hasOwn(tables, table.name)) {
-      refuse(`Two tables are named \`${table.name}\`.`);
-    }
-    Object.defineProperty(tables, table.name, {
-      enumerable: true,
-      value: tableOf(table),
-    });
-  }
-  const answers = answersOf(definition);
-  const config = defineApp({
-    name: definition.name,
-    permissions: definedPermissions(definition),
-    ...(answers.length === 0 ? {} : { answers }),
-  });
-  // SAFETY: `defineSchema` checks the tables, and their references, at
-  // run time.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const schema = defineSchema(tables as never) as SchemaDefinition;
-  return { config, schema };
-};
-
-/**
- * The manifest of what a definition declares, with no functions: what its
- * schema plans compare (core's schema-changes.ts). Throws the builders' errors for
- * a definition that isn't coherent.
- */
-export const definitionManifest = (definition: AppDefinition): AppManifest =>
-  inspectApp(
-    registerApp({ ...definitionApp(definition), modules: {}, migrations: [] })
-  ).manifest;
-
 /**
  * `data`, a permission's, with each descriptor it holds mapped by `map`:
  * a workflow's `input` and `output`, and the platform's functions' `args`
@@ -430,29 +388,58 @@ const readType = <Read>(where: string, read: () => Read): Read => {
 const fromCompact = (where: string, compact: unknown): ValueDescriptor =>
   readType(where, () => descriptorFromCompact(compact));
 
+/** Orders keys as canonical JSON does: by UTF-16 code unit. */
+const byKey = ([a]: [string, unknown], [b]: [string, unknown]): number =>
+  a < b ? -1 : 1;
+
 /**
- * The definition `text` holds, checked whole (`definitionManifest`):
- * throws `AppDefinitionError`, or the builders' own errors, for text that
- * isn't one.
+ * `value` with every object's keys sorted, as canonical JSON has them,
+ * but an object type's `fields` (`{ kind: "object", fields }`), which
+ * keep the order their code declares them in: that order is the type's.
  */
-export const readDefinition = (text: string): AppDefinition => {
-  if (isOverBytes(text, definitionMaxBytes)) {
-    return refuse(`A definition is at most ${definitionMaxBytes} bytes.`);
+const ordered = (value: unknown, declared = false): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => ordered(item));
   }
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    return refuse(`${definitionPath} isn't JSON.`);
+  if (typeof value !== "object" || value === null) {
+    return value;
   }
-  const parsed = definitionSchema.safeParse(data);
-  if (!parsed.success) {
-    return refuse(
-      `${definitionPath} isn't a definition: ${z.prettifyError(parsed.error)}`
-    );
-  }
-  const { tables, permissions, ...rest } = parsed.data;
-  const definition: AppDefinition = {
+  const entries = Object.entries(value);
+  const objectType = Reflect.get(value, "kind") === "object";
+  return Object.fromEntries(
+    (declared ? entries : entries.toSorted(byKey)).map(([key, item]) => [
+      key,
+      ordered(item, objectType && key === "fields"),
+    ])
+  );
+};
+
+/** `definition` as its text holds it: every descriptor in its compact form. */
+const compactForm = (definition: AppDefinition): unknown => ({
+  ...definition,
+  permissions: definition.permissions.map((data) =>
+    permissionTypes(data, (descriptor) =>
+      // SAFETY: a permission's descriptors, as `permission.*` made them.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      compactDescriptor(descriptor as ValueDescriptor)
+    )
+  ),
+  tables: definition.tables.map((table) => ({
+    ...table,
+    fields: table.fields.map((field) => ({
+      ...field,
+      type: compactDescriptor(field.type),
+    })),
+  })),
+});
+
+/**
+ * The definition `data`, its structure checked, holds: each descriptor
+ * read from its compact form, a refusal naming the one that isn't one.
+ */
+const fullForm = (data: z.output<typeof definitionSchema>): AppDefinition => {
+  const { tables, permissions, ...rest } = data;
+  return {
     ...rest,
     permissions: permissions.map((permission) =>
       permissionTypes(permission, (compact) =>
@@ -470,33 +457,101 @@ export const readDefinition = (text: string): AppDefinition => {
       })),
     })),
   };
-  definitionManifest(definition);
-  return definition;
 };
 
 /**
- * A definition's text, as `definition.json` holds it: every descriptor in
- * its compact form.
+ * A definition's text, as Grasp stores, hashes and compares it: its JSON,
+ * every descriptor in its compact form (value-compact.ts), in one form,
+ * so equal definitions have equal text however the keys of its records
+ * and values came in. Its keys are sorted as canonical JSON's are, but an
+ * object type's fields (`ordered`): sorting those would reorder the code
+ * it generates.
  */
-export const definitionText = (definition: AppDefinition): string => {
-  const text = {
-    ...definition,
-    permissions: definition.permissions.map((data) =>
-      permissionTypes(data, (descriptor) =>
-        // SAFETY: a permission's descriptors, as `permission.*` made them.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        compactDescriptor(descriptor as ValueDescriptor)
-      )
-    ),
-    tables: definition.tables.map((table) => ({
-      ...table,
-      fields: table.fields.map((field) => ({
-        ...field,
-        type: compactDescriptor(field.type),
-      })),
-    })),
-  };
-  return `${JSON.stringify(text, null, 2)}\n`;
+export const definitionText = (definition: AppDefinition): string =>
+  JSON.stringify(ordered(compactForm(definition)));
+
+/**
+ * `definition` in its one form, its text read back (`definitionText`):
+ * what code is generated and declared from, so equal definitions
+ * generate the same code however the keys of their values came in (an
+ * object default's, say).
+ */
+export const canonicalDefinition = (definition: AppDefinition): AppDefinition =>
+  fullForm(definitionSchema.parse(JSON.parse(definitionText(definition))));
+
+/** The App a definition declares: its config and its schema, as code would. */
+export const definitionApp = (
+  declared: AppDefinition
+): { config: App; schema: SchemaDefinition } => {
+  const definition = canonicalDefinition(declared);
+  requireUniqueIds(definition.tables, "tables");
+  for (const table of definition.tables) {
+    requireUniqueIds(table.fields, `fields of \`${table.name}\``);
+  }
+  const tables: Record<string, AnyTable> = {};
+  for (const table of definition.tables) {
+    if (Object.hasOwn(tables, table.name)) {
+      refuse(`Two tables are named \`${table.name}\`.`);
+    }
+    Object.defineProperty(tables, table.name, {
+      enumerable: true,
+      value: tableOf(table),
+    });
+  }
+  const answers = answersOf(definition);
+  const config = defineApp({
+    name: definition.name,
+    permissions: definedPermissions(definition),
+    ...(answers.length === 0 ? {} : { answers }),
+  });
+  // SAFETY: `defineSchema` checks the tables, and their references, at
+  // run time.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const schema = defineSchema(tables as never) as SchemaDefinition;
+  return { config, schema };
+};
+
+/**
+ * The manifest of what a definition declares, with no functions: what its
+ * schema plans compare (core's schema-changes.ts). Throws the builders' errors for
+ * a definition that isn't coherent.
+ */
+export const definitionManifest = (definition: AppDefinition): AppManifest =>
+  inspectApp(
+    registerApp({ ...definitionApp(definition), modules: {}, migrations: [] })
+  ).manifest;
+
+/** `data`'s JSON, or undefined for data JSON can't hold. */
+const jsonOf = (data: unknown): string | undefined => {
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The definition `data` is, checked whole (`definitionManifest`): throws
+ * `AppDefinitionError`, or the builders' own errors, for data that isn't
+ * one. Its size is checked first, on its JSON, before anything else
+ * reads it.
+ */
+export const readDefinition = (data: unknown): AppDefinition => {
+  const text = jsonOf(data);
+  if (text === undefined || isOverBytes(text, definitionMaxBytes)) {
+    return refuse(
+      `A definition is JSON of at most ${definitionMaxBytes} bytes.`
+    );
+  }
+  const parsed = definitionSchema.safeParse(data);
+  if (!parsed.success) {
+    return refuse(
+      `That isn't an App definition: ${z.prettifyError(parsed.error)}`
+    );
+  }
+  const definition = fullForm(parsed.data);
+  definitionManifest(definition);
+  return canonicalDefinition(definition);
 };
 
 /** The definition of a new App named `name`: nothing in it yet. */

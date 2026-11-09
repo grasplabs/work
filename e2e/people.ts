@@ -6,6 +6,8 @@ import type { BrowserContext } from "@playwright/test";
 import { newWebSocketRpcSession } from "capnweb";
 import { z } from "zod";
 
+import { commitApp } from "../apps/core/test/app-definitions.ts";
+import type { TestSource } from "../apps/core/test/app-definitions.ts";
 /**
  * Signed-in people for end-to-end tests. They sign in through the product,
  * as anyone does: core sends them to the client's Entra tenant, which on
@@ -625,10 +627,10 @@ export const ordinaryData = async (app: string): Promise<void> => {
 export const release = async (
   api: ReturnType<typeof apiOf>["api"],
   app: string,
-  files: Record<string, string | null>,
+  files: TestSource,
   message: string
 ): Promise<void> => {
-  const { version } = await api.apps.files.commit(app, files, message);
+  const { version } = await commitApp(api.apps.files, app, files, message);
   await api.apps.versions.setCurrent(app, version);
   // Published, for the people it is shared with (a draft is its
   // builders' alone).

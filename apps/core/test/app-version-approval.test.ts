@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { publishVersion } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
+import { commitApp } from "./app-definitions.ts";
 import { grantReviewed, racingDb, release, reviewedOf } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -285,7 +286,8 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     ]);
     const app = await builtBy(builder, admin);
     const late = await builder.api.permissions.request(mailFor(app, "LATE"));
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
       {
         "src/routes/index.tsx": `${deskPage}\n// Asks for more.\n`,
@@ -378,7 +380,8 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     // A version never made current, marked as a blueprint.
     const { id } = await builder.api.apps.create({ name: `Map ${unique()}` });
     const source = appIdSchema.parse(id);
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       source,
       { "src/routes/index.tsx": deskPage },
       "Never run"
@@ -424,7 +427,8 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     ]);
     const app = await builtBy(builder, admin);
     const granted = await permissionsOf(admin, app);
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
       {
         "src/routes/index.tsx": `${deskPage}\n// Reviewed.\n`,
@@ -466,7 +470,8 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       personApi("builder"),
     ]);
     const app = await builtBy(builder, admin);
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
       {
         "src/routes/index.tsx": `${deskPage}\n// Demoted.\n`,

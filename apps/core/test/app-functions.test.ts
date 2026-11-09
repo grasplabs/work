@@ -13,7 +13,6 @@ import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles } from "../src/apps.ts";
 import {
   appMembers,
   sdkReleaseManifests,
@@ -21,7 +20,9 @@ import {
 } from "../src/db/core/schema.ts";
 import { deliveryOf, standingOf } from "../src/page-delivery.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp, TestSource } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { deepFiles, fieldDepth } from "./deep-records.ts";
 import {
   appWith,
@@ -39,28 +40,30 @@ import type { Fixture } from "./sealed-apps.ts";
 // another App's data, run another contract or keep something of one
 // caller's for another.
 
-const notesFiles = (label = "Notes"): Record<string, string> => ({
-  ...appDefinition({
-    name: label,
-    tables: {
-      notes: {
-        fields: {
-          title: "v.string().trim().min(1).max(200)",
-          body: 'v.string().max(100_000).default("")',
+const notesFiles = (label = "Notes"): TestApp =>
+  testApp(
+    {
+      name: label,
+      tables: {
+        notes: {
+          fields: {
+            title: "v.string().trim().min(1).max(200)",
+            body: 'v.string().max(100_000).default("")',
+          },
+          access: { read: "owner", write: "owner" },
+          indexes: { by_updated: ["_updatedAt"] },
         },
-        access: { read: "owner", write: "owner" },
-        indexes: { by_updated: ["_updatedAt"] },
       },
     },
-  }),
-  "values.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
 };
 `,
-  "server/notes.ts": `import {
+      "server/notes.ts": `import {
   AppError,
   paginationOptionsValidator,
   paginationResultValidator,
@@ -296,13 +299,14 @@ export const recover = action({
   },
 });
 `,
-});
+    }
+  );
 
 type Sealed = Fixture & { release: Release };
 
 /** A Notes App, sealed and current. */
 const sealedNotes = async (
-  files: Record<string, string> = notesFiles()
+  files: TestSource = notesFiles()
 ): Promise<Sealed> => {
   const fixture = await appWith(files);
   const release = await seal(fixture);
@@ -720,23 +724,25 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     const first = await save();
     // Version 2 gives `create` an argument with a default, which the
     // version normalizes the same input to.
-    const files = notesFiles();
-    const operations = files["server/notes.ts"] ?? "";
+    let files = notesFiles();
+    const operations = files.files["server/notes.ts"] ?? "";
     const create = `export const create = mutation({
   args: { title: noteFields.title, body: noteFields.body },
   returns: v.id("notes"),
   handler: async (ctx, args) => await ctx.db.insert("notes", args),
 });`;
     expect(operations).toContain(create);
-    files["server/notes.ts"] = operations.replace(
-      create,
-      `export const create = mutation({
+    files = withFiles(files, {
+      "server/notes.ts": operations.replace(
+        create,
+        `export const create = mutation({
   args: { title: noteFields.title, body: noteFields.body, tag: v.string().default("none") },
   returns: v.id("notes"),
   handler: async (ctx, args) => await ctx.db.insert("notes", { title: args.title, body: args.body }),
 });`
-    );
-    await commitFiles(env, notes.owner, notes.app, files, "Tag");
+      ),
+    });
+    await commitDefined(env, notes.owner, notes.app, files, "Tag");
     await seal(notes, 2);
     await publishVersion(env, notes.owner, notes.app, 2);
     const again = await save();
@@ -756,26 +762,28 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
       bump: referenceTo(notes.release, "notes.bump"),
     };
     // Version 2 renames `get`'s argument and takes `bump` out of its API.
-    const files = notesFiles("Notes, renamed");
-    const operations = files["server/notes.ts"] ?? "";
+    let files = notesFiles("Notes, renamed");
+    const operations = files.files["server/notes.ts"] ?? "";
     const get = `export const get = query({
   args: { id: v.id("notes") },
   returns: doc("notes").nullable(),
   handler: async (ctx, args) => await ctx.db.get("notes", args.id),
 });`;
     expect(operations).toContain(get);
-    files["server/notes.ts"] = operations
-      .replace(
-        get,
-        get
-          .replace("{ id: v.id", "{ noteId: v.id")
-          .replace("args.id", "args.noteId")
-      )
-      .replace(
-        "export const bump = query(",
-        "export const bump = internalQuery("
-      );
-    await commitFiles(env, notes.owner, notes.app, files, "Rename");
+    files = withFiles(files, {
+      "server/notes.ts": operations
+        .replace(
+          get,
+          get
+            .replace("{ id: v.id", "{ noteId: v.id")
+            .replace("args.id", "args.noteId")
+        )
+        .replace(
+          "export const bump = query(",
+          "export const bump = internalQuery("
+        ),
+    });
+    await commitDefined(env, notes.owner, notes.app, files, "Rename");
     await seal(notes, 2);
     await publishVersion(env, notes.owner, notes.app, 2);
     const fromPage = async (
@@ -851,8 +859,8 @@ describe("what a function answers", { timeout: 120_000 }, () => {
  * each handler answers is its return, held only to JSON and the output
  * limit; one that returns nothing answers null.
  */
-const undeclaredReturnFiles: Record<string, string> = {
-  ...appDefinition({
+const undeclaredReturnFiles: TestApp = testApp(
+  {
     name: "Greetings",
     tables: {
       notes: {
@@ -860,8 +868,9 @@ const undeclaredReturnFiles: Record<string, string> = {
         access: { read: "owner", write: "owner" },
       },
     },
-  }),
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 export const greet = query({
@@ -890,7 +899,8 @@ export const nothing = mutation({ args: {}, handler: async () => {} });
 
 export const flood = query({ args: {}, handler: () => "x".repeat(2 * 1024 * 1024) });
 `,
-};
+  }
+);
 
 /**
  * An App that reads the clock and randomness in each kind of function,
@@ -901,8 +911,8 @@ export const flood = query({ args: {}, handler: () => "x".repeat(2 * 1024 * 1024
  * with what it read, and what a query it runs read, so nothing commits
  * and its caller may send it again under its key.
  */
-const diceFiles: Record<string, string> = {
-  ...appDefinition({
+const diceFiles: TestApp = testApp(
+  {
     name: "Dice",
     tables: {
       rolls: {
@@ -910,8 +920,9 @@ const diceFiles: Record<string, string> = {
         access: { read: "owner", write: "owner" },
       },
     },
-  }),
-  "server/dice.ts": `import { AppError, v } from "@grasp-os/sdk";
+  },
+  {
+    "server/dice.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 const heldRandom = Math.random;
@@ -1037,7 +1048,8 @@ export const peek = action({ args: {}, handler: twice });
 
 export const generate = action({ args: {}, handler: keyRefused });
 `,
-};
+  }
+);
 
 /** A read of the clock and randomness, as `diceFiles`' `read` answers it. */
 const readSchema = z.strictObject({

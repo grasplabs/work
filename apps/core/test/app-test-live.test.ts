@@ -9,10 +9,13 @@ import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
-import { commitFiles, createApp, findApp } from "../src/apps.ts";
+import { createApp, findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { queryMaxReruns } from "../src/call-limits.ts";
 import { maxTornReads } from "../src/query-subscriptions.ts";
+import { appOf, withFiles } from "./app-definitions.ts";
+import type { TestApp, TestSource } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import { person } from "./sealed-apps.ts";
 
@@ -33,17 +36,24 @@ const pushOfNotes = z.object({
 });
 
 /** The Notes App the session client's tests use, with a fixture. */
-const appFiles: Record<string, string> = {
-  ...Object.fromEntries(
-    Object.entries(notesFiles).filter(([path]) => !path.startsWith("src/"))
+const appFiles: TestApp = withFiles(
+  appOf(
+    notesFiles.definition,
+    Object.fromEntries(
+      Object.entries(notesFiles.files).filter(
+        ([path]) => !path.startsWith("src/")
+      )
+    )
   ),
-  "tests/fixtures/notes.json": JSON.stringify({
-    principals: {
-      "note-owner": { role: "user" },
-      "other-owner": { role: "user" },
-    },
-  }),
-};
+  {
+    "tests/fixtures/notes.json": JSON.stringify({
+      principals: {
+        "note-owner": { role: "user" },
+        "other-owner": { role: "user" },
+      },
+    }),
+  }
+);
 
 /** Spec 28.2's first example, word for word, but for the package's scope. */
 const specExample = `import { appTest } from "@grasp-os/sdk/testing";
@@ -101,10 +111,10 @@ interface Built {
 }
 
 /** A builder's App with `files` as its first version. */
-const appWith = async (files: Record<string, string>): Promise<Built> => {
+const appWith = async (files: TestSource): Promise<Built> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitFiles(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files, "First version");
   return { owner, app: id };
 };
 
@@ -152,10 +162,11 @@ const requestFor = (release: Release, path: string, input: unknown): string => {
 
 describe("an App test's live queries", { timeout: 180_000 }, () => {
   it("pass the spec's first example as written, through the real host", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/notes.test.ts": specExample,
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/notes.test.ts": specExample,
+      })
+    );
     await expect(failuresOf(built)).resolves.toStrictEqual([]);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: 1,
@@ -164,10 +175,10 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
   });
 
   it("show each principal only the rows they may read", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/access.test.ts": suiteOf({
-        "another owner's snapshots never hold the note": `
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/access.test.ts": suiteOf({
+          "another owner's snapshots never hold the note": `
       const owner = await t.as("note-owner");
       const other = await t.as("other-owner");
       const mine = await owner.subscribe(api.notes.list, page);
@@ -182,39 +193,41 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       });
       t.equal(seen.includes(createdId), false, "the other owner saw the note");
       t.equal(last.items.map((note) => note.title), ["Theirs"]);`,
-        "a refusal it expects": `
+          "a refusal it expects": `
       const owner = await t.as("note-owner");
       const live = await owner.subscribe({ ...api.notes.list, name: "notes.nothing" }, page);
       await t.rejectsCode(live.next(), "function.not_found");`,
-      }),
-    });
+        }),
+      })
+    );
     await expect(failuresOf(built)).resolves.toStrictEqual([]);
   });
 
   it("fail a test on a refusal it didn't expect, and one that waits for a snapshot that never comes", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/failing.test.ts": suiteOf({
-        "follows a query the App doesn't have": `
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/failing.test.ts": suiteOf({
+          "follows a query the App doesn't have": `
       const owner = await t.as("note-owner");
       const live = await owner.subscribe({ ...api.notes.list, name: "notes.nothing" }, page);
       await live.next();`,
-        "waits for a note nobody makes": `
+          "waits for a note nobody makes": `
       const owner = await t.as("note-owner");
       const live = await owner.subscribe(api.notes.list, page);
       await live.next((p) => p.items.length > 0);`,
-        "waits for two snapshots at once": `
+          "waits for two snapshots at once": `
       const owner = await t.as("note-owner");
       const live = await owner.subscribe(api.notes.list, page);
       void live.next(() => false).catch(() => null);
       await live.next();`,
-        "reads a live query it closed": `
+          "reads a live query it closed": `
       const owner = await t.as("note-owner");
       const live = await owner.subscribe(api.notes.list, page);
       await live.close();
       await live.next();`,
-      }),
-    });
+        }),
+      })
+    );
     await expect(
       failuresOf(built, envWith({ APP_TEST_LIMITS_MS: "3000" }))
     ).resolves.toStrictEqual([
@@ -232,10 +245,10 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
     // A write at a time, the next only once the last was pushed: both
     // live queries share each read (the same principal and call), so the
     // one never read is pushed a snapshot per write, never fewer.
-    const built = await appWith({
-      ...appFiles,
-      "tests/unread.test.ts": suiteOf({
-        "never reads what it follows": `
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/unread.test.ts": suiteOf({
+          "never reads what it follows": `
       const owner = await t.as("note-owner");
       await owner.subscribe(api.notes.list, page);
       const paced = await owner.subscribe(api.notes.list, page);
@@ -243,8 +256,9 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
         const id = await owner.mutation(api.notes.create, { title: \`Note \${round}\` });
         await paced.next((p) => p.items.some((note) => note._id === id));
       }`,
-      }),
-    });
+        }),
+      })
+    );
     await expect(
       failuresOf(built, envWith({ APP_TEST_LIMITS_MS: "29000" }))
     ).resolves.toStrictEqual([
@@ -255,10 +269,10 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
   it("release the host subscription when a test closes it", async () => {
     // More live queries one after another than a connection may follow at
     // once (100): each must be released by its close for the next to open.
-    const built = await appWith({
-      ...appFiles,
-      "tests/close.test.ts": suiteOf({
-        "follows and closes again and again": `
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/close.test.ts": suiteOf({
+          "follows and closes again and again": `
       const owner = await t.as("note-owner");
       for (let round = 0; round < 110; round += 1) {
         const live = await owner.subscribe(api.notes.list, page);
@@ -267,37 +281,39 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       const live = await owner.subscribe(api.notes.list, page);
       await owner.mutation(api.notes.create, { title: "Still live" });
       await live.next((p) => p.items.length === 1);`,
-        "can't follow more at once than a page's page may": `
+          "can't follow more at once than a page's page may": `
       const owner = await t.as("note-owner");
       for (let round = 0; round < 100; round += 1) {
         await owner.subscribe(api.notes.list, page);
       }
       await t.rejectsCode(owner.subscribe(api.notes.list, page), "page.too_many_queries");`,
-      }),
-    });
+        }),
+      })
+    );
     await expect(failuresOf(built)).resolves.toStrictEqual([]);
   });
 
   it("follow a query again when core can't keep it fresh, as a page does, and fail one it never can", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/lost.test.ts": suiteOf({
-        "follows the note it makes": `
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/lost.test.ts": suiteOf({
+          "follows the note it makes": `
       const owner = await t.as("note-owner");
       const live = await owner.subscribe(api.notes.list, page);
       await owner.mutation(api.notes.create, { title: "Kept" });
       await live.next((p) => p.items.length === 1);`,
-        // Never asks for a snapshot: core giving up on the query must
-        // still fail it.
-        "follows a query it never reads": `
+          // Never asks for a snapshot: core giving up on the query must
+          // still fail it.
+          "follows a query it never reads": `
       const owner = await t.as("note-owner");
       await owner.subscribe(api.notes.list, page);
       for (let round = 0; round < 15; round += 1) {
         await owner.mutation(api.notes.create, { title: \`Note \${round}\` });
         await new Promise((resolve) => { setTimeout(resolve, 200); });
       }`,
-      }),
-    });
+        }),
+      })
+    );
     // Every store object answers as it does, but refuses its first
     // `refusals` watches: core lets go of the query each time.
     const refusingWatches = (refusals: number): Env => {
@@ -372,7 +388,12 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
     const built = await appWith(appFiles);
     await publishVersion(env, built.owner, built.app, 1);
     const release = await loadRelease(env, built.app, 1);
-    const host = fixtureHostFor(env, release, appFiles);
+    const host = fixtureHostFor(
+      env,
+      release,
+      appFiles.files,
+      await releaseIdsOf(env, release)
+    );
     return { host, release, opened: await host.open("notes", "live") };
   };
 
@@ -497,7 +518,8 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
     const host = fixtureHostFor(
       envWith({ DATA_STORES: stores }),
       release,
-      appFiles
+      appFiles.files,
+      await releaseIdsOf(env, release)
     );
     const opened = await host.open("notes", "torn");
     const followed = follower();

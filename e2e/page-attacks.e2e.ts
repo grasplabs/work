@@ -7,6 +7,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 
+import type { TestSource } from "../apps/core/test/app-definitions.ts";
 import { attackAppFiles, injectingAppFiles } from "./attack-apps.ts";
 import { test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
@@ -84,7 +85,7 @@ const serveTurn = async (): Promise<{
 const releaseApp = async (
   builder: Person,
   name: string,
-  files: Record<string, string>
+  files: TestSource
 ): Promise<string> => {
   const { core, api } = apiOf(builder);
   try {

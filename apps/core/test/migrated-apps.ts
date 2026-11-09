@@ -5,10 +5,11 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
 import { publishVersion } from "../src/app-publish.ts";
-import { commitFiles } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { commit } from "./notes-stores.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -25,14 +26,16 @@ const placeholder = "0".repeat(64);
  */
 export const notesOfFields = (
   fields: Readonly<Record<string, string>>
-): Record<string, string> => ({
-  ...appDefinition({
-    name: "Notes",
-    tables: {
-      notes: { fields, access: { read: "owner", write: "owner" } },
+): TestApp =>
+  testApp(
+    {
+      name: "Notes",
+      tables: {
+        notes: { fields, access: { read: "owner", write: "owner" } },
+      },
     },
-  }),
-  "values.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
 ${Object.entries(fields)
@@ -40,7 +43,8 @@ ${Object.entries(fields)
   .join("\n")}
 };
 `,
-});
+    }
+  );
 
 const title = "v.string().min(1).max(200)";
 
@@ -92,15 +96,15 @@ export const migratedFiles = (
   handler: string,
   fixtures = passingFixtures,
   schema = v2Files
-): Record<string, string> => ({
-  ...schema,
-  "server/migrations/derive-category.ts": migrationFile(
-    fromSchema,
-    toSchema,
-    handler,
-    fixtures
-  ),
-});
+): TestApp =>
+  withFiles(schema, {
+    "server/migrations/derive-category.ts": migrationFile(
+      fromSchema,
+      toSchema,
+      handler,
+      fixtures
+    ),
+  });
 
 /** The code and details of what `work` threw. */
 export const refusalOf = async (work: () => Promise<unknown>) => {
@@ -169,9 +173,9 @@ export const migrated = async (
     /** Who creates the App and writes its notes: a new builder unless given. */
     owner?: Identity;
     /** The files the notes start under: `v1Files` unless given. */
-    start?: Record<string, string>;
+    start?: TestApp;
     /** The files the migration migrates to: `v2Files` unless given. */
-    next?: Record<string, string>;
+    next?: TestApp;
   } = {}
 ) => {
   const fixture: Fixture = await appWith(start, "Notes", owner);
@@ -200,26 +204,26 @@ export const migrated = async (
       fixture.owner.userId
     );
   }
-  await commitFiles(
+  await commitDefined(
     env,
     fixture.owner,
     fixture.app,
-    {
-      ...migratedFiles(fromSchema, placeholder, handler, fixtures, next),
-      ...extra,
-    },
+    withFiles(
+      migratedFiles(fromSchema, placeholder, handler, fixtures, next),
+      extra
+    ),
     "Migrate"
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
   const toSchema = namedSchema(refused.details);
-  await commitFiles(
+  await commitDefined(
     env,
     fixture.owner,
     fixture.app,
-    {
-      ...migratedFiles(fromSchema, toSchema, handler, fixtures, next),
-      ...extra,
-    },
+    withFiles(
+      migratedFiles(fromSchema, toSchema, handler, fixtures, next),
+      extra
+    ),
     "Migrate to the sealed schema"
   );
   const release = await seal(fixture, 3);

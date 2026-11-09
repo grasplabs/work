@@ -2,7 +2,8 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page, Route } from "@playwright/test";
 
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { commitApp, testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -46,26 +47,28 @@ const definition = JSON.stringify({
  * bound one through `useWorkflow(workflows.followUp)`, showing each of the
  * hook's fields it reads.
  */
-const appFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+const appFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { permissions } from "../grasp.config.ts";
 
 export const followUp = permissions.followUp;
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
@@ -105,7 +108,8 @@ function Desk() {
 }
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-});
+    }
+  );
 
 /**
  * A new App of `appFiles` whose `followUp` binds version 1 of a new
@@ -136,7 +140,8 @@ const boundApp = async (
       alias: "followUp",
       version: 1,
     });
-    const { version } = await builds.api.apps.files.commit(
+    const { version } = await commitApp(
+      builds.api.apps.files,
       app,
       appFiles(),
       "Requests"

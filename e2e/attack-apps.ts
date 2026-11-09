@@ -1,4 +1,5 @@
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp } from "../apps/core/test/app-definitions.ts";
 
 /**
  * Apps whose pages attack the page around their frame, for
@@ -556,7 +557,7 @@ export const attackAppFiles = ({
 }: {
   attacker: string;
   turn: string;
-}): Record<string, string> => {
+}): TestApp => {
   const pages: Record<string, string> = {
     leaving: leavingPage(attacker),
     wandering: wanderingPage,
@@ -566,22 +567,27 @@ export const attackAppFiles = ({
     pasting: pastingPage,
     injecting: injectingPage,
   };
-  return {
-    ...appDefinition({ name: "Attacks", tables: {} }),
-    "server/attacks.ts": operations,
-    ...Object.fromEntries(
-      Object.entries(pages).map(([name, code]) => [
-        `src/routes/${name}.tsx`,
-        // Each its own route, `/<name>`.
-        code.replace('createFileRoute("/")', `createFileRoute("/${name}")`),
-      ])
-    ),
-  };
+  return testApp(
+    { name: "Attacks", tables: {} },
+    {
+      "server/attacks.ts": operations,
+      ...Object.fromEntries(
+        Object.entries(pages).map(([name, code]) => [
+          `src/routes/${name}.tsx`,
+          // Each its own route, `/<name>`.
+          code.replace('createFileRoute("/")', `createFileRoute("/${name}")`),
+        ])
+      ),
+    }
+  );
 };
 
 /** The attacking App with only its injecting page. */
-export const injectingAppFiles = (): Record<string, string> => ({
-  ...appDefinition({ name: "Attacks", tables: {} }),
-  "server/attacks.ts": operations,
-  "src/routes/index.tsx": injectingPage,
-});
+export const injectingAppFiles = (): TestApp =>
+  testApp(
+    { name: "Attacks", tables: {} },
+    {
+      "server/attacks.ts": operations,
+      "src/routes/index.tsx": injectingPage,
+    }
+  );

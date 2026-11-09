@@ -1,6 +1,10 @@
 import { expect } from "@playwright/test";
 
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import {
+  commitApp,
+  testApp,
+  withFiles,
+} from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
@@ -15,8 +19,8 @@ import { apiOf, peopleIn } from "./people.ts";
  * The desk's data and functions, of spec 8's layout: an invoices table,
  * and a mutation that books one, which changes the App's data.
  */
-const invoices = {
-  ...appDefinition({
+const invoices = testApp(
+  {
     name: "Invoice desk",
     tables: {
       invoices: {
@@ -24,8 +28,9 @@ const invoices = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+  },
+  {
+    "server/invoices.ts": `import { v } from "@grasp-os/sdk";
 import { mutation } from "@server/_generated/server";
 
 export const book = mutation({
@@ -34,7 +39,8 @@ export const book = mutation({
   handler: async (ctx, args) => await ctx.db.insert("invoices", args),
 });
 `,
-};
+  }
+);
 
 const appPage = `import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@grasp-os/ui/components/button";
@@ -58,12 +64,10 @@ test("the side panel shows an App being built, and a builder makes its version c
   const name = `Invoice desk ${tag}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await api.apps.files.commit(
+    const { version } = await commitApp(
+      api.apps.files,
       app.id,
-      {
-        "src/routes/index.tsx": appPage,
-        ...invoices,
-      },
+      withFiles(invoices, { "src/routes/index.tsx": appPage }),
       "An invoice desk for invoices@"
     );
     await api.apps.versions.propose(app.id, version);

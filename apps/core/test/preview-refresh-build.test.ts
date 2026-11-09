@@ -2,7 +2,7 @@ import { kitModuleName } from "@grasp-os/compiler";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { appModulesOf, loadFrame } from "./page-frames.ts";
@@ -21,9 +21,10 @@ import { signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = {
-  ...appDefinition({ name: "Counter", tables: {} }),
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const files = testApp(
+  { name: "Counter", tables: {} },
+  {
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 
@@ -33,7 +34,8 @@ function Small() {
 }
 export const Route = createFileRoute("/")({ component: Small });
 `,
-};
+  }
+);
 
 /** What only React Fast Refresh, its runtime or its instrumentation has. */
 const refreshMarkers = [
@@ -84,10 +86,9 @@ describe("a chat's preview of its draft", { timeout: 60_000 }, () => {
     const published = await framed(builder.api.pages.open(app));
     // The draft changes one word of the page.
     const { chatId } = await chatWithDraft(builder, app, {
-      "src/routes/index.tsx": files["src/routes/index.tsx"].replace(
-        "Clicked",
-        "Pressed"
-      ),
+      "src/routes/index.tsx": (
+        files.files["src/routes/index.tsx"] ?? ""
+      ).replace("Clicked", "Pressed"),
     });
     const preview = await framed(builder.api.chats.preview(chatId, app));
 

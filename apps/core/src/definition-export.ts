@@ -19,7 +19,13 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
-import { appFor, versionFiles, versionTree } from "./apps.ts";
+import {
+  appFor,
+  findVersion,
+  readStored,
+  versionFiles,
+  versionTree,
+} from "./apps.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { requireNotStaff } from "./sharing.ts";
@@ -63,8 +69,8 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 // - An export goes unrecorded: it is in the audit log before anything is
 //   answered, or it fails.
 // - What is exported isn't what was sealed: every part is read back with
-//   the checks a run makes (the release's, its source tree's against the
-//   manifest, each generated file's, each workflow version's and build's),
+//   the checks a run makes (the release's, its source tree's and its
+//   definition's against the manifest, each generated file's, each workflow version's and build's),
 //   and refused otherwise.
 // - A version repeats, or the package grows past what one answer holds:
 //   each version is packaged once under its key and named by it
@@ -234,11 +240,19 @@ export const exportAppDefinition = async (
   if (tree !== manifest.sourceTreeHash) {
     throw versionErrors.create("version.artifact_corrupt", { path: "source" });
   }
+  const definition = await readStored(await findVersion(env, app.id, version));
+  if (definition.hash !== manifest.definitionHash) {
+    throw versionErrors.create("version.artifact_corrupt", {
+      path: "definition",
+    });
+  }
   const budget = textBudget(maxBytesOf(env));
   budget("app", files);
   const registration = canonicalText(release.app);
   // Named as the package names it: it is no file of the App's.
   budget(null, { "app.manifest": registration });
+  // What the App is, as data: counted and scanned as the files are.
+  budget(null, { "app.definition": definition.text });
   // Only their hashes: they name this deployment's resources, the
   // workflows' it may not read among them, and the destination generates
   // its own.
@@ -312,6 +326,7 @@ export const exportAppDefinition = async (
       provenance: {
         manifestHash: release.manifestHash,
         sourceTreeHash: manifest.sourceTreeHash,
+        definitionHash: manifest.definitionHash,
         contractHash: manifest.contractHash,
         schemaHash: manifest.schemaHash,
         dependencyLockHash: manifest.dependencyLockHash,
@@ -321,6 +336,7 @@ export const exportAppDefinition = async (
         generated,
       },
       files,
+      definition: z.json().parse(JSON.parse(definition.text)),
       manifest: registration,
       store:
         store === null

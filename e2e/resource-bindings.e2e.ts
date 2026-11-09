@@ -1,7 +1,8 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { commitApp, testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp, TestSource } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
@@ -15,18 +16,20 @@ import { apiOf, peopleIn } from "./people.ts";
 // shows resolves a binding exactly as that request does.
 
 /** The App's files: an action that asks its `ai`. */
-const writerFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Desk",
-    tables: {
-      notes: {
-        fields: { title: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const writerFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Desk",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
+      permissions: ["permission.ai({ maxOutputTokens: 200 })"],
     },
-    permissions: ["permission.ai({ maxOutputTokens: 200 })"],
-  }),
-  "server/desk.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -38,18 +41,19 @@ export const draft = action({
   handler: async (ctx) => await ctx.ai.generate({ prompt: "Draft a greeting." }),
 });
 `,
-});
+    }
+  );
 
 /** A builder's new App of `files`, with its first version current. */
 const appOf = async (
   builder: Parameters<typeof apiOf>[0],
-  files: Record<string, string>
+  files: TestSource
 ): Promise<string> => {
   const name = `Desk ${crypto.randomUUID().slice(0, 8)}`;
   const { core, api } = apiOf(builder);
   try {
     const { id } = await api.apps.create({ name });
-    const { version } = await api.apps.files.commit(id, files, name);
+    const { version } = await commitApp(api.apps.files, id, files, name);
     await api.apps.versions.setCurrent(id, version);
     // Published, for the people it is shared with (a draft is its
     // builders' alone).

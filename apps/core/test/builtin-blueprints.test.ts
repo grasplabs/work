@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 
 import {
-  definitionPath,
   definitionSources,
   generatedFiles,
   readDefinition,
@@ -37,6 +36,7 @@ import {
 import type { Release } from "../src/builtins.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildPages } from "../src/pages.ts";
+import { commitApp } from "./app-definitions.ts";
 import { grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
@@ -138,13 +138,30 @@ const reinstall = async (): Promise<void> => {
 /** `hello` as stored. */
 const helloRow = async () =>
   await env.DB.prepare(
-    "SELECT name, description, tree, permissions FROM blueprints WHERE id = 'hello'"
+    "SELECT name, description, tree, definition, permissions FROM blueprints WHERE id = 'hello'"
   ).first<{
     name: string;
     description: string;
     tree: string;
+    definition: string;
     permissions: string;
   }>();
+
+/** The SHA-256 of a stored definition's text, as an update names it. */
+const definitionHash = (text = ""): string =>
+  createHash("sha256").update(text).digest("hex");
+
+/**
+ * `hello`'s definition with its one field's stable ID `id`: the same
+ * names and types, so the same code.
+ */
+const helloReIded = (id: string): string => {
+  const text = hello().definition.replace('"id2"', `"${id}"`);
+  if (text === hello().definition) {
+    throw new Error("hello's field is no longer id2");
+  }
+  return text;
+};
 
 /** The actions of the audit events of `hello` in `events`. */
 const helloActions = (
@@ -278,11 +295,9 @@ describe("the built-in blueprints", () => {
         },
       }))
     ).toStrictEqual(
-      release.blueprints.map(({ id, files }) => ({
+      release.blueprints.map(({ id, definition }) => ({
         id,
-        generated: definitionSources(
-          readDefinition(files[definitionPath] ?? "")
-        ),
+        generated: definitionSources(readDefinition(JSON.parse(definition))),
       }))
     );
   });
@@ -711,7 +726,8 @@ describe("the built-in blueprints", () => {
     const afterRelease = await admin.api.permissions.list(copy);
 
     // Code of the builder's own is asked for again.
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       created.app.id,
       {
         [greetings]: `${hello().files[greetings]}\n// Mine.\n`,
@@ -763,7 +779,8 @@ describe("the built-in blueprints", () => {
 
     // The builder's own greeting, made current.
     const mine = `${hello().files[greetings]}\n// Mine.\n`;
-    const { version: edited } = await builder.api.apps.files.commit(
+    const { version: edited } = await commitApp(
+      builder.api.apps.files,
       app.id,
       { [greetings]: mine },
       "Mine"
@@ -791,6 +808,7 @@ describe("the built-in blueprints", () => {
     const stale = await outcome(
       builder.api.apps.blueprints.acceptUpdate(app.id, {
         to: offered.to,
+        definition: offered.definition,
         over: 1,
       })
     );
@@ -803,6 +821,7 @@ describe("the built-in blueprints", () => {
       accepted.push(
         await builder.api.apps.blueprints.acceptUpdate(app.id, {
           to: offered.to,
+          definition: offered.definition,
           over: edited,
         })
       );
@@ -814,6 +833,7 @@ describe("the built-in blueprints", () => {
     const again = await outcome(
       builder.api.apps.blueprints.acceptUpdate(app.id, {
         to: offered.to,
+        definition: offered.definition,
         over: edited,
       })
     );
@@ -830,6 +850,7 @@ describe("the built-in blueprints", () => {
     const { version: wholeVersion } =
       await builder.api.apps.blueprints.acceptUpdate(untouched.id, {
         to: offered.to,
+        definition: offered.definition,
         over: 1,
       });
     const { id: marked } = await builder.api.apps.blueprints.mark(
@@ -867,9 +888,11 @@ describe("the built-in blueprints", () => {
         blueprint: "hello",
         from: released?.tree,
         to: installed?.tree,
+        definition: definitionHash(installed?.definition),
         over: edited,
         changes: [[helperPath, "added"]],
         conflicts: [greetings],
+        definitionConflict: false,
       },
       before: mine,
       stale: "app.conflict",
@@ -890,6 +913,82 @@ describe("the built-in blueprints", () => {
       whole: [],
       wholeFiles: next.blueprints.find(({ id }) => id === "hello")?.files,
       ofMarked: null,
+    });
+
+    await reinstall();
+  });
+
+  it("refuse an update whose blueprint's definition changed after it was offered, though its code didn't", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const { app } = await builder.api.apps.blueprints.create("hello", {
+      name: "Offered",
+    });
+    const changed = changedHello();
+    await install(changed);
+    const offered = await builder.api.apps.blueprints.update(app.id);
+    if (!offered) {
+      throw new Error("No update was offered");
+    }
+    // The blueprint's field takes another stable ID: no file changes.
+    const changedFiles = changed.blueprints.find(
+      ({ id }) => id === "hello"
+    )?.files;
+    await install(
+      releaseWith({ files: changedFiles, definition: helloReIded("id9") })
+    );
+    const now = await builder.api.apps.blueprints.update(app.id);
+
+    expect({
+      sameCode: now?.to === offered.to,
+      stale: await outcome(
+        builder.api.apps.blueprints.acceptUpdate(app.id, {
+          to: offered.to,
+          definition: offered.definition,
+          over: offered.over,
+        })
+      ),
+    }).toStrictEqual({ sameCode: true, stale: "app.conflict" });
+
+    await reinstall();
+  });
+
+  it("say a definition both a copy and its blueprint changed is a conflict, though the code each generates is the same", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const { app } = await builder.api.apps.blueprints.create("hello", {
+      name: "Re-IDed",
+    });
+    // Each side gives the one field another stable ID: the same code.
+    const created = await builder.api.apps.files.read(app.id);
+    const { version } = await builder.api.apps.files.commit(
+      app.id,
+      { "AGENTS.md": created["AGENTS.md"] ?? "" },
+      "Another ID",
+      JSON.parse(helloReIded("id7"))
+    );
+    await install(releaseWith({ definition: helloReIded("id8") }));
+    const offered = await builder.api.apps.blueprints.update(app.id);
+    const taken =
+      offered === null
+        ? null
+        : await builder.api.apps.blueprints.acceptUpdate(app.id, {
+            to: offered.to,
+            definition: offered.definition,
+            over: offered.over,
+          });
+
+    expect({
+      changes: offered?.changes,
+      conflicts: offered?.conflicts,
+      definitionConflict: offered?.definitionConflict,
+      // The copy's definition stays: nothing to commit.
+      taken: taken?.version,
+    }).toStrictEqual({
+      changes: [],
+      conflicts: [],
+      definitionConflict: true,
+      taken: version,
     });
 
     await reinstall();
@@ -928,6 +1027,7 @@ describe("the built-in blueprints", () => {
     }
     const { version } = await builder.api.apps.blueprints.acceptUpdate(app.id, {
       to: offered.to,
+      definition: offered.definition,
       over: 1,
     });
     const taken = await builder.api.apps.files.read(app.id, version);

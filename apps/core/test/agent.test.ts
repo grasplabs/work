@@ -1465,7 +1465,12 @@ describe("chat agent code run leases", () => {
       createAfterRevoke: "agent.run_revoked",
       unknownRun: "agent.run_ended",
       ending: "revoked",
-      draft: { base: null, changes: { "a.md": "a" }, revision: 1 },
+      draft: {
+        base: null,
+        changes: { "a.md": "a" },
+        definition: null,
+        revision: 1,
+      },
     });
     await expect(
       runRecords(stub, chat.id).then((records) =>

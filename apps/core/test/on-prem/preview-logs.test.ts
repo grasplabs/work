@@ -6,7 +6,8 @@ import { z } from "zod";
 import { chatAgentId, personalWorkspaceId } from "../../src/chats-rpc.ts";
 import { workspace } from "../../src/durable-objects.ts";
 import { codeResults, codeStep, model, says } from "../agent-chat.ts";
-import { appDefinition, withoutDefinition } from "../app-definitions.ts";
+import { testApp, withoutDefinition } from "../app-definitions.ts";
+import type { TestApp } from "../app-definitions.ts";
 import { release, requestGranted } from "../apps.ts";
 import { mockIdp } from "../idp.ts";
 import { fakeProvider } from "../model-provider.ts";
@@ -22,8 +23,8 @@ import { signedInApi } from "../sign-in.ts";
 const idp = mockIdp();
 
 /** A notes App of spec 8's layout whose `create` writes what it creates. */
-const drafted: Record<string, string> = {
-  ...appDefinition({
+const drafted: TestApp = testApp(
+  {
     name: "Invoice desk",
     tables: {
       notes: {
@@ -31,8 +32,9 @@ const drafted: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation } from "@server/_generated/server";
 
 export const create = mutation({
@@ -44,15 +46,15 @@ export const create = mutation({
   },
 });
 `,
-};
+  }
+);
 
 /**
  * The Invoice desk as released: its config, and a schema with the tables
  * of every draft here, which the agent never writes (its definition's).
  */
-const releasedDesk: Record<string, string> = {
-  "AGENTS.md": "# Invoice desk\n",
-  ...appDefinition({
+const releasedDesk: TestApp = testApp(
+  {
     name: "Invoice desk",
     tables: {
       invoices: {
@@ -64,8 +66,11 @@ const releasedDesk: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-};
+  },
+  {
+    "AGENTS.md": "# Invoice desk\n",
+  }
+);
 
 /** `files` as the agent writes them: never the definition, its config or its schema. */
 const agentWritten = withoutDefinition;

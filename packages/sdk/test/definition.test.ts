@@ -39,6 +39,12 @@ const counter = () => {
 const fieldNames = (definition: AppDefinition) =>
   definition.tables[0]?.fields.map(({ name }) => name);
 
+/** `definition` as Grasp stores it: its text's JSON, compact descriptors. */
+const stored = (definition: AppDefinition): Record<string, unknown> =>
+  // SAFETY: a definition's text is a JSON object.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  JSON.parse(definitionText(definition)) as Record<string, unknown>;
+
 /** `operations` applied in order to an empty App's definition. */
 const defined = (...operations: DefinitionOperation[]): AppDefinition => {
   const newId = counter();
@@ -419,11 +425,8 @@ describe("operations", () => {
   });
 
   test("regenerate the config of an App that reads people, however its definition holds the permission", () => {
-    const base = definitionText(tasks());
     const withPeople = (people: object) =>
-      readDefinition(
-        JSON.stringify({ ...JSON.parse(base), permissions: [people] })
-      );
+      readDefinition({ ...stored(tasks()), permissions: [people] });
     const configs = [
       // As `addPermission` writes it, and as a definition may hold it.
       withPeople({ "~permission": "people", alias: "people" }),
@@ -570,26 +573,93 @@ describe("generated code", () => {
   });
 });
 
+/** `value` with every object's keys in reverse order, all the way down. */
+const reversed = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(reversed);
+  }
+  return typeof value === "object" && value !== null
+    ? Object.fromEntries(
+        Object.entries(value)
+          .toReversed()
+          .map(([key, item]) => [key, reversed(item)])
+      )
+    : value;
+};
+
 describe("reading", () => {
-  test("reads back what it wrote", () => {
+  test("reads back what it stores, as the same text whatever the key order", () => {
     const definition = tasks();
-    expect(readDefinition(definitionText(definition))).toStrictEqual(
-      definition
+    const text = definitionText(definition);
+    expect(readDefinition(JSON.parse(text))).toStrictEqual(definition);
+    const reordered = Object.fromEntries(
+      Object.entries(stored(definition)).toReversed()
     );
+    expect(definitionText(readDefinition(reordered))).toBe(text);
+  });
+
+  test("gives equal definitions one text whatever order their records' keys came in, and keeps an object type's fields in their declared order", () => {
+    const definition = defined(
+      {
+        op: "addTable",
+        name: "orders",
+        fields: {
+          shipping: "v.object({ street: v.string(), city: v.string() })",
+        },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      {
+        op: "addPermission",
+        permission:
+          'permission.workflow("triage", { input: v.object({ title: v.string(), body: v.string() }), output: v.null() })',
+      }
+    );
+    // Every key reversed, an object type's fields too: another type.
+    const shuffled = readDefinition(reversed(stored(definition)));
+    const text = definitionText(definition);
+    expect({
+      permissions: definitionText({
+        ...definition,
+        permissions: definition.permissions.map((permission) =>
+          Object.fromEntries(Object.entries(permission).toReversed())
+        ),
+      }),
+      fields: text.indexOf('"street"') < text.indexOf('"city"'),
+      reorderedType: definitionText(shuffled) === text,
+    }).toStrictEqual({ permissions: text, fields: true, reorderedType: false });
+  });
+
+  test("generates the same code from a definition as from its stored text read back, an object default's keys whatever their order", () => {
+    const definition = defined({
+      op: "addTable",
+      name: "places",
+      fields: {
+        address:
+          'v.object({ street: v.string(), city: v.string() }).default({ street: "Main", city: "Utrecht" })',
+      },
+      access: { read: "appMembers", write: "appMembers" },
+    });
+    const readBack = readDefinition(JSON.parse(definitionText(definition)));
+    expect(definitionSources(readBack)).toStrictEqual(
+      definitionSources(definition)
+    );
+  });
+
+  test("refuses a definition over its size before reading any of it", () => {
+    expect(() =>
+      readDefinition({ ...stored(tasks()), name: "x".repeat(1024 * 1024) })
+    ).toThrow(/at most/u);
   });
 
   test("holds every type in its compact form, and says which one it can't read", () => {
     const text = definitionText(tasks());
 
     expect(text).not.toContain("descriptorVersion");
-    expect(text).toContain(
-      '"type": {\n            "kind": "boolean",\n            "default": false\n          }'
-    );
+    expect(text).toContain('"type":{"default":false,"kind":"boolean"}');
     expect(() =>
       readDefinition(
-        text.replace(
-          '"kind": "boolean"',
-          '"kind": "boolean",\n "nullable": false'
+        JSON.parse(
+          text.replace('"kind":"boolean"', '"kind":"boolean","nullable":false')
         )
       )
     ).toThrow(/`tasks\.done`/u);
@@ -598,28 +668,27 @@ describe("reading", () => {
   test("refuses a definition that isn't one", () => {
     const text = definitionText(tasks());
     const refused = [
-      "not json",
-      JSON.stringify({ ...tasks(), extra: 1 }),
-      text.replace('"id3"', '"id2"'),
-      text.replace(
-        '"fields": [\n            "id2"',
-        '"fields": [\n            "id9"'
-      ),
-      JSON.stringify({
-        ...tasks(),
+      "not a definition",
+      { ...stored(tasks()), extra: 1 },
+      JSON.parse(text.replace('"id3"', '"id2"')),
+      JSON.parse(text.replace('"fields":["id2"]', '"fields":["id9"]')),
+      {
+        ...stored(tasks()),
         permissions: [
           { "~permission": "ai", alias: "ai", maxOutputTokens: -1 },
         ],
-      }),
+      },
     ];
     for (const input of refused) {
       expect(() => readDefinition(input)).toThrow(/./u);
     }
-    expect(() => readDefinition("not json")).toThrow(AppDefinitionError);
+    expect(() => readDefinition("not a definition")).toThrow(
+      AppDefinitionError
+    );
     // Two fields of one table named alike, each with an ID of its own.
-    const twice = text.replace('"name": "done"', '"name": "title"');
+    const twice = text.replace('"name":"done"', '"name":"title"');
     expect(twice).not.toBe(text);
-    expect(() => readDefinition(twice)).toThrow(AppDefinitionError);
-    expect(() => readDefinition(twice)).toThrow(/named `title`/u);
+    expect(() => readDefinition(JSON.parse(twice))).toThrow(AppDefinitionError);
+    expect(() => readDefinition(JSON.parse(twice))).toThrow(/named `title`/u);
   });
 });

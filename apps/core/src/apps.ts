@@ -1,5 +1,11 @@
 import { isPageFile } from "@grasp-os/compiler";
-import { definitionPath } from "@grasp-os/sdk/definition";
+import {
+  definitionText,
+  emptyDefinition,
+  readDefinition,
+  tryReadDefinition,
+} from "@grasp-os/sdk/definition";
+import type { AppDefinition } from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -44,9 +50,13 @@ import {
   requireNotArchived,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
-import { definitionFiles, withDefinitionCode } from "./app-definition.ts";
-import { refuseWithoutLayout } from "./app-layout.ts";
+import {
+  generatedPaths,
+  schemaIdsOf,
+  withDefinitionCode,
+} from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
+import type { Release } from "./app-releases.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
 import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
 import {
@@ -69,13 +79,19 @@ import { isUniqueViolation, retriedBatch } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
+import type { SchemaIds } from "./schema-changes.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
 // The App registry and each App's code. The registry and the versions are
-// rows in the core database. A version's files are one object in R2 (EU),
+// rows in the core database. A version is its code and its definition. Its
+// files, code only, are one object in R2 (EU),
 // `apps/<app>/trees/<sha256>.json`: canonical JSON by path, stored under
 // its own SHA-256, which the version row names. Reading a version is one
-// read, checked against the hash.
+// read, checked against the hash. Its definition, what the App is as data
+// (@grasp-os/sdk's definition.ts: its tables, with the stable IDs its
+// store matches them by, and its permissions), is no file: the row holds
+// it, as its text (`definitionText`), with its SHA-256, and a migration reaches it as
+// it reaches any row.
 //
 // A tree is only ever written under its own hash and version rows never
 // change, so a version's files stay exactly as committed whatever happens
@@ -86,6 +102,35 @@ import { liveStoreSql } from "./store-deletion.ts";
 // Versions are linear: each commit is the latest version with its changes
 // over it, as the next number. Two commits at once both try the same
 // number, and the database keeps one; the other is refused as a conflict.
+//
+// Threat model of the definition beside the tree, and how each is closed:
+//
+// - The definition and the code generated from it drift apart: every
+//   version is written through `storedVersion`, which generates its
+//   `grasp.config.ts` and `server/schema.ts` from the definition it is
+//   committed with, whatever the files held, before the tree is hashed;
+//   nothing else writes those paths (the agent's `write` refuses them,
+//   app-definition.ts). Generation goes one way: nothing reads a
+//   definition back from code. Applying a version's schema to its store
+//   refuses a table or field its definition gives no ID
+//   (app-definition.ts, `schemaIdsOf`).
+// - A definition changed or swapped after it was committed: the row
+//   holds its SHA-256, checked on every read (`readStored`); a
+//   trigger refuses any change of either (migration 0228); the version's
+//   sealed release names the hash next to the tree's (`definitionHash`),
+//   and its schema is applied only by the definition of that hash
+//   (app-schema.ts).
+// - A version committed before definitions left the tree (its row has
+//   none, its tree a `definition.json` nothing reads now): refused
+//   wherever its definition is needed (`app.definition_missing`, which
+//   says to create the App again), a draft's writes included, and its
+//   release, sealed in an earlier format, is refused to load or make
+//   current (`version.format_unsupported`). Nothing reads the old file.
+// - A chat's draft and a version committed meanwhile both change the
+//   definition: the draft keeps its own copy (workspace.ts), and
+//   proposing it over a version that changed the definition since it
+//   began, when the draft changed it too, is refused as a conflict, as a
+//   file both changed is (`draftOverLatest`).
 
 export type AppRow = typeof apps.$inferSelect;
 /** A version as this release writes it: never the previous release's `screens`. */
@@ -474,6 +519,111 @@ export const codeIdentity = async (
   return await sha256Hex(canonicalJson(Object.fromEntries(code)));
 };
 
+/**
+ * A definition as Grasp holds it: itself, its text (`definitionText`,
+ * one text for equal definitions, which is what is stored and compared)
+ * and that text's SHA-256.
+ */
+export interface StoredDefinition {
+  definition: AppDefinition;
+  text: string;
+  hash: string;
+}
+
+/** `definition` as Grasp holds it. */
+export const storedDefinition = async (
+  definition: AppDefinition
+): Promise<StoredDefinition> => {
+  const text = definitionText(definition);
+  return { definition, text, hash: await sha256Hex(text) };
+};
+
+/**
+ * The definition a version's row, a chat's draft or a blueprint holds,
+ * read and checked whole: the one reader of a stored definition. Checked
+ * against the hash the row holds, where it holds one (a version's, see
+ * the header). `app.definition_missing` for one made before definitions
+ * left the tree, which has none.
+ */
+export const readStored = async (stored: {
+  readonly definition: string | null;
+  readonly definitionHash?: string | null;
+}): Promise<StoredDefinition> => {
+  const { definition: text, definitionHash } = stored;
+  if (text === null || definitionHash === null) {
+    throw appErrors.create("app.definition_missing");
+  }
+  const hash = await sha256Hex(text);
+  if (definitionHash !== undefined && hash !== definitionHash) {
+    throw new Error("A stored definition doesn't match its hash");
+  }
+  return { definition: readDefinition(JSON.parse(text)), text, hash };
+};
+
+/**
+ * The definition a caller gives (`commitFiles`), checked whole:
+ * `app.definition_invalid` naming the problem otherwise.
+ */
+export const givenDefinition = (input: unknown): AppDefinition => {
+  const read = tryReadDefinition(input);
+  if ("problem" in read) {
+    throw appErrors.create("app.definition_invalid", {
+      issues: [read.problem],
+    });
+  }
+  return read.definition;
+};
+
+/**
+ * The stable IDs `release`'s schema is applied by (app-definition.ts,
+ * `schemaIdsOf`): its version's definition's, only while that is the
+ * definition the release was sealed with (`definitionHash`).
+ */
+export const releaseIdsOf = async (
+  env: Env,
+  release: Pick<Release, "manifest" | "app">
+): Promise<SchemaIds> => {
+  const app = appIdSchema.parse(release.manifest.resourceId);
+  const row = await findVersion(env, app, release.manifest.resourceVersion);
+  const { definition, hash } = await readStored(row);
+  if (hash !== release.manifest.definitionHash) {
+    throw new Error("A release names another definition than its version's");
+  }
+  return schemaIdsOf(definition, release.app.schema);
+};
+
+/** A version as it is stored: its tree, the hash of its code, its definition. */
+export interface StoredVersion extends Tree {
+  code: string;
+  definition: StoredDefinition;
+}
+
+/**
+ * `files` and `definition` as a version stores them, `files` changed in
+ * place to hold the config and schema `definition` generates, whatever
+ * they held: every version is written through here, so its code is
+ * always its definition's (see the header). `app.too_large` if they are
+ * over an App's limits.
+ */
+export const storedVersion = async (
+  files: Map<string, string>,
+  definition: AppDefinition
+): Promise<StoredVersion> => {
+  withDefinitionCode(files, definition);
+  return {
+    ...(await versionTree(files)),
+    code: await codeIdentity(files),
+    definition: await storedDefinition(definition),
+  };
+};
+
+/** Whether `stored` is exactly the version `row`: its code and its definition. */
+export const sameVersion = (
+  stored: StoredVersion,
+  row: Pick<VersionRow, "tree" | "definitionHash"> | undefined
+): boolean =>
+  stored.tree === row?.tree && stored.definition.hash === row.definitionHash;
+
 /** Stores a tree under its hash, before any version row names it. */
 export const storeTree = async (
   env: Env,
@@ -695,23 +845,22 @@ export const readFiles = async (
 /**
  * Applies changes (`FileChanges`: new content by path, or null to delete a
  * file) to an App's `files`, its latest version's or a chat's draft of it
- * (agent-builds.ts), refused as a whole when they would be over the App's
- * limits, hold paths that can't both exist, or an AGENTS.md over its
- * limit. The changes, checked.
+ * (agent-builds.ts), with the config and schema `definition` generates,
+ * refused as a whole when they would be over the App's limits, hold
+ * paths that can't both exist, or an AGENTS.md over its limit. The
+ * changes, checked.
  */
 export const applyChanges = (
-  env: Env,
   files: Map<string, string>,
   input: unknown,
-  /** The App's name, for the empty definition of its first files. */
-  name: string
+  /** The definition the files are of: their config and schema are its. */
+  definition: AppDefinition
 ): [string, string | null][] => {
   const changes = Object.entries(
     appErrors.parse("app.invalid", fileChangesSchema, input)
   );
   const before = sizeOf(files);
   const agentsBefore = files.get(appMemoryPath);
-  const defined = files.has(definitionPath);
   const added = new Set(
     changes.flatMap(([path, content]) =>
       content === null || files.has(path) ? [] : [path]
@@ -725,17 +874,17 @@ export const applyChanges = (
     }
   }
   // The config and schema as the definition generates them, whatever the
-  // changes held of them, before the App's limits are checked on them;
-  // and the definition a first write gets. Answered as changes too, so a
-  // draft saves the files it was checked with.
+  // changes held of them, before the App's limits are checked on them.
+  // Answered as changes too, so a draft saves the files it was checked
+  // with.
   const submitted = new Map(
-    [...definitionFiles].map((path) => [path, files.get(path)])
+    [...generatedPaths].map((path) => [path, files.get(path)])
   );
-  withDefinitionCode(files, name, defined);
+  withDefinitionCode(files, definition);
   checkLimits(files, before);
   checkPaths(files.keys(), added);
   checkMemory(agentsBefore, files.get(appMemoryPath));
-  const generated = [...definitionFiles].flatMap((path): [string, string][] => {
+  const generated = [...generatedPaths].flatMap((path): [string, string][] => {
     const content = files.get(path);
     return content === undefined || content === submitted.get(path)
       ? []
@@ -751,29 +900,39 @@ export const applyChanges = (
 
 /**
  * Commits changes (new content by path, or null to delete a file) over an
- * App's latest version as its next version, by `by` with `message`.
- * Refused as a whole when the version would be over the App's limits. A
- * version committed meanwhile takes the number: `app.conflict`, and
- * nothing of this commit is kept.
+ * App's latest version as its next version, by `by` with `message`, with
+ * `definition` if given, else the latest version's (an empty one for an
+ * App's first). Refused as a whole when the version would be over the
+ * App's limits. A version committed meanwhile takes the number:
+ * `app.conflict`, and nothing of this commit is kept.
  */
 export const commitFiles = async (
   env: Env,
   by: Identity,
   app: unknown,
   input: unknown,
-  message: unknown
+  message: unknown,
+  definitionInput?: unknown
 ): Promise<CommittedVersion> => {
   const { id: appId, name } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const { latest, files } = await latestFiles(env, appId);
-  applyChanges(env, files, input, name);
-  const { tree, json } = await versionTree(files);
-  if (tree === latest?.tree) {
+  let definition: AppDefinition;
+  if (definitionInput !== undefined) {
+    definition = givenDefinition(definitionInput);
+  } else if (latest === undefined) {
+    definition = emptyDefinition(name);
+  } else {
+    ({ definition } = await readStored(latest));
+  }
+  applyChanges(files, input, definition);
+  const stored = await storedVersion(files, definition);
+  if (sameVersion(stored, latest)) {
     throw appErrors.create("app.nothing_to_commit");
   }
+  const { tree, json } = stored;
   refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
-  refuseWithoutLayout(files.keys());
   await storeTree(env, appId, { tree, json });
 
   const row: VersionRow = {
@@ -781,7 +940,9 @@ export const commitFiles = async (
     version: (latest?.version ?? 0) + 1,
     parent: latest?.version ?? null,
     tree,
-    code: await codeIdentity(files),
+    code: stored.code,
+    definition: stored.definition.text,
+    definitionHash: stored.definition.hash,
     files: files.size,
     authorId: by.userId,
     message: text,
@@ -816,6 +977,7 @@ export const commitFiles = async (
           version: row.version,
           parent: row.parent,
           tree,
+          definition: row.definitionHash,
           files: row.files,
         }),
         sql`NOT ${archivedNow(appId)}`
@@ -856,13 +1018,24 @@ export interface DraftChanges {
   base: number | null;
   /** New content by path, or null to delete a file. */
   changes: Record<string, string | null>;
+  /**
+   * Its own definition, as stored (`definitionText`); null while it is
+   * its base's.
+   */
+  definition: string | null;
 }
+
+/** Whether a draft changes anything over its base: a file or its definition. */
+export const changesAnything = (
+  draft: Pick<DraftChanges, "changes" | "definition">
+): boolean =>
+  Object.keys(draft.changes).length > 0 || draft.definition !== null;
 
 /** A draft's files: its base version's, with its changes over them. */
 export const draftFiles = async (
   env: Env,
   app: AppId,
-  { base, changes }: DraftChanges
+  { base, changes }: Pick<DraftChanges, "base" | "changes">
 ): Promise<Map<string, string>> => {
   const files = new Map(
     base === null ? [] : Object.entries(await versionFiles(env, app, base))
@@ -877,23 +1050,47 @@ export const draftFiles = async (
   return files;
 };
 
-/** The files a draft commits, and the version they follow. */
+/**
+ * A draft's definition (`readStored`): its own, else its base version's;
+ * null for a draft of an App with no version that hasn't written yet.
+ */
+export const draftDefinition = async (
+  env: Env,
+  app: AppId,
+  { base, definition }: Pick<DraftChanges, "base" | "definition">
+): Promise<StoredDefinition | null> => {
+  if (definition !== null) {
+    return await readStored({ definition });
+  }
+  return base === null
+    ? null
+    : await readStored(await findVersion(env, app, base));
+};
+
+/** The files and definition a draft commits, and the version they follow. */
 export interface DraftOverLatest {
   parent: number | null;
   files: Map<string, string>;
+  /** Null for a draft of an App with no version that holds none. */
+  definition: AppDefinition | null;
 }
+
+/** A conflict's issue: what a version committed since a draft began changed. */
+const changedSince = (what: string): string =>
+  `${what}: Changed in a version committed since this draft began`;
 
 /**
  * A chat's draft over the App's latest version: its changes over its base
  * while that is still the latest; otherwise over the latest, only if no
- * version since changed a path the draft changes (to other content):
+ * version since changed a path the draft changes (to other content), nor
+ * the definition, when the draft changed it too (to another):
  * `app.conflict` naming them, when one did. So a draft never undoes what
  * a builder committed after it began.
  */
 export const draftOverLatest = async (
   env: Env,
   app: AppId,
-  { base, changes }: DraftChanges
+  { base, changes, definition }: DraftChanges
 ): Promise<DraftOverLatest> => {
   const { latest, files } = await latestFiles(env, app);
   const parent = latest?.version ?? null;
@@ -907,9 +1104,17 @@ export const draftOverLatest = async (
     const clashes = Object.entries(changes).flatMap(([path, content]) =>
       before.get(path) !== files.get(path) &&
       (content ?? undefined) !== files.get(path)
-        ? [`${path}: Changed in a version committed since this draft began`]
+        ? [changedSince(path)]
         : []
     );
+    const latestDefinition = latest?.definition ?? null;
+    if (
+      definition !== null &&
+      (baseRow?.definition ?? null) !== latestDefinition &&
+      definition !== latestDefinition
+    ) {
+      clashes.push(changedSince("The App's definition"));
+    }
     if (clashes.length > 0) {
       throw appErrors.create("app.conflict", { issues: clashes.toSorted() });
     }
@@ -928,7 +1133,13 @@ export const draftOverLatest = async (
   }
   // What builders committed since may clash with what the draft adds.
   checkPaths(files.keys(), added);
-  return { parent, files };
+  let merged: StoredDefinition | null = null;
+  if (definition !== null) {
+    merged = await readStored({ definition });
+  } else if (latest !== undefined) {
+    merged = await readStored(latest);
+  }
+  return { parent, files, definition: merged?.definition ?? null };
 };
 
 /**
@@ -943,31 +1154,36 @@ export const proposeDraft = async (
   env: Env,
   by: Acting,
   app: unknown,
-  { parent, files }: DraftOverLatest,
+  { parent, files, definition }: DraftOverLatest,
   message: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
   admit?: () => Promise<void>,
   /** The chat whose draft it is, which its audit names. */
   fromChat?: string
 ): Promise<AppVersion> => {
-  const { id: appId } = await editableApp(env, by, app);
+  const { id: appId, name } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
-  const { tree, json } = await versionTree(files);
+  const stored = await storedVersion(
+    files,
+    definition ?? emptyDefinition(name)
+  );
   const latest =
     parent === null ? undefined : await findVersion(env, appId, parent);
-  if (tree === latest?.tree) {
+  if (sameVersion(stored, latest)) {
     throw appErrors.create("app.nothing_to_commit");
   }
+  const { tree, json } = stored;
   refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
-  refuseWithoutLayout(files.keys());
   await storeTree(env, appId, { tree, json });
   const row: VersionRow = {
     appId,
     version: (parent ?? 0) + 1,
     parent,
     tree,
-    code: await codeIdentity(files),
+    code: stored.code,
+    definition: stored.definition.text,
+    definitionHash: stored.definition.hash,
     files: files.size,
     authorId: by.userId,
     message: text,
@@ -1004,6 +1220,7 @@ export const proposeDraft = async (
           version: row.version,
           parent,
           tree,
+          definition: row.definitionHash,
           files: row.files,
         }),
         sql`NOT ${archivedNow(appId)}`

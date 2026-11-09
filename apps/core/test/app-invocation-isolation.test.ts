@@ -156,7 +156,7 @@ describe(
       });
       // With a page, which its preview opens, and its lease with it.
       const drafted = {
-        "server/notes.ts": `${isolationFiles["server/notes.ts"] ?? ""}\n// Drafted.\n`,
+        "server/notes.ts": `${isolationFiles.files["server/notes.ts"] ?? ""}\n// Drafted.\n`,
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({ component: () => <p>Notes</p> });

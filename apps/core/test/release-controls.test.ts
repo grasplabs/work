@@ -2,7 +2,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { loadRelease } from "../src/app-releases.ts";
-import { commitFiles } from "../src/apps.ts";
+import { withFiles } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
@@ -27,14 +28,13 @@ const idp = mockIdp();
 const sealedTwice = async () => {
   const fixture = await appWith(notesFiles);
   const first = await seal(fixture);
-  await commitFiles(
+  await commitDefined(
     env,
     fixture.owner,
     fixture.app,
-    {
-      ...notesFiles,
-      "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}// Again.\n`,
-    },
+    withFiles(notesFiles, {
+      "server/notes.ts": `${notesFiles.files["server/notes.ts"] ?? ""}// Again.\n`,
+    }),
     "Again"
   );
   const second = await seal(fixture, 2);

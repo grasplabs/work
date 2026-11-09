@@ -55,7 +55,6 @@ const languageOf = (file: string): string => {
 /** Where a file stands on its page: what the App is, then its server, then its pages. */
 const placeOf = (file: string): number => {
   const order = [
-    "definition.json",
     "grasp.config.ts",
     "server/schema.ts",
     "server/",
@@ -107,7 +106,7 @@ export const examplePage = (
     `  order: ${order}`,
     "---",
     "",
-    `${description} Every file of the App is below, as Grasp installs it: \`definition.json\` and the \`grasp.config.ts\` and \`server/schema.ts\` generated from it, its server functions in \`server/\`, and its Pages in \`src/\`.`,
+    `${description} Every file of the App is below, as Grasp installs it: the \`grasp.config.ts\` and \`server/schema.ts\` generated from its definition, its server functions in \`server/\`, and its Pages in \`src/\`.`,
     "",
     ...sections.flatMap((section) => [section, ""]),
   ].join("\n");

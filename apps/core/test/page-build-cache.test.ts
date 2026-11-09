@@ -5,6 +5,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { cachedFilesManifest, filesManifest } from "../src/app-inspection.ts";
 import { buildCachePrefix } from "../src/build-cache.ts";
 import { buildPages, versionPages } from "../src/pages.ts";
+import { withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { notesFiles } from "./notes-client-app.ts";
 
 // The toolchain's output kept in R2, served again only as core kept it
@@ -262,14 +264,14 @@ describe("the build cache", { timeout: 120_000 }, () => {
 });
 
 /** The Notes App with server code of its own, so nothing else inspected it. */
-const ownNotes = (): Record<string, string> => ({
-  ...notesFiles,
-  "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`,
-});
+const ownNotes = (): TestApp =>
+  withFiles(notesFiles, {
+    "server/notes.ts": `${notesFiles.files["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`,
+  });
 
 /** What `files`' first inspection for `profile` kept: its manifest's entry. */
 const keptInspection = async (
-  files: Record<string, string>,
+  files: Readonly<Record<string, string>>,
   profile: "preview" | "production"
 ) => {
   let manifest: Awaited<ReturnType<typeof filesManifest>> | undefined;
@@ -292,7 +294,7 @@ const keptInspection = async (
 describe("the inspection cache", { timeout: 120_000 }, () => {
   it("reads back no manifest core didn't keep, and inspects again", async () => {
     const files = ownNotes();
-    const { manifest, key } = await keptInspection(files, "production");
+    const { manifest, key } = await keptInspection(files.files, "production");
     const kept = await env.FILES.get(key);
     const text = (await kept?.text()) ?? "";
     // A manifest that reads, naming the App otherwise: forged over the
@@ -303,14 +305,14 @@ describe("the inspection cache", { timeout: 120_000 }, () => {
       { customMetadata: kept?.customMetadata }
     );
 
-    const sidebar = await cachedFilesManifest(env, files);
-    const inspectedAgain = await filesManifest(env, files, "app-test");
+    const sidebar = await cachedFilesManifest(env, files.files);
+    const inspectedAgain = await filesManifest(env, files.files, "app-test");
 
     expect({
       // The sidebar shows only what core kept, so nothing now.
       sidebar,
       name: inspectedAgain.name,
-      restored: await cachedFilesManifest(env, files),
+      restored: await cachedFilesManifest(env, files.files),
     }).toStrictEqual({
       sidebar: undefined,
       name: manifest.name,
@@ -320,10 +322,10 @@ describe("the inspection cache", { timeout: 120_000 }, () => {
 
   it("keeps a draft's inspection apart from a version's", async () => {
     const files = ownNotes();
-    const preview = await keptInspection(files, "preview");
+    const preview = await keptInspection(files.files, "preview");
     // A draft's inspection is no version's: the sidebar has none to show.
-    const sidebar = await cachedFilesManifest(env, files);
-    const production = await keptInspection(files, "production");
+    const sidebar = await cachedFilesManifest(env, files.files);
+    const production = await keptInspection(files.files, "production");
 
     expect({
       sidebar,

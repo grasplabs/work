@@ -22,7 +22,7 @@ import { catalogBindingKinds } from "./workflow-resources.ts";
  * refused, to be exported again, rather than read as this one: the
  * schema is strict, so another format's shape would read as no package.
  */
-export const definitionPackageFormatVersion = 4;
+export const definitionPackageFormatVersion = 5;
 
 /** The most workflow versions one package holds. */
 export const definitionPackageMaxWorkflows = 64;
@@ -73,6 +73,8 @@ export const definitionPackageSchema = z.strictObject({
     provenance: z.strictObject({
       manifestHash: sha256Schema,
       sourceTreeHash: sha256Schema,
+      /** The SHA-256 of `definition`'s text, as the release names it. */
+      definitionHash: sha256Schema,
       contractHash: sha256Schema,
       schemaHash: sha256Schema,
       dependencyLockHash: sha256Schema,
@@ -87,6 +89,14 @@ export const definitionPackageSchema = z.strictObject({
     }),
     /** The version's source tree, which hashes to `sourceTreeHash`. */
     files: filesSchema,
+    /**
+     * The version's App definition (@grasp-os/sdk's definition.ts), which
+     * its config and schema were generated from: its tables, with their
+     * stable IDs, access and permissions, as data. Its text hashes to
+     * `definitionHash`. A developer's project needs none of it, and none
+     * of it is code; a destination that imports the App takes it whole.
+     */
+    definition: z.json(),
     /**
      * The App's registration as the host read and sealed it, canonical
      * text, which the SDK reads back strictly (`readAppManifest`): what

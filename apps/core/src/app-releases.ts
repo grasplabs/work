@@ -5,6 +5,7 @@ import {
   kitModules,
   serverSdkModules,
 } from "@grasp-os/compiler";
+import type { AppDefinition } from "@grasp-os/sdk/definition";
 import {
   contractFingerprints,
   contractsFormatVersion,
@@ -51,7 +52,14 @@ import {
   inspected,
   readManifest,
 } from "./app-inspection.ts";
-import { appFor, findVersion, versionFiles, versionTree } from "./apps.ts";
+import {
+  appFor,
+  findVersion,
+  readStored,
+  storedDefinition,
+  versionFiles,
+  versionTree,
+} from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
@@ -1130,8 +1138,9 @@ interface PackagedRelease {
 
 /**
  * The release of `built` for `key`: every artifact under the SHA-256 of
- * its bytes, and the manifest naming them, the source tree `tree` and the
- * store binding `store` the host chose, as canonical text and its hash.
+ * its bytes, and the manifest naming them, the source tree `tree`, the
+ * definition `definition` (its hash) and the store binding `store` the
+ * host chose, as canonical text and its hash.
  */
 const packaged = async (
   env: Env,
@@ -1139,10 +1148,12 @@ const packaged = async (
   built: InspectedRelease,
   {
     tree,
+    definition,
     store,
     pages = null,
   }: {
     tree: string;
+    definition: string;
     store: DataStoreBinding | null;
     /** The pages, built, sealed beside the code (`builtPages`). */
     pages?: PageBuildResult | null;
@@ -1159,6 +1170,7 @@ const packaged = async (
     resourceId: key.app,
     resourceVersion: key.version,
     sourceTreeHash: tree,
+    definitionHash: definition,
     schemaHash: schema,
     contractHash: await sha256Hex(contracts),
     sdkVersion: sdk.version,
@@ -1217,20 +1229,23 @@ export interface SealedDraft extends StoredDraft {
 }
 
 /**
- * Seals `files`, a chat's draft of `key.app`, as the release of the
- * version it would become (`key.version`), exactly as `sealRelease` seals
- * a version (see the header), but bound to no store and stored nowhere:
- * its keeper (draft-runs.ts) keeps what this answers, and loads it
- * back through `loadDraftRelease`. Stored nowhere a version's release is,
- * so nothing that runs a version (`loadRelease`) ever finds it, even when
- * it names a committed one (a read-only preview's, `draftReferences`).
+ * Seals `files` and `definition`, a chat's draft of `key.app`, as the
+ * release of the version it would become (`key.version`), exactly as
+ * `sealRelease` seals a version (see the header), but bound to no store
+ * and stored nowhere: its keeper (draft-runs.ts) keeps what this answers,
+ * and loads it back through `loadDraftRelease`. Stored nowhere a
+ * version's release is, so nothing that runs a version (`loadRelease`)
+ * ever finds it, even when it names a committed one (a read-only
+ * preview's, `draftReferences`).
  */
 export const sealDraftRelease = async (
   env: Env,
   key: { app: AppId; version: number },
-  files: ReadonlyMap<string, string>
+  files: ReadonlyMap<string, string>,
+  definition: AppDefinition
 ): Promise<SealedDraft> => {
   const { tree } = await versionTree(files);
+  const stored = await storedDefinition(definition);
   const built = await inspectForSeal(
     env,
     key,
@@ -1239,6 +1254,7 @@ export const sealDraftRelease = async (
   );
   const { artifacts, text, hash } = await packaged(env, key, built, {
     tree,
+    definition: stored.hash,
     store: null,
   });
   const unique = new Map<string, Uint8Array>();
@@ -1269,6 +1285,9 @@ export const sealRelease = async (
     return await resealed(env, { app, version });
   }
   const row = await findVersion(env, app, version);
+  // Checked against its hash, and refused for a version with none: its
+  // release names the definition its schema is applied by (app-schema.ts).
+  const { hash: definition } = await readStored(row);
   const files = await versionFiles(env, app, version);
   const built = await inspectForSeal(
     env,
@@ -1284,7 +1303,7 @@ export const sealRelease = async (
     env,
     { app, version },
     built,
-    { tree: row.tree, store, pages }
+    { tree: row.tree, definition, store, pages }
   );
   const { manifest, final, sdk, schema } = built;
 

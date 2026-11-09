@@ -10,7 +10,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -65,17 +66,19 @@ const deals = (
 });
 
 /** The App's files, its deals table's access `access`. */
-const filesWith = (access: Access): Record<string, string> => ({
-  ...appDefinition({
-    name: "Deals",
-    tables: {
-      deals: {
-        fields: { title: "v.string()", assignee: "v.person().optional()" },
-        access,
+const filesWith = (access: Access): TestApp =>
+  testApp(
+    {
+      name: "Deals",
+      tables: {
+        deals: {
+          fields: { title: "v.string()", assignee: "v.person().optional()" },
+          access,
+        },
       },
     },
-  }),
-  "server/deals.ts": `import { mutation } from "@server/_generated/server";
+    {
+      "server/deals.ts": `import { mutation } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
 export const add = mutation({
@@ -95,14 +98,15 @@ export const rename = mutation({
   },
 });
 `,
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Deals() {
   return <p>Deals</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Deals });
 `,
-});
+    }
+  );
 
 type Person = Awaited<ReturnType<typeof signedInApi>> & { role: Role };
 

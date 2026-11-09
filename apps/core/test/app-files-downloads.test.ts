@@ -14,6 +14,7 @@ import {
 } from "../src/file-host.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { commitApp, withFiles } from "./app-definitions.ts";
 import {
   appsOf,
   answerOf,
@@ -698,12 +699,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const reader = response.body?.getReader();
     await reader?.read();
     // The same files under a second version.
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
-      {
-        ...files,
-        "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// The second.\n`,
-      },
+      withFiles(files, {
+        "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// The second.\n`,
+      }),
       "Second"
     );
     await builder.api.apps.versions.setCurrent(app, version);

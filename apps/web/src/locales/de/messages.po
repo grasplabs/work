@@ -10517,6 +10517,10 @@ msgstr "{name} umbenennen"
 msgid "Rename chat"
 msgstr "Chat umbenennen"
 
+#: src/apps/data-model-changes.tsx
+msgid "Renames the table {from} to {to}; its records go with it."
+msgstr "Benennt die Tabelle {from} in {to} um; ihre Datensätze gehen mit."
+
 #: src/settings/ai-providers.tsx
 msgid "Replace key"
 msgstr "Schlüssel ersetzen"
@@ -13301,6 +13305,10 @@ msgstr "Der Test hat nicht funktioniert. {model} hat nicht geantwortet: {why}"
 msgid "The upload was cancelled."
 msgstr "Der Upload wurde abgebrochen."
 
+#: src/apps/data-model-changes.tsx
+msgid "The values of {from} in {table} move to {to}."
+msgstr "Die Werte von {from} in {table} wandern nach {to}."
+
 #: src/apps/release-controls.tsx
 msgid "The version is kept only as long as the retention rules and its other holds keep it. Lifting the hold is recorded."
 msgstr "Die Version bleibt nur so lange erhalten, wie die Aufbewahrungsregeln und ihre anderen Aufbewahrungen sie halten. Das Aufheben wird festgehalten."
@@ -15099,6 +15107,7 @@ msgid "When to use it"
 msgstr "Wann sie zu verwenden ist"
 
 #: src/apps/app-data-model.tsx
+#: src/chat/builds.tsx
 msgid "When you publish"
 msgstr "Wenn du veröffentlichst"
 

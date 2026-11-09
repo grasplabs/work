@@ -4,8 +4,8 @@
 // Apart from `host`, as oxc parses it (oxc-parse.ts), which nothing a page
 // or the sandbox loads needs.
 export {
+  canonicalDefinition,
   definitionManifest,
-  definitionPath,
   definitionText,
   emptyDefinition,
   generatedFiles,

@@ -1,12 +1,9 @@
 import type { IndexRead } from "@grasp-os/compiler";
 import {
+  canonicalDefinition,
   definitionManifest,
-  definitionPath,
   definitionSources,
-  definitionText,
-  emptyDefinition,
   generatedFiles,
-  tryReadDefinition,
   validatorSource,
 } from "@grasp-os/sdk/definition";
 import type {
@@ -34,30 +31,31 @@ import { z } from "zod";
 import { catalogOf, planSchemaChange } from "./schema-changes.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 
-// An App's definition among its files (@grasp-os/sdk's definition.ts):
-// `definition.json`, what the App is, and the config and schema generated
-// from it. Every App of spec 8's layout has one: a draft gets an empty one
-// with its first write (agent-builds.ts), and every version the App
+// An App's definition (@grasp-os/sdk's definition.ts), what the App is,
+// and the config and schema generated from it among its files. The
+// definition is no file: each version holds it as metadata (apps.ts), a
+// chat's draft its own copy (workspace.ts). Every version the App
 // commits holds its config and schema exactly as its definition generates
-// them (`withDefinitionCode`). A chat's agent changes it only with the
-// definition tools (`define`): `write` refuses the three files, naming the
-// tools, so the definition and the code generated from it never part.
+// them (`withDefinitionCode`), and generation goes one way: nothing reads
+// a definition back from code. A chat's agent changes the definition
+// only with the definition tools (`define`): `write` refuses the two
+// generated files, naming the tools, so the definition and the code
+// generated from it never part.
 
-/** The files only the definition tools write. */
-export const definitionFiles: ReadonlySet<string> = new Set([
-  definitionPath,
+/** The files generated from the definition, which only Grasp writes. */
+export const generatedPaths: ReadonlySet<string> = new Set([
   generatedFiles.config,
   generatedFiles.schema,
 ]);
 
 /**
- * Refuses a write that names any of `definitionFiles`, in any case: an
+ * Refuses a write that names any of `generatedPaths`, in any case: an
  * App's paths may not differ only in case, so `GRASP.config.ts` would be
  * the same file.
  */
-export const refuseDefinitionFiles = (paths: Iterable<string>): void => {
+export const refuseGeneratedFiles = (paths: Iterable<string>): void => {
   const named = [...paths].filter((path) =>
-    definitionFiles.has(path.toLowerCase())
+    generatedPaths.has(path.toLowerCase())
   );
   if (named.length > 0) {
     throw appErrors.create("app.generated_file", { issues: named.toSorted() });
@@ -65,78 +63,30 @@ export const refuseDefinitionFiles = (paths: Iterable<string>): void => {
 };
 
 /**
- * The definition `files` hold, a new one named `name` for files with none
- * yet, or the problem with the one they hold.
- */
-export const definitionIn = (
-  files: ReadonlyMap<string, string>,
-  name: string
-): { definition: AppDefinition } | { problem: string } => {
-  const text = files.get(definitionPath);
-  return text === undefined
-    ? { definition: emptyDefinition(name) }
-    : tryReadDefinition(text);
-};
-
-/** The files `definition` is: itself, and the code generated from it. */
-export const definitionChanges = (
-  definition: AppDefinition
-): Record<string, string> => ({
-  [definitionPath]: definitionText(definition),
-  ...definitionSources(definition),
-});
-
-/**
- * `files` with their config and schema as their definition generates
- * them, changed in place. Files with no definition yet, the first of the
- * App named `name` (one of pages alone too), get an empty one. Refused
- * (`app.definition_invalid`) when they hold a config or a schema but no
- * definition, a definition that isn't one, or have lost the one they had
- * (`had`): every write of a definition comes through here, the definition
- * tools' and a commit's alike.
+ * `files` with their config and schema as `definition` generates them,
+ * changed in place, whatever they held: every write of an App's files
+ * comes through here, the definition tools' and a commit's alike.
  */
 export const withDefinitionCode = (
   files: Map<string, string>,
-  name: string,
-  had: boolean
+  definition: AppDefinition
 ): void => {
-  const text = files.get(definitionPath);
-  if (text === undefined) {
-    const handwritten =
-      files.has(generatedFiles.config) || files.has(generatedFiles.schema);
-    if (had || handwritten) {
-      throw appErrors.create("app.definition_invalid", {
-        issues: [
-          `${generatedFiles.config} and ${generatedFiles.schema} are generated from ${definitionPath}, which the App doesn't have.`,
-        ],
-      });
-    }
-    for (const [path, source] of Object.entries(
-      definitionChanges(emptyDefinition(name))
-    )) {
-      files.set(path, source);
-    }
-    return;
-  }
-  const read = tryReadDefinition(text);
-  if ("problem" in read) {
-    throw appErrors.create("app.definition_invalid", {
-      issues: [read.problem],
-    });
-  }
-  for (const [path, source] of Object.entries(
-    definitionSources(read.definition)
-  )) {
+  for (const [path, source] of Object.entries(definitionSources(definition))) {
     files.set(path, source);
   }
 };
 
 /**
- * The problem an `app.definition_invalid` refusal names, in words, or
- * undefined for any other error: as the definition tools answer it.
+ * The problem an `app.definition_invalid` refusal names, in words, the
+ * whole of an `app.definition_missing` one, or undefined for any other
+ * error: as the definition tools answer it.
  */
 export const definitionRefusal = (error: unknown): string | undefined => {
-  if (appErrors.codeOf(error) !== "app.definition_invalid") {
+  const code = appErrors.codeOf(error);
+  if (code === "app.definition_missing") {
+    return appErrors.create(code).message;
+  }
+  if (code !== "app.definition_invalid") {
     return undefined;
   }
   const details: unknown =
@@ -170,19 +120,17 @@ const idsOf = (definition: AppDefinition): SchemaIds =>
   );
 
 /**
- * The stable IDs of `schema`'s tables and fields, from the definition
- * `files` hold (schema-changes.ts): what its store matches them by.
- * `app.definition_invalid` when the definition doesn't name every one:
- * the schema is generated from it, so only files changed by hand miss one.
+ * The stable IDs of `schema`'s tables and fields, from `definition`, the
+ * version's or draft's own (schema-changes.ts): what its store matches
+ * them by. `app.definition_invalid` when the definition doesn't name
+ * every one: the schema is generated from it, so only code that drifted
+ * from its definition misses one.
  */
 export const schemaIdsOf = (
-  files: Readonly<Record<string, string>>,
+  definition: AppDefinition,
   schema: SchemaManifest
 ): SchemaIds => {
-  const text = files[definitionPath];
-  const read = text === undefined ? undefined : tryReadDefinition(text);
-  const ids =
-    read !== undefined && "definition" in read ? idsOf(read.definition) : {};
+  const ids = idsOf(definition);
   const missing = Object.entries(schema.tables).flatMap(([name, table]) =>
     ids[name] === undefined
       ? [name]
@@ -193,7 +141,7 @@ export const schemaIdsOf = (
   if (missing.length > 0) {
     throw appErrors.create("app.definition_invalid", {
       issues: [
-        `${definitionPath} gives no ID to ${missing.slice(0, 10).join(", ")}, which ${generatedFiles.schema} declares.`,
+        `The App's definition gives no ID to ${missing.slice(0, 10).join(", ")}, which ${generatedFiles.schema} declares.`,
       ],
     });
   }
@@ -231,6 +179,12 @@ export const definitionPlan = (
   return {
     accepted: plan.refused.length === 0,
     addedTables: [...plan.addedTables],
+    renamedTables: plan.renamedTables.map(({ from, to }) => ({ from, to })),
+    renamedFields: plan.renamedFields.map(({ table, from, to }) => ({
+      table,
+      from,
+      to,
+    })),
     addedFields: fieldsOf(plan.addedFields),
     widenedFields: fieldsOf(plan.widenedFields),
     checks: plan.checks.map(({ table, field, answer }) => ({
@@ -313,6 +267,8 @@ export const changePlan = (
   return {
     accepted: now.accepted,
     addedTables: freshIn(now.addedTables, was.addedTables),
+    renamedTables: freshIn(now.renamedTables, was.renamedTables),
+    renamedFields: freshIn(now.renamedFields, was.renamedFields),
     addedFields: freshIn(now.addedFields, was.addedFields),
     widenedFields: freshIn(now.widenedFields, was.widenedFields),
     checks: freshIn(now.checks, was.checks),
@@ -447,14 +403,21 @@ const modelTableOf = (table: DefinedTable): DataModelTable => {
 const textOf = (value: unknown): string =>
   typeof value === "string" ? value : "";
 
-/** `definition`'s data model, as the workspace's Data view shows it. */
-export const dataModelOf = (definition: AppDefinition): DataModel => ({
-  tables: definition.tables.map(modelTableOf),
-  permissions: definition.permissions.map((permission) => ({
-    alias: textOf(permission.alias),
-    kind: textOf(permission["~permission"]),
-  })),
-});
+/**
+ * `definition`'s data model, as the workspace's Data view shows it: from
+ * its one form (`canonicalDefinition`), so each field's code reads as the
+ * generated code declares it.
+ */
+export const dataModelOf = (declared: AppDefinition): DataModel => {
+  const definition = canonicalDefinition(declared);
+  return {
+    tables: definition.tables.map(modelTableOf),
+    permissions: definition.permissions.map((permission) => ({
+      alias: textOf(permission.alias),
+      kind: textOf(permission["~permission"]),
+    })),
+  };
+};
 
 /** A row rule, as the tools take it: its field by name. */
 const ruleSchema = z.union([

@@ -1,6 +1,8 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { withFiles } from "../apps/core/test/app-definitions.ts";
+import type { TestSource } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { hoppingFiles, navigationFiles } from "./notes-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
@@ -14,7 +16,7 @@ import { apiOf, peopleIn, release } from "./people.ts";
 // (page-bridge.test.ts, page-host.test.ts).
 
 /** A new App of `files`, released. Returns its ID. */
-const newApp = async (files: Record<string, string>): Promise<string> => {
+const newApp = async (files: TestSource): Promise<string> => {
   const { builder } = peopleIn("pageNavigation");
   const name = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const { core, api } = apiOf(builder);
@@ -63,21 +65,23 @@ test("a new version made current switches a clean page at once, and asks an edit
   pageOf,
 }) => {
   const { builder } = peopleIn("pageNavigation");
-  const files = navigationFiles();
+  let files = navigationFiles();
   // The note's form saves, and holds nothing unsaved once it has.
-  files["src/routes/notes.$id.tsx"] = (files["src/routes/notes.$id.tsx"] ?? "")
-    .replace(
-      'import { Form, TextField } from "@grasp-os/ui/form";',
-      'import { Form, SubmitButton, TextField } from "@grasp-os/ui/form";'
-    )
-    .replace(
-      '{ defaultValues: { title: "", body: "" } }',
-      '{ defaultValues: { title: "", body: "" }, resetOnSuccess: true }'
-    )
-    .replace(
-      '<TextField form={form} label="Title" name="title" />',
-      '<TextField form={form} label="Title" name="title" />\n        <SubmitButton form={form}>Save note</SubmitButton>'
-    );
+  files = withFiles(files, {
+    "src/routes/notes.$id.tsx": (files.files["src/routes/notes.$id.tsx"] ?? "")
+      .replace(
+        'import { Form, TextField } from "@grasp-os/ui/form";',
+        'import { Form, SubmitButton, TextField } from "@grasp-os/ui/form";'
+      )
+      .replace(
+        '{ defaultValues: { title: "", body: "" } }',
+        '{ defaultValues: { title: "", body: "" }, resetOnSuccess: true }'
+      )
+      .replace(
+        '<TextField form={form} label="Title" name="title" />',
+        '<TextField form={form} label="Title" name="title" />\n        <SubmitButton form={form}>Save note</SubmitButton>'
+      ),
+  });
   const app = await newApp(files);
   /** Makes a new version current, its start page changed by `mark`. */
   const releaseAgain = async (mark: string): Promise<void> => {
@@ -86,10 +90,9 @@ test("a new version made current switches a clean page at once, and asks an edit
       await release(
         again.api,
         app,
-        {
-          ...files,
-          "src/routes/start.tsx": `${files["src/routes/start.tsx"]}// ${mark}\n`,
-        },
+        withFiles(files, {
+          "src/routes/start.tsx": `${files.files["src/routes/start.tsx"]}// ${mark}\n`,
+        }),
         mark
       );
     } finally {
