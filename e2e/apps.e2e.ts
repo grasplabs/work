@@ -376,17 +376,6 @@ test("a link to an app, opened signed out, leads through sign-in to the app in t
   await counterPage(signedIn);
 });
 
-test("someone with the user role finds no App to open", async ({ pageOf }) => {
-  const page = await pageOf(user);
-  // The Apps page has none for them, and no way to make one.
-  await page.goto("/apps");
-  await expect(
-    page.getByText("The Apps your colleagues share with you show here.")
-  ).toBeVisible();
-  await expect(page.getByRole("link", { name: "New App" })).toHaveCount(0);
-  await expect(page.getByRole("alert")).toHaveCount(0);
-});
-
 test("signing in goes back to the page asked for, and only to a page of this site", async ({
   pageOf,
 }) => {

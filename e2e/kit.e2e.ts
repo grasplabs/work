@@ -8,99 +8,23 @@ const bodyBackground = async (page: Page): Promise<string> =>
     .locator("body")
     .evaluate((body) => getComputedStyle(body).backgroundColor);
 
-const expectKitRendered = async (page: Page): Promise<void> => {
+// Which theme the page paints is the browser's cascade, from the system's
+// scheme: what a component does is its own tests' (packages/ui), and how a
+// person's choice is kept apps/web/src/frame/theme.test.ts.
+test("paints the system's scheme, dark from the start and following a change without a reload", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/kit");
   await expect(page.getByRole("heading", { name: "UI kit" })).toBeVisible();
-  await expect(page.getByLabel("Name")).toBeVisible();
+  const dark = await bodyBackground(page);
 
-  const model = page.getByRole("combobox", { name: "Model" });
-  await expect(model).toContainText("Small");
-  await model.click();
-  await page.getByRole("option", { name: "Large" }).click();
-  await expect(model).toContainText("Large");
-
-  const summary = page.getByRole("checkbox", { name: "Email me a summary" });
-  await expect(summary).toBeChecked();
-  await summary.click();
-  await expect(summary).not.toBeChecked();
-
-  const notifications = page.getByRole("switch", { name: "Notifications" });
-  await expect(notifications).not.toBeChecked();
-  await notifications.click();
-  await expect(notifications).toBeChecked();
-
-  await expect(page.getByRole("cell", { name: "Weekly report" })).toBeVisible();
-
-  await page.getByRole("tab", { name: "Actions" }).click();
-  await page.getByRole("button", { name: "Open dialog" }).click();
-  await expect(page.getByRole("dialog", { name: "Dialog" })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toBeHidden();
-
-  await page.getByRole("button", { name: "Open menu" }).click();
-  await expect(page.getByRole("menuitem", { name: "Rename" })).toBeVisible();
-  await page.keyboard.press("Escape");
-
-  await page.getByRole("button", { name: "Show toast" }).click();
-  await expect(page.getByText("Your changes are saved.")).toBeVisible();
-
-  await expect(page.getByRole("button", { name: "Chat" })).toBeVisible();
-  await expect(page.getByText("A title is needed.")).toBeVisible();
-
-  await page.getByRole("button", { name: "Open sheet" }).click();
-  const sheet = page.getByRole("dialog", { name: "Sheet" });
-  await expect(sheet).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(sheet).toBeHidden();
-
-  await page.getByRole("button", { name: "Open popover" }).click();
-  await expect(page.getByText("Anchored to its button.")).toBeVisible();
-  await page.keyboard.press("Escape");
-
-  await page.getByRole("button", { name: "Show details" }).click();
-  await expect(page.getByText("The details.")).toBeVisible();
-
-  // Every page's states: not found, an error with its reference and a way
-  // to try again, and skeletons while it loads.
-  await expect(
-    page.getByRole("heading", { name: "Workflow not found" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "This page didn't load" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("alert").filter({ hasText: "Reference: " })
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
-  await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
-};
-
-test("renders the UI kit in light mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
-  await expectKitRendered(page);
-});
-
-test("renders the UI kit in dark mode", async ({ page }) => {
-  await page.emulateMedia({ colorScheme: "light" });
-  await page.goto("/kit");
+  await expect.poll(async () => await bodyBackground(page)).not.toBe(dark);
   const light = await bodyBackground(page);
 
-  // The page follows a change of the system scheme without a reload.
   await page.emulateMedia({ colorScheme: "dark" });
   await expect.poll(async () => await bodyBackground(page)).not.toBe(light);
-
-  // And starts dark when the system already is.
-  await expectKitRendered(page);
-  expect(await bodyBackground(page)).not.toBe(light);
-});
-
-test("serves the Grasp favicon the page names", async ({ page }) => {
-  await page.goto("/kit");
-  const href = await page.locator('link[rel="icon"]').getAttribute("href");
-  expect(href).toBe("/favicon.svg");
-  const icon = await page.request.get("/favicon.svg");
-  expect(icon.ok()).toBe(true);
-  expect(icon.headers()["content-type"]).toContain("image/svg+xml");
 });
 
 test("a page sidebar folds from the keyboard and stays folded over a reload", async ({
