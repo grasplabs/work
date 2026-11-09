@@ -733,7 +733,8 @@ const perRowStepPattern = /^(?:CO-ROUTINE|MATERIALIZE)\b/u;
  * `=` and `M`) inside a step that runs for every match (a co-routine or a
  * materialized CTE), not only for the few rows the search returns. Each
  * such lookup reads the word's whole posting list, so a word in thousands
- * of sections costs thousands of reads of the index.
+ * of sections costs thousands of reads of the index. The returned rows'
+ * snippets, at most a search's limit, are looked up in the outermost query.
  */
 const indexesAskedPerMatch = async ({
   query,
