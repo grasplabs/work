@@ -439,10 +439,10 @@ jobs:
       - uses: ./.github/actions/playwright-browser
         with:
           save: true
-      # About 70 s, the most of this job's 2 minutes: the parts wait for it.
+      # The parts wait for it: every build at once (e2e/build.ts).
       # Then the parallel parts' tests, listed once for all fourteen
       # (scripts/e2e-parts.ts): the count is e2e's matrix's, below.
-      - run: vp run e2e:build && node scripts/e2e-parts.ts --all 14
+      - run: node e2e/build.ts && node scripts/e2e-parts.ts --all 14
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-stack
@@ -554,7 +554,7 @@ jobs:
           sampler=$!
           trap 'kill "$sampler"' EXIT
           if [ "$GRASP_E2E_PART" = parallel ]; then
-            vp run e2e --project chromium --test-list "e2e/dist/parts/$PART.txt" --reporter=github,json
+            node_modules/.bin/playwright test --project chromium --test-list "e2e/dist/parts/$PART.txt" --reporter=github,json
           elif [ -n "$SHARD" ]; then
             node_modules/.bin/playwright test --shard "$SHARD" --reporter=github,json
           else
@@ -661,7 +661,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
-      - run: vp run e2e --project "$BROWSER" --reporter=github,json
+      - run: node_modules/.bin/playwright test --project "$BROWSER" --reporter=github,json
         env:
           GRASP_E2E_PART: parallel
           GRASP_E2E_PREBUILT: "true"
@@ -704,7 +704,7 @@ jobs:
         with:
           store: false
       - uses: ./.github/actions/playwright-browser
-      - run: vp run e2e:admin --shard "$SHARD"
+      - run: node_modules/.bin/playwright test -c playwright.admin.config.ts --shard "$SHARD"
         env:
           SHARD: ${{ matrix.shard }}
       # A failing journey keeps its trace (playwright.admin.config.ts).
