@@ -9,7 +9,7 @@
 import { expectTypeOf } from "vite-plus/test";
 
 import type { GraspClient } from "../src/client.ts";
-import type { Id, OperationReference } from "../src/index.ts";
+import type { Id, FunctionReference } from "../src/index.ts";
 import {
   useAction,
   useClient,
@@ -25,10 +25,11 @@ declare const client: GraspClient;
 declare const noteId: Id<"notes">;
 declare const signal: AbortSignal;
 /** A public query that takes no arguments. */
-declare const everyone: OperationReference<
+declare const everyone: FunctionReference<
+  "query",
+  "public",
   Record<never, never>,
-  number,
-  "query"
+  number
 >;
 
 type Note = NonNullable<

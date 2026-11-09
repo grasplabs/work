@@ -1065,7 +1065,7 @@ const RelationPicker = <
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     unlisted = chosenId as IdOf<Reference>;
   }
-  const looked = useQuery<OperationReference<unknown, unknown, "query">>(
+  const looked = useQuery<FunctionReference<"query">>(
     lookup?.query ?? query,
     unlisted === null || lookup === undefined ? "skip" : lookup.args(unlisted)
   );
