@@ -404,6 +404,27 @@ const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
 };
 
 /**
+ * The class core checks a call of the chat's agent of the native tool
+ * `action` against: its class, but for a Microsoft 365 mail tool, which
+ * takes any mailbox the account may open. The mailbox it reaches is
+ * checked in connect, which knows it (its own, or one the company pointed
+ * the agent at: shared-mailboxes.ts), so here it has the class it has in
+ * the person's own mailbox. Undefined for a tool the table hasn't got.
+ */
+export const checkedClassOf = (
+  provider: string,
+  action: string
+): ToolClass | undefined => {
+  const toolClass = nativeClasses.get(provider)?.get(action);
+  if (toolClass === undefined || toolClass === "never") {
+    return toolClass;
+  }
+  return provider === "microsoft" && action.startsWith("mail.")
+    ? inOwnMailbox[toolClass]
+    : toolClass;
+};
+
+/**
  * Refuses a call of the chat's agent whose class is off for the person it
  * acts for, before core signs anything for connect: `connect.class_off`.
  * A native tool missing from the generated table, or classed `never`, is
@@ -428,21 +449,14 @@ export const requireToolClassOn = async (
     return await requireAppClassOn(env, authority, owner, action);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);
-  if (toolClass === undefined) {
+  const checked = checkedClassOf(owner.provider, action);
+  if (toolClass === undefined || checked === undefined) {
     throw connectErrors.create("connect.class_unknown");
   }
-  if (toolClass === "never") {
+  if (toolClass === "never" || checked === "never") {
     throw connectErrors.create("connect.class_off");
   }
-  // A Microsoft 365 mail tool takes any mailbox the account may open: the
-  // mailbox it reaches is checked in connect, which knows it (its own, or
-  // one the company pointed the agent at: shared-mailboxes.ts), so here
-  // it has the class it has in the person's own mailbox.
-  const mailTool = owner.provider === "microsoft" && action.startsWith("mail.");
-  const audience = await audienceNow(
-    env,
-    mailTool ? inOwnMailbox[toolClass] : toolClass
-  );
+  const audience = await audienceNow(env, checked);
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { nativeToolClasses } from "../src/native-tool-classes.gen.ts";
+import { checkedClassOf } from "../src/tool-classes.ts";
 import { codeResults, codeStep, chatOf, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -254,11 +255,13 @@ const onByDefault = new Set(
 // review here: for some, such as Google's mail.send (a token that may
 // change mail may send it too), the class is the only guard.
 describe("the native tools on by default", () => {
-  it("are exactly the reviewed ones, each of a class on for everyone until an admin changes it", () => {
+  it("are exactly the reviewed ones, each checked as a class on for everyone until an admin changes it", () => {
     const tools = Object.entries(nativeToolClasses).flatMap(
       ([provider, classes]) =>
-        Object.entries(classes).flatMap(([tool, toolClass]) =>
-          onByDefault.has(toolClass) ? [`${provider} ${tool}`] : []
+        Object.keys(classes).flatMap((tool) =>
+          onByDefault.has(checkedClassOf(provider, tool) ?? "never")
+            ? [`${provider} ${tool}`]
+            : []
         )
     );
 
@@ -281,8 +284,14 @@ describe("the native tools on by default", () => {
         "microsoft calendar.update",
         "microsoft files.createDraft",
         "microsoft mail.categorise",
+        "microsoft mail.createDraft",
+        "microsoft mail.createReplyDraft",
         "microsoft mail.flag",
+        "microsoft mail.get",
+        "microsoft mail.list",
         "microsoft mail.move",
+        "microsoft mail.readAttachment",
+        "microsoft mail.thread",
         "microsoft onenote.create",
         "microsoft onenote.pages",
         "microsoft onenote.read",
