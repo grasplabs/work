@@ -23,7 +23,8 @@ import {
   approveResourceBinding,
   reviewResourceBindings,
 } from "../src/resource-bindings.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp, TestSource } from "./app-definitions.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
@@ -50,10 +51,8 @@ const connectionTo = (
   `permission.connection("${alias}", { contract: "${contract}", actions: ${actions} })`;
 
 /** The Mailer's definition, holding `permissions`. */
-const mailerDefinition = (
-  permissions: readonly string[]
-): Record<string, string> =>
-  appDefinition({
+const mailerDefinition = (permissions: readonly string[]): TestApp =>
+  testApp({
     name: "Mailer",
     tables: {
       notes: {
@@ -68,9 +67,9 @@ const mailerDefinition = (
 const mailFiles = (
   contract = "microsoft-365.mail@1",
   actions = `["send", "list"]`
-): Record<string, string> => ({
-  ...mailerDefinition([connectionTo("mail", contract, actions)]),
-  "server/mail.ts": `import { v } from "@grasp-os/sdk";
+): TestApp =>
+  withFiles(mailerDefinition([connectionTo("mail", contract, actions)]), {
+    "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -149,21 +148,32 @@ export const careless = action({
   },
 });
 `,
-});
+  });
 
 /**
  * An App declaring a mail connector of a contract no connector generates:
  * the config its definition generates doesn't type-check, as the types
  * know every contract, so no version of it runs to be bound.
  */
-const unknownContractFiles = (): Record<string, string> =>
+const unknownContractFiles = (): TestApp =>
   mailerDefinition([connectionTo("mail", "grasp.mail@1")]);
 
 /** The Mailer, with a second alias of the same contract: its archive. */
-const archiveFiles = (): Record<string, string> => ({
-  ...mailFiles(),
-  ...mailerDefinition([connectionTo("mail"), connectionTo("archive")]),
-  "server/archive.ts": `import { v } from "@grasp-os/sdk";
+const archiveFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Mailer",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
+      },
+      permissions: [connectionTo("mail"), connectionTo("archive")],
+    },
+    {
+      ...mailFiles().files,
+      "server/archive.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -178,18 +188,22 @@ export const archived = action({
   },
 });
 `,
-});
+    }
+  );
 
 /** The Mailer, declaring its mail resource still, with no action that uses it. */
 /** The Mailer's files once it no longer declares its mail connection. */
-const undeclaredMailFiles = (): Record<string, string> => ({
-  "server/mail.ts": `import { v } from "@grasp-os/sdk";
+const undeclaredMailFiles = (): TestApp =>
+  testApp(
+    { name: "Mailer" },
+    {
+      "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const ping = query({ args: {}, returns: v.string(), handler: () => "pong" });
 `,
-  ...appDefinition({ name: "Mailer" }),
-});
+    }
+  );
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -249,13 +263,14 @@ const mailerApp = async (
     tools?: string[];
     contract?: string;
     bind?: boolean;
-    files?: Record<string, string>;
+    files?: TestSource;
   } = {}
 ) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const created = await builder.api.apps.create({ name: "Mailer" });
-  await builder.api.apps.files.commit(
+  await commitApp(
+    builder.api.apps.files,
     created.id,
     options.files ?? mailFiles(options.contract),
     "First"
@@ -553,7 +568,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const mailer = await mailerApp();
     // The builder's next version changes nothing the binding approved,
     // but makes the connection permission asked for again.
-    await mailer.builder.api.apps.files.commit(
+    await commitApp(
+      mailer.builder.api.apps.files,
       mailer.release.manifest.resourceId,
       { "README.md": "Mailer." },
       "Docs"
@@ -700,7 +716,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     );
     const held = await heldSend(mailer);
     const app = mailer.release.manifest.resourceId;
-    await mailer.builder.api.apps.files.commit(
+    await commitApp(
+      mailer.builder.api.apps.files,
       app,
       mailFiles("microsoft-365.mail@1", `["send", "list", "createDraft"]`),
       "More"
@@ -779,7 +796,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     );
     const held = await heldSend(mailer);
     const app = mailer.release.manifest.resourceId;
-    await mailer.builder.api.apps.files.commit(
+    await commitApp(
+      mailer.builder.api.apps.files,
       app,
       undeclaredMailFiles(),
       "Quiet"
@@ -1105,20 +1123,22 @@ const crmRules = (listIsRead = true) => [
 ];
 
 /** An App whose actions list and create contacts in the CRM. */
-const crmFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Contacts",
-    tables: {
-      notes: {
-        fields: { title: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const crmFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Contacts",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
+      permissions: [
+        'permission.connection("crm", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS", "CRM_CREATE_CONTACT"],\n})',
+      ],
     },
-    permissions: [
-      'permission.connection("crm", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS", "CRM_CREATE_CONTACT"],\n})',
-    ],
-  }),
-  "server/crm.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/crm.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -1154,24 +1174,27 @@ export const create = action({
   },
 });
 `,
-});
+    }
+  );
 
 /** An App reading contacts from two CRMs, each its own resource. */
-const twoCrmFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Two CRMs",
-    tables: {
-      notes: {
-        fields: { title: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const twoCrmFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Two CRMs",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
+      permissions: [
+        'permission.connection("crm", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS"],\n})',
+        'permission.connection("backup", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS"],\n})',
+      ],
     },
-    permissions: [
-      'permission.connection("crm", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS"],\n})',
-      'permission.connection("backup", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS"],\n})',
-    ],
-  }),
-  "server/crm.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/crm.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -1189,7 +1212,8 @@ export const contacts = action({
   },
 });
 `,
-});
+    }
+  );
 
 const crmServerStateSchema = z.object({
   ran: z.array(z.object({ tool: z.string(), arguments: z.unknown() })),
@@ -1260,7 +1284,7 @@ const contactsApp = async (
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const created = await builder.api.apps.create({ name: "Contacts" });
-  await builder.api.apps.files.commit(created.id, crmFiles(), "First");
+  await commitApp(builder.api.apps.files, created.id, crmFiles(), "First");
   await builder.api.apps.versions.setCurrent(created.id, 1);
   const crm = await crmConnection();
   await options.before?.(crm);
@@ -1435,7 +1459,7 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
     const created = await builder.api.apps.create({ name: "Two CRMs" });
-    await builder.api.apps.files.commit(created.id, twoCrmFiles(), "First");
+    await commitApp(builder.api.apps.files, created.id, twoCrmFiles(), "First");
     await builder.api.apps.versions.setCurrent(created.id, 1);
     const down = await crmConnection();
     const up = await crmConnection();

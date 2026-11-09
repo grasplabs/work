@@ -1,4 +1,5 @@
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 
 // An App of spec 8's layout whose functions try to carry one invocation's
 // authority into another (GRA-383, GRA-387): `hold` keeps its channel in
@@ -10,8 +11,8 @@ import { appDefinition } from "./app-definitions.ts";
 // that calls an App's functions (app-invocation-isolation.test.ts).
 
 /** The App's files, its `notes` table readable and writable by its members. */
-export const isolationFiles: Record<string, string> = {
-  ...appDefinition({
+export const isolationFiles: TestApp = testApp(
+  {
     name: "Isolation",
     tables: {
       notes: {
@@ -19,8 +20,9 @@ export const isolationFiles: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -126,4 +128,5 @@ export const probe = query({
   ],
 });
 `,
-};
+  }
+);

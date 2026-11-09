@@ -24,7 +24,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -418,8 +418,8 @@ const envOf = (instance: object): object => {
 /** An App with a store, sealed, current, and its store's ID. */
 const appWithStore = async () => {
   const fixture = await appWith(
-    {
-      ...appDefinition({
+    testApp(
+      {
         name: "Desk",
         tables: {
           notes: {
@@ -427,16 +427,17 @@ const appWithStore = async () => {
             access: { read: "appMembers", write: "appMembers" },
           },
         },
-      }),
-
-      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      },
+      {
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Desk() {
   return <main>Desk</main>;
 }
 
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-    },
+      }
+    ),
     "Desk"
   );
   const release = await seal(fixture);

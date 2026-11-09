@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
 import { restrict } from "../src/restricted.ts";
 import type { WorkContext } from "../src/restricted.ts";
+import { commitApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
@@ -529,7 +530,8 @@ describe("memory limits", setUpTime, () => {
       ),
       user: await outcome(saveOver(admin, personal, "USER.md", sized(8001))),
       appCode: await outcome(
-        builder.api.apps.files.commit(
+        commitApp(
+          builder.api.apps.files,
           appId,
           { "AGENTS.md": sized(8001) },
           "Over"
@@ -540,7 +542,8 @@ describe("memory limits", setUpTime, () => {
         saveOver(admin, personal, "USER.md", sized(8000))
       ),
       appCodeAtLimit: await outcome(
-        builder.api.apps.files.commit(
+        commitApp(
+          builder.api.apps.files,
           appId,
           { "AGENTS.md": sized(8000) },
           "At the limit"
@@ -552,7 +555,8 @@ describe("memory limits", setUpTime, () => {
         saveOver(admin, memory, "notes.md", sized(9000))
       ),
       appOtherFile: await outcome(
-        builder.api.apps.files.commit(
+        commitApp(
+          builder.api.apps.files,
           appId,
           { "docs/AGENTS.md": sized(9000) },
           "Another file"

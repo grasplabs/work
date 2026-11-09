@@ -23,7 +23,6 @@ import {
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
-  commitFiles,
   createApp,
   draftOverLatest,
   findVersion,
@@ -35,9 +34,16 @@ import {
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
 import { buildAppCode, buildAppTests, buildPages } from "../src/pages.ts";
-import { appDefinition, definitionOf } from "./app-definitions.ts";
-import type { AppSpec } from "./app-definitions.ts";
+import {
+  appOf,
+  changesOf,
+  definitionOf,
+  testApp,
+  withFiles,
+} from "./app-definitions.ts";
+import type { AppSpec, TestApp, TestSource } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -72,16 +78,16 @@ const notesSpec = (label = "Notes"): AppSpec => ({
   },
 });
 
-const notesFiles = (label = "Notes"): Record<string, string> => ({
-  ...appDefinition(notesSpec(label)),
-  "values.ts": `import { v } from "@grasp-os/sdk";
+const notesFiles = (label = "Notes"): TestApp =>
+  testApp(notesSpec(label), {
+    "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
 };
 `,
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { internal } from "@server/_generated/internal";
 import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../values.ts";
@@ -113,18 +119,18 @@ export const tally = action({
   handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
 });
 `,
-});
+  });
 
 /** The Notes App's files with one more table, `name`. */
-const withTable = (name: string): Record<string, string> => {
+const withTable = (name: string): TestApp => {
   const spec = notesSpec();
-  return {
-    ...notesFiles(),
-    ...appDefinition({
+  return testApp(
+    {
       ...spec,
       tables: { ...spec.tables, [name]: { fields: { label: "v.string()" } } },
-    }),
-  };
+    },
+    notesFiles().files
+  );
 };
 
 /** The artifact of `release` at `path`. */
@@ -175,12 +181,12 @@ describe("sealing a release", { timeout: 120_000 }, () => {
 
   it("seals an App at exactly the App's file and size limits", async () => {
     const base = notesFiles();
-    const padding = appLimits.files - Object.keys(base).length;
-    const used = Object.values(base).reduce(
+    const padding = appLimits.files - Object.keys(base.files).length;
+    const used = Object.values(base.files).reduce(
       (sum, source) => sum + source.length,
       0
     );
-    const files: Record<string, string> = { ...base };
+    const files: Record<string, string> = { ...base.files };
     let left = appLimits.totalLength - used;
     for (let index = 0; index < padding; index += 1) {
       const head = `export const pad${index} = ${index};\n//`;
@@ -194,20 +200,21 @@ describe("sealing a release", { timeout: 120_000 }, () => {
       sizes.length,
       sizes.reduce((sum, size) => sum + size, 0),
     ]).toStrictEqual([appLimits.files, appLimits.totalLength]);
-    const release = await seal(await appWith(files));
+    const release = await seal(await appWith(appOf(base.definition, files)));
     expect(release.manifest.resourceVersion).toBe(1);
   });
 
   it("pins the source, schema, contracts, runtime, store and every artifact by hash", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
-    const { tree } = await findVersion(env, fixture.app, 1);
+    const { tree, definitionHash } = await findVersion(env, fixture.app, 1);
     const schema = await schemaHash(release.app.schema);
     expect(release.manifest).toMatchObject({
       formatVersion: releaseFormatVersion,
       resourceId: fixture.app,
       resourceVersion: 1,
       sourceTreeHash: tree,
+      definitionHash,
       schemaHash: schema,
       target: "app",
       bindings: [],
@@ -313,7 +320,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
   it("is never changed by a later edit of the source: that is another version", async () => {
     const fixture = await appWith(notesFiles());
     const first = await seal(fixture);
-    await commitFiles(
+    await commitDefined(
       env,
       fixture.owner,
       fixture.app,
@@ -337,13 +344,16 @@ describe("sealing a release", { timeout: 120_000 }, () => {
 });
 
 /** A table-less App: nothing to store, so no store binding. */
-const tablelessFiles = (): Record<string, string> => ({
-  ...appDefinition({ name: "Hello", tables: {} }),
-  "server/hello.ts": `import { v } from "@grasp-os/sdk";
+const tablelessFiles = (): TestApp =>
+  testApp(
+    { name: "Hello", tables: {} },
+    {
+      "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
 `,
-});
+    }
+  );
 
 /** JSON text that holds an object, as a mutable record. */
 const jsonRecord = (text: string): Record<string, Json> => {
@@ -421,6 +431,7 @@ const recordEvidence = async (
   evidence.source = {
     resourceId: manifest.resourceId ?? null,
     sourceTreeHash: manifest.sourceTreeHash ?? null,
+    definitionHash: manifest.definitionHash ?? null,
   };
   evidence.candidate = {
     resourceVersion: manifest.resourceVersion ?? null,
@@ -911,7 +922,7 @@ describe(
       const stored = await env.FILES.get(await artifactKey(entry.sha256));
       const evidence = jsonRecord((await stored?.text()) ?? "{}");
       const { manifest } = release;
-      const { tree } = await findVersion(env, fixture.app, 1);
+      const { tree, definitionHash } = await findVersion(env, fixture.app, 1);
       expect({
         reportHash: manifest.verificationReportHash,
         source: evidence.source,
@@ -925,6 +936,7 @@ describe(
         source: {
           resourceId: fixture.app,
           sourceTreeHash: tree,
+          definitionHash,
         },
         candidate: {
           resourceVersion: 1,
@@ -962,7 +974,8 @@ describe(
       const draft = await sealDraftRelease(
         env,
         key,
-        new Map(Object.entries(notesFiles()))
+        new Map(Object.entries(notesFiles().files)),
+        notesFiles().definition
       );
       const bytes = new Map(
         draft.artifacts.map(({ sha256, bytes: kept }) => [sha256, kept])
@@ -1213,7 +1226,7 @@ describe(
 
 /** What a seal of `files` was refused with: its code, and the files its diagnostics name. */
 const refusedSeal = async (
-  files: Record<string, string>
+  files: TestSource
 ): Promise<{ code: string; files: string[] }> => {
   const fixture = await appWith(files);
   try {
@@ -1246,10 +1259,10 @@ const refusedSeal = async (
 };
 
 /** An operation file added to the notes, holding `source`. */
-const withOperation = (source: string): Record<string, string> => ({
-  ...notesFiles(),
-  "server/extra.ts": source,
-});
+const withOperation = (source: string): TestApp =>
+  withFiles(notesFiles(), {
+    "server/extra.ts": source,
+  });
 
 describe("server code a seal type-checks", { timeout: 120_000 }, () => {
   it.each([
@@ -1344,10 +1357,14 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     // Without imports or exports, TypeScript would read the other file as
     // a script whose names every file sees; the build makes each a module.
     await expect(
-      refusedSeal({
-        ...withOperation("export const greeting = (): string => shared;\n"),
-        "server/extra-name.ts": 'const shared = "Hi";\n',
-      })
+      refusedSeal(
+        withFiles(
+          withOperation("export const greeting = (): string => shared;\n"),
+          {
+            "server/extra-name.ts": 'const shared = "Hi";\n',
+          }
+        )
+      )
     ).resolves.toStrictEqual({
       code: "version.build_failed",
       files: ["server/extra.ts"],
@@ -1356,10 +1373,11 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
 
   it("refuses a test's type error with the server code's", async () => {
     await expect(
-      refusedSeal({
-        ...notesFiles(),
-        "tests/helper.ts": 'export const count: number = "none";\n',
-      })
+      refusedSeal(
+        withFiles(notesFiles(), {
+          "tests/helper.ts": 'export const count: number = "none";\n',
+        })
+      )
     ).resolves.toStrictEqual({
       code: "version.build_failed",
       files: ["tests/helper.ts"],
@@ -1371,13 +1389,15 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     // the check: the operation's `document` stays an error. It is refused
     // where tests run, as a version is made current.
     await expect(
-      refusedSeal({
-        ...withOperation(
-          "export const title = (): string => document.title;\n"
-        ),
-        "tests/helper.ts":
-          "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
-      })
+      refusedSeal(
+        withFiles(
+          withOperation("export const title = (): string => document.title;\n"),
+          {
+            "tests/helper.ts":
+              "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
+          }
+        )
+      )
     ).resolves.toStrictEqual({
       code: "version.build_failed",
       files: ["server/extra.ts"],
@@ -1388,8 +1408,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     // A streaming action runs only for a page following it (spec
     // 10.7.6): a test principal's `action` answers once, so its type
     // refuses one, as the host does (`function.mode_mismatch`).
-    const streamed = {
-      ...notesFiles(),
+    const streamed = withFiles(notesFiles(), {
       "server/streams.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
@@ -1405,16 +1424,16 @@ export const progress = action({
   },
 });
 `,
-    };
-    const running = (reference: string): Record<string, string> => ({
-      ...streamed,
-      "tests/helper.ts": `import type { api } from "@server/_generated/api";
+    });
+    const running = (reference: string): TestApp =>
+      withFiles(streamed, {
+        "tests/helper.ts": `import type { api } from "@server/_generated/api";
 import type { TestPrincipal } from "@grasp-os/sdk/testing";
 
 export const run = async (principal: TestPrincipal, refs: typeof api, flag: boolean): Promise<number> =>
   await principal.action(${reference}, {});
 `,
-    });
+      });
     await expect(
       Promise.all(
         [
@@ -1433,23 +1452,26 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
 
   it("seals tests that name the App's references and the SDK's testing module for their types", async () => {
     await expect(
-      refusedSeal({
-        ...notesFiles(),
-        "tests/helper.ts":
-          'import type { api } from "@server/_generated/api";\nimport type * as testing from "@grasp-os/sdk/testing";\nexport type Checked = [typeof api, typeof testing];\n',
-      })
+      refusedSeal(
+        withFiles(notesFiles(), {
+          "tests/helper.ts":
+            'import type { api } from "@server/_generated/api";\nimport type * as testing from "@grasp-os/sdk/testing";\nexport type Checked = [typeof api, typeof testing];\n',
+        })
+      )
     ).resolves.toStrictEqual({ code: "ok", files: [] });
   });
 
   it("refuses a migration's global declarations, which the rest of the server code would see", async () => {
     await expect(
-      refusedSeal({
-        ...withOperation(
-          "export const title = (): string => document.title;\n"
-        ),
-        "server/migrations/0001-globals.ts":
-          "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
-      })
+      refusedSeal(
+        withFiles(
+          withOperation("export const title = (): string => document.title;\n"),
+          {
+            "server/migrations/0001-globals.ts":
+              "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
+          }
+        )
+      )
     ).resolves.toStrictEqual({
       code: "version.build_failed",
       files: ["server/migrations/0001-globals.ts"],
@@ -1460,13 +1482,15 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
     // Refused before the type check reads it, as its directive would reach
     // every file of the program.
     await expect(
-      refusedSeal({
-        ...withOperation(
-          "export const title = (): string => document.title;\n"
-        ),
-        "server/migrations/0001-dom.ts":
-          '/// <reference lib="dom" />\nexport const migration = 1;\n',
-      })
+      refusedSeal(
+        withFiles(
+          withOperation("export const title = (): string => document.title;\n"),
+          {
+            "server/migrations/0001-dom.ts":
+              '/// <reference lib="dom" />\nexport const migration = 1;\n',
+          }
+        )
+      )
     ).resolves.toStrictEqual({
       code: "version.build_failed",
       files: ["server/migrations/0001-dom.ts"],
@@ -1485,13 +1509,17 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
 
   it("seals server code and tests with unused names: the lint reports them, before a version is proposed", async () => {
     await expect(
-      refusedSeal({
-        ...withOperation(
-          'import { v } from "@grasp-os/sdk";\n\nexport const later = (): number => {\n  const spare = 1;\n  return 2;\n};\n'
-        ),
-        "tests/helper.ts":
-          'import { v } from "@grasp-os/sdk";\n\nexport const helper = 1;\n',
-      })
+      refusedSeal(
+        withFiles(
+          withOperation(
+            'import { v } from "@grasp-os/sdk";\n\nexport const later = (): number => {\n  const spare = 1;\n  return 2;\n};\n'
+          ),
+          {
+            "tests/helper.ts":
+              'import { v } from "@grasp-os/sdk";\n\nexport const helper = 1;\n',
+          }
+        )
+      )
     ).resolves.toStrictEqual({ code: "ok", files: [] });
   });
 });
@@ -1539,7 +1567,7 @@ describe("an App's definition", { timeout: 120_000 }, () => {
       ],
       answers: [{ table: "notes", field: "priority", value: "low" }],
     };
-    const fixture = await appWith(appDefinition(spec), "Desk");
+    const fixture = await appWith(testApp(spec), "Desk");
     const release = await seal(fixture);
     expect(release.app).toStrictEqual(definitionManifest(definitionOf(spec)));
   });
@@ -1550,7 +1578,11 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
   const sealedWith = async (
     changes: Record<string, string>
   ): Promise<string> => {
-    const fixture = await appWith({ ...notesFiles(), ...changes });
+    const fixture = await appWith(
+      withFiles(notesFiles(), {
+        ...changes,
+      })
+    );
     return await failure(async () => await seal(fixture));
   };
 
@@ -1565,11 +1597,12 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
   it("can't name a server module after an object's prototype", async () => {
     // Its modules are keyed by path in the generated entry: `__proto__`
     // is refused as a path, never taken for the map's prototype.
-    const fixture = await appWith({
-      ...notesFiles(),
-      "server/__proto__.ts":
-        'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });\n',
-    });
+    const fixture = await appWith(
+      withFiles(notesFiles(), {
+        "server/__proto__.ts":
+          'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });\n',
+      })
+    );
     const refused: unknown = await seal(fixture).then(
       () => {},
       (error: unknown) => error
@@ -1645,7 +1678,7 @@ JSON.stringify = (value, ...rest) => {
   it("is refused to someone who doesn't build the App, before a store is made or its code is built", async () => {
     const owner = await person("builder");
     const { id } = await createApp(env, owner, { name: "Beta" });
-    await commitFiles(env, owner, id, withTable("beta"), "First version");
+    await commitDefined(env, owner, id, withTable("beta"), "First version");
     const outsider = await person("builder");
     const before = await builds();
     const refused = await failure(
@@ -1675,11 +1708,13 @@ JSON.stringify = (value, ...rest) => {
     // still, kept as a rollback target.
     // Its operations replaced: the notes' file goes, which reads tables
     // version 2 doesn't have.
-    await commitFiles(
+    await commitDefined(
       env,
       fixture.owner,
       fixture.app,
-      { ...tablelessFiles(), "server/notes.ts": null },
+      changesOf(tablelessFiles(), {
+        "server/notes.ts": null,
+      }),
       "Two"
     );
     await seal(fixture, 2);
@@ -1737,9 +1772,9 @@ JSON.stringify = (value, ...rest) => {
   });
 
   it("seals functions at any segment a reference doesn't answer, `preferences` among them", async () => {
-    const fixture = await appWith({
-      ...notesFiles(),
-      "server/preferences.ts": `import { v } from "@grasp-os/sdk";
+    const fixture = await appWith(
+      withFiles(notesFiles(), {
+        "server/preferences.ts": `import { v } from "@grasp-os/sdk";
 import { api } from "@server/_generated/api";
 import { action, query } from "@server/_generated/server";
 
@@ -1755,7 +1790,8 @@ export const reach = action({
   handler: async (ctx) => await ctx.runQuery(api.preferences.defaults, {}),
 });
 `,
-    });
+      })
+    );
     const release = await seal(fixture);
     expect([
       release.app.operations["preferences.defaults"]?.kind,
@@ -1766,9 +1802,9 @@ export const reach = action({
   it("makes its App's one store when it first declares tables, keyed by the App and audited", async () => {
     const owner = await person("builder");
     const { id } = await createApp(env, owner, { name: "Notes" });
-    await commitFiles(env, owner, id, notesFiles(), "First version");
+    await commitDefined(env, owner, id, notesFiles(), "First version");
     const first = await sealRelease(env, { app: id, version: 1, by: owner });
-    await commitFiles(env, owner, id, withTable("beta"), "Second version");
+    await commitDefined(env, owner, id, withTable("beta"), "Second version");
     const second = await sealRelease(env, { app: id, version: 2, by: owner });
     const keyed = await env.DB.prepare(
       "SELECT store_id AS store FROM app_default_stores WHERE app_id = ?"
@@ -1794,19 +1830,21 @@ export const reach = action({
     await expect(
       failure(
         async () =>
-          await appWith({
-            ...notesFiles(),
-            "app/server.ts": "export class App {}\n",
-          })
+          await appWith(
+            withFiles(notesFiles(), {
+              "app/server.ts": "export class App {}\n",
+            })
+          )
       )
     ).resolves.toBe("app.v1_server");
   });
 
-  it("is an App of spec 8's layout: a draft that drops its schema isn't proposed", async () => {
+  it("is an App of spec 8's layout: a draft that drops its schema gets it back from its definition", async () => {
     const fixture = await appWith(notesFiles());
     const draft = await draftOverLatest(env, fixture.app, {
       base: 1,
       changes: { "server/schema.ts": null },
+      definition: null,
     });
     await expect(
       failure(
@@ -1819,7 +1857,9 @@ export const reach = action({
             "No schema"
           )
       )
-    ).resolves.toBe("app.layout_missing");
+      // Its schema generated from its definition again: the version it
+      // would commit is the one it is over.
+    ).resolves.toBe("app.nothing_to_commit");
   });
 
   it("can't keep anything but server code under operations/: each is refused by name", async () => {
@@ -1834,10 +1874,10 @@ export const reach = action({
     ];
     const built = await buildAppCode(
       env,
-      {
-        ...notesFiles(),
-        ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
-      },
+      withFiles(
+        notesFiles(),
+        Object.fromEntries(strays.map((path) => [path, "export {};\n"]))
+      ).files,
       "app-test"
     );
     expect({
@@ -1866,10 +1906,10 @@ export const reach = action({
     ];
     const built = await buildAppCode(
       env,
-      {
-        ...notesFiles(),
-        ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
-      },
+      withFiles(
+        notesFiles(),
+        Object.fromEntries(strays.map((path) => [path, "export {};\n"]))
+      ).files,
       "app-test"
     );
     expect({
@@ -1890,11 +1930,10 @@ export const reach = action({
     // A folder named like a file beside it: each still has its own module.
     const built = await buildAppCode(
       env,
-      {
-        ...notesFiles(),
+      withFiles(notesFiles(), {
         "server/v1.0/extra.ts": "export const one = 1;\n",
         "server/notes.ts/extra.ts": "export const two = 2;\n",
-      },
+      }).files,
       "app-test"
     );
     expect(
@@ -1918,14 +1957,13 @@ export const reach = action({
     await expect(
       failure(
         async () =>
-          await commitFiles(
+          await commitDefined(
             env,
             owner,
             id,
-            {
-              ...notesFiles(),
+            withFiles(notesFiles(), {
               "server/_generated/api.ts": "export const api = {};\n",
-            },
+            }),
             "Forged references"
           )
       )
@@ -2086,8 +2124,7 @@ describe("pages", { timeout: 120_000 }, () => {
   it("import a component kept in a folder whose name has a dot", async () => {
     const built = await buildPages(
       env,
-      {
-        ...notesFiles(),
+      withFiles(notesFiles(), {
         "src/components/v1.0/title.tsx":
           "export function Title() {\n  return <h1>Notes</h1>;\n}\n",
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
@@ -2099,7 +2136,7 @@ function Notes() {
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-      },
+      }).files,
       "app-test"
     );
     expect(errorsOf(built)).toStrictEqual([]);
@@ -2116,8 +2153,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     ];
     const built = await buildPages(
       env,
-      {
-        ...notesFiles(),
+      withFiles(notesFiles(), {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Notes() {
   return null;
@@ -2126,7 +2162,7 @@ function Notes() {
 export const Route = createFileRoute("/")({ component: Notes });
 `,
         ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
-      },
+      }).files,
       "app-test"
     );
     expect(
@@ -2158,11 +2194,10 @@ export const Route = createFileRoute("/")({ component: Notes });
         async (line) =>
           await buildPages(
             env,
-            {
-              ...notesFiles(),
+            withFiles(notesFiles(), {
               ...declarations,
               "src/routes/index.tsx": pageShowingProps(line),
-            },
+            }).files,
             "app-test"
           )
       )
@@ -2184,8 +2219,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     // The declaration's import check refuses it before any type check;
     // the type check's resolution, which holds it as well, is tested on its
     // own (packages/compiler, type-check.test.ts).
-    const files = {
-      ...notesFiles(),
+    const files = withFiles(notesFiles(), {
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Notes() {
   return null;
@@ -2195,8 +2229,8 @@ export const Route = createFileRoute("/")({ component: Notes });
 `,
       "probe.d.ts":
         'declare namespace Probe {\n  type Server = typeof import("@grasp-os/sdk/server");\n}\n',
-    };
-    const built = await buildPages(env, files, "app-test");
+    });
+    const built = await buildPages(env, files.files, "app-test");
     expect(
       (built.ok ? [] : built.diagnostics)
         .filter(({ file }) => file === "probe.d.ts")
@@ -2223,8 +2257,7 @@ export const Route = createFileRoute("/")({ component: Notes });
   ])("never declare a module by name: %s", async (_case, file, source) => {
     const built = await buildPages(
       env,
-      {
-        ...notesFiles(),
+      withFiles(notesFiles(), {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 export type Reached = unknown;
 function Notes() {
@@ -2234,7 +2267,7 @@ function Notes() {
 export const Route = createFileRoute("/")({ component: Notes });
 `,
         [file]: source,
-      },
+      }).files,
       "app-test"
     );
     expect({
@@ -2263,8 +2296,7 @@ export const Route = createFileRoute("/")({ component: Notes });
   ])("never declare globals, in %s", async (_case, file, source) => {
     const built = await buildPages(
       env,
-      {
-        ...notesFiles(),
+      withFiles(notesFiles(), {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Notes() {
   return null;
@@ -2273,7 +2305,7 @@ function Notes() {
 export const Route = createFileRoute("/")({ component: Notes });
 `,
         [file]: source,
-      },
+      }).files,
       "app-test"
     );
     expect({
@@ -2291,8 +2323,7 @@ export const Route = createFileRoute("/")({ component: Notes });
   it("read a declaration file as declarations: a const needs no value", async () => {
     const built = await buildPages(
       env,
-      {
-        ...notesFiles(),
+      withFiles(notesFiles(), {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import type { Limit } from "../../limits";
 export type Shown = Limit;
@@ -2304,7 +2335,7 @@ export const Route = createFileRoute("/")({ component: Notes });
 `,
         "limits.d.ts":
           "export const limit: number;\nexport type Limit = typeof limit;\n",
-      },
+      }).files,
       "app-test"
     );
     expect(built.ok ? [] : errorsOf(built)).toStrictEqual([]);
@@ -2329,12 +2360,11 @@ export const Route = createFileRoute("/")({ component: Notes });
         'import { createFileRoute } from "@tanstack/react-router";\n\nfunction Notes() {\n  return null;\n}\n\nexport const Route = createFileRoute("/")({ component: Notes });\n';
       const built = await buildPages(
         env,
-        {
-          ...notesFiles(),
+        withFiles(notesFiles(), {
           "src/routes/index.tsx":
             file === "src/routes/index.tsx" ? `${lines}\n${page}` : page,
           ...(file === "notes.d.ts" ? { [file]: lines } : {}),
-        },
+        }).files,
         "app-test"
       );
       const refused = saidSchema
@@ -2351,8 +2381,7 @@ export const Route = createFileRoute("/")({ component: Notes });
       }).toStrictEqual({ ok: false, imports: 6 });
       const directives = await buildPages(
         env,
-        {
-          ...notesFiles(),
+        withFiles(notesFiles(), {
           "src/routes/index.tsx":
             file === "src/routes/index.tsx"
               ? `${lines.split("\n").slice(0, 2).join("\n")}\n${page}`
@@ -2360,7 +2389,7 @@ export const Route = createFileRoute("/")({ component: Notes });
           ...(file === "notes.d.ts"
             ? { [file]: lines.split("\n").slice(0, 2).join("\n") }
             : {}),
-        },
+        }).files,
         "app-test"
       );
       expect({
@@ -2391,8 +2420,7 @@ export const Route = createFileRoute("/")({ component: Notes });
         'import { createFileRoute } from "@tanstack/react-router";\n\nfunction Notes() {\n  return null;\n}\n\nexport const Route = createFileRoute("/")({ component: Notes });\n';
       const built = await buildPages(
         env,
-        {
-          ...notesFiles(),
+        withFiles(notesFiles(), {
           "src/routes/index.tsx":
             file === "src/routes/index.tsx"
               ? `${typeLines.join("\n")}\nexport type Q = typeof query | typeof internal;\n${page}`
@@ -2404,7 +2432,7 @@ export const Route = createFileRoute("/")({ component: Notes });
                   .join("\n"),
               }
             : {}),
-        },
+        }).files,
         "app-test"
       );
       expect({
@@ -2447,14 +2475,13 @@ export const Route = createFileRoute("/")({ component: Notes });
     async (_case, line) => {
       const build = await buildPages(
         env,
-        {
-          ...notesFiles(),
+        withFiles(notesFiles(), {
           "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 ${line}\nfunction Notes() {\n  return null;\n}\n
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-        },
+        }).files,
         "app-test"
       );
       expect(build.ok).toBeFalsy();
@@ -2492,8 +2519,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     async (_case, line, refused) => {
       const build = await buildPages(
         env,
-        {
-          ...notesFiles(),
+        withFiles(notesFiles(), {
           "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 ${line}
 
@@ -2506,7 +2532,7 @@ function Notes() {
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-        },
+        }).files,
         "app-test"
       );
       expect({
@@ -2519,8 +2545,7 @@ export const Route = createFileRoute("/")({ component: Notes });
   it("type-check a page's use of the data model against the App's own tables", async () => {
     const build = await buildPages(
       env,
-      {
-        ...notesFiles(),
+      withFiles(notesFiles(), {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import type { Doc } from "@server/_generated/dataModel";
 
@@ -2532,7 +2557,7 @@ function Notes() {
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-      },
+      }).files,
       "app-test"
     );
     expect({
@@ -2553,11 +2578,12 @@ describe("import boundaries", { timeout: 120_000 }, () => {
     "keep the platform's bootstrap out of %s, naming it for its %s",
     async (_target, _form, kind, write) => {
       const { file, wrap, build } = kind;
-      const built = await build({
-        ...notesFiles(),
-        ...("others" in kind ? kind.others : {}),
-        [file]: wrap(namingAll(write)),
-      });
+      const built = await build(
+        withFiles(notesFiles(), {
+          ...("others" in kind ? kind.others : {}),
+          [file]: wrap(namingAll(write)),
+        }).files
+      );
       expect({ ok: built.ok, refused: refusedIn(built, file) }).toStrictEqual({
         ok: false,
         refused: [...bootstrapModules].toSorted(),
@@ -2569,11 +2595,12 @@ describe("import boundaries", { timeout: 120_000 }, () => {
     "build %s that names none of it, with the types it may name",
     async (_target, kind) => {
       const { file, wrap, build, types } = kind;
-      const built = await build({
-        ...notesFiles(),
-        ...("others" in kind ? kind.others : {}),
-        [file]: wrap(types),
-      });
+      const built = await build(
+        withFiles(notesFiles(), {
+          ...("others" in kind ? kind.others : {}),
+          [file]: wrap(types),
+        }).files
+      );
       expect({
         ok: built.ok,
         errors: errorsOf(built),

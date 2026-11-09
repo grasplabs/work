@@ -19,7 +19,7 @@ import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
-import { appFor, commitFiles } from "../src/apps.ts";
+import { appFor } from "../src/apps.ts";
 import { readWorkflowWatch } from "../src/page-workflows.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -33,7 +33,9 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -44,20 +46,22 @@ import { unique } from "./sign-in.ts";
 // against the operation host directly (workflow-app-starts.test.ts);
 // this is the same path from the release's own code.
 
-const files = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+const files = (): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -83,7 +87,8 @@ export const kickOff = action({
   handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
 });
 `,
-});
+    }
+  );
 
 const objectSchema = (fields: Record<string, unknown>) => ({
   kind: "object",
@@ -1189,14 +1194,13 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const throughOld = refusalOf(
       await ask(bob, { runId: failed, pagination: {} })
     );
-    await commitFiles(
+    await commitDefined(
       env,
       owner,
       app,
-      {
-        ...files(),
-        "server/requests.ts": `${files()["server/requests.ts"] ?? ""}// Sealed again.\n`,
-      },
+      withFiles(files(), {
+        "server/requests.ts": `${files().files["server/requests.ts"] ?? ""}// Sealed again.\n`,
+      }),
       "Seal again"
     );
     const next = await seal(fixture, 2);

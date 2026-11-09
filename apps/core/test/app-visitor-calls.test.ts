@@ -19,7 +19,8 @@ import { appHost } from "../src/durable-objects.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { leasedBuild, leaseFor } from "../src/page-delivery.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp, TestSource } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
@@ -54,24 +55,26 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
  * members' secrets (`appMembers`), a mutation that starts a workflow after
  * it commits, and an action.
  */
-const portalFiles = (marker = "1"): Record<string, string> => ({
-  ...appDefinition({
-    name: "Portal",
-    tables: {
-      notes: {
-        fields: { text: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const portalFiles = (marker = "1"): TestApp =>
+  testApp(
+    {
+      name: "Portal",
+      tables: {
+        notes: {
+          fields: { text: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
+        secrets: {
+          fields: { text: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
-      secrets: {
-        fields: { text: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
-      },
+      permissions: [
+        'permission.workflow("followUp", {\n  input: v.object({ who: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("followUp", {\n  input: v.object({ who: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/portal.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/portal.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -145,14 +148,15 @@ export const shout = action({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Portal() {
   return <p>Portal</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Portal });
 `,
-});
+    }
+  );
 
 /** 50 more queries' names, as long as names get. */
 const manyNames = Array.from(
@@ -165,7 +169,7 @@ const manyNames = Array.from(
 const manyPaths = manyNames.map((name) => `portal.${name}`);
 
 /** The Portal App with the 50 queries of `manyNames` beside its own. */
-const manyFiles = (): Record<string, string> => {
+const manyFiles = (): TestApp => {
   const files = portalFiles();
   const queries = manyNames
     .map(
@@ -178,19 +182,23 @@ export const ${name} = query({
 `
     )
     .join("");
-  return {
-    ...files,
-    "server/portal.ts": `${files["server/portal.ts"] ?? ""}${queries}`,
-  };
+  return withFiles(files, {
+    "server/portal.ts": `${files.files["server/portal.ts"] ?? ""}${queries}`,
+  });
 };
 
 /** Commits `files` as the App's current version. */
 const released = async (
   builder: Person,
   app: string,
-  files: Record<string, string>
+  files: TestSource
 ): Promise<number> => {
-  const { version } = await builder.api.apps.files.commit(app, files, "Next");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    app,
+    files,
+    "Next"
+  );
   await builder.api.apps.versions.setCurrent(app, version);
   return version;
 };

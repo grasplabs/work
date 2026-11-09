@@ -1,11 +1,9 @@
 import {
   applyOperation,
-  definitionPath,
   definitionSources,
   definitionText,
   emptyDefinition,
   generatedFiles,
-  readDefinition,
 } from "@grasp-os/sdk/definition";
 import type {
   AppDefinition,
@@ -13,10 +11,12 @@ import type {
   FrozenJson,
 } from "@grasp-os/sdk/definition";
 
-// An App's definition as a test writes it, and the files it is: the
-// definition, and the config and schema generated from it, exactly as
-// Grasp's definition tools make them. Every App's version holds them so
-// (core's app-definition.ts), the tests' Apps (core's and e2e/'s) too.
+// An App's definition as a test writes it, and the config and schema
+// generated from it, exactly as Grasp's definition tools make them. Every
+// App's version holds its definition beside its files and its config and
+// schema as the definition generates them (core's apps.ts), the tests'
+// Apps (core's and e2e/'s) too: a test commits its files with the
+// definition (`TestApp`, `commitApp`).
 
 /** A row rule, as `setAccess` takes it. */
 type Rule =
@@ -133,35 +133,142 @@ export const definitionOf = (spec: AppSpec): AppDefinition => {
   return { ...definition, answers };
 };
 
-/** The files `definition` is: itself, its config and its schema. */
-const filesOf = (definition: AppDefinition): Record<string, string> => ({
-  [definitionPath]: definitionText(definition),
-  ...definitionSources(definition),
+/**
+ * What marks a test's App, or changes with their definition, as such: a
+ * symbol, which no files' path can be, so changes alone are never taken
+ * for one.
+ */
+const defined: unique symbol = Symbol("defined");
+
+/**
+ * Changes to commit over a version with a definition: files by path, null
+ * deleting one there. A test's App is one.
+ */
+export interface TestChanges {
+  readonly [defined]: true;
+  readonly files: Readonly<Record<string, string | null>>;
+  readonly definition: AppDefinition;
+}
+
+/**
+ * A test's App: its files, its config and schema among them as its
+ * definition generates them, and that definition, which a version of the
+ * files is committed with.
+ */
+export interface TestApp extends TestChanges {
+  readonly files: Readonly<Record<string, string>>;
+}
+
+/** `definition` with `files` beside the config and schema it generates. */
+export const appOf = (
+  definition: AppDefinition,
+  files: Readonly<Record<string, string>> = {}
+): TestApp => ({
+  [defined]: true,
+  // The config and schema always the definition's, as a commit makes them.
+  files: { ...files, ...definitionSources(definition) },
+  definition,
 });
 
-/** The files of the definition `spec` describes: itself, its config and its schema. */
-export const appDefinition = (spec: AppSpec): Record<string, string> =>
-  filesOf(definitionOf(spec));
+/** The App `spec` describes, with `files` beside its config and schema. */
+export const testApp = (
+  spec: AppSpec,
+  files: Readonly<Record<string, string>> = {}
+): TestApp => appOf(definitionOf(spec), files);
 
-/** `files` with their definition as `change` makes it, and the code generated from it. */
-export const redefined = (
-  files: Readonly<Record<string, string>>,
-  change: (definition: AppDefinition) => AppDefinition
-): Record<string, string> => ({
-  ...files,
-  ...filesOf(change(readDefinition(files[definitionPath] ?? ""))),
+/** `app` with `files` changed (null deletes one), its definition kept. */
+export const withFiles = (
+  app: TestApp,
+  files: Readonly<Record<string, string | null>>
+): TestApp => {
+  const changed: Record<string, string> = { ...app.files };
+  for (const [path, content] of Object.entries(files)) {
+    if (content === null) {
+      Reflect.deleteProperty(changed, path);
+    } else {
+      changed[path] = content;
+    }
+  }
+  return { [defined]: true, files: changed, definition: app.definition };
+};
+
+/**
+ * `app`'s files with `files` over them as changes, a null deleting a
+ * file of the version they are committed over, and `app`'s definition.
+ */
+export const changesOf = (
+  app: TestApp,
+  files: Readonly<Record<string, string | null>>
+): TestChanges => ({
+  [defined]: true,
+  files: { ...app.files, ...files },
+  definition: app.definition,
 });
 
 /**
- * `files` with their definition changed by `operations`, as the agent's
+ * What a test commits or writes: changes with their definition (a test's
+ * App among them), or changes alone (null deletes a file), which keep
+ * the App's.
+ */
+export type TestSource = TestChanges | Readonly<Record<string, string | null>>;
+
+/** The changes `source` makes, and its definition if it has one. */
+export const sourceParts = (
+  source: TestSource
+): {
+  files: Readonly<Record<string, string | null>>;
+  definition: AppDefinition | undefined;
+} => (defined in source ? source : { files: source, definition: undefined });
+
+/**
+ * `definition` as a commit takes it: the JSON of its text, every
+ * descriptor in its compact form, as Grasp stores it.
+ */
+export const definitionInput = (definition: AppDefinition): unknown =>
+  JSON.parse(definitionText(definition));
+
+/**
+ * A test's commit of `source` (`apps.files.commit`): its files, with its
+ * definition when it is a test's App.
+ */
+export const commitApp = <Committed>(
+  api: {
+    readonly commit: (
+      app: string,
+      changes: Record<string, string | null>,
+      message: string,
+      definition?: unknown
+    ) => Committed;
+  },
+  app: string,
+  source: TestSource,
+  message: string
+): Committed => {
+  const { files, definition } = sourceParts(source);
+  return api.commit(
+    app,
+    { ...files },
+    message,
+    definition === undefined ? undefined : definitionInput(definition)
+  );
+};
+
+/** `app` with its definition as `change` makes it, and the code generated from it. */
+export const redefined = (
+  app: TestApp,
+  change: (definition: AppDefinition) => AppDefinition
+): TestApp => appOf(change(app.definition), app.files);
+
+/**
+ * `app` with its definition changed by `operations`, as the agent's
  * definition tools change it, and the code generated from it: new IDs
  * taken from names, as `definitionOf` takes them.
  */
 export const definedWith = (
-  files: Readonly<Record<string, string>>,
+  app: TestApp,
   ...operations: readonly DefinitionOperation[]
-): Record<string, string> =>
-  redefined(files, (definition) => {
+): TestApp =>
+  redefined(app, (definition) => {
     let changed = definition;
     for (const operation of operations) {
       changed = applied(changed, operation);
@@ -170,29 +277,26 @@ export const definedWith = (
   });
 
 /**
- * `files` without their definition and the code generated from it: what
- * the agent writes with `writeFile`, which refuses those three.
+ * `app`'s files without the code generated from its definition: what the
+ * agent writes with `writeFile`, which refuses both.
  */
-export const withoutDefinition = (
-  files: Readonly<Record<string, string>>
-): Record<string, string> =>
+export const withoutDefinition = (app: TestApp): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(files).filter(
+    Object.entries(app.files).filter(
       ([path]) =>
-        path !== definitionPath &&
-        path !== generatedFiles.config &&
-        path !== generatedFiles.schema
+        path !== generatedFiles.config && path !== generatedFiles.schema
     )
   );
 
-/** `files` with their table `table` declared sensitive. */
-export const withSensitive = (
-  files: Readonly<Record<string, string>>,
-  table: string
-): Record<string, string> =>
-  redefined(files, (definition) => ({
+/** `app` with its table `table` declared sensitive. */
+export const withSensitive = (app: TestApp, table: string): TestApp =>
+  redefined(app, (definition) => ({
     ...definition,
     tables: definition.tables.map((held) =>
       held.name === table ? { ...held, sensitive: true } : held
     ),
   }));
+
+/** The text a chat's draft keeps of `app`'s definition, as the definition tools write it. */
+export const draftDefinitionOf = (app: TestApp): string =>
+  definitionText(app.definition);

@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createFromBlueprint } from "../src/app-blueprints.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
 import { outlook, release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -51,8 +51,8 @@ const personApi = async (role: Role): Promise<Person> =>
  * its store, which any member reads, so a note that came along to a copy
  * would show to whoever has a role in it.
  */
-const notesCode = {
-  ...appDefinition({
+const notesCode = testApp(
+  {
     name: "Notes",
     tables: {
       notes: {
@@ -60,8 +60,9 @@ const notesCode = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const add = mutation({
@@ -76,7 +77,8 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.text),
 });
 `,
-};
+  }
+);
 
 /** The App's notes, as `person` reads them through its sealed query. */
 const notesOf = async (person: Person, app: string): Promise<unknown> =>
@@ -86,8 +88,7 @@ const notesOf = async (person: Person, app: string): Promise<unknown> =>
   });
 
 /** A copy has every file of it but AGENTS.md, which starts as a stub. */
-const v1 = {
-  ...notesCode,
+const v1 = withFiles(notesCode, {
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
@@ -100,13 +101,14 @@ function Notes() {
 export const Route = createFileRoute("/")({ component: Notes });
 `,
   "AGENTS.md": "# Notes\n",
-};
+});
 
 /** A released App of `owner`'s at version 1, with a version 2 after it. */
 const notesApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Notes ${unique()}` });
   await release(owner, id, v1);
-  await owner.api.apps.files.commit(
+  await commitApp(
+    owner.api.apps.files,
     id,
     { "AGENTS.md": "# Notes, v2\n" },
     "Version 2"
@@ -410,10 +412,9 @@ describe("blueprints", { timeout: 60_000 }, () => {
       listed: true,
       // The same code, but for AGENTS.md: the source's agents wrote it
       // from what the source read, which the copy has no sources for.
-      files: {
-        ...v1,
+      files: withFiles(v1, {
         "AGENTS.md": `Created from the blueprint ${sourceName}. Write what this App does here.\n`,
-      },
+      }).files,
       sourceNotes: { ok: true, value: ["Only the source's"] },
       notes: { ok: true, value: [] },
       members: [],

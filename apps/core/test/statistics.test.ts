@@ -15,7 +15,8 @@ import { appFor } from "../src/apps.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { requestPermission } from "../src/permissions.ts";
 import { readPlatformStatistics } from "../src/statistics.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
@@ -45,18 +46,20 @@ const dayMs = 24 * 60 * 60 * 1000;
  * `grasp`; each answers what it got, or the error's code and details, as
  * JSON text.
  */
-const statsFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Stats",
-    tables: {
-      marks: {
-        fields: { at: "v.number()" },
-        access: { read: "owner", write: "owner" },
+const statsFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Stats",
+      tables: {
+        marks: {
+          fields: { at: "v.number()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
+      permissions: ["permission.grasp()"],
     },
-    permissions: ["permission.grasp()"],
-  }),
-  "server/stats.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/stats.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -121,7 +124,8 @@ export const platformReadBurst = action({
     }),
 });
 `,
-});
+    }
+  );
 
 /** A new App of `owner`'s with `files`, current: its ID. */
 const statsApp = async (

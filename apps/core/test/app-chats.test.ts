@@ -208,7 +208,6 @@ describe("a chat for an App", () => {
         {
           app: app.id,
           changed: [
-            "definition.json",
             "grasp.config.ts",
             "server/schema.ts",
             "src/routes/index.tsx",

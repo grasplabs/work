@@ -15,7 +15,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { appFor, commitFiles } from "../src/apps.ts";
+import { appFor } from "../src/apps.ts";
 import {
   appMembers,
   appResourceBindings,
@@ -37,8 +37,9 @@ import {
 } from "../src/resource-bindings.ts";
 import { publishTemplate } from "../src/resource-templates.ts";
 import { isRestricted } from "../src/restricted.ts";
-import { appDefinition } from "./app-definitions.ts";
-import type { AppSpec } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { AppSpec, TestApp, TestSource } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProviderFor } from "./model-provider.ts";
@@ -69,13 +70,15 @@ const notesTable = {
   },
 } satisfies AppSpec["tables"];
 
-const modelFiles = (maxOutputTokens = 300): Record<string, string> => ({
-  ...appDefinition({
-    name: "Assistant",
-    tables: notesTable,
-    permissions: [`permission.ai({ maxOutputTokens: ${maxOutputTokens} })`],
-  }),
-  "server/assist.ts": `import { v } from "@grasp-os/sdk";
+const modelFiles = (maxOutputTokens = 300): TestApp =>
+  testApp(
+    {
+      name: "Assistant",
+      tables: notesTable,
+      permissions: [`permission.ai({ maxOutputTokens: ${maxOutputTokens} })`],
+    },
+    {
+      "server/assist.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -160,15 +163,13 @@ export const attempt = action({
   },
 });
 `,
-});
+    }
+  );
 
 type Sealed = Fixture & { release: Release };
 
 /** An App with `files`, sealed and current. */
-const sealedApp = async (
-  files: Record<string, string>,
-  name?: string
-): Promise<Sealed> => {
+const sealedApp = async (files: TestSource, name?: string): Promise<Sealed> => {
   const fixture = await appWith(files, name);
   const release = await seal(fixture);
   await publishVersion(env, fixture.owner, fixture.app, 1);
@@ -178,10 +179,10 @@ const sealedApp = async (
 /** Commits `files` as the App's next version, seals it and makes it current. */
 const nextVersion = async (
   sealed: Sealed,
-  files: Record<string, string>,
+  files: TestSource,
   version: number
 ): Promise<Sealed> => {
-  await commitFiles(env, sealed.owner, sealed.app, files, "Next version");
+  await commitDefined(env, sealed.owner, sealed.app, files, "Next version");
   const release = await seal(sealed, version);
   await publishVersion(env, sealed.owner, sealed.app, version);
   return { ...sealed, release };
@@ -294,16 +295,18 @@ const writerApproval = (sealed: Sealed) => ({
 });
 
 /** An App whose actions search and read two of the Brain's collections. */
-const knowledgeFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Help",
-    tables: notesTable,
-    permissions: [
-      'permission.brain({ operations: ["search", "read"], collections: ["handbook", "salaries"] })',
-      "permission.ai({ maxOutputTokens: 300 })",
-    ],
-  }),
-  "server/help.ts": `import { v } from "@grasp-os/sdk";
+const knowledgeFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Help",
+      tables: notesTable,
+      permissions: [
+        'permission.brain({ operations: ["search", "read"], collections: ["handbook", "salaries"] })',
+        "permission.ai({ maxOutputTokens: 300 })",
+      ],
+    },
+    {
+      "server/help.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -333,7 +336,8 @@ export const summarize = action({
   },
 });
 `,
-});
+    }
+  );
 
 /** A collection permission of the App, asked for by its owner and granted. */
 const grantedCollection = async (
@@ -1476,22 +1480,24 @@ const deskFiles = ({
   maxOutputTokens?: number;
   collections?: readonly string[];
   sneak?: boolean;
-} = {}): Record<string, string> => ({
-  ...appDefinition({
-    name: "Desk",
-    tables: notesTable,
-    permissions: [
-      ...(withWriter
-        ? [`permission.ai({ maxOutputTokens: ${maxOutputTokens} })`]
-        : []),
-      ...(withBrain
-        ? [
-            `permission.brain({ operations: ["search"], collections: ${JSON.stringify(collections)} })`,
-          ]
-        : []),
-    ],
-  }),
-  "server/desk.ts": `import { v } from "@grasp-os/sdk";
+} = {}): TestApp =>
+  testApp(
+    {
+      name: "Desk",
+      tables: notesTable,
+      permissions: [
+        ...(withWriter
+          ? [`permission.ai({ maxOutputTokens: ${maxOutputTokens} })`]
+          : []),
+        ...(withBrain
+          ? [
+              `permission.brain({ operations: ["search"], collections: ${JSON.stringify(collections)} })`,
+            ]
+          : []),
+      ],
+    },
+    {
+      "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 ${withWriter || withBrain ? 'import { permissions } from "../grasp.config.ts";' : ""}
 
@@ -1532,7 +1538,8 @@ ${
     : ""
 }
 `,
-});
+    }
+  );
 
 /** The Desk App, sealed and current, granted to read one collection. */
 const deskApp = async () => {

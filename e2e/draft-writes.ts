@@ -90,7 +90,7 @@ export const writeDraft = async (
               chatId,
               app,
               base,
-              sha256(canonicalJson({ base, files: hashes })),
+              sha256(canonicalJson({ base, files: hashes, definition: null })),
               now,
             ],
           },

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { frameAccess, frameKey, stageFrame } from "../src/page-frame.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { withFiles } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -156,7 +157,13 @@ describe(
       const builder = await signedInApi(idp, "builder");
       const { id } = await builder.api.apps.create({ name: "Desk" });
       const app = appIdSchema.parse(id);
-      await release(builder, app, { ...deskFiles(), ...withComponent("Live") });
+      await release(
+        builder,
+        app,
+        withFiles(deskFiles(), {
+          ...withComponent("Live"),
+        })
+      );
       const published = await framed(await builder.api.pages.open(app));
       const { chatId } = await chatWithDraft(
         builder,
@@ -288,7 +295,7 @@ describe(
       // Another chat's draft of the same App.
       const { chatId: otherChat } = await chatWithDraft(builder, app, {
         "src/routes/index.tsx":
-          deskFiles("Elsewhere")["src/routes/index.tsx"] ?? "",
+          deskFiles("Elsewhere").files["src/routes/index.tsx"] ?? "",
       });
       const otherDraft = await framed(
         await builder.api.chats.preview(otherChat, app)
@@ -354,7 +361,7 @@ describe(
       const frame = await framed(opened);
       const { chatId: otherChat } = await chatWithDraft(builder, app, {
         "src/routes/index.tsx":
-          deskFiles("Elsewhere")["src/routes/index.tsx"] ?? "",
+          deskFiles("Elsewhere").files["src/routes/index.tsx"] ?? "",
       });
       const other = await framed(
         await builder.api.chats.preview(otherChat, app)
@@ -441,7 +448,7 @@ describe(
       const next = await write(
         {
           "src/routes/index.tsx":
-            deskFiles("Later")["src/routes/index.tsx"] ?? "",
+            deskFiles("Later").files["src/routes/index.tsx"] ?? "",
         },
         revision
       );

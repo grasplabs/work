@@ -6,7 +6,8 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
 import { openTestRun, testRunOpening } from "./agent-chat.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -70,17 +71,19 @@ export const Route = createFileRoute("/")({ component: Desk });
 `;
 
 /** An App of spec 8's layout whose one page says `marker` and reads its notes. */
-const deskFiles = (marker: string): Record<string, string> => ({
-  ...appDefinition({
-    name: "Desk",
-    tables: {
-      notes: {
-        fields: { title: "v.string().min(1).max(200)" },
-        access: { read: "appMembers", write: "appMembers" },
+const deskFiles = (marker: string): TestApp =>
+  testApp(
+    {
+      name: "Desk",
+      tables: {
+        notes: {
+          fields: { title: "v.string().min(1).max(200)" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
     },
-  }),
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const titles = query({
@@ -92,8 +95,9 @@ export const titles = query({
   },
 });
 `,
-  "src/routes/index.tsx": desk(marker),
-});
+      "src/routes/index.tsx": desk(marker),
+    }
+  );
 
 /** What each of the chat's drafts changes, and at which revision. */
 const changesOf = (drafts: readonly ChatDraft[]) =>

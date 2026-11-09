@@ -24,15 +24,20 @@
  *   "workflows/<alias>.json" }]`, each a grasp-workflow/1 definition
  *   in the folder (not in `files/`: it is no file of the App), which the
  *   copy binds under its alias and asks to start under its binding name;
+ * - `definition.json`: the App's definition (@grasp-os/sdk's
+ *   definition.ts), which each copy's first version holds, in the folder
+ *   too: it is no file of the App either;
  * - `files/`: the App's files, by path, written against `@grasp-os/sdk`
- *   like any App's.
+ *   like any App's, its `grasp.config.ts` and `server/schema.ts` exactly
+ *   as its definition generates them.
  *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
  * collections, and its permissions as any request's are checked, each
- * for a collection it declares), and its
+ * for a collection it declares), its definition, and its
  * files as any App's write checks them (paths, no hidden files, each
- * file's size and their number), and their total size as any version's.
+ * file's size and their number), their total size as any version's, and
+ * their generated files as its definition generates them.
  */
 import { createHash } from "node:crypto";
 import {
@@ -45,6 +50,11 @@ import {
 } from "node:fs";
 import path from "node:path";
 
+import {
+  definitionSources,
+  definitionText,
+  readDefinition,
+} from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
 import { declaredCollectionSchema } from "@grasp-os/shared/knowledge";
@@ -244,7 +254,30 @@ const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
         }
         return shipped.data;
       });
-      return { id: name, ...manifest.data, workflows, files };
+      const definitionFile = path.join(folder, "definition.json");
+      if (!existsSync(definitionFile)) {
+        throw new Error(`${where}: has no definition.json`);
+      }
+      const definition = readDefinition(
+        JSON.parse(readFileSync(definitionFile, "utf-8"))
+      );
+      // Its code is its definition's, as every version's is (src/apps.ts).
+      for (const [file, source] of Object.entries(
+        definitionSources(definition)
+      )) {
+        if (files[file] !== source) {
+          throw new Error(
+            `${where}: files/${file} isn't what definition.json generates`
+          );
+        }
+      }
+      return {
+        id: name,
+        ...manifest.data,
+        workflows,
+        definition: definitionText(definition),
+        files,
+      };
     });
 
 /**

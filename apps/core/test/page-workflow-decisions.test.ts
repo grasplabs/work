@@ -48,7 +48,8 @@ import {
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { withRespond } from "../src/workflows/run-waits.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   resumed,
@@ -90,20 +91,22 @@ function Desk() {
 export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-const files = (page = pageOf("approval")): Record<string, string> => ({
-  ...appDefinition({
-    name: "Invoices",
-    tables: {
-      invoices: {
-        fields: { amount: "v.number()" },
-        access: { read: "appMembers", write: "appMembers" },
+const files = (page = pageOf("approval")): TestApp =>
+  testApp(
+    {
+      name: "Invoices",
+      tables: {
+        invoices: {
+          fields: { amount: "v.number()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("review", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("review", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/invoices.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -116,8 +119,9 @@ export const count = query({
 });
 `,
 
-  "src/routes/index.tsx": page,
-});
+      "src/routes/index.tsx": page,
+    }
+  );
 
 /** A value's schema: an object of exactly `fields`, each required. */
 const objectDocument = (fields: Record<string, unknown>) => ({
@@ -1687,7 +1691,7 @@ describe(
           env,
           fixture.app,
           1,
-          files(pageOf(key))
+          files(pageOf(key)).files
         );
         return await pageErrors(fixture, drafted.files);
       };

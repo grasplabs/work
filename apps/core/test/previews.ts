@@ -1,3 +1,4 @@
+import { definitionText } from "@grasp-os/sdk/definition";
 import type {
   PreviewAt,
   PreviewRefresh,
@@ -17,11 +18,13 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { sealDraftRelease } from "../src/app-releases.ts";
-import { draftFiles } from "../src/apps.ts";
+import { draftDefinition, draftFiles } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import type { Draft } from "../src/workspace.ts";
 import { openTestRun } from "./agent-chat.ts";
+import { sourceParts } from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
@@ -45,22 +48,24 @@ export const chatsOf = (person: Pick<Person, "userId">) =>
 export const chatWithDraft = async (
   person: Person,
   app: AppId,
-  changes: Record<string, string | null>
+  changes: TestSource
 ) => {
   const chat = await person.api.chats.create("Build");
   const chatId = chatIdSchema.parse(chat.id);
   const write = async (
-    written: Record<string, string | null>,
+    written: TestSource,
     revision: number
   ): Promise<number> => {
+    const { files, definition } = sourceParts(written);
     const saved = await chatsOf(person).saveDraft(
       chatId,
       app,
       1,
-      written,
+      { ...files },
       [],
       revision,
-      { runId: await openTestRun(chatsOf(person), chatId) }
+      { runId: await openTestRun(chatsOf(person), chatId) },
+      definition === undefined ? undefined : definitionText(definition)
     );
     if (!saved) {
       throw new Error("The draft wasn't written");
@@ -95,12 +100,17 @@ const answerSchema = z.object({
 /** The contracts of `draft`, a draft of `app`, sealed as its preview seals it. */
 const draftContracts = async (
   app: AppId,
-  draft: Pick<Draft, "base" | "changes">
+  draft: Pick<Draft, "base" | "changes" | "definition">
 ): Promise<string | undefined> => {
+  const definition = await draftDefinition(env, app, draft);
+  if (definition === null) {
+    throw new Error("The draft has no definition");
+  }
   const sealed = await sealDraftRelease(
     env,
     { app, version: (draft.base ?? 0) + 1 },
-    await draftFiles(env, app, draft)
+    await draftFiles(env, app, draft),
+    definition.definition
   );
   const manifest = keptManifestSchema.parse(JSON.parse(sealed.manifest));
   const sha256 = manifest.artifacts.find(
@@ -130,7 +140,7 @@ export const requestFor = async (
   const draft =
     typeof revision === "number"
       ? await chatsOf(person).previewDraft(chatId, person.userId, app)
-      : { base: revision.appVersion, changes: {} };
+      : { base: revision.appVersion, changes: {}, definition: null };
   const read = contractsSchema.parse(
     JSON.parse((await draftContracts(app, draft)) ?? "null")
   );

@@ -1597,6 +1597,13 @@
       "when": 1794161991467,
       "tag": "0227_event_waits",
       "breakpoints": true
+    },
+    {
+      "idx": 228,
+      "version": "6",
+      "when": 1794176082843,
+      "tag": "0228_version_definitions",
+      "breakpoints": true
     }
   ]
 }

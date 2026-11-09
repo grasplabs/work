@@ -11,6 +11,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { releaseIdsOf } from "../src/apps.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
 import {
@@ -33,7 +34,8 @@ import type { HostedActivation } from "../src/workflows/resource-runs.ts";
 import type { StepError } from "../src/workflows/sealed-isolate.ts";
 import { sealedRunModules } from "../src/workflows/sealed-run.ts";
 import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
@@ -362,20 +364,22 @@ const candidatePinOf = async (workflow: string, runId: string) => {
 };
 
 /** The Requests App's files: it binds `followUp`, keeps requests, `desk`. */
-const requestsFiles = (fixture: unknown): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+const requestsFiles = (fixture: unknown): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -397,14 +401,15 @@ export const list = query({
 });
 `,
 
-  "tests/fixtures/desk.json": JSON.stringify({
-    principals: {
-      "desk-user": { role: "user" },
-      approver: { role: "user" },
-    },
-    workflows: { followUp: fixture },
-  }),
-});
+      "tests/fixtures/desk.json": JSON.stringify({
+        principals: {
+          "desk-user": { role: "user" },
+          approver: { role: "user" },
+        },
+        workflows: { followUp: fixture },
+      }),
+    }
+  );
 
 /**
  * The Requests App binding a workflow of `steps` ending in `status` as
@@ -538,7 +543,12 @@ describe(
       const app = await requestsApp([summarize], greeting, {
         models: { summary: { line: "Hello from the fixture" } },
       });
-      const host = fixtureHostFor(env, app.release, app.files);
+      const host = fixtureHostFor(
+        env,
+        app.release,
+        app.files.files,
+        await releaseIdsOf(env, app.release)
+      );
       const session = await host.open("desk", `test-${unique()}`);
       await session.start(
         "desk-user",
@@ -570,7 +580,12 @@ describe(
       const app = await requestsApp([linger, summarize], greeting, {
         models: { summary: { line: "Hello from the fixture" } },
       });
-      const host = fixtureHostFor(env, app.release, app.files);
+      const host = fixtureHostFor(
+        env,
+        app.release,
+        app.files.files,
+        await releaseIdsOf(env, app.release)
+      );
       const session = await host.open("desk", `test-${unique()}`);
       await session.start(
         "desk-user",
@@ -591,7 +606,12 @@ describe(
       const app = await requestsApp([linger, summarize], greeting, {
         models: { summary: { line: "Hello" } },
       });
-      const host = fixtureHostFor(env, app.release, app.files);
+      const host = fixtureHostFor(
+        env,
+        app.release,
+        app.files.files,
+        await releaseIdsOf(env, app.release)
+      );
       const session = await host.open("desk", `test-${unique()}`);
       await session.start(
         "desk-user",
@@ -617,7 +637,12 @@ describe(
 
     it("refuses an App test's run on the run host a call its test doesn't serve, sending nothing", async () => {
       const app = await requestsApp([linger, send], "sent", {});
-      const host = fixtureHostFor(env, app.release, app.files);
+      const host = fixtureHostFor(
+        env,
+        app.release,
+        app.files.files,
+        await releaseIdsOf(env, app.release)
+      );
       const session = await host.open("desk", `test-${unique()}`);
       await session.start(
         "desk-user",
@@ -703,7 +728,12 @@ describe(
       const app = await requestsApp([linger, review], reviewed, {
         deciders: { approval: ["approver"] },
       });
-      const host = fixtureHostFor(env, app.release, app.files);
+      const host = fixtureHostFor(
+        env,
+        app.release,
+        app.files.files,
+        await releaseIdsOf(env, app.release)
+      );
       const session = await host.open("desk", `test-${unique()}`);
       const started = z
         .object({ ok: z.literal(true), value: z.object({ run: z.number() }) })
@@ -778,7 +808,12 @@ describe(
       const app = await requestsApp([linger, batch], "signed", {
         deciders: { approval: ["approver"] },
       });
-      const host = fixtureHostFor(env, app.release, app.files);
+      const host = fixtureHostFor(
+        env,
+        app.release,
+        app.files.files,
+        await releaseIdsOf(env, app.release)
+      );
       const session = await host.open("desk", `test-${unique()}`);
       const started = z
         .object({ ok: z.literal(true), value: z.object({ run: z.number() }) })

@@ -12,13 +12,15 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { resumed, sleeping, stopped } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -87,20 +89,22 @@ interface WorkflowFixture {
 const filesWith = (
   workflow: WorkflowFixture,
   tests: Record<string, string> = {}
-): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -122,12 +126,13 @@ export const list = query({
 });
 `,
 
-  "tests/fixtures/desk.json": JSON.stringify({
-    principals: { "desk-user": { role: "user" } },
-    workflows: { followUp: workflow },
-  }),
-  ...tests,
-});
+      "tests/fixtures/desk.json": JSON.stringify({
+        principals: { "desk-user": { role: "user" } },
+        workflows: { followUp: workflow },
+      }),
+      ...tests,
+    }
+  );
 
 /** The model catalog contract `admin` publishes. */
 const modelContract = async (admin: Identity): Promise<string> => {
@@ -203,7 +208,12 @@ const startedSchema = z.object({
 
 /** A test session on `app`'s release, its run of `followUp` for "Ada" started. */
 const runningIn = async (app: RequestsApp) => {
-  const host = fixtureHostFor(env, app.release, app.files);
+  const host = fixtureHostFor(
+    env,
+    app.release,
+    app.files.files,
+    await releaseIdsOf(env, app.release)
+  );
   const session = await host.open("desk", `test-${unique()}`);
   const { value } = startedSchema.parse(
     JSON.parse(

@@ -19,7 +19,8 @@ import {
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { knowledgeFingerprintOf } from "../src/resource-knowledge.ts";
 import { isRestricted } from "../src/restricted.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
@@ -41,20 +42,22 @@ import type { Fixture } from "./sealed-apps.ts";
 //    every App that doesn't use them.
 
 /** An App whose actions select a skill and read a pinned one. */
-const skillsFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "How",
-    tables: {
-      notes: {
-        fields: { title: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const skillsFiles = (): TestApp =>
+  testApp(
+    {
+      name: "How",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
+      permissions: [
+        'permission.brain({\n  operations: ["skillsSelect", "skillsRead"],\n  collections: ["company", "secret"],\n})',
+      ],
     },
-    permissions: [
-      'permission.brain({\n  operations: ["skillsSelect", "skillsRead"],\n  collections: ["company", "secret"],\n})',
-    ],
-  }),
-  "server/skills.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/skills.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -87,7 +90,8 @@ export const open = action({
   },
 });
 `,
-});
+    }
+  );
 
 type Sealed = Fixture & { release: Release };
 

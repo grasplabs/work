@@ -27,7 +27,8 @@ import type { FunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { referenceTo } from "./notes-client-app.ts";
@@ -46,8 +47,8 @@ import { callAuth, routed, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files: Record<string, string> = {
-  ...appDefinition({
+const files: TestApp = testApp(
+  {
     name: "Writer",
     tables: {
       notes: {
@@ -56,8 +57,9 @@ const files: Record<string, string> = {
         indexes: { by_updated: ["_updatedAt"] },
       },
     },
-  }),
-  "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, mutation, query } from "@server/_generated/server";
 
 export const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
@@ -90,7 +92,7 @@ export const waits = action({
   },
 });
 `,
-  "server/writer.ts": `import { v } from "@grasp-os/sdk";
+    "server/writer.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
 import { create, list, pause } from "./notes.ts";
@@ -174,7 +176,7 @@ export const huge = action({
   },
 });
 `,
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useStream } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
@@ -184,7 +186,8 @@ function Writer() {
 }
 export const Route = createFileRoute("/")({ component: Writer });
 `,
-};
+  }
+);
 
 /** The operation at `path` of `release`. */
 const operationAt = (release: Release, path: string) => {
@@ -279,7 +282,12 @@ const openedApp = async (people: { builder?: Person; admin?: Person } = {}) => {
   const admin = people.admin ?? (await personApi("admin"));
   const { id } = await builder.api.apps.create({ name: "Writer" });
   await publishedApp(id);
-  const { version } = await builder.api.apps.files.commit(id, files, "First");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    id,
+    files,
+    "First"
+  );
   await builder.api.apps.versions.setCurrent(id, version);
   const { lease } = await builder.api.pages.open(id);
   const { lease: adminLease } = await admin.api.pages.open(id);
@@ -1236,11 +1244,11 @@ const endOf = async (frames: ReadableStream<Uint8Array>): Promise<string> => {
 
 /** Publishes a second version of `opened`'s App, its contracts unchanged. */
 const published = async (opened: Opened): Promise<Release> => {
-  const changed = {
-    ...files,
-    "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// The second version.\n`,
-  };
-  const { version } = await opened.builderApi.api.apps.files.commit(
+  const changed = withFiles(files, {
+    "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// The second version.\n`,
+  });
+  const { version } = await commitApp(
+    opened.builderApi.api.apps.files,
     opened.app,
     changed,
     "Second"

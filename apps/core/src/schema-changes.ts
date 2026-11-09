@@ -22,8 +22,8 @@ import { fitted } from "./store-queries.ts";
 // runs it inside that transaction, and the Data view runs it on two
 // definitions for its dry run (app-definition.ts).
 //
-// Tables and fields are matched by the IDs the App's `definition.json`
-// gives them, never by name, so a rename moves a name and nothing else:
+// Tables and fields are matched by the IDs the App's definition gives
+// them, never by name, so a rename moves a name and nothing else:
 // records, indexes and references are kept by the table's ID, and a
 // field's values move to its new name.
 //

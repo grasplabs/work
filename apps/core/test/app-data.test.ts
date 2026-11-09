@@ -22,7 +22,8 @@ import { loadRelease } from "../src/app-releases.ts";
 import { identify } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { appDefinition, withSensitive } from "./app-definitions.ts";
+import { testApp, withFiles, withSensitive } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -37,8 +38,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files: Record<string, string> = {
-  ...appDefinition({
+const files: TestApp = testApp(
+  {
     name: "Notes",
     tables: {
       notes: {
@@ -78,8 +79,9 @@ const files: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": `import { mutation } from "@server/_generated/server";
+  },
+  {
+    "server/notes.ts": `import { mutation } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
 export const create = mutation({
@@ -150,14 +152,15 @@ export const pay = mutation({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Notes() {
   return <p>Notes</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-};
+  }
+);
 
 type Person = Awaited<ReturnType<typeof signedInApi>> & { role: Role };
 
@@ -752,8 +755,8 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
 
   it("keeps no values of a table first declared sensitive in a later version, its earlier changes included", async () => {
     const sensitiveFiles = withSensitive(files, "notes");
-    expect(sensitiveFiles["server/schema.ts"]).not.toBe(
-      files["server/schema.ts"]
+    expect(sensitiveFiles.files["server/schema.ts"]).not.toBe(
+      files.files["server/schema.ts"]
     );
     // The first version: notes as they were; then one declaring them sensitive.
     const builder = await personApi("builder");
@@ -887,10 +890,13 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     const reader = stream.getReader();
     const header = await reader.read();
     expect(new TextDecoder().decode(header.value)).toContain("_id,");
-    await release(builder, app, {
-      ...files,
-      "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}\n// v2\n`,
-    });
+    await release(
+      builder,
+      app,
+      withFiles(files, {
+        "src/routes/index.tsx": `${files.files["src/routes/index.tsx"] ?? ""}\n// v2\n`,
+      })
+    );
     await expect(reader.read()).rejects.toThrow(/This App changed/u);
   });
 
@@ -903,10 +909,13 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     }
     const { version } = await builder.api.apps.data.tables(app);
     expect(version).toBe(notes.version);
-    await release(builder, app, {
-      ...files,
-      "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}\n// v2\n`,
-    });
+    await release(
+      builder,
+      app,
+      withFiles(files, {
+        "src/routes/index.tsx": `${files.files["src/routes/index.tsx"] ?? ""}\n// v2\n`,
+      })
+    );
     const { data } = builder.api.apps;
     const refusals = await Promise.all([
       outcome(data.records(app, "notes", notes.version, null)),

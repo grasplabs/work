@@ -40,7 +40,8 @@ import type { Runner } from "../src/operations.ts";
 import type { SessionCheck } from "../src/session-check.ts";
 import type { MigrationRow } from "../src/store-host.ts";
 import { reviewVersion } from "../src/version-review.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { published, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -1135,8 +1136,8 @@ const dataRpcOf = (
 
 describe("an App's data page", () => {
   const idp = mockIdp();
-  const files: Record<string, string> = {
-    ...appDefinition({
+  const files: TestApp = testApp(
+    {
       name: "Requests",
       tables: {
         requests: {
@@ -1155,8 +1156,9 @@ describe("an App's data page", () => {
           access: { read: "appMembers", write: "appMembers" },
         },
       },
-    }),
-    "server/requests.ts": `import { mutation } from "@server/_generated/server";
+    },
+    {
+      "server/requests.ts": `import { mutation } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
 export const add = mutation({
@@ -1190,14 +1192,15 @@ export const retitle = mutation({
 });
 `,
 
-    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Requests() {
   return <p>Requests</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Requests });
 `,
-  };
+    }
+  );
 
   /**
    * The App released by a builder in Sales, and an admin in Sales and
@@ -1912,8 +1915,8 @@ describe("a record's long history, read by row rules", () => {
 
 describe("a version's review", () => {
   it("shows each table's row rules as the version declares them", async () => {
-    const fixture = await appWith({
-      ...appDefinition({
+    const fixture = await appWith(
+      testApp({
         name: "Requests",
         tables: {
           requests: {
@@ -1964,8 +1967,8 @@ describe("a version's review", () => {
             },
           },
         },
-      }),
-    });
+      })
+    );
     const review = await reviewVersion(env, fixture.owner, fixture.app, 1);
     // Only the tables that have rules: the other is its access mode's
     // alone. Writes are shown as the store holds them: read rules stand

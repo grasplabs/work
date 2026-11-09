@@ -15,7 +15,8 @@ import { withPageReferences } from "../src/page-references.ts";
 import { buildPages } from "../src/pages.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { apiOf, notesFiles as files } from "./notes-client-app.ts";
 import {
@@ -509,12 +510,12 @@ describe("the session client", { timeout: 120_000 }, () => {
       .poll(async () => await titles(client, api), { timeout: 20_000 })
       .toStrictEqual(["Ran"]);
     // Version 2 published, and version 1 revoked, while it runs.
-    const { version } = await opened.builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      opened.builder.api.apps.files,
       opened.app,
-      {
-        ...files,
-        "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// The second version.\n`,
-      },
+      withFiles(files, {
+        "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// The second version.\n`,
+      }),
       "Second"
     );
     await opened.builder.api.apps.versions.setCurrent(opened.app, version);
@@ -641,13 +642,12 @@ const inspections = async (): Promise<number> => {
   return objects.filter(({ key }) => key.includes("/inspection/")).length;
 };
 /** The diagnostics of version 1 of an App holding `files`, as core builds its pages. */
-const diagnosticsOf = async (
-  appFiles: Record<string, string>
-): Promise<string[]> => {
+const diagnosticsOf = async (appFiles: TestSource): Promise<string[]> => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   await published(id);
-  const { version } = await builder.api.apps.files.commit(
+  const { version } = await commitApp(
+    builder.api.apps.files,
     id,
     appFiles,
     "First"
@@ -674,16 +674,21 @@ describe("a page's build", { timeout: 120_000 }, () => {
     const builder = await personApi("builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
     await published(id);
-    const { builds } = await builder.api.apps.files.commit(id, files, "First");
-    expect(builds.pages).toMatchObject({ status: "ok", diagnostics: [] });
-    const broken = await builder.api.apps.files.commit(
+    const { builds } = await commitApp(
+      builder.api.apps.files,
       id,
-      {
-        ...files,
+      files,
+      "First"
+    );
+    expect(builds.pages).toMatchObject({ status: "ok", diagnostics: [] });
+    const broken = await commitApp(
+      builder.api.apps.files,
+      id,
+      withFiles(files, {
         "src/routes/index.tsx": page(
           '  useQuery(api.notes.get, { noteId: "x" });'
         ),
-      },
+      }),
       "Second"
     );
     expect(broken.builds.pages.status).toBe("failed");
@@ -692,29 +697,34 @@ describe("a page's build", { timeout: 120_000 }, () => {
   it("inspects the same server code once, however often a save brings it", async () => {
     const builder = await personApi("builder");
     // Server code of its own, so no other test inspected it already.
-    const operations = `${files["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`;
-    const own = { ...files, "server/notes.ts": operations };
+    const operations = `${files.files["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`;
+    const own = withFiles(files, {
+      "server/notes.ts": operations,
+    });
     const before = await inspections();
     const { id } = await builder.api.apps.create({ name: "Notes" });
     await published(id);
-    await builder.api.apps.files.commit(id, own, "First");
+    await commitApp(builder.api.apps.files, id, own, "First");
     // A page changed, the server code not: what was inspected is kept.
-    await builder.api.apps.files.commit(
+    await commitApp(
+      builder.api.apps.files,
       id,
-      { ...own, "src/routes/index.tsx": page("") },
+      withFiles(own, {
+        "src/routes/index.tsx": page(""),
+      }),
       "Second"
     );
     await expect(inspections()).resolves.toBe(before + 1);
     // Other server code is inspected for itself.
-    await builder.api.apps.files.commit(
+    await commitApp(
+      builder.api.apps.files,
       id,
-      {
-        ...own,
+      withFiles(own, {
         "server/notes.ts": operations.replace(
           '.default("hello")',
           '.default("hi")'
         ),
-      },
+      }),
       "Third"
     );
     await expect(inspections()).resolves.toBe(before + 2);
@@ -751,13 +761,14 @@ describe("a page's build", { timeout: 120_000 }, () => {
 
   it("fails the type check on arguments a reference doesn't take, without a cast", async () => {
     await expect(
-      diagnosticsOf({
-        ...files,
-        "src/routes/index.tsx":
-          page(`  useQuery(api.notes.get, { noteId: "x" });
+      diagnosticsOf(
+        withFiles(files, {
+          "src/routes/index.tsx":
+            page(`  useQuery(api.notes.get, { noteId: "x" });
   const create = useMutation(api.notes.create);
   void create();`),
-      })
+        })
+      )
     ).resolves.toStrictEqual([
       expect.stringContaining("noteId"),
       expect.stringContaining("Expected 1-2 arguments, but got 0"),
@@ -766,16 +777,17 @@ describe("a page's build", { timeout: 120_000 }, () => {
 
   it("refuses a page that makes its own client", async () => {
     await expect(
-      diagnosticsOf({
-        ...files,
-        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      diagnosticsOf(
+        withFiles(files, {
+          "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { GraspClient } from "@grasp-os/sdk/client";
 function Notes() {
   return <p>{String(GraspClient)}</p>;
 }
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-      })
+        })
+      )
     ).resolves.toStrictEqual([
       expect.stringContaining("the platform's: it makes the session client"),
     ]);
@@ -833,22 +845,27 @@ function Notes() {
 export const Route = createFileRoute("/")({ component: Notes });
 `;
     await expect(
-      diagnosticsOf({ ...files, "src/routes/index.tsx": formPage })
+      diagnosticsOf(
+        withFiles(files, {
+          "src/routes/index.tsx": formPage,
+        })
+      )
     ).resolves.toStrictEqual([]);
     await expect(
-      diagnosticsOf({
-        ...files,
-        "src/routes/index.tsx": formPage.replace(
-          '<TextField form={create} label="Title" name="title" />',
-          '<TextField form={create} label="Owner" name="owner" />'
-        ),
-      })
+      diagnosticsOf(
+        withFiles(files, {
+          "src/routes/index.tsx": formPage.replace(
+            '<TextField form={create} label="Title" name="title" />',
+            '<TextField form={create} label="Owner" name="owner" />'
+          ),
+        })
+      )
     ).resolves.toStrictEqual([expect.stringContaining('"owner"')]);
   });
 
   it("builds a page of a data grid and a field for every kind of value, typed by what each binds", async () => {
-    const tasks = {
-      ...appDefinition({
+    const tasks = testApp(
+      {
         name: "Tasks",
         tables: {
           tasks: {
@@ -874,8 +891,9 @@ export const Route = createFileRoute("/")({ component: Notes });
           'permission.files({ operations: ["upload", "read"] })',
           'permission.links({ origins: ["https://example.com"] })',
         ],
-      }),
-      "values.ts": `import { v } from "@grasp-os/sdk";
+      },
+      {
+        "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const taskFields = {
   title: v.string().trim().min(1).max(200),
@@ -889,7 +907,7 @@ export const taskFields = {
   brief: v.file().optional(),
 };
 `,
-      "server/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+        "server/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 import { taskFields } from "../values.ts";
 
@@ -926,7 +944,8 @@ export const rename = mutation({
   },
 });
 `,
-    };
+      }
+    );
     const tasksPage = `import { createFileRoute } from "@tanstack/react-router";
 import { useForm, useMutation } from "@grasp-os/sdk/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
@@ -976,32 +995,38 @@ function Tasks() {
 export const Route = createFileRoute("/tasks")({ component: Tasks });
 `;
     await expect(
-      diagnosticsOf({ ...tasks, "src/routes/tasks.tsx": tasksPage })
+      diagnosticsOf(
+        withFiles(tasks, {
+          "src/routes/tasks.tsx": tasksPage,
+        })
+      )
     ).resolves.toStrictEqual([]);
     // A field bound to a value of another kind is the page's type error.
     await expect(
-      diagnosticsOf({
-        ...tasks,
-        "src/routes/tasks.tsx": tasksPage.replace(
-          '<NumberField form={form} label="Estimate" name="estimate" />',
-          '<NumberField form={form} label="Estimate" name="title" />'
-        ),
-      })
+      diagnosticsOf(
+        withFiles(tasks, {
+          "src/routes/tasks.tsx": tasksPage.replace(
+            '<NumberField form={form} label="Estimate" name="estimate" />',
+            '<NumberField form={form} label="Estimate" name="title" />'
+          ),
+        })
+      )
     ).resolves.toStrictEqual([expect.stringContaining('"title"')]);
   });
 
   it("gives pages only the native values of the SDK's root", async () => {
     await expect(
-      diagnosticsOf({
-        ...files,
-        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      diagnosticsOf(
+        withFiles(files, {
+          "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { defineApp } from "@grasp-os/sdk";
 function Notes() {
   return <p>{typeof defineApp}</p>;
 }
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-      })
+        })
+      )
     ).resolves.toStrictEqual([
       expect.stringContaining("Pages import only { v } from @grasp-os/sdk"),
     ]);

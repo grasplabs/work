@@ -7,6 +7,7 @@ import type { AppWebhooksApi } from "./app-webhooks.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
+import type { DefinitionPlan } from "./data-model.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
 import { defineErrorFamily } from "./errors.ts";
@@ -357,6 +358,15 @@ export interface VersionReview {
       }[]
     | null;
   /**
+   * What making it current does to the App's records, as the store plans
+   * it from the current version's definition (none while none is current)
+   * to its own: null when its definition is the current version's. A
+   * definition changes no file of its own, so this is how a change of it
+   * alone (two fields' IDs swapped, which moves their values) shows; it
+   * counts as a change of the server code too (`server`).
+   */
+  schema: DefinitionPlan | null;
+  /**
    * Whether its server code may hand files people can read to the
    * workflows it binds (GRA-976): it declares a files resource with
    * `read` and a bound workflow whose input can hold a file. Its
@@ -464,19 +474,25 @@ export interface AppFilesApi {
   read: (app: string, version?: number) => Promise<AppFiles>;
   /**
    * Commits `changes` over the App's latest version as its next version,
-   * and builds its pages, so the version opens without building.
+   * with `definition` (@grasp-os/sdk's `AppDefinition`, checked whole:
+   * `app.definition_invalid` otherwise) if given, else the latest
+   * version's, and builds its pages, so the version opens without
+   * building. Its `grasp.config.ts` and `server/schema.ts` are always
+   * what its definition generates, whatever `changes` hold of them.
    * Answers once they are done with how they went (`builds`).
    * A build never fails the commit. Files under `app/` (the v1 server's,
    * `appV1ServerFolder`) do: the commit is refused with `app.v1_server`,
    * naming them.
-   * Changes that leave the files as they are: `app.nothing_to_commit`.
+   * Changes that leave the files and the definition as they are:
+   * `app.nothing_to_commit`.
    * Of two commits at once, one is refused with `app.conflict`: read the
    * latest version and commit over it again.
    */
   commit: (
     app: string,
     changes: FileChanges,
-    message: string
+    message: string,
+    definition?: unknown
   ) => Promise<CommittedVersion>;
 }
 
@@ -748,23 +764,35 @@ export interface CreatedFromBlueprint {
  * version (`over`), from the blueprint's code the App last took (`from`)
  * to the blueprint's code now (`to`). A file only the blueprint changed
  * takes its change; one only the App's builders changed keeps theirs; one
- * both changed keeps theirs and is listed in `conflicts`. AGENTS.md is
- * the App's own. Nothing is written until a builder accepts it.
+ * both changed keeps theirs and is listed in `conflicts`. The App's
+ * definition merges as a whole the same way (`definition`, the SHA-256 of
+ * the blueprint's now; `definitionConflict` when both changed it), and
+ * its config and schema follow it. AGENTS.md is the App's own. Nothing is
+ * written until a builder accepts it.
  */
 export interface BlueprintUpdate {
   blueprint: string;
   from: string;
   to: string;
+  /** The SHA-256 of the blueprint's definition now, which `to` goes with. */
+  definition: string;
   over: number;
   /** How the merged files differ from version `over`'s. */
   changes: FileDiff[];
   /** Paths both changed, kept as the App has them, sorted. */
   conflicts: string[];
+  /**
+   * Whether both changed the definition, each otherwise: the App's is
+   * kept, whether or not the code generated from the two differs (a
+   * change of stable IDs alone changes none).
+   */
+  definitionConflict: boolean;
 }
 
 /** What a builder accepts of a `BlueprintUpdate`: exactly what they saw. */
 export const acceptedUpdateSchema = z.strictObject({
   to: z.string().regex(/^[0-9a-f]{64}$/u),
+  definition: z.string().regex(/^[0-9a-f]{64}$/u),
   over: appVersionSchema,
 });
 export type AcceptedUpdate = z.input<typeof acceptedUpdateSchema>;
@@ -970,8 +998,6 @@ export const appErrors = defineErrorFamily({
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
   "app.v1_server":
     "An App no longer has files under app/: its server code is grasp.config.ts, server/schema.ts and its functions in server/. Delete the files under app/ and commit again.",
-  "app.layout_missing":
-    "Every version of an App holds grasp.config.ts and server/schema.ts, which Grasp generates from its definition.json. Restore definition.json, or change the definition with the definition tools, and commit again.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.no_version": "Make a version of the App current before publishing it.",
@@ -998,9 +1024,11 @@ export const appErrors = defineErrorFamily({
   "app.no_workflows":
     "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
   "app.generated_file":
-    "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code Grasp generates from it: change them with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts), never by writing them.",
+    "grasp.config.ts and server/schema.ts are the code Grasp generates from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts), never by writing them.",
   "app.definition_invalid":
-    "The App's definition.json, from which its grasp.config.ts and server/schema.ts are generated, is missing or isn't valid.",
+    "The App's definition, from which its grasp.config.ts and server/schema.ts are generated, isn't valid.",
+  "app.definition_missing":
+    "This App was made before Grasp kept an App's definition apart from its files, so it has none. Create the App again.",
   "app.chat_has_app":
     "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
   "app.draft_failed":

@@ -1,15 +1,24 @@
+import { definitionSources, definitionText } from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { commitFiles } from "../src/apps.ts";
-import { appDefinition } from "./app-definitions.ts";
-import { racingDb } from "./apps.ts";
+import { draftOverLatest } from "../src/apps.ts";
+import {
+  commitApp,
+  definitionInput,
+  definitionOf,
+  testApp,
+  withFiles,
+} from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
+import { commitDefined, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
@@ -53,41 +62,59 @@ const newApp = async (apps: Apps) =>
 const commit = async (
   apps: Apps,
   app: string,
-  files: Record<string, string | null>,
+  files: TestSource,
   message = "Change"
-) => await apps.files.commit(app, files, message);
+) => await commitApp(apps.files, app, files, message);
 
 /**
  * Gives an App without versions a first one holding `files` exactly,
  * unchecked: committed before a check existed or a limit was lowered.
+ * With `definition` null, one committed before definitions left the
+ * tree, which holds none.
  */
 const storedUnchecked = async (
   app: string,
   author: string,
-  files: Record<string, string>
+  files: Readonly<Record<string, string>>,
+  definition: string | null = definitionText(
+    definitionOf({ name: "Invoice desk" })
+  )
 ): Promise<void> => {
   const json = canonicalJson(files);
   const tree = await sha256Hex(json);
   await env.FILES.put(`apps/${app}/trees/${tree}.json`, json);
   await env.DB.prepare(
-    "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at) VALUES (?, 1, ?, ?, ?, 'Earlier', 0)"
+    "INSERT INTO app_versions (app_id, version, tree, definition, definition_hash, files, author_id, message, created_at) VALUES (?, 1, ?, ?, ?, ?, ?, 'Earlier', 0)"
   )
-    .bind(app, tree, Object.keys(files).length, author)
+    .bind(
+      app,
+      tree,
+      definition,
+      definition === null ? null : await sha256Hex(definition),
+      Object.keys(files).length,
+      author
+    )
     .run();
 };
 
 /** The App's definition, and the config and schema generated from it. */
-const defined = appDefinition({ name: "Invoice desk" });
+const defined = testApp({ name: "Invoice desk" });
 
-const first = {
-  ...defined,
+/** The test App's definition with one table, `table`, of a title. */
+const withTable = (table: string) =>
+  definitionOf({
+    name: "Invoice desk",
+    tables: { [table]: { fields: { title: "v.string()" } } },
+  });
+
+const first = withFiles(defined, {
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => <p>Inbox</p>;
 
 export const Route = createFileRoute("/")({ component: Page });
 `,
   "AGENTS.md": "# Invoice desk — facturen, 請求書 🧾\n",
-};
+});
 
 // Making a version with workflows current compiles them and runs their
 // tests, as "names the pages and workflows" does. That takes half a
@@ -111,19 +138,22 @@ export const Route = createFileRoute("/")({ component: Page });
     });
 
     expect({ v1, v2 }).toMatchObject({
-      v1: { version: 1, parent: null, files: 5, author: userId },
-      v2: { version: 2, parent: 1, files: 5, author: userId },
+      v1: { version: 1, parent: null, files: 4, author: userId },
+      v2: { version: 2, parent: 1, files: 4, author: userId },
     });
-    await expect(apps.files.read(app.id, 1)).resolves.toStrictEqual(first);
-    await expect(apps.files.read(app.id, 2)).resolves.toStrictEqual({
-      ...defined,
-      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    await expect(apps.files.read(app.id, 1)).resolves.toStrictEqual(
+      first.files
+    );
+    await expect(apps.files.read(app.id, 2)).resolves.toStrictEqual(
+      withFiles(defined, {
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => <p>Invoices</p>;
 
 export const Route = createFileRoute("/")({ component: Page });
 `,
-      "src/components/row.tsx": "export const Row = () => null;\n",
-    });
+        "src/components/row.tsx": "export const Row = () => null;\n",
+      }).files
+    );
     // A version reads back as committed; the commit's answer adds how its
     // builds went (build-on-save.test.ts).
     const { builds: _builds, ...committedV1 } = v1;
@@ -167,9 +197,11 @@ export const Route = createFileRoute("/")({ component: Page });
       one: await apps.files.read(app.id, 1),
     }).toStrictEqual({
       none: {},
-      afterFirst: first,
-      latest: { ...defined, "AGENTS.md": "# Second\n" },
-      one: first,
+      afterFirst: first.files,
+      latest: withFiles(defined, {
+        "AGENTS.md": "# Second\n",
+      }).files,
+      one: first.files,
     });
     // What is already there, deleting what isn't, and deleting the
     // schema its definition generates back, change nothing.
@@ -206,36 +238,253 @@ export const Route = createFileRoute("/")({ component: Page });
       "AGENTS.md": "# Mine\n",
     });
     const handwritten = await apps.files.read(app.id);
-    const other = await newApp(apps);
+    const invalid = await outcome(
+      apps.files.commit(app.id, {}, "Invalid", { name: 1 })
+    );
+    const versions = await apps.versions.list(app.id);
     expect({
       pagesOnly,
       config: handwritten["grasp.config.ts"],
-      // A config or schema with no definition, a definition that isn't
-      // one, or one deleted: refused, nothing of the commit kept.
-      withoutDefinition: await outcome(
-        commit(apps, other.id, {
-          "grasp.config.ts": defined["grasp.config.ts"] ?? "",
-        })
-      ),
-      invalid: await outcome(
-        commit(apps, app.id, { "definition.json": '{ "name": 1 }' })
-      ),
-      deleted: await outcome(commit(apps, app.id, { "definition.json": null })),
-      versions: await apps.versions.list(app.id),
-    }).toMatchObject({
-      pagesOnly: {
-        ...defined,
+      // A definition that isn't one: refused, nothing of the commit kept.
+      invalid,
+      versions: versions.map(({ version }) => version),
+    }).toStrictEqual({
+      pagesOnly: withFiles(defined, {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => null;
 
 export const Route = createFileRoute("/")({ component: Page });
 `,
-      },
-      config: defined["grasp.config.ts"],
-      withoutDefinition: "app.definition_invalid",
+      }).files,
+      config: defined.files["grasp.config.ts"],
       invalid: "app.definition_invalid",
-      deleted: "app.definition_invalid",
-      versions: [{ version: 2 }, { version: 1 }],
+      versions: [2, 1],
+    });
+  });
+
+  it("holds each version's definition beside its files, never among them, and commits a change of the definition alone", async () => {
+    const { apps } = await appsApi("builder");
+    const app = await newApp(apps);
+    const notes = definitionOf({
+      name: "Invoice desk",
+      tables: { notes: { fields: { title: "v.string()" } } },
+    });
+    await commit(apps, app.id, first);
+    // The same files, another definition: a version of its own, its code
+    // generated from the definition it was committed with.
+    const unchanged = { "AGENTS.md": first.files["AGENTS.md"] ?? "" };
+    const redefinedVersion = await apps.files.commit(
+      app.id,
+      unchanged,
+      "Notes",
+      definitionInput(notes)
+    );
+    const files = await apps.files.read(app.id);
+    // The same files and definition again change nothing.
+    const again = await outcome(
+      apps.files.commit(app.id, unchanged, "Again", definitionInput(notes))
+    );
+    // A commit that names no definition keeps the latest version's.
+    await commit(apps, app.id, { "AGENTS.md": "# Notes\n" });
+    const latest = await apps.files.read(app.id);
+    expect({
+      version: redefinedVersion.version,
+      paths: Object.keys(files).toSorted(),
+      generated: {
+        "grasp.config.ts": files["grasp.config.ts"],
+        "server/schema.ts": files["server/schema.ts"],
+      },
+      kept: latest["server/schema.ts"],
+      again,
+    }).toStrictEqual({
+      version: 2,
+      paths: Object.keys(first.files).toSorted(),
+      generated: definitionSources(notes),
+      kept: definitionSources(notes)["server/schema.ts"],
+      again: "app.nothing_to_commit",
+    });
+  });
+
+  it("reviews a change of the definition as a change of the server code, with what it does to the records, renames included", async () => {
+    const { apps } = await appsApi("admin");
+    const app = await newApp(apps);
+    const two = definitionOf({
+      name: "Invoice desk",
+      tables: {
+        notes: { fields: { title: "v.string()", body: "v.string()" } },
+      },
+    });
+    const [table] = two.tables;
+    const [title, body] = table?.fields ?? [];
+    if (table === undefined || title === undefined || body === undefined) {
+      throw new Error("The notes table has no title and body");
+    }
+    // The same names, their IDs swapped: the same code, and on publish
+    // each field's values move to the other.
+    const swapped = {
+      ...two,
+      tables: [
+        {
+          ...table,
+          fields: [
+            { ...title, id: body.id },
+            { ...body, id: title.id },
+          ],
+        },
+      ],
+    };
+    const unchanged = { "AGENTS.md": first.files["AGENTS.md"] ?? "" };
+    await apps.files.commit(app.id, first.files, "Notes", definitionInput(two));
+    await apps.versions.setCurrent(app.id, 1);
+    await apps.files.commit(
+      app.id,
+      unchanged,
+      "Swapped",
+      definitionInput(swapped)
+    );
+    await apps.files.commit(
+      app.id,
+      { "AGENTS.md": "# Notes\n" },
+      "Docs",
+      definitionInput(two)
+    );
+    // A rename: the title's values move to the heading.
+    await apps.files.commit(
+      app.id,
+      unchanged,
+      "Headings",
+      definitionInput({
+        ...two,
+        tables: [{ ...table, fields: [{ ...title, name: "heading" }, body] }],
+      })
+    );
+    const [swappedReview, filesOnly, renamedReview] = await Promise.all([
+      apps.versions.review(app.id, 2),
+      apps.versions.review(app.id, 3),
+      apps.versions.review(app.id, 4),
+    ]);
+    expect({
+      files: swappedReview.files,
+      server: swappedReview.server,
+      // The store takes no swap of two fields' names: it needs a migration.
+      refused: swappedReview.schema?.refused.map(({ reason }) => reason),
+      filesOnly: [filesOnly.server, filesOnly.schema],
+      renamed: renamedReview.schema?.renamedFields,
+    }).toStrictEqual({
+      files: [],
+      server: "modified",
+      refused: ["name_taken", "name_taken"],
+      filesOnly: [null, null],
+      renamed: [{ table: "notes", from: "title", to: "heading" }],
+    });
+  });
+
+  it("never changes a version's definition once committed", async () => {
+    const { apps } = await appsApi("builder");
+    const app = await newApp(apps);
+    await commit(apps, app.id, first);
+    const other = definitionText(withTable("notes"));
+    // Whether the database refuses to change `column` to `value`.
+    const refused = async (column: string, value: string): Promise<boolean> => {
+      const changed = await outcome(
+        env.DB.prepare(
+          `UPDATE app_versions SET ${column} = ? WHERE app_id = ? AND version = 1`
+        )
+          .bind(value, app.id)
+          .run()
+      );
+      return changed.includes("never changes");
+    };
+    expect({
+      definition: await refused("definition", other),
+      hash: await refused("definition_hash", await sha256Hex(other)),
+      files: await apps.files.read(app.id, 1),
+    }).toStrictEqual({
+      definition: true,
+      hash: true,
+      files: first.files,
+    });
+  });
+
+  it("tells an App made before definitions left the tree to be created again, and nothing else, wherever its definition is needed", async () => {
+    const { apps, userId } = await appsApi("builder");
+    const app = await newApp(apps);
+    // Its tree holds the definition as a file, as versions did then:
+    // nothing reads it now.
+    await storedUnchecked(
+      app.id,
+      userId,
+      withFiles(first, {
+        "definition.json": "{}",
+      }).files,
+      null
+    );
+    const oldReview = await apps.versions.review(app.id, 1);
+    let refusal: unknown;
+    try {
+      await commit(apps, app.id, { "AGENTS.md": "# Again\n" });
+    } catch (error) {
+      refusal = error;
+    }
+    expect({
+      commit: appErrors.codeOf(refusal),
+      message: refusal instanceof Error ? refusal.message : null,
+      seal: await outcome(apps.versions.setCurrent(app.id, 1)),
+      // Its review plans nothing for the records, and refuses nothing.
+      review: oldReview.schema,
+      draft: await outcome(
+        draftOverLatest(env, appIdSchema.parse(app.id), {
+          base: 1,
+          changes: { "AGENTS.md": "# Drafted\n" },
+          definition: null,
+        })
+      ),
+    }).toStrictEqual({
+      commit: "app.definition_missing",
+      message: appErrors.create("app.definition_missing").message,
+      seal: "app.definition_missing",
+      review: null,
+      draft: "app.definition_missing",
+    });
+  });
+
+  it("refuses a chat's draft that changed the definition over a version that changed it since, and takes that version's when the draft didn't", async () => {
+    const { apps } = await appsApi("builder");
+    const app = await newApp(apps);
+    const appId = appIdSchema.parse(app.id);
+    await commit(apps, app.id, first);
+    // A builder's version changes the definition after the drafts began.
+    await apps.files.commit(
+      app.id,
+      { "AGENTS.md": first.files["AGENTS.md"] ?? "" },
+      "Notes",
+      definitionInput(withTable("notes"))
+    );
+    let changedToo: unknown;
+    try {
+      await draftOverLatest(env, appId, {
+        base: 1,
+        changes: {},
+        definition: definitionText(withTable("tasks")),
+      });
+    } catch (error) {
+      changedToo = error;
+    }
+    const unchanged = await draftOverLatest(env, appId, {
+      base: 1,
+      changes: { "AGENTS.md": "# Drafted\n" },
+      definition: null,
+    });
+    expect({
+      changedToo: appErrors.codeOf(changedToo),
+      issues: refusalSchema.parse(changedToo).details.issues,
+      kept: unchanged.definition,
+    }).toStrictEqual({
+      changedToo: "app.conflict",
+      issues: [
+        "The App's definition: Changed in a version committed since this draft began",
+      ],
+      kept: withTable("notes"),
     });
   });
 
@@ -331,7 +580,7 @@ export const Route = createFileRoute("/")({ component: Page });
 
     await expect(
       outcome(
-        commitFiles(
+        commitDefined(
           racing,
           await api.whoami(),
           app.id,
@@ -347,10 +596,11 @@ export const Route = createFileRoute("/")({ component: Page });
       [2, "Theirs"],
       [1, "Change"],
     ]);
-    await expect(apps.files.read(app.id)).resolves.toStrictEqual({
-      ...first,
-      ...theirs,
-    });
+    await expect(apps.files.read(app.id)).resolves.toStrictEqual(
+      withFiles(first, {
+        ...theirs,
+      }).files
+    );
   });
 
   it("diffs two versions by path", async () => {
@@ -372,7 +622,11 @@ export const Route = createFileRoute("/detail")({ component: Page });
     });
 
     await expect(apps.versions.diff(app.id, 1, 2)).resolves.toStrictEqual([
-      { path: "AGENTS.md", change: "deleted", before: first["AGENTS.md"] },
+      {
+        path: "AGENTS.md",
+        change: "deleted",
+        before: first.files["AGENTS.md"],
+      },
       {
         path: "src/routes/detail.tsx",
         change: "added",
@@ -385,7 +639,7 @@ export const Route = createFileRoute("/detail")({ component: Page });
       {
         path: "src/routes/index.tsx",
         change: "modified",
-        before: first["src/routes/index.tsx"],
+        before: first.files["src/routes/index.tsx"],
         after: `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => null;
 
@@ -421,7 +675,12 @@ export const Route = createFileRoute("/")({ component: Page });
     expect(rolledBack).toMatchObject({ currentVersion: 1 });
     await expect(
       Promise.all([apps.files.read(app.id, 1), apps.files.read(app.id, 2)])
-    ).resolves.toStrictEqual([first, { ...first, "AGENTS.md": "# Changed\n" }]);
+    ).resolves.toStrictEqual([
+      first.files,
+      withFiles(first, {
+        "AGENTS.md": "# Changed\n",
+      }).files,
+    ]);
     await expect(
       Promise.all([
         outcome(apps.versions.setCurrent(app.id, 3)),
@@ -477,7 +736,13 @@ export const Route = createFileRoute("/archive")({ component: Page });
     const refusals = await Promise.all(
       v1Files.map(
         async (files) =>
-          await commit(apps, app.id, { ...first, ...files }).then(
+          await commit(
+            apps,
+            app.id,
+            withFiles(first, {
+              ...files,
+            })
+          ).then(
             () => ({ code: "committed" }),
             (error: unknown) => error
           )
@@ -499,10 +764,13 @@ export const Route = createFileRoute("/archive")({ component: Page });
   it("never marks a version still holding the v1 server's files as a blueprint", async () => {
     const { apps, userId } = await appsApi("builder");
     const app = await newApp(apps);
-    await storedUnchecked(app.id, userId, {
-      ...first,
-      "app/server.ts": "export class App {}\n",
-    });
+    await storedUnchecked(
+      app.id,
+      userId,
+      withFiles(first, {
+        "app/server.ts": "export class App {}\n",
+      }).files
+    );
 
     await expect(apps.blueprints.mark(app.id, 1)).rejects.toMatchObject({
       code: "app.v1_server",
@@ -521,7 +789,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
       const app = await newApp(apps);
       ({ tree } = await apps.files.commit(
         app.id,
-        first,
+        first.files,
         "Secret plans in the message"
       ));
       await apps.versions.propose(app.id, 1);
@@ -559,7 +827,8 @@ export const Route = createFileRoute("/archive")({ component: Page });
           version: 1,
           parent: null,
           tree,
-          files: 5,
+          definition: aHash,
+          files: 4,
         },
       },
       {
@@ -627,7 +896,9 @@ export const Route = createFileRoute("/archive")({ component: Page });
     await expect(builder.get(app.id)).resolves.toMatchObject({
       currentVersion: null,
     });
-    await expect(builder.files.read(app.id)).resolves.toStrictEqual(first);
+    await expect(builder.files.read(app.id)).resolves.toStrictEqual(
+      first.files
+    );
   });
 
   it("refuses paths outside the App and files over its limits", async () => {
@@ -654,7 +925,8 @@ export const Route = createFileRoute("/archive")({ component: Page });
 
     const tooLong = "x".repeat(appLimits.fileLength + 1);
     // The App's definition counts too: its first version gets one.
-    const room = appLimits.totalLength - Object.values(defined).join("").length;
+    const room =
+      appLimits.totalLength - Object.values(defined.files).join("").length;
     const full = Object.fromEntries(
       Array.from(
         { length: Math.ceil(room / appLimits.fileLength) },
@@ -697,16 +969,20 @@ export const Route = createFileRoute("/archive")({ component: Page });
     const app = await newApp(apps);
     // More files than an App may have now: committed when the limits were
     // higher, its definition among them.
-    const count = appLimits.files + 2 - Object.keys(defined).length;
-    await storedUnchecked(app.id, userId, {
-      ...defined,
-      ...Object.fromEntries(
-        Array.from({ length: count }, (_, index) => [
-          `src/components/part-${index}.ts`,
-          "x",
-        ])
-      ),
-    });
+    const count = appLimits.files + 2 - Object.keys(defined.files).length;
+    await storedUnchecked(
+      app.id,
+      userId,
+      withFiles(
+        defined,
+        Object.fromEntries(
+          Array.from({ length: count }, (_, index) => [
+            `src/components/part-${index}.ts`,
+            "x",
+          ])
+        )
+      ).files
+    );
 
     // One after another: each is over the same version.
     const steps: [string, Record<string, string | null>][] = [

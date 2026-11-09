@@ -919,6 +919,12 @@ export const blueprints = sqliteTable(
     name: text().notNull(),
     description: text().notNull(),
     tree: text().notNull(),
+    /**
+     * Its App definition (`app_versions.definition`): a marked one's
+     * version's, a built-in's from the release. Null for a row written
+     * before definitions left the tree, which no App is created from.
+     */
+    definition: text(),
     appId: text("app_id").references(() => apps.id),
     version: integer(),
     /**
@@ -969,14 +975,21 @@ export const appOrigins = sqliteTable("app_origins", {
   blueprintVersion: integer("blueprint_version"),
   tree: text().notNull(),
   code: text().notNull(),
+  /**
+   * The blueprint's definition the App last took, as `tree` its code: what
+   * an update merges the App's definition over. Null for an origin written
+   * before definitions left the tree, which no update merges over.
+   */
+  definition: text(),
   createdAt: timestamp("created_at").notNull(),
 });
 
 /**
  * Every committed version of an App, never deleted, and never changed but
  * its publishing `status`. `tree` is
- * the SHA-256 of the version's files, which are stored under it in R2
- * (`src/apps.ts`). Versions count up from 1 per App, and the primary key
+ * the SHA-256 of the version's files, its code, which are stored under it
+ * in R2 (`src/apps.ts`); `definition` is what the App is, as data, held
+ * here beside it. Versions count up from 1 per App, and the primary key
  * makes two commits of the same version conflict instead of both landing.
  */
 export const appVersions = sqliteTable(
@@ -994,6 +1007,18 @@ export const appVersions = sqliteTable(
      * for a version committed before the column, which is no blueprint's.
      */
     code: text(),
+    /**
+     * The version's App definition (@grasp-os/sdk's definition.ts), as its
+     * text (`definitionText`): its name, tables with their stable IDs, access and
+     * permissions, from which its `grasp.config.ts` and `server/schema.ts`
+     * were generated as it was committed. Written once, never changed (a
+     * trigger refuses it). Null for a version committed before
+     * definitions left the tree, which this release refuses: commit
+     * again.
+     */
+    definition: text(),
+    /** The SHA-256 of `definition`, which its sealed release names. */
+    definitionHash: text("definition_hash"),
     files: integer().notNull(),
     authorId: text("author_id").notNull(),
     message: text().notNull(),

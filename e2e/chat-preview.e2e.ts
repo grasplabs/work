@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { FrameLocator, Locator, Page } from "@playwright/test";
 
+import { commitApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { modelScripts } from "./model-scripts.ts";
@@ -57,7 +58,8 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
   const name = `Tally ${tag}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await api.apps.files.commit(
+    const { version } = await commitApp(
+      api.apps.files,
       app.id,
       tallyFiles("in the App"),
       "A tally"
@@ -102,7 +104,8 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // Its agent writes a draft: the App stands on the right, and the chat
     // moves to its left.
     await writeDraft(builder.userId, chat.id, app.id, version, {
-      "server/tally.ts": tallyFiles("in the preview")["server/tally.ts"] ?? "",
+      "server/tally.ts":
+        tallyFiles("in the preview").files["server/tally.ts"] ?? "",
     });
     // A read of it that fails says so beside the chat, and is tried again
     // from there.
@@ -238,13 +241,15 @@ test("a version up for review shows its changes in the workspace's Code view, on
     const app = await api.apps.create({
       name: `Tally ${crypto.randomUUID().slice(0, 8)}`,
     });
-    const { version } = await api.apps.files.commit(
+    const { version } = await commitApp(
+      api.apps.files,
       app.id,
       tallyFiles("in the App"),
       "A tally"
     );
     await api.apps.versions.setCurrent(app.id, version);
-    const next = await api.apps.files.commit(
+    const next = await commitApp(
+      api.apps.files,
       app.id,
       tallyFiles("in the next version"),
       "The next tally"
@@ -287,7 +292,12 @@ test("an App's own chat writes its page and server code, and its workspace previ
     await expect(page.getByText("Nothing built yet")).toBeVisible();
 
     // A version committed elsewhere, from another tab: the App shows.
-    await api.apps.files.commit(app.id, tallyFiles("in the App"), "A tally");
+    await commitApp(
+      api.apps.files,
+      app.id,
+      tallyFiles("in the App"),
+      "A tally"
+    );
     const committed = page
       .getByRole("region", { name: `Preview of ${name}` })
       .frameLocator("iframe");
@@ -405,7 +415,6 @@ test("an App's own chat writes its page and server code, and its workspace previ
       "src",
       "routes",
       "index.tsx",
-      "definition.json",
       "grasp.config.ts",
     ]);
     await files.getByRole("button", { name: "index.tsx" }).click();
@@ -429,7 +438,12 @@ test("an App's workspace previews the App before its chat changes anything, then
   const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   try {
     const app = await api.apps.create({ name });
-    await api.apps.files.commit(app.id, tallyFiles("in the App"), "A tally");
+    await commitApp(
+      api.apps.files,
+      app.id,
+      tallyFiles("in the App"),
+      "A tally"
+    );
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}/edit`);
 
@@ -445,7 +459,8 @@ test("an App's workspace previews the App before its chat changes anything, then
     ).toHaveCount(0);
 
     // A version committed elsewhere comes into the open preview.
-    await api.apps.files.commit(
+    await commitApp(
+      api.apps.files,
       app.id,
       tallyFiles("in version 2"),
       "Elsewhere"
@@ -484,7 +499,12 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
   const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   try {
     const app = await api.apps.create({ name });
-    await api.apps.files.commit(app.id, tallyFiles("in the App"), "A tally");
+    await commitApp(
+      api.apps.files,
+      app.id,
+      tallyFiles("in the App"),
+      "A tally"
+    );
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}/edit`);
     const preview = page.getByRole("region", { name: `Preview of ${name}` });

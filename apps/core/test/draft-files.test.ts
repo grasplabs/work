@@ -1,11 +1,13 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { definitionText } from "@grasp-os/sdk/definition";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
-import { redefined } from "./app-definitions.ts";
+import { openTestRun } from "./agent-chat.ts";
+import { commitApp, redefined, testApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { deskFiles } from "./preview-drafts.ts";
-import { chatWithDraft } from "./previews.ts";
+import { chatsOf, chatWithDraft } from "./previews.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -22,7 +24,7 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /** Version 1 of the App: its registration, schema and one page. */
 const released = deskFiles("Released");
-const { "src/routes/index.tsx": _page, ...unpageed } = released;
+const { "src/routes/index.tsx": _page, ...unpageed } = released.files;
 
 /** The App's definition, as a builder's second version renames it. */
 const renamed = redefined(released, (definition) => ({
@@ -55,14 +57,69 @@ describe("a chat's draft files, for the App's code view", () => {
     const second = await chats.draftFiles(chatId, app);
     const empty = await chats.create("Nothing written");
     const before = await chats.draftFiles(empty.id, app);
-    await builder.api.apps.files.commit(app, renamed, "Rename");
+    await commitApp(builder.api.apps.files, app, renamed, "Rename");
     const latest = await chats.draftFiles(empty.id, app);
 
     expect({ first, second, before, latest }).toStrictEqual({
       first: { ...unpageed, "server/notes.ts": notes(10) },
       second: { ...unpageed, "server/notes.ts": notes(25) },
-      before: released,
-      latest: renamed,
+      before: released.files,
+      latest: renamed.files,
+    });
+  });
+
+  it("say a draft changes the App when it changes only its definition's IDs, no file", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const notesApp = testApp({
+      name: "Notes",
+      tables: { notes: { fields: { title: "v.string()" } } },
+    });
+    const { id } = await builder.api.apps.create({ name: "Notes" });
+    await release(builder, id, notesApp);
+    const app = appIdSchema.parse(id);
+    const { chatId, revision } = await chatWithDraft(builder, app, {});
+    // The title's ID changed, its name and type not: the same code.
+    const [table] = notesApp.definition.tables;
+    const reIded = {
+      ...notesApp.definition,
+      tables: table
+        ? [
+            {
+              ...table,
+              fields: table.fields.map((field) => ({
+                ...field,
+                id: "field:notes.renumbered",
+              })),
+            },
+          ]
+        : [],
+    };
+    const before = await builder.api.chats.drafts(chatId);
+    await chatsOf(builder).saveDraft(
+      chatIdSchema.parse(chatId),
+      app,
+      1,
+      {},
+      [],
+      revision,
+      {
+        runId: await openTestRun(chatsOf(builder), chatIdSchema.parse(chatId)),
+      },
+      definitionText(reIded)
+    );
+    const after = await builder.api.chats.drafts(chatId);
+    expect({
+      before: before.map(({ changed, definitionChanged }) => [
+        changed,
+        definitionChanged,
+      ]),
+      after: after.map(({ changed, definitionChanged }) => [
+        changed,
+        definitionChanged,
+      ]),
+    }).toStrictEqual({
+      before: [[[], false]],
+      after: [[[], true]],
     });
   });
 

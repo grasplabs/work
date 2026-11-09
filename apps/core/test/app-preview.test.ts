@@ -1,3 +1,4 @@
+import { definitionText } from "@grasp-os/sdk/definition";
 import { shownAt } from "@grasp-os/shared/chat";
 import type { PreviewAt, PreviewBundle } from "@grasp-os/shared/chat";
 import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
@@ -7,6 +8,13 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { openTestRun } from "./agent-chat.ts";
+import {
+  commitApp,
+  draftDefinitionOf,
+  sourceParts,
+  withFiles,
+} from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { loadFrame, servedAll } from "./page-frames.ts";
@@ -39,7 +47,7 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const newApp = async (
   builder: Person,
   name: string,
-  files: Record<string, string>
+  files: TestSource
 ): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name });
   await release(builder, id, files);
@@ -59,7 +67,7 @@ const answer = async (promise: Promise<unknown>): Promise<unknown> => {
 
 /** The notes App's desk page, saying `word` before its titles. */
 const deskSaying = (word: string): string =>
-  (notesFiles("drafted")["src/routes/index.tsx"] ?? "").replace(
+  (notesFiles("drafted").files["src/routes/index.tsx"] ?? "").replace(
     'titles.join(", ")',
     `"${word} " + titles.join(", ")`
   );
@@ -75,17 +83,19 @@ const writeDraft = async (
   person: Person,
   chatId: ChatId,
   app: AppId,
-  changes: Record<string, string | null>,
+  changes: TestSource,
   revision: number
 ): Promise<void> => {
+  const { files, definition } = sourceParts(changes);
   const saved = await chatsOf(person).saveDraft(
     chatId,
     app,
     1,
-    changes,
+    { ...files },
     [],
     revision,
-    { runId: await openTestRun(chatsOf(person), chatId) }
+    { runId: await openTestRun(chatsOf(person), chatId) },
+    definition === undefined ? undefined : definitionText(definition)
   );
   if (!saved) {
     throw new Error("The draft wasn't written");
@@ -120,16 +130,15 @@ const callsAt = (bundle: PreviewBundle): PreviewAt =>
 
 /** The notes App's server code with `notes.titles` answering `title` alone. */
 const titlesSaying = (title: string): string =>
-  (notesFiles("drafted")["server/notes.ts"] ?? "").replace(
+  (notesFiles("drafted").files["server/notes.ts"] ?? "").replace(
     '(await ctx.db.query("notes").take(100)).map((note) => note.title).sort()',
     JSON.stringify([title])
   );
 
 /** The notes App's server code with `notes.titles` renamed `notes.allTitles`. */
-const renamedTitles = (notesFiles("drafted")["server/notes.ts"] ?? "").replace(
-  "export const titles = query(",
-  "export const allTitles = query("
-);
+const renamedTitles = (
+  notesFiles("drafted").files["server/notes.ts"] ?? ""
+).replace("export const titles = query(", "export const allTitles = query(");
 
 describe("previewing a chat's draft", { timeout: 120_000 }, () => {
   it("shows the App's latest version, its functions running, while the chat has written nothing, then takes the chat's first write", async () => {
@@ -335,13 +344,13 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       chatId,
       app,
       null,
-      {
-        ...notesFiles("unbuilt"),
+      withFiles(notesFiles("unbuilt"), {
         "src/routes/index.tsx": "export default function Desk( {",
-      },
+      }).files,
       [],
       0,
-      { runId: await openTestRun(chatsOf(builder), chatId) }
+      { runId: await openTestRun(chatsOf(builder), chatId) },
+      draftDefinitionOf(notesFiles("unbuilt"))
     );
 
     expect({
@@ -361,15 +370,16 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       app,
       null,
       {
-        ...files,
-        "server/notes.ts": (files["server/notes.ts"] ?? "").replace(
+        ...files.files,
+        "server/notes.ts": (files.files["server/notes.ts"] ?? "").replace(
           'ctx.db.query("notes").take(100)',
           'ctx.db.query("notes").take(1000)'
         ),
       },
       [],
       0,
-      { runId: await openTestRun(chatsOf(builder), chatId) }
+      { runId: await openTestRun(chatsOf(builder), chatId) },
+      draftDefinitionOf(files)
     );
     let refused: unknown;
     try {
@@ -493,11 +503,12 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
 
     // A commit from the App's code, not made current.
     const beforeCommit = await follow();
-    await builder.api.apps.files.commit(
+    await commitApp(
+      builder.api.apps.files,
       app,
       {
         "src/routes/index.tsx":
-          deskFiles("Committed")["src/routes/index.tsx"] ?? "",
+          deskFiles("Committed").files["src/routes/index.tsx"] ?? "",
       },
       "Elsewhere"
     );
@@ -551,12 +562,13 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
       appVersion: 1,
     });
     // Version 2 names the page `board`.
-    await builder.api.apps.files.commit(
+    await commitApp(
+      builder.api.apps.files,
       app,
       {
         "src/routes/index.tsx": null,
         "src/routes/board.tsx":
-          notesFiles("board")["src/routes/index.tsx"] ?? "",
+          notesFiles("board").files["src/routes/index.tsx"] ?? "",
       },
       "Board"
     );
@@ -600,7 +612,8 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
         appVersion: 1,
       })
     );
-    await builder.api.apps.files.commit(
+    await commitApp(
+      builder.api.apps.files,
       app,
       { "server/notes.ts": titlesSaying("from version 2") },
       "Second"
@@ -639,7 +652,12 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
     const chatId = await appChat(builder, app);
 
     const before = await answer(builder.api.chats.preview(chatId, app));
-    await builder.api.apps.files.commit(app, deskFiles("Committed"), "First");
+    await commitApp(
+      builder.api.apps.files,
+      app,
+      deskFiles("Committed"),
+      "First"
+    );
     const after = await builder.api.chats.preview(chatId, app);
 
     expect({

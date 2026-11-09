@@ -3,7 +3,8 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { commitApp, testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -73,29 +74,28 @@ const definitionOf = (contract: string) =>
  * and status, watches any run by its ID, and lists the decisions waiting
  * for the person, each answered through its own decision form.
  */
-const appFiles = (
-  admin: string,
-  colleague: string
-): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+const appFiles = (admin: string, colleague: string): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1), reviewer: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1), reviewer: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { permissions } from "../grasp.config.ts";
 
 export const followUp = permissions.followUp;
 `,
 
-  "src/components/review.tsx": `import { v } from "@grasp-os/sdk";
+      "src/components/review.tsx": `import { v } from "@grasp-os/sdk";
 import type { WorkflowDecisionInboxItem } from "@grasp-os/sdk";
 import { useForm, useWorkflow } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextField } from "@grasp-os/ui/form";
@@ -152,7 +152,7 @@ export function Review({
   );
 }
 `,
-  "src/components/watched.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
+      "src/components/watched.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
 import { workflows } from "@server/_generated/api";
 
 /** Run \`runId\`'s status, as the person may see it: thrown otherwise. */
@@ -161,7 +161,7 @@ export function Watched({ runId }: { runId: string }) {
   return <output aria-label="Watched status">{run.status}</output>;
 }
 `,
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
@@ -214,7 +214,8 @@ function Desk() {
 }
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-});
+    }
+  );
 
 /**
  * A new App of `appFiles` whose `followUp` binds version 1 of a new
@@ -267,7 +268,8 @@ const boundApp = async (
       alias: "followUp",
       version: 1,
     });
-    const { version } = await builds.api.apps.files.commit(
+    const { version } = await commitApp(
+      builds.api.apps.files,
       app,
       appFiles(admin.userId, colleague.userId),
       "Requests"

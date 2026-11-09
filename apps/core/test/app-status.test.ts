@@ -6,16 +6,12 @@ import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import { changeStatus } from "../src/app-status.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import {
-  commitFiles,
-  draftOverLatest,
-  proposeDraft,
-  proposeVersion,
-} from "../src/apps.ts";
+import { draftOverLatest, proposeDraft, proposeVersion } from "../src/apps.ts";
 import { deleteStore } from "../src/data-stores.ts";
 import { cancelRunsOf } from "../src/workflows/controls.ts";
 import { repairResourceStarts } from "../src/workflows/resource-runs.ts";
-import { racingDb } from "./apps.ts";
+import { commitApp, withFiles } from "./app-definitions.ts";
+import { commitDefined, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -59,13 +55,13 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
  */
 const draftApp = async (builder: Person, user?: Person): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Invoices" });
-  const { version } = await builder.api.apps.files.commit(
+  const { version } = await commitApp(
+    builder.api.apps.files,
     id,
-    {
-      ...notesFiles,
+    withFiles(notesFiles, {
       "src/routes/index.tsx":
         'import { createFileRoute } from "@tanstack/react-router"; export const Route = createFileRoute("/")({ component: () => null });\n',
-    },
+    }),
     "First version"
   );
   await builder.api.apps.versions.setCurrent(id, version);
@@ -433,7 +429,8 @@ describe("an App's status", () => {
     const builder = await signedInApi(idp, "builder");
     const user = await acting("user");
     const app = await draftApp(builder);
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
       { "notes.md": "Next" },
       "Next"
@@ -470,7 +467,7 @@ describe("an App's status", () => {
         })
       ),
       commit: await outcome(
-        builder.api.apps.files.commit(app, { "notes.md": "Later" }, "Later")
+        commitApp(builder.api.apps.files, app, { "notes.md": "Later" }, "Later")
       ),
       store: await outcome(deleteStore(env, other, defaultStore?.store ?? "")),
       // Taking access away is never blocked.
@@ -494,7 +491,8 @@ describe("an App's status", () => {
     const builder = await signedInApi(idp, "builder");
     const app = await draftApp(builder);
     const by = await builder.api.whoami();
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
       { "notes.md": "Next" },
       "Next"
@@ -512,7 +510,7 @@ describe("an App's status", () => {
 
     // Archived just before each write's batch lands, after its check.
     const committed = await outcome(
-      commitFiles(
+      commitDefined(
         { ...env, DB: racingDb(archive, /insert into "app_versions"/iu) },
         by,
         app,
@@ -537,6 +535,7 @@ describe("an App's status", () => {
     const draft = await draftOverLatest(env, appIdSchema.parse(app), {
       base: version,
       changes: { "notes.md": "Drafted" },
+      definition: null,
     });
     const drafted = await outcome(
       proposeDraft(

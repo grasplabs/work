@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
+import type { TestSource } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import {
   fileViewFiles,
@@ -38,7 +39,7 @@ import {
 const notesApp = async (
   builder: Parameters<typeof apiOf>[0],
   sharedWith?: { userId: string },
-  files: Record<string, string> = notesAppFiles()
+  files: TestSource = notesAppFiles()
 ): Promise<string> => {
   const name = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const { core, api } = apiOf(builder);

@@ -3,7 +3,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
 import { outlook, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
@@ -37,15 +37,16 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-const files = {
-  ...appDefinition({ name: "Desk", tables: {} }),
-
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const files = testApp(
+  { name: "Desk", tables: {} },
+  {
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => <p>Desk</p>;
 
 export const Route = createFileRoute("/")({ component: Page });
 `,
-};
+  }
+);
 
 /** The page at `path` that says `text`. */
 const pageSaying = (path: string, text: string): string =>
@@ -97,7 +98,7 @@ const callsOn = async ({ api }: Person, app: string) => ({
   // Its code and settings.
   read: await outcome(api.apps.files.read(app)),
   commit: await outcome(
-    api.apps.files.commit(app, { "notes.md": "# Mine\n" }, "Mine")
+    commitApp(api.apps.files, app, { "notes.md": "# Mine\n" }, "Mine")
   ),
   versions: await outcome(api.apps.versions.list(app)),
   version: await outcome(api.apps.versions.get(app, 1)),
@@ -195,7 +196,12 @@ describe("App roles", { timeout: 60_000 }, () => {
     // Admins manage every App.
     await expect(
       outcome(
-        admin.api.apps.files.commit(app, { "notes.md": "# Admin\n" }, "Admin")
+        commitApp(
+          admin.api.apps.files,
+          app,
+          { "notes.md": "# Admin\n" },
+          "Admin"
+        )
       )
     ).resolves.toBe("ok");
   });
@@ -317,7 +323,12 @@ describe("App roles", { timeout: 60_000 }, () => {
     const { id: app } = await owner.api.apps.create({
       name: `Desk ${unique()}`,
     });
-    const { version } = await owner.api.apps.files.commit(app, files, "One");
+    const { version } = await commitApp(
+      owner.api.apps.files,
+      app,
+      files,
+      "One"
+    );
     await owner.api.apps.versions.setCurrent(app, version);
     await owner.api.apps.members.add(app, {
       type: "person",
@@ -331,7 +342,8 @@ describe("App roles", { timeout: 60_000 }, () => {
     });
     // A version committed after the current one isn't listed: its page
     // opens for nobody yet.
-    await owner.api.apps.files.commit(
+    await commitApp(
+      owner.api.apps.files,
       app,
       {
         "src/routes/later.tsx": `import { createFileRoute } from "@tanstack/react-router";
@@ -377,13 +389,17 @@ export const Route = createFileRoute("/later")({ component: Page });
       throw new Error("Four Apps were made");
     }
     // Published, its pages committed out of their order.
-    await release(owner, oldest, {
-      ...files,
-      "src/routes/zeta.tsx": pageSaying("/zeta", "Zeta"),
-      "src/routes/alpha.tsx": pageSaying("/alpha", "Alpha"),
-    });
+    await release(
+      owner,
+      oldest,
+      withFiles(files, {
+        "src/routes/zeta.tsx": pageSaying("/zeta", "Zeta"),
+        "src/routes/alpha.tsx": pageSaying("/alpha", "Alpha"),
+      })
+    );
     // A draft that serves a business process.
-    const { version } = await owner.api.apps.files.commit(
+    const { version } = await commitApp(
+      owner.api.apps.files,
       middle,
       files,
       "Draft"

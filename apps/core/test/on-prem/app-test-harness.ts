@@ -5,10 +5,13 @@ import { env } from "cloudflare:workers";
 import { expect } from "vite-plus/test";
 
 import { publishVersion } from "../../src/app-publish.ts";
-import { commitFiles, createApp, findApp } from "../../src/apps.ts";
+import { createApp, findApp } from "../../src/apps.ts";
 import type { Acting } from "../../src/auth/identity.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
+import { appOf, withFiles } from "../app-definitions.ts";
+import type { TestApp } from "../app-definitions.ts";
+import { commitDefined } from "../apps.ts";
 import { notesFiles } from "../notes-client-app.ts";
 import { person } from "../sealed-apps.ts";
 
@@ -17,14 +20,21 @@ import { person } from "../sealed-apps.ts";
 // version current, and places held in the sandbox supervisor.
 
 /** The Notes App, its pages left out, with a fixture. */
-export const appFiles: Record<string, string> = {
-  ...Object.fromEntries(
-    Object.entries(notesFiles).filter(([path]) => !path.startsWith("src/"))
+export const appFiles: TestApp = withFiles(
+  appOf(
+    notesFiles.definition,
+    Object.fromEntries(
+      Object.entries(notesFiles.files).filter(
+        ([path]) => !path.startsWith("src/")
+      )
+    )
   ),
-  "tests/fixtures/notes.json": JSON.stringify({
-    principals: { "note-owner": { role: "user" } },
-  }),
-};
+  {
+    "tests/fixtures/notes.json": JSON.stringify({
+      principals: { "note-owner": { role: "user" } },
+    }),
+  }
+);
 
 /** A suite of one test, `body`, with an owner and a page at hand. */
 export const suiteOf = (
@@ -64,11 +74,13 @@ export interface Built {
 export const appWith = async (suite: string): Promise<Built> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitFiles(
+  await commitDefined(
     env,
     owner,
     id,
-    { ...appFiles, "tests/notes.test.ts": suite },
+    withFiles(appFiles, {
+      "tests/notes.test.ts": suite,
+    }),
     "First version"
   );
   return { owner, app: id };

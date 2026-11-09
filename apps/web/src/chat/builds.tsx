@@ -23,6 +23,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { HammerIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { PlanList, planLines } from "../apps/data-model-changes.tsx";
 import { makeCurrentFailure } from "../apps/store-change-errors.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
@@ -337,6 +338,18 @@ const ReviewDetails = ({
             {i18n._(serverChangeWarnings[review.server])}
           </Badge>
           <ServerCode code={serverCode} onRetry={onRetryServerCode} />
+        </section>
+      )}
+      {review.schema === null ||
+      planLines(review.schema, i18n).length === 0 ? null : (
+        <section
+          aria-label={t`When you publish`}
+          className="flex flex-col gap-1"
+        >
+          <h4 className="font-medium">
+            <Trans>When you publish</Trans>
+          </h4>
+          <PlanList lines={planLines(review.schema, i18n)} />
         </section>
       )}
       {review.migrations?.length === 0 ? null : (
@@ -844,7 +857,7 @@ export interface NamedDraft {
 
 /** Whether `draft` changes its App: it has changes not proposed yet. */
 export const changesApp = (draft: ChatDraft): boolean =>
-  draft.changed.length > 0;
+  draft.changed.length > 0 || draft.definitionChanged;
 
 /**
  * The chat's drafts, as core lists them in the latest builds read; none

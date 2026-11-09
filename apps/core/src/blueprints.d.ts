@@ -27,6 +27,11 @@ export interface BuiltinBlueprint {
    * each asking for an admin's grant to start.
    */
   workflows: readonly BlueprintWorkflow[];
+  /**
+   * The App's definition, as a version holds it (`definitionText`),
+   * which its generated files are generated from.
+   */
+  definition: string;
   /** The App's files: their text, by path. */
   files: Readonly<Record<string, string>>;
 }

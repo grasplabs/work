@@ -18,7 +18,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
-import { definitionFiles } from "./app-definition.ts";
+import { generatedPaths } from "./app-definition.ts";
 import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { keepLints, readLints } from "./build-cache.ts";
@@ -342,7 +342,7 @@ const lintedFiles = (files: Record<string, string>): Record<string, string> =>
       ([path]) =>
         isLintedCode(path) &&
         !isGeneratedPath(path) &&
-        !definitionFiles.has(path)
+        !generatedPaths.has(path)
     )
   );
 

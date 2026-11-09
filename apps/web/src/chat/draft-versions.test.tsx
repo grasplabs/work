@@ -34,6 +34,7 @@ const draftAt = (revision: number, app = "app-1"): ChatDraft => ({
   base: 1,
   changed: ["src/routes/index.tsx"],
   deleted: [],
+  definitionChanged: false,
   revision,
   updatedAt: "2026-10-22T10:00:00.000Z",
   callId: null,

@@ -10517,6 +10517,10 @@ msgstr "Renommer {name}"
 msgid "Rename chat"
 msgstr "Renommer le chat"
 
+#: src/apps/data-model-changes.tsx
+msgid "Renames the table {from} to {to}; its records go with it."
+msgstr "Renomme la table {from} en {to} ; ses enregistrements la suivent."
+
 #: src/settings/ai-providers.tsx
 msgid "Replace key"
 msgstr "Remplacer la clé"
@@ -13301,6 +13305,10 @@ msgstr "Le test n'a pas fonctionné. {model} n'a pas répondu : {why}"
 msgid "The upload was cancelled."
 msgstr "Le téléversement a été annulé."
 
+#: src/apps/data-model-changes.tsx
+msgid "The values of {from} in {table} move to {to}."
+msgstr "Les valeurs de {from} dans {table} passent à {to}."
+
 #: src/apps/release-controls.tsx
 msgid "The version is kept only as long as the retention rules and its other holds keep it. Lifting the hold is recorded."
 msgstr "La version n’est conservée que tant que les règles de conservation et ses autres conservations l’exigent. La levée est enregistrée."
@@ -15099,6 +15107,7 @@ msgid "When to use it"
 msgstr "Quand l’utiliser"
 
 #: src/apps/app-data-model.tsx
+#: src/chat/builds.tsx
 msgid "When you publish"
 msgstr "Quand vous publiez"
 

@@ -12,7 +12,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { findApp } from "../src/apps.ts";
+import { findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -20,7 +20,8 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -124,40 +125,43 @@ interface Given {
 const filesWith = (
   { reviewer = "approver", deciders = ["approver"] }: Given,
   tests: Record<string, string> = {}
-): Record<string, string> => ({
-  ...appDefinition({
-    name: "Invoices",
-    tables: {
-      invoices: {
-        fields: { amount: "v.number()" },
-        access: { read: "appMembers", write: "appMembers" },
+): TestApp =>
+  testApp(
+    {
+      name: "Invoices",
+      tables: {
+        invoices: {
+          fields: { amount: "v.number()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("approval", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("approval", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/invoices.ts": `import { v } from "@grasp-os/sdk";
 import { permissions } from "../grasp.config.ts";
 
 export const approval = permissions.approval;
 `,
 
-  "tests/fixtures/desk.json": JSON.stringify({
-    principals: {
-      "desk-user": { role: "user" },
-      approver: { role: "user" },
-      other: { role: "user" },
-    },
-    workflows: {
-      approval: {
-        params: { reviewer: `person:${reviewer}` },
-        deciders: { invoiceApproval: deciders },
-      },
-    },
-  }),
-  ...tests,
-});
+      "tests/fixtures/desk.json": JSON.stringify({
+        principals: {
+          "desk-user": { role: "user" },
+          approver: { role: "user" },
+          other: { role: "user" },
+        },
+        workflows: {
+          approval: {
+            params: { reviewer: `person:${reviewer}` },
+            deciders: { invoiceApproval: deciders },
+          },
+        },
+      }),
+      ...tests,
+    }
+  );
 
 /**
  * The Invoices App, binding the approval workflow of `steps`, ending with
@@ -240,7 +244,12 @@ const codeOf = (answer: string): string => {
 
 /** A test session on `app`'s release, and a run of it `desk-user` started. */
 const runningIn = async (app: Awaited<ReturnType<typeof invoicesApp>>) => {
-  const host = fixtureHostFor(env, app.release, app.files);
+  const host = fixtureHostFor(
+    env,
+    app.release,
+    app.files.files,
+    await releaseIdsOf(env, app.release)
+  );
   const session = await host.open("desk", `test-${unique()}`);
   const started = resultSchema.parse(
     JSON.parse(

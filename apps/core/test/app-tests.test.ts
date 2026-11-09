@@ -12,15 +12,17 @@ import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { sweepTestFixtures } from "../src/app-tests.ts";
-import { commitFiles, createApp, findApp } from "../src/apps.ts";
+import { createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import {
   discardFixtureStore,
   openFixtureStore,
   openStore,
 } from "../src/data-stores.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp, TestSource } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { commitDefined } from "./apps.ts";
 import { person } from "./sealed-apps.ts";
 import { applied } from "./store-schemas.ts";
 
@@ -33,8 +35,8 @@ import { applied } from "./store-schemas.ts";
 // limits on a run, and nothing left in the App's own store or behind in
 // fixture stores.
 
-const appFiles: Record<string, string> = {
-  ...appDefinition({
+const appFiles: TestApp = testApp(
+  {
     name: "Notes",
     tables: {
       notes: {
@@ -49,8 +51,9 @@ const appFiles: Record<string, string> = {
     permissions: [
       'permission.brain({\n  operations: ["search"],\n  collections: ["handbook"],\n})',
     ],
-  }),
-  "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, internalQuery, mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -101,14 +104,15 @@ export const count = internalQuery({
 });
 `,
 
-  "tests/fixtures/notes.json": JSON.stringify({
-    principals: {
-      "note-owner": { role: "user" },
-      "other-owner": { role: "user" },
-      "note-builder": { role: "builder" },
-    },
-  }),
-};
+    "tests/fixtures/notes.json": JSON.stringify({
+      principals: {
+        "note-owner": { role: "user" },
+        "other-owner": { role: "user" },
+        "note-builder": { role: "builder" },
+      },
+    }),
+  }
+);
 
 const passingSuite = `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
@@ -214,10 +218,10 @@ interface Built {
 }
 
 /** A builder's App with `files` as its first version. */
-const appWith = async (files: Record<string, string>): Promise<Built> => {
+const appWith = async (files: TestSource): Promise<Built> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitFiles(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files, "First version");
   return { owner, app: id };
 };
 
@@ -280,10 +284,11 @@ const alarmOf = async (id: string): Promise<number | null> =>
 
 describe("an App's tests", { timeout: 180_000 }, () => {
   it("make the version current when they pass, and leave the App's data alone", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/notes.test.ts": passingSuite,
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/notes.test.ts": passingSuite,
+      })
+    );
     await publishVersion(env, built.owner, built.app, 1);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: 1,
@@ -305,21 +310,23 @@ describe("an App's tests", { timeout: 180_000 }, () => {
   });
 
   it("give each principal the teams its fixture names, as a table's team rules read them", async () => {
-    const built = await appWith({
-      ...appDefinition({
-        name: "Deals",
-        tables: {
-          deals: {
-            fields: { title: "v.string()", team: "v.string()" },
-            access: {
-              read: "appMembers",
-              write: "appMembers",
-              rows: { read: [{ kind: "team", field: "team" }] },
+    const built = await appWith(
+      testApp(
+        {
+          name: "Deals",
+          tables: {
+            deals: {
+              fields: { title: "v.string()", team: "v.string()" },
+              access: {
+                read: "appMembers",
+                write: "appMembers",
+                rows: { read: [{ kind: "team", field: "team" }] },
+              },
             },
           },
         },
-      }),
-      "server/deals.ts": `import { v } from "@grasp-os/sdk";
+        {
+          "server/deals.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const add = mutation({
@@ -336,13 +343,13 @@ export const titles = query({
 });
 `,
 
-      "tests/fixtures/deals.json": JSON.stringify({
-        principals: {
-          seller: { role: "user", teams: ["sales"] },
-          helper: { role: "user", teams: ["support"] },
-        },
-      }),
-      "tests/deals.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+          "tests/fixtures/deals.json": JSON.stringify({
+            principals: {
+              seller: { role: "user", teams: ["sales"] },
+              helper: { role: "user", teams: ["support"] },
+            },
+          }),
+          "tests/deals.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 
 export default appTest({
@@ -362,7 +369,9 @@ export default appTest({
   },
 });
 `,
-    });
+        }
+      )
+    );
     await publishVersion(env, built.owner, built.app, 1);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: 1,
@@ -370,10 +379,11 @@ export default appTest({
   });
 
   it("refuse the version while one fails, naming each failing test and why", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/failing.test.ts": failingSuite,
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/failing.test.ts": failingSuite,
+      })
+    );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
@@ -389,14 +399,15 @@ export default appTest({
   });
 
   it("can't reach the App's server code, only its references", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/sneaky.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/sneaky.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { titles } from "../server/notes.ts";
 
 export default appTest({ fixtures: "notes", tests: { "runs a handler": async () => { await titles.handler(); } } });
 `,
-    });
+      })
+    );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
@@ -407,13 +418,14 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
   });
 
   it("fail a suite whose fixture the App doesn't have", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/notes.test.ts": passingSuite.replace(
-        'fixtures: "notes"',
-        'fixtures: "missing"'
-      ),
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/notes.test.ts": passingSuite.replace(
+          'fixtures: "notes"',
+          'fixtures: "missing"'
+        ),
+      })
+    );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
@@ -433,10 +445,11 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
   value !== null && typeof value === "object" && "results" in value
     ? stringify({ fixtures: value.fixtures, results: [] })
     : stringify(value, ...rest);`;
-    const built = await appWith({
-      ...appFiles,
-      "tests/forged.test.ts": suiteOf("t.equal(1, 2);", forging),
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/forged.test.ts": suiteOf("t.equal(1, 2);", forging),
+      })
+    );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
@@ -448,14 +461,14 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
     const waiting = `const owner = await t.as("note-owner");
       await owner.mutation(api.notes.create, { title: "Held" });
       await new Promise((resolve) => { setTimeout(resolve, 2500); });`;
-    const built = await appWith({
-      ...appFiles,
-      "tests/hanging-test.test.ts": suiteOf(
-        `await owner.mutation(api.notes.create, { title: "Held" });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/hanging-test.test.ts": suiteOf(
+          `await owner.mutation(api.notes.create, { title: "Held" });
       await new Promise(() => {});`
-      ),
-      // Each test within its 3 s, both together past the suite's 4 s.
-      "tests/hanging-suite.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+        ),
+        // Each test within its 3 s, both together past the suite's 4 s.
+        "tests/hanging-suite.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 export default appTest({
   fixtures: "notes",
@@ -465,7 +478,8 @@ export default appTest({
   },
 });
 `,
-    });
+      })
+    );
     const { code, failures } = await refusal(
       built,
       envWith({ APP_TEST_LIMITS_MS: "3000/4000" })
@@ -480,12 +494,13 @@ export default appTest({
   });
 
   it("give up on a cleanup that stalls, leaving its stores to the sweep", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/notes.test.ts": suiteOf(
-        'await owner.mutation(api.notes.create, { title: "Kept" });'
-      ),
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/notes.test.ts": suiteOf(
+          'await owner.mutation(api.notes.create, { title: "Kept" });'
+        ),
+      })
+    );
     // Every store object answers as it does, but a discard never ends.
     const stalling = new Proxy(env.DATA_STORES, {
       get: (namespace, key): unknown => {
@@ -524,13 +539,14 @@ export default appTest({
   });
 
   it("run no suite past the run's deadline", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/a.test.ts": suiteOf(
-        "await new Promise((resolve) => { setTimeout(resolve, 2000); });"
-      ),
-      "tests/b.test.ts": suiteOf("t.equal(1, 1);"),
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/a.test.ts": suiteOf(
+          "await new Promise((resolve) => { setTimeout(resolve, 2000); });"
+        ),
+        "tests/b.test.ts": suiteOf("t.equal(1, 1);"),
+      })
+    );
     // The suites may take 500 ms in all: the first runs out of it, and is
     // told the run's limit (not the time it happened to have left), the
     // second can't start.
@@ -546,10 +562,11 @@ export default appTest({
   });
 
   it("run a suite in any folder an App's paths allow, dots included", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/access.rules/notes.test.ts": suiteOf("t.equal(1, 2);"),
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/access.rules/notes.test.ts": suiteOf("t.equal(1, 2);"),
+      })
+    );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
@@ -558,11 +575,12 @@ export default appTest({
   });
 
   it("refuse a file under tests/ that is no suite, helper or fixture", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/notes.test.ts": passingSuite,
-      "tests/notes.spec.js": "export default {};\n",
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/notes.test.ts": passingSuite,
+        "tests/notes.spec.js": "export default {};\n",
+      })
+    );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
@@ -577,7 +595,11 @@ export default appTest({
         suiteOf("t.equal(1, 1);"),
       ])
     );
-    const built = await appWith({ ...appFiles, ...suites });
+    const built = await appWith(
+      withFiles(appFiles, {
+        ...suites,
+      })
+    );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
@@ -586,10 +608,11 @@ export default appTest({
   });
 
   it("say so where nothing could bound them", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/notes.test.ts": passingSuite,
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/notes.test.ts": passingSuite,
+      })
+    );
     // Sealed where App code may run; made current where it may not.
     await sealRelease(env, { app: built.app, version: 1, by: built.owner });
     await expect(
@@ -599,24 +622,26 @@ export default appTest({
 
   it("need no runtime for fixtures and helpers alone, yet refuse a stray file anywhere", async () => {
     /** Version 1 of an App with `files`, sealed where App code may run. */
-    const sealedWith = async (files: Record<string, string>) => {
+    const sealedWith = async (files: TestSource) => {
       const built = await appWith(files);
       await sealRelease(env, { app: built.app, version: 1, by: built.owner });
       return built;
     };
     // `appFiles` holds tests/fixtures/notes.json; a helper, but no suite.
-    const helpers = await sealedWith({
-      ...appFiles,
-      "tests/lib/owner.ts": "export const ownerName = 'note-owner';\n",
-    });
+    const helpers = await sealedWith(
+      withFiles(appFiles, {
+        "tests/lib/owner.ts": "export const ownerName = 'note-owner';\n",
+      })
+    );
     await expect(
       publishVersion(unbounded, helpers.owner, helpers.app, 1)
     ).resolves.toMatchObject({ currentVersion: 1 });
 
-    const stray = await sealedWith({
-      ...appFiles,
-      "tests/notes.spec.js": "export default {};\n",
-    });
+    const stray = await sealedWith(
+      withFiles(appFiles, {
+        "tests/notes.spec.js": "export default {};\n",
+      })
+    );
     await expect(
       publishVersion(unbounded, stray.owner, stray.app, 1)
     ).rejects.toMatchObject({
@@ -630,10 +655,11 @@ export default appTest({
   });
 
   it("don't run again when the current version is made current again", async () => {
-    const built = await appWith({
-      ...appFiles,
-      "tests/notes.test.ts": passingSuite,
-    });
+    const built = await appWith(
+      withFiles(appFiles, {
+        "tests/notes.test.ts": passingSuite,
+      })
+    );
     await publishVersion(env, built.owner, built.app, 1);
     // Where the tests can't run at all, the current version is still
     // made current again: nothing ran them.

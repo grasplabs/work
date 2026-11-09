@@ -33,7 +33,7 @@ export const rpcParamNames: ParamNames = {
     "tables": ["app"],
   },
   "AppFilesRpc": {
-    "commit": ["app","changes","message"],
+    "commit": ["app","changes","message","definition"],
     "read": ["app","version"],
   },
   "AppIntegrationsRpc": {

@@ -9,7 +9,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appHost } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp } from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
 import { ordinaryData } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -36,18 +37,19 @@ const declared = [
 ];
 
 /** The Notes App, with permissions to open links to `origins` and to read files. */
-const linkedFiles = (origins: readonly string[] | null = declared) => ({
-  ...notesFiles,
-  ...appDefinition({
-    ...notesSpec,
-    permissions: [
-      ...(origins === null
-        ? []
-        : [`permission.links({ origins: ${JSON.stringify(origins)} })`]),
-      'permission.files({ operations: ["read"] })',
-    ],
-  }),
-});
+const linkedFiles = (origins: readonly string[] | null = declared) =>
+  testApp(
+    {
+      ...notesSpec,
+      permissions: [
+        ...(origins === null
+          ? []
+          : [`permission.links({ origins: ${JSON.stringify(origins)} })`]),
+        'permission.files({ operations: ["read"] })',
+      ],
+    },
+    notesFiles.files
+  );
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
@@ -57,9 +59,14 @@ type Person = Awaited<ReturnType<typeof personApi>>;
 const released = async (
   builder: Person,
   app: string,
-  files: Record<string, string>
+  files: TestSource
 ): Promise<number> => {
-  const { version } = await builder.api.apps.files.commit(app, files, "Next");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    app,
+    files,
+    "Next"
+  );
   await builder.api.apps.versions.setCurrent(app, version);
   return version;
 };

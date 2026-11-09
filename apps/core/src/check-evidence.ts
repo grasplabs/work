@@ -49,6 +49,7 @@ export type CheckedRelease = Pick<
   | "resourceId"
   | "resourceVersion"
   | "sourceTreeHash"
+  | "definitionHash"
   | "contractHash"
   | "schemaHash"
   | "target"
@@ -84,6 +85,7 @@ const evidenceOf = async (
     source: {
       resourceId: release.resourceId,
       sourceTreeHash: release.sourceTreeHash,
+      definitionHash: release.definitionHash,
     },
     candidate: {
       resourceVersion: release.resourceVersion,

@@ -5,9 +5,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { publishVersion } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
-import { commitFiles, versionFiles } from "../src/apps.ts";
+import { versionFiles } from "../src/apps.ts";
 import { buildPages, versionPages } from "../src/pages.ts";
 import { buildOnSave, draftLintBuild } from "../src/save-builds.ts";
+import { commitApp, withFiles } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
@@ -63,7 +65,8 @@ describe("building on save", { timeout: 60_000 }, () => {
     const unique = crypto.randomUUID();
     const app = await newApp(builder);
 
-    const { version, builds } = await builder.api.apps.files.commit(
+    const { version, builds } = await commitApp(
+      builder.api.apps.files,
       app,
       page(unique),
       "Save"
@@ -90,7 +93,8 @@ describe("building on save", { timeout: 60_000 }, () => {
 ${page(crypto.randomUUID())["src/routes/index.tsx"] ?? ""}`,
     };
 
-    const { builds } = await builder.api.apps.files.commit(
+    const { builds } = await commitApp(
+      builder.api.apps.files,
       app,
       unused,
       "Unused"
@@ -111,7 +115,8 @@ export const Route = createFileRoute("/")({ component: Desk });
 `,
     };
 
-    const committed = await builder.api.apps.files.commit(
+    const committed = await commitApp(
+      builder.api.apps.files,
       app,
       broken,
       "Broken"
@@ -140,11 +145,14 @@ export const Route = createFileRoute("/")({ component: Desk });
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     // Registration throws (never inspected before: no kept manifest).
-    const throwing = `${notesFiles["server/notes.ts"] ?? ""}\nif (globalThis.Object === Object) throw new Error("No notes today ${crypto.randomUUID()}");\n`;
+    const throwing = `${notesFiles.files["server/notes.ts"] ?? ""}\nif (globalThis.Object === Object) throw new Error("No notes today ${crypto.randomUUID()}");\n`;
 
-    const { builds } = await builder.api.apps.files.commit(
+    const { builds } = await commitApp(
+      builder.api.apps.files,
       app,
-      { ...notesFiles, "server/notes.ts": throwing },
+      withFiles(notesFiles, {
+        "server/notes.ts": throwing,
+      }),
       "Notes"
     );
 
@@ -173,7 +181,7 @@ export const Route = createFileRoute("/")({ component: Desk });
     };
     const warned = vi.spyOn(console, "warn");
 
-    const committed = await commitFiles(
+    const committed = await commitDefined(
       { ...env, LOADER: unreachable },
       by,
       app,
@@ -272,7 +280,7 @@ export const Route = createFileRoute("/")({ component: Desk });
 
     // Answers while the cache is still held: a second build would wait on
     // it, and the commit with it, until the test timed out.
-    const committed = await commitFiles(
+    const committed = await commitDefined(
       { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
       by,
       app,
@@ -288,7 +296,8 @@ export const Route = createFileRoute("/")({ component: Desk });
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     const by = await builder.api.whoami();
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
       page(crypto.randomUUID()),
       "Save"

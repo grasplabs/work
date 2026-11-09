@@ -18,7 +18,8 @@ import {
 } from "../src/permissions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { isRestricted } from "../src/restricted.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
@@ -38,20 +39,22 @@ import type { Fixture } from "./sealed-apps.ts";
 // 6. A retained binding keeps recalling after the Brain's grant is gone.
 
 /** An App whose action recalls from two declared Knowledge collections. */
-const brainFiles = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Ask",
-    tables: {
-      notes: {
-        fields: { title: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const brainFiles = (): TestApp =>
+  testApp(
+    {
+      name: "Ask",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
+      permissions: [
+        'permission.brain({\n  operations: ["recall"],\n  collections: ["handbook", "salaries"],\n})',
+      ],
     },
-    permissions: [
-      'permission.brain({\n  operations: ["recall"],\n  collections: ["handbook", "salaries"],\n})',
-    ],
-  }),
-  "server/brain.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/brain.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -73,7 +76,8 @@ export const ask = action({
   },
 });
 `,
-});
+    }
+  );
 
 type Sealed = Fixture & { release: Release };
 

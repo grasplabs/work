@@ -8,9 +8,8 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { schemaIdsOf } from "./app-definition.ts";
 import type { Release } from "./app-releases.ts";
-import { changeEntry, editableApp, findApp, versionFiles } from "./apps.ts";
+import { changeEntry, editableApp, findApp, releaseIdsOf } from "./apps.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { liveStoreOf, openStore, resetAppStore } from "./data-stores.ts";
 import { runMigrations } from "./migration-run.ts";
@@ -24,7 +23,7 @@ import type { AppliedSchema, SchemaApply } from "./store-host.ts";
 // the schema the store holds, run first, once, their output staged in the
 // store (migration-run.ts); then the store diffs the version's schema
 // against what it holds, by the stable IDs of the version's own
-// `definition.json`, and applies it with that output in one transaction
+// definition (apps.ts), and applies it with that output in one transaction
 // (store-host.ts, `applySchema`). A failure anywhere changes nothing.
 //
 // What can go wrong, and how each is closed:
@@ -53,14 +52,15 @@ import type { AppliedSchema, SchemaApply } from "./store-host.ts";
 // - A rollback after a schema change: the older version's schema is
 //   applied like any other. Fields and tables it leaves out keep their
 //   values, so making the newer version current again finds them.
-// - The IDs come from the files: the version's files are immutable, read
-//   back by their hash, and its schema is generated from the very
-//   definition its IDs come from.
+// - The IDs aren't the ones the release was sealed with: they come from
+//   the version's definition, immutable and read back by its hash, which
+//   must be the hash the release names (`definitionHash`); and its
+//   schema is generated from the very definition its IDs come from.
 
 /**
  * The change applying `release`'s schema over version `basedOn`, for
- * `by`: its schema, its IDs from the version's own `definition.json`, and
- * its answers; no migration.
+ * `by`: its schema, its IDs from the version's own definition, and its
+ * answers; no migration.
  */
 const schemaApplyOf = async (
   env: Env,
@@ -72,7 +72,7 @@ const schemaApplyOf = async (
   const version = release.manifest.resourceVersion;
   return {
     manifest: manifestText(release.app.schema),
-    ids: schemaIdsOf(await versionFiles(env, app, version), release.app.schema),
+    ids: await releaseIdsOf(env, release),
     answers: (release.app.answers ?? []).map((answer) => ({ ...answer })),
     actor: actorOf(by),
     version: { app, number: version, basedOn },

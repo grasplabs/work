@@ -31,11 +31,13 @@ export class AppFilesRpc extends CoreRpcTarget implements AppFilesApi {
   async commit(
     app: string,
     changes: FileChanges,
-    message: string
+    message: string,
+    definition?: unknown
   ): Promise<CommittedVersion> {
     return await withPerson(
       this.#check,
-      async (by) => await commitFiles(this.#env, by, app, changes, message)
+      async (by) =>
+        await commitFiles(this.#env, by, app, changes, message, definition)
     );
   }
 }

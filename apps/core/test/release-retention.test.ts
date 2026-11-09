@@ -11,7 +11,7 @@ import {
   sealRelease,
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, isPublished } from "../src/apps.ts";
+import { isPublished } from "../src/apps.ts";
 import { callOperation } from "../src/operations.ts";
 import type { Runner } from "../src/operations.ts";
 import {
@@ -33,8 +33,9 @@ import {
   sweepStrayKeys,
   unnamedSealMs,
 } from "../src/sealed-artifacts.ts";
-import { appDefinition } from "./app-definitions.ts";
-import { lostAnswerDb } from "./apps.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
+import { commitDefined, lostAnswerDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -53,17 +54,19 @@ import type { Fixture } from "./sealed-apps.ts";
 // and that a deleted release's version runs again only once published
 // again.
 
-const files = (label: string): Record<string, string> => ({
-  ...appDefinition({
-    name: "Notes",
-    tables: {
-      notes: {
-        fields: { title: "v.string()" },
-        access: { read: "owner", write: "owner" },
+const files = (label: string): TestApp =>
+  testApp(
+    {
+      name: "Notes",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
     },
-  }),
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 export const label = query({
   args: {},
@@ -85,7 +88,8 @@ export const touchTwice = action({
   },
 });
 `,
-});
+    }
+  );
 
 const day = 24 * 60 * 60_000;
 
@@ -98,7 +102,7 @@ const twoVersions = async (
   await publishVersion(env, fixture.owner, fixture.app, 1);
   // The sweep sees version 1 current.
   await sweepReleases(env, start);
-  await commitFiles(env, fixture.owner, fixture.app, files("two"), "Two");
+  await commitDefined(env, fixture.owner, fixture.app, files("two"), "Two");
   const second = await seal(fixture, 2);
   await publishVersion(env, fixture.owner, fixture.app, 2);
   await sweepReleases(env, start);

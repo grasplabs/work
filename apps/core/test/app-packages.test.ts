@@ -3,11 +3,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { publishVersion } from "../src/app-publish.ts";
-import { commitFiles } from "../src/apps.ts";
 import { decideDependency } from "../src/packages/requests.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { buildAppCode, buildPages } from "../src/pages.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { named, publish, reportToOsv, rescannedUntil } from "./npm.ts";
 import { appWith, calledAs, seal, sweptAway } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -60,17 +61,19 @@ const maths = async (): Promise<string> => {
 };
 
 /** The App's files: a page importing `page`, server code importing `server`. */
-const appFiles = (page: string, server: string): Record<string, string> => ({
-  ...appDefinition({
-    name: "Charts",
-    tables: {
-      points: {
-        fields: { n: "v.number()" },
-        access: { read: "appMembers", write: "appMembers" },
+const appFiles = (page: string, server: string): TestApp =>
+  testApp(
+    {
+      name: "Charts",
+      tables: {
+        points: {
+          fields: { n: "v.number()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
     },
-  }),
-  "server/points.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/points.ts": `import { v } from "@grasp-os/sdk";
 import { action, query } from "@server/_generated/server";
 import { double, reach } from ${JSON.stringify(server)};
 
@@ -86,17 +89,18 @@ export const reached = action({
   handler: async () => await reach(),
 });
 `,
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { Bars } from ${JSON.stringify(page)};
 
 export const Route = createFileRoute("/")({ component: () => <Bars /> });
 `,
-});
+    }
+  );
 
 /** An App whose pages alone import `page`: its server code imports none. */
-const pageOnlyFiles = (page: string): Record<string, string> => ({
-  ...appFiles(page, page),
-  "server/points.ts": `import { v } from "@grasp-os/sdk";
+const pageOnlyFiles = (page: string): TestApp =>
+  withFiles(appFiles(page, page), {
+    "server/points.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const doubled = query({
@@ -105,7 +109,7 @@ export const doubled = query({
   handler: async (_ctx, args) => args.n * 2,
 });
 `,
-});
+  });
 
 /** `packages` asked for App `fixture` by its builder, and approved by them. */
 const approved = async (
@@ -137,7 +141,7 @@ describe("an App's approved packages", () => {
     const fixture = await appWith(files, "Charts");
     const request = await approved(fixture, [page, server]);
 
-    const pages = await buildPages(env, files, fixture.app);
+    const pages = await buildPages(env, files.files, fixture.app);
     await seal(fixture);
     await publishVersion(env, fixture.owner, fixture.app, 1);
     const doubled = await calledAs(
@@ -174,7 +178,7 @@ describe("an App's approved packages", () => {
     await approved(fixture, [page]);
     const second = await approved(fixture, [server]);
 
-    const pages = await buildPages(env, files, fixture.app);
+    const pages = await buildPages(env, files.files, fixture.app);
     await seal(fixture);
     await publishVersion(env, fixture.owner, fixture.app, 1);
     const doubled = await calledAs(
@@ -206,14 +210,14 @@ describe("an App's approved packages", () => {
       dependencies: [],
       remove: [server],
     });
-    const before = await buildAppCode(env, files, fixture.app);
+    const before = await buildAppCode(env, files.files, fixture.app);
     await decideDependency(env, fixture.owner, removal.id, {
       approved: true,
       graphHash: removal.graphHash,
     });
 
-    const pages = await buildPages(env, files, fixture.app);
-    const code = await buildAppCode(env, files, fixture.app);
+    const pages = await buildPages(env, files.files, fixture.app);
+    const code = await buildAppCode(env, files.files, fixture.app);
 
     expect({
       removed: removal.removed,
@@ -237,8 +241,8 @@ describe("an App's approved packages", () => {
     const files = appFiles(page, server);
     const fixture = await appWith(files, "Charts");
 
-    const pages = await buildPages(env, files, fixture.app);
-    const code = await buildAppCode(env, files, fixture.app);
+    const pages = await buildPages(env, files.files, fixture.app);
+    const code = await buildAppCode(env, files.files, fixture.app);
 
     expect({
       pages: saidOf(pages).includes("env.build.resolveDependencies"),
@@ -249,28 +253,26 @@ describe("an App's approved packages", () => {
   it("never give a page a React of a package's own", async () => {
     const page = await chart();
     const fixture = await appWith(
-      {
-        ...appFiles(page, page),
+      withFiles(appFiles(page, page), {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { renderToString } from ${JSON.stringify(`${page}/server`)};
 
 export const Route = createFileRoute("/")({ component: () => <p>{String(renderToString)}</p> });
 `,
-      },
+      }),
       "Charts"
     );
     await approved(fixture, [page], [page, `${page}/server`]);
 
     const pages = await buildPages(
       env,
-      {
-        ...appFiles(page, page),
+      withFiles(appFiles(page, page), {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { renderToString } from ${JSON.stringify(`${page}/server`)};
 
 export const Route = createFileRoute("/")({ component: () => <p>{String(renderToString)}</p> });
 `,
-      },
+      }).files,
       fixture.app
     );
 
@@ -300,10 +302,10 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
     const files = appFiles(page, server);
     const fixture = await appWith(files, "Charts");
     await approved(fixture, [page, server]);
-    const first = await buildPages(env, files, fixture.app);
+    const first = await buildPages(env, files.files, fixture.app);
     await reportToOsv(page, "1.0.0", "MAL-2026-50002");
 
-    const again = await outcome(buildPages(env, files, fixture.app));
+    const again = await outcome(buildPages(env, files.files, fixture.app));
 
     expect({ first: first.ok, again }).toStrictEqual({
       first: true,
@@ -318,14 +320,13 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
     const first = await approved(fixture, [page]);
     await seal(fixture, 1);
     await approved(fixture, [await chart()]);
-    await commitFiles(
+    await commitDefined(
       env,
       fixture.owner,
       fixture.app,
-      {
-        ...files,
-        "src/routes/index.tsx": `${files["src/routes/index.tsx"]}// Again.\n`,
-      },
+      withFiles(files, {
+        "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}// Again.\n`,
+      }),
       "Again"
     );
     await seal(fixture, 2);
@@ -363,8 +364,7 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
 
   it("are imported by the App's own tests, which pass as it is published", async () => {
     const [page, server] = [await chart(), await maths()];
-    const files = {
-      ...appFiles(page, server),
+    const files = withFiles(appFiles(page, server), {
       "tests/fixtures/people.json": JSON.stringify({
         principals: { reader: { role: "user" } },
       }),
@@ -380,7 +380,7 @@ export default appTest({
   },
 });
 `,
-    };
+    });
     const fixture = await appWith(files, "Charts");
     await approved(fixture, [page, server]);
 
@@ -405,7 +405,7 @@ export default appTest({
       { name: "points.doubled", kind: "query" },
       { n: 21 }
     );
-    const pages = await buildPages(env, files, fixture.app);
+    const pages = await buildPages(env, files.files, fixture.app);
 
     expect({ called, rebuilt: pages.ok }).toMatchObject({
       called: { ok: false, error: { code: "dependency.revoked" } },

@@ -44,6 +44,8 @@ const nothingPlanned: DefinitionPlan = {
   keptFields: [],
   accessChanges: [],
   sensitiveTables: [],
+  renamedTables: [],
+  renamedFields: [],
   refused: [],
 };
 

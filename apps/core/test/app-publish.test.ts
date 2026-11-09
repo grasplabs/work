@@ -6,10 +6,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { addMember, removeMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
-import { commitFiles, findApp } from "../src/apps.ts";
+import { findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { appDefinition } from "./app-definitions.ts";
-import { markPublished, racingDb } from "./apps.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import type { TestApp, TestSource } from "./app-definitions.ts";
+import { commitDefined, markPublished, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, artifactKey, failure, person } from "./sealed-apps.ts";
 
@@ -19,9 +20,11 @@ import { appWith, artifactKey, failure, person } from "./sealed-apps.ts";
 // a crash midway, bytes changed in storage, and someone without the right.
 
 /** An App of spec 8's layout answering `greeting`. */
-const helloFiles = (greeting = "hello"): Record<string, string> => ({
-  ...appDefinition({ name: "Hello", tables: {} }),
-  "server/hello.ts": `import { v } from "@grasp-os/sdk";
+const helloFiles = (greeting = "hello"): TestApp =>
+  testApp(
+    { name: "Hello", tables: {} },
+    {
+      "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const hello = query({
@@ -30,7 +33,8 @@ export const hello = query({
   handler: () => ${JSON.stringify(greeting)},
 });
 `,
-});
+    }
+  );
 
 /** An App test of `helloFiles` expecting `greeting`. */
 const helloTest = (greeting: string): Record<string, string> => ({
@@ -56,9 +60,9 @@ export default appTest({
 const committed = async (
   by: Acting & Identity,
   app: AppId,
-  files: Record<string, string | null>
+  files: TestSource
 ): Promise<number> => {
-  const { version } = await commitFiles(env, by, app, files, "Next");
+  const { version } = await commitDefined(env, by, app, files, "Next");
   return version;
 };
 
@@ -121,10 +125,11 @@ const audited = async (app: AppId, action: string): Promise<unknown[][]> => {
 
 describe("publishing a version", { timeout: 120_000 }, () => {
   it("seals it, runs its tests, marks it published and makes it current, each audited", async () => {
-    const { owner, app } = await appWith({
-      ...helloFiles(),
-      ...helloTest("hello"),
-    });
+    const { owner, app } = await appWith(
+      withFiles(helloFiles(), {
+        ...helloTest("hello"),
+      })
+    );
     const made = await publishVersion(env, owner, app, 1);
     const release = await loadRelease(env, app, 1);
     const events = await allEvents();
@@ -150,10 +155,11 @@ describe("publishing a version", { timeout: 120_000 }, () => {
   });
 
   it("refuses a version whose test fails, marks it failed, and leaves the current one", async () => {
-    const { owner, app } = await appWith({
-      ...helloFiles(),
-      ...helloTest("hello"),
-    });
+    const { owner, app } = await appWith(
+      withFiles(helloFiles(), {
+        ...helloTest("hello"),
+      })
+    );
     await publishVersion(env, owner, app, 1);
     const failing = await committed(owner, app, helloTest("goodbye"));
     expect({
@@ -270,10 +276,11 @@ export const hello = query({
   });
 
   it("goes on after a crash between sealing and marking, sealing nothing new", async () => {
-    const { owner, app } = await appWith({
-      ...helloFiles(),
-      ...helloTest("hello"),
-    });
+    const { owner, app } = await appWith(
+      withFiles(helloFiles(), {
+        ...helloTest("hello"),
+      })
+    );
     // Sealed, then the publish stopped before its tests.
     const sealed = await sealRelease(env, { app, version: 1, by: owner });
     await expect(refusedByHand(app, 1)).resolves.toBeTruthy();
@@ -291,10 +298,11 @@ export const hello = query({
   });
 
   it("goes on after a crash between marking and making current, testing nothing again", async () => {
-    const { owner, app } = await appWith({
-      ...helloFiles(),
-      ...helloTest("hello"),
-    });
+    const { owner, app } = await appWith(
+      withFiles(helloFiles(), {
+        ...helloTest("hello"),
+      })
+    );
     await sealRelease(env, { app, version: 1, by: owner });
     // Marked, then the publish stopped before making it current.
     await markPublished(app, 1);
@@ -312,12 +320,19 @@ export const hello = query({
   });
 
   it("rolls back to a published version without running its tests again", async () => {
-    const { owner, app } = await appWith({
-      ...helloFiles(),
-      ...helloTest("hello"),
-    });
+    const { owner, app } = await appWith(
+      withFiles(helloFiles(), {
+        ...helloTest("hello"),
+      })
+    );
     await publishVersion(env, owner, app, 1);
-    await committed(owner, app, { ...helloFiles("two"), ...helloTest("two") });
+    await committed(
+      owner,
+      app,
+      withFiles(helloFiles("two"), {
+        ...helloTest("two"),
+      })
+    );
     await publishVersion(env, owner, app, 2);
     const back = await publishVersion(env, owner, app, 1);
     expect({

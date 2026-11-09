@@ -19,7 +19,8 @@ import {
   frameObjectMaxBytes,
   stageFrame,
 } from "../src/page-frame.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -39,23 +40,25 @@ import { signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = {
-  ...appDefinition({ name: "Sealed pages", tables: {} }),
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const files = testApp(
+  { name: "Sealed pages", tables: {} },
+  {
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
 function Desk() {
   return <p>Desk</p>;
 }
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-  "src/routes/inbox.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/inbox.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
 function Inbox() {
   return <p>Inbox</p>;
 }
 export const Route = createFileRoute("/inbox")({ component: Inbox });
 `,
-};
+  }
+);
 
 /** Whether `key` is a page's cached build. */
 const isPageBuild = (key: string): boolean =>
@@ -126,7 +129,7 @@ const poisonCache = async (
 };
 
 /** An App running `files`, and who builds it. */
-const published = async (released: Record<string, string> = files) => {
+const published = async (released: TestSource = files) => {
   const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: "Sealed pages" });
   await release(builder, id, released);
@@ -388,11 +391,12 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     const { builder, app } = await published();
     // Another build: a build is stored by what it is, so the same files
     // would be this one.
-    const other = await published({
-      ...files,
-      // Other code: a comment alone compiles to the same build.
-      "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}export const another = "build";\n`,
-    });
+    const other = await published(
+      withFiles(files, {
+        // Other code: a comment alone compiles to the same build.
+        "src/routes/index.tsx": `${files.files["src/routes/index.tsx"] ?? ""}export const another = "build";\n`,
+      })
+    );
     const desk = await builder.api.pages.open(app);
     const inbox = await other.builder.api.pages.open(other.app);
     const deskFrame = await loadFrame(desk);
@@ -440,9 +444,10 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     const { builder, app, id } = await published();
     // The next version builds to what the first did, so sealing it asks
     // the cache for the builds the first left there.
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
-      { "src/routes/index.tsx": `${files["src/routes/index.tsx"]}\n` },
+      { "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}\n` },
       "Again"
     );
     const poisoned = {
@@ -472,9 +477,10 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     const { builder, app, id } = await published();
     // Not made current, so not sealed: its manifest is its code's
     // inspection, kept in R2 for the same code.
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
-      { "src/routes/index.tsx": `${files["src/routes/index.tsx"]}\n` },
+      { "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}\n` },
       "Again"
     );
     const saved = await versionFiles(env, id, version);
@@ -497,7 +503,8 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
 
   it("refuses to make a version current whose page doesn't build", async () => {
     const { builder, app, id } = await published();
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
       {
         "src/routes/broken.tsx":

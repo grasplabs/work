@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { indexApps } from "../src/knowledge/apps-collection.ts";
+import { commitApp } from "./app-definitions.ts";
 import { grantReviewed, release, requestGranted } from "./apps.ts";
 import { actingFor, envOf, knowledgeIn } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
@@ -319,7 +320,8 @@ describe("indexing", setUpTime, () => {
     // Version 2 made current unindexed, version 3 committed.
     await withIndexingFailing(owner, async (api) => {
       await release({ api }, app.id, { "AGENTS.md": agentsMd(second) });
-      await api.apps.files.commit(
+      await commitApp(
+        api.apps.files,
         app.id,
         { "AGENTS.md": agentsMd(third) },
         "Third"

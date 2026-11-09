@@ -22,6 +22,7 @@ export const blueprintsDigestText = (
         permissions,
         contracts,
         workflows,
+        definition,
         files,
       }) => ({
         id,
@@ -31,6 +32,7 @@ export const blueprintsDigestText = (
         permissions: [...permissions],
         contracts: [...contracts],
         workflows: [...workflows],
+        definition,
         files: { ...files },
       })
     )

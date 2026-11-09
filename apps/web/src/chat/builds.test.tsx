@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { App, AppStatus, VersionReview } from "@grasp-os/shared/apps";
+import type { ChatDraft } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -14,7 +15,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { ChatBuilds } from "./builds.tsx";
+import { ChatBuilds, changesApp } from "./builds.tsx";
 import type { ChatBuildsRead } from "./builds.tsx";
 
 // Releasing a version beside the chat, against core's `apps` as the page
@@ -63,6 +64,7 @@ const review: VersionReview = {
   server: null,
   serverFiles: [],
   migrations: [],
+  schema: null,
   permissions: [],
   grants: [],
   handsFilesToWorkflows: false,
@@ -250,6 +252,41 @@ describe("releasing a version beside the chat", () => {
     ]);
   });
 
+  it("shows what a change of the definition does to the records, renames included", async () => {
+    const { apps } = fakeApps({
+      ...review,
+      files: [],
+      server: "modified",
+      schema: {
+        accepted: true,
+        addedTables: [],
+        renamedTables: [{ from: "tasks", to: "todos" }],
+        renamedFields: [{ table: "notes", from: "title", to: "heading" }],
+        addedFields: [],
+        widenedFields: [],
+        checks: [],
+        keptTables: [],
+        keptFields: [],
+        accessChanges: [],
+        sensitiveTables: [],
+        refused: [],
+      },
+    });
+    await opened(appAt("published"), apps);
+    const section = document.querySelector(
+      'section[aria-label="When you publish"]'
+    );
+
+    expect(
+      [...(section?.querySelectorAll("li") ?? [])].map(
+        (line) => line.textContent
+      )
+    ).toStrictEqual([
+      "Renames the table tasks to todos; its records go with it.",
+      "The values of title in notes move to heading.",
+    ]);
+  });
+
   it("only makes a published App's version current", async () => {
     const { calls, apps } = fakeApps();
     await opened(appAt("published"), apps);
@@ -261,5 +298,24 @@ describe("releasing a version beside the chat", () => {
       offered: { buttons: ["Make version 2 current"], saysDraft: false },
       calls: [`setCurrent ${appId} 2`],
     });
+  });
+});
+
+describe("whether a chat's draft changes its App", () => {
+  it("counts a change of the definition alone, its stable IDs say, though no file changed", () => {
+    const draft: ChatDraft = {
+      app: appId,
+      base: 1,
+      changed: [],
+      deleted: [],
+      definitionChanged: false,
+      revision: 2,
+      updatedAt: "2026-10-20T08:00:00.000Z",
+      callId: null,
+    };
+    expect([
+      changesApp(draft),
+      changesApp({ ...draft, definitionChanged: true }),
+    ]).toStrictEqual([false, true]);
   });
 });

@@ -259,7 +259,6 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       {
         app: app.id,
         changed: [
-          "definition.json",
           "grasp.config.ts",
           "server/cards.ts",
           "server/schema.ts",

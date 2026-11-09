@@ -9,6 +9,7 @@ import {
   fingerprintOf,
   loadBuiltinRelease,
 } from "../src/builtins.ts";
+import { commitApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { refusal, signedInApi } from "./sign-in.ts";
@@ -54,9 +55,10 @@ describe("an App's own workflows", () => {
     await release(builder, app, { "AGENTS.md": "# Ledger\n" });
 
     const refused = await Promise.all([
-      refusal(builder.api.apps.files.commit(app, stealing, "Steal")),
+      refusal(commitApp(builder.api.apps.files, app, stealing, "Steal")),
       refusal(
-        builder.api.apps.files.commit(
+        commitApp(
+          builder.api.apps.files,
           app,
           { "notes.md": "# Notes\n", "workflows/lib/send.ts": "export {};\n" },
           "Helper"
@@ -108,6 +110,7 @@ describe("an App's own workflows", () => {
       const updated = await refusal(
         builder.api.apps.blueprints.acceptUpdate(copy.id, {
           to: offered.to,
+          definition: offered.definition,
           over: offered.over,
         })
       );

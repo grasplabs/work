@@ -1,7 +1,8 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestSource } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -33,20 +34,22 @@ export const Route = createFileRoute("${path}")({ component: Page });
 `;
 
 /** Two pages, the board at `/` and the list at `/list`, and nothing else. */
-const twoPages = {
-  ...appDefinition({
+const twoPages = testApp(
+  {
     name: "Boards",
     tables: { marks: { fields: { at: "v.number()" } } },
-  }),
-  "src/routes/index.tsx": pageSaying("/", "The board", "/list"),
-  "src/routes/list.tsx": pageSaying("/list", "The list", "/"),
-};
+  },
+  {
+    "src/routes/index.tsx": pageSaying("/", "The board", "/list"),
+    "src/routes/list.tsx": pageSaying("/list", "The list", "/"),
+  }
+);
 
 /** A new App named `name`, released (so published) with `files` if any. */
 const newApp = async (
   person: Person,
   name: string,
-  files: Record<string, string> = {}
+  files: TestSource = {}
 ): Promise<string> => {
   const { core, api } = apiOf(person);
   try {

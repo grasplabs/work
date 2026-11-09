@@ -139,6 +139,7 @@ const chatDraft = (revision: number): ChatDraft => ({
   base: null,
   changed: Object.keys(draftAt[revision] ?? {}).toSorted(),
   deleted: [],
+  definitionChanged: false,
   revision,
   updatedAt: "2026-11-05T08:00:00.000Z",
   callId: null,

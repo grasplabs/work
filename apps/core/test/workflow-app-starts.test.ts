@@ -389,6 +389,7 @@ const sealedManifest = async (app: string) => {
     resourceId: app,
     resourceVersion: 1,
     sourceTreeHash: zeros,
+    definitionHash: zeros,
     schemaHash: zeros,
     contractHash: zeros,
     sdkVersion: "1.0.0",

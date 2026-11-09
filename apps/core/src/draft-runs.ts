@@ -1,3 +1,5 @@
+import { definitionText } from "@grasp-os/sdk/definition";
+import type { AppDefinition } from "@grasp-os/sdk/definition";
 import {
   declaredPermission,
   generatedPaths,
@@ -37,7 +39,12 @@ import {
 } from "./app-people.ts";
 import { loadDraftRelease, sealDraftRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { draftFiles, editableApp } from "./apps.ts";
+import {
+  changesAnything,
+  draftDefinition,
+  draftFiles,
+  editableApp,
+} from "./apps.ts";
 import { memberRole } from "./auth/identity.ts";
 import { holdThrowawayStore, throwawayStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
@@ -83,7 +90,8 @@ import type { Draft } from "./workspace.ts";
 // - Other code runs than the draft's: it is sealed from the draft's files
 //   as they are now (`sealDraftRelease`, every check a version's seal
 //   makes) and loaded back through `loadRelease`'s own checks; this isolate
-//   keeps it by the hash of exactly the files the seal reads (`sealed`).
+//   keeps it by the hash of exactly the files the seal reads and the
+//   draft's definition (`sealed`).
 // - What someone typed into a preview stays: its store empties itself a
 //   day after its last use (`throwawayStoreMs`), and at once, for good,
 //   when the draft is dropped, the chat deleted or its person removed or
@@ -128,27 +136,59 @@ const sealedMax = 16;
 /** Drafts sealed in this isolate, by the hash of what the seal reads. */
 const sealedDrafts = new Map<string, Promise<Release>>();
 
+/** A draft's files and definition, as its seal reads them. */
+interface DraftSource {
+  readonly files: Map<string, string>;
+  readonly definition: AppDefinition;
+}
+
 /**
- * `files`, a draft of `app` as `version`, sealed and loaded back through
+ * `draft`'s files and definition (apps.ts); null for a draft of an App
+ * with no version that holds nothing, which has nothing to seal.
+ */
+const draftSource = async (
+  env: Env,
+  app: AppId,
+  draft: Draft
+): Promise<DraftSource | null> => {
+  const held = await draftDefinition(env, app, draft);
+  return held === null
+    ? null
+    : {
+        files: await draftFiles(env, app, draft),
+        definition: held.definition,
+      };
+};
+
+/**
+ * `source`, a draft of `app` as `version`, sealed and loaded back through
  * the same checks as a version's release (`loadDraftRelease`): kept in
  * this isolate by the hash of the files its seal reads
- * (`appCodeAndTestFiles`, the very selection its build and check make),
- * so a write of a page seals nothing again. A failed seal isn't kept.
+ * (`appCodeAndTestFiles`, the very selection its build and check make)
+ * and of its definition, so a write of a page seals nothing again. A
+ * failed seal isn't kept.
  */
 const sealed = async (
   env: Env,
   app: AppId,
   version: number,
-  files: ReadonlyMap<string, string>
+  { files, definition }: DraftSource
 ): Promise<Release> => {
   const reads = appCodeAndTestFiles(Object.fromEntries(files));
-  const key = await sha256Hex(canonicalJson([app, version, reads]));
+  const key = await sha256Hex(
+    canonicalJson([app, version, reads, definitionText(definition)])
+  );
   const kept = sealedDrafts.get(key);
   if (kept !== undefined) {
     return await kept;
   }
   const sealing = (async () => {
-    const draft = await sealDraftRelease(env, { app, version }, files);
+    const draft = await sealDraftRelease(
+      env,
+      { app, version },
+      files,
+      definition
+    );
     return await loadDraftRelease(
       { app, version },
       draft,
@@ -185,12 +225,11 @@ export const draftReferences = async (
   draft: Draft
 ): Promise<string | null> => {
   const version = (draft.base ?? 0) + 1;
-  const release = await sealed(
-    env,
-    app,
-    version,
-    await draftFiles(env, app, draft)
-  );
+  const source = await draftSource(env, app, draft);
+  if (source === null) {
+    return null;
+  }
+  const release = await sealed(env, app, version, source);
   const generated = await generateModules(release.app, {
     resourceId: app,
     resourceVersion: version,
@@ -219,17 +258,22 @@ export const draftRunOf = async (
     by.userId,
     app
   );
-  const files = await draftFiles(env, app, draft);
-  const release = await sealed(env, app, (draft.base ?? 0) + 1, files);
+  const source = await draftSource(env, app, draft);
+  // The draft that holds nothing previews the App's latest version, so a
+  // draft to preview always has a definition.
+  if (source === null) {
+    throw appErrors.create("app.not_running");
+  }
+  const release = await sealed(env, app, (draft.base ?? 0) + 1, source);
   return {
     app,
     chatId,
     workspaceId,
     revision: draft.revision,
-    own: Object.keys(draft.changes).length > 0,
+    own: changesAnything(draft),
     seed,
     release,
-    ids: schemaIdsOf(Object.fromEntries(files), release.app.schema),
+    ids: schemaIdsOf(source.definition, release.app.schema),
   };
 };
 

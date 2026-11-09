@@ -2,7 +2,8 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp } from "../apps/core/test/app-definitions.ts";
 
 /**
  * The App the page tests run, of spec 8's layout: notes that update live
@@ -210,19 +211,22 @@ export const Route = createFileRoute("/")({ component: Notes });
 `;
 
 /** The App's files, with every attempt aimed at `attacker`. */
-export const pageAppFiles = (attacker: string): Record<string, string> => ({
-  ...appDefinition({
-    name: "Notes",
-    tables: {
-      notes: {
-        fields: { note: "v.string().min(1).max(200)" },
-        access: { read: "appMembers", write: "appMembers" },
+export const pageAppFiles = (attacker: string): TestApp =>
+  testApp(
+    {
+      name: "Notes",
+      tables: {
+        notes: {
+          fields: { note: "v.string().min(1).max(200)" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
     },
-  }),
-  "server/notes.ts": operations,
-  "src/routes/index.tsx": pageCode(attacker),
-});
+    {
+      "server/notes.ts": operations,
+      "src/routes/index.tsx": pageCode(attacker),
+    }
+  );
 
 /**
  * The receiver a page's attacks are aimed at: it counts every request

@@ -1,4 +1,5 @@
-import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import { testApp } from "../apps/core/test/app-definitions.ts";
+import type { TestApp } from "../apps/core/test/app-definitions.ts";
 
 /**
  * A tally App the e2e tests build: in a chat's draft written straight
@@ -65,16 +66,19 @@ export const add = mutation({
  * references (`@server/_generated/api`). `label` says whose count it is: the App's, or
  * the draft's preview.
  */
-export const tallyFiles = (label: string): Record<string, string> => ({
-  ...appDefinition({
-    name: "Tally",
-    tables: {
-      tally: {
-        fields: { added: "v.boolean()" },
-        access: { read: "appMembers", write: "appMembers" },
+export const tallyFiles = (label: string): TestApp =>
+  testApp(
+    {
+      name: "Tally",
+      tables: {
+        tally: {
+          fields: { added: "v.boolean()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
     },
-  }),
-  "server/tally.ts": tallyServer(label),
-  "src/routes/index.tsx": tallyPage("Add one"),
-});
+    {
+      "server/tally.ts": tallyServer(label),
+      "src/routes/index.tsx": tallyPage("Add one"),
+    }
+  );

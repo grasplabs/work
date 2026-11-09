@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { revokeRelease } from "../src/release-retention.ts";
+import { commitApp } from "./app-definitions.ts";
 import {
   appsOf,
   answerOf,
@@ -247,7 +248,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await publishedApp(app);
-    const { version } = await builder.api.apps.files.commit(
+    const { version } = await commitApp(
+      builder.api.apps.files,
       app,
       files,
       "First"

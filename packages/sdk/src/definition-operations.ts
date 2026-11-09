@@ -682,6 +682,6 @@ export const tryOperation = (
 
 /** `readDefinition`, its refusal answered as data, as `tryOperation`'s is. */
 export const tryReadDefinition = (
-  text: string
+  data: unknown
 ): { definition: AppDefinition } | { problem: string } =>
-  attempt(() => readDefinition(text));
+  attempt(() => readDefinition(data));

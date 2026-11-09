@@ -1,5 +1,6 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import { compilerVersion } from "@grasp-os/compiler";
+import type { AppDefinition } from "@grasp-os/sdk/definition";
 import {
   acceptedUpdateSchema,
   appErrors,
@@ -34,23 +35,25 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import { refuseWithoutLayout } from "./app-layout.ts";
+import { generatedPaths, withDefinitionCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
-import type { AppRow, VersionRow } from "./apps.ts";
+import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
 import {
   appFor,
   blueprintFiles,
   changeEntry,
   checkPaths,
-  codeIdentity,
   deleteOtherBlueprintTrees,
   diffFiles,
   editableApp,
   findVersion,
   latestVersion,
+  readStored,
   readTree,
+  sameVersion,
   storeBlueprintTree,
+  storedVersion,
   storeTree,
   hasPages,
   toApp,
@@ -388,6 +391,9 @@ export const markBlueprint = async (
   // A version holding the v1 server's files is never a blueprint: no App
   // could be created from it (`createFromBlueprint` refuses them too).
   refuseV1Server(Object.keys(await versionFiles(env, found.id, row.version)));
+  // Nor one without a definition, committed before definitions left the
+  // tree: its copies would have none.
+  const definition = await readStored(row);
   const db = drizzle(env.DB);
   const marked = async () =>
     await db
@@ -413,6 +419,7 @@ export const markBlueprint = async (
         name: found.name,
         description: found.description,
         tree: row.tree,
+        definition: definition.text,
         appId: found.id,
         version: row.version,
         approved: approvedVersion(found, row),
@@ -511,11 +518,16 @@ export const createFromBlueprint = async (
     fromBlueprintSchema,
     input
   );
+  const { definition } = await readStored(blueprint);
   const files = await blueprintFiles(env, {
     id: blueprintIdSchema.parse(blueprint.id),
     appId: source?.id ?? null,
     tree: blueprint.tree,
   });
+  // Its code as its definition generates it, as every version's is: what
+  // the blueprint holds already (its version's, or a built-in's, which
+  // its build checks).
+  withDefinitionCode(files, definition);
   // The blueprint's code, kept under the copy (`app_origins.code`): what an
   // update of the blueprint is merged over. Its AGENTS.md isn't, as it
   // isn't copied (above).
@@ -539,8 +551,7 @@ export const createFromBlueprint = async (
   // App is created from it as none is committed with them.
   refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
-  refuseWithoutLayout(files.keys());
-  const tree = await versionTree(files);
+  const tree = await storedVersion(files, definition);
   await storeTree(env, app, tree);
   await storeTree(env, app, takenCode);
   // What the blueprint ships, as the release stored it: refused whole if
@@ -587,6 +598,8 @@ export const createFromBlueprint = async (
     tree: tree.tree,
     // The blueprint's code: the copy's AGENTS.md is its own.
     code: takenCode.tree,
+    definition: tree.definition.text,
+    definitionHash: tree.definition.hash,
     files: files.size,
     authorId: by.userId,
     message: `Created from the blueprint ${blueprint.name}.`,
@@ -650,6 +663,7 @@ export const createFromBlueprint = async (
       blueprintVersion: blueprint.version,
       tree: blueprint.tree,
       code: takenCode.tree,
+      definition: tree.definition.text,
       createdAt: now,
     }),
     outboxed(
@@ -668,6 +682,7 @@ export const createFromBlueprint = async (
         version: 1,
         parent: null,
         tree: tree.tree,
+        definition: tree.definition.hash,
         files: files.size,
       })
     ),
@@ -727,18 +742,48 @@ export const createFromBlueprint = async (
   };
 };
 
-/** A merge's files (see `BlueprintUpdate`), and the paths both changed. */
+/**
+ * A merge's files and definition (see `BlueprintUpdate`), and the paths
+ * both changed.
+ */
 interface Merged {
   files: Map<string, string>;
+  definition: AppDefinition;
   conflicts: string[];
+  /** Whether both changed the definition, each otherwise. */
+  definitionConflict: boolean;
+}
+
+/** One side of a merge: its files, and its definition as stored. */
+interface MergeSide {
+  files: ReadonlyMap<string, string>;
+  definition: StoredDefinition;
 }
 
 /**
- * `theirs` (the blueprint's code now) merged over `ours` (the App's latest
- * files) from `base` (the blueprint's code the App last took), file by
- * file: what only one side changed comes from that side, and a file both
- * changed (to different content) stays as the App has it, listed as a
- * conflict. AGENTS.md is the App's own, whatever the blueprint holds.
+ * Of a value `base` had, which `ours` and `theirs` may each have changed:
+ * theirs where ours didn't change it or changed it alike, else ours,
+ * which conflicts where theirs changed it too.
+ */
+const threeWay = <Value>(
+  was: Value,
+  mine: Value,
+  now: Value
+): { kept: Value; conflict: boolean } =>
+  mine === was || mine === now
+    ? { kept: now, conflict: false }
+    : { kept: mine, conflict: now !== was };
+
+/**
+ * `theirs` (the blueprint's code and definition now) merged over `ours`
+ * (the App's latest version's) from `base` (what the App last took of the
+ * blueprint), file by file and the definition as a whole: what only one
+ * side changed comes from that side, and what both changed (to different
+ * content) stays as the App has it, listed as a conflict. AGENTS.md is
+ * the App's own, whatever the blueprint holds. The config and schema
+ * aren't merged: they are generated from the merged definition, as in
+ * every version; a definition both changed is a conflict of its own
+ * (`definitionConflict`), the code it generates alike or not.
  *
  * The v1 server's files (`app/`) are dropped, from either side: a copy
  * made before the v1 server went may still hold them, and no version is
@@ -746,31 +791,53 @@ interface Merged {
  * deleted, and its version is one that commits.
  */
 const mergeOver = (
-  base: ReadonlyMap<string, string>,
-  ours: ReadonlyMap<string, string>,
-  theirs: ReadonlyMap<string, string>
+  base: MergeSide,
+  ours: MergeSide,
+  theirs: MergeSide
 ): Merged => {
   const files = new Map<string, string>();
   const conflicts: string[] = [];
-  const paths = new Set([...base.keys(), ...ours.keys(), ...theirs.keys()]);
+  const paths = new Set([
+    ...base.files.keys(),
+    ...ours.files.keys(),
+    ...theirs.files.keys(),
+  ]);
   for (const path of [...paths].toSorted()) {
-    if (path.startsWith(appV1ServerFolder)) {
+    if (path.startsWith(appV1ServerFolder) || generatedPaths.has(path)) {
       continue;
     }
-    const mine = ours.get(path);
-    const was = base.get(path);
-    const now = theirs.get(path);
-    let kept = mine;
-    if (path !== appMemoryPath && (mine === was || mine === now)) {
-      kept = now;
-    } else if (path !== appMemoryPath && now !== was) {
+    const mine = ours.files.get(path);
+    const { kept, conflict } =
+      path === appMemoryPath
+        ? { kept: mine, conflict: false }
+        : threeWay(base.files.get(path), mine, theirs.files.get(path));
+    if (conflict) {
       conflicts.push(path);
     }
     if (kept !== undefined) {
       files.set(path, kept);
     }
   }
-  return { files, conflicts };
+  // Compared by their text, one for equal definitions.
+  const { kept: keptText, conflict } = threeWay(
+    base.definition.text,
+    ours.definition.text,
+    theirs.definition.text
+  );
+  const kept =
+    keptText === theirs.definition.text
+      ? theirs.definition.definition
+      : ours.definition.definition;
+  // Its config and schema follow it: no file conflict of their own, a
+  // definition conflict being said as such, whether or not the code the
+  // two generate differs (stable IDs alone change none).
+  withDefinitionCode(files, kept);
+  return {
+    files,
+    definition: kept,
+    conflicts: conflicts.toSorted(),
+    definitionConflict: conflict,
+  };
 };
 
 /** An update of the built-in an App was created from, worked out now. */
@@ -780,8 +847,11 @@ interface PendingUpdate {
   blueprint: Row;
   latest: VersionRow;
   ours: Map<string, string>;
-  /** The blueprint's code now, without its AGENTS.md: the next base. */
-  theirs: Map<string, string>;
+  /**
+   * The blueprint's code now, without its AGENTS.md, and its definition:
+   * the next base.
+   */
+  theirs: MergeSide;
   merged: Merged;
 }
 
@@ -808,11 +878,16 @@ const pendingUpdate = async (
       ? undefined
       : await blueprintRow(env, blueprintIdSchema.parse(origin.blueprintId));
   const latest = await latestVersion(env, found.id);
+  // An origin or a built-in from before definitions left the tree has no
+  // definition to merge over or from.
   if (
     origin === undefined ||
     blueprint === undefined ||
     blueprint.appId !== null ||
-    blueprint.tree === origin.tree ||
+    origin.definition === null ||
+    blueprint.definition === null ||
+    (blueprint.tree === origin.tree &&
+      blueprint.definition === origin.definition) ||
     latest === null
   ) {
     return undefined;
@@ -827,16 +902,26 @@ const pendingUpdate = async (
       tree: blueprint.tree,
     }),
   ]);
+  const [baseDefinition, oursDefinition, theirsDefinition] = await Promise.all([
+    readStored(origin),
+    readStored(latestRow),
+    readStored(blueprint),
+  ]);
   const theirs = new Map(blueprintNow);
   theirs.delete(appMemoryPath);
+  const theirSide = { files: theirs, definition: theirsDefinition };
   return {
     app: found.id,
     origin,
     blueprint,
     latest: latestRow,
     ours,
-    theirs,
-    merged: mergeOver(base, ours, theirs),
+    theirs: theirSide,
+    merged: mergeOver(
+      { files: base, definition: baseDefinition },
+      { files: ours, definition: oursDefinition },
+      theirSide
+    ),
   };
 };
 
@@ -859,9 +944,11 @@ export const blueprintUpdate = async (
     blueprint: pending.blueprint.id,
     from: pending.origin.tree,
     to: pending.blueprint.tree,
+    definition: pending.theirs.definition.hash,
     over: pending.latest.version,
     changes: diffFiles(pending.ours, pending.merged.files),
     conflicts: pending.merged.conflicts,
+    definitionConflict: pending.merged.definitionConflict,
   };
 };
 
@@ -875,6 +962,23 @@ export const blueprintUpdate = async (
  * accepted already. Nothing is made current: the version is published,
  * as any (`setCurrent`), and asks for nothing.
  */
+/**
+ * Whether the update is still the one offered: the blueprint at the same
+ * code and definition (one of them alone can change), over the same
+ * version.
+ */
+const stillOffered = (
+  pending: {
+    blueprint: { tree: string };
+    theirs: MergeSide;
+    latest: { version: number };
+  },
+  accepted: { to: string; definition: string; over: number }
+): boolean =>
+  pending.blueprint.tree === accepted.to &&
+  pending.theirs.definition.hash === accepted.definition &&
+  pending.latest.version === accepted.over;
+
 export const acceptBlueprintUpdate = async (
   env: Env,
   by: Acting,
@@ -883,36 +987,34 @@ export const acceptBlueprintUpdate = async (
 ): Promise<AppVersion> => {
   const accepted = appErrors.parse("app.invalid", acceptedUpdateSchema, input);
   const pending = await pendingUpdate(env, by, app);
-  if (
-    pending === undefined ||
-    pending.blueprint.tree !== accepted.to ||
-    pending.latest.version !== accepted.over
-  ) {
+  if (pending === undefined || !stillOffered(pending, accepted)) {
     throw appErrors.create("app.conflict");
   }
   const { app: appId, origin, blueprint, latest, ours, theirs } = pending;
-  const { files, conflicts } = pending.merged;
+  const { files, definition, conflicts, definitionConflict } = pending.merged;
   checkPaths(
     files.keys(),
     new Set([...files.keys()].filter((path) => !ours.has(path)))
   );
   refuseAppWorkflows(files.keys());
-  refuseWithoutLayout(files.keys());
-  const tree = await versionTree(files);
-  const base = await versionTree(theirs);
+  const tree = await storedVersion(files, definition);
+  const base = await versionTree(theirs.files);
   await storeTree(env, appId, base);
-  const changed = tree.tree !== latest.tree;
+  const changed = !sameVersion(tree, latest);
   if (changed) {
     await storeTree(env, appId, tree);
   }
   const db = drizzle(env.DB);
-  // The origin moves on only from the code the builder's update was worked
-  // out from, to the blueprint's code as they saw it, over the version they
-  // saw (it runs before this batch commits a version): otherwise NULL,
-  // which the column refuses, and the whole batch with it.
-  const stillSeen = sql`${appOrigins.tree} = ${origin.tree} AND EXISTS (
+  // The origin moves on only from the code and definition the builder's
+  // update was worked out from, to the blueprint's as they saw them, over
+  // the version they saw (it runs before this batch commits a version):
+  // otherwise NULL, which the columns `tree` and `code` refuse, and the
+  // whole batch with them.
+  const stillSeen = sql`${appOrigins.tree} = ${origin.tree}
+    AND ${appOrigins.definition} = ${origin.definition} AND EXISTS (
     SELECT 1 FROM ${blueprints}
-    WHERE ${blueprints.id} = ${blueprint.id} AND ${blueprints.tree} = ${blueprint.tree})
+    WHERE ${blueprints.id} = ${blueprint.id} AND ${blueprints.tree} = ${blueprint.tree}
+      AND ${blueprints.definition} = ${theirs.definition.text})
     AND (SELECT max(${appVersions.version}) FROM ${appVersions}
       WHERE ${appVersions.appId} = ${appId}) = ${latest.version}`;
   const moveOrigin = db
@@ -920,6 +1022,7 @@ export const acceptBlueprintUpdate = async (
     .set({
       tree: sql`CASE WHEN ${stillSeen} THEN ${blueprint.tree} ELSE NULL END`,
       code: sql`CASE WHEN ${stillSeen} THEN ${base.tree} ELSE NULL END`,
+      definition: theirs.definition.text,
       blueprintVersion: null,
     })
     .where(eq(appOrigins.appId, appId));
@@ -932,6 +1035,7 @@ export const acceptBlueprintUpdate = async (
         to: blueprint.tree,
         version,
         conflicts: conflicts.length,
+        definitionConflict,
       })
     );
   const row: VersionRow = {
@@ -939,7 +1043,9 @@ export const acceptBlueprintUpdate = async (
     version: latest.version + 1,
     parent: latest.version,
     tree: tree.tree,
-    code: await codeIdentity(files),
+    code: tree.code,
+    definition: tree.definition.text,
+    definitionHash: tree.definition.hash,
     files: files.size,
     authorId: by.userId,
     message: `Updated from the blueprint ${blueprint.name}.`,
@@ -962,6 +1068,7 @@ export const acceptBlueprintUpdate = async (
             version: row.version,
             parent: row.parent,
             tree: row.tree,
+            definition: row.definitionHash,
             files: row.files,
           })
         ),
@@ -972,11 +1079,7 @@ export const acceptBlueprintUpdate = async (
     await auditedBatch(env, db, write);
   } catch (error) {
     const now = await pendingUpdate(env, by, appId);
-    if (
-      now === undefined ||
-      now.blueprint.tree !== accepted.to ||
-      now.latest.version !== accepted.over
-    ) {
+    if (now === undefined || !stillOffered(now, accepted)) {
       throw appErrors.create("app.conflict");
     }
     throw error;
@@ -1053,6 +1156,8 @@ export const installBuiltinBlueprint = async (
   );
   const files = new Map(Object.entries(builtin.files));
   const tree = await versionTree(files);
+  // Checked, and as a version stores it: its build checked it too.
+  const definition = await readStored(builtin);
   const declared = [...builtin.permissions];
   const shipped = blueprintWorkflowSchema.array().parse(builtin.workflows);
   const stored = await blueprintRow(env, id);
@@ -1061,6 +1166,7 @@ export const installBuiltinBlueprint = async (
     (stored.name !== name ||
       stored.description !== description ||
       stored.tree !== tree.tree ||
+      stored.definition !== definition.text ||
       JSON.stringify(stored.permissions) !== JSON.stringify(declared) ||
       JSON.stringify(stored.workflows) !== JSON.stringify(shipped));
   if (stored === undefined || stored.tree !== tree.tree) {
@@ -1078,6 +1184,7 @@ export const installBuiltinBlueprint = async (
               name,
               description,
               tree: tree.tree,
+              definition: definition.text,
               appId: null,
               version: null,
               approved: true,
@@ -1091,6 +1198,7 @@ export const installBuiltinBlueprint = async (
             db,
             installEntry("blueprint.installed", id, {
               tree: tree.tree,
+              definition: definition.hash,
               release: compilerVersion,
             })
           ),
@@ -1104,6 +1212,7 @@ export const installBuiltinBlueprint = async (
             name,
             description,
             tree: tree.tree,
+            definition: definition.text,
             permissions: declared,
             workflows: shipped,
             markedAt: now,
@@ -1111,7 +1220,7 @@ export const installBuiltinBlueprint = async (
           .where(
             and(
               eq(blueprints.id, id),
-              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)} OR ${blueprints.workflows} IS NOT ${JSON.stringify(shipped)})`
+              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.definition} IS NOT ${definition.text} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)} OR ${blueprints.workflows} IS NOT ${JSON.stringify(shipped)})`
             )
           ),
         outboxedIfChanged(
@@ -1122,6 +1231,7 @@ export const installBuiltinBlueprint = async (
             // log keeps identifier-sized values only.
             description: await sha256Hex(description),
             tree: tree.tree,
+            definition: definition.hash,
             release: compilerVersion,
             // What copies ask for and get, by the SHA-256 of each as stored.
             permissions: await sha256Hex(JSON.stringify(declared)),

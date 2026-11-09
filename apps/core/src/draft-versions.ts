@@ -114,7 +114,15 @@ export class DraftVersions {
       number,
       revision: draft.revision,
       base: draft.base,
-      contentHash: sha256(canonicalJson({ base: draft.base, files: hashes })),
+      definition: draft.definition,
+      contentHash: sha256(
+        canonicalJson({
+          base: draft.base,
+          files: hashes,
+          definition:
+            draft.definition === null ? null : sha256(draft.definition),
+        })
+      ),
       turnId,
       callId: "callId" in by ? by.callId : null,
       restoredFrom: "restoredFrom" in by ? by.restoredFrom : null,
@@ -270,6 +278,7 @@ export class DraftVersions {
         changes: Object.fromEntries(
           files.map(({ path, content }) => [path, content])
         ),
+        definition: row.definition,
         revision: row.revision,
       },
     };

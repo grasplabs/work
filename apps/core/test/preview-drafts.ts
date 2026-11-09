@@ -2,7 +2,8 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import { chatWithDraft } from "./previews.ts";
@@ -52,18 +53,20 @@ export const livePushes = () => {
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /** The App's notes, its functions and a page that reads them live. */
-export const notesFiles = (marker: string): Record<string, string> => ({
-  ...appDefinition({
-    name: "Notes",
-    tables: {
-      notes: {
-        fields: { title: "v.string().min(1).max(200)" },
-        access: { read: "appMembers", write: "appMembers" },
+export const notesFiles = (marker: string): TestApp =>
+  testApp(
+    {
+      name: "Notes",
+      tables: {
+        notes: {
+          fields: { title: "v.string().min(1).max(200)" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: ["permission.ai({ maxOutputTokens: 100 })"],
     },
-    permissions: ["permission.ai({ maxOutputTokens: 100 })"],
-  }),
-  "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+    {
+      "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -254,7 +257,7 @@ export const consult = action({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
@@ -265,7 +268,8 @@ function Desk() {
 
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-});
+    }
+  );
 
 /** A new App of `builder`'s, its notes released, sealed and current. */
 export const notesApp = async (builder: Person): Promise<AppId> => {
@@ -275,15 +279,18 @@ export const notesApp = async (builder: Person): Promise<AppId> => {
 };
 
 /** An App with no tables, and one page. */
-export const deskFiles = (marker = "Desk"): Record<string, string> => ({
-  ...appDefinition({ name: "Desk" }),
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+export const deskFiles = (marker = "Desk"): TestApp =>
+  testApp(
+    { name: "Desk" },
+    {
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
 const Desk = () => <main>${marker}</main>;
 
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-});
+    }
+  );
 
 /** A Desk App of `builder`'s, released, and a chat with a draft of it. */
 export const deskDraft = async (builder: Person) => {
@@ -291,7 +298,8 @@ export const deskDraft = async (builder: Person) => {
   await release(builder, id, deskFiles());
   const app = appIdSchema.parse(id);
   const draft = await chatWithDraft(builder, app, {
-    "src/routes/index.tsx": deskFiles("Drafted")["src/routes/index.tsx"] ?? "",
+    "src/routes/index.tsx":
+      deskFiles("Drafted").files["src/routes/index.tsx"] ?? "",
   });
   return { app, ...draft };
 };
@@ -307,7 +315,7 @@ export const previewDraftsOf = (idp: Idp) => ({
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
     const draft = await chatWithDraft(builder, app, {
-      "server/notes.ts": notesFiles("drafted")["server/notes.ts"] ?? "",
+      "server/notes.ts": notesFiles("drafted").files["server/notes.ts"] ?? "",
     });
     return { builder, app, ...draft };
   },

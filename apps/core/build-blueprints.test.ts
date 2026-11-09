@@ -9,6 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  definitionSources,
+  definitionText,
+  emptyDefinition,
+} from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -21,10 +26,14 @@ import { writeBlueprints } from "./build-blueprints.ts";
 
 const made: string[] = [];
 
+/** The definition every fixture's built-in has, unless `beside` says otherwise. */
+const fixtureDefinition = emptyDefinition("Fixture");
+
 /**
  * A folder of one built-in, `id`, with `files` by path, `manifest` added
  * to its `blueprint.json`, and `beside` by path beside them in its
- * folder; returns it.
+ * folder (its `definition.json`, `fixtureDefinition`'s unless `beside` names
+ * one); returns it.
  */
 const fixture = (
   id: string,
@@ -49,7 +58,10 @@ const fixture = (
     mkdirSync(path.dirname(where), { recursive: true });
     writeFileSync(where, text);
   }
-  for (const [file, text] of Object.entries(beside)) {
+  for (const [file, text] of Object.entries({
+    "definition.json": definitionText(fixtureDefinition),
+    ...beside,
+  })) {
     const where = path.join(folder, file);
     mkdirSync(path.dirname(where), { recursive: true });
     writeFileSync(where, text);
@@ -64,10 +76,8 @@ const build = (dir: string): string => {
   return out;
 };
 
-const schema = {
-  "server/schema.ts":
-    'import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n',
-};
+/** The config and schema `fixtureDefinition` generates, which a built-in must hold. */
+const schema = definitionSources(fixtureDefinition);
 
 /** A collection a built-in declares. */
 const tasks = { id: "tasks", name: "Tasks", description: "Things to do." };
@@ -114,9 +124,33 @@ describe("the built-in blueprints' build", () => {
         permissions: [],
         contracts: [],
         workflows: [],
+        definition: definitionText(fixtureDefinition),
         files: schema,
       },
     ]);
+  });
+
+  it.each([
+    ["no definition.json", { "definition.json": "" }, "definition"],
+    [
+      "a definition.json that isn't a definition",
+      { "definition.json": '{"name":"Fixture"}' },
+      "definition",
+    ],
+    [
+      "a config its definition doesn't generate",
+      {
+        "definition.json": definitionText(emptyDefinition("Another")),
+      },
+      "grasp.config.ts",
+    ],
+  ])("fails for a built-in with %s", (_case, beside, message) => {
+    const dir = fixture("defined", schema, {}, beside);
+    if (beside["definition.json"] === "") {
+      rmSync(path.join(dir, "defined", "definition.json"));
+    }
+    expect(() => build(dir)).toThrow(message);
+    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });
 
   it("embeds the workflows a built-in ships, their definitions' text, and the contracts they bind", () => {

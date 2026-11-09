@@ -7,6 +7,8 @@ import { z } from "zod";
 
 import { sealDraftRelease } from "../src/app-releases.ts";
 import { frameAccess, frameKey } from "../src/page-frame.ts";
+import { withFiles } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -78,7 +80,7 @@ const stagedFrameSchema = z.object({ preview: z.boolean() }).loose();
 
 /** The desk page of the notes App, saying `word` before its titles. */
 const deskSaying = (word: string): string =>
-  (notesFiles("drafted")["src/routes/index.tsx"] ?? "").replace(
+  (notesFiles("drafted").files["src/routes/index.tsx"] ?? "").replace(
     'titles.join(", ")',
     `"${word} " + titles.join(", ")`
   );
@@ -96,7 +98,7 @@ const codeOf = async (promise: Promise<unknown>): Promise<unknown> => {
 
 /** The notes App's server code with `notes.titles` answering `title` alone. */
 const titlesSaying = (title: string): string =>
-  (notesFiles("drafted")["server/notes.ts"] ?? "").replace(
+  (notesFiles("drafted").files["server/notes.ts"] ?? "").replace(
     '(await ctx.db.query("notes").take(100)).map((note) => note.title).sort()',
     JSON.stringify([title])
   );
@@ -105,7 +107,9 @@ const titlesSaying = (title: string): string =>
  * The notes App's server code reading past what a query takes at once: it
  * fails its type check, so it doesn't build.
  */
-const titlesUnbuilt = (notesFiles("drafted")["server/notes.ts"] ?? "").replace(
+const titlesUnbuilt = (
+  notesFiles("drafted").files["server/notes.ts"] ?? ""
+).replace(
   'ctx.db.query("notes").take(100)).map',
   'ctx.db.query("notes").take(1000)).map'
 );
@@ -219,7 +223,8 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     const kept = await call(next, "notes.titles");
     const server = await write(
       {
-        "server/notes.ts": notesFiles("rewritten")["server/notes.ts"] ?? "",
+        "server/notes.ts":
+          notesFiles("rewritten").files["server/notes.ts"] ?? "",
       },
       next
     );
@@ -433,21 +438,21 @@ export const Route = createFileRoute("/")({ component: Desk });
     const builder = await signedInApi(idp, "builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
     const app = appIdSchema.parse(id);
-    const base = {
-      ...notesFiles("sealed"),
+    const base = withFiles(notesFiles("sealed"), {
       "src/components/badge.tsx": `export const Badge = () => <span>One</span>;
 `,
-    };
+    });
     /**
      * What a seal of `files` holds, with the whole tree's hash taken out
      * wherever it is recorded (the manifest's identity, which its
      * verification report repeats), and the hashes that cover it.
      */
-    const sealedOf = async (files: Record<string, string>) => {
+    const sealedOf = async (files: TestApp) => {
       const sealed = await sealDraftRelease(
         env,
         { app, version: 1 },
-        new Map(Object.entries(files))
+        new Map(Object.entries(files.files)),
+        files.definition
       );
       const decoder = new TextDecoder();
       const bySha = new Map(
@@ -477,16 +482,19 @@ export const Route = createFileRoute("/")({ component: Desk });
     };
     const [before, pagesOnly, server] = await Promise.all([
       sealedOf(base),
-      sealedOf({
-        ...base,
-        "src/components/badge.tsx": `export const Badge = () => <span>Two</span>;
+      sealedOf(
+        withFiles(base, {
+          "src/components/badge.tsx": `export const Badge = () => <span>Two</span>;
 `,
-        "src/routes/index.tsx": "export default function Desk( {",
-      }),
-      sealedOf({
-        ...base,
-        "server/notes.ts": notesFiles("changed")["server/notes.ts"] ?? "",
-      }),
+          "src/routes/index.tsx": "export default function Desk( {",
+        })
+      ),
+      sealedOf(
+        withFiles(base, {
+          "server/notes.ts":
+            notesFiles("changed").files["server/notes.ts"] ?? "",
+        })
+      ),
     ]);
     // Only the whole tree's hash, provenance, tells the first two apart:
     // every module, generated file and the rest of the identity are one.

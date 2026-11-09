@@ -11,7 +11,8 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -25,8 +26,8 @@ import { signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files: Record<string, string> = {
-  ...appDefinition({
+const files: TestApp = testApp(
+  {
     name: "Notes",
     tables: {
       notes: {
@@ -34,8 +35,9 @@ const files: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
@@ -81,7 +83,8 @@ export const holdThenCreate = action({
   },
 });
 `,
-};
+  }
+);
 
 /** The call of `path` with `input`, as the chat's code writes it. */
 const callOf = (release: Release, path: string, input: unknown): string =>
@@ -109,7 +112,12 @@ const tryEach = (calls: Record<string, string>): string =>
 const notesApp = async (existing?: Awaited<ReturnType<typeof signedInApi>>) => {
   const builder = existing ?? (await signedInApi(idp, "builder"));
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await builder.api.apps.files.commit(id, files, "First");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    id,
+    files,
+    "First"
+  );
   await builder.api.apps.versions.setCurrent(id, version);
   return { builder, app: id, release: await loadRelease(env, id, version) };
 };

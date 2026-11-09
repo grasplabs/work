@@ -21,7 +21,8 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { signedInSession } from "../src/auth/identity.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { grantReviewed, release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import { liveStatus, runObject } from "./runs.ts";
@@ -318,31 +319,34 @@ export const endLiveResourceRuns = async (): Promise<void> => {
 };
 
 /** The App every bound workflow here is bound to: one page, one alias. */
-const boundAppFiles = (alias: string): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+const boundAppFiles = (alias: string): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        `permission.workflow(${JSON.stringify(alias)}, { input: v.object({ who: v.string().trim().min(1) }), output: v.object({ status: v.string() }) })`,
+      ],
     },
-    permissions: [
-      `permission.workflow(${JSON.stringify(alias)}, { input: v.object({ who: v.string().trim().min(1) }), output: v.object({ status: v.string() }) })`,
-    ],
-  }),
-  "server/requests.ts": `import { permissions } from "../grasp.config.ts";
+    {
+      "server/requests.ts": `import { permissions } from "../grasp.config.ts";
 
 export const ${alias} = permissions.${alias};
 `,
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Desk() {
   return <main>Requests</main>;
 }
 
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-});
+    }
+  );
 
 /**
  * The reference to `alias` that the `@server/_generated/api` generator writes into the

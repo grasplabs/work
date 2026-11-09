@@ -43,7 +43,8 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
@@ -62,33 +63,36 @@ import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = (): Record<string, string> => ({
-  ...appDefinition({
-    name: "Invoices",
-    tables: {
-      invoices: {
-        fields: { amount: "v.number()" },
-        access: { read: "appMembers", write: "appMembers" },
+const files = (): TestApp =>
+  testApp(
+    {
+      name: "Invoices",
+      tables: {
+        invoices: {
+          fields: { amount: "v.number()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("review", {\n  input: v.object({ jobId: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("review", {\n  input: v.object({ jobId: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/invoices.ts": `import { v } from "@grasp-os/sdk";
 import { permissions } from "../grasp.config.ts";
 
 export const review = permissions.review;
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Desk() {
   return <main>Invoices</main>;
 }
 
 export const Route = createFileRoute("/")({ component: Desk });
 `,
-});
+    }
+  );
 
 const completed = "grasp.job.completed";
 

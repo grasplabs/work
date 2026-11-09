@@ -2,7 +2,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles } from "../src/apps.ts";
 import {
   transformBatch,
   failedOutside,
@@ -14,8 +13,9 @@ import {
 import type { TransformRow } from "../src/migration-run.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { reviewVersion } from "../src/version-review.ts";
-import { appDefinition } from "./app-definitions.ts";
-import type { TableSpec } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import type { TableSpec, TestApp } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
@@ -90,18 +90,21 @@ ${Object.entries(fields)
 const schemaOf = (
   names: readonly string[],
   fields: Readonly<Record<string, string>>
-): Record<string, string> => ({
-  ...appDefinition({
-    name: "Notes",
-    tables: Object.fromEntries(
-      tablesOf(names).map((table) => [
-        table,
-        { fields, access: { read: "owner", write: "owner" } },
-      ])
-    ),
-  }),
-  "values.ts": valuesOf("noteFields", fields),
-});
+): TestApp =>
+  testApp(
+    {
+      name: "Notes",
+      tables: Object.fromEntries(
+        tablesOf(names).map((table) => [
+          table,
+          { fields, access: { read: "owner", write: "owner" } },
+        ])
+      ),
+    },
+    {
+      "values.ts": valuesOf("noteFields", fields),
+    }
+  );
 
 const baseFields = {
   title: "v.string().trim().min(1).max(200)",
@@ -115,23 +118,21 @@ const migratedFields = {
 };
 
 /** Notes before the migrations of `names`: no category yet. */
-const baseFiles = (names: readonly string[]): Record<string, string> =>
+const baseFiles = (names: readonly string[]): TestApp =>
   schemaOf(names, baseFields);
 
 /** Notes, with `migrations` (file name to source) registered in order. */
-const notesFiles = (
-  migrations: Readonly<Record<string, string>>
-): Record<string, string> => {
+const notesFiles = (migrations: Readonly<Record<string, string>>): TestApp => {
   const names = Object.keys(migrations);
-  return {
-    ...schemaOf(names, migratedFields),
-    ...Object.fromEntries(
+  return withFiles(
+    schemaOf(names, migratedFields),
+    Object.fromEntries(
       Object.entries(migrations).map(([name, source]) => [
         `server/migrations/${name}.ts`,
         source,
       ])
-    ),
-  };
+    )
+  );
 };
 
 /** Migration `name` of its own table, `fromSchema` to `toSchema`, with `handler`. */
@@ -234,7 +235,7 @@ const filesTo = (
   group: Readonly<Record<string, string>>,
   fromSchema: string,
   toSchema: string
-): Record<string, string> =>
+): TestApp =>
   notesFiles(
     Object.fromEntries(
       Object.entries(group).map(([name, handler]) => [
@@ -284,8 +285,8 @@ const namedSchema = (details: unknown): string => {
  */
 const sealedMigrating = async (
   names: readonly string[],
-  files: (fromSchema: string, toSchema: string) => Record<string, string>,
-  first: Record<string, string> = baseFiles(names)
+  files: (fromSchema: string, toSchema: string) => TestApp,
+  first: TestApp = baseFiles(names)
 ): Promise<{
   fixture: Fixture;
   release: Release;
@@ -294,7 +295,7 @@ const sealedMigrating = async (
   const fixture = await appWith(first);
   const base = await seal(fixture);
   const fromSchema = base.manifest.schemaHash;
-  await commitFiles(
+  await commitDefined(
     env,
     fixture.owner,
     fixture.app,
@@ -302,7 +303,7 @@ const sealedMigrating = async (
     "Migrate"
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
-  await commitFiles(
+  await commitDefined(
     env,
     fixture.owner,
     fixture.app,
@@ -362,7 +363,7 @@ const sealedSource = async (
   const base = await seal(fixture);
   const fromSchema = base.manifest.schemaHash;
   const commit = async (toSchema: string) =>
-    await commitFiles(
+    await commitDefined(
       env,
       fixture.owner,
       fixture.app,
@@ -704,18 +705,21 @@ const salaryAccess = (name: string): TableSpec["access"] => {
 const salariesSchema = (
   names: readonly string[],
   fields: Readonly<Record<string, string>>
-): Record<string, string> => ({
-  ...appDefinition({
-    name: "Notes",
-    tables: Object.fromEntries(
-      names.map((name) => [
-        tableOf(name),
-        { fields, access: salaryAccess(name) },
-      ])
-    ),
-  }),
-  "values.ts": valuesOf("salaryFields", fields),
-});
+): TestApp =>
+  testApp(
+    {
+      name: "Notes",
+      tables: Object.fromEntries(
+        names.map((name) => [
+          tableOf(name),
+          { fields, access: salaryAccess(name) },
+        ])
+      ),
+    },
+    {
+      "values.ts": valuesOf("salaryFields", fields),
+    }
+  );
 
 const salaryBase = {
   employee: "v.person()",
@@ -795,12 +799,12 @@ const sealedSalaries = async () =>
     Object.keys(salaryHandlers),
     (fromSchema, toSchema) => {
       const names = Object.keys(salaryHandlers);
-      return {
-        ...salariesSchema(names, {
+      return withFiles(
+        salariesSchema(names, {
           ...salaryBase,
           band: 'v.enum(["low", "high"])',
         }),
-        ...Object.fromEntries(
+        Object.fromEntries(
           Object.entries(salaryHandlers).map(([name, handler]) => [
             `server/migrations/${name}.ts`,
             migrationSource(name, handler, {
@@ -813,8 +817,8 @@ const sealedSalaries = async () =>
                 : "input: v.object({ employee: noteFields.employee, team: noteFields.team, amount: noteFields.amount }),",
             }).replaceAll("noteFields", "salaryFields"),
           ])
-        ),
-      };
+        )
+      );
     },
     salariesSchema(Object.keys(salaryHandlers), salaryBase)
   ));

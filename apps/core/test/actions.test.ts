@@ -47,7 +47,7 @@ import type {
   UseRefusal,
 } from "../src/operations.ts";
 import { hostedRelease } from "../src/release-runner.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, seal } from "./sealed-apps.ts";
@@ -2473,17 +2473,19 @@ describe("evidence of a refused use", () => {
   });
 
   it("is kept by core for a table its access denies, once a call however often its code asks", async () => {
-    const fixture = await appWith({
-      ...appDefinition({
-        name: "Vault",
-        tables: {
-          vault: {
-            fields: { secret: "v.string()" },
-            access: { read: "none", write: "none" },
+    const fixture = await appWith(
+      testApp(
+        {
+          name: "Vault",
+          tables: {
+            vault: {
+              fields: { secret: "v.string()" },
+              access: { read: "none", write: "none" },
+            },
           },
         },
-      }),
-      "server/vault.ts": `import { v } from "@grasp-os/sdk";
+        {
+          "server/vault.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 export const peek = query({
   args: {},
@@ -2506,7 +2508,9 @@ export const stamp = mutation({
   },
 });
 `,
-    });
+        }
+      )
+    );
     const release = await seal(fixture);
     const appId = appIdSchema.parse(fixture.app);
     const run = async (path: string, kind: "query" | "mutation") => {
@@ -2560,22 +2564,26 @@ export const stamp = mutation({
   });
 
   it("is kept by core as app.use.refused, from a person's call", async () => {
-    const fixture = await appWith({
-      ...appDefinition({
-        name: "Notes",
-        tables: {
-          notes: {
-            fields: { title: "v.string()" },
-            access: { read: "owner", write: "owner" },
+    const fixture = await appWith(
+      testApp(
+        {
+          name: "Notes",
+          tables: {
+            notes: {
+              fields: { title: "v.string()" },
+              access: { read: "owner", write: "owner" },
+            },
           },
         },
-      }),
-      "server/notes.ts": `import { v } from "@grasp-os/sdk";
+        {
+          "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, query } from "@server/_generated/server";
 export const label = query({ args: {}, returns: v.string(), handler: () => "label" });
 export const probe = action({ args: {}, returns: v.null(), handler: async () => null });
 `,
-    });
+        }
+      )
+    );
     const release = await seal(fixture);
     const hosted = hostedRelease(env, release);
     // Code that goes around its SDK: it asks the host for a function the

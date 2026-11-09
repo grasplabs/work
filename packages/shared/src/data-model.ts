@@ -120,6 +120,13 @@ export interface DefinitionPlan {
   /** Whether the store can apply it without a migration in code. */
   accepted: boolean;
   addedTables: string[];
+  /**
+   * Tables renamed, by their stable ID: their records go with them. Two
+   * swapped names show as two renames.
+   */
+  renamedTables: { from: string; to: string }[];
+  /** Fields renamed, by their stable ID: their values move to the new name. */
+  renamedFields: { table: string; from: string; to: string }[];
   addedFields: PlanField[];
   /** Fields every record still fits: nothing to check. */
   widenedFields: PlanField[];

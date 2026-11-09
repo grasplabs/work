@@ -5,12 +5,11 @@ sidebar:
   order: 1
 ---
 
-An App is a folder of files. Grasp reads them, checks them and runs them; you never deploy anything yourself.
+An App is its definition and a folder of files. Grasp reads them, checks them and runs them; you never deploy anything yourself.
 
 ```text
-definition.json     What the App is: its name, tables, access and permissions
-grasp.config.ts     The App's config, generated from definition.json
-server/schema.ts    Its tables, generated from definition.json
+grasp.config.ts     The App's config, generated from its definition
+server/schema.ts    Its tables, generated from its definition
 server/             Its server functions, one module or more
 src/routes/         Its Pages, one file route each
 src/components/     Its own components, and src/lib/ its own code
@@ -22,13 +21,13 @@ This guide builds a Tasks App: a list of tasks people add and complete.
 
 ## The definition
 
-`definition.json` is what the App is, as data: its name, its tables and their fields, indexes and access, and the permissions it needs. Every table and field has an ID of its own, so renaming one never loses what refers to it.
+The definition is what the App is, as data: its name, its tables and their fields, indexes and access, and the permissions it needs. Every table and field has an ID of its own, so renaming one never loses what refers to it. It is no file: Grasp keeps it with each version of the App, beside its files.
 
 Each type in it says what `v` says, as JSON, in the same words, and leaves out whatever is false: `v.string().trim().max(200).optional()` is `{ "kind": "string", "trim": true, "max": 200, "optional": true }`. Workflows declare their input, output, state and parameters the same way.
 
 You don't write it by hand. Grasp changes it with its definition tools, in a chat or on the App's page: `addTable`, `addField`, `changeField`, `renameField`, `renameTable`, `setAccess`, `addIndex` and `addPermission`. Each change is checked whole, and Grasp tells you what it does to the records the App already holds.
 
-From the definition, Grasp generates two files you read but never edit: `grasp.config.ts` and `server/schema.ts`. Every version of the App holds them exactly as its definition generates them.
+From the definition, Grasp generates two files you read but never edit: `grasp.config.ts` and `server/schema.ts`. Every version of the App holds them exactly as its definition generates them. Generation goes one way, and the IDs stay in the definition: the code names tables and fields by their names alone, so an exported App is a plain code project.
 
 ## The schema
 

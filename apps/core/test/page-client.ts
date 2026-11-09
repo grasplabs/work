@@ -16,7 +16,8 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { definedWith } from "./app-definitions.ts";
+import { commitApp, definedWith, withFiles } from "./app-definitions.ts";
+import type { TestApp, TestSource } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
@@ -57,12 +58,13 @@ export const personApi = async (role: Role) => {
  * A builder's Notes App, made current, its page opened by its builder
  * and an admin: the release, the page's lease, and the builder's session.
  */
-export const openedApp = async (appFiles: Record<string, string> = files) => {
+export const openedApp = async (appFiles: TestSource = files) => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   await published(id);
-  const { version } = await builder.api.apps.files.commit(
+  const { version } = await commitApp(
+    builder.api.apps.files,
     id,
     appFiles,
     "First"
@@ -368,16 +370,17 @@ export const memberOf = async (opened: Opened) => {
  * The Notes App with a table only its builders read and write
  * (`secrets`), and its query and mutation.
  */
-export const withSecrets = (): Record<string, string> => {
-  const operations = files["server/notes.ts"] ?? "";
-  return {
-    ...definedWith(files, {
+export const withSecrets = (): TestApp => {
+  const operations = files.files["server/notes.ts"] ?? "";
+  return withFiles(
+    definedWith(files, {
       op: "addTable",
       name: "secrets",
       fields: { text: "v.string()" },
       access: { read: "appBuilders", write: "appBuilders" },
     }),
-    "server/notes.ts": `${operations}
+    {
+      "server/notes.ts": `${operations}
 export const secrets = query({
   args: {},
   returns: v.array(doc("secrets")),
@@ -390,5 +393,6 @@ export const tell = mutation({
   handler: async (ctx, args) => await ctx.db.insert("secrets", args),
 });
 `,
-  };
+    }
+  );
 };

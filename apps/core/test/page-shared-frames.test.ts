@@ -15,6 +15,8 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { commitApp, withFiles } from "./app-definitions.ts";
+import type { TestSource } from "./app-definitions.ts";
 import { pastAccessRecheck, published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
@@ -50,10 +52,15 @@ const personApi = async (role: Role) => await signedInApi(idp, role);
 type Person = Awaited<ReturnType<typeof personApi>>;
 
 /** A new App with `files` as its current version: nobody approves its pages. */
-const currentApp = async (builder: Person, files: Record<string, string>) => {
+const currentApp = async (builder: Person, files: TestSource) => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
   await published(id);
-  const { version } = await builder.api.apps.files.commit(id, files, "First");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    id,
+    files,
+    "First"
+  );
   await builder.api.apps.versions.setCurrent(id, version);
   return { app: id, version };
 };
@@ -62,11 +69,13 @@ const currentApp = async (builder: Person, files: Record<string, string>) => {
  * Two pages, so two builds; and the App's `api`, as they call it.
  */
 const twoPageApp = async (builder: Person) => {
-  const notesPage = notesFiles["src/routes/index.tsx"] ?? "";
-  const { app, version } = await currentApp(builder, {
-    ...notesFiles,
-    "src/routes/other.tsx": notesPage.replace(">Add<", ">Other<"),
-  });
+  const notesPage = notesFiles.files["src/routes/index.tsx"] ?? "";
+  const { app, version } = await currentApp(
+    builder,
+    withFiles(notesFiles, {
+      "src/routes/other.tsx": notesPage.replace(">Add<", ">Other<"),
+    })
+  );
   return { app, version, api: apiOf(await loadRelease(env, app, version)) };
 };
 
@@ -75,8 +84,9 @@ const twoPageApp = async (builder: Person) => {
  * App's `api` at it.
  */
 const nextVersion = async (builder: Person, app: string) => {
-  const notesPage = notesFiles["src/routes/index.tsx"] ?? "";
-  const { version } = await builder.api.apps.files.commit(
+  const notesPage = notesFiles.files["src/routes/index.tsx"] ?? "";
+  const { version } = await commitApp(
+    builder.api.apps.files,
     app,
     { "src/routes/index.tsx": notesPage.replace(">Add<", ">Add a note<") },
     "Second"

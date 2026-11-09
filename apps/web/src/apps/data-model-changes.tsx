@@ -86,6 +86,20 @@ export const planLines = (plan: DefinitionPlan, i18n: I18n): PlanLine[] => [
   ...plan.addedTables.map((table) =>
     lineOf(`table:${table}`, "added", i18n._(msg`Adds the table ${table}.`))
   ),
+  ...plan.renamedTables.map(({ from, to }) =>
+    lineOf(
+      `renamed:${from}`,
+      "kept",
+      i18n._(msg`Renames the table ${from} to ${to}; its records go with it.`)
+    )
+  ),
+  ...plan.renamedFields.map(({ table, from, to }) =>
+    lineOf(
+      `renamed:${table}.${from}`,
+      "kept",
+      i18n._(msg`The values of ${from} in ${table} move to ${to}.`)
+    )
+  ),
   ...plan.addedFields.map(({ table, field }) =>
     lineOf(
       `field:${table}.${field}`,

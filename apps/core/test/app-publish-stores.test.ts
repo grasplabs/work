@@ -1,8 +1,4 @@
-import {
-  definitionManifest,
-  definitionPath,
-  readDefinition,
-} from "@grasp-os/sdk/definition";
+import { definitionManifest } from "@grasp-os/sdk/definition";
 import { schemaHash } from "@grasp-os/sdk/host";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -27,15 +23,26 @@ import {
   resetAppData,
   resetLegacyAppData,
 } from "../src/app-schema.ts";
-import { commitFiles, createApp, findApp } from "../src/apps.ts";
+import { createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { deleteStore } from "../src/data-stores.ts";
 import { appDefaultStores } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { appDefinition, definedWith, redefined } from "./app-definitions.ts";
-import type { AppSpec } from "./app-definitions.ts";
+import {
+  changesOf,
+  definedWith,
+  redefined,
+  testApp,
+  withFiles,
+} from "./app-definitions.ts";
+import type {
+  AppSpec,
+  TestApp,
+  TestChanges,
+  TestSource,
+} from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { failingDb, racingDb } from "./apps.ts";
+import { commitDefined, failingDb, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { failure, person, sweptAway } from "./sealed-apps.ts";
 
@@ -56,9 +63,9 @@ const notesSpec = (title: string, more: AppSpec["tables"] = {}): AppSpec => ({
   },
 });
 
-const notesFiles = (title = "Notes"): Record<string, string> => ({
-  ...appDefinition(notesSpec(title)),
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+const notesFiles = (title = "Notes"): TestApp =>
+  testApp(notesSpec(title), {
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
@@ -73,11 +80,12 @@ export const titles = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
 });
 `,
-});
+  });
 
-const emptyFiles: Record<string, string> = {
-  ...appDefinition({ name: "Hello", tables: {} }),
-  "server/hello.ts": `import { v } from "@grasp-os/sdk";
+const emptyFiles: TestApp = testApp(
+  { name: "Hello", tables: {} },
+  {
+    "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const hello = query({
@@ -86,24 +94,24 @@ export const hello = query({
   handler: () => "hello",
 });
 `,
-};
+  }
+);
 
 /**
  * `emptyFiles` over a version of `notesFiles`: its operations replaced,
  * the notes' file gone with the tables it reads.
  */
-const withoutNotes: Record<string, string | null> = {
-  ...emptyFiles,
+const withoutNotes: TestChanges = changesOf(emptyFiles, {
   "server/notes.ts": null,
-};
+});
 
 type Caller = Awaited<ReturnType<typeof person>>;
 
 /** A builder's App with `files` as its first version. */
-const appWith = async (files: Record<string, string>) => {
+const appWith = async (files: TestSource) => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitFiles(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files, "First version");
   return { owner, app: id };
 };
 
@@ -154,7 +162,7 @@ const evolvingFiles = (
   optional: Record<string, string> = {},
   defaulted: Record<string, string> = {},
   { indexed = false } = {}
-): Record<string, string> => {
+): TestApp => {
   const extra = [
     ...Object.entries(optional).map(
       ([name, validator]) => `${name}: ${validator}.optional(), `
@@ -164,8 +172,8 @@ const evolvingFiles = (
     ),
   ].join("");
   const fields = `title: v.string().min(1).max(200), ${extra}`;
-  return {
-    ...appDefinition({
+  return testApp(
+    {
       name: "Notes",
       tables: {
         notes: {
@@ -183,8 +191,9 @@ const evolvingFiles = (
           access: { read: "appMembers", write: "appMembers" },
         },
       },
-    }),
-    "server/notes.ts": `import { v } from "@grasp-os/sdk";
+    },
+    {
+      "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 const note = v.object({ ${fields} });
@@ -226,7 +235,8 @@ export const rows = query({
       .toSorted((a, b) => (a.title < b.title ? -1 : 1)),
 });
 `,
-  };
+    }
+  );
 };
 
 /** The value `path` of the current release of `app` answers `by` for `input`. */
@@ -299,9 +309,9 @@ const codeOfCall = async (
 const nextVersion = async (
   owner: Caller,
   app: AppId,
-  files: Record<string, string>
+  files: TestSource
 ): Promise<number> => {
-  const committed = await commitFiles(env, owner, app, files, "Next version");
+  const committed = await commitDefined(env, owner, app, files, "Next version");
   return committed.version;
 };
 
@@ -335,7 +345,7 @@ describe(
       const first = await loadRelease(env, app, 1);
       await call(owner, first, "notes.create", { title: "Kept" });
 
-      await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
       await publishVersion(env, owner, app, 2);
       const second = await loadRelease(env, app, 2);
       expect(second.store?.storeId).toBe(first.store?.storeId);
@@ -360,7 +370,7 @@ describe(
         id: other.userId,
         role: "builder",
       });
-      await commitFiles(env, other, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, other, app, notesFiles("Notes 2"), "Second");
       const activated = await publishVersion(env, other, app, 2);
       const second = await loadRelease(env, app, 2);
       expect([
@@ -372,7 +382,7 @@ describe(
 
     it("is refused to someone who doesn't build the App, sealing it directly", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
       const stranger = await person("builder");
       await expect(
         failure(
@@ -434,9 +444,9 @@ describe(
     it("refuses a revoked version, even one revoked as it is made current", async () => {
       const { owner, app } = await appWith(notesFiles());
       await publishVersion(env, owner, app, 1);
-      await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
       await publishVersion(env, owner, app, 2);
-      await commitFiles(env, owner, app, notesFiles("Notes 3"), "Third");
+      await commitDefined(env, owner, app, notesFiles("Notes 3"), "Third");
       await publishVersion(env, owner, app, 3);
       const admin = await person("admin");
 
@@ -463,7 +473,7 @@ describe(
       const { owner, app } = await appWith(notesFiles());
       await publishVersion(env, owner, app, 1);
       const [own] = await defaultStores(app);
-      await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
+      await commitDefined(env, owner, app, notesFiles("Notes 2"), "Second");
       await publishVersion(env, owner, app, 2);
       // A rollback to a release still kept seals nothing.
       await publishVersion(env, owner, app, 1);
@@ -491,7 +501,7 @@ describe(
       const { owner, app } = await appWith(notesFiles());
       await publishVersion(env, owner, app, 1);
       const [deleted] = await defaultStores(app);
-      await commitFiles(env, owner, app, withoutNotes, "No tables");
+      await commitDefined(env, owner, app, withoutNotes, "No tables");
       await publishVersion(env, owner, app, 2);
       // Version 1 kept binds its store; once retention lets it go, the
       // store can be deleted.
@@ -503,7 +513,13 @@ describe(
       const back = await publishVersion(env, owner, app, 1);
       expect(back.currentVersion).toBe(1);
 
-      await commitFiles(env, owner, app, notesFiles("Notes 3"), "Tables again");
+      await commitDefined(
+        env,
+        owner,
+        app,
+        notesFiles("Notes 3"),
+        "Tables again"
+      );
       await publishVersion(env, owner, app, 3);
       const [fresh] = await defaultStores(app);
       expect(fresh?.storeId).not.toBe(deleted?.storeId);
@@ -518,7 +534,7 @@ describe(
       const { owner, app } = await appWith(notesFiles());
       await publishVersion(env, owner, app, 1);
       const [store] = await defaultStores(app);
-      await commitFiles(env, owner, app, withoutNotes, "No tables");
+      await commitDefined(env, owner, app, withoutNotes, "No tables");
       await publishVersion(env, owner, app, 2);
       // Its store gone as the statement runs (deletion itself is refused
       // while version 1 is kept: this is the guard behind that).
@@ -541,11 +557,13 @@ describe(
     it("refuses a version that can't be sealed, and leaves the current one", async () => {
       const { owner, app } = await appWith(notesFiles());
       await publishVersion(env, owner, app, 1);
-      await commitFiles(
+      await commitDefined(
         env,
         owner,
         app,
-        { ...notesFiles(), "server/broken.ts": 'throw new Error("Broken");\n' },
+        withFiles(notesFiles(), {
+          "server/broken.ts": 'throw new Error("Broken");\n',
+        }),
         "Broken"
       );
       await expect(
@@ -653,16 +671,14 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
     const { owner, app } = await appWith(notesFiles());
     await publishVersion(env, owner, app, 1);
     // The same schema and operations under another name: one definition.
-    await commitFiles(env, owner, app, notesFiles("Notes 2"), "Renamed");
+    await commitDefined(env, owner, app, notesFiles("Notes 2"), "Renamed");
     await publishVersion(env, owner, app, 2);
     // Another table: a second definition.
-    const widened = {
-      ...notesFiles("Notes 3"),
-      ...appDefinition(
-        notesSpec("Notes 3", { tags: { fields: { name: "v.string()" } } })
-      ),
-    };
-    await commitFiles(env, owner, app, widened, "Tags");
+    const widened = testApp(
+      notesSpec("Notes 3", { tags: { fields: { name: "v.string()" } } }),
+      notesFiles("Notes 3").files
+    );
+    await commitDefined(env, owner, app, widened, "Tags");
     await publishVersion(env, owner, app, 3);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
@@ -710,10 +726,8 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
 });
 
 /** The hash of the schema the definition `files` hold declares. */
-const schemaOf = async (files: Record<string, string>): Promise<string> =>
-  await schemaHash(
-    definitionManifest(readDefinition(files[definitionPath] ?? "")).schema
-  );
+const schemaOf = async (files: TestApp): Promise<string> =>
+  await schemaHash(definitionManifest(files.definition).schema);
 
 /**
  * A Tickets App whose row rule reads each ticket's `team`, holding
@@ -729,8 +743,8 @@ const teamRenamedMigration = async (
   fixtureTitle: number,
   prelude = ""
 ) => {
-  const first = {
-    ...appDefinition({
+  const first = testApp(
+    {
       name: "Tickets",
       tables: {
         tickets: {
@@ -742,9 +756,11 @@ const teamRenamedMigration = async (
           },
         },
       },
-    }),
-    "server/hello.ts": emptyFiles["server/hello.ts"] ?? "",
-  };
+    },
+    {
+      "server/hello.ts": emptyFiles.files["server/hello.ts"] ?? "",
+    }
+  );
   const { owner, app } = await appWith(first);
   await publishVersion(env, owner, app, 1);
   const [own] = await defaultStores(app);
@@ -773,9 +789,11 @@ const teamRenamedMigration = async (
     { op: "renameField", table: "tickets", field: "team", name: "group" },
     { op: "changeField", table: "tickets", field: "title", type: "v.number()" }
   );
-  const second = await nextVersion(owner, app, {
-    ...renamed,
-    "server/migrations/title.ts": `import { defineMigration, v } from "@grasp-os/sdk";
+  const second = await nextVersion(
+    owner,
+    app,
+    withFiles(renamed, {
+      "server/migrations/title.ts": `import { defineMigration, v } from "@grasp-os/sdk";
 
 ${prelude}
 
@@ -792,7 +810,8 @@ export default defineMigration({
   handler: ${handler},
 });
 `,
-  });
+    })
+  );
 
   const published = await failure(
     async () => await publishVersion(env, owner, app, second)
@@ -814,12 +833,11 @@ export default defineMigration({
  * each record's `category` as `category` (TypeScript over `row`) derives it.
  */
 const migratedFiles = async (
-  from: Record<string, string>,
+  from: TestApp,
   category: string
-): Promise<Record<string, string>> => {
+): Promise<TestApp> => {
   const files = evolvingFiles({ category: "v.number()" });
-  return {
-    ...files,
+  return withFiles(files, {
     "server/migrations/category.ts": `import { defineMigration, v } from "@grasp-os/sdk";
 
 export default defineMigration({
@@ -838,7 +856,7 @@ export default defineMigration({
   handler: (ctx, row) => ({ title: row.title, category: ${category} }),
 });
 `,
-  };
+  });
 };
 
 describe(
@@ -992,13 +1010,12 @@ describe(
       await valueOf(owner, app, "notes.create", { title: "Launch" });
       const required = evolvingFiles({}, { category: "v.string()" });
       // Its writes keep the field it requires.
-      const files = {
-        ...required,
-        "server/notes.ts": (required["server/notes.ts"] ?? "").replaceAll(
+      const files = withFiles(required, {
+        "server/notes.ts": (required.files["server/notes.ts"] ?? "").replaceAll(
           "{ title });",
           "{ title, category: found.category });"
         ),
-      };
+      });
       const unanswered = await nextVersion(owner, app, files);
       const refused = await failure(
         async () => await publishVersion(env, owner, app, unanswered)
@@ -1042,13 +1059,15 @@ describe(
         field: "category",
         name: "topic",
       });
-      const second = await nextVersion(owner, app, {
-        ...renamed,
-        "server/notes.ts": (renamed["server/notes.ts"] ?? "").replaceAll(
-          "category",
-          "topic"
-        ),
-      });
+      const second = await nextVersion(
+        owner,
+        app,
+        withFiles(renamed, {
+          "server/notes.ts": (
+            renamed.files["server/notes.ts"] ?? ""
+          ).replaceAll("category", "topic"),
+        })
+      );
 
       await publishVersion(env, owner, app, second);
       const moved = await valueOf(owner, app, "notes.rows");
@@ -1087,13 +1106,15 @@ describe(
         table: "notes",
         name: "memos",
       });
-      const second = await nextVersion(owner, app, {
-        ...renamed,
-        "server/notes.ts": (renamed["server/notes.ts"] ?? "").replaceAll(
-          '"notes"',
-          '"memos"'
-        ),
-      });
+      const second = await nextVersion(
+        owner,
+        app,
+        withFiles(renamed, {
+          "server/notes.ts": (
+            renamed.files["server/notes.ts"] ?? ""
+          ).replaceAll('"notes"', '"memos"'),
+        })
+      );
 
       await publishVersion(env, owner, app, second);
       await valueOf(owner, app, "notes.rename", { id, title: "Launched" });
@@ -1130,10 +1151,13 @@ describe(
       const { owner, app } = await appWith(evolvingFiles());
       await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
-      const empty = await nextVersion(owner, app, {
-        ...emptyFiles,
-        "server/notes.ts": "",
-      });
+      const empty = await nextVersion(
+        owner,
+        app,
+        withFiles(emptyFiles, {
+          "server/notes.ts": "",
+        })
+      );
       await publishVersion(env, owner, app, empty);
       const back = await nextVersion(owner, app, evolvingFiles());
 
@@ -1588,10 +1612,13 @@ describe("resetting an App's data", { timeout: 120_000 }, () => {
     const { owner, app } = await appWith(evolvingFiles());
     await publishVersion(env, owner, app, 1);
     await valueOf(owner, app, "notes.create", { title: "Launch" });
-    const empty = await nextVersion(owner, app, {
-      ...emptyFiles,
-      "server/notes.ts": "",
-    });
+    const empty = await nextVersion(
+      owner,
+      app,
+      withFiles(emptyFiles, {
+        "server/notes.ts": "",
+      })
+    );
     await publishVersion(env, owner, app, empty);
     const admin = await person("admin");
 

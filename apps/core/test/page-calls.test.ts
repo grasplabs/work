@@ -16,7 +16,8 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { commitApp, testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { chatWithDraft, previewLease } from "./previews.ts";
@@ -44,8 +45,8 @@ import {
 
 const idp = mockIdp();
 
-const files: Record<string, string> = {
-  ...appDefinition({
+const files: TestApp = testApp(
+  {
     name: "Notes",
     tables: {
       notes: {
@@ -53,8 +54,9 @@ const files: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/notes.ts": `import { v } from "@grasp-os/sdk";
+  },
+  {
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
@@ -83,14 +85,15 @@ export const slow = action({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Notes() {
   return <p>Notes</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-};
+  }
+);
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -105,7 +108,12 @@ const servedApp = async () => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   await published(id);
-  const { version } = await builder.api.apps.files.commit(id, files, "First");
+  const { version } = await commitApp(
+    builder.api.apps.files,
+    id,
+    files,
+    "First"
+  );
   await builder.api.apps.versions.setCurrent(id, version);
   const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);
@@ -785,7 +793,7 @@ describe(
         builder,
         appIdSchema.parse(served.app),
         {
-          "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// Drafted.\n`,
+          "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// Drafted.\n`,
         }
       );
       const lease = await previewLease(builder, chatId, served.app);

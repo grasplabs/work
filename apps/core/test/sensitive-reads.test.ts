@@ -17,7 +17,8 @@ import { AppDataRpc } from "../src/app-data.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { identify } from "../src/auth/identity.ts";
-import { appDefinition, withSensitive } from "./app-definitions.ts";
+import { testApp, withSensitive } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
@@ -42,8 +43,8 @@ import { signedInApi } from "./sign-in.ts";
 
 const idp = mockSessionIdp();
 
-const files: Record<string, string> = {
-  ...appDefinition({
+const files: TestApp = testApp(
+  {
     name: "Payroll",
     tables: {
       salaries: {
@@ -62,8 +63,9 @@ const files: Record<string, string> = {
         access: { read: "appMembers", write: "appMembers" },
       },
     },
-  }),
-  "server/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
+  },
+  {
+    "server/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const pay = mutation({
@@ -199,14 +201,15 @@ export const byPerson = query({
 });
 `,
 
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Pay() {
   return <p>Pay</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Pay });
 `,
-};
+  }
+);
 
 type Person = Awaited<ReturnType<typeof signedInApi>> & { role: Role };
 

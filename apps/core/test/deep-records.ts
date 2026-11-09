@@ -1,6 +1,7 @@
 import { valueDepth } from "@grasp-os/shared/value-depth";
 
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 
 // An App that keeps a record as deep as a table may declare one, for the
 // tests that hold every bound on its way to the store to it: the
@@ -18,8 +19,8 @@ export const fieldDepth = valueDepth - 1;
  * and whose `deep.read` reads it back: every level crosses the operation
  * channel to the store and back.
  */
-export const deepFiles: Record<string, string> = {
-  ...appDefinition({
+export const deepFiles: TestApp = testApp(
+  {
     name: "Deep",
     tables: {
       deep: {
@@ -31,8 +32,9 @@ export const deepFiles: Record<string, string> = {
         access: { read: "owner", write: "owner" },
       },
     },
-  }),
-  "server/deep.ts": `import { v } from "@grasp-os/sdk";
+  },
+  {
+    "server/deep.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 const nested = (): unknown => {
@@ -64,4 +66,5 @@ export const read = query({
   },
 });
 `,
-};
+  }
+);

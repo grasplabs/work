@@ -20,6 +20,7 @@
  * start over, stop `vp run dev`, delete `apps/core/.wrangler/state`, and
  * start it again.
  */
+import { definitionText as appDefinitionText } from "@grasp-os/sdk/definition";
 import { appErrors } from "@grasp-os/shared/apps";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
@@ -28,7 +29,7 @@ import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
-import { appFiles } from "./seed/app-files.ts";
+import { appDefinition, appFiles } from "./seed/app-files.ts";
 import { apps, decisionResponse } from "./seed/apps.ts";
 import type { AppSeed, WorkflowSeed } from "./seed/apps.ts";
 import { chats, writeTranscript } from "./seed/chats.ts";
@@ -489,7 +490,8 @@ const seedApp = async (
     const { version } = await owner.api.apps.files.commit(
       app.id,
       appFiles(seed, pages),
-      "Release the App's workflows and pages"
+      "Release the App's workflows and pages",
+      JSON.parse(appDefinitionText(appDefinition(seed)))
     );
     // An admin makes it current, which approves its code, once its
     // workflow tests pass.

@@ -12,7 +12,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor, sweepTestFixtures } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { findApp } from "../src/apps.ts";
+import { findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { actionMainModule } from "../src/workflow-modules.ts";
@@ -22,7 +22,8 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import { passing } from "./json-workflow-apps.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -93,31 +94,34 @@ const filesWith = (
   tests: Record<string, string> = {},
   /** The parameter values the fixture gives each workflow, by alias. */
   workflows?: Record<string, { params: Record<string, unknown> }>
-): Record<string, string> => ({
-  ...appDefinition({
-    name: "Requests",
-    tables: {
-      requests: {
-        fields: { who: "v.string()" },
-        access: { read: "appMembers", write: "appMembers" },
+): TestApp =>
+  testApp(
+    {
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { who: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
       },
+      permissions: [
+        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+      ],
     },
-    permissions: [
-      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
-    ],
-  }),
-  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { permissions } from "../grasp.config.ts";
 
 export const followUp = permissions.followUp;
 `,
 
-  "tests/fixtures/desk.json": JSON.stringify({
-    principals: { "desk-user": { role: "user" } },
-    ...(workflows === undefined ? {} : { workflows }),
-  }),
-  ...tests,
-});
+      "tests/fixtures/desk.json": JSON.stringify({
+        principals: { "desk-user": { role: "user" } },
+        ...(workflows === undefined ? {} : { workflows }),
+      }),
+      ...tests,
+    }
+  );
 
 /** A connector contract of the catalog `admin` publishes: `mail.send`. */
 const mailContract = async (admin: Identity): Promise<string> => {
@@ -235,7 +239,12 @@ const sessionOf = async (
     on?: Env;
   } = {}
 ) => {
-  const host = fixtureHostFor(on, release, filesWith({}, workflows));
+  const host = fixtureHostFor(
+    on,
+    release,
+    filesWith({}, workflows).files,
+    await releaseIdsOf(on, release)
+  );
   return await host.open("desk", `test-${unique()}`);
 };
 

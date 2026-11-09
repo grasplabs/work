@@ -8,7 +8,8 @@ import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
 import type { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 
@@ -36,31 +37,30 @@ type Builder = Parameters<typeof release>[0];
  * as an action would ask for all of it: at most 6,000 tokens on Llama
  * 3.3.
  */
-export const sampleApp = ({ ai }: { ai?: number } = {}): Record<
-  string,
-  string
-> => ({
-  ...appDefinition({
-    name: "Invoices",
-    tables: {
-      counters: {
-        fields: { name: "v.string()", count: "v.number()" },
-        indexes: { by_name: ["name"] },
-        access: { read: "appMembers", write: "appMembers" },
+export const sampleApp = ({ ai }: { ai?: number } = {}): TestApp =>
+  testApp(
+    {
+      name: "Invoices",
+      tables: {
+        counters: {
+          fields: { name: "v.string()", count: "v.number()" },
+          indexes: { by_name: ["name"] },
+          access: { read: "appMembers", write: "appMembers" },
+        },
+        ledger: {
+          fields: { invoice: "v.string()", total: "v.number()" },
+          access: { read: "owner", write: "owner" },
+        },
       },
-      ledger: {
-        fields: { invoice: "v.string()", total: "v.number()" },
-        access: { read: "owner", write: "owner" },
-      },
+      permissions: [
+        'permission.connection("send", { contract: "composio.mail@1", actions: ["MAIL_SEND"] })',
+        ...(ai === undefined
+          ? []
+          : [`permission.ai({ maxOutputTokens: ${String(ai)} })`]),
+      ],
     },
-    permissions: [
-      'permission.connection("send", { contract: "composio.mail@1", actions: ["MAIL_SEND"] })',
-      ...(ai === undefined
-        ? []
-        : [`permission.ai({ maxOutputTokens: ${String(ai)} })`]),
-    ],
-  }),
-  "server/counter.ts": `import { v } from "@grasp-os/sdk";
+    {
+      "server/counter.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 export const hits = query({
@@ -91,7 +91,7 @@ export const hit = action({
 });
 
 `,
-  "server/ledger.ts": `import { v } from "@grasp-os/sdk";
+      "server/ledger.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const purchaseOrder = query({
@@ -110,7 +110,7 @@ export const book = mutation({
   },
 });
 `,
-  "server/effects.ts": `import { permissions } from "../grasp.config.ts";
+      "server/effects.ts": `import { permissions } from "../grasp.config.ts";
 
 export const send = permissions.send;
 
@@ -125,7 +125,7 @@ export const outcome = async (work: () => Promise<unknown>): Promise<unknown> =>
   }
 };
 `,
-  "server/mail.ts": `import { v } from "@grasp-os/sdk";
+      "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
 import { invoice, outcome, send } from "./effects.ts";
@@ -156,7 +156,8 @@ export const mailOwnKey = action({
 });
 
 `,
-});
+    }
+  );
 
 /**
  * Workflow code calling the sample App's function `path`, of `kind`, with
