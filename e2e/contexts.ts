@@ -5,8 +5,18 @@ import type {
   Page,
 } from "@playwright/test";
 
-import { signInTo } from "./people.ts";
+import { seedConnections } from "./connections-seed.ts";
+import { signInRetry, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
+
+/**
+ * A retry's own cast, signed in before the test (`signInRetry`); a first
+ * attempt's the global setup signed in. A file whose `beforeAll` looks
+ * people up calls `signInRetry` there, as it runs before any fixture.
+ */
+export const retryCast = async (): Promise<void> => {
+  await signInRetry(seedConnections);
+};
 
 /**
  * Playwright's `test`, with the browser contexts a test opens beyond its
@@ -17,6 +27,8 @@ import type { Person } from "./people.ts";
  * into later tests (a person's watch caps, "signed in elsewhere" fences).
  */
 export const test = base.extend<{
+  /** The attempt, its cast signed in before the test (`retryCast`). */
+  cast: number;
   /** A browser context of the test's own, closed when the test ends. */
   newContext: (options?: BrowserContextOptions) => Promise<BrowserContext>;
   /**
@@ -25,6 +37,14 @@ export const test = base.extend<{
    */
   pageOf: (person: Person, options?: BrowserContextOptions) => Promise<Page>;
 }>({
+  cast: [
+    // oxlint-disable-next-line no-empty-pattern -- Playwright reads a fixture's dependencies from its first parameter's pattern, and this one has none
+    async ({}, provide, testInfo) => {
+      await retryCast();
+      await provide(testInfo.retry);
+    },
+    { auto: true },
+  ],
   newContext: async ({ browser }, provide) => {
     const opened: BrowserContext[] = [];
     await provide(async (options) => {

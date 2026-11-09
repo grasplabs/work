@@ -8,8 +8,10 @@ import {
   testTokenKey,
 } from "./e2e/people.ts";
 import {
+  coreInspectorPort,
   corePort,
   connectConfig,
+  idpInspectorPort,
   idpOrigin,
   idpPort,
   modelFakePort,
@@ -196,7 +198,7 @@ export default defineConfig({
         "node e2e/connect-config.ts &&",
         // The dir comes from `env` below, so no path is ever shell syntax.
         'rm -rf "$DEV_PERSIST_TO" &&',
-        `vp run --filter @grasp-os/core ${prebuilt ? "dev:serve" : "dev"} --local --port ${corePort}`,
+        `vp run --filter @grasp-os/core ${prebuilt ? "dev:serve" : "dev"} --local --port ${corePort} --inspector-port ${coreInspectorPort}`,
         devVar("BETTER_AUTH_SECRET", testAuthSecret),
         ...Object.entries(localSignIn(origin, idpOrigin)).map(([name, value]) =>
           devVar(
@@ -246,7 +248,7 @@ export default defineConfig({
     },
     // Stands in for the client's Entra tenant.
     {
-      command: `node_modules/.bin/wrangler dev -c apps/core/test/idp.wrangler.jsonc --port ${idpPort}`,
+      command: `node_modules/.bin/wrangler dev -c apps/core/test/idp.wrangler.jsonc --port ${idpPort} --inspector-port ${idpInspectorPort}`,
       port: idpPort,
       reuseExistingServer: false,
       timeout: 60_000,

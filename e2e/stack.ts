@@ -9,27 +9,27 @@ import path from "node:path";
 const root = path.join(import.meta.dirname, "..");
 
 /**
- * Ports from 20000 up, three per checkout, picked by its path: parallel
+ * Ports from 20000 up, five per checkout, picked by its path: parallel
  * worktrees each get their own, and none is dev's (8787 and 8788). Two
- * checkouts that land on the same three fail loudly, as Playwright never
+ * checkouts that land on the same five fail loudly, as Playwright never
  * reuses a server (playwright.config.ts); `E2E_PORT` then moves one.
  */
 const firstPort = 20_000;
-const portTriples = 5000;
-const portsEach = 3;
+const portBlocks = 3000;
+const portsEach = 5;
 const hashed =
   firstPort +
   portsEach *
-    (createHash("sha256").update(root).digest().readUInt32BE(0) % portTriples);
+    (createHash("sha256").update(root).digest().readUInt32BE(0) % portBlocks);
 
 const portOf = (value: string | undefined): number => {
   if (value === undefined) {
     return hashed;
   }
   const port = Number(value);
-  if (!Number.isInteger(port) || port < 1024 || port > 65_533) {
+  if (!Number.isInteger(port) || port < 1024 || port > 65_531) {
     throw new Error(
-      `E2E_PORT must be a port from 1024 to 65533, not "${value}"`
+      `E2E_PORT must be a port from 1024 to 65531, not "${value}"`
     );
   }
   return port;
@@ -39,6 +39,13 @@ export const corePort = portOf(process.env.E2E_PORT);
 export const idpPort = corePort + 1;
 /** The fake AI providers' (e2e/model-fake.ts). */
 export const modelFakePort = corePort + 2;
+/**
+ * Each wrangler's inspector: core's (with connect's), and the IdP's. Left
+ * to wrangler, both took the first free port from 9229 as they started at
+ * once, and one then found it taken (November 2026).
+ */
+export const coreInspectorPort = corePort + 3;
+export const idpInspectorPort = corePort + 4;
 
 export const origin = `http://localhost:${corePort}`;
 export const idpOrigin = `http://localhost:${idpPort}`;
