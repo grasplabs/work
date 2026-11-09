@@ -61,18 +61,18 @@ const person = async (role: Role): Promise<Identity> => {
 };
 
 /**
- * A definition: its bindings, its input `{ who }` (`who`'s schema), its
+ * A definition: its permissions, its input `{ who }` (`who`'s schema), its
  * steps (one titled `label` unless given), and its output `{ status }`.
  */
 const definitionOf = (
   label: string,
   {
-    bindings,
+    permissions,
     who = { kind: "string" },
     steps = [passing("echo", label)],
     status = { $expr: "args.who" },
   }: {
-    bindings?: Record<string, unknown>;
+    permissions?: Record<string, unknown>;
     who?: Record<string, unknown>;
     steps?: unknown[];
     status?: unknown;
@@ -83,7 +83,7 @@ const definitionOf = (
     args: objectSchema({ who }),
     returns: objectSchema({ status: { kind: "string" } }),
     result: { status },
-    ...(bindings === undefined ? {} : { bindings }),
+    ...(permissions === undefined ? {} : { permissions }),
     steps,
   });
 

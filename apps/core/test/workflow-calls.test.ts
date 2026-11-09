@@ -2348,7 +2348,7 @@ describe("model resources of a workflow's own actions", () => {
       withinRequests: 1,
       refusedAtLimit: [
         {
-          call: "writer",
+          call: "ai",
           reason: "model_call_limit",
           errorCode: "workflow.model_call_limit",
         },

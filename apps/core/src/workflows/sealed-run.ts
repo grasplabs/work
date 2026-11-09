@@ -20,6 +20,7 @@ import {
 import {
   executionErrors,
   expressionErrors,
+  expressionFailed,
   paramsStep,
   placeholderOf,
   stepIdempotencyKey,
@@ -1432,6 +1433,16 @@ class SealedRun implements SealedRunKind {
     const raised = raisedFailure(this.run.build, error);
     if (raised !== undefined) {
       return raised;
+    }
+    if (error.code === undefined && error.name !== "TimeoutError") {
+      // A failure of the build's code itself, outside any step: the only
+      // code of it that can throw is an expression's (a field of `null`
+      // read, say), in the platform's words, never the error's own.
+      return {
+        name: "Error",
+        message: expectedMessageOf(expressionFailed) ?? taskFailed,
+        code: expressionFailed,
+      };
     }
     return isAppErrorCode(error.code) ? isolateFailure(error) : error;
   }

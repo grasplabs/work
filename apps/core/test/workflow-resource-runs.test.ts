@@ -44,11 +44,7 @@ import {
 } from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
-import {
-  endLiveResourceRuns,
-  objectSchema,
-  passing,
-} from "./json-workflow-apps.ts";
+import { endLiveResourceRuns, objectSchema } from "./json-workflow-apps.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { aroundEngine, runObject, whileEngineRefuses } from "./runs.ts";
@@ -97,7 +93,8 @@ const definitionOf = (
   JSON.stringify({
     $schema: workflowSchemaUrl,
     args: objectSchema({ who: { kind: "string" } }),
-    output: { schema: objectSchema(output), value },
+    returns: objectSchema(output),
+    result: value,
     params: {
       greeting: {
         label: "Greeting",
@@ -1455,13 +1452,15 @@ const loadWaitsOf = async (id: string | null): Promise<number> =>
         .one().waits
   );
 
-/** An `if` step `id` deciding on its input: one step, and no call. */
+/**
+ * A step `id` that records one thing and calls nothing: a wait until a
+ * deadline long past, its enter step one attempt (an `if` has no step of
+ * its own).
+ */
 const deciding = (id: string) => ({
   id,
-  type: "if",
-  condition: { $expr: 'args.who !== ""' },
-  // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
-  then: [],
+  type: "wait",
+  until: { $expr: "0" },
 });
 
 /**
@@ -1478,13 +1477,13 @@ const greetThenCall = definitionOf([deciding("greet"), deciding("call")], {
  * engine fences it.
  */
 const hangingModule = moduleOf(`
-await step.do("finish", { key: "task", description: "finish" }, async () => await new Promise(() => {}));
+await step.do("finish", { key: "enter", description: "finish" }, async () => await new Promise(() => {}));
 return { status: "never" };`);
 
 /** The receipt of run `id`'s attempt at `hangingModule`'s step. */
 const heldBy = async (id: string | null) => {
   const receipts = await receiptsOf(id);
-  return receipts.find(({ key }) => stepOfKey(key) === "finish:task");
+  return receipts.find(({ key }) => stepOfKey(key) === "finish:enter");
 };
 
 /**
@@ -1572,16 +1571,19 @@ describe(
         startedWithRun: true,
         usedAsSettled: true,
         // Its parameters' step, each of its own, and its output's.
-        receipts: ["$params", "greet:task", "call:task", "workflow:output"].map(
-          (step) => ({
-            step,
-            attempt: 1,
-            root: runId,
-            settled: 1,
-            hostCalls: 0,
-            resource: `workflow-resource:${workflow.id}`,
-          })
-        ),
+        receipts: [
+          "$params",
+          "greet:enter",
+          "call:enter",
+          "workflow:output",
+        ].map((step) => ({
+          step,
+          attempt: 1,
+          root: runId,
+          settled: 1,
+          hostCalls: 0,
+          resource: `workflow-resource:${workflow.id}`,
+        })),
       });
     });
 
@@ -1589,7 +1591,7 @@ describe(
       const by = await builder();
       const workflow = await published(by, greetThenCall);
       const result = await withCpuKills(
-        "greet:task",
+        "greet:enter",
         () => true,
         async () => {
           const { runId } = await start(by, workflow.id);
@@ -1675,7 +1677,7 @@ describe(
       const admittedAt = Date.now();
       await env.DB.batch([
         env.DB.prepare(
-          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'call:task', 9, 1, ?, ?, ?, ?)"
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'call:enter', 9, 1, ?, ?, ?, ?)"
         ).bind(runId, runId, reserved, admittedAt + reserved, admittedAt),
         env.DB.prepare(
           "UPDATE run_lineages SET active_held_ms = active_held_ms + ? WHERE root_run_id = ?"
@@ -1697,7 +1699,7 @@ describe(
 
     it("holds an attempt while every slot is taken, and runs it once a stopped run's attempt gives its slot back, charged up to its deadline", async () => {
       const by = await builder();
-      const hanging = await published(by, definitionOf([passing("finish")]));
+      const hanging = await published(by, definitionOf([deciding("finish")]));
       await forgedModule(hanging.id, hangingModule);
       const workflow = await published(by, greetThenCall);
       const result = await withQuotas(
@@ -1788,11 +1790,11 @@ describe(
 
     it("fails a task that answers a value shaped as core's wait for load, rather than wait on it", async () => {
       const by = await builder();
-      const workflow = await published(by, definitionOf([passing("finish")]));
+      const workflow = await published(by, definitionOf([deciding("finish")]));
       await forgedModule(
         workflow.id,
         moduleOf(
-          'return await step.do("finish", { key: "task", description: "finish" }, async () => ({ "$grasp:busy": 1, "$grasp:busyMaxMs": 86400000 }));'
+          'return await step.do("finish", { key: "enter", description: "finish" }, async () => ({ "$grasp:busy": 1, "$grasp:busyMaxMs": 86400000 }));'
         )
       );
       const { runId } = await start(by, workflow.id);
