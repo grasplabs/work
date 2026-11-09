@@ -308,6 +308,9 @@ peerDependencyRules:
 # more Proxy on every construction (0.23.0 too); with `isolate: false`, a
 # shard that constructs about 1,800 objects of one class overflows the
 # stack, and every file after fails (GRA-972). The patch wraps it once.
+# It likewise patches a worker's module runner once, not once more per
+# file it runs, which slowed every module load of a worker's later files.
+# Both are fixed in @cloudflare/vitest-plugin, the pool's new name.
 patchedDependencies:
   "@cloudflare/vitest-pool-workers@0.22.0": patches/@cloudflare__vitest-pool-workers@0.22.0.patch
   miniflare@5.20261023.1-beta: patches/miniflare@5.20261023.1-beta.patch
