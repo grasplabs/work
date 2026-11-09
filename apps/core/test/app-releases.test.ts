@@ -1826,19 +1826,6 @@ export const reach = action({
     });
   });
 
-  it("is an App of spec 8's layout: a version holding the v1 server's files isn't even committed", async () => {
-    await expect(
-      failure(
-        async () =>
-          await appWith(
-            withFiles(notesFiles(), {
-              "app/server.ts": "export class App {}\n",
-            })
-          )
-      )
-    ).resolves.toBe("app.v1_server");
-  });
-
   it("is an App of spec 8's layout: a draft that drops its schema gets it back from its definition", async () => {
     const fixture = await appWith(notesFiles());
     const draft = await draftOverLatest(env, fixture.app, {

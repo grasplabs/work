@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { generateKeyPair } from "jose";
 import {
   afterEach,
   beforeEach,
@@ -19,6 +20,7 @@ import {
   onRoster,
   post,
   reached,
+  signed,
   teamsPerson,
   toMicrosoft,
   watched,
@@ -130,6 +132,35 @@ describe("a request Teams didn't send for this client", () => {
       activities: [],
       asked: [],
     });
+  });
+
+  it("is refused with a token Microsoft didn't sign, and nothing is read or sent", async () => {
+    const { teams } = await member(idp);
+    const { privateKey } = await generateKeyPair("RS256");
+
+    await expect(
+      post(messageFrom(teams), {
+        authorization: `Bearer ${await signed({ key: privateKey })}`,
+      })
+    ).resolves.toBe(401);
+
+    await expect(kept(teams.conversation)).resolves.toStrictEqual([]);
+    await expect(reached(teams.conversation)).resolves.toMatchObject({
+      activities: [],
+      asked: [],
+    });
+  });
+
+  it("is refused with a token for another bot", async () => {
+    const { teams } = await member(idp);
+
+    await expect(
+      post(messageFrom(teams), {
+        authorization: `Bearer ${await signed({ claims: { aud: "another-bot" } })}`,
+      })
+    ).resolves.toBe(401);
+
+    await expect(kept(teams.conversation)).resolves.toStrictEqual([]);
   });
 
   it("is refused from another tenant, and nothing is read or sent", async () => {

@@ -9,8 +9,7 @@ import { signedInApi, unique } from "./sign-in.ts";
 import { member, messageFrom, post, reached } from "./teams-door.ts";
 
 // A Teams turn that held writes, its card, and presses on it, as Teams
-// sends them, for the press's tests (channels-press.test.ts) and the
-// door's security suite (teams-security.test.ts).
+// sends them, for the press's tests (channels-press.test.ts).
 
 /**
  * A member whose Teams turn held two mails, to Ben then to Cleo, on a mail
