@@ -1020,7 +1020,7 @@ describe("Knowledge usage signals", () => {
                 !(search && step.includes("TEMP B-TREE")) &&
                 !(
                   search &&
-                  /^SCAN (?:early|matches|found|present|scored|ranked|top)\b/u.test(
+                  /^SCAN (?:early|matches|found|present|looked|scored|ranked|top)\b/u.test(
                     step
                   )
                 )

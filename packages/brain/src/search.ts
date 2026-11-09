@@ -306,7 +306,9 @@ const matchesSql = ({ table, pass, match, short }: Pass, gate?: SQL): SQL => {
  * is what its lookups add up to. Asking each row whether it holds a word
  * reads the word's whole posting list for every row, so a word in
  * thousands of sections cost a scan of the index per section (GRA-1668).
- * A pass none of `found` is from isn't asked at all.
+ * A pass none of `found` is from isn't asked at all, and only the rows of
+ * `found` are added up: the unary `+` keeps that filter off the index, so
+ * SQLite can't turn it back into a lookup per row.
  */
 const weightsSql = (passes: readonly Pass[], found: string): SQL => {
   const from = sql.identifier(found);
@@ -321,7 +323,8 @@ const weightsSql = (passes: readonly Pass[], found: string): SQL => {
       WHERE ${name} MATCH json_extract(asked.value, '$[0]')`;
   });
   return sql`SELECT row_id, pass, sum(score) AS score, sum(own) AS own
-    FROM (${sql.join(lookups, sql` UNION ALL `)})
+    FROM (${sql.join(lookups, sql` UNION ALL `)}) AS looked
+    WHERE (+looked.row_id, looked.pass) IN (SELECT row_id, pass FROM ${from})
     GROUP BY row_id, pass`;
 };
 

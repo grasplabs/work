@@ -537,10 +537,6 @@ interface Bound {
 }
 
 /**
- * What D1's `first` answers of a statement's `results`: its first row, or
- * that row's `column`, or `null` when there is none.
- */
-/**
  * Most rows a search reads for each section a common word is in: about 28
  * as it ranks them now (matched, joined to its document, scored, sorted).
  * Looking each section's words up one by one read about 67, and took
@@ -548,6 +544,10 @@ interface Bound {
  */
 const rowsPerCommonMatch = 40;
 
+/**
+ * What D1's `first` answers of a statement's `results`: its first row, or
+ * that row's `column`, or `null` when there is none.
+ */
 const firstOf = (
   results: Record<string, unknown>[],
   column?: string
