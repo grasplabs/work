@@ -2,11 +2,14 @@
  * The split between CI's shards (test-shards.ts): every file runs exactly
  * once, the same way on every runner, and the long files spread out.
  */
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   concurrentFiles,
-  firstShardFiles,
+  installsOffline,
   projectStartSeconds,
   shardSeconds,
   splitIntoShards,
@@ -116,7 +119,7 @@ describe("splitting the test files between shards", () => {
   });
 
   it("runs the files that install offline from pnpm's store in the first shard, whatever their time", () => {
-    const [offline = ""] = firstShardFiles;
+    const offline = "scripts scripts/package-definition.test.ts";
     const files = [
       ...suite,
       file(offline, 1),
@@ -132,8 +135,23 @@ describe("splitting the test files between shards", () => {
     }
   });
 
+  it("knows every test file that installs offline from pnpm's store", () => {
+    const offlineFlag = ["--", "offline"].join("");
+    const installing = execFileSync(
+      "git",
+      ["grep", "-l", "-e", offlineFlag, "--", "*.test.ts"],
+      { cwd: path.join(import.meta.dirname, ".."), encoding: "utf-8" }
+    )
+      .split("\n")
+      .filter((each) => each !== "")
+      .map((each) => `scripts ${each}`);
+
+    expect(installing.length).toBeGreaterThan(0);
+    expect(installing.filter((key) => !installsOffline(key))).toStrictEqual([]);
+  });
+
   it("refuses a file that installs offline outside the first group", () => {
-    const [offline = ""] = firstShardFiles;
+    const offline = "scripts scripts/package-definition.test.ts";
 
     expect(() =>
       splitIntoShards([...suite, file(offline, 1, { group: 1 })], 4)

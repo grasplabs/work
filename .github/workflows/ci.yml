@@ -173,7 +173,7 @@ jobs:
           persist-credentials: false
       # pnpm's store only where a test installs offline from it: the first
       # shard holds every such file (scripts/test-shards.ts,
-      # `firstShardFiles`). The rest restore node_modules alone, 9 s sooner.
+      # `installsOffline`). The rest restore node_modules alone, 9 s sooner.
       - uses: ./.github/actions/setup
         with:
           store: ${{ matrix.shard == 1 }}

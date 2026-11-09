@@ -106,15 +106,15 @@ const unitsOf = (files: readonly ShardFile[]): ShardFile[][] => {
 };
 
 /**
- * Files that run in the first shard, whatever the split: those that
- * install offline from pnpm's store. CI restores the store, about 9 s of
- * a shard's setup, only in the first shard (.github/workflows/ci.yml,
- * `test`). Each must be in the tests' first group, whose first shard is
- * the run's first.
+ * The test files that install offline from pnpm's store, by `key`: they
+ * run in the first shard, whatever the split, as CI restores the store,
+ * about 9 s of a shard's setup, only there (.github/workflows/ci.yml,
+ * `test`). They must be in the tests' first group, whose first shard is
+ * the run's first. test-shards.test.ts checks that every test file that
+ * installs offline matches.
  */
-export const firstShardFiles: ReadonlySet<string> = new Set([
-  "scripts scripts/package-definition.test.ts",
-]);
+export const installsOffline = (key: string): boolean =>
+  /^scripts scripts\/package-definition[\w-]*\.test\.ts$/u.test(key);
 
 /** A unit by its first file's key, for an order that is the same on every runner. */
 const keyOfUnit = (unit: readonly ShardFile[]): string => unit[0]?.key ?? "";
@@ -131,7 +131,7 @@ export const spreadOver = (
   const shards: ShardFile[][] = Array.from({ length: count }, () => []);
   const units = unitsOf(files);
   const pinned = (unit: readonly ShardFile[]): boolean =>
-    unit.some(({ key }) => firstShardFiles.has(key));
+    unit.some(({ key }) => installsOffline(key));
   for (const unit of units.filter(pinned)) {
     shards[0]?.push(...unit);
   }
@@ -187,7 +187,7 @@ export const splitIntoShards = (
     );
   }
   const misplaced = files.filter(
-    ({ key, group }) => firstShardFiles.has(key) && group !== order[0]
+    ({ key, group }) => installsOffline(key) && group !== order[0]
   );
   if (misplaced.length > 0) {
     throw new Error(
