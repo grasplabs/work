@@ -3,7 +3,7 @@
  * One run of the whole dev split, its three arms paired over two repeats,
  * took close to three minutes in CI: more than a shard should wait for one
  * file. So each part of the split's tasks runs in a file of its own
- * (brain-baseline-<n>.test.ts), on a company of its own, the whole suite
+ * (brain-baseline-<n>-of-4.test.ts), on a company of its own, the whole suite
  * loaded, updated window by window and pinned as in one run; and the
  * controls and durability cases, which run after the measured trials and
  * need none of them, run in brain-baseline.test.ts, which also checks that
@@ -13,8 +13,10 @@
  * one at a time: a part holds the gate alone as it did beside the others.
  * The comparisons are paired by task, so each part pairs its own tasks.
  */
-import { expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
+import { filePart } from "../../../scripts/test-file-parts.ts";
+import type { FilePart } from "../../../scripts/test-file-parts.ts";
 import {
   brainArms,
   runBrainBaseline,
@@ -27,6 +29,7 @@ import {
   brainSuiteVersion,
   brainTasks,
 } from "./fixtures/brain-tasks.ts";
+import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
 
 export const repeats = 2;
@@ -41,7 +44,7 @@ export const revocationTasks = [
 ];
 
 /**
- * The parts of the dev split, a file each (brain-baseline-<n>.test.ts),
+ * The parts of the dev split, a file each (brain-baseline-<n>-of-4.test.ts),
  * of eight or nine tasks. Each part is the whole split in small, so each
  * holds its arms to the budgets as the whole run did: a task its person
  * may not read; one asking what changed (corrected, withdrawn, removed or
@@ -151,14 +154,33 @@ const tally = (values: readonly string[]): Record<string, number> =>
   );
 
 /**
- * What part `part` (counted from 1) of the baseline must show of its own
- * tasks, from a run of them on a company of its own.
+ * The part of the baseline the file `file` (a path or URL) runs, from its
+ * own name: `brain-baseline-<part>-of-<parts>.test.ts`
+ * (scripts/test-file-parts.ts), `parts` the number of
+ * `brainBaselineParts`. brain-baseline.test.ts reads every such file's
+ * name and checks that together they measure the whole split, each task
+ * once.
  */
-export const baselinePartTests = (idp: Idp, part: number): void => {
-  const tasks: readonly string[] | undefined = brainBaselineParts.at(part - 1);
-  if (tasks === undefined) {
-    throw new RangeError(`The baseline has no part ${part}`);
+export const baselinePart = (
+  file: string
+): FilePart & { tasks: readonly string[] } => {
+  const named = filePart(file);
+  const { run, part, parts } = named;
+  const tasks = brainBaselineParts.at(part - 1);
+  if (
+    run !== "brain-baseline" ||
+    parts !== brainBaselineParts.length ||
+    tasks === undefined
+  ) {
+    throw new RangeError(
+      `${run}-${part}-of-${parts} isn't a part of the baseline: brain-baseline-<part>-of-${brainBaselineParts.length}.test.ts`
+    );
   }
+  return { ...named, tasks };
+};
+
+/** What a part of the baseline, `tasks`, must show of them. */
+const baselinePartTests = (idp: Idp, tasks: readonly string[]): void => {
   const run = brainBaselineRun(idp, { tasks });
   // In the suite's order, as the run takes them.
   const measured = brainTasks.filter(({ id }) => tasks.includes(id));
@@ -372,4 +394,21 @@ export const baselinePartTests = (idp: Idp, part: number): void => {
       background: { missed: [] },
     });
   });
+};
+
+/**
+ * What a part of the baseline must show of its own tasks, from a run of
+ * them on a company of its own: the part the file `file` (its
+ * `import.meta.url`) names (`baselinePart`).
+ */
+export const baselinePartFile = (file: string): void => {
+  const { part, parts, tasks } = baselinePart(file);
+  const idp = mockIdp();
+  describe(
+    `the Brain baseline: part ${part} of ${parts}`,
+    { timeout: baselineTimeout },
+    () => {
+      baselinePartTests(idp, tasks);
+    }
+  );
 };

@@ -2,10 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   brainScaleRun,
+  scaleArmPart,
   scaleArmTests,
   scaleChunks as chunks,
-  scaleHalves,
   scaleTimeout,
+  truncatedShareOf,
 } from "./brain-scale-arm.ts";
 import { distractorDigest, distractorLeaksIn } from "./brain-scale.ts";
 import { normalized } from "./brain-scoring.ts";
@@ -27,11 +28,12 @@ import { mockIdp } from "./idp.ts";
 // The Brain baseline at scale (GRA-678) as CI runs it: the smallest scale
 // size, the frozen company grown by 1,000 generated distractor chunks, the
 // dev split's three arms over a cold and a warm repeat, each arm in parts,
-// a file each (brain-scale-arm.ts says why): full text's first half here,
-// with the distractors' generator, the run's identity and build, and the
-// control; its second half in brain-scale-2.test.ts, the agent's in
-// brain-scale-agent*.test.ts, full context's in
-// brain-scale-full-context*.test.ts. Its gate reads Knowledge as the larger
+// a file each, named for its arm and part (brain-scale-arm.ts says why):
+// full text's first half here, with the distractors' generator, the run's
+// identity and build, and the control; its second half in
+// brain-scale-full-text-2-of-2.test.ts, the agent's in
+// brain-scale-agent-*.test.ts, full context's in
+// brain-scale-full-context-*.test.ts. Its gate reads Knowledge as the larger
 // sizes do, by each table's row count (every row, twice a trial, would take
 // hours there), and a control shows that this still catches a change to
 // Knowledge; core, R2 and the Workspace object are read row by row at
@@ -41,11 +43,11 @@ import { mockIdp } from "./idp.ts";
 
 const idp = mockIdp();
 
-// Full text's first half: the second is brain-scale-2.test.ts.
-const [tasks = []] = scaleHalves;
+// The arm and part this file's name says: full text's first half.
+const here = scaleArmPart(import.meta.url);
 
 // The control runs after the arm's trials, as it ran after all three.
-const run = brainScaleRun(idp, "fullText", tasks, {
+const run = brainScaleRun(idp, here.arm, here.tasks, {
   controls: ["changesKnowledge"],
   controlTasks: ["dev-fleet-size"],
 });
@@ -105,8 +107,8 @@ describe("the Brain baseline at scale", { timeout: scaleTimeout }, () => {
     });
   });
 
-  describe("full text", () => {
-    scaleArmTests("fullText", tasks, run, 0);
+  describe(`${here.arm}, part ${here.part} of ${here.parts}`, () => {
+    scaleArmTests(here.arm, here.tasks, run, truncatedShareOf(here.arm));
   });
 
   it("would see a change to Knowledge by its row counts alone", async () => {

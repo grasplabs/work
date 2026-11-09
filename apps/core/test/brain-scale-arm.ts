@@ -6,16 +6,18 @@
  * company of its own: one run of all three took over three minutes in CI,
  * a shard's floor (GRA-1094), and one arm alone up to a minute and a half.
  * So each arm's tasks run in parts, the baseline's
- * (brain-baseline-parts.ts): full text's and the agent's in halves
- * (brain-scale.test.ts and brain-scale-2.test.ts, brain-scale-agent.test.ts
- * and brain-scale-agent-2.test.ts), full context's, whose every question
- * reads every document, in quarters (brain-scale-full-context.test.ts and
- * brain-scale-full-context-2.test.ts to -4). The trials don't share state:
- * each checks that its own trial left every stored row as it found it, so
- * each part holds its gate alone as it did beside the others.
+ * (brain-baseline-parts.ts), a file each named for its arm and part
+ * (`scaleArmPart`): full text's and the agent's in halves
+ * (brain-scale-full-text-1-of-2.test.ts and -2-of-2,
+ * brain-scale-agent-1-of-2.test.ts and -2-of-2), full context's, whose
+ * every question reads every document, in quarters
+ * (brain-scale-full-context-1-of-4.test.ts to -4-of-4). The trials don't
+ * share state: each checks that its own trial left every stored row as it
+ * found it, so each part holds its gate alone as it did beside the others.
  */
-import { expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
+import { filePart, partOf } from "../../../scripts/test-file-parts.ts";
 import { brainBaselineParts } from "./brain-baseline-parts.ts";
 import { setUpBrainCompany } from "./brain-harness.ts";
 import type { BrainArm, BrainControl } from "./brain-harness.ts";
@@ -28,6 +30,7 @@ import {
   brainScaleSizes,
   distractorReaders,
 } from "./fixtures/brain-distractors.ts";
+import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
 
 /** Distractor chunks: the smallest scale size. */
@@ -35,16 +38,42 @@ export const [scaleChunks] = brainScaleSizes;
 
 const repeats = 2;
 
-const [first, second, third, fourth] = brainBaselineParts;
+/** Each arm by the words a file's name has for it. */
+const armsByName: Readonly<Record<string, BrainArm>> = {
+  "full-text": "fullText",
+  agent: "agent",
+  "full-context": "fullContext",
+};
 
-/** The dev split in halves, two of the baseline's parts each. */
-export const scaleHalves: readonly (readonly string[])[] = [
-  [...first, ...second],
-  [...third, ...fourth],
-];
+/** A file's part of an arm's scale run, which its name says. */
+export interface ScaleArmPart {
+  arm: BrainArm;
+  part: number;
+  parts: number;
+  tasks: readonly string[];
+}
 
-/** The dev split in quarters: the baseline's parts. */
-export const scaleQuarters: readonly (readonly string[])[] = brainBaselineParts;
+/**
+ * The part of an arm's scale run the file `file` (a path or URL) runs,
+ * from its own name (scripts/test-file-parts.ts):
+ * `brain-scale-<full-text|agent|full-context>-<part>-of-<parts>.test.ts`.
+ * Its tasks are that part of the baseline's
+ * parts (brain-baseline-parts.ts), whole parts in order: of four, a half
+ * is two. Throws on a name of no arm, or a part that would hold no task.
+ * brain-baseline.test.ts reads every such file's name and checks that
+ * together they run each arm on the whole split, each task once.
+ */
+export const scaleArmPart = (file: string): ScaleArmPart => {
+  const { run, part, parts } = filePart(file);
+  const arm = armsByName[run.replace(/^brain-scale-/u, "")];
+  if (arm === undefined || !run.startsWith("brain-scale-")) {
+    throw new Error(
+      `${run} names no arm: brain-scale-<${Object.keys(armsByName).join("|")}>-<part>-of-<parts>.test.ts`
+    );
+  }
+  const tasks = partOf(brainBaselineParts, { part, parts }).flat();
+  return { arm, part, parts, tasks };
+};
 
 /** The arms whose sources come from a search: the agent's and full text's. */
 const searchingArms: ReadonlySet<BrainArm> = new Set(["agent", "fullText"]);
@@ -145,19 +174,31 @@ export const scaleArmTests = (
 };
 
 /**
- * A file's part of `arm`'s scale run: `part` (counted from 1) of `parts`,
- * on a company of its own, held to what every arm must show.
+ * How often an arm's context is truncated at the scale size: full
+ * context's on every trial, every person reading more than its budget
+ * holds; the searching arms' never.
  */
-export const scaleArmPart = (
-  idp: Idp,
-  arm: BrainArm,
-  parts: readonly (readonly string[])[],
-  part: number,
-  truncatedShare: number
-): void => {
-  const tasks = parts.at(part - 1);
-  if (tasks === undefined) {
-    throw new RangeError(`The scale run has no part ${part}`);
-  }
-  scaleArmTests(arm, tasks, brainScaleRun(idp, arm, tasks), truncatedShare);
+export const truncatedShareOf = (arm: BrainArm): number =>
+  searchingArms.has(arm) ? 0 : 1;
+
+/**
+ * The part of an arm's scale run the file `file` (its `import.meta.url`)
+ * names (`scaleArmPart`), on a company of its own, held to what every arm
+ * must show.
+ */
+export const scaleArmPartFile = (file: string): void => {
+  const { arm, part, parts, tasks } = scaleArmPart(file);
+  const idp = mockIdp();
+  describe(
+    `the Brain baseline at scale: ${arm}, part ${part} of ${parts}`,
+    { timeout: scaleTimeout },
+    () => {
+      scaleArmTests(
+        arm,
+        tasks,
+        brainScaleRun(idp, arm, tasks),
+        truncatedShareOf(arm)
+      );
+    }
+  );
 };

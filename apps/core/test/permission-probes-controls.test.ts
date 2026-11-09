@@ -40,9 +40,9 @@ import { watched } from "./teams-door.ts";
 // what it asks (permission-probing.ts).
 // Here: the probes are what the gate asks, and the files there are, read
 // by their names, share the members' between them: a file deleted or
-// renamed leaves probes unasked, and this fails. Controls show the same reads do reach what the
-// asker may read. Someone removed and a guest get one line, and nothing is
-// read.
+// renamed leaves probes unasked, and this fails. Controls show the same
+// reads do reach what the asker may read. Someone removed and a guest get
+// one line, and nothing is read.
 
 const idp = mockIdp();
 

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  baselinePart,
   baselineTimeout,
-  brainBaselineParts,
   brainBaselineRun,
   repeats,
   revocationTasks,
@@ -10,6 +10,7 @@ import {
 } from "./brain-baseline-parts.ts";
 import { brainArms, brainControls } from "./brain-harness.ts";
 import type { RecordedRequest } from "./brain-harness.ts";
+import { scaleArmPart } from "./brain-scale-arm.ts";
 import { brainProposedBudgets } from "./brain-scoring.ts";
 import { brainLanguages } from "./fixtures/brain-corpus.ts";
 import {
@@ -31,7 +32,8 @@ import { mockIdp } from "./idp.ts";
 // separate opt-in. The measured trials run in parts, a file each
 // (brain-baseline-parts.ts); this file runs the controls and the
 // durability cases, after no measured trial, on the suite as the last
-// window left it, and checks that the parts are the whole split. The
+// window left it, and checks that the parts' files, and the scale run's
+// (brain-scale-arm.ts), are the whole split. The
 // statistics have unit tests of their own (brain-scoring.test.ts), and the
 // suite's split rules theirs (brain-suite.test.ts).
 
@@ -90,8 +92,15 @@ const idsOf = (...families: string[]) =>
     .filter(({ family }) => families.includes(family))
     .map(({ id }) => id);
 
-/** Every task the parts measure, as many times as they do. */
-const partTasks: readonly string[] = brainBaselineParts.flat();
+/**
+ * The parts' files themselves, by name (Vite lists them without loading
+ * them), each with the part it runs: a file deleted or renamed leaves its
+ * tasks unmeasured, and the tests below fail.
+ */
+const partFiles = () =>
+  Object.keys(import.meta.glob("./brain-baseline-*-of-*.test.ts")).map((file) =>
+    baselinePart(file)
+  );
 
 describe("the Brain baseline", { timeout: baselineTimeout }, () => {
   it("would catch a leak and an unrequested change: its controls break the gate, whatever they answer", async () => {
@@ -352,6 +361,8 @@ describe("the Brain baseline", { timeout: baselineTimeout }, () => {
 
   it("measures the whole dev split in its parts, each task in one part, every family and language among them, and reports the probes it can't run yet", async () => {
     const { coverage } = await run();
+    // Every task the parts' files measure, as many times as they do.
+    const partTasks = partFiles().flatMap(({ tasks }) => tasks);
     const current = idsOf(
       "correction",
       "withdrawal",
@@ -386,9 +397,28 @@ describe("the Brain baseline", { timeout: baselineTimeout }, () => {
     });
   });
 
+  // The scale run's parts are the baseline's (brain-scale-arm.ts), so
+  // they're checked here, in a file that is none of them: deleting or
+  // renaming one leaves its tasks unrun in its arm, and this fails.
+  it("runs every arm of the scale run on the whole split in the scale run's files, each task once an arm", () => {
+    const scaleFiles = Object.keys(
+      import.meta.glob("./brain-scale-*-of-*.test.ts")
+    ).map((file) => scaleArmPart(file));
+    expect(
+      brainArms.map((arm) =>
+        scaleFiles
+          .filter((file) => file.arm === arm)
+          .flatMap(({ tasks }) => tasks)
+          .toSorted()
+      )
+    ).toStrictEqual(
+      brainArms.map(() => devTasks.map(({ id }) => id).toSorted())
+    );
+  });
+
   it("measures every proposed budget in some part: what one part's tasks can't measure, another's do", () => {
     // Each part's file holds its arms to exactly these (`unmeasuredIn`).
-    const unmeasured = brainBaselineParts.map((tasks) => unmeasuredIn(tasks));
+    const unmeasured = partFiles().map(({ tasks }) => unmeasuredIn(tasks));
     expect(
       brainProposedBudgets
         .map(({ name }) => name)
