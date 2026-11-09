@@ -373,7 +373,8 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
         ...files.files,
         "server/notes.ts": (files.files["server/notes.ts"] ?? "").replace(
           'ctx.db.query("notes").take(100)',
-          'ctx.db.query("notes").take(1000)'
+          // A count that isn't a number: it fails its type check.
+          'ctx.db.query("notes").take("all")'
         ),
       },
       [],
@@ -398,19 +399,17 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       })
       .parse(refused);
 
-    // The type error names the limit, and what to use past it.
+    // The type error says what the count must be.
     expect({
       code: details.code,
       files: details.details.diagnostics.map(({ file }) => file),
-      namesLimit: details.details.diagnostics.some(({ message }) =>
-        message.includes(
-          "take() returns 0 to 100 records: use paginate() for more"
-        )
+      namesType: details.details.diagnostics.some(({ message }) =>
+        message.includes("'number'")
       ),
     }).toStrictEqual({
       code: "version.build_failed",
       files: ["server/notes.ts"],
-      namesLimit: true,
+      namesType: true,
     });
   });
 
