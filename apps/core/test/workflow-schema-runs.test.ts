@@ -919,8 +919,9 @@ describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
       retryReadsThePage: retriedThenCaught,
       catchReadsThePage: retriedThenCaught,
       catchDeclines: {
-        ran: failedWith("workflow.compute_failed"),
-        guarded: { decided: 1, retried: 0, failed: 1, told: false },
+        ran: failedWith("connect.server_unavailable"),
+        // The engine's three tries of the step, never a round.
+        guarded: { decided: 1, retried: 0, failed: 3, told: false },
       },
     });
   });
