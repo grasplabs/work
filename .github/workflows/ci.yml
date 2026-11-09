@@ -289,8 +289,9 @@ jobs:
           retention-days: 14
       # The UI kit's browser tests (@grasp-os/ui:browser) save a screenshot
       # of each failing page, and what it attached: kept when the shard
-      # fails, else lost with the runner.
-      - if: failure()
+      # fails, else lost with the runner. Only the first shard runs them
+      # (scripts/test-shards.ts, `runsInFirstShard`).
+      - if: failure() && matrix.shard == 1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ui-browser-failures-${{ matrix.shard }}-of-${{ strategy.job-total }}
