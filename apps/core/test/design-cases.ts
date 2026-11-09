@@ -1,7 +1,7 @@
 // What the pages' own lint rules (packages/compiler/src/page-rules.ts)
 // say of an App's pages and components, alike in Grasp (Ultracite's lint,
 // page-checks.test.ts) and in an exported App's oxlint
-// (scripts/package-definition.test.ts):
+// (scripts/package-definition-tidy.test.ts):
 // - a plain <form>, which never submits in a page's frame, fails;
 // - a disable comment as oxlint writes it holds;
 // - a disable comment for another lint's rule, and an inline config
