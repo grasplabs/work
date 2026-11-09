@@ -9,6 +9,7 @@ import {
   checkedAlias,
   checkedConfig,
   checkedContract,
+  checkedActions,
   checkedList,
   checkedOrigins,
   declared,
@@ -122,7 +123,7 @@ export const permission = Object.freeze({
       "~permission": "connections",
       alias: checkedAlias(alias),
       contract: checkedContract(checked.contract),
-      actions: checkedList(checked.actions, "actions"),
+      actions: checkedActions(checked.actions),
     }) as ConnectionPermission<Alias, Contract, Actions>;
   },
   /** Some operations on some of the Brain's collections. An App holds one (`ctx.brain`). */

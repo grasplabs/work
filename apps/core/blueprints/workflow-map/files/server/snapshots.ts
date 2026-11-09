@@ -193,8 +193,7 @@ export const take = action({
     const now = new Date();
     const frozen = await freeze(
       read,
-      async (statisticQuery) =>
-        await ctx.grasp.call("statistics.read", statisticQuery),
+      async (statisticQuery) => await ctx.grasp.statistics.read(statisticQuery),
       now.toISOString()
     );
     const takeId = crypto.randomUUID();

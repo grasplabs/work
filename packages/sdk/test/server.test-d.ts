@@ -345,14 +345,14 @@ granted.action({
     ).resolves.toEqualTypeOf<Id<"notes">>();
     // Internal functions of the App are its own server code's to call.
     expectTypeOf(ctx.runQuery(secret, {})).resolves.toEqualTypeOf<string>();
-    await ctx.connections.mail.call("send", {
+    await ctx.connections.mail.send({
       mailbox: "team@acme.test",
       subject: "Hello",
       body: "Hi.",
       to: [args.to],
     });
-    // @ts-expect-error -- an action the declaration doesn't list
-    await ctx.connections.mail.call("delete", {});
+    // An action the declaration doesn't list isn't a member.
+    expectTypeOf(ctx.connections.mail).not.toHaveProperty("delete");
     expectTypeOf(ctx.brain.search({ text: "a" })).resolves.toEqualTypeOf<
       { title: string; excerpt: string }[]
     >();

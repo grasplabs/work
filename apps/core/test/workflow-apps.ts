@@ -135,7 +135,7 @@ import { invoice, outcome, send } from "./effects.ts";
 export const mail = action({
   args: {},
   returns: v.string(),
-  handler: async (ctx) => JSON.stringify(await outcome(async () => await ctx.connections.send.call("MAIL_SEND", invoice))),
+  handler: async (ctx) => JSON.stringify(await outcome(async () => await ctx.connections.send.MAIL_SEND(invoice))),
 });
 
 // As mail, naming a key of its own past the client's types: refused, as
@@ -146,11 +146,11 @@ export const mailOwnKey = action({
   handler: async (ctx) =>
     JSON.stringify(
       await outcome(async () => {
-        const call: unknown = Reflect.get(ctx.connections.send, "call");
-        if (typeof call !== "function") {
-          throw new TypeError("The client has no call");
+        const send: unknown = Reflect.get(ctx.connections.send, "MAIL_SEND");
+        if (typeof send !== "function") {
+          throw new TypeError("The client has no MAIL_SEND");
         }
-        return await Reflect.apply(call, ctx.connections.send, ["MAIL_SEND", invoice, { idempotencyKey: crypto.randomUUID() }]);
+        return await Reflect.apply(send, ctx.connections.send, [invoice, { idempotencyKey: crypto.randomUUID() }]);
       })
     ),
 });

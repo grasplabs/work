@@ -1,10 +1,12 @@
 // Compile-time guarantees of permissions (spec 12): a connection names a
 // generated contract of the release (the SDK's connector catalog,
 // `connector-catalog.gen.ts`) and some of its actions, and
-// `ctx.connections.<alias>.call(action, args)` then infers that action's
-// arguments and answer from the contract alone, without a cast or a
-// generic argument; the platform's functions are typed by what
-// `permission.grasp()` declares of them; `ctx.ai`, `ctx.brain`,
+// each declared action is then a member, `ctx.connections.<alias>.<action>(args)`,
+// whose arguments and answer come from the contract alone, without a cast
+// or a generic argument, and an undeclared one isn't a member; the
+// platform's functions are members of their namespace
+// (`ctx.grasp.statistics.read(args)`), typed by what `permission.grasp()`
+// declares of them; `ctx.ai`, `ctx.brain`,
 // `ctx.grasp` and `ctx.guests` are there only for an action of an App
 // that declares them. This file is type-checked by
 // `vp check` and never run: every `@ts-expect-error` below must stay an
@@ -52,7 +54,7 @@ expectTypeOf<ConnectorAction<"microsoft-365.mail@1">>().toEqualTypeOf<
 declare const ctx: ActionCtx<typeof mail | typeof gmail>;
 
 // Arguments as the contract takes them: optional fields may be left out.
-const sent = await ctx.connections.mail.call("send", {
+const sent = await ctx.connections.mail.send({
   mailbox: "team@acme.test",
   subject: "Hello",
   body: "Hi.",
@@ -60,7 +62,7 @@ const sent = await ctx.connections.mail.call("send", {
 });
 // The answer as the contract gives it, with no narrowing first.
 expectTypeOf(sent).toEqualTypeOf<{ mailbox: string; sent: true }>();
-await ctx.connections.mail.call("send", {
+await ctx.connections.mail.send({
   mailbox: "team@acme.test",
   subject: "Hello",
   body: "<p>Hi.</p>",
@@ -70,7 +72,7 @@ await ctx.connections.mail.call("send", {
 });
 
 // Each action has its own types, and so does each contract.
-const listed = await ctx.connections.mail.call("list", {
+const listed = await ctx.connections.mail.list({
   mailbox: "team@acme.test",
   top: 10,
 });
@@ -78,7 +80,7 @@ expectTypeOf(listed.nextPage).toEqualTypeOf<string | null>();
 expectTypeOf(listed.messages[0]?.subject).toEqualTypeOf<
   string | null | undefined
 >();
-const gmailSent = await ctx.connections.gmail.call("send", {
+const gmailSent = await ctx.connections.gmail.send({
   mailbox: "me",
   subject: "Hello",
   body: "Hi.",
@@ -86,7 +88,7 @@ const gmailSent = await ctx.connections.gmail.call("send", {
 });
 expectTypeOf(gmailSent.threadId).toEqualTypeOf<string | null>();
 expectTypeOf(
-  ctx.connections.gmail.call("labels", { mailbox: "me" })
+  ctx.connections.gmail.labels({ mailbox: "me" })
 ).resolves.toEqualTypeOf<{
   labels: { id: string; name: string; type: string | null }[];
   mailbox: string;
@@ -98,7 +100,7 @@ action({
   args: { to: v.string().email() },
   returns: v.string(),
   handler: async (context, args) => {
-    const answer = await context.connections.mail.call("send", {
+    const answer = await context.connections.mail.send({
       mailbox: "team@acme.test",
       subject: "Hello",
       body: "Hi.",
@@ -123,11 +125,13 @@ permission.connection("other", {
   actions: ["send"],
 });
 
-// Refused: an action the declaration doesn't list, though its contract has it.
-// @ts-expect-error -- `move` isn't declared
-await ctx.connections.mail.call("move", {});
+// Refused: an action the declaration doesn't list, though its contract has
+// it, isn't a member.
+expectTypeOf(ctx.connections.mail).not.toHaveProperty("move");
+// There's no `call`: each action is its own member.
+expectTypeOf(ctx.connections.mail).not.toHaveProperty("call");
 
-await ctx.connections.mail.call("send", {
+await ctx.connections.mail.send({
   mailbox: "team@acme.test",
   subject: "Hello",
   body: "Hi.",
@@ -135,12 +139,12 @@ await ctx.connections.mail.call("send", {
   to: "ada@acme.test",
 });
 // @ts-expect-error -- `to` is required
-await ctx.connections.mail.call("send", {
+await ctx.connections.mail.send({
   mailbox: "team@acme.test",
   subject: "Hello",
   body: "Hi.",
 });
-await ctx.connections.mail.call("send", {
+await ctx.connections.mail.send({
   mailbox: "team@acme.test",
   subject: "Hello",
   body: "Hi.",
@@ -148,7 +152,7 @@ await ctx.connections.mail.call("send", {
   // @ts-expect-error -- not a body type the contract has
   bodyType: "markdown",
 });
-await ctx.connections.mail.call("send", {
+await ctx.connections.mail.send({
   mailbox: "team@acme.test",
   subject: "Hello",
   body: "Hi.",
@@ -162,32 +166,6 @@ expectTypeOf(sent.threadId).toBeString();
 // @ts-expect-error -- `sent` is `true`, not a string
 expectTypeOf(sent.sent).toBeString();
 
-// An action known only as one of several: its arguments must fit
-// whichever it is, so arguments that fit only `list` are refused.
-declare const either: "send" | "list";
-// @ts-expect-error -- fits `list`, but not `send`
-await ctx.connections.mail.call(either, { mailbox: "team@acme.test" });
-// Narrowed, each branch is typed by its own action, and so is its answer.
-const answer =
-  either === "send"
-    ? await ctx.connections.mail.call(either, {
-        mailbox: "team@acme.test",
-        subject: "Hello",
-        body: "Hi.",
-        to: ["ada@acme.test"],
-      })
-    : await ctx.connections.mail.call(either, { mailbox: "team@acme.test" });
-expectTypeOf(answer).toExtend<
-  { mailbox: string; sent: true } | { nextPage: string | null }
->();
-// A literal action still infers that action alone, answer included.
-expectTypeOf(
-  ctx.connections.mail.call("list", { mailbox: "team@acme.test" })
-).resolves.toHaveProperty("messages");
-expectTypeOf(
-  ctx.connections.mail.call("list", { mailbox: "team@acme.test" })
-).resolves.not.toHaveProperty("sent");
-
 // A Composio toolkit's contract (`composio.<toolkit>@1`): its tools change
 // without a release, so it isn't in the catalog and its calls are untyped
 // JSON, checked by the host against the contract its binding pinned.
@@ -198,14 +176,55 @@ const crm = permission.connection("crm", {
 expectTypeOf<"composio.hubspot@1">().toExtend<ConnectorContract>();
 expectTypeOf<ConnectorAction<"composio.hubspot@1">>().toEqualTypeOf<string>();
 declare const crmCtx: ActionCtx<typeof crm>;
-const contacts = await crmCtx.connections.crm.call("HUBSPOT_LIST_CONTACTS", {
+const contacts = await crmCtx.connections.crm.HUBSPOT_LIST_CONTACTS({
   limit: 5,
 });
 expectTypeOf(contacts).toEqualTypeOf<JsonValue>();
 // @ts-expect-error -- arguments are a JSON object
-await crmCtx.connections.crm.call("HUBSPOT_LIST_CONTACTS", "all");
-// @ts-expect-error -- only the actions it declares
-await crmCtx.connections.crm.call("HUBSPOT_CREATE_CONTACT", {});
+await crmCtx.connections.crm.HUBSPOT_LIST_CONTACTS("all");
+// Only the actions it declares.
+expectTypeOf(crmCtx.connections.crm).not.toHaveProperty(
+  "HUBSPOT_CREATE_CONTACT"
+);
+
+// An action name with `-` is a camel-case member; the host still gets
+// the name as declared.
+const tools = permission.connection("tools", {
+  contract: "composio.tools@1",
+  actions: ["send-mail", "get-v2"],
+});
+declare const toolsCtx: ActionCtx<typeof tools>;
+expectTypeOf(
+  toolsCtx.connections.tools.sendMail({})
+).resolves.toEqualTypeOf<JsonValue>();
+expectTypeOf(toolsCtx.connections.tools.getV2).toBeFunction();
+expectTypeOf(toolsCtx.connections.tools).not.toHaveProperty("send-mail");
+
+// An HTTP connection is `fetch` alone, with only the methods its declared
+// actions allow: without `send`, no POST; without `get`, a method.
+const billing = permission.connection("billing", {
+  contract: "http.request@1",
+  actions: ["get"],
+});
+const webhook = permission.connection("webhook", {
+  contract: "http.request@1",
+  actions: ["send"],
+});
+declare const httpCtx: ActionCtx<typeof billing | typeof webhook>;
+expectTypeOf(
+  httpCtx.connections.billing.fetch("/v1/invoices")
+).resolves.toEqualTypeOf<Response>();
+await httpCtx.connections.billing.fetch("/v1/invoices", { method: "HEAD" });
+// @ts-expect-error -- `send` isn't declared
+await httpCtx.connections.billing.fetch("/v1/invoices", { method: "POST" });
+// It has no action members.
+expectTypeOf(httpCtx.connections.billing).not.toHaveProperty("get");
+await httpCtx.connections.webhook.fetch("/hooks", {
+  method: "POST",
+  body: "{}",
+});
+// @ts-expect-error -- `get` isn't declared, so the method is required
+await httpCtx.connections.webhook.fetch("/hooks");
 permission.connection("old", {
   // @ts-expect-error -- Composio contracts are generated at version 1 only
   contract: "composio.hubspot@2",
@@ -224,14 +243,17 @@ expectTypeOf(permission).not.toHaveProperty("app");
 // The platform's own read-only functions, under `grasp`.
 const grasp = permission.grasp();
 declare const graspCtx: ActionCtx<typeof grasp>;
-const runs = await graspCtx.grasp.call("statistics.read", {
+const runs = await graspCtx.grasp.statistics.read({
   measure: "platform.workflow_runs",
   days: 30,
   apps: ["app_1"],
   groupBy: ["app"],
 });
 expectTypeOf(runs.groups[0]?.count).toEqualTypeOf<number | undefined>();
-await graspCtx.grasp.call("statistics.read", {
+// Only the platform's functions are members, and there's no `call`.
+expectTypeOf(graspCtx.grasp.statistics).not.toHaveProperty("write");
+expectTypeOf(graspCtx.grasp).not.toHaveProperty("call");
+await graspCtx.grasp.statistics.read({
   // @ts-expect-error -- only the measures the platform publishes
   measure: "invoices_booked",
   days: 30,

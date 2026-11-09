@@ -80,7 +80,7 @@ export const send = action({
   args: { to: v.string().email(), subject: v.string().min(1) },
   returns: v.object({ mailbox: v.string(), sent: v.boolean() }),
   handler: async (ctx, args) => {
-    const sent = await ctx.connections.mail.call("send", {
+    const sent = await ctx.connections.mail.send({
       mailbox: "team@acme.test",
       subject: args.subject,
       body: "Hello.",
@@ -97,7 +97,7 @@ export const inbox = action({
   args: {},
   returns: v.number(),
   handler: async (ctx) => {
-    const listed = await ctx.connections.mail.call("list", { mailbox: "team@acme.test" });
+    const listed = await ctx.connections.mail.list({ mailbox: "team@acme.test" });
     return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.messages)
       ? listed.messages.length
       : -1;
@@ -109,7 +109,7 @@ export const sendFresh = action({
   args: {},
   returns: v.boolean(),
   handler: async (ctx) => {
-    await ctx.connections.mail.call("send", {
+    await ctx.connections.mail.send({
       mailbox: "team@acme.test",
       subject: crypto.randomUUID(),
       body: "Hello.",
@@ -125,7 +125,7 @@ export const probe = action({
   returns: v.string(),
   handler: async (ctx) => {
     const client = ctx.connections.mail;
-    const listed = await client.call("list", { mailbox: "team@acme.test" });
+    const listed = await client.list({ mailbox: "team@acme.test" });
     const prototype = Object.getPrototypeOf(client) ?? {};
     return [
       ...Object.getOwnPropertyNames(globalThis),
@@ -133,7 +133,7 @@ export const probe = action({
       ...Object.getOwnPropertyNames(prototype),
       JSON.stringify(listed),
       JSON.stringify(client),
-      String(client.call),
+      String(client.list),
     ].join(",");
   },
 });
@@ -144,7 +144,7 @@ export const careless = action({
   returns: v.string(),
   handler: async (ctx) => {
     // What its contract requires left out, past the types on purpose.
-    await ctx.connections.mail.call("send", { mailbox: "team@acme.test" } as never);
+    await ctx.connections.mail.send({ mailbox: "team@acme.test" } as never);
     return "sent";
   },
 });
@@ -173,7 +173,7 @@ export const archived = action({
   args: {},
   returns: v.boolean(),
   handler: async (ctx) => {
-    await ctx.connections.archive.call("list", { mailbox: "team@acme.test" });
+    await ctx.connections.archive.list({ mailbox: "team@acme.test" });
     return true;
   },
 });
@@ -1128,7 +1128,7 @@ export const contacts = action({
   args: {},
   returns: v.number(),
   handler: async (ctx) => {
-    const listed = await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
+    const listed = await ctx.connections.crm.CRM_LIST_CONTACTS({ limit: 5 });
     return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.contacts)
       ? listed.contacts.length
       : -1;
@@ -1140,7 +1140,7 @@ export const sloppy = action({
   args: {},
   returns: v.number(),
   handler: async (ctx) => {
-    await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5, archived: true });
+    await ctx.connections.crm.CRM_LIST_CONTACTS({ limit: 5, archived: true });
     return 0;
   },
 });
@@ -1149,7 +1149,7 @@ export const create = action({
   args: { email: v.string() },
   returns: v.string(),
   handler: async (ctx, args) => {
-    const created = await ctx.connections.crm.call("CRM_CREATE_CONTACT", { email: args.email });
+    const created = await ctx.connections.crm.CRM_CREATE_CONTACT({ email: args.email });
     return typeof created === "string" ? created : "";
   },
 });
@@ -1183,8 +1183,8 @@ export const contacts = action({
   args: {},
   returns: v.number(),
   handler: async (ctx) => {
-    await ctx.connections.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
-    await ctx.connections.backup.call("CRM_LIST_CONTACTS", { limit: 5 });
+    await ctx.connections.crm.CRM_LIST_CONTACTS({ limit: 5 });
+    await ctx.connections.backup.CRM_LIST_CONTACTS({ limit: 5 });
     return 0;
   },
 });

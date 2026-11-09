@@ -86,6 +86,8 @@ const brain = permission.brain({
 });
 // Guest chats it lists and reads, and never invites.
 const guests = permission.guests({ operations: ["list", "read"] });
+// The platform's functions, which serve only the paths they declare.
+const grasp = permission.grasp();
 
 /** A workflow the App declares, which no function here starts. */
 const followUp = permission.workflow("followUp", {
@@ -101,6 +103,7 @@ const config = defineApp({
     ai,
     brain,
     guests,
+    grasp,
     workflows: [followUp],
   },
 });
@@ -221,7 +224,7 @@ const sendMail = action({
   args: { to: v.string().email() },
   returns: v.object({ mailbox: v.string() }),
   handler: async (ctx, args) => {
-    const sent = await ctx.connections.mail.call("send", mailTo(args.to));
+    const sent = await ctx.connections.mail.send(mailTo(args.to));
     return { mailbox: sent.mailbox };
   },
 });
@@ -299,7 +302,7 @@ const sendMany = action({
   handler: async (ctx, args) => {
     for (let index = 0; index < args.count; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one request after the other
-      await ctx.connections.mail.call("send", mailTo("ada@acme.test"));
+      await ctx.connections.mail.send(mailTo("ada@acme.test"));
     }
     return args.count;
   },
@@ -310,7 +313,7 @@ const sendMailToo = action({
   args: { to: v.string().email() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.connections.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.send(mailTo(args.to));
     return null;
   },
 });
@@ -481,7 +484,7 @@ const sendsWhileStreaming = action({
   stream: v.object({ done: v.number() }),
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
-    await ctx.connections.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.send(mailTo(args.to));
     return null;
   },
 });
@@ -493,7 +496,7 @@ const sendsAndLeaves = action({
   stream: v.object({ done: v.number() }),
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
-    void ctx.connections.mail.call("send", mailTo(args.to));
+    void ctx.connections.mail.send(mailTo(args.to));
     return null;
   },
 });
@@ -530,7 +533,7 @@ const savesThenSends = action({
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.runMutation(create, { title: args.title });
-    await ctx.connections.mail.call("send", mailTo(args.to));
+    await ctx.connections.mail.send(mailTo(args.to));
     return null;
   },
 });
@@ -1269,6 +1272,12 @@ describe("resources", () => {
         async (channel) =>
           await channel.resource("followUp", "call", ["send", {}])
       ),
+      // A platform function the declaration doesn't serve, past the
+      // client, which has no member for it.
+      undeclaredFunction: await attempt(
+        async (channel) =>
+          await channel.resource("grasp", "call", ["statistics.write", {}])
+      ),
       reached,
       invite,
       invited,
@@ -1276,6 +1285,7 @@ describe("resources", () => {
       undeclaredAction: "resource.not_allowed",
       undeclaredAlias: "resource.not_allowed",
       workflowAsResource: "resource.not_allowed",
+      undeclaredFunction: "resource.not_allowed",
       reached: false,
       invite: "resource.not_allowed",
       invited: false,
@@ -2245,11 +2255,18 @@ describe("evidence of a refused use", () => {
     const request = await kept(
       async (channel) => await channel.resource("mail", "call", ["delete", {}])
     );
+    // The platform's functions, asked for one they don't serve: declared,
+    // so refused as the request, never as a missing alias.
+    const platform = await kept(
+      async (channel) =>
+        await channel.resource("grasp", "call", ["statistics.write", {}])
+    );
     expect({
       loop,
       noFunction: noFunction.heard,
       workflow: workflow.heard,
       request: request.heard,
+      platform: platform.heard,
     }).toStrictEqual({
       loop: {
         result: "ok",
@@ -2284,6 +2301,14 @@ describe("evidence of a refused use", () => {
         {
           function: "actions.sendMail",
           use: { kind: "resource", name: "mail" },
+          reason: "request_not_allowed",
+          errorCode: "resource.not_allowed",
+        },
+      ],
+      platform: [
+        {
+          function: "actions.sendMail",
+          use: { kind: "resource", name: "grasp" },
           reason: "request_not_allowed",
           errorCode: "resource.not_allowed",
         },
