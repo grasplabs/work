@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 
-import { retryCast, test } from "./contexts.ts";
+import { fileCast, test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
 import { serveAttacker } from "./page-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
@@ -35,7 +35,7 @@ export const Route = createFileRoute("/")({ component: Plain });
 
 test.beforeAll(async () => {
   attacker = await serveAttacker();
-  await retryCast();
+  await fileCast();
   ({ builder } = peopleIn("productPageScripts"));
   const { core, api } = apiOf(builder);
   try {

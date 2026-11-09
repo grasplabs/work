@@ -8,7 +8,7 @@ import {
   withFiles,
 } from "../apps/core/test/app-definitions.ts";
 import type { TestApp, TestSource } from "../apps/core/test/app-definitions.ts";
-import { retryCast } from "./contexts.ts";
+import { fileCast } from "./contexts.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -132,7 +132,7 @@ let name: string;
 let app: string;
 
 test.beforeAll(async () => {
-  await retryCast();
+  await fileCast();
   ({ builder, user, admin } = peopleIn("apps"));
   // Builders see every App, other tests' too: this one's name is its own.
   name = `Counter ${crypto.randomUUID()}`;

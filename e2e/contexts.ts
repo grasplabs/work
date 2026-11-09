@@ -6,21 +6,26 @@ import type {
 } from "@playwright/test";
 
 import { seedConnections } from "./connections-seed.ts";
-import { signInRetry, signInTo } from "./people.ts";
+import { signInFile, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
 
 /**
- * A retry's own cast, signed in before the test (`signInRetry`); a first
- * attempt's the global setup signed in. A file whose `beforeAll` looks
- * people up calls `signInRetry` there, as it runs before any fixture.
+ * The people the running test's file looks up, signed in for its attempt
+ * (`signInFile`), and the connections scene's connections written once
+ * its people are. A file whose `beforeAll` looks people up calls it there,
+ * as that runs before any fixture.
  */
-export const retryCast = async (): Promise<void> => {
-  await signInRetry(seedConnections);
+export const fileCast = async (): Promise<void> => {
+  await signInFile(async (scenes, attempt) => {
+    if (scenes.connections !== undefined) {
+      await seedConnections(scenes, attempt);
+    }
+  });
 };
 
 /**
- * How long a retry's cast may take to sign in, apart from its test's own
- * time: over a hundred sign-ins on a loaded stack.
+ * How long a file's people may take to sign in, apart from its test's own
+ * time: up to a few dozen sign-ins on a loaded stack.
  */
 const castSignInMs = 120_000;
 
@@ -33,8 +38,8 @@ const castSignInMs = 120_000;
  * into later tests (a person's watch caps, "signed in elsewhere" fences).
  */
 export const test = base.extend<{
-  /** Signs a retry's cast in before the test (`retryCast`); gives nothing. */
-  retrySignedIn: undefined;
+  /** Signs the file's people in before the test (`fileCast`); gives nothing. */
+  fileSignedIn: undefined;
   /** A browser context of the test's own, closed when the test ends. */
   newContext: (options?: BrowserContextOptions) => Promise<BrowserContext>;
   /**
@@ -43,14 +48,14 @@ export const test = base.extend<{
    */
   pageOf: (person: Person, options?: BrowserContextOptions) => Promise<Page>;
 }>({
-  retrySignedIn: [
+  fileSignedIn: [
     // oxlint-disable-next-line no-empty-pattern -- Playwright reads a fixture's dependencies from its first parameter's pattern, and this one has none
     async ({}, provide) => {
-      await retryCast();
+      await fileCast();
       // oxlint-disable-next-line unicorn/no-useless-undefined -- Playwright's `use` takes the fixture's value, and this fixture has none
       await provide(undefined);
     },
-    // Its own time, not the test's: a retry signs in a whole cast.
+    // Its own time, not the test's: a file's first test signs its people in.
     { auto: true, timeout: castSignInMs },
   ],
   newContext: async ({ browser }, provide) => {

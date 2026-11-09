@@ -4,6 +4,10 @@
 //   node scripts/e2e-parts.ts 3/10 > part.txt
 //   vp run e2e --project chromium --test-list part.txt
 //
+// or every part's at once, as CI's e2e-build does (`partsDir`):
+//
+//   node scripts/e2e-parts.ts --all 10
+//
 // Split by how long each test takes (scripts/e2e-durations.json), as the
 // test shards are (scripts/test-shards.ts), test by test, not file by
 // file: each part runs on a stack of its own, so a file's tests need not
@@ -15,7 +19,7 @@
 // time. The tests come from Playwright's own listing, so a test added
 // anywhere runs in exactly one part without touching this file.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -280,20 +284,48 @@ const serialFilesOf = (tests: readonly PartTest[]): Set<string> =>
     )
   );
 
+/**
+ * Where `--all <parts>` writes each part's test list (`<part>-of-<parts>.txt`):
+ * e2e-build lists the tests once for every part, which then needs no
+ * listing of its own, about 3.5 s of each part's start (November 2026).
+ */
+export const partsDir = path.join(root, "e2e/dist/parts");
+
+/** The file of part `index` of `count` in `partsDir`. */
+export const partFile = (index: number, count: number): string =>
+  path.join(partsDir, `${index}-of-${count}.txt`);
+
 if (import.meta.main) {
-  const match = /^(?<index>\d+)\/(?<count>\d+)$/u.exec(process.argv[2] ?? "");
+  const [first = "", second = ""] = process.argv.slice(2);
+  const all = first === "--all" ? Number(second) : Number.NaN;
+  const match = /^(?<index>\d+)\/(?<count>\d+)$/u.exec(first);
   const index = Number(match?.groups?.index);
   const count = Number(match?.groups?.count);
-  if (index >= 1 && index <= count) {
-    const durations = z
+  const durations = (): Record<string, number> =>
+    z
       .record(z.string(), z.number())
       .parse(JSON.parse(readFileSync(e2eDurationsFile, "utf-8")));
+  if (Number.isInteger(all) && all >= 1) {
+    const tests = listed();
+    const serial = serialFilesOf(tests);
+    const known = durations();
+    rmSync(partsDir, { recursive: true, force: true });
+    mkdirSync(partsDir, { recursive: true });
+    for (let part = 1; part <= all; part += 1) {
+      writeFileSync(
+        partFile(part, all),
+        `${partOf(tests, known, part, all, serial).join("\n")}\n`
+      );
+    }
+  } else if (index >= 1 && index <= count) {
     const tests = listed();
     console.log(
-      partOf(tests, durations, index, count, serialFilesOf(tests)).join("\n")
+      partOf(tests, durations(), index, count, serialFilesOf(tests)).join("\n")
     );
   } else {
-    console.error("Usage: node scripts/e2e-parts.ts <part>/<parts>");
+    console.error(
+      "Usage: node scripts/e2e-parts.ts <part>/<parts>, or --all <parts>"
+    );
     process.exitCode = 1;
   }
 }
