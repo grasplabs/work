@@ -114,7 +114,7 @@ describe("a JSON workflow's run on-prem", () => {
         ],
         {
           permissions: { events: { jobEvents: { contract } } },
-          status: { $expr: 'job.event?.data.note ?? ""' },
+          status: { $expr: 'job.timedOut ? "" : job.event.data.note' },
         }
       ),
       basedOn: null,
