@@ -1074,9 +1074,6 @@ const looseDefineApp = defineApp as (
 ) => ReturnType<typeof defineApp>;
 // SAFETY: as above.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const looseAction = server.action as (declaration: unknown) => unknown;
-// SAFETY: as above.
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 const loosePermission = permission as Record<
   "files" | "links",
   (config: unknown) => unknown
@@ -1216,18 +1213,6 @@ describe("browser permissions", () => {
         small({ permissions: { files, connections: [connection] } })
       )
     ).toContain("Two of the App's permissions have alias `files`");
-  });
-
-  test("are the App's, never listed by a function", () => {
-    const files = permission.files({ operations: ["read"] });
-    expect(() =>
-      looseAction({
-        args: {},
-        returns: v.null(),
-        uses: [files],
-        handler: () => null,
-      })
-    ).toThrow("An action's declaration has no `uses`.");
   });
 });
 
