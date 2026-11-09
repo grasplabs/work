@@ -6,7 +6,7 @@ import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { queuedMail } from "./onboarding-outbox.ts";
 import { apiOf, signInAs, signInStaff } from "./people.ts";
-import { readOn } from "./speech.ts";
+import { installReadingClock, readOn } from "./speech.ts";
 import { origin } from "./stack.ts";
 
 // The admin's onboarding, end to end (GRA-339): they sign in, give their
@@ -98,7 +98,7 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
 
   // The steps' lines are read silently, at the pace of reading on the
   // page's clock: the test goes on it to read them (`readOn`).
-  await page.clock.install();
+  await installReadingClock(page);
   // Signed out, the onboarding sends them to sign in, and the company's
   // sign-in (the stack's stand-in for Entra) brings them back to it.
   await page.goto("/setup?step=welcome");

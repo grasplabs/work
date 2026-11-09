@@ -13,7 +13,7 @@ import { test } from "./csp.ts";
 import { interviewLinkOf } from "./interview-link.ts";
 import { apiOf, signInAs, signInStaff, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
-import { readOn } from "./speech.ts";
+import { installReadingClock, readOn } from "./speech.ts";
 import { origin, stateDir } from "./stack.ts";
 import { workbookOf } from "./staff-workbook.ts";
 
@@ -401,7 +401,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
     asked.find((line) => line.text === text)?.tone;
   // The steps' lines are read silently, at the pace of reading on the
   // page's clock: the test goes on it to read them (`readOn`).
-  await page.clock.install();
+  await installReadingClock(page);
   await page.goto("/setup?step=welcome");
 
   await expect(

@@ -3,7 +3,12 @@ import { expect } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
-import { answerSpeech, readOn, readUntil } from "./speech.ts";
+import {
+  answerSpeech,
+  installReadingClock,
+  readOn,
+  readUntil,
+} from "./speech.ts";
 
 // Stephen says each step of the admin's onboarding (apps/web/src/voice):
 // with the sound on, each step's line is asked of the voice, the next
@@ -140,7 +145,7 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
     const page = await pageOf(admin);
     // The steps' lines are read silently, at the pace of reading on the
     // page's clock: the test goes on it to read them (`readOn`).
-    await page.clock.install();
+    await installReadingClock(page);
     await page.goto("/setup?step=sources");
     // What Grasp knows of the organization, said apart from how far the admin is through the steps.
     const bar = page.getByRole("button", {
@@ -239,7 +244,7 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   // Read silently, the story goes at the pace of reading on the page's
   // clock: the test goes on it to read it (`readUntil`). Heard, it takes
   // the time its sound plays.
-  await page.clock.install();
+  await installReadingClock(page);
 
   // The welcome, in Dutch from the moment it is picked.
   await page.goto("/setup?step=welcome");
