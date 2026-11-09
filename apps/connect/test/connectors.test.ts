@@ -133,14 +133,6 @@ const probe = async (
 /** A probe's report of a request the egress handler refused. */
 const refused = { status: 403, error: null };
 
-/** Each tool of a bundled suite, by its class. */
-const classesOf = (suite: string) =>
-  Object.fromEntries(
-    Object.entries(nativeConnector(suite)?.manifest.actions ?? {}).map(
-      ([action, declared]) => [action, toolClassOf(declared)]
-    )
-  );
-
 describe("a native connector", () => {
   it("can't write from a lookup of a call's effect: only the action's GETs leave", async () => {
     const connection = await connectionTo("sample");
@@ -498,82 +490,27 @@ describe("a native connector", () => {
     }
   });
 
-  it("of each suite gives every tool the class of the furthest it reaches", () => {
-    // Microsoft opens shared and colleagues' mailboxes and calendars, and
-    // Google colleagues' and groups' calendars, so those reach the company;
-    // a Google token reaches only its own mailbox. A suite with a tool
-    // that doesn't say whom it reaches isn't loaded.
-    const calendar = {
-      "calendar.list": "read-company",
-      "calendar.get": "read-company",
-    };
-    const files = {
-      "files.list": "read-company",
-      "files.search": "read-company",
-      "files.read": "read-company",
-    };
-    expect(classesOf("microsoft-365")).toStrictEqual({
-      "mail.list": "read-company",
-      "mail.get": "read-company",
-      "mail.readAttachment": "read-company",
-      "mail.move": "change-own",
-      "mail.flag": "change-own",
-      "mail.categorise": "change-own",
-      "mail.send": "reach-others",
-      "mail.createDraft": "change-company",
-      "mail.createReplyDraft": "change-company",
-      ...calendar,
-      ...files,
-      "lists.items": "read-company",
-      "calendar.freeTime": "read-own",
-      "calendar.create": "change-own",
-      "calendar.update": "change-own",
-      "excel.listRows": "read-company",
-      "excel.addRow": "change-company",
-      "excel.updateRow": "change-company",
-      "mail.thread": "read-company",
-      // A delegated token opens no one's To Do but its own user's.
-      "todo.lists": "read-own",
-      "todo.tasks": "read-own",
-      "todo.create": "change-own",
-      "todo.complete": "change-own",
-      "files.versions": "read-company",
-      "files.createDraft": "change-own",
-      // A Word document is in a drive: a OneDrive or a SharePoint library.
-      "word.read": "read-company",
-      "lists.addItem": "change-company",
-      "lists.updateItem": "change-company",
-      // A plan is a group's. A task is made unassigned: assigning one
-      // would tell someone, and reach others.
-      "planner.tasks": "read-company",
-      "planner.create": "change-company",
-      // Only the person's own notebooks, shared with no one.
-      "onenote.sections": "read-own",
-      "onenote.pages": "read-own",
-      "onenote.read": "read-own",
-      "onenote.create": "change-own",
-      // Other people's words in the person's own chats and meetings.
-      "chats.list": "read-others",
-      "chats.messages": "read-others",
-      "meetings.list": "read-others",
-      "meetings.transcript": "read-others",
+  // Each tool's class, from whom its manifest says it reaches, is the
+  // table core reads (apps/core/src/native-tool-classes.gen.ts, made from
+  // these manifests and reviewed as it changes); core refuses a call of a
+  // class that is off for its person (tool-classes.ts).
+  it("of each suite asks its provider for rights of its own once a tool's class is on", () => {
+    const tools = Object.values(providerConfigs).flatMap((config) =>
+      Object.entries(
+        nativeConnector(config.server)?.manifest.actions ?? {}
+      ).map(([action, declared]) => ({ config, action, declared }))
+    );
+    const withoutRights = tools.flatMap(({ config, action, declared }) => {
+      const signIn = new Set(rightsFor(config.id, []));
+      const toolClass = toolClassOf(declared);
+      const asked = rightsFor(config.id, [toolClass]) ?? [];
+      return asked.some((right) => !signIn.has(right))
+        ? []
+        : [`${config.server} ${action} (${toolClass})`];
     });
-    expect(classesOf("google-workspace")).toStrictEqual({
-      "mail.list": "read-own",
-      "mail.get": "read-own",
-      "mail.readAttachment": "read-own",
-      "mail.labels": "read-own",
-      "mail.label": "change-own",
-      "mail.send": "reach-others",
-      "mail.createDraft": "change-own",
-      ...calendar,
-      ...files,
-      // A spreadsheet of a shared drive, as its files.
-      "sheets.read": "read-company",
-      // Only in the person's own calendar.
-      "calendar.create": "change-own",
-      // Only in the person's own Drive.
-      "files.createDraft": "change-own",
+    expect({ checked: tools.length > 0, withoutRights }).toStrictEqual({
+      checked: true,
+      withoutRights: [],
     });
   });
 });
