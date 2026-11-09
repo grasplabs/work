@@ -734,6 +734,9 @@ const documentsOf = async (person: Person, collectionId: string) => {
   }
 };
 
+/** How many documents the full-context arm reads at once. */
+const documentReadBatch = 32;
+
 /**
  * Every section of the collections `person` may read and `granted` holds,
  * in path order, leaving out what doesn't fit in {@link fullContextChars}.
@@ -743,31 +746,34 @@ const fullContextOf = async (
   granted: ReadonlySet<string>
 ): Promise<{ sources: Source[]; truncated: boolean }> => {
   const readable = await person.api.knowledge.listCollections();
-  // Every document asked for at once, then taken in path order, as before:
-  // one read after another was most of the arm's time at scale, and a
-  // context builder has no reason to wait for one before asking the next.
-  const reads = await Promise.all(
+  // The documents in path order, then read a batch at a time: one read
+  // after another was most of the arm's time at scale, and all at once
+  // held every text of the corpus until the last arrived. Each batch's
+  // sections are taken, in order, as it arrives.
+  const listed = await Promise.all(
     readable
       .filter(({ id }) => granted.has(id))
-      .map(async (collection) => {
-        const documents = await documentsOf(person, collection.id);
-        return await Promise.all(
-          documents.map(
-            async (document) => await person.api.knowledge.read(document.id)
-          )
-        );
-      })
+      .map(async (collection) => await documentsOf(person, collection.id))
   );
+  const documents = listed.flat();
   const sources: Source[] = [];
   let chars = 0;
   let truncated = false;
-  for (const read of reads.flat()) {
-    for (const section of sectionsOf(read.path, read.text)) {
-      if (chars + section.text.length <= fullContextChars) {
-        chars += section.text.length;
-        sources.push(section);
-      } else {
-        truncated = true;
+  for (let at = 0; at < documents.length; at += documentReadBatch) {
+    // oxlint-disable-next-line no-await-in-loop -- a batch at a time, in order
+    const reads = await Promise.all(
+      documents
+        .slice(at, at + documentReadBatch)
+        .map(async (document) => await person.api.knowledge.read(document.id))
+    );
+    for (const read of reads) {
+      for (const section of sectionsOf(read.path, read.text)) {
+        if (chars + section.text.length <= fullContextChars) {
+          chars += section.text.length;
+          sources.push(section);
+        } else {
+          truncated = true;
+        }
       }
     }
   }

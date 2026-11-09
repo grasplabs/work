@@ -17,6 +17,8 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -130,6 +132,10 @@ export const restorePrebuilt = (key: string, files: PrebuiltFiles): boolean => {
   if (!existsSync(path.join(kept, complete))) {
     return false;
   }
+  // Marked as used before it is read, so no other run's pruning takes it
+  // away meanwhile (`pruneKept`).
+  const now = new Date();
+  utimesSync(kept, now, now);
   rmSync(files.assets, { recursive: true, force: true });
   for (const [what, name] of names) {
     const to = files[what];
@@ -139,9 +145,41 @@ export const restorePrebuilt = (key: string, files: PrebuiltFiles): boolean => {
   return true;
 };
 
+/** How many builds are kept, the most recently used first. */
+const keptBuilds = 3;
+
 /**
- * Keeps the run's build under `key`, in place of any other: written aside
- * and moved in whole, so a run reading the directory never sees half of it.
+ * How long a build no run used is kept past {@link keptBuilds}: far longer
+ * than a run takes to copy one, so a run reading a build never has it
+ * removed under it.
+ */
+const unusedForMs = 60 * 60_000;
+
+/**
+ * Removes the builds past the {@link keptBuilds} most recently used, and
+ * any half-written one, once no run has used it for {@link unusedForMs}.
+ */
+const pruneKept = (): void => {
+  const entries = readdirSync(prebuiltRoot).map((name) => {
+    const full = path.join(prebuiltRoot, name);
+    return { name, full, usedAt: statSync(full).mtimeMs };
+  });
+  const builds = entries
+    .filter(({ name }) => !name.startsWith("."))
+    .toSorted((a, b) => b.usedAt - a.usedAt);
+  const aside = entries.filter(({ name }) => name.startsWith("."));
+  const unusedSince = Date.now() - unusedForMs;
+  for (const { full, usedAt } of [...builds.slice(keptBuilds), ...aside]) {
+    if (usedAt < unusedSince) {
+      rmSync(full, { recursive: true, force: true });
+    }
+  }
+};
+
+/**
+ * Keeps the run's build under `key`: written aside and moved in whole, so
+ * a run reading the directory never sees half of it. Other keys' builds
+ * stay for runs that still read them; only long-unused ones go.
  */
 export const savePrebuilt = (key: string, files: PrebuiltFiles): void => {
   const aside = path.join(prebuiltRoot, `.${process.pid}`);
@@ -152,15 +190,11 @@ export const savePrebuilt = (key: string, files: PrebuiltFiles): void => {
     });
   }
   writeFileSync(path.join(aside, complete), key);
-  for (const name of readdirSync(prebuiltRoot)) {
-    if (!name.startsWith(".") && name !== key) {
-      rmSync(path.join(prebuiltRoot, name), { recursive: true, force: true });
-    }
-  }
   try {
     renameSync(aside, path.join(prebuiltRoot, key));
   } catch {
     // Another run kept the same build first.
     rmSync(aside, { recursive: true, force: true });
   }
+  pruneKept();
 };
