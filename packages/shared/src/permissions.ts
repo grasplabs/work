@@ -260,6 +260,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "GOOGLE_DOCUMENTS_CLIENT_ID",
   "GOOGLE_DOCUMENTS_CLIENT_SECRET",
   "KNOWLEDGE",
+  // A lower live-read budget, which tests set (core's src/app.ts).
+  "LIVE_READ_LIMITS",
   "LOADER",
   // Who core's mail is from (core's src/mail.ts).
   "MAIL_FROM",
