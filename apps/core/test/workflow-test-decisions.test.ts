@@ -42,7 +42,7 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 /** The review: asks `recipients` (the reviewer parameter's) about `input`. */
 const reviewOf = ({
   recipients = { $expr: "[params.reviewer]" },
-  input = { $expr: "input" },
+  input = { $expr: "args" },
   timeout,
 }: { recipients?: unknown; input?: unknown; timeout?: string } = {}) => ({
   id: "review",
@@ -67,7 +67,7 @@ const approvalSteps = (review = reviewOf()): unknown[] => [review, unanswered];
 
 /** What an approval ends with: approved, unless its review declined it. */
 const approvalStatus = {
-  $expr: 'review.approved ? "approved" : "rejected"',
+  $expr: '!review.timedOut && review.approved ? "approved" : "rejected"',
 };
 
 /** A review of each of two invoices, in turn. */
@@ -649,9 +649,11 @@ describe(
         decisions: await decisionsOf(runId),
         late: await respond(session, "approver", run, { approved: true }),
       }).toStrictEqual({
+        // Its raise's code is the workflow's own, never one the platform
+        // defines: its outcome says only that it failed.
         end: {
           status: "failed",
-          code: "workflow.raised",
+          code: "workflow.step_failed",
         },
         decisions: [
           { recipients: '["approver"]', status: "timed_out", decidedBy: null },

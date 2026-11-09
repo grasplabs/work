@@ -332,17 +332,19 @@ const goesOn = (
 
 /**
  * Which run of its task the step named `step` is, as its name counts it
- * (`<task>:task@<n>`, from its second run in a loop's items on): none
- * for its first, or outside a loop.
+ * (`<task>:task@<n>`, from its second run in a loop's items on; its
+ * first, `0`, has none).
  */
 const itemOf = (step: string): string => {
   const at = step.indexOf("@");
-  return at === -1 ? "" : step.slice(at + 1);
+  return at === -1 ? "0" : step.slice(at + 1);
 };
 
 /**
  * The decision of task `task` that run `runId` asks at item `at` (each
- * loop's, outermost first), or, without one, its latest. Until the run
+ * loop's, outermost first: the run of its task the last names, as the
+ * run host counts a task's runs in a loop's items), or, without one, its
+ * latest. Until the run
  * asks it, waits while the run goes on, until `until` or `stopped`
  * (`decision.not_found` when it asked none); one answered or out of time
  * is `decision.closed`, never waited on, as a second answer to it would be.
@@ -355,7 +357,7 @@ const openDecisionOf = async (
   { until, stopped }: { until: number; stopped: () => boolean }
 ) => {
   const db = drizzle(env.DB);
-  const item = at?.join("/");
+  const item = at === undefined ? undefined : String(at.at(-1) ?? 0);
   for (;;) {
     // One look after another, as the run goes on.
     // oxlint-disable-next-line no-await-in-loop

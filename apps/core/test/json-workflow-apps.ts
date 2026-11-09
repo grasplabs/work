@@ -69,15 +69,14 @@ export const objectSchema = (fields: Record<string, unknown>) => ({
 const greeting = { $expr: '"Hello, " + args.who' };
 
 /**
- * A step `id` that runs and ends at once: a raise its `if` skips for
- * anyone with a name, so a run's history has a step of it.
+ * A step `id` that runs and ends at once: a wait of a second (a raise,
+ * an `if` or a loop has no step of its own to show).
  */
 export const passing = (id: string, title?: string) => ({
   id,
   ...(title === undefined ? {} : { title }),
-  type: "raise",
-  if: { $expr: 'args.who === ""' },
-  error: { code: "test.nameless", message: "Failed." },
+  type: "wait",
+  for: "1 second",
 });
 
 /**
@@ -218,7 +217,7 @@ export const decisionTasks = (
  * with the comment the answer carried, if any.
  */
 const answeredStatus = {
-  $expr: `(${decided}.approved ? "approved" : "declined") + " by " + ${decided}.by + (${decided}.payload === null ? "" : ": " + ${decided}.payload.comment)`,
+  $expr: `${decided}.timedOut ? "unanswered" : (${decided}.approved ? "approved" : "declined") + " by " + ${decided}.by + (${decided}.payload === null ? "" : ": " + ${decided}.payload.comment)`,
 };
 
 /**

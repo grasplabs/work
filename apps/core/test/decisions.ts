@@ -80,9 +80,9 @@ const approvalOf = (contract: string, { from, timeout }: Asking): string =>
     }),
     result: {
       answered: true,
-      approved: { $expr: `${answered}.approved` },
-      by: { $expr: `${answered}.by` },
-      value: { $expr: `${answered}.payload` },
+      approved: { $expr: `!${answered}.timedOut && ${answered}.approved` },
+      by: { $expr: `${answered}.timedOut ? "" : ${answered}.by` },
+      value: { $expr: `${answered}.timedOut ? null : ${answered}.payload` },
     },
     permissions: { decisions: { approval: { contract } } },
     steps: [

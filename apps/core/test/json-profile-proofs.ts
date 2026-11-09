@@ -354,7 +354,7 @@ export const profileProofs = (where: string): void => {
           grace: endOf(await ended(by, workflow.id, grace)),
         }).toStrictEqual({
           ada: { status: "completed", output: { status: "Hello, Ada" } },
-          grace: { status: "failed", code: "workflow.raised" },
+          grace: { status: "failed", code: "test.stranger" },
         });
       });
 
@@ -417,7 +417,7 @@ export const profileProofs = (where: string): void => {
         );
         expect(endOf(run)).toStrictEqual({
           status: "failed",
-          code: "workflow.raised",
+          code: "invoice.conflict",
         });
       });
 

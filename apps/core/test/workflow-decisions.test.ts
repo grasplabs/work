@@ -100,7 +100,7 @@ const reviewOf = (recipients: unknown = theReviewer) => ({
   decision: "invoiceApproval",
   recipients,
   prompt: { $expr: "params.approvalPrompt" },
-  input: { $expr: "input" },
+  input: { $expr: "args" },
 });
 
 /**
@@ -128,7 +128,8 @@ const approvalSteps = (
 
 /** What an approval ends with: approved, unless its review declined it. */
 const approvalStatus = {
-  $expr: 'review === null || review.approved ? "approved" : "rejected"',
+  $expr:
+    'review === null || (!review.timedOut && review.approved) ? "approved" : "rejected"',
 };
 
 /**
@@ -1161,7 +1162,7 @@ describe("authority behind a JSON workflow's decision", () => {
       end: endOf(run),
       decisions: statuses,
     }).toStrictEqual({
-      end: { status: "failed", code: "workflow.raised" },
+      end: { status: "failed", code: "test.unanswered" },
       decisions: ["timed_out"],
     });
   });

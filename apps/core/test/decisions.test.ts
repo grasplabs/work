@@ -356,7 +356,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       seen: await decider.api.decisions.get(decision),
     }).toMatchObject({
       // No outcome is made up for it: the workflow raises on it.
-      end: { status: "failed", code: "workflow.raised" },
+      end: { status: "failed", code: "test.unanswered" },
       late: "decision.closed",
       seen: { status: "timed_out" },
     });

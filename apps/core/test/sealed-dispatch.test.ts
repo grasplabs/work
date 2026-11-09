@@ -829,7 +829,7 @@ describe(
           { ok: true, value: null },
         ],
         kept: [
-          { step: "sign:task@0", status: "approved" },
+          { step: "sign:task", status: "approved" },
           { step: "sign:task@1", status: "rejected" },
         ],
       });
