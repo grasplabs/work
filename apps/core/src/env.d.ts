@@ -65,8 +65,8 @@ interface __BaseEnv_Env {
    * the isolate rather than printed (GRA-919). That holds as long as the
    * process isn't served `--verbose`, which core can't detect: served so,
    * a timer imported by name from `node:timers` in core's own Node code
-   * (the compiler, extraction) still has its throw reported. An operator who sets this
-   * doesn't serve core so (GRA-939).
+   * (the compiler, extraction) still has its throw reported. An operator
+   * who sets this doesn't serve core so (GRA-939).
    */
   SANDBOX_IN_PROCESS?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
