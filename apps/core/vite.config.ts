@@ -214,6 +214,9 @@ export const coreProject = (
             SLACK_SIGNING_SECRET: slackApp.signingSecret,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_READ_LIMITS: "20/60",
+            // A live-read budget a test spends in dozens of reads
+            // (src/app.ts, test/page-client-load.test.ts).
+            LIVE_READ_LIMITS: "50/300",
             // The gateway runs call the model through; tests fake the AI binding.
             // Who core's mail is from (src/mail.ts); tests capture what
             // the EMAIL binding is given (test/mail-capture.ts).
