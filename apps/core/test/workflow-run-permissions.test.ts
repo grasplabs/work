@@ -23,7 +23,7 @@ import { finished, leave, sleeping, woken } from "./runs.ts";
 // person is gone starting nothing (schedule-triggers.test.ts, "audit a
 // start refused for good and go on: a grant revoked, a person gone"); and
 // a run's output shown only to its person and the workflow's builders
-// (workflow-resource-runs.test.ts). Gone with App workflows: a run's code
+// (workflow-resource-run-bounds.test.ts). Gone with App workflows: a run's code
 // cut off from the network and handed only its App's bindings, before or
 // as its module loads, which a JSON run has no code of its own for.
 
