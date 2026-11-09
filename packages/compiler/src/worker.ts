@@ -1008,7 +1008,16 @@ export type AppCodeBuild =
        */
       functions?: string[];
     }
-  | { ok: false; diagnostics: Diagnostic[] };
+  | {
+      ok: false;
+      diagnostics: Diagnostic[];
+      /**
+       * As above, for code whose server files all parse but that doesn't
+       * build, say for a package not approved yet: which functions it
+       * exports is read from their syntax alone.
+       */
+      functions?: string[];
+    };
 
 /** `typeImportError` and `typeFileError` for App code, as `appCodeImport` answers. */
 const typeImportErrorAsResult = (
@@ -1184,9 +1193,17 @@ const buildAppCodeNoting = (
       errors.push(...result.errors);
     }
   }
-  return errors.length > 0
-    ? { ok: false, diagnostics: errors }
-    : { ok: true, modules, indexReads, functions: functions.toSorted() };
+  if (errors.length === 0) {
+    return { ok: true, modules, indexReads, functions: functions.toSorted() };
+  }
+  // A server file that doesn't parse, or isn't compiled as its name is
+  // another's, hides what it exports: then none.
+  const allRead = compiled.every(
+    ([path]) => !unparsed.has(path) && named.get(appModuleName(path)) === path
+  );
+  return allRead
+    ? { ok: false, diagnostics: errors, functions: functions.toSorted() }
+    : { ok: false, diagnostics: errors };
 };
 
 /**

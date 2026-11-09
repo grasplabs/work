@@ -646,9 +646,11 @@ export const carriedDefinitions = async (
 
 /**
  * The paths of the queries and mutations `files`' server code exports,
- * as the App compiler finds them building it; undefined for code that
- * doesn't build, a build refused (a bound passed, the builders busy) or
- * one that doesn't answer within the build wait: a commit never waits
+ * as the App compiler finds them building it, from their syntax, so code
+ * that doesn't build yet (a package not approved yet) has them too;
+ * undefined for a server file that doesn't parse, a build refused (a
+ * bound passed, the builders busy) or one that doesn't answer within the
+ * build wait: a commit never waits
  * longer on whether its code compiles, nor fails on it. A seal refuses a
  * version whose code exports one it gave no ID (app-releases.ts), so
  * the next commit gives it.
@@ -667,11 +669,11 @@ const exportedPaths = async (
       env,
       async () => await buildAppCode(env, Object.fromEntries(files), app)
     );
-    if (build === "late" || !build.ok) {
+    if (build === "late" || build.functions === undefined) {
       return undefined;
     }
     // Only paths a function may have: what a definition takes.
-    return (build.functions ?? []).filter((path) => isFunctionPath(path));
+    return build.functions.filter((path) => isFunctionPath(path));
   } catch (error) {
     // Whatever stopped the build: the commit stands, and the next one
     // gives what this one couldn't (a seal refuses a version short of
