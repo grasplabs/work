@@ -51,13 +51,16 @@ import type { OpenStore } from "./data-stores.ts";
 import { workspace } from "./durable-objects.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation, ProgressSink } from "./operations.ts";
-import { isWorkflowMutationPath } from "./page-workflows.ts";
+import { checkedValue, isWorkflowMutationPath } from "./page-workflows.ts";
 import { appCodeAndTestFiles } from "./pages.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { functionProblem } from "./preview-reports.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import type { SchemaIds } from "./schema-changes.ts";
-import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
+import {
+  isWorkflowQueryPath,
+  workflowQueryOf,
+} from "./workflow-reference-queries.ts";
 import type { Draft } from "./workspace.ts";
 
 // A builder's preview of their draft of an App: the draft, sealed as the
@@ -479,9 +482,8 @@ const answerOf = (result: OperationResult, run?: DraftRun): FunctionAnswer => ({
 /**
  * The call `request` asks of a preview, as `options` take it: refused as
  * the preview's side effect when it calls a workflow reference's
- * mutations, as `resource.unavailable` for its queries, which read runs
- * through the App's binding of the workflow, a preview has none of; and
- * as `contract.invalid_request` when it isn't of the kind asked for.
+ * mutations, and as `contract.invalid_request` when it isn't of the kind
+ * asked for.
  */
 const draftCallOf = (
   request: unknown,
@@ -491,13 +493,30 @@ const draftCallOf = (
   if (isWorkflowMutationPath(call.reference.name)) {
     throw appErrors.create("app.preview_side_effect");
   }
-  if (isWorkflowQueryPath(call.reference.name)) {
-    throw operationErrors.create("resource.unavailable");
-  }
   if (kind !== undefined && call.reference.kind !== kind) {
     throw operationErrors.create("contract.invalid_request");
   }
   return call;
+};
+
+/**
+ * What a preview answers `call` of a workflow reference's query, which
+ * reads runs through the App's binding of the workflow, a preview has
+ * none of: no run (`run` answers `null`), none it may start (`canStart`
+ * answers `false`), so a page built on `useWorkflow` shows as it does
+ * before its first start; any other query `resource.unavailable`. The
+ * draft must declare the workflow, and the arguments be the query's.
+ */
+const draftWorkflowQuery = (
+  release: Release,
+  call: FunctionRequest
+): OperationResult => {
+  const query = workflowQueryOf(release, call.reference);
+  if (query.name !== "run" && query.name !== "canStart") {
+    throw operationErrors.create("resource.unavailable");
+  }
+  checkedValue(query.args, call.input, "contract.invalid_args");
+  return { ok: true, value: query.name === "run" ? null : false };
 };
 
 /** `call` of one of the draft's own functions, on `store`. */
@@ -559,6 +578,9 @@ export const callDraft = async (
     };
     // Before anything is read, the store made or opened.
     await gate();
+    if (isWorkflowQueryPath(call.reference.name)) {
+      return answerOf(draftWorkflowQuery(run.release, call), run);
+    }
     if (isPeoplePath(call.reference.name)) {
       const value = await answerPeople(
         memberPeople(env, {

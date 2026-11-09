@@ -2122,6 +2122,43 @@ describe(
       });
     });
 
+    it("shows a chat's preview no run and nothing it may start, and starts nothing from it", async () => {
+      const { builder, app, reference } = await boundApp({ hold: "1 hour" });
+      // A real run of the App's, which the preview never shows.
+      const live = await pageOf(builder, app);
+      const { runId } = startedOf(
+        await called(builder, app, live, startCommand(reference))
+      );
+      const { id: chat } = await builder.api.chats.forApp(app);
+      const { lease } = await builder.api.chats.preview(chat, app);
+      if (lease === undefined) {
+        throw new Error("The preview opened with no lease.");
+      }
+      const previewed = async (request: string) =>
+        outcomeOf(await called(builder, app, lease, request));
+      expect({
+        // As `useWorkflow` reads them before a first start: the page
+        // renders as it does published, never at its error boundary.
+        canStart: await previewed(queryCall(reference, "canStart", {})),
+        run: await previewed(queryCall(reference, "run", { runId })),
+        runs: await previewed(
+          queryCall(reference, "runs", { pagination: { cursor: null } })
+        ),
+        start: await previewed(startCommand(reference)),
+        runsStarted: await env.DB.prepare(
+          "SELECT COUNT(*) AS runs FROM workflow_start_receipts WHERE invoker_id = ?"
+        )
+          .bind(app)
+          .first<number>("runs"),
+      }).toStrictEqual({
+        canStart: false,
+        run: null,
+        runs: "resource.unavailable",
+        start: "app.preview_side_effect",
+        runsStarted: 1,
+      });
+    });
+
     it("refuses an App's workflows to its own server code's callers", async () => {
       const { builder, app, reference } = await boundApp({
         hold: "1 hour",
