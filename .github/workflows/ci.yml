@@ -578,15 +578,16 @@ jobs:
           retention-days: 14
 
   # The parallel part's Firefox and WebKit tests (playwright.config.ts's
-  # browser policy tests), on the stack e2e-build built, on the runner as
-  # e2e's parts. Their builds are cached by Playwright's version, and the
-  # system packages they need beyond the runner's image as the .deb files
-  # apt fetched, by the image's version: installing them from the Ubuntu
-  # mirror took up to 12 minutes when it was slow (October 2026, GRA-1016),
-  # and Playwright's image, which has them, took 55 s to start and install
-  # in (November 2026). When and why as e2e, above.
+  # browser policy tests), a part each, on the stack e2e-build built, on
+  # the runner as e2e's parts. Each browser's build is cached by
+  # Playwright's version, and the system packages it needs beyond the
+  # runner's image as the .deb files apt fetched, by the image's version:
+  # installing them from the Ubuntu mirror took up to 12 minutes when it
+  # was slow (October 2026, GRA-1016), and Playwright's image, which has
+  # them, took 55 s to start and install in (November 2026). When and why
+  # as e2e, above.
   e2e-browsers:
-    name: e2e (firefox, webkit)
+    name: e2e (${{ matrix.browser }})
     needs: e2e-build
     if: github.event_name != 'push' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -613,19 +614,19 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-firefox-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-${{ matrix.browser }}-${{ runner.os }}-${{ steps.playwright.outputs.version }}
       - if: steps.browsers.outputs.cache-hit != 'true'
-        run: vp exec playwright install firefox webkit
+        run: vp exec playwright install "$BROWSER"
       - if: steps.browsers.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-firefox-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-${{ matrix.browser }}-${{ runner.os }}-${{ steps.playwright.outputs.version }}
       - id: debs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/playwright-debs
-          key: playwright-debs-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}
+          key: playwright-debs-${{ matrix.browser }}-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}
       # Installed from the cached files, offline: dpkg needs nothing else, as
       # they are every package apt fetched for them on this image.
       - if: steps.debs.outputs.cache-hit == 'true'
@@ -635,18 +636,18 @@ jobs:
         run: |
           sudo rm -f /var/cache/apt/archives/*.deb
           echo 'Binary::apt-get::APT::Keep-Downloaded-Packages "true";' | sudo tee /etc/apt/apt.conf.d/99-keep-downloads > /dev/null
-          vp exec playwright install-deps firefox webkit
+          vp exec playwright install-deps "$BROWSER"
           mkdir -p ~/playwright-debs
           cp /var/cache/apt/archives/*.deb ~/playwright-debs/
       - if: steps.debs.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/playwright-debs
-          key: playwright-debs-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}
+          key: playwright-debs-${{ matrix.browser }}-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
-      - run: vp run e2e --project firefox --project webkit --reporter=github,json
+      - run: vp run e2e --project "$BROWSER" --reporter=github,json
         env:
           GRASP_E2E_PART: parallel
           GRASP_E2E_PREBUILT: "true"
@@ -654,14 +655,14 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-results-browsers
+          name: e2e-results-${{ matrix.browser }}
           path: ${{ runner.temp }}/e2e-results.json
           if-no-files-found: ignore
           retention-days: 14
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-traces-browsers
+          name: playwright-traces-${{ matrix.browser }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 14
