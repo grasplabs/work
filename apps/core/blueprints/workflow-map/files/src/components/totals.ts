@@ -141,6 +141,6 @@ export const shortTextMax = 200;
 /** Longest a parameter's value is, in characters. */
 export const parameterValueMax = 1000;
 
-/** Hours, as the map shows them: `12.5 h`. */
+/** Hours, as the map and its board show them: `12.5 h`. */
 export const formatHours = (hours: number): string =>
   `${(Math.round(hours * 10) / 10).toLocaleString("en", { maximumFractionDigits: 1 })} h`;

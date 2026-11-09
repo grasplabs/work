@@ -11,13 +11,13 @@ import type { ReactNode } from "react";
 
 import {
   beforeAndAfter,
-  formatHours,
   headlineOf,
   maturityLevels,
   signalRows,
   topByHours,
 } from "./board";
 import type { SnapshotRecord, WorkflowFigures } from "./board";
+import { formatHours } from "./totals";
 
 /** A section of the page, with its heading. */
 const Section = ({
