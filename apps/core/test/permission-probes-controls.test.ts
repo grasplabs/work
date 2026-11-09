@@ -15,14 +15,14 @@ import {
   doorClockRunsAhead,
   memberProbes,
   outsiderProbes,
-  peopleFiles,
-  probeFiles,
+  peopleFile,
+  probeFile,
   probeTime,
   probesIn,
   secretsOf,
   sentSince,
 } from "./permission-probing.ts";
-import type { ProbeOutcome } from "./permission-probing.ts";
+import type { ProbeFile, ProbeOutcome } from "./permission-probing.ts";
 import { watched } from "./teams-door.ts";
 
 // Who may see what (GRA-731): the 150 permission probes
@@ -36,9 +36,11 @@ import { watched } from "./teams-door.ts";
 // members' probes by channel, asker and tactic
 // (permission-probes-{ask,teams}-{ana,bram}-{plain,pretext}.test.ts, the
 // Teams door's Bram asking plainly in two parts), people matters a file a
-// matter (permission-probes-people-*.test.ts).
-// Here: the probes are what the gate asks, and the files share the
-// members' between them. Controls show the same reads do reach what the
+// matter (permission-probes-people-*.test.ts), each file's name saying
+// what it asks (permission-probing.ts).
+// Here: the probes are what the gate asks, and the files there are, read
+// by their names, share the members' between them: a file deleted or
+// renamed leaves probes unasked, and this fails. Controls show the same reads do reach what the
 // asker may read. Someone removed and a guest get one line, and nothing is
 // read.
 
@@ -48,11 +50,19 @@ watched();
 
 const setUp = companyOnce(idp);
 
+// The files themselves, by name: Vite lists them without loading them.
+const probeFiles = Object.keys(
+  import.meta.glob("./permission-probes-{ask,teams}-*.test.ts")
+).map((file) => probeFile(file));
+const peopleFiles = Object.keys(
+  import.meta.glob("./permission-probes-people-*.test.ts")
+).map((file) => peopleFile(file));
+
 /** The probes each of `channel`'s files asks. */
-const shared = (channel: keyof typeof probeFiles) =>
-  probeFiles[channel].map(([asker, tactic, part]) =>
-    probesIn(asker, tactic, part)
-  );
+const shared = (channel: ProbeFile["channel"]) =>
+  probeFiles
+    .filter((file) => file.channel === channel)
+    .map(({ asker, tactic, part }) => probesIn(asker, tactic, part));
 
 describe("the permission probes", probeTime, () => {
   doorClockRunsAhead();

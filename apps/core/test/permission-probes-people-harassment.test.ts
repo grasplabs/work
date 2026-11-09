@@ -9,4 +9,4 @@ import { peopleMattersOf } from "./permission-probing.ts";
 // permission-probes-people-*.test.ts like this one; the members' probes
 // and their controls in the other permission-probes-*.test.ts files.
 
-peopleMattersOf("harassment");
+peopleMattersOf(import.meta.url);

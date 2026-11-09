@@ -8,6 +8,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { filePart } from "../../../scripts/test-file-parts.ts";
 import { doorClock } from "../src/channels/door.ts";
 import { channelText } from "../src/channels/stephen-rules.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
@@ -447,49 +448,68 @@ export const probesIn = (
   [part, of]: ProbePart = [1, 1]
 ) => probesOf(asker, tactic).filter((_, at) => at % of === part - 1);
 
-/**
- * The files that ask the members' probes, by channel: which asker's, put
- * which way, and which part of them. permission-probes-controls.test.ts
- * checks that they ask every probe once.
- */
-export const probeFiles: Record<
-  "workspace" | "teams",
-  readonly (readonly [BrainPersona, ProbeTactic, ProbePart])[]
-> = {
-  workspace: [
-    ["ana", "ask", [1, 1]],
-    ["ana", "pretext", [1, 1]],
-    ["bram", "ask", [1, 1]],
-    ["bram", "pretext", [1, 1]],
-  ],
-  teams: [
-    ["ana", "ask", [1, 1]],
-    ["ana", "pretext", [1, 1]],
-    ["bram", "ask", [1, 2]],
-    ["bram", "ask", [2, 2]],
-    ["bram", "pretext", [1, 1]],
-  ],
-};
-
 const channels = {
   workspace: { name: "Workspace.ask", asked: askedInWorkspace },
   teams: { name: "the Teams door", asked: askedThroughDoor },
 } as const;
 
+/** A probe file's channel, by the word its name has for it. */
+const doors: Readonly<Record<string, keyof typeof channels>> = {
+  ask: "workspace",
+  teams: "teams",
+};
+
+/** A probe file's tactic, by the word its name has for it. */
+const tactics: Readonly<Record<string, ProbeTactic>> = {
+  plain: "ask",
+  pretext: "pretext",
+};
+
+const askers: readonly BrainPersona[] = ["ana", "bram"];
+
+const probeFileName =
+  /^permission-probes-(?<door>[a-z]+)-(?<asker>[a-z]+)-(?<tactic>[a-z]+)$/u;
+
+/** What a members' probe file asks, which its name says. */
+export interface ProbeFile {
+  channel: keyof typeof channels;
+  asker: BrainPersona;
+  tactic: ProbeTactic;
+  part: ProbePart;
+}
+
 /**
- * A test file's probes: each of `asker`'s probes put with `tactic` (or
- * `part` of them), asked through `channel` in the file's own company, one
- * test each. A probe
- * passes when it was asked, its answer came back, and nothing its asker
- * may not read (no canary, fact or colleague's memory) reached a model or
- * the answer.
+ * What the members' probe file `file` asks, from its own name:
+ * `permission-probes-<ask|teams>-<asker>-<plain|pretext>.test.ts`, with
+ * `-<part>-of-<parts>` before `.test.ts` for a part of them
+ * (scripts/test-file-parts.ts). permission-probes-controls.test.ts reads
+ * every such file's name and checks that together they ask every probe
+ * once.
  */
-export const probedThrough = (
-  channel: keyof typeof channels,
-  asker: BrainPersona,
-  tactic: ProbeTactic,
-  part: ProbePart = [1, 1]
-) => {
+export const probeFile = (file: string): ProbeFile => {
+  const { run, part, parts } = filePart(file);
+  const groups = probeFileName.exec(run)?.groups ?? {};
+  const channel = doors[groups.door ?? ""];
+  const asker = askers.find((each) => each === groups.asker);
+  const tactic = tactics[groups.tactic ?? ""];
+  if (channel === undefined || asker === undefined || tactic === undefined) {
+    throw new Error(
+      `${run} names no probes: permission-probes-<ask|teams>-<ana|bram>-<plain|pretext>[-<part>-of-<parts>].test.ts`
+    );
+  }
+  return { channel, asker, tactic, part: [part, parts] };
+};
+
+/**
+ * A test file's probes, which its name (`file`, its `import.meta.url`)
+ * says (`probeFile`): each of the asker's probes put that way (or that
+ * part of them), asked through that channel in the file's own company,
+ * one test each. A probe passes when it was asked, its answer came back,
+ * and nothing its asker may not read (no canary, fact or colleague's
+ * memory) reached a model or the answer.
+ */
+export const probedThrough = (file: string) => {
+  const { channel, asker, tactic, part } = probeFile(file);
   const idp = mockIdp();
   watched();
   const setUp = companyOnce(idp);
@@ -512,24 +532,40 @@ export const probedThrough = (
   });
 };
 
-/**
- * The people matters' files, one a matter: each asks its matter in every
- * language, as Ana and as Bram. permission-probes-controls.test.ts checks
- * that they ask every one.
- */
-export const peopleFiles: readonly PeopleMatter["matter"][] = [
+const matters: readonly PeopleMatter["matter"][] = [
   "sickness",
   "harassment",
   "conflict",
 ];
 
 /**
- * A test file's people matters (sickness, harassment or a conflict) go to
- * a person: the rule is in what the model is told in a chat app, and what
- * HR keeps about a colleague never reaches it, asked through the Teams
- * door in the file's own company.
+ * The people matter the file `file` asks, from its own name:
+ * `permission-probes-people-<matter>.test.ts`.
+ * permission-probes-controls.test.ts reads every such file's name and
+ * checks that together they ask every matter.
  */
-export const peopleMattersOf = (kind: PeopleMatter["matter"]) => {
+export const peopleFile = (file: string): PeopleMatter["matter"] => {
+  const { run } = filePart(file);
+  const matter = matters.find(
+    (each) => run === `permission-probes-people-${each}`
+  );
+  if (matter === undefined) {
+    throw new Error(
+      `${run} names no people matter: permission-probes-people-<${matters.join("|")}>.test.ts`
+    );
+  }
+  return matter;
+};
+
+/**
+ * A test file's people matters (sickness, harassment or a conflict, which
+ * its name, `file`, says: `peopleFile`) go to a person: the rule is in
+ * what the model is told in a chat app, and what HR keeps about a
+ * colleague never reaches it, asked through the Teams door in the file's
+ * own company.
+ */
+export const peopleMattersOf = (file: string) => {
+  const kind = peopleFile(file);
   const idp = mockIdp();
   watched();
   const setUp = companyOnce(idp);

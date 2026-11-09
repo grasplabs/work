@@ -7,4 +7,4 @@ import { probedThrough } from "./permission-probing.ts";
 // apart; permission-probes-controls.test.ts has their count, the controls
 // and the outsiders, permission-probes-people-*.test.ts people matters.
 
-probedThrough("workspace", "bram", "ask");
+probedThrough(import.meta.url);
