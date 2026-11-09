@@ -2034,26 +2034,24 @@ class SealedRun implements SealedRunKind {
   /**
    * The failure step `step` answers its code with: what a catch reads of
    * it (`failureOf`: its code and the platform's words, never what the
-   * step's own message held), or, for one no catch may take, its code and
-   * the platform's words alone. So nothing a failure's message quoted
-   * reaches the code, which a catch would hand on.
+   * step's own message held), so nothing a failure's message quoted
+   * reaches a catch, which would hand it on; one no catch may take as the
+   * host failed it, since the run ends with it whatever its code does.
    */
   failureForCode(step: string, error: StepError): StepError {
     const task = this.#stepOf(step)?.task;
     const failure =
       task === undefined ? notCaught() : failureOf(error, task, false);
-    if (failure.catchable) {
-      return {
-        name: error.name,
-        message: failure.error.message,
-        code: failure.error.code,
-      };
-    }
-    return {
-      name: error.name,
-      message: expectedMessageOf(error.code ?? "") ?? taskFailed,
-      ...(error.code === undefined ? {} : { code: error.code }),
-    };
+    // One no catch may take ends the run, whatever the code does: its
+    // words are the host's own (a refusal's, a timeout's), as the run ends
+    // with them.
+    return failure.catchable
+      ? {
+          name: error.name,
+          message: failure.error.message,
+          code: failure.error.code,
+        }
+      : error;
   }
 
   /**

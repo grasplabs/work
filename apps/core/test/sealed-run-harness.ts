@@ -98,10 +98,6 @@ export const objectOf = (fields: Record<string, unknown>) => ({
   fields,
 });
 
-/** Where the standard error types are, as a catch's filter names them. */
-export const standardErrors =
-  "https://grasp.work/schemas/grasp-workflow/2/errors/";
-
 /** What mail.send takes, `{ to, subject }`, and answers, `{ messageId }`. */
 export const mailInput = v.object({ to: v.string(), subject: v.string() });
 export const mailOutput = v.object({ messageId: v.string() });
@@ -159,7 +155,7 @@ export const granted = async (
  * A workflow of `by`'s, published and approved by `admin`: after an hour's
  * wait, task `send` mails its input's `who` through connector binding
  * `mail`, the subject its sensitive `token` parameter as a binding
- * argument (`secret`), and task `greet` asks model binding `summary`.
+ * argument (`secret`), and task `greet` asks the model, `ai`.
  * `extra` steps come last.
  */
 export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
@@ -227,7 +223,6 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
             },
           ],
           catch: {
-            errors: { type: `${standardErrors}runtime` },
             retry: { attempts: 3, delay: "1 second", backoff: "constant" },
           },
         },
@@ -286,19 +281,19 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
                 },
               ],
               catch: {
-                errors: { status: 500 },
+                code: "internal.unexpected",
                 when: { $expr: 'args.who === "Ada"' },
               },
             },
           ],
           catch: {
-            errors: { status: 500 },
+            code: "internal.unexpected",
             retry: { attempts: 3, delay: "1 second", backoff: "constant" },
           },
         },
         // A loop of a mail and a raise its own catch takes in each item
-        // (`rows`, enter; `notify` and `check`, task@<item>; `guard`,
-        // catch@<item>), then a step after it.
+        // (`notify:task`, then `notify:task@1`; `check` and `guard` have
+        // no steps, their flow the code's), then a step after it.
         {
           id: "rows",
           type: "forEach",
@@ -415,12 +410,42 @@ export const sdkWorkflow = JSON.stringify(
 /**
  * A module of the test's own in place of the build's generated one: a
  * workflow on input `{ who }` whose run is `body`, with `step`, `env`,
- * `input` and `sensitiveParam` in scope.
+ * `input` (and `args`, the same), `AppError` and `sensitiveParam` in
+ * scope. `step` reaches the run host's
+ * engine as the SDK's journal does, but by any name the test gives
+ * (`step.do("send", { key: "task" }, fn)` runs engine step `send:task`,
+ * and a key's run count `@0`, the first, is left out as the SDK does):
+ * so a test can make the steps generated code never makes, as tampering
+ * code would. Its `decision` runs a decision's parts as the SDK's `ask`
+ * does, after the enter step the test runs itself.
  */
 export const moduleOf = (body: string): string => `
-import { sensitiveParam, v, workflow } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: v.object({ who: v.string() }) }, async (step, { env, input }) => {
+import { AppError, sensitiveParam } from ${sdkWorkflow};
+const named = (name, options) => options?.key === undefined ? name : name + ":" + String(options.key).replace(/@0$/u, "");
+const units = { second: 1000, minute: 60000, hour: 3600000, day: 86400000, week: 604800000 };
+const msOf = (duration) => typeof duration === "number" ? duration : Number(duration.split(" ")[0]) * units[duration.split(" ")[1].replace(/s$/u, "")];
+export default Object.freeze({
+  metadata: { params: [] },
+  run: async (engine, input) => {
+    const env = engine.env;
+    // What generated code reads the run's input as.
+    const args = input;
+    const step = {
+      do: async (name, options, fn) => await engine.do(named(name, options), { ...(options?.retries === undefined ? {} : { retries: options.retries }) }, async () => await fn({}), typeof options?.retry === "function" ? async (error) => await options.retry(error) : undefined),
+      sleep: async (name, options) => await engine.sleep(named(name, options), msOf(options.duration)),
+      sleepUntil: async (name, options) => await engine.sleepUntil(named(name, options), options.until),
+      listen: async (name, options) => await engine.listen(named(name, options)),
+      decision: async (name, options) => {
+        const task = named(name, options);
+        const { decision, deadline } = await engine.do(task, { input: { from: options.from } }, async () => await engine.openDecision({ step: task, from: options.from, description: options.description, timeout: msOf(options.timeout) }));
+        await engine.do(task + "#ask", { input: { from: options.from } }, async () => { await engine.askDecision(decision); });
+        const askedAt = await engine.do(task + "#asked", {}, async () => Date.now());
+        const answer = await engine.waitForDecision(task + "#answer", { decision, timeout: Math.max(deadline - askedAt, 0), last: true });
+        return answer.answered ? { timedOut: false, approved: answer.approved, by: answer.by, payload: answer.payload } : { timedOut: true };
+      },
+    };
 ${body}
+  },
 });
 `;
 
@@ -445,7 +470,7 @@ export const greeting =
 
 /** The engine step of `task`'s own step, asking its model with `args`. */
 export const greet = (args: string, task = "greet"): string =>
-  `return await step.do(${JSON.stringify(task)}, { key: "task", description: "Its task" }, async () => await env.summary.call("grasp.model", ${args}));`;
+  `return await step.do(${JSON.stringify(task)}, { key: "task", description: "Its task" }, async () => await env.ai.call("grasp.model", ${args}));`;
 
 /** A provider answer greeting Ada, as the model's output schema takes it. */
 export const hello = {
@@ -726,9 +751,19 @@ export const ranAs = async (
   const settled = settledSchema.parse(
     await code.run(host, await sealedRunStart(env, run))
   );
+  // What the run fails with, as its activation ends it
+  // (`SealedRunKind.runFailure`): a raise only as its build seals it.
+  // A run caught tampering fails with the refusal, as its activation does.
+  let failed: { code?: string; message: string } | undefined;
+  if (!settled.ok) {
+    failed =
+      tampered.length > 0 || kind === undefined
+        ? settled.error
+        : kind.runFailure({ name: "Error", ...settled.error });
+  }
   return {
-    ended: settled.ok ? settled.value : settled.error.code,
-    ...(settled.ok ? {} : { why: settled.error.message }),
+    ended: settled.ok ? settled.value : failed?.code,
+    ...(settled.ok ? {} : { why: failed?.message }),
     tampered,
     // A failure no catch took, as the run's code ended well past it.
     ...(settled.ok && kind?.failureUntaken !== undefined
@@ -797,7 +832,7 @@ export const echoingMail = async (id: string, echo: string): Promise<void> => {
 
 /** Engine step `name` with key `key`, as the SDK names it. */
 export const engineStep = (name: string, key: string): string =>
-  `${name}:${encodeURIComponent(key)}`;
+  `${name}:${key}`;
 
 /** A refusal, saying `why`, that ends the run as tampering. */
 export const refusedAs = (why: string) => ({
@@ -854,8 +889,8 @@ export const decisionWorkflow = async () => {
         by: { kind: "string" },
       }),
       result: {
-        approved: { $expr: "review.approved" },
-        by: { $expr: "review.by" },
+        approved: { $expr: "!review.timedOut && review.approved" },
+        by: { $expr: 'review.timedOut ? "" : review.by' },
       },
       permissions: { decisions: { approval: { contract } } },
       steps: [

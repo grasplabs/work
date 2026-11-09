@@ -4,14 +4,14 @@ import { describe, expect, it } from "vite-plus/test";
 import { failureOf, retryable } from "../src/workflows/resource-errors.ts";
 
 // What a catch may take of a step's failure, and as what (spec 13.7): the
-// mapping of the host's failures to upstream errors, pure logic, so tested
+// mapping of the host's failures to `{ code, message, step }`, pure logic, so tested
 // on its own. Integration through a run is workflow-failures.test.ts's.
 
 const task: SealedTask = {
   id: "send",
-  pointer: "/do/0/guard/try/0/send",
+  pointer: "/steps/0/try/0",
   kind: "switch",
-  steps: ["task"],
+  steps: [],
   scope: [],
 };
 
@@ -23,7 +23,7 @@ const retries = (error: { name: string; code?: string }, of: SealedTask) =>
 const onceTask = (name: "grasp.action" | "grasp.model"): SealedTask => {
   const base = {
     id: "charge",
-    pointer: "/do/0/guard/try/0/charge",
+    pointer: "/steps/0/try/0",
     kind: "call" as const,
     steps: ["task" as const],
     scope: [],
@@ -51,8 +51,6 @@ const onceTask = (name: "grasp.action" | "grasp.model"): SealedTask => {
     },
   };
 };
-
-const standard = "https://grasp.work/schemas/grasp-workflow/1/errors/";
 
 describe("a step's failure, as a catch sees it", () => {
   it("never lets a catch take an unknown outcome or a refusal of the module", () => {
@@ -103,7 +101,7 @@ describe("a step's failure, as a catch sees it", () => {
     // have gone out, and no attempt had connect's definite answer.
     const connector: SealedTask = {
       id: "send",
-      pointer: "/do/0/guard/try/0/send",
+      pointer: "/steps/0/try/0",
       kind: "call",
       steps: ["task"],
       scope: [],
@@ -119,8 +117,8 @@ describe("a step's failure, as a catch sees it", () => {
     ).toStrictEqual({ catchable: false });
   });
 
-  it("maps the host's failures to standard types, never with the step's own message", () => {
-    const typeOf = (error: { name: string; code?: string }) => {
+  it("hands a catch the failure's code and the platform's words, never the step's own message", () => {
+    const caughtOf = (error: { name: string; code?: string }) => {
       const failure = failureOf(
         { ...error, message: "with data the run read" },
         task,
@@ -128,117 +126,37 @@ describe("a step's failure, as a catch sees it", () => {
       );
       return failure.catchable
         ? {
-            type: failure.error.type.slice(standard.length),
-            status: failure.error.status,
-            detail: failure.error.detail,
-            leaks: failure.error.title?.includes("data") ?? false,
+            code: failure.error.code,
+            step: failure.error.step,
+            leaks: failure.error.message.includes("data"),
           }
         : undefined;
     };
     expect({
-      timeout: typeOf({ name: "TimeoutError" }),
-      denied: typeOf({ name: "Error", code: "permission.denied" }),
-      inactive: typeOf({ name: "Error", code: "permission.person_inactive" }),
-      data: typeOf({ name: "Error", code: "workflow.task_data_invalid" }),
-      expression: typeOf({ name: "Error", code: "expression.failed" }),
-      connector: typeOf({ name: "Error", code: "connect.declined" }),
-      unknown: typeOf({ name: "Error" }),
+      timeout: caughtOf({ name: "TimeoutError" }),
+      denied: caughtOf({ name: "Error", code: "permission.denied" }),
+      data: caughtOf({ name: "Error", code: "workflow.task_data_invalid" }),
+      expression: caughtOf({ name: "Error", code: "expression.failed" }),
+      connector: caughtOf({ name: "Error", code: "connect.declined" }),
+      unknown: caughtOf({ name: "Error" }),
     }).toStrictEqual({
       timeout: {
-        type: "timeout",
-        status: 408,
-        detail: undefined,
+        code: "function.deadline_exceeded",
+        step: "send",
         leaks: false,
       },
-      denied: {
-        type: "authorization",
-        status: 403,
-        detail: undefined,
-        leaks: false,
-      },
-      inactive: {
-        type: "authorization",
-        status: 403,
-        detail: undefined,
-        leaks: false,
-      },
-      data: {
-        type: "validation",
-        status: 400,
-        detail: undefined,
-        leaks: false,
-      },
-      expression: {
-        type: "expression",
-        status: 400,
-        detail: undefined,
-        leaks: false,
-      },
-      connector: {
-        type: "communication",
-        status: 500,
-        detail: undefined,
-        leaks: false,
-      },
-      unknown: {
-        type: "runtime",
-        status: 500,
-        detail: undefined,
-        leaks: false,
-      },
-    });
-  });
-
-  it("takes the workflow's own error only from a raise, as the raise declared it", () => {
-    const raise: SealedTask = {
-      id: "deny",
-      pointer: "/do/0/guard/try/0/deny",
-      kind: "raise",
-      steps: ["task"],
-      scope: [],
-      error: { type: "urn:grasp:error:denied", status: 409, title: "Denied." },
-    };
-    const raised = {
-      name: "NonRetryableError",
-      message: "",
-      code: "workflow.raised",
-    };
-    expect({
-      raise: failureOf(raised, raise, false),
-      other: failureOf(raised, task, false),
-    }).toStrictEqual({
-      raise: {
-        catchable: true,
-        code: "workflow.raised",
-        error: {
-          type: "urn:grasp:error:denied",
-          status: 409,
-          instance: "/do/0/guard/try/0/deny",
-          title: "Denied.",
-        },
-      },
-      other: { catchable: false },
+      denied: { code: "permission.denied", step: "send", leaks: false },
+      data: { code: "workflow.task_data_invalid", step: "send", leaks: false },
+      expression: { code: "expression.failed", step: "send", leaks: false },
+      connector: { code: "connect.declined", step: "send", leaks: false },
+      unknown: { code: "internal.unexpected", step: "send", leaks: false },
     });
   });
 
   it("lets a retry policy try again only what trying again may fix", () => {
-    const raise: Extract<SealedTask, { kind: "raise" }> = {
-      id: "deny",
-      pointer: "/do/0/guard/try/0/deny",
-      kind: "raise",
-      steps: ["task"],
-      scope: [],
-      error: { type: "urn:grasp:error:denied", status: 409 },
-    };
     expect({
       timeout: retries({ name: "TimeoutError" }, task),
       connector: retries({ name: "Error", code: "connect.unavailable" }, task),
-      raised: retries({ name: "Error", code: "workflow.raised" }, raise),
-      // Of a status trying again might fix: still the workflow's own.
-      raisedServerError: retries(
-        { name: "Error", code: "workflow.raised" },
-        { ...raise, error: { type: "urn:grasp:error:upstream", status: 503 } }
-      ),
       testRunWaitLimit: failureOf(
         { name: "Error", message: "", code: "workflow.candidate_wait_limit" },
         task,
@@ -254,8 +172,6 @@ describe("a step's failure, as a catch sees it", () => {
     }).toStrictEqual({
       timeout: true,
       connector: true,
-      raised: false,
-      raisedServerError: false,
       testRunWaitLimit: false,
       conflict: false,
       denied: false,
