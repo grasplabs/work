@@ -48,6 +48,13 @@ export const journeyTests = /journey\.e2e\.ts$/u;
  */
 const adminTests = /\/e2e\/admin\//u;
 const ci = process.env.CI === "true";
+/**
+ * Whether the stack's code is built already (`GRASP_E2E_PREBUILT=true`):
+ * CI builds it once, in a job of its own, for every part's stack
+ * (`vp run --filter @grasp-os/core dev:build`), so a part only starts it.
+ * Locally it builds each time, as the checkout changes between runs.
+ */
+const prebuilt = process.env.GRASP_E2E_PREBUILT === "true";
 
 /** A `--var` for wrangler dev, quoted once for the shell. */
 const devVar = (name: string, value: string): string =>
@@ -189,7 +196,7 @@ export default defineConfig({
         "node e2e/connect-config.ts &&",
         // The dir comes from `env` below, so no path is ever shell syntax.
         'rm -rf "$DEV_PERSIST_TO" &&',
-        `vp run --filter @grasp-os/core dev --local --port ${corePort}`,
+        `vp run --filter @grasp-os/core ${prebuilt ? "dev:serve" : "dev"} --local --port ${corePort}`,
         devVar("BETTER_AUTH_SECRET", testAuthSecret),
         ...Object.entries(localSignIn(origin, idpOrigin)).map(([name, value]) =>
           devVar(
