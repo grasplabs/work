@@ -1,24 +1,24 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { liveReadLimitsOf, querySubscriptionLimits } from "../src/pages.ts";
+import { liveReadLimitsOf } from "../src/pages.ts";
 
-const { liveReads } = querySubscriptionLimits;
+/** A person's live-read budget when nothing lowers it. */
+const budget = { burst: 200, perMinute: 600 };
 
 describe("the live-read budget a deployment is configured with", () => {
   it("takes a lower burst and rate, each on its own", () => {
     expect({
       both: liveReadLimitsOf("50/300"),
-      burst: liveReadLimitsOf(`50/${liveReads.perMinute + 1}`),
+      burst: liveReadLimitsOf("50/601"),
     }).toStrictEqual({
       both: { burst: 50, perMinute: 300 },
-      burst: { burst: 50, perMinute: liveReads.perMinute },
+      burst: { burst: 50, perMinute: 600 },
     });
   });
 
   it("keeps the default for a higher, a garbled or an empty value, or none", () => {
-    const higher = `${liveReads.burst + 1}/${liveReads.perMinute + 1}`;
     for (const value of [
-      higher,
+      "201/601",
       "lots",
       "-5/-1",
       "1.5/2.5",
@@ -26,7 +26,7 @@ describe("the live-read budget a deployment is configured with", () => {
       "",
       undefined,
     ]) {
-      expect(liveReadLimitsOf(value)).toStrictEqual(liveReads);
+      expect(liveReadLimitsOf(value)).toStrictEqual(budget);
     }
   });
 });

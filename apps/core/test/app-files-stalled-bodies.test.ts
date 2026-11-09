@@ -68,11 +68,34 @@ describe("an App's files", { timeout: 120_000 }, () => {
         },
         body,
       });
+      // The clock moves on until core answers: past the read's deadline
+      // once it waits for the rest of the body, and no further than a
+      // second at a time, so a test that never gets its answer times out
+      // rather than hangs.
+      const settled = { now: false };
+      const watched = (async () => {
+        try {
+          await answer;
+        } finally {
+          settled.now = true;
+        }
+      })();
       // Once core reads the body and waits for the rest.
       await vi.waitFor(() => {
         expect(vi.getTimerCount()).toBeGreaterThan(0);
       });
-      await vi.advanceTimersByTimeAsync(readDeadlineMs);
+      for (let moved = 0; !settled.now; moved += 1000) {
+        if (moved > 2 * readDeadlineMs) {
+          throw new Error("No answer once the read's deadline long passed");
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one second after the other
+        await vi.advanceTimersByTimeAsync(1000);
+        // Real time for what core does over I/O meanwhile (scheduler.wait
+        // isn't faked).
+        // oxlint-disable-next-line no-await-in-loop -- one second after the other
+        await scheduler.wait(10);
+      }
+      await watched;
       response = await answer;
     } finally {
       vi.useRealTimers();

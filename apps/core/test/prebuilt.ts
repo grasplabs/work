@@ -3,7 +3,7 @@
  * built from, so a run whose inputs are byte for byte those of an earlier
  * build reuses that build instead of building again: the App compiler,
  * the extractor and connect's bundle took some 30 s of every CI shard's
- * start. CI restores the directory by the key test/prebuilt-key.ts
+ * start. CI restores it by this key (ci.yml), which test/prebuilt-key.ts
  * prints; locally the second run reuses the first's.
  */
 
@@ -45,10 +45,13 @@ export const prebuiltInputs = [
   "apps/core/test/global-setup.ts",
   "apps/core/test/prebuilt.ts",
   "apps/core/test/run-node.ts",
+  "apps/core/package.json",
+  "apps/core/tsconfig.json",
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
   "patches",
+  "tsconfig.base.json",
   "tsconfig.json",
   "vite.config.ts",
 ] as const;

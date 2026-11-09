@@ -1,6 +1,7 @@
 /**
  * Prints the key core's global setup keeps its builds under
- * (prebuilt.ts), for CI to cache `apps/core/dist/test-prebuilt` by:
+ * (prebuilt.ts), which CI restores `apps/core/dist/test-prebuilt` by
+ * (ci.yml):
  * `node apps/core/test/prebuilt-key.ts`.
  */
 import { prebuiltKey } from "./prebuilt.ts";
