@@ -243,8 +243,8 @@ export const workflowResourceErrors = defineErrorFamily({
 
 /**
  * The binding kinds the host catalog serves, beside other workflows. A
- * `knowledge` or `files` binding is reached only by the
- * workflow's own actions (GRA-700, GRA-724): no JSON task calls one.
+ * `knowledge` or `files` binding is for the Brain and files steps
+ * (GRA-1662); until they land, no JSON task calls one.
  */
 export const catalogBindingKinds = [
   "connector",
@@ -332,13 +332,13 @@ export const catalogContractSchema = z
            */
           readOnly: z.boolean().optional(),
           /**
-           * That the operation answers a file an action may keep as a file
-           * of its run (GRA-886): only on an operation described by its
+           * That the operation answers a file a call may keep as a file of
+           * its run (GRA-886): only on an operation described by its
            * native connector's JSON Schemas, as connect confirms it.
            */
           answersFile: z.literal(true).optional(),
           /**
-           * That the operation attaches files an action names from its run
+           * That the operation attaches files a call names from its run
            * (GRA-887): only on an operation described by its native
            * connector's JSON Schemas, as connect confirms it.
            */

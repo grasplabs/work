@@ -84,7 +84,7 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
  * now (run-object.ts).
  */
 export interface RunMemory {
-  /** The model calls its JSON workflow and its actions made (sealed-run.ts). */
+  /** The model calls its JSON workflow made (sealed-run.ts). */
   modelCalls?: RunModelCalls;
   /** Its sealed build's calls tried once that went out (sealed-run.ts). */
   sentCalls?: SentCalls;

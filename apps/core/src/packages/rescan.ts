@@ -76,6 +76,7 @@ const revokeGraph = async (
     .where(
       and(
         eq(dependencyRequests.graphHash, row.graphHash),
+        eq(dependencyRequests.subjectType, "app"),
         inArray(dependencyRequests.status, [...inForce])
       )
     );
@@ -231,6 +232,9 @@ export const rescanPackages = async (
     .from(dependencyRequests)
     .where(
       and(
+        // A workflow's, from before workflows lost their packages, is
+        // never served again: nothing to rescan.
+        eq(dependencyRequests.subjectType, "app"),
         inArray(dependencyRequests.status, [...inForce]),
         or(
           isNull(dependencyRequests.malwareCheckedAt),

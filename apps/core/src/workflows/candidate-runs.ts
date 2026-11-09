@@ -89,7 +89,7 @@ import { snapshotFrom, snapshotOf, snapshotStored } from "./state-snapshots.ts";
 //   binding it goes through, in `makeCall` before any binding, authority
 //   or receipt is looked at (resource-calls.ts); a call through a binding
 //   with no answer fails the run (`workflow.candidate_unfixtured`). Its
-//   compute and action code runs in the same sandbox as a version's.
+//   generated code runs in the same sandbox as a version's.
 // - Draft code reading a secret. Its parameters are the start's own values,
 //   else the defaults (`candidateParams`), never the values set on the
 //   workflow: its builder wrote its code, and a sensitive value they can't

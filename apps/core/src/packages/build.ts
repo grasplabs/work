@@ -8,7 +8,6 @@ import {
   packageLimits,
 } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageTarball } from "@grasp-os/shared/packages";
-import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -59,10 +58,11 @@ export type PackageBuildEnv = PlatformEnv &
 //   malware check and the audit run on every build all the same.
 
 /**
- * Most bytes of modules core takes from the sandbox host: everything one
- * App's builds may produce.
+ * Most bytes of modules core takes from the sandbox host for one build:
+ * held whole in memory twice (its chunks, then joined), so well under an
+ * isolate's memory.
  */
-const maxModuleBytes = platformLimits.artifactBytes;
+const maxModuleBytes = 8 * 1024 * 1024;
 
 /** `chunks`, in order, as one. */
 const joined = (chunks: readonly Uint8Array[]): Uint8Array => {

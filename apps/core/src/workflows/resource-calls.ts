@@ -179,14 +179,14 @@ export type BuiltCall =
       readonly outputSchema: Json;
     }
   | {
-      /** A Knowledge collection's search, read or recall, by an action (GRA-700). */
+      /** A Knowledge collection's search, read or recall (GRA-700). */
       readonly name: "grasp.knowledge";
       readonly binding: string;
       readonly operation: KnowledgeCall["operation"];
       readonly arguments: Json;
     }
   | {
-      /** One call on the run's own files, by an action (GRA-724). */
+      /** One call on the run's own files (GRA-724). */
       readonly name: "grasp.files";
       readonly binding: string;
       readonly operation: FilesCallOperation;
@@ -653,7 +653,7 @@ const callConnector = async (
   // answers a file, which it is asked for as base64, the bytes as they are.
   const read = call.into === undefined ? asked : asFileRead(shape, asked);
   // Files attached: only to a write its connector declares takes them, as
-  // its sealed contract records it, from a files use the action declared;
+  // its sealed contract records it, from a files binding the call names;
   // each a finished file of this run, named by ID, whose name, type, size
   // and digest are core's own and whose bytes go beside the input.
   const attached = await attachedTo(env, run, shape, call, read);
