@@ -253,7 +253,11 @@ const resealed = async (
 };
 /** A step calling `mail`'s `op`. */
 const mailTask = (op: string) => ({
-  id: `call-${op.replace(".", "-")}`,
+  // `mail.send` is `callMailSend`: a step's ID is an identifier.
+  id: `call${op
+    .split(".")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("")}`,
   type: "call",
   connection: "mail",
   action: op,
@@ -917,7 +921,8 @@ describe("a JSON workflow's own actions", () => {
       );
       const { permissions } = definition;
       const text = JSON.stringify(before);
-      if (text.includes('"ai"')) {
+      // A generate step asks the workflow's one model, `ai`.
+      if (text.includes('"generate"')) {
         permissions.ai = { contract: model };
       }
       const published = await publishWorkflowVersion(env, ada, workflow.id, {
@@ -1060,7 +1065,7 @@ describe("a JSON workflow's own actions", () => {
     }
     expect(problems).toStrictEqual([
       "workflow.definition_invalid: workflow.unknown_permission",
-      "workflow.definition_invalid: workflow.duplicate_alias, workflow.permission_kind",
+      "workflow.definition_invalid: workflow.duplicate_alias, workflow.unknown_permission",
     ]);
   });
 

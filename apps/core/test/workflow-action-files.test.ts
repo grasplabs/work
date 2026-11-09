@@ -160,10 +160,10 @@ export const go = action({
 `;
 
 /** A step `id` calling action `binding` with `args`. */
-const call = (id: string, binding: string, args: Record<string, unknown>) => ({
+const call = (id: string, module: string, args: Record<string, unknown>) => ({
   id,
   type: "call",
-  binding,
+  module,
   args,
 });
 
@@ -192,7 +192,7 @@ const definitionOf = (
       size: { kind: "number" },
     }),
     returns: objectSchema({ status: { kind: "string" } }),
-    result: { $expr: `steps[${JSON.stringify(steps.at(-1)?.id)}].output` },
+    result: { $expr: steps.at(-1)?.id ?? "null" },
     permissions: {
       modules: {
         writeFile: {
@@ -422,9 +422,9 @@ describe("a workflow run's own files", () => {
     const ada = await person("builder");
     const size = 3 * 1024 * 1024 + 7;
     const { workflow } = await filesWorkflow(ada, admin, [
-      call("write-file", "writeFile", { size: { $expr: "args.size" } }),
-      call("read-file", "readFile", {
-        file: { $expr: 'steps["write-file"].output.file' },
+      call("written", "writeFile", { size: { $expr: "args.size" } }),
+      call("read", "readFile", {
+        file: { $expr: "written.file" },
       }),
     ]);
     const runId = await started(ada, workflow.id, { size });

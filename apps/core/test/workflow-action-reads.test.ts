@@ -698,8 +698,8 @@ describe("a workflow action's knowledge uses", () => {
         ["/permissions/modules/look/contract", "binding.use_undeclared"],
       ],
       connector: [
-        ["/permissions/modules/look/contract", "binding.use_undeclared"],
         ["/permissions/connections/docs/contract", "binding.unknown_contract"],
+        ["/permissions/modules/look/contract", "binding.use_undeclared"],
       ],
     });
   });
