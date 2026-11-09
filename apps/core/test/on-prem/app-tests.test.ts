@@ -74,7 +74,12 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
         slowest = Math.max(slowest, Date.now() - asked - 100);
       }
     })();
-    const outcome = await activation(built);
+    // A suite's CPU time lowered from its 30 s, which the spin would take
+    // in full: what stops it is the same.
+    const outcome = await activation(
+      built,
+      envWith({ APP_TEST_LIMITS_MS: "////3000" })
+    );
     done.abort();
     await watching;
     expect(outcome).toStrictEqual({

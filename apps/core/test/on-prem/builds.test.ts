@@ -186,6 +186,9 @@ describe("the App compiler on-prem", () => {
     let kept = 0;
     const counting = {
       ...onPrem,
+      // Stopped at the deadline here rather than the 30 s a build may
+      // take otherwise: a limit all the same.
+      SANDBOX_DEADLINE_MS: String(DEADLINE_MS),
       FILES: {
         get: env.FILES.get.bind(env.FILES),
         put: async (...args: Parameters<R2Bucket["put"]>) => {
