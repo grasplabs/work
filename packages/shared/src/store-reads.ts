@@ -308,15 +308,17 @@ export type WriteRequest =
   | { kind: "delete"; table: string; id: string };
 
 /**
- * What separates a search's words: anything but a letter, a digit or a
- * mark, as the full-text index's unicode61 tokenizer splits text. So
- * `a-b` is two words here as it is two tokens there, and a search's
- * words are what FTS5 reads (`searchMaxTerms`), however they are joined.
+ * What separates a search's words: anything but a letter, a number or a
+ * private-use character, the token classes of the full-text index's
+ * unicode61 tokenizer by default (marks, punctuation and spaces split).
+ * So `INV-2024-001` is three words here as it is three tokens there, and
+ * a search's words are what FTS5 reads (`searchMaxTerms`), however they
+ * are joined.
  */
-const searchSeparator = /[^\p{L}\p{N}\p{M}]+/u;
+const searchSeparator = /[^\p{L}\p{N}\p{Co}]+/u;
 
-/** A letter or digit: a word of marks alone finds nothing. */
-const wordCharacter = /[\p{L}\p{N}]/u;
+/** What a word holds at least one of, as unicode61 tokens do. */
+const wordCharacter = /[\p{L}\p{N}\p{Co}]/u;
 
 /**
  * The words a search's text looks for, in order, as the full-text index

@@ -4,11 +4,13 @@ import type { Json } from "@grasp-os/shared/json";
 import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
 import type { QueryCache } from "./client-query-cache.ts";
-import { keepMs, show } from "./client-query-entry.ts";
+import { keepMs, loading, show } from "./client-query-entry.ts";
+import { unfollow } from "./client-query-following.ts";
 import { inputOf, readReference } from "./client-request.ts";
 import { observe } from "./client-retry.ts";
 import {
   failPager,
+  freshPage,
   isPageSize,
   ownPage,
   pageOf,
@@ -48,7 +50,11 @@ import { isPlainObject } from "./value-descriptor.ts";
 //   search's anchor record went): a page fails with `data.cursor_expired`
 //   or `data.invalid_cursor`, and the list starts again from its first
 //   page, loading pages of its first size until it holds as many records
-//   as it showed, showing those meanwhile.
+//   as it showed. What it showed stays only until its first page answers,
+//   since some of it may no longer be the person's to see. Pages failed
+//   for their cursor are read afresh when asked for again, never taken
+//   from the cache, and a refill or Load More goes on only from what core
+//   pushed since the list started again (`freshPage`).
 // - A late answer lands in another list: each page is its own query,
 //   keyed by the list's reference, its canonical arguments and its
 //   pagination; a list whose arguments change is another list.
@@ -204,11 +210,24 @@ export class Pagers {
         ...(endCursor === null ? {} : { endCursor }),
       },
     };
+    const entry = this.#queries.entryFor(pager.reference, input);
+    // A page that failed for its cursor or its size, cached and followed
+    // by no one now, is read afresh: what failed it may have passed (a
+    // ranking that flipped back, a title edited back), and a list started
+    // again that met the cached failure would start again for ever.
+    const failed = entry.snapshot.error?.code ?? "";
+    if (
+      entry.listeners.size === 0 &&
+      (cursorRefusals.has(failed) || tooLarge.has(failed))
+    ) {
+      unfollow(entry);
+      show(entry, loading);
+    }
     return {
       cursor,
       endCursor,
       pageSize,
-      entry: this.#queries.entryFor(pager.reference, input),
+      entry,
       stop: undefined,
       held: undefined,
       twin: undefined,
@@ -274,10 +293,21 @@ export class Pagers {
       if (error !== undefined) {
         pager.waiting.reject(error);
         pager.waiting = undefined;
-      } else if (shownPage(last) !== undefined) {
+      } else if (freshPage(last) !== undefined) {
         pager.waiting.resolve(null);
         pager.waiting = undefined;
       }
+    }
+    // Started again: what it showed goes once its first page answers,
+    // never kept on screen for the whole refill (a row rule may hide some
+    // of it now); the refill goes on behind.
+    const [first] = pager.pages;
+    if (
+      pager.held !== undefined &&
+      first !== undefined &&
+      freshPage(first) !== undefined
+    ) {
+      pager.held = undefined;
     }
     this.#refill(pager);
     pagerChanged(pager);
@@ -302,10 +332,7 @@ export class Pagers {
     // Only from what core pushed since the page was followed: a cached
     // answer may be from before the list started again, its cursor one
     // that no longer applies.
-    if (
-      shownPage(last) === undefined ||
-      (last.entry.live?.revision ?? 0) === 0
-    ) {
+    if (freshPage(last) === undefined) {
       return;
     }
     const loaded = pager.pages.reduce(
@@ -401,7 +428,10 @@ export class Pagers {
     pager.pages = [this.#page(pager, null, null, pager.initialPageSize)];
     const keep = items !== undefined && items.length > 0;
     pager.held = keep ? items : undefined;
-    pager.refill = keep ? items.length : undefined;
+    // Started again while it refilled: it loads back as much as it was
+    // to, never only what it had loaded again so far.
+    const wanted = Math.max(pager.refill ?? 0, items?.length ?? 0);
+    pager.refill = wanted > 0 ? wanted : undefined;
     for (const page of pager.pages) {
       this.#follow(pager, page);
     }
@@ -416,7 +446,9 @@ export class Pagers {
    */
   #extend(pager: Pager, size: number): boolean {
     const last = pager.pages.at(-1);
-    const shown = last === undefined ? undefined : shownPage(last);
+    // Only from what core pushed since the page was followed, as the
+    // refill: a cached answer's cursor may be from before a restart.
+    const shown = last === undefined ? undefined : freshPage(last);
     if (
       last === undefined ||
       shown === undefined ||
@@ -494,9 +526,10 @@ export class Pagers {
       return;
     }
     const last = pager.pages.at(-1);
-    const shown = last === undefined ? undefined : shownPage(last);
+    const shown = last === undefined ? undefined : freshPage(last);
     if (last === undefined || shown === undefined) {
-      // The last page isn't shown yet: wait for it, adding nothing.
+      // The last page isn't shown yet, or only from a cache (a list
+      // started again): wait for it, adding nothing.
       pager.waiting = Promise.withResolvers<null>();
       void observe(pager.waiting.promise);
       await pager.waiting.promise;

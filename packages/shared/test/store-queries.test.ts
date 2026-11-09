@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { queryRequestSchema, readRequestSchema } from "../src/store-queries.ts";
+import { searchTerms } from "../src/store-reads.ts";
 
 // The host's schema of a read: the store checks every descriptor App code
 // built with it, so it must refuse what is malformed or oversized without
@@ -273,5 +274,28 @@ describe("a read request", () => {
     expect(
       readRequestSchema.safeParse({ kind: "sql", text: "SELECT 1" }).success
     ).toBeFalsy();
+  });
+});
+
+describe("a search's words", () => {
+  it("are the tokens the full-text index reads: letters, numbers and private-use characters", () => {
+    expect({
+      // Split at punctuation, so an invoice number is three words.
+      invoice: searchTerms("INV-2024-001"),
+      // A combining mark splits, as unicode61 splits at marks.
+      mark: searchTerms("cafe\u0301s"),
+      // Private-use characters are word characters.
+      privateUse: searchTerms("\uE000x y"),
+      // Letters of any script, and numbers.
+      scripts: searchTerms("日本 Ünïcode ٣"),
+      // Nothing to look for.
+      none: searchTerms(" -- \u0301 "),
+    }).toStrictEqual({
+      invoice: ["INV", "2024", "001"],
+      mark: ["cafe", "s"],
+      privateUse: ["\uE000x", "y"],
+      scripts: ["日本", "Ünïcode", "٣"],
+      none: [],
+    });
   });
 });

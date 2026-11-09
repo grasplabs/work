@@ -259,6 +259,281 @@ describe("the session client's paginated list", () => {
   });
 });
 
+/** A page a list asks the host for, as its `pagination` argument. */
+interface Asked {
+  readonly pageSize: number;
+  readonly cursor: string | null;
+  readonly endCursor?: string;
+}
+
+/**
+ * A host that answers a list of `titles` in title order, keyset pages
+ * whose cursors (`<version>:<title>`) expire with `version`, as core's
+ * do with a release. What the test controls: `version`, records `hidden`
+ * from the person, `broken` (every page with a cursor refused, as when
+ * its anchor ranks before its start), and `hold` (answers held until
+ * `release`: to pages with a cursor, or to all). `reread` pushes every page followed, as
+ * a write would; `asked` is every page followed, in order.
+ */
+/** The title a test host's cursor (`<version>:<title>`) is after. */
+const titleOf = (cursor: string): string =>
+  cursor.slice(cursor.indexOf(":") + 1);
+
+/** The page a followed request asks for, read from its JSON. */
+const askedOf = (request: string): Asked => {
+  const sent: unknown = JSON.parse(request);
+  const input: unknown =
+    typeof sent === "object" && sent !== null ? Reflect.get(sent, "input") : {};
+  const pagination: unknown =
+    typeof input === "object" && input !== null
+      ? Reflect.get(input, "pagination")
+      : {};
+  const field = (name: string): unknown =>
+    typeof pagination === "object" && pagination !== null
+      ? Reflect.get(pagination, name)
+      : undefined;
+  const pageSize = field("pageSize");
+  const cursor = field("cursor");
+  const endCursor = field("endCursor");
+  return {
+    pageSize: typeof pageSize === "number" ? pageSize : 0,
+    cursor: typeof cursor === "string" ? cursor : null,
+    ...(typeof endCursor === "string" ? { endCursor } : {}),
+  };
+};
+
+/** Which answers a test host holds back until it releases them. */
+type Holding = "none" | "cursors" | "all";
+
+const listHost = (titles: readonly string[]) => {
+  const state: {
+    version: number;
+    hidden: Set<string>;
+    broken: boolean;
+    hold: Holding;
+  } = {
+    version: 0,
+    hidden: new Set<string>(),
+    broken: false,
+    hold: "none",
+  };
+  interface Followed {
+    readonly asked: Asked;
+    readonly onSnapshot: (push: unknown) => void;
+    revision: number;
+  }
+  const followed = new Set<Followed>();
+  const held: Followed[] = [];
+  const asked: Asked[] = [];
+  const resultOf = ({ pageSize, cursor, endCursor }: Asked) => {
+    const cursors = [cursor, endCursor ?? null].filter(
+      (each): each is string => each !== null
+    );
+    if (
+      (state.broken && cursors.length > 0) ||
+      cursors.some((each) => !each.startsWith(`${state.version}:`))
+    ) {
+      return failedWith("data.cursor_expired", "domain").result;
+    }
+    const after = cursor === null ? undefined : titleOf(cursor);
+    const visible = titles.filter(
+      (title) =>
+        !state.hidden.has(title) && (after === undefined || title > after)
+    );
+    const until = endCursor === undefined ? undefined : titleOf(endCursor);
+    const items =
+      until === undefined
+        ? visible.slice(0, pageSize)
+        : visible.filter((title) => title <= until);
+    const last = items.at(-1);
+    const hasMore = visible.length > items.length;
+    const nextCursor =
+      endCursor ?? (last === undefined ? null : `${state.version}:${last}`);
+    return {
+      ok: true,
+      value:
+        hasMore && nextCursor !== null
+          ? { items: items.map((title) => ({ title })), hasMore, nextCursor }
+          : {
+              items: items.map((title) => ({ title })),
+              hasMore: false,
+              nextCursor: null,
+            },
+    };
+  };
+  const push = (page: Followed): void => {
+    page.revision += 1;
+    page.onSnapshot({ revision: page.revision, result: resultOf(page.asked) });
+  };
+  const transport: ClientTransport = {
+    call: async () => await Promise.reject(new Error("No calls here")),
+    watch: async (request, onSnapshot) => {
+      const page: Followed = {
+        asked: askedOf(request),
+        onSnapshot,
+        revision: 0,
+      };
+      asked.push(page.asked);
+      followed.add(page);
+      await Promise.resolve();
+      if (
+        state.hold === "all" ||
+        (state.hold === "cursors" && page.asked.cursor !== null)
+      ) {
+        held.push(page);
+      } else {
+        push(page);
+      }
+      return {
+        release: () => {
+          followed.delete(page);
+        },
+      };
+    },
+  };
+  return {
+    state,
+    asked,
+    client: new GraspClient(transport),
+    reread: () => {
+      // Those followed now: a page followed meanwhile is read anew.
+      const now = [...followed];
+      for (const page of now) {
+        push(page);
+      }
+    },
+    release: () => {
+      state.hold = "none";
+      for (const page of held.splice(0)) {
+        if (followed.has(page)) {
+          push(page);
+        }
+      }
+    },
+  };
+};
+
+/** A list of `host`'s, followed, `size` a page, and what it shows. */
+const listOf = (host: ReturnType<typeof listHost>, size: number) => {
+  const internals = clientInternals(host.client);
+  const pager = internals.pager(api.notes.list, {}, size);
+  const stop = internals.subscribePager(pager, () => {});
+  const titles = (): unknown[] =>
+    pager.snapshot.view.items.map((item) =>
+      typeof item === "object" && item !== null && "title" in item
+        ? item.title
+        : item
+    );
+  return { pager, stop, titles };
+};
+
+describe("the session client's paginated list started again", () => {
+  it("recovers once what failed its pages passed, rather than start again for ever", async () => {
+    const host = listHost(["a", "b", "c", "d", "e", "f"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    await list.pager.loadMore();
+    // Every page with a cursor is refused once, then the cause passes:
+    // the pages it starts again with are the same queries, cached failed.
+    host.state.broken = true;
+    host.reread();
+    host.state.broken = false;
+    const settled = () => ({
+      titles: list.titles(),
+      error: list.pager.snapshot.error,
+      // Loaded back whole, every page showing its own answer.
+      refilling: list.pager.refill !== undefined,
+      pages: list.pager.pages.map(
+        ({ entry, held }) =>
+          held === undefined && entry.snapshot.error === undefined
+      ),
+    });
+    const recovered = {
+      titles: ["a", "b", "c", "d"],
+      error: undefined,
+      refilling: false,
+      pages: [true, true],
+    };
+    await vi.waitFor(() => {
+      expect(settled()).toStrictEqual(recovered);
+    });
+    // A write reads every page again: still as it is, never starting
+    // again and again.
+    host.reread();
+    await vi.waitFor(() => {
+      expect(settled()).toStrictEqual(recovered);
+    });
+    expect(host.asked.length).toBeLessThan(20);
+    list.stop();
+  });
+
+  it("never loads more from a cursor cached from before it started again", async () => {
+    const host = listHost(["a", "b", "c", "d", "e", "f"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    // Three more: the page a Load More of two would ask for after the
+    // first is one the list never asked for, so nothing cached answers it.
+    await list.pager.loadMore(3);
+    const before = host.asked.length;
+    // A new version: every cursor read before expires, and the first
+    // page's fresh answer is slow to come.
+    host.state.version = 1;
+    host.state.hold = "all";
+    host.reread();
+    // A Load More while the list starts again, its first page showing
+    // only what was cached from before.
+    const more = list.pager.loadMore();
+    host.release();
+    await more;
+    await vi.waitFor(() => {
+      expect({
+        titles: list.titles(),
+        refilling: list.pager.refill !== undefined,
+      }).toStrictEqual({
+        titles: ["a", "b", "c", "d", "e", "f"],
+        refilling: false,
+      });
+    });
+    expect(
+      host.asked
+        .slice(before)
+        .flatMap(({ cursor, endCursor }) => [cursor, endCursor ?? null])
+        .filter((cursor) => cursor?.startsWith("0:") === true)
+    ).toStrictEqual([]);
+    list.stop();
+  });
+
+  it("stops showing records the person may no longer see once its first page answers, the refill going on behind", async () => {
+    const host = listHost(["a", "b", "c", "d", "e", "f"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    await list.pager.loadMore();
+    // A rule now hides `b`, and a new version expires every cursor; the
+    // refill's later pages are slow to answer.
+    host.state.hidden.add("b");
+    host.state.version = 1;
+    host.state.hold = "cursors";
+    host.reread();
+    await vi.waitFor(() => {
+      expect({
+        titles: list.titles(),
+        refilling: list.pager.refill !== undefined,
+      }).toStrictEqual({ titles: ["a", "c"], refilling: true });
+    });
+    host.release();
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "c", "d", "e"]);
+    });
+    list.stop();
+  });
+});
+
 describe("the session client and arguments JSON can't hold", () => {
   it("refuses them as invalid arguments, sending nothing", async () => {
     const { client, calls } = network(async () => {

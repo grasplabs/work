@@ -77,7 +77,7 @@ export interface Pager {
   waiting: PromiseWithResolvers<null> | undefined;
   /**
    * The records it showed before it started again (a cursor expired),
-   * shown until it has loaded as many again, or all there are.
+   * shown until its first page answers.
    */
   held: readonly unknown[] | undefined;
   /** How many records it loads again after starting again, if it does. */
@@ -154,6 +154,14 @@ export const shownPage = (page: ListPage): PageValue | undefined =>
   page.held ?? ownPage(page);
 
 /**
+ * What `page` shows once core pushed it since it was followed: never an
+ * answer cached from before (a list started again may get one), whose
+ * cursor may no longer apply.
+ */
+export const freshPage = (page: ListPage): PageValue | undefined =>
+  (page.entry.live?.revision ?? 0) > 0 ? shownPage(page) : undefined;
+
+/**
  * What a list's readers see: the records of its pages in order, up to the
  * first that shows nothing yet; a page's failure or the list's own
  * (`failure`); loading while any page shows nothing yet.
@@ -183,7 +191,7 @@ export const snapshotOf = (
     items.push(...value.items);
     ({ hasMore } = value);
   }
-  // Started again: what it showed stays until it has loaded that again.
+  // Started again: what it showed stays until its first page answers.
   const restarting = pager.held !== undefined;
   return {
     snapshot: {

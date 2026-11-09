@@ -786,6 +786,31 @@ describe("pages ended at a cursor", () => {
     }).toStrictEqual({ within: false, grown: 8, split: fresh.nextCursor });
   });
 
+  it("say where to split them once their records pass half an answer, however few", async () => {
+    const fixture = await storeWith("appMembers");
+    // Four records of 60 KB: within twice a page of three, but past half
+    // of what one answer may carry.
+    await insertNotes(fixture, [
+      ...["a", "b", "c", "d"].map((letter) => ({
+        title: letter.repeat(60_000),
+      })),
+      { title: "e" },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const whole = await byTitle().paginate({ pageSize: 4 });
+    const grown = await byTitle().paginate({
+      pageSize: 3,
+      endCursor: whole.nextCursor ?? "",
+    });
+    const half = await byTitle().paginate({ pageSize: 2 });
+    expect({
+      grown: grown.items.length,
+      // After the records within the first half of their bytes.
+      split: grown.splitCursor,
+    }).toStrictEqual({ grown: 4, split: half.nextCursor });
+  });
+
   it("expire with an end of its ID alone whose record moved to or before their start", async () => {
     const fixture = await storeWith("appMembers");
     await insertNotes(fixture, [

@@ -11,6 +11,7 @@ import type {
   SchemaManifest,
 } from "@grasp-os/sdk/host";
 import { isRecord } from "@grasp-os/shared/json";
+import { pageLimits } from "@grasp-os/shared/pages";
 import {
   queryMaxScannedBytes,
   queryMaxScannedEntries,
@@ -1770,6 +1771,39 @@ const compareAnchorValues = (left: AnchorValue, right: AnchorValue): number => {
 };
 
 /**
+ * Where a page with an end that grew is split (`readPage`): after its
+ * first `pageSize` records once it holds more than twice that; else,
+ * once its records pass half of what one answer may carry, after the
+ * last record within the first half of their bytes, both halves holding
+ * one at least. None while it is within both.
+ */
+const splitAt = (
+  found: readonly Match[],
+  pageSize: number
+): Match | undefined => {
+  if (found.length > 2 * pageSize) {
+    return found[pageSize - 1];
+  }
+  const sizes = found.map(({ row }) =>
+    typeof row.bytes === "number" ? row.bytes : 0
+  );
+  const total = sizes.reduce((sum, size) => sum + size, 0);
+  if (found.length < 2 || total <= pageLimits.answerBytes / 2) {
+    return undefined;
+  }
+  let within = 0;
+  let at = 0;
+  for (const [position, size] of sizes.entries()) {
+    within += size;
+    if (within > total / 2 || position === found.length - 1) {
+      break;
+    }
+    at = position;
+  }
+  return found[at];
+};
+
+/**
  * Whether place `key` comes after `end` in the query's order: their order
  * fields' values compared one by one, then their record IDs, as
  * `seeksAfter` seeks.
@@ -1923,12 +1957,12 @@ export const readPage = (
             : { values: placeOf(match, anchorFields).values }),
         };
   // A page with an end grows as records move into it: past twice its
-  // size it says where to split it, after its first `pageSize`, so a live
-  // list keeps its pages near their size (as Convex's `splitCursor`).
+  // size it says where to split it, after its first `pageSize`, and past
+  // half of what one answer may carry, where its records' bytes are
+  // halved, so a live list keeps its pages near their size and within an
+  // answer (as Convex's `splitCursor`).
   const split =
-    end !== null && found.length > 2 * terminal.pageSize
-      ? anchorAt(found[terminal.pageSize - 1])
-      : undefined;
+    end === null ? undefined : anchorAt(splitAt(found, terminal.pageSize));
   return {
     items,
     hasMore: more,

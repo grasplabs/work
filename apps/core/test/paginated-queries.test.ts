@@ -906,5 +906,54 @@ describe(
         loadMore: "app.not_found",
       });
     });
+
+    it("clears a list whose page splits as the person loses access, showing none of either half", async () => {
+      const opened = await openedApp();
+      const api = apiOf(opened.release);
+      const member = await personApi("builder");
+      const them = { type: "person", id: member.userId } as const;
+      await opened.builder.api.apps.members.add(opened.app, {
+        ...them,
+        role: "user",
+      });
+      const { lease } = await member.api.pages.open(opened.app);
+      const theirs = clientFor(
+        { ...opened, lease, cookie: member.session, userId: member.userId },
+        member.api.pages
+      ).client;
+      await theirs.mutation(api.create, { title: "Mine" });
+      await theirs.mutation(api.create, { title: "Also mine" });
+      const list = listing(theirs, api.list, 1);
+      await eventually(() => {
+        expect(list.titles()).toStrictEqual(["Also mine"]);
+      });
+      await list.pager.loadMore();
+      // Their first page grows past twice its size, so it splits, while
+      // their access is taken away.
+      for (const title of ["Third", "Fourth"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await theirs.mutation(api.create, { title });
+      }
+      await opened.builder.api.apps.members.remove(opened.app, them);
+      const owner = clientFor(opened).client;
+      await pastAccessRecheck(async () => {
+        await vi.waitFor(
+          async () => {
+            await owner.mutation(api.create, { title: "Elsewhere" });
+            expect(list.pager.snapshot.error).toBeDefined();
+          },
+          { timeout: 10_000, interval: 250 }
+        );
+      });
+      expect({
+        error: list.pager.snapshot.error?.code,
+        items: list.view().items,
+        loadMore: await codeOf(list.pager.loadMore()),
+      }).toStrictEqual({
+        error: "app.not_found",
+        items: [],
+        loadMore: "app.not_found",
+      });
+    });
   }
 );
