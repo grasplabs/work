@@ -752,19 +752,39 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           save: ${{ github.event_name == 'push' }}
-      - run: vp run release:build --out release-out
       # The admin isn't part of a release (see Deploy platform): check that
       # it builds, for each stage, into a Worker cf would deploy
       # (cloudflare.config.ts). Vite records the stage as its mode, which
-      # the deploy names again. No credentials needed.
-      - if: github.event_name != 'push'
-        run: |
+      # the deploy names again. No credentials needed. Beside the
+      # release's build, not after it: one after the other they took about
+      # 35 s more (November 2026). Its log follows the release's.
+      - run: |
           set -euo pipefail
-          for stage in staging production; do
-            vp build --mode "$stage"
-            vp exec cf deploy --prebuilt --mode "$stage" --dry-run
-          done
-        working-directory: apps/admin
+          admin=""
+          if [ "$EVENT" != push ]; then
+            (
+              cd apps/admin
+              for stage in staging production; do
+                vp build --mode "$stage"
+                vp exec cf deploy --prebuilt --mode "$stage" --dry-run
+              done
+            ) > "$RUNNER_TEMP/admin-build.log" 2>&1 &
+            admin=$!
+          fi
+          vp run release:build --out release-out
+          if [ -n "$admin" ]; then
+            status=0
+            wait "$admin" || status=$?
+            echo "::group::The admin's builds"
+            cat "$RUNNER_TEMP/admin-build.log"
+            echo "::endgroup::"
+            if [ "$status" != 0 ]; then
+              echo "::error::The admin didn't build (exit $status): its log is above."
+              exit "$status"
+            fi
+          fi
+        env:
+          EVENT: ${{ github.event_name }}
       # The builds above regenerate the route trees, which must be committed
       # (static checks the other generated files without building).
       - if: github.event_name != 'push'
