@@ -211,25 +211,46 @@ export const partOf = (
 /** A file's tests that run one after another (`mode: "serial"`). */
 const serialMode = /mode: "serial"|describe\.serial\(/u;
 
-/** The parallel part's Chromium tests, as Playwright lists them. */
 /**
- * `tests`, when a test list can name each: Playwright splits a list's line
- * at `›` and trims each name, so a title with `›` in it, or with space at
+ * `tests`, when a test list can name each one, and only that one.
+ * Playwright reads a list a line at a time, splits a line at `›` and trims
+ * each name, so a title with a line break or `›` in it, or with space at
  * either end, would match no test, and the test would silently run in no
- * part. Throws, naming the first such test.
+ * part. A line also matches every test whose names start with its own, so
+ * a test whose key, then ` › `, starts another's (a describe block of the
+ * same title as a test beside it) would run in that test's part too.
+ * Throws, naming the first such test.
  */
-export const listable = (tests: readonly ReportTest[]): ReportTest[] => {
+export const listable = (
+  tests: readonly ReportTest[]
+): readonly ReportTest[] => {
+  const keys = new Set(tests.map(({ key }) => key));
   for (const { key, titles } of tests) {
-    if (titles.some((title) => title.includes("›") || title !== title.trim())) {
+    if (
+      titles.some(
+        (title) =>
+          title.includes("›") || title.includes("\n") || title !== title.trim()
+      )
+    ) {
       throw new Error(
-        `A test list can't name ${JSON.stringify(key)}: rename it without "›" or space at either end`
+        `A test list can't name ${JSON.stringify(key)}: rename it without "›", a line break or space at either end`
       );
     }
+    const names = key.split(" › ");
+    for (let length = 1; length < names.length; length += 1) {
+      const start = names.slice(0, length).join(" › ");
+      if (keys.has(start)) {
+        throw new Error(
+          `A test list can't name ${JSON.stringify(start)} alone: ${JSON.stringify(key)} starts with it, so its line would run both`
+        );
+      }
+    }
   }
-  return [...tests];
+  return tests;
 };
 
-const listed = (): PartTest[] =>
+/** The parallel part's Chromium tests, as Playwright lists them. */
+const listed = (): readonly PartTest[] =>
   listable(
     testsIn(
       execFileSync(

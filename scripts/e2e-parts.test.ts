@@ -128,7 +128,45 @@ describe("naming the tests in a test list", () => {
 
     expect(() => listable(named("asks › answers"))).toThrow(/asks › answers/u);
     expect(() => listable(named("asks "))).toThrow(/asks /u);
+    expect(() => listable(named("asks\nagain"))).toThrow(/line break/u);
     expect(listable(named("asks"))).toStrictEqual(named("asks"));
+  });
+});
+
+describe("naming each test once in a test list", () => {
+  it("refuses a test whose key starts another's, which its line would run too", () => {
+    const nested = testsIn(
+      JSON.stringify({
+        suites: [
+          {
+            title: "chat.e2e.ts",
+            file: "chat.e2e.ts",
+            specs: [
+              {
+                title: "asks",
+                file: "chat.e2e.ts",
+                tests: [{ projectName: "chromium", results: [] }],
+              },
+            ],
+            suites: [
+              {
+                title: "asks",
+                file: "chat.e2e.ts",
+                specs: [
+                  {
+                    title: "again",
+                    file: "chat.e2e.ts",
+                    tests: [{ projectName: "chromium", results: [] }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    expect(() => listable(nested)).toThrow(/would run both/u);
   });
 });
 

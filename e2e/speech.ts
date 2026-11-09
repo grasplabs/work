@@ -96,7 +96,8 @@ const lookMs = 100;
  * was made.
  */
 interface Traffic {
-  requests: Set<Request>;
+  /** Its requests in flight, with when each started. */
+  requests: Map<Request, number>;
   sockets: Map<WebSocket, Socket>;
 }
 
@@ -109,6 +110,8 @@ interface Socket {
   openedAt: number;
   answered: boolean;
   calls: Map<number, number>;
+  /** The id the page's next `push`, `stream` or `pipe` takes. */
+  nextId: number;
 }
 
 /**
@@ -123,26 +126,35 @@ const answerDeadlineMs = 5000;
 const trafficOf = new WeakMap<Page, Traffic>();
 
 /**
- * A capnweb message (capnweb's RpcSession, one JSON array a frame): a
- * `["pull", id]` the page sends asks for a call's answer, and a
- * `["resolve", id, …]` or `["reject", id, …]` back gives it. Every other
- * message, a `release` that follows each answer say, expects none.
+ * A capnweb message (capnweb 0.12's RpcSession, one JSON array a frame).
+ * Each `push`, `stream` and `pipe` the page sends takes the next import
+ * id, from 1, as capnweb numbers them. The page awaits a call's answer
+ * through a `["pull", id]`, and a `stream` it sends waits for its own; a
+ * `["resolve", id, …]` or `["reject", id, …]` from core gives it. Every
+ * other message expects no answer: a `release`, which follows each
+ * answer, and core's answers to calls core made of the page (negative
+ * ids), which the page doesn't await through a pull.
  */
-const messageSchema = z.tuple([z.string(), z.number()]).rest(z.unknown());
+const messageSchema = z.tuple([z.string()]).rest(z.unknown());
 
-/** The message in `payload`: its kind and id, or undefined for none. */
+/** The message in `payload`: its kind, and its id if it names one. */
 const messageOf = (
   payload: string | Buffer
-): { kind: string; id: number } | undefined => {
+): { kind: string; id: number | undefined } | undefined => {
   try {
     const parsed = messageSchema.safeParse(JSON.parse(String(payload)));
-    return parsed.success
-      ? { kind: parsed.data[0], id: parsed.data[1] }
-      : undefined;
+    if (!parsed.success) {
+      return undefined;
+    }
+    const [kind, id] = parsed.data;
+    return { kind, id: typeof id === "number" ? id : undefined };
   } catch {
     return undefined;
   }
 };
+
+/** The messages of the page's that take the next import id. */
+const takesAnId = new Set(["push", "stream", "pipe"]);
 
 /** Follows the calls the page makes on `socket`, until it closes. */
 const followCalls = (traffic: Traffic, socket: WebSocket): void => {
@@ -150,18 +162,31 @@ const followCalls = (traffic: Traffic, socket: WebSocket): void => {
     openedAt: Date.now(),
     answered: false,
     calls: new Map(),
+    nextId: 1,
   };
   traffic.sockets.set(socket, followed);
   socket.on("framesent", ({ payload }) => {
     const message = messageOf(payload);
-    if (message?.kind === "pull") {
+    if (message === undefined) {
+      return;
+    }
+    if (takesAnId.has(message.kind)) {
+      const id = followed.nextId;
+      followed.nextId += 1;
+      if (message.kind === "stream") {
+        followed.calls.set(id, Date.now());
+      }
+    } else if (message.kind === "pull" && message.id !== undefined) {
       followed.calls.set(message.id, Date.now());
     }
   });
   socket.on("framereceived", ({ payload }) => {
     followed.answered = true;
     const message = messageOf(payload);
-    if (message?.kind === "resolve" || message?.kind === "reject") {
+    if (
+      (message?.kind === "resolve" || message?.kind === "reject") &&
+      message.id !== undefined
+    ) {
       followed.calls.delete(message.id);
     }
   });
@@ -175,14 +200,14 @@ const followCalls = (traffic: Traffic, socket: WebSocket): void => {
  * it waits on from core, for `readUntil`.
  */
 export const installReadingClock = async (page: Page): Promise<void> => {
-  const traffic: Traffic = { requests: new Set(), sockets: new Map() };
+  const traffic: Traffic = { requests: new Map(), sockets: new Map() };
   trafficOf.set(page, traffic);
   page.on("request", (request) => {
     const from = request.redirectedFrom();
     if (from !== null) {
       traffic.requests.delete(from);
     }
-    traffic.requests.add(request);
+    traffic.requests.set(request, Date.now());
   });
   const done = (request: Request) => {
     traffic.requests.delete(request);
@@ -196,8 +221,8 @@ export const installReadingClock = async (page: Page): Promise<void> => {
 };
 
 /**
- * Whether the page is waiting on core: a request, or a call on a socket
- * still within its deadline.
+ * Whether the page is waiting on core: a request, a socket opening or a
+ * call on one, each within its deadline from when it began.
  */
 const waitingOnCore = (traffic: Traffic | undefined): boolean => {
   if (traffic === undefined) {
@@ -206,7 +231,7 @@ const waitingOnCore = (traffic: Traffic | undefined): boolean => {
   const now = Date.now();
   const pending = (since: number): boolean => now - since < answerDeadlineMs;
   return (
-    traffic.requests.size > 0 ||
+    [...traffic.requests.values()].some(pending) ||
     [...traffic.sockets.values()].some(
       ({ openedAt, answered, calls }) =>
         // Opening: the page queues its calls until it is open, and core
