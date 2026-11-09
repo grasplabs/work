@@ -82,10 +82,65 @@ export const answerSpeech = async (page: Page): Promise<Asked[]> => {
 
 /**
  * How far the page's clock goes at a time while a test waits on reading:
- * a second, so whatever else the page times (a request's deadline, a
- * reconnect) never sees more than a second pass at once.
+ * a second.
  */
 const readingStepMs = 1000;
+
+/** How long a look at the page waits, in real time, between steps. */
+const lookMs = 100;
+
+/**
+ * How long a frame the page sent to core without one back counts as a
+ * call core is still answering: past it, the page is taken as waiting on
+ * nothing, so a frame that is never answered holds no step for good.
+ */
+const unansweredMs = 2000;
+
+/** What a page is waiting on from core: its requests, and its socket's last frames. */
+interface Traffic {
+  requests: Set<Request>;
+  sentAt: number;
+  receivedAt: number;
+}
+
+const trafficOf = new WeakMap<Page, Traffic>();
+
+/**
+ * Installs Playwright's clock on `page`, before it loads, and watches what
+ * it waits on from core, for `readUntil`.
+ */
+export const installReadingClock = async (page: Page): Promise<void> => {
+  const traffic: Traffic = { requests: new Set(), sentAt: 0, receivedAt: 0 };
+  trafficOf.set(page, traffic);
+  page.on("request", (request) => {
+    const from = request.redirectedFrom();
+    if (from !== null) {
+      traffic.requests.delete(from);
+    }
+    traffic.requests.add(request);
+  });
+  const done = (request: Request) => {
+    traffic.requests.delete(request);
+  };
+  page.on("requestfinished", done);
+  page.on("requestfailed", done);
+  page.on("websocket", (socket) => {
+    socket.on("framesent", () => {
+      traffic.sentAt = Date.now();
+    });
+    socket.on("framereceived", () => {
+      traffic.receivedAt = Date.now();
+    });
+  });
+  await page.clock.install();
+};
+
+/** Whether the page is waiting on core: a request, or a call on its socket. */
+const waitingOnCore = (traffic: Traffic | undefined): boolean =>
+  traffic !== undefined &&
+  (traffic.requests.size > 0 ||
+    (traffic.sentAt > traffic.receivedAt &&
+      Date.now() - traffic.sentAt < unansweredMs));
 
 /**
  * How long a step's way on may take to come on the page's clock: its
@@ -102,28 +157,43 @@ const wayOnMs = 30_000;
  * line on the page's clock (apps/web/src/voice/voice.ts's `hold`,
  * apps/web/src/onboarding/setup-parts.tsx's `explainedWait`): over a
  * minute of a walkthrough's steps in real time. With Playwright's clock
- * (`page.clock.install()` before the page loads) a test reads them at
+ * (`installReadingClock` before the page loads) a test reads them at
  * once. Only that wait goes faster, still bounded as a real wait was:
- * what the test then checks is checked as before. Sound the browser plays
- * runs on its own clock, so a line heard still takes its time.
+ * what the test then checks is checked as before. The clock steps only
+ * while the page waits on nothing from core: the page gives core's
+ * answers 5 s on that clock (apps/web/src/core.ts's `timeoutMs`), and a
+ * step taken while one was on its way failed a slow runner's answers as
+ * out of reach (November 2026). Sound the browser plays runs on its own
+ * clock, so a line heard still takes its time.
  */
 export const readUntil = async (
   page: Page,
   ready: () => Promise<void>,
   withinMs: number
 ): Promise<void> => {
-  for (let forwarded = 0; ; forwarded += readingStepMs) {
+  const traffic = trafficOf.get(page);
+  const started = Date.now();
+  let forwarded = 0;
+  for (;;) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one look per step of the clock
       await ready();
       return;
     } catch (error) {
-      if (forwarded >= withinMs) {
+      // The page's clock went on as far as it was stepped, and as long as
+      // the looks took.
+      if (forwarded + Date.now() - started >= withinMs) {
         throw error;
       }
     }
-    // oxlint-disable-next-line no-await-in-loop -- one step of the clock at a time
-    await page.clock.fastForward(readingStepMs);
+    if (waitingOnCore(traffic)) {
+      // oxlint-disable-next-line no-await-in-loop -- its answer comes in real time
+      await page.waitForTimeout(lookMs);
+    } else {
+      // oxlint-disable-next-line no-await-in-loop -- one step of the clock at a time
+      await page.clock.fastForward(readingStepMs);
+      forwarded += readingStepMs;
+    }
   }
 };
 
@@ -135,7 +205,7 @@ export const readOn = async (page: Page, wayOn: Locator): Promise<void> => {
   await readUntil(
     page,
     async () => {
-      await wayOn.click({ trial: true, timeout: 100 });
+      await wayOn.click({ trial: true, timeout: lookMs });
     },
     wayOnMs
   );
