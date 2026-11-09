@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { BrainPersona } from "./fixtures/brain-corpus.ts";
 import {
+  peopleMatters,
   permissionProbes,
   unreadableTo,
 } from "./fixtures/permission-probes.ts";
@@ -14,8 +15,10 @@ import {
   doorClockRunsAhead,
   memberProbes,
   outsiderProbes,
+  peopleFiles,
+  probeFiles,
   probeTime,
-  probesOf,
+  probesIn,
   secretsOf,
   sentSince,
 } from "./permission-probing.ts";
@@ -31,8 +34,9 @@ import { watched } from "./teams-door.ts";
 // (permission-probing.ts), so a probe passes on the platform's permissions
 // alone. The probes are split over files that can run apart: the
 // members' probes by channel, asker and tactic
-// (permission-probes-{ask,teams}-{ana,bram}-{plain,pretext}.test.ts),
-// people matters in permission-probes-people.test.ts.
+// (permission-probes-{ask,teams}-{ana,bram}-{plain,pretext}.test.ts, the
+// Teams door's Bram asking plainly in two parts), people matters a file a
+// matter (permission-probes-people-*.test.ts).
 // Here: the probes are what the gate asks, and the files share the
 // members' between them. Controls show the same reads do reach what the
 // asker may read. Someone removed and a guest get one line, and nothing is
@@ -43,6 +47,12 @@ const idp = mockIdp();
 watched();
 
 const setUp = companyOnce(idp);
+
+/** The probes each of `channel`'s files asks. */
+const shared = (channel: keyof typeof probeFiles) =>
+  probeFiles[channel].map(([asker, tactic, part]) =>
+    probesIn(asker, tactic, part)
+  );
 
 describe("the permission probes", probeTime, () => {
   doorClockRunsAhead();
@@ -68,14 +78,38 @@ describe("the permission probes", probeTime, () => {
   });
 
   it("are the members' 120 between the files that ask them, each in one", () => {
-    const shared = (["ana", "bram"] as const).flatMap((asker) =>
-      (["ask", "pretext"] as const).map((tactic) => probesOf(asker, tactic))
+    const workspace = shared("workspace");
+    const teams = shared("teams");
+    const people = peopleFiles.map((kind) =>
+      peopleMatters.filter(({ matter }) => matter === kind)
     );
     expect({
       members: memberProbes.length,
-      files: shared.map((probes) => probes.length),
-      asked: new Set(shared.flat().map(({ id }) => id)).size,
-    }).toStrictEqual({ members: 120, files: [25, 25, 35, 35], asked: 120 });
+      files: {
+        workspace: workspace.map((probes) => probes.length),
+        teams: teams.map((probes) => probes.length),
+        people: people.map((matters) => matters.length),
+      },
+      asked: {
+        workspace: new Set(workspace.flat().map(({ id }) => id)).size,
+        teams: new Set(teams.flat().map(({ id }) => id)).size,
+        people: new Set(people.flat().map(({ id }) => id)).size,
+      },
+      once: {
+        workspace: workspace.flat().length,
+        teams: teams.flat().length,
+        people: people.flat().length,
+      },
+    }).toStrictEqual({
+      members: 120,
+      files: {
+        workspace: [25, 25, 35, 35],
+        teams: [25, 25, 18, 17, 35],
+        people: [5, 5, 5],
+      },
+      asked: { workspace: 120, teams: 120, people: peopleMatters.length },
+      once: { workspace: 120, teams: 120, people: peopleMatters.length },
+    });
   });
 
   it("reach what their asker may read: the same reads would catch a leak", async () => {

@@ -3,8 +3,8 @@ import { probedThrough } from "./permission-probing.ts";
 // Who may see what (GRA-731): the permission probes
 // (fixtures/permission-probes.ts) Ana asks plainly, through the Teams door,
 // each its own test. The members' probes are split by channel, asker and
-// tactic over eight files like this one, so they run apart;
+// tactic over nine files like this one, so they run apart;
 // permission-probes-controls.test.ts has their count, the controls and the
-// outsiders, permission-probes-people.test.ts people matters.
+// outsiders, permission-probes-people-*.test.ts people matters.
 
 probedThrough("teams", "ana", "ask");
