@@ -77,11 +77,10 @@ describe("splitting the test files between shards", () => {
     }
   });
 
-  it("gives the shards left over to the group whose shards would end last, of those another shard shortens", () => {
+  it("gives the shards left over to the group whose shards would end last", () => {
     const groups = splitIntoShards(suite, 6).map((shard) => shard[0]?.group);
 
-    // Core's three end with its longest file; a fourth would end no sooner.
-    expect(groups).toStrictEqual([0, 0, 0, 1, 2, 2]);
+    expect(groups).toStrictEqual([0, 0, 0, 0, 1, 2]);
   });
 
   it("gives a shard left over to a group it shortens, not to one its longest file holds up", () => {
@@ -99,10 +98,20 @@ describe("splitting the test files between shards", () => {
     const groups = splitIntoShards(files, 5).map((shard) => shard[0]?.group);
 
     // Two shards take the compiler's short build off the long one's;
-    // a third would shorten nothing, so the rest go to core.
+    // a third would end no sooner, so the rest go to core.
     expect(longestOfCompiler(5)).toBe(projectStartSeconds + 400);
     expect(groups.filter((group) => group === 5)).toHaveLength(2);
     expect(groups.filter((group) => group === 0)).toHaveLength(3);
+  });
+
+  it("leaves empty the shards no group ends sooner with", () => {
+    // Two at once on a runner: three shards end with the longest file.
+    const files = Array.from({ length: 6 }, (_, index) =>
+      file(`core ${index}`, 100)
+    );
+    const shards = splitIntoShards(files, 5);
+
+    expect(shards.map((shard) => shard.length)).toStrictEqual([2, 2, 2, 0, 0]);
   });
 
   it("refuses fewer shards than groups, which would have to run two together", () => {
@@ -156,6 +165,12 @@ describe("splitting the test files between shards", () => {
 
     expect(shardSeconds([file("core long", 300), ...builds])).toBe(
       2 * projectStartSeconds + 300 + 180
+    );
+  });
+
+  it("adds a shard's projects up, as Vitest starts each once the one before has ended", () => {
+    expect(shardSeconds([file("admin a", 50), file("scripts a", 50)])).toBe(
+      2 * projectStartSeconds + 100
     );
   });
 

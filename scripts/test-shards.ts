@@ -58,49 +58,28 @@ const workOf = (files: readonly ShardFile[]): number =>
   files.reduce((total, file) => total + costOf(file), 0);
 
 /**
- * How long a shard with `files` takes, roughly: its groups one after
- * another, each as long as its files run at once (their work spread over
- * the files a runner works through together, or its longest such file if
- * that is longer), then those of each project that runs its files one
- * after another (`serial`: their work added up); and the start of each of
- * its projects. Vitest runs a serial project's files after the rest of
- * the group's, not beside them: in CI the compiler's started once core's
- * had ended (November 2026). A project runs its files one at a time when
+ * How long a shard with `files` takes, roughly: its projects one after
+ * another, each its start and then as long as its files run at once
+ * (their work spread over the files a runner works through together, or
+ * its longest file if that is longer), or, for a project that runs its
+ * files one after another (`serial`), their work added up. Vitest starts a
+ * project's files once the project before it in the shard has ended: in
+ * CI the scripts' longest build began after the admin's last file, and
+ * core's first file 40 s after the scripts' last, its runtime starting
+ * only then (November 2026). A project runs its files one at a time when
  * two at once starve each other, such as the compiler's builds, each of
  * which starts Node, TypeScript and three bundles across the runner's CPUs.
  */
 export const shardSeconds = (files: readonly ShardFile[]): number => {
-  const groups = new Map<
-    number,
-    {
-      parallel: number;
-      serial: Map<string, number>;
-      /** The longest file run at once with others, never a serial one. */
-      longest: number;
-    }
-  >();
-  for (const file of files) {
-    const group = groups.get(file.group) ?? {
-      parallel: 0,
-      serial: new Map<string, number>(),
-      longest: 0,
-    };
-    if (file.serial) {
-      group.serial.set(
-        file.project,
-        (group.serial.get(file.project) ?? 0) + costOf(file)
-      );
-    } else {
-      group.parallel += costOf(file);
-      group.longest = Math.max(group.longest, costOf(file));
-    }
-    groups.set(file.group, group);
-  }
-  let total =
-    new Set(files.map(({ project }) => project)).size * projectStartSeconds;
-  for (const { parallel, serial, longest } of groups.values()) {
-    const oneByOne = [...serial.values()].reduce((sum, each) => sum + each, 0);
-    total += Math.max(parallel / concurrentFiles, longest) + oneByOne;
+  let total = 0;
+  for (const own of Map.groupBy(files, ({ project }) => project).values()) {
+    const work = workOf(own);
+    const longest = Math.max(...own.map(costOf));
+    total +=
+      projectStartSeconds +
+      (own[0]?.serial === true
+        ? work
+        : Math.max(work / concurrentFiles, longest));
   }
   return total;
 };
@@ -172,10 +151,10 @@ export const spreadOver = (
  * GRA-1094). Of one group each, a shard starts only its own, and a group
  * kept apart to run alone (vite.brain.config.ts) has its runner to itself.
  * Each group gets one shard, and each shard left over goes to the group
- * whose shards would end last among those another shard would shorten: a
- * group held up by one long file (the compiler's longest build) gains
- * nothing from more, which then go where they help. The same files always
- * split the same way, on every runner.
+ * whose shards would end last, of those that end later than their longest
+ * unit alone would: a group held up by one long file (the compiler's
+ * longest build) gains nothing from more, which then go where they help.
+ * The same files always split the same way, on every runner.
  */
 export const splitIntoShards = (
   files: readonly ShardFile[],
@@ -193,33 +172,39 @@ export const splitIntoShards = (
   );
   const longestOf = (shards: readonly ShardFile[][]): number =>
     Math.max(...shards.map(shardSeconds));
+  /** The soonest a group's shards can end, however many: its longest unit's. */
+  const floorOf = new Map(
+    order.map((group) => [group, longestOf(unitsOf(groups.get(group) ?? []))])
+  );
   for (let left = count - order.length; left > 0; left -= 1) {
-    let chosen: { group: number; split: ShardFile[][] } | undefined;
-    let chosenSeconds = Number.NEGATIVE_INFINITY;
-    let slowest = order[0] ?? 0;
+    let slowest: number | undefined;
+    let slowestSeconds = Number.NEGATIVE_INFINITY;
     for (const group of order) {
-      const current = shardsOf.get(group) ?? [];
-      const seconds = longestOf(current);
-      if (seconds > longestOf(shardsOf.get(slowest) ?? [])) {
+      const seconds = longestOf(shardsOf.get(group) ?? []);
+      const shortens = seconds > (floorOf.get(group) ?? 0);
+      if (shortens && seconds > slowestSeconds) {
         slowest = group;
-      }
-      const split = spreadOver(groups.get(group) ?? [], current.length + 1);
-      if (longestOf(split) < seconds && seconds > chosenSeconds) {
-        chosen = { group, split };
-        chosenSeconds = seconds;
+        slowestSeconds = seconds;
       }
     }
-    // No group ends sooner with another shard: the slowest takes it.
-    chosen ??= {
-      group: slowest,
-      split: spreadOver(
+    if (slowest === undefined) {
+      // Every group ends with its longest unit: more shards end no sooner.
+      break;
+    }
+    shardsOf.set(
+      slowest,
+      spreadOver(
         groups.get(slowest) ?? [],
         (shardsOf.get(slowest)?.length ?? 0) + 1
-      ),
-    };
-    shardsOf.set(chosen.group, chosen.split);
+      )
+    );
   }
-  return order.flatMap((group) => shardsOf.get(group) ?? []);
+  const shards = order.flatMap((group) => shardsOf.get(group) ?? []);
+  // A shard each for the rest, empty: Vitest runs none of its files.
+  return [
+    ...shards,
+    ...Array.from({ length: count - shards.length }, (): ShardFile[] => []),
+  ];
 };
 
 /** A file as the order within its project sees it: its time, if anyone took it. */
