@@ -482,7 +482,8 @@ const signInScenes = async (
 };
 
 /**
- * Signs in the configured admin, and the platform warm-up's builder, and
+ * Signs in the configured admin, the platform warm-up's builder and the
+ * connections scene, and
  * connects the stack's AI providers. Each test file's people are signed in
  * as the file starts (`signInFile`): signing in every scene's people up
  * front, for every attempt a test may get, took 30 to 40 s of every CI
@@ -494,9 +495,12 @@ export const signInCast = async (): Promise<Cast> => {
   const adminCookie = await signInAs(localAdmin);
   // Playwright hands the global setup's environment to the test workers.
   process.env[adminVariable] = adminCookie;
+  // The connections scene too: its connections, written by the global setup
+  // (e2e/setup.ts), are what every test finds connected, as Microsoft 365
+  // for everyone (setup-voice.e2e.ts reads it as connected).
   const first = await signInScenes(
     adminCookie,
-    ["platformWarmUp"],
+    ["platformWarmUp", "connections"],
     signInsAtOnce
   );
   const { core, api } = apiOf({ cookie: adminCookie });
