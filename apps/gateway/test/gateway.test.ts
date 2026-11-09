@@ -18,8 +18,35 @@ const other = "grasp-ijklmnop45-connect";
 /** What each stand-in connect was asked, by script. */
 const asked = new Map<string, unknown[][]>();
 
+/**
+ * Names that aren't connect's methods, though a stand-in connect has a
+ * method of each: were the gateway to forward one, its call would land.
+ */
+const strayNames = [
+  "constructor",
+  "connect",
+  "toString",
+  "toJSON",
+  "valueOf",
+  "_secret",
+  "ctx",
+  "env",
+];
+
+/** The stray names a stand-in connect was called by. */
+const strays: string[] = [];
+
 /** A stand-in connect: answers its own script name, records what it was asked. */
 const connectStandIn = (script: string) => ({
+  ...Object.fromEntries(
+    strayNames.map((stray) => [
+      stray,
+      async () => {
+        strays.push(stray);
+        return await Promise.resolve(script);
+      },
+    ])
+  ),
   name: async (...args: unknown[]) => {
     asked.set(script, [...(asked.get(script) ?? []), args]);
     return await Promise.resolve(script);
@@ -149,33 +176,23 @@ describe("the connect gateway", () => {
     }).toStrictEqual({ kind: true, message: "connect's own" });
   });
 
-  it("forwards no name that isn't one of connect's methods", () => {
+  it("forwards no name that isn't one of connect's methods", async () => {
     const gateway = gatewayFor({ script: own });
-    const names = [
-      "then",
-      "constructor",
-      "connect",
-      "toString",
-      "toJSON",
-      "valueOf",
-      "_secret",
-      "ctx",
-      "env",
-    ];
-    // Not one of them reaches connect: `then` above all, or an RPC answer
-    // of the gateway would be awaited into it.
-    const reachingConnect = names.filter((name) => {
-      const found: unknown = Reflect.get(gateway, name);
-      return typeof found === "function" && found.name === "";
-    });
+    strays.length = 0;
+    for (const stray of strayNames) {
+      // oxlint-disable-next-line no-await-in-loop -- one call at a time
+      await failure(async () => await call(gateway, stray));
+    }
 
+    // `then` above all is no method, or an RPC answer of the gateway would
+    // be awaited into connect.
     expect({
       thenable: typeof Reflect.get(gateway, "then"),
-      reachingConnect,
+      reachedConnect: strays,
       symbol: typeof Reflect.get(gateway, Symbol.iterator),
     }).toStrictEqual({
       thenable: "undefined",
-      reachingConnect: [],
+      reachedConnect: [],
       symbol: "undefined",
     });
   });
