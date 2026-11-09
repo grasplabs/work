@@ -13,6 +13,7 @@ import { test } from "./csp.ts";
 import { interviewLinkOf } from "./interview-link.ts";
 import { apiOf, signInAs, signInStaff, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
+import { readOn } from "./speech.ts";
 import { origin, stateDir } from "./stack.ts";
 import { workbookOf } from "./staff-workbook.ts";
 
@@ -398,6 +399,9 @@ test("the company's admin goes through their onboarding: the staff list, the org
   });
   const toneOf = (text: string) =>
     asked.find((line) => line.text === text)?.tone;
+  // The steps' lines are read silently, at the pace of reading on the
+  // page's clock: the test goes on it to read them (`readOn`).
+  await page.clock.install();
   await page.goto("/setup?step=welcome");
 
   await expect(
@@ -444,17 +448,24 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await page.getByRole("button", { name: "Continue" }).click();
 
   // Where the documents live and Pulse are skipped (e2e/setup-voice.e2e.ts notes them).
+  await readOn(page, page.getByRole("button", { name: "Skip for now" }));
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", {
       name: "Do you have anything that explains how you work?",
     })
   ).toBeVisible();
+  await readOn(page, page.getByRole("button", { name: "Skip for now" }));
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", { name: "Which tools do people actually use?" })
   ).toBeVisible();
+  await readOn(page, page.getByRole("button", { name: "Skip for now" }));
   await page.getByRole("button", { name: "Skip for now" }).click();
+  await readOn(
+    page,
+    page.getByRole("button", { name: "We don’t use an HR platform" })
+  );
   await page
     .getByRole("button", { name: "We don’t use an HR platform" })
     .click();
@@ -501,6 +512,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
   // Stephen says what happens next, as the plan has it now.
   const nextLine = await next.textContent();
   await expect.poll(() => toneOf(nextLine ?? "")).toBe("sincere, steady");
+  await readOn(page, page.getByRole("button", { name: "I sent it" }));
   await page.getByRole("button", { name: "I sent it" }).click();
 
   await expect(

@@ -1,4 +1,5 @@
-import type { Page, Request } from "@playwright/test";
+import { expect } from "@playwright/test";
+import type { Locator, Page, Request } from "@playwright/test";
 
 // Stephen's voice on the onboarding's pages (apps/web/src/voice) is
 // ElevenLabs behind the model gateway, which the local stack doesn't
@@ -78,4 +79,45 @@ export const answerSpeech = async (page: Page): Promise<Asked[]> => {
     });
   });
   return asked;
+};
+
+/**
+ * How far the page's clock goes at a time while a test waits on reading:
+ * a second, so whatever else the page times (a request's deadline, a
+ * reconnect) never sees more than a second pass at once.
+ */
+const readingStepMs = 1000;
+
+/** How long a test may wait, in real time, for what it reads to be read. */
+const readingTimeoutMs = 60_000;
+
+/**
+ * Goes on the page's clock a second at a time until `ready` passes. A
+ * line read silently, and the way on after it, wait the time it takes to
+ * read the line on the page's clock (apps/web/src/voice/voice.ts's `hold`,
+ * apps/web/src/onboarding/setup-parts.tsx's `explainedWait`): over a
+ * minute of a walkthrough's steps in real time. With Playwright's clock
+ * (`page.clock.install()` before the page loads) a test reads them at
+ * once. Only that wait goes faster: what the test then checks is checked
+ * as before. Sound the browser plays runs on its own clock, so a line
+ * heard still takes its time.
+ */
+export const readUntil = async (
+  page: Page,
+  ready: () => Promise<void>
+): Promise<void> => {
+  await expect(async () => {
+    await page.clock.fastForward(readingStepMs);
+    await ready();
+  }).toPass({ intervals: [0], timeout: readingTimeoutMs });
+};
+
+/**
+ * `readUntil` the step's way on (`wayOn`) can be clicked: it fades in,
+ * inert until then, once the step's line has been read.
+ */
+export const readOn = async (page: Page, wayOn: Locator): Promise<void> => {
+  await readUntil(page, async () => {
+    await wayOn.click({ trial: true, timeout: 100 });
+  });
 };

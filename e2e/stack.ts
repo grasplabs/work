@@ -59,6 +59,16 @@ export const modelFakeOrigin = `http://localhost:${modelFakePort}`;
 export const stateDir = path.join(root, "apps/core/.wrangler/e2e-state");
 
 /**
+ * The stack's empty state with every migration applied, as e2e/build.ts
+ * makes it: a prebuilt stack starts from a copy, so it starts empty each
+ * time too.
+ */
+export const migratedStateDir = path.join(
+  root,
+  "apps/core/.wrangler/e2e-state-migrated"
+);
+
+/**
  * Connect's Wrangler config for the stack, written before it starts
  * (e2e/connect-config.ts): connect's own, which sends the AI providers'
  * requests to the fake ones.
