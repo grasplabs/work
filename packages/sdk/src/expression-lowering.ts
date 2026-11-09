@@ -231,7 +231,14 @@ class Lowering {
       case "TemplateLiteral": {
         return {
           type: "Template",
-          quasis: node.quasis.map((quasi) => quasi.value.raw),
+          // What each part reads, never as written (code-print.ts). Only
+          // a tagged template, which the check refuses, cooks to null.
+          quasis: node.quasis.map((quasi) => {
+            if (quasi.value.cooked === null) {
+              throw new Error("A checked template has no invalid escape.");
+            }
+            return quasi.value.cooked;
+          }),
           expressions: node.expressions.map((expression) =>
             this.expression(expression)
           ),

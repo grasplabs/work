@@ -19,7 +19,7 @@ export type Code =
   | { type: "Number"; value: number }
   | { type: "Boolean"; value: boolean }
   | { type: "Null" }
-  /** `quasis` as written (raw), one more than `expressions`. */
+  /** `quasis` as they read (cooked), one more than `expressions`. */
   | {
       type: "Template";
       quasis: readonly string[];
@@ -281,26 +281,29 @@ interface Context {
   arrowBody: boolean;
 }
 
-/**
- * A line continuation in a template's raw part: an unescaped `\` and the
- * line break after it, which stand for nothing.
- */
-const lineContinuation =
-  /(?<!\\)(?<escaped>(?:\\\\)*)\\(?:\r\n?|[\n\u2028\u2029])/gu;
+/** What a template's text escapes: what would end it, open a placeholder or break its line. */
+const templateEscapes = /[\\`$\r\n\u2028\u2029]/gu;
+
+const templateEscape: Readonly<Record<string, string>> = {
+  "\\": "\\\\",
+  "`": "\\`",
+  $: "\\$",
+  "\r": "\\r",
+  "\n": "\\n",
+  "\u2028": "\\u2028",
+  "\u2029": "\\u2029",
+};
 
 /**
- * A template's raw part with its line breaks as escapes, which read the
- * same (a raw CR or CRLF reads as LF), and its line continuations dropped,
- * which read as nothing: code the generator indents line by line must
- * hold no line break inside a template's text.
+ * A template's text, from what it reads (cooked), escaped anew: every
+ * `\`, backtick and `$` escaped, so no text closes the template or opens a
+ * placeholder, and every line break an escape, so code the generator
+ * indents line by line holds none. Printed from the cooked value, never
+ * the raw, no escape or line continuation as written can change what the
+ * code reads.
  */
-const unbroken = (raw: string): string =>
-  raw
-    .replaceAll(lineContinuation, "$<escaped>")
-    .replaceAll(/\r\n?/gu, "\\n")
-    .replaceAll("\n", "\\n")
-    .replaceAll("\u2028", "\\u2028")
-    .replaceAll("\u2029", "\\u2029");
+const templateText = (cooked: string): string =>
+  cooked.replaceAll(templateEscapes, (char) => templateEscape[char] ?? char);
 
 /** `node` printed (see the header). */
 // One case per node type: its length is the tree's, not complexity.
@@ -344,9 +347,9 @@ const printed = (node: Code, context: Context): string => {
     case "Template": {
       const parts = node.expressions.map(
         (expression, at) =>
-          `${unbroken(node.quasis[at] ?? "")}\${${child(expression, "other")}}`
+          `${templateText(node.quasis[at] ?? "")}\${${child(expression, "other")}}`
       );
-      return `\`${parts.join("")}${unbroken(node.quasis.at(-1) ?? "")}\``;
+      return `\`${parts.join("")}${templateText(node.quasis.at(-1) ?? "")}\``;
     }
     case "Array": {
       const elements = node.elements.map((element) =>

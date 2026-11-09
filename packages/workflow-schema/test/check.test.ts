@@ -422,6 +422,15 @@ describe("checking a workflow", () => {
         )
       )
     ).toStrictEqual({ "/steps/6/action": "workflow.duplicate" });
+    // One a member of the other: `notes` can't be called and hold `add`.
+    expect(
+      codesAt(
+        followedBy(
+          sending("listed", "mail.notes"),
+          sending("added", "mail.notes.add")
+        )
+      )
+    ).toStrictEqual({ "/steps/6/action": "workflow.duplicate" });
   });
 
   it("refuses a duration longer than a year", () => {

@@ -491,6 +491,33 @@ describe("the code generated from an expression", () => {
     }).toStrictEqual({ continued: "ab", crlf: "ab", escapedSlash: "a\\\nb" });
   });
 
+  it("keeps a template's text text, whatever its escapes and continuations spell", () => {
+    // Each reads as the text `${…}`, `\`` or `\${…}`: never a placeholder
+    // the check didn't see, nor the template's end.
+    let called = false;
+    const touch = () => {
+      called = true;
+      return "called";
+    };
+    expect({
+      continued: evaluated("`$\\\n{args.a}`", { a: "x" }),
+      call: evaluated("`$\\\r\n{args.f()}`", { f: touch }),
+      escapedDollar: evaluated("`\\${args.a}`", { a: "x" }),
+      unicodeDollar: evaluated("`\\u0024{args.a}`", { a: "x" }),
+      backtick: evaluated("`a\\`b`", {}),
+      backslash: evaluated("`a\\\\${args.a}`", { a: "x" }),
+      called,
+    }).toStrictEqual({
+      continued: "${args.a}",
+      call: "${args.f()}",
+      escapedDollar: "${args.a}",
+      unicodeDollar: "${args.a}",
+      backtick: "a`b",
+      backslash: "a\\x",
+      called: false,
+    });
+  });
+
   it("puts every comparison in parentheses, so TypeScript reads no type arguments", () => {
     // `args.a<args.b, args.c>(args.d)`, a generic call, in TypeScript.
     expect(generated("[args.a < args.b, args.c > (args.d)]")).toBe(

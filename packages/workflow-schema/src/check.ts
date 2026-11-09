@@ -1116,6 +1116,20 @@ const checkCall = (
         "Call one of them only, or through a connection of its own."
       );
     }
+    // A member is a function or holds others, never both: `notes` and
+    // `notes.add` can't both be members of one connection.
+    const nesting = [...actions].find(
+      ([path]) => path.startsWith(`${member}.`) || member.startsWith(`${path}.`)
+    );
+    if (nesting !== undefined) {
+      problem(
+        walk,
+        join(pointer, "action"),
+        "workflow.duplicate",
+        `\`${step.action}\` and \`${nesting[1]}\` read as a member of \`${step.connection}\` and a member of that member.`,
+        "Call one of them only, or through a connection of its own."
+      );
+    }
     actions.set(member, step.action);
     walk.members.set(step.connection, actions);
   } else {
