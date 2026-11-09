@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { parseSync } from "oxc-parser";
 import { describe, expect, it } from "vite-plus/test";
 
 // Agents never answer a person's decision (GRA-624, threat model T7): the
@@ -23,50 +24,76 @@ const core = path.join(import.meta.dirname, "../apps/core/src");
 const allowed = new Set(["decisions/rpc.ts", "workflows/page-decisions.ts"]);
 
 /** The functions that record or confirm a person's answer. */
-const guarded = ["answerDecision", "confirmDecision"];
+const guarded = new Set(["answerDecision", "confirmDecision"]);
 
 /** Where core keeps the decision service, within its sources. */
 const service = "decisions/decisions.ts";
 
-const moduleSpecifier = /["'](?<specifier>\.{1,2}\/[^"']+)["']/u;
-
 /** Whether `specifier`, imported from `file`, is the decision service. */
 const isService = (file: string, specifier: string): boolean => {
+  if (!specifier.startsWith(".")) {
+    return false;
+  }
   const resolved = path.posix.join(path.posix.dirname(file), specifier);
   return resolved === service || `${resolved}.ts` === service;
 };
-const statements =
-  /(?:import|export)\s+(?:type\s+)?(?<clause>[^;]*?)\s+from\s+["'][^"']+["']|import\(\s*["'][^"']+["']\s*\)/gu;
+
+/** The one kind of import or re-export that takes names one by one: any other takes the module whole. */
+const byName: ReadonlySet<string> = new Set(["Name"]);
+
+/** A statement's text, as one line, without its semicolon. */
+const statementAt = (source: string, start: number, end: number): string =>
+  source.slice(start, end).replaceAll(/\s+/gu, " ").replace(/;$/u, "");
+
+/** A string literal's value, or undefined for any other expression. */
+const literalValue = (written: string): string | undefined =>
+  /^["'`](?<value>[^"'`]*)["'`]$/u.exec(written.trim())?.groups?.value;
 
 /**
  * How `source`, at `file` within core's sources, reaches the guarded
- * functions: each import, re-export or namespace or dynamic import of the
- * decision service that could. None from the decision service itself.
+ * functions, as oxc parses its module: each import, re-export or
+ * namespace or dynamic import of the decision service that could. Type-only
+ * ones too, as written. None from the decision service itself.
  */
 const reachesOf = (file: string, source: string): string[] => {
   if (file === service) {
     return [];
   }
-  const found: string[] = [];
-  for (const match of source.matchAll(statements)) {
-    const [statement] = match;
-    const clause = match.groups?.clause ?? "";
-    const specifier = moduleSpecifier.exec(statement)?.groups?.specifier;
-    if (specifier === undefined || !isService(file, specifier)) {
-      continue;
-    }
-    const whole =
-      statement.startsWith("import(") ||
-      clause.includes("*") ||
-      statement.startsWith("export *");
-    const named = guarded.some((name) =>
-      new RegExp(`\\b${name}\\b`, "u").test(clause)
-    );
-    if (whole || named) {
-      found.push(statement.replaceAll(/\s+/gu, " "));
-    }
+  const { module, errors } = parseSync(file, source);
+  if (errors.length > 0) {
+    throw new Error(`${file} doesn't parse: ${errors[0]?.message ?? ""}`);
   }
-  return found;
+  const imports = module.staticImports.flatMap(
+    ({ start, end, moduleRequest, entries }) =>
+      isService(file, moduleRequest.value) &&
+      entries.some(
+        ({ importName }) =>
+          !byName.has(importName.kind) || guarded.has(importName.name ?? "")
+      )
+        ? [statementAt(source, start, end)]
+        : []
+  );
+  const exports = module.staticExports.flatMap(({ start, end, entries }) =>
+    entries.some(
+      ({ moduleRequest, importName }) =>
+        moduleRequest !== null &&
+        isService(file, moduleRequest.value) &&
+        (!byName.has(importName.kind) || guarded.has(importName.name ?? ""))
+    )
+      ? [statementAt(source, start, end)]
+      : []
+  );
+  const dynamic = module.dynamicImports.flatMap(
+    ({ start, end, moduleRequest }) => {
+      const specifier = literalValue(
+        source.slice(moduleRequest.start, moduleRequest.end)
+      );
+      return specifier !== undefined && isService(file, specifier)
+        ? [statementAt(source, start, end)]
+        : [];
+    }
+  );
+  return [...imports, ...exports, ...dynamic];
 };
 
 /** Every TypeScript source of core, relative to its `src`. */
@@ -116,6 +143,18 @@ describe("who answers a person's decision", () => {
         `export { answerDecision } from ${from};`
       ),
       everything: reachesOf("agents/agent.ts", `export * from ${from};`),
+      namespaceReexported: reachesOf(
+        "agents/agent.ts",
+        `export * as decisions from ${from};`
+      ),
+      mixed: reachesOf(
+        "agents/agent.ts",
+        `import { stillOpen, type answerDecision as A } from ${from};`
+      ),
+      unextended: reachesOf(
+        "agents/agent.ts",
+        'import { answerDecision } from "../decisions/decisions";'
+      ),
       dynamic: reachesOf("agents/agent.ts", `const d = await import(${from});`),
       other: reachesOf("agents/agent.ts", `import { stillOpen } from ${from};`),
     }).toStrictEqual({
@@ -124,6 +163,9 @@ describe("who answers a person's decision", () => {
       namespace: [`import * as decisions from ${from}`],
       reexported: [`export { answerDecision } from ${from}`],
       everything: [`export * from ${from}`],
+      namespaceReexported: [`export * as decisions from ${from}`],
+      mixed: [`import { stillOpen, type answerDecision as A } from ${from}`],
+      unextended: ['import { answerDecision } from "../decisions/decisions"'],
       dynamic: [`import(${from})`],
       other: [],
     });
