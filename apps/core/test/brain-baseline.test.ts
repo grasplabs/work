@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  brainArms,
-  brainControls,
-  runBrainBaseline,
-  setUpBrainCompany,
-} from "./brain-harness.ts";
-import type { BrainReport, RecordedRequest } from "./brain-harness.ts";
+  baselineTimeout,
+  brainBaselineParts,
+  brainBaselineRun,
+  repeats,
+  revocationTasks,
+  unmeasuredIn,
+} from "./brain-baseline-parts.ts";
+import { brainArms, brainControls } from "./brain-harness.ts";
+import type { RecordedRequest } from "./brain-harness.ts";
+import { brainProposedBudgets } from "./brain-scoring.ts";
 import { brainLanguages } from "./fixtures/brain-corpus.ts";
 import {
   brainFamilies,
@@ -24,23 +28,18 @@ import { mockIdp } from "./idp.ts";
 // harness measures what it reports and that its security gate holds and
 // would fail, access revoked mid-run included, and how a run breaks and is
 // asked again (GRA-677): a real model's run, which costs money, is a
-// separate opt-in. The statistics have unit tests of their own
-// (brain-scoring.test.ts), and the suite's split rules theirs
-// (brain-suite.test.ts).
+// separate opt-in. The measured trials run in parts, a file each
+// (brain-baseline-parts.ts); this file runs the controls and the
+// durability cases, after no measured trial, on the suite as the last
+// window left it, and checks that the parts are the whole split. The
+// statistics have unit tests of their own (brain-scoring.test.ts), and the
+// suite's split rules theirs (brain-suite.test.ts).
 
 const idp = mockIdp();
 
 /** How often `part` occurs in `text`. */
 const count = (text: string, part: string): number =>
   text.split(part).length - 1;
-
-const repeats = 2;
-
-/** The tasks that take access away between their earlier turns and their question. */
-const revocationTasks = [
-  "dev-route-plan-left-team",
-  "dev-route-plan-grant-revoked",
-];
 
 /**
  * The tasks the controls run on: one company and one team audience, and
@@ -75,20 +74,13 @@ const recordedWithCost = (requests: readonly RecordedRequest[]) =>
   requests.length > 0 &&
   requests.every(({ chargedMicros }) => chargedMicros > 0);
 
-let baseline: Promise<BrainReport> | undefined;
-
-/** The file's one run, shared by its tests: storage lasts the whole file. */
-const run = async (): Promise<BrainReport> => {
-  baseline ??= (async () =>
-    await runBrainBaseline(await setUpBrainCompany(idp), {
-      split: "dev",
-      repeats,
-      controls: brainControls,
-      controlTasks,
-      durabilityTasks,
-    }))();
-  return await baseline;
-};
+/** The file's one run, shared by its tests: no measured trial, only the controls and durability cases. */
+const run = brainBaselineRun(idp, {
+  tasks: [],
+  controls: brainControls,
+  controlTasks,
+  durabilityTasks,
+});
 
 const devTasks = brainTasks.filter(({ split }) => split === "dev");
 
@@ -98,20 +90,10 @@ const idsOf = (...families: string[]) =>
     .filter(({ family }) => families.includes(family))
     .map(({ id }) => id);
 
-describe("the Brain baseline", { timeout: 300_000 }, () => {
-  it("holds its security gate in every arm: nothing unreadable reaches a model, and nothing in D1, Knowledge, R2 or the Workspace object changes (other objects' storage isn't checked)", async () => {
-    const { gate, arms, scores } = await run();
-    expect({
-      gate,
-      unauthorized: arms.map(({ arm, unauthorized }) => [arm, unauthorized]),
-      trials: scores.filter(({ arm }) => arm === "agent").length,
-    }).toStrictEqual({
-      gate: { passed: true, violations: [] },
-      unauthorized: brainArms.map((arm) => [arm, 0]),
-      trials: devTasks.length * repeats,
-    });
-  });
+/** Every task the parts measure, as many times as they do. */
+const partTasks: readonly string[] = brainBaselineParts.flat();
 
+describe("the Brain baseline", { timeout: baselineTimeout }, () => {
   it("would catch a leak and an unrequested change: its controls break the gate, whatever they answer", async () => {
     const { controlGate, controls } = await run();
     expect({
@@ -174,52 +156,6 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
             : 0,
       })),
     });
-  });
-
-  it("takes access revoked mid-run away from the question in every arm: leaving the team, or the agent's grant revoked", async () => {
-    const { scores } = await run();
-    expect(
-      scores
-        .filter(
-          ({ taskId, arm }) =>
-            revocationTasks.includes(taskId) &&
-            brainArms.some((each) => each === arm)
-        )
-        .map(
-          ({
-            arm,
-            taskId,
-            repeat,
-            leaks,
-            revokedReached,
-            stateChanged,
-            completed,
-          }) => ({
-            trial: `${arm} ${taskId} ${repeat}`,
-            leaks,
-            revokedReached,
-            stateChanged,
-            completed,
-          })
-        )
-        .toSorted((a, b) => a.trial.localeCompare(b.trial))
-    ).toStrictEqual(
-      brainArms
-        .flatMap((arm) =>
-          revocationTasks.flatMap((taskId) =>
-            Array.from({ length: repeats }, (_, index) => ({
-              trial: `${arm} ${taskId} ${index + 1}`,
-              leaks: [],
-              // Its earlier turns read nothing: nothing revoked ever reached it.
-              revokedReached: [],
-              stateChanged: false,
-              // It abstains: what it could have read earlier is gone.
-              completed: true,
-            }))
-          )
-        )
-        .toSorted((a, b) => a.trial.localeCompare(b.trial))
-    );
   });
 
   it("cuts what a revocation took away at the revocation: read before it, while allowed, is no leak, and the chat's history never sends it again after it", async () => {
@@ -370,24 +306,6 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     );
   });
 
-  it("answers from the corpus as it stands: corrected, withdrawn and removed content never comes back", async () => {
-    const { scores } = await run();
-    const current = idsOf(
-      "correction",
-      "withdrawal",
-      "removal",
-      "historical-ownership"
-    );
-    const missed = scores
-      .filter(({ taskId, completed }) => current.includes(taskId) && !completed)
-      .map(({ arm, taskId }) => `${arm} ${taskId}`);
-    expect({ tasks: current.length, missed }).toStrictEqual({
-      // Withdrawal and removal in English, and again in Spanish and Dutch.
-      tasks: 7,
-      missed: [],
-    });
-  });
-
   it("pins what a comparison depends on", async () => {
     const { identity } = await run();
     const digest = /^[0-9a-f]{64}$/u;
@@ -423,6 +341,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       pinned: true,
       run: ["dev", repeats, "8"],
       schedule: {
+        tasks: [],
         arms: brainArms,
         controls: brainControls,
         controlTasks,
@@ -431,98 +350,49 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     });
   });
 
-  it("compares the arms paired by task, with an interval and the tasks a decision would need", async () => {
-    const { arms, comparisons } = await run();
-    const fullContext = arms.find(({ arm }) => arm === "fullContext");
-    expect({
-      // Every readable section reached the model in the full-context arm.
-      fullContext: [fullContext?.evidenceRecall, fullContext?.completionRate],
-      // The stub answers alike every time: no noise between repeats.
-      noise: arms.map(({ repeatDisagreement }) => repeatDisagreement),
-      pairs: comparisons.map(({ candidate, baseline: base, tasks }) => [
-        candidate,
-        base,
-        tasks,
-      ]),
-      bounded: comparisons.every(
-        ({ meanDifference, interval: [low, high], requiredTasks }) =>
-          low <= meanDifference && meanDifference <= high && requiredTasks >= 2
-      ),
-    }).toStrictEqual({
-      fullContext: [1, 1],
-      noise: [0, 0, 0],
-      pairs: [
-        ["fullContext", "agent", devTasks.length],
-        ["fullText", "agent", devTasks.length],
-        ["fullContext", "fullText", devTasks.length],
-      ],
-      bounded: true,
-    });
-  });
-
-  it("measures cold and warm latency, and what each trial cost", async () => {
-    const { arms, costs, scores } = await run();
-    expect({
-      latency: arms.map(
-        ({ latencyMs }) =>
-          latencyMs.coldP95 !== null && latencyMs.warmP95 !== null
-      ),
-      // Every trial cost something, through the gateway.
-      charged: scores.every(({ costMicros }) => costMicros > 0),
-      perCompleted: arms.map(
-        ({ cost }) => cost.totalMicros > 0 && cost.perCompletedMicros !== null
-      ),
-      // Full-text indexing needs no model, and the baseline learns nothing.
-      build: costs.build.costMicros,
-      updates: costs.updates.map(({ window, costMicros }) => [
-        window,
-        costMicros,
-      ]),
-      learning: costs.learningMicros,
-    }).toStrictEqual({
-      latency: [true, true, true],
-      charged: true,
-      perCompleted: [true, true, true],
-      build: 0,
-      updates: [
-        ["t1", 0],
-        ["t2", 0],
-      ],
-      learning: 0,
-    });
-  });
-
-  it("holds every arm to the proposed budgets: none misses a security budget, and what the stub can't meet is named", async () => {
-    const { budgets } = await run();
-    expect(budgets).toStrictEqual({
-      arms: brainArms.map((arm) => ({
-        arm,
-        hardMissed: [],
-        // Retrieval reads five sections: the agent and full-text arms
-        // abstain on the five- and six-contributor counts, in each language
-        // they are asked in. Every section reaches full context.
-        missed: arm === "fullContext" ? [] : ["quality.over-abstention"],
-        unmeasured: [],
-      })),
-      background: { missed: [] },
-    });
-  });
-
-  it("covers every acceptance family and the five languages, and reports the probes it can't run yet", async () => {
+  it("measures the whole dev split in its parts, each task in one part, every family and language among them, and reports the probes it can't run yet", async () => {
     const { coverage } = await run();
+    const current = idsOf(
+      "correction",
+      "withdrawal",
+      "removal",
+      "historical-ownership"
+    );
+    const measured = devTasks.filter(({ id }) => partTasks.includes(id));
     expect({
+      once: new Set(partTasks).size === partTasks.length,
+      tasks: partTasks.toSorted(),
+      // Withdrawal and removal in English, and again in Spanish and Dutch:
+      // the parts check each answers from the corpus as it stands.
+      current: current.filter((id) => partTasks.includes(id)).length,
       families: brainFamilies.filter(
-        (family) => coverage.families[family] === undefined
+        (family) => !measured.some((task) => task.family === family)
       ),
       languages: brainLanguages.filter(
-        (language) => coverage.languages[language] === undefined
+        (language) => !measured.some((task) => task.language === language)
       ),
+      // This file measures nothing itself: its run is the controls'.
+      here: [coverage.families, coverage.languages],
+      // Every admission case, in every language.
       unsupported: coverage.unsupported,
     }).toStrictEqual({
+      once: true,
+      tasks: devTasks.map(({ id }) => id).toSorted(),
+      current: 7,
       families: [],
       languages: [],
-      // Every admission case, in every language.
+      here: [{}, {}],
       unsupported: [{ requires: "interview-admission", probes: 55 }],
     });
+  });
+
+  it("measures every proposed budget in some part: what one part's tasks can't measure, another's do", () => {
+    // Each part's file holds its arms to exactly these (`unmeasuredIn`).
+    const unmeasured = brainBaselineParts.map((tasks) => unmeasuredIn(tasks));
+    expect(
+      brainProposedBudgets
+        .map(({ name }) => name)
+        .filter((name) => unmeasured.every((each) => each.includes(name)))
+    ).toStrictEqual([]);
   });
 });
