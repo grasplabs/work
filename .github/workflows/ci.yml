@@ -315,7 +315,19 @@ jobs:
 
   check:
     name: check
-    needs: [static, plan, test, release, workerd, e2e, admin-e2e, oxc-wasm]
+    needs:
+      [
+        static,
+        plan,
+        test,
+        release,
+        workerd,
+        e2e-build,
+        e2e,
+        e2e-browsers,
+        admin-e2e,
+        oxc-wasm,
+      ]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -333,6 +345,13 @@ jobs:
           if [ "$TEST" = skipped ] && [ "$PLAN" = success ] && [ "$SHARDS" = '[]' ]; then
             TEST="success (no tests affected)"
           fi
+          # e2e's parts, its Firefox and WebKit part and the build they
+          # start: one result, the first that isn't a success.
+          for part in "$E2E_BUILD" "$E2E_BROWSERS"; do
+            if [ "$E2E" = success ] && [ "$part" != success ]; then
+              E2E=$part
+            fi
+          done
           if [ "$EVENT" = merge_group ] && [ "$E2E" = skipped ] && [ "$ADMIN_E2E" = skipped ]; then
             echo "The merge queue skips the journeys: the pull request's head passed them."
             E2E=success
@@ -366,6 +385,8 @@ jobs:
           # A matrix job's result: a failure if any shard or part failed.
           TEST: ${{ needs.test.result }}
           E2E: ${{ needs.e2e.result }}
+          E2E_BUILD: ${{ needs.e2e-build.result }}
+          E2E_BROWSERS: ${{ needs.e2e-browsers.result }}
           ADMIN_E2E: ${{ needs.admin-e2e.result }}
           E2E_RUNS: ${{ needs.plan.outputs.e2e }}
           ADMIN_E2E_RUNS: ${{ needs.plan.outputs['admin-e2e'] }}
@@ -374,23 +395,68 @@ jobs:
           DRAFT: ${{ github.event.pull_request.draft == true }}
           EVENT: ${{ github.event_name }}
 
+  # The e2e stack's code, built once for every e2e part: the frontend in
+  # development mode with the App compiler, the extractor and the docs
+  # beside it, core's generated modules and connect's build (`vp run
+  # --filter @grasp-os/core dev:build`). Each part built it for itself,
+  # about 60 s of its 3 to 6 minutes (November 2026); now it only starts
+  # it (GRASP_E2E_PREBUILT, playwright.config.ts). Beside the plan, not
+  # after it, so it adds nothing to the parts' start when the plan takes
+  # as long. Chromium's headless shell is cached here too, by Playwright's
+  # version, for the parts to restore.
+  e2e-build:
+    name: e2e-build
+    if: github.event_name != 'push' && github.event_name != 'merge_group' && github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - id: playwright
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+      - id: browsers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: vp exec playwright install --only-shell chromium
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - run: vp run --filter @grasp-os/core dev:build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-stack
+          path: |
+            apps/web/dist
+            apps/core/dist
+            apps/connect/dist
+            packages/compiler/dist
+          if-no-files-found: error
+          retention-days: 1
+          # Mostly minified code and wasm: the fastest level packs it
+          # nearly as small.
+          compression-level: 1
+
   # The journeys (playwright.config.ts) in parts, a runner and a stack
-  # each. Unsplit, the job took 18 to 23 minutes and ran into its 30
-  # (October 2026). Playwright runs a project's dependencies in full on
-  # every shard, and the serial projects (Grasp's go, the interviews, the
-  # journeys) depend on everything before them, so `--shard` alone splits
-  # nothing: GRASP_E2E_PART picks the part. The parallel part runs in
-  # parts, each the files scripts/e2e-parts.ts gives it by their times
-  # (scripts/e2e-durations.json), and each serial project on a stack of its
-  # own, where nothing runs before it: on one stack the three took about 7
-  # minutes (October 2026, GRA-1094). Four parallel parts, not more: each
-  # part spends about 3.5 minutes on setup and starting its stack before its
-  # first test, and eight parts' tests took under 2 minutes each, so half
-  # of every part was that overhead while PRs queued for runners at the
-  # account's 60 concurrent jobs. Four still end before the test shards,
-  # which wait for the plan (October 2026, 136 PR runs). Add a parallel
-  # part by adding an entry and raising the count in every entry's `part`.
-  # Part of the required `check` (above).
+  # each, every part on the stack e2e-build built. Playwright runs a
+  # project's dependencies in full on every shard, and the serial projects
+  # (Grasp's go, the interviews, the journeys) depend on everything before
+  # them, so `--shard` alone splits nothing: GRASP_E2E_PART picks the part.
+  # The parallel part's Chromium tests run in parts, each the tests
+  # scripts/e2e-parts.ts gives it by their times (scripts/e2e-durations.json),
+  # test by test; its Firefox and WebKit tests in a part of their own; and
+  # each serial project on a stack of its own, where nothing runs before
+  # it, the journeys a file a stack (`--shard`). Ten parallel parts: their
+  # tests take about 70 s each, as long as the longest test, so the job
+  # ends within about 2.5 minutes of setup, stack and tests (November
+  # 2026). Add a parallel part by adding an entry and raising the count in
+  # every entry's `part`. Part of the required `check` (above).
   #
   # Not in the merge queue, here and in admin-e2e: the pull request's head
   # already passed every journey, and repeating them on main plus the batch
@@ -400,92 +466,98 @@ jobs:
   # nightly full run (nightly-alert, below) catches a journey two pull
   # requests break only together.
   #
-  # In Playwright's image, which has the browsers and their system packages
-  # installed: `playwright install --with-deps` fetched 119 MB of them from
-  # the Ubuntu mirror, up to 12 minutes when it was slow (October 2026,
-  # GRA-1016). Its tag must be the catalog's @playwright/test, whose browser
-  # builds it carries: check:playwright-image (static) holds the two
-  # together, and Renovate moves them in one pull request.
+  # On the runner itself, with Chromium's headless shell from e2e-build's
+  # cache: the runner's image has the system packages Chromium needs.
+  # Playwright's image took 28 s to start, and its own install 31 s, as the
+  # install cache lives elsewhere in it (November 2026). Firefox and WebKit
+  # need packages the runner lacks, which `playwright install --with-deps`
+  # fetched from the Ubuntu mirror, up to 12 minutes when it was slow
+  # (October 2026, GRA-1016): their part runs in Playwright's image
+  # (e2e-browsers, below).
   #
   # Only when the plan finds the change reaches its stack
   # (scripts/test-plan.ts, `journeysReached`): a change to the admin, the
   # router or Vitest's test files alone leaves what it runs as it was.
   e2e:
     name: e2e (${{ matrix.part }})
-    needs: plan
+    needs: [plan, e2e-build]
     if: needs.plan.outputs.e2e == 'true' && github.event_name != 'merge_group'
-    container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
-      # The runner's own user, which owns the checkout, the caches and
-      # $HOME, as Playwright's CI guide has it: Firefox won't start as root
-      # in a home it doesn't own. A host IPC namespace, so Chromium's shared
-      # memory isn't held to Docker's 64 MB /dev/shm.
-      options: --user 1001 --ipc=host
     runs-on: ubuntu-latest
-    # About 1 minute of setup and 2 for the stack to build and start, then
-    # each part's tests.
-    timeout-minutes: 20
+    # About 1 minute of setup and starting the stack, then each part's
+    # tests.
+    timeout-minutes: 15
     strategy:
       # A failing part doesn't cancel the others: each says what failed in
       # it.
       fail-fast: false
       matrix:
         include:
-          - part: 1/4
-            project: parallel
-            artifact: 1-of-4
-          - part: 2/4
-            project: parallel
-            artifact: 2-of-4
-          - part: 3/4
-            project: parallel
-            artifact: 3-of-4
-          - part: 4/4
-            project: parallel
-            artifact: 4-of-4
-          - part: onboarding
-            project: onboarding
-            artifact: onboarding
-          - part: interview
-            project: interview
-            artifact: interview
-          - part: journeys
-            project: journeys
-            artifact: journeys
+          - { part: 1/10, project: parallel, artifact: 1-of-10 }
+          - { part: 2/10, project: parallel, artifact: 2-of-10 }
+          - { part: 3/10, project: parallel, artifact: 3-of-10 }
+          - { part: 4/10, project: parallel, artifact: 4-of-10 }
+          - { part: 5/10, project: parallel, artifact: 5-of-10 }
+          - { part: 6/10, project: parallel, artifact: 6-of-10 }
+          - { part: 7/10, project: parallel, artifact: 7-of-10 }
+          - { part: 8/10, project: parallel, artifact: 8-of-10 }
+          - { part: 9/10, project: parallel, artifact: 9-of-10 }
+          - { part: 10/10, project: parallel, artifact: 10-of-10 }
+          - { part: onboarding, project: onboarding, artifact: onboarding }
+          - { part: interview, project: interview, artifact: interview }
+          - {
+              part: journeys 1/3,
+              project: journeys,
+              shard: 1/3,
+              artifact: journeys-1-of-3,
+            }
+          - {
+              part: journeys 2/3,
+              project: journeys,
+              shard: 2/3,
+              artifact: journeys-2-of-3,
+            }
+          - {
+              part: journeys 3/3,
+              project: journeys,
+              shard: 3/3,
+              artifact: journeys-3-of-3,
+            }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Without the pnpm store cache, here and in admin-e2e: in the image the
-      # store sits at another path and is packed with gzip, not zstd, so it
-      # is another cache from the one the other jobs restore. Only pull
-      # requests ran these jobs, so it never reached main's scope: a pull
-      # request's first run missed it, and all 12 jobs then packed the store
-      # to save it, 35 to 49 s each, for one to win and the rest to fail. A
-      # restore that hit was 12 s slower than the install fetching every
-      # package (October 2026).
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      - uses: ./.github/actions/setup
+      - id: playwright
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+      - id: browsers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: .node-version
-          cache: false
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - uses: ./.github/actions/oxc-wasm
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: vp exec playwright install --only-shell chromium
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-stack
       # Beside the journeys, the runner's memory once a minute, as in the
       # test shards (scripts/memory-log.ts).
       - run: |
           node scripts/memory-log.ts &
           sampler=$!
           trap 'kill "$sampler"' EXIT
-          files=""
           if [ "$GRASP_E2E_PART" = parallel ]; then
-            files=$(node scripts/e2e-parts.ts "$PART")
+            node scripts/e2e-parts.ts "$PART" > "$RUNNER_TEMP/e2e-tests.txt"
+            vp run e2e --project chromium --test-list "$RUNNER_TEMP/e2e-tests.txt" --reporter=github,json
+          elif [ -n "$SHARD" ]; then
+            vp run e2e --shard "$SHARD" --reporter=github,json
+          else
+            vp run e2e --reporter=github,json
           fi
-          # Unquoted: a filter per file.
-          vp run e2e $files --reporter=github,json
         env:
           GRASP_E2E_PART: ${{ matrix.project }}
+          GRASP_E2E_PREBUILT: "true"
           PART: ${{ matrix.part }}
+          SHARD: ${{ matrix.shard }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/e2e-results.json
       # Kept for passing runs too: the times the parts are split by come
       # from it (scripts/e2e-durations.ts).
@@ -508,41 +580,104 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # The admin's journeys (playwright.admin.config.ts): a stack of
-  # their own, the admin on the fake Cloudflare API, so apart from e2e's.
-  # Chromium only, in e2e's image.
-  # Only when the plan finds the change reaches the admin (scripts/test-plan.ts,
-  # `journeysReached`). Skipped so, `check` passes it, and fails the run
-  # when the plan itself failed.
-  admin-e2e:
-    name: admin-e2e
-    # Not in the merge queue, as e2e above.
-    needs: plan
-    if: needs.plan.outputs['admin-e2e'] == 'true' && github.event_name != 'merge_group'
+  # The parallel part's Firefox and WebKit tests (playwright.config.ts's
+  # browser policy tests), on the stack e2e-build built, in Playwright's
+  # image, which has those browsers and their system packages installed.
+  # Its tag must be the catalog's @playwright/test, whose browser builds it
+  # carries: check:playwright-image (static) holds the two together, and
+  # Renovate moves them in one pull request. When and why as e2e, above.
+  e2e-browsers:
+    name: e2e (firefox, webkit)
+    needs: [plan, e2e-build]
+    if: needs.plan.outputs.e2e == 'true' && github.event_name != 'merge_group'
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
+      # The runner's own user, which owns the checkout, the caches and
+      # $HOME, as Playwright's CI guide has it: Firefox won't start as root
+      # in a home it doesn't own. A host IPC namespace, so Chromium's shared
+      # memory isn't held to Docker's 64 MB /dev/shm.
       options: --user 1001 --ipc=host
-    # On GitHub's runners, as e2e above.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Without the pnpm store cache: in the image the store sits at
+      # another path and is packed with gzip, not zstd, so it is another
+      # cache from the one the other jobs restore, which only this job
+      # would fill. A restore that hit was 12 s slower than the install
+      # fetching every package (October 2026).
       - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
         with:
           node-version-file: .node-version
-          # As e2e's: the image's store is a cache of its own.
           cache: false
           run-install: |
             - args: ["--frozen-lockfile"]
       - uses: ./.github/actions/oxc-wasm
-      - run: vp run e2e:admin
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-stack
+      - run: vp run e2e --project firefox --project webkit --reporter=github,json
+        env:
+          GRASP_E2E_PART: parallel
+          GRASP_E2E_PREBUILT: "true"
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/e2e-results.json
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results-browsers
+          path: ${{ runner.temp }}/e2e-results.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-traces-browsers
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The admin's journeys (playwright.admin.config.ts): a stack of their
+  # own, the admin on the fake Cloudflare API, so apart from e2e's, in
+  # parts (`--shard`), a stack each: one after another they took 4
+  # minutes (November 2026). Chromium only, on the runner, as e2e's
+  # parts. Only when the plan finds the change reaches the admin
+  # (scripts/test-plan.ts, `journeysReached`). Skipped so, `check` passes
+  # it, and fails the run when the plan itself failed.
+  admin-e2e:
+    name: admin-e2e (${{ matrix.shard }})
+    # Not in the merge queue, as e2e above.
+    needs: plan
+    if: needs.plan.outputs['admin-e2e'] == 'true' && github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/3, 2/3, 3/3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - id: playwright
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+      - id: browsers
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: vp exec playwright install --only-shell chromium
+      - run: vp run e2e:admin --shard "$SHARD"
+        env:
+          SHARD: ${{ matrix.shard }}
       # A failing journey keeps its trace (playwright.admin.config.ts).
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: admin-playwright-traces
+          name: admin-playwright-traces-${{ strategy.job-index }}
           path: test-results/
           retention-days: 14
 
