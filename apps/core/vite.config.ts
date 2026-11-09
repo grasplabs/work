@@ -160,11 +160,59 @@ export const coreProject = (
       // fallback can't load: bundled first, as Wrangler bundles it for the
       // Worker, so each require resolves. Node's built-ins stay imports,
       // which workerd's nodejs_compat serves.
+      //
+      // The rest are bundled for speed: each worker's runtime fetches every
+      // module it loads from Vitest one request at a time, and these
+      // libraries are thousands of small ones (pi-ai's TypeBox alone over
+      // 500). Bundled, a worker loads core in less than half the requests
+      // (some 1,400 instead of 3,400), which six workers on a CI runner
+      // all make at once. Every specifier core imports from them is
+      // listed: one left off still loads, module by module, but as a second
+      // copy of the library next to the bundled one.
       deps: {
         optimizer: {
           ssr: {
             enabled: true,
-            include: ["@chat-adapter/teams"],
+            include: [
+              "@chat-adapter/teams",
+              "zod",
+              "drizzle-orm",
+              "drizzle-orm/d1",
+              "drizzle-orm/sqlite-core",
+              "drizzle-orm/batch",
+              "drizzle-orm/durable-sqlite",
+              "@earendil-works/pi-ai",
+              "@earendil-works/pi-ai/utils/transcript",
+              "@earendil-works/pi-ai/models",
+              "@earendil-works/pi-ai/utils/estimate",
+              "@earendil-works/pi-ai/utils/event-stream",
+              "@earendil-works/pi-ai/providers/faux",
+              "@earendil-works/pi-ai/providers/anthropic.models",
+              "@earendil-works/pi-ai/providers/openrouter.models",
+              "@earendil-works/pi-ai/providers/openai.models",
+              "@earendil-works/pi-ai/providers/mistral.models",
+              "@earendil-works/pi-ai/api/anthropic-messages",
+              "@earendil-works/pi-ai/api/openai-completions",
+              "@earendil-works/pi-ai/api/openai-responses",
+              "@earendil-works/pi-agent-core",
+              "@earendil-works/pi-durable",
+              "@earendil-works/pi-durable/storage/sqlite/cloudflare",
+              "@earendil-works/chord",
+              "@earendil-works/chord/context",
+              "better-auth/minimal",
+              "better-auth/api",
+              "better-auth/plugins/organization",
+              "better-auth/plugins/organization/access",
+              "better-auth/adapters/drizzle",
+              "@better-auth/sso",
+              "jose",
+              "yaml",
+              "typebox/value",
+              "@orama/orama",
+              "chat",
+              "postal-mime",
+              "csv-parse/sync",
+            ],
             exclude: ["@opentelemetry/api"],
             rolldownOptions: {
               external: [
