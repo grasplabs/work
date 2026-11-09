@@ -97,7 +97,18 @@ const lookMs = 100;
  */
 interface Traffic {
   requests: Set<Request>;
-  calls: Map<WebSocket, Map<number, number>>;
+  sockets: Map<WebSocket, Socket>;
+}
+
+/**
+ * A socket of the page's to core: when it began opening, whether core has
+ * said anything on it yet, and the calls core owes an answer, by id, with
+ * when each was made.
+ */
+interface Socket {
+  openedAt: number;
+  answered: boolean;
+  calls: Map<number, number>;
 }
 
 /**
@@ -135,22 +146,27 @@ const messageOf = (
 
 /** Follows the calls the page makes on `socket`, until it closes. */
 const followCalls = (traffic: Traffic, socket: WebSocket): void => {
-  const calls = new Map<number, number>();
-  traffic.calls.set(socket, calls);
+  const followed: Socket = {
+    openedAt: Date.now(),
+    answered: false,
+    calls: new Map(),
+  };
+  traffic.sockets.set(socket, followed);
   socket.on("framesent", ({ payload }) => {
     const message = messageOf(payload);
     if (message?.kind === "pull") {
-      calls.set(message.id, Date.now());
+      followed.calls.set(message.id, Date.now());
     }
   });
   socket.on("framereceived", ({ payload }) => {
+    followed.answered = true;
     const message = messageOf(payload);
     if (message?.kind === "resolve" || message?.kind === "reject") {
-      calls.delete(message.id);
+      followed.calls.delete(message.id);
     }
   });
   socket.on("close", () => {
-    traffic.calls.delete(socket);
+    traffic.sockets.delete(socket);
   });
 };
 
@@ -159,7 +175,7 @@ const followCalls = (traffic: Traffic, socket: WebSocket): void => {
  * it waits on from core, for `readUntil`.
  */
 export const installReadingClock = async (page: Page): Promise<void> => {
-  const traffic: Traffic = { requests: new Set(), calls: new Map() };
+  const traffic: Traffic = { requests: new Set(), sockets: new Map() };
   trafficOf.set(page, traffic);
   page.on("request", (request) => {
     const from = request.redirectedFrom();
@@ -188,10 +204,16 @@ const waitingOnCore = (traffic: Traffic | undefined): boolean => {
     return false;
   }
   const now = Date.now();
+  const pending = (since: number): boolean => now - since < answerDeadlineMs;
   return (
     traffic.requests.size > 0 ||
-    [...traffic.calls.values()].some((calls) =>
-      [...calls.values()].some((madeAt) => now - madeAt < answerDeadlineMs)
+    [...traffic.sockets.values()].some(
+      ({ openedAt, answered, calls }) =>
+        // Opening: the page queues its calls until it is open, and core
+        // opens it only once it found the session, while the calls'
+        // deadlines already run. Playwright shows the handshake as no
+        // request, and the queued calls as no frame.
+        (!answered && pending(openedAt)) || [...calls.values()].some(pending)
     )
   );
 };
