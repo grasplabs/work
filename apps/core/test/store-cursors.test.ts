@@ -811,6 +811,37 @@ describe("pages ended at a cursor", () => {
     }).toStrictEqual({ grown: 4, split: half.nextCursor });
   });
 
+  it("stop at their end before any filter, never scanning on past it", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: "a0", done: true },
+      { title: "a1", done: true },
+      { title: "a2", done: true },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const doneByTitle = () =>
+      db.query("notes").withIndex("by_title").filter({ done: true });
+    const first = await doneByTitle().paginate({ pageSize: 2 });
+    // Between its end and the next record it matches, more records than
+    // one read may examine, none of them passing the filter.
+    await insertNotes(
+      fixture,
+      Array.from({ length: queryMaxScannedEntries + 1 }, (_, index) => ({
+        title: `a1-${String(index).padStart(6, "0")}`,
+        done: false,
+      })),
+      "ada",
+      100
+    );
+    const ended = await outcome(
+      doneByTitle().paginate({
+        pageSize: 1,
+        endCursor: first.nextCursor ?? "",
+      })
+    );
+    expect(pageIds(ended)).toStrictEqual(idsOf(first.items));
+  });
+
   it("expire with an end of its ID alone whose record moved to or before their start", async () => {
     const fixture = await storeWith("appMembers");
     await insertNotes(fixture, [

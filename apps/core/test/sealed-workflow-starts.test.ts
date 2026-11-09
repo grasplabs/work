@@ -2,6 +2,7 @@ import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -523,6 +524,37 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     );
   });
 
+  it("refuse a page of runs whose end lies past what one read may examine, never loading them all", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await greetingOf(owner);
+    const { app, release } = await requestsApp(
+      admin,
+      [bob],
+      workflow.id,
+      owner
+    );
+    // More of Bob's runs than one read may examine.
+    await startedRuns(app, workflow.id, bob.userId, queryMaxScannedEntries + 2);
+    const runs = queryReference(release, "followUp", "runs");
+    const ask = async (input: unknown) => {
+      const { result } = await callAppFunction(
+        env,
+        bob,
+        app,
+        JSON.stringify({ reference: runs, input })
+      );
+      return result;
+    };
+    // An end at the oldest of them (runs list newest first): a cursor is
+    // a place, its time then an ID, which anyone may write.
+    const cursor = `${Date.UTC(2026, 0, 1)}:0`;
+    expect(
+      codeOf(await ask({ pagination: { pageSize: 1, endCursor: cursor } }))
+    ).toBe("data.scan_limit");
+  });
+
   it("keep each App's runs its own, end a page where the next starts, and follow access, revocation and rebinding", async () => {
     const admin = await person("admin");
     const bob = await person("user");
@@ -568,11 +600,24 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     const secondCursor = secondPage.ok
       ? z.object({ nextCursor: z.string() }).parse(secondPage.value).nextCursor
       : "";
+    // Past twice its size, an ended page says where to split it: where a
+    // page of its size from its start ends.
+    const cursors = z.object({
+      nextCursor: z.string().nullable(),
+      splitCursor: z.string().optional(),
+    });
+    const grown = await ask({
+      pagination: { pageSize: 40, endCursor: secondCursor },
+    });
+    const forty = await ask({ pagination: { pageSize: 40 } });
     expect({
       // Ended where a third page would start: two pages' worth of runs.
       ended: runIds(
         await ask({ pagination: { pageSize: 1, endCursor: secondCursor } })
       ),
+      split:
+        cursors.parse(grown.ok ? grown.value : {}).splitCursor ===
+        cursors.parse(forty.ok ? forty.value : {}).nextCursor,
       firstPage: runIds(firstPage).length,
       secondApp: runIds(await askSecond()).length,
       indexed: plan.results.some(({ detail }) =>
@@ -580,6 +625,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       ),
     }).toStrictEqual({
       ended: [...runIds(firstPage), ...runIds(secondPage)],
+      split: true,
       firstPage: 50,
       secondApp: 3,
       indexed: true,

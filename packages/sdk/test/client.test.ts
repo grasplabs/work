@@ -600,6 +600,71 @@ describe("the session client's paginated list started again", () => {
     list.stop();
   });
 
+  it("reads an ended page of one record that grew too large to answer again, rather than fail the list", async () => {
+    const host = listHost(["b", "c"]);
+    const list = listOf(host, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["b"]);
+    });
+    await list.pager.loadMore();
+    // Records moved into the first page, ended after `b`, until its answer
+    // is past what one may carry, though each record fits on its own.
+    host.state.titles.push("a0", "a1", "a2", "a3");
+    host.refuse(
+      ({ endCursor }) => endCursor !== undefined,
+      "page.answer_too_large"
+    );
+    await vi.waitFor(() => {
+      expect({
+        error: list.pager.snapshot.error,
+        titles: list.titles(),
+        pages: list.pager.pages.map(({ cursor, endCursor, pageSize }) => ({
+          cursor,
+          endCursor,
+          pageSize,
+        })),
+      }).toStrictEqual({
+        error: undefined,
+        titles: ["a0"],
+        // Read again from its start, without its end.
+        pages: [{ cursor: null, endCursor: null, pageSize: 1 }],
+      });
+    });
+    list.stop();
+  });
+
+  it("never shows a split page's records twice once its second half is read again in its place", async () => {
+    const host = listHost(["b", "c"]);
+    const list = listOf(host, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["b"]);
+    });
+    await list.pager.loadMore();
+    host.state.titles.push("a0", "a1", "a2");
+    host.state.hold = "all";
+    host.reread();
+    await vi.waitFor(() => {
+      expect(
+        list.pager.pages.slice(0, 2).map(({ held }) => held !== undefined)
+      ).toStrictEqual([true, true]);
+    });
+    // The second half is too large to answer: it is read again in its
+    // place, and the first half holds the whole page no longer.
+    host.refuse(
+      ({ cursor, endCursor }) => cursor !== null && endCursor !== undefined,
+      "page.answer_too_large"
+    );
+    await vi.waitFor(() => {
+      expect(list.pager.pages.at(-1)?.endCursor).toBeNull();
+    });
+    expect(list.titles()).toStrictEqual([]);
+    host.release();
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a0", "a1"]);
+    });
+    list.stop();
+  });
+
   it("shows nothing of a page split mid-way once one of its halves is refused", async () => {
     const host = listHost(["b", "c"]);
     const list = listOf(host, 1);

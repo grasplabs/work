@@ -645,6 +645,11 @@ export interface HistoryEntries {
   /** The engine event ID the page ended at, when more follow. */
   readonly nextCursor: string | null;
   readonly hasMore: boolean;
+  /**
+   * Given `until`, the event it stopped at short of it, its reads spent
+   * (`maxReads`): the span after it is not in the page.
+   */
+  readonly stoppedAt?: number;
 }
 
 /**
@@ -654,7 +659,8 @@ export interface HistoryEntries {
  * of: still starting, or never started. Who may read it is the caller's
  * to have checked. With `until`, the entries up to and including that
  * event instead, however many: a live list's loaded page. The journal
- * only grows, so that span reads the same events every time.
+ * only grows, so that span reads the same events every time. A span
+ * longer than its reads reach ends early, saying where (`stoppedAt`).
  */
 export const historyEntries = async (
   env: Env,
@@ -703,7 +709,10 @@ export const historyEntries = async (
       }
     }
   }
-  return more
+  const stoppedAt =
+    until !== undefined && more && after < until ? after : undefined;
+  const page: HistoryEntries = more
     ? { items, nextCursor: String(after), hasMore: true }
     : { items, nextCursor: null, hasMore: false };
+  return stoppedAt === undefined ? page : { ...page, stoppedAt };
 };

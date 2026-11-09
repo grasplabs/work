@@ -346,15 +346,19 @@ export class Pagers {
   }
 
   /**
-   * Reads a page refused as too large to answer (`tooLarge`) again at half its
-   * size, from where it starts, dropping the pages after it: the list
-   * shows less, and Load More goes on from there, rather than failing for
-   * good. Answers whether it did. A page of one record stays refused.
+   * Reads a page refused as too large to answer (`tooLarge`) again from
+   * where it starts, without an end and at half its size, dropping the
+   * pages after it: the list shows less, and Load More goes on from there,
+   * rather than failing for good. A page with an end holds however many
+   * records moved into it, whatever its size, so it is read again even at
+   * a size of one. Answers whether it did. Only a page of one record and
+   * no end, that one record too large to answer, stays refused.
    */
   #shrinkTooLarge(pager: Pager): boolean {
     const at = pager.pages.findIndex(
       (page) =>
-        tooLarge.has(page.entry.snapshot.error?.code ?? "") && page.pageSize > 1
+        tooLarge.has(page.entry.snapshot.error?.code ?? "") &&
+        (page.pageSize > 1 || page.endCursor !== null)
     );
     const page = pager.pages[at];
     if (page === undefined) {
@@ -365,10 +369,13 @@ export class Pagers {
       gone.stop?.();
       gone.stop = undefined;
     }
-    // A page whose twin went no longer waits for it.
+    // A page whose twin went no longer waits for it, nor shows the whole
+    // page it was split from, which held the dropped half's records too:
+    // the page read again in its place would show them twice.
     for (const kept of pager.pages.slice(0, at)) {
       if (kept.twin !== undefined && dropped.includes(kept.twin)) {
         kept.twin = undefined;
+        kept.held = undefined;
       }
     }
     const smaller = this.#page(

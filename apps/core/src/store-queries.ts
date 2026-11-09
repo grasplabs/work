@@ -717,6 +717,15 @@ export const planQuery = (
   };
 };
 
+/**
+ * A page's end, as the rows of its statements are read (`matchesOf`):
+ * whether a row comes after it, and whether one did.
+ */
+export interface EndBound {
+  readonly past: (row: ReadRow) => boolean;
+  reached: boolean;
+}
+
 /** A row a plan matched, with its document when the plan read it. */
 export interface Match {
   readonly row: ReadRow;
@@ -731,7 +740,8 @@ export interface Match {
 export const matchesOf = (
   sql: ReadSql,
   plan: Plan,
-  shared?: Scan
+  shared?: Scan,
+  end?: EndBound
 ): IterableIterator<Match, undefined> => {
   // A scan of its own unless the caller's spans several statements.
   const scan: Scan = shared ?? { entries: 0, bytes: 0 };
@@ -747,6 +757,12 @@ export const matchesOf = (
       for (let read = rows.next(); read.done !== true; read = rows.next()) {
         const row = read.value;
         scanned(scan, row.bytes ?? 0);
+        // A page's end, checked on every row read, whether or not it
+        // passes the filter: a page never scans on past its end.
+        if (end?.past(row) === true) {
+          end.reached = true;
+          return { done: true, value: undefined };
+        }
         if (!plan.filtered || row.matched === 1) {
           return { done: false, value: { row, valueJson: row.value_json } };
         }
@@ -1439,11 +1455,11 @@ const searchMatches = (
   query: QueryRequest,
   { after, end }: { after: Anchor | null; end: Anchor | null },
   scan: Scan
-): { matches: Iterator<Match>; until: SearchSeek | undefined } => {
+): { matches: Iterator<Match>; bound: EndBound | undefined } => {
   const search = searchOf(pinned, table, query);
   const terms = searchTerms(query.search ?? "");
   if (terms.length === 0) {
-    return { matches: [][Symbol.iterator](), until: undefined };
+    return { matches: [][Symbol.iterator](), bound: undefined };
   }
   const match = searchMatch(search, terms, scope.principal, table.ownerScoped);
   // Counted among the rows the caller may read, when rules or the owner
@@ -1488,13 +1504,18 @@ const searchMatches = (
   ) {
     throw dataErrors.create("data.cursor_expired");
   }
+  const bound: EndBound | undefined =
+    until === undefined
+      ? undefined
+      : { past: (row) => searchPast(row, until), reached: false };
   return {
     matches: matchesOf(
       sql,
       searchPlan(scope, table, query, search, match, seek),
-      scan
+      scan,
+      bound
     ),
-    until,
+    bound,
   };
 };
 
@@ -1729,10 +1750,14 @@ const withDocuments = (
 const chainedMatches = function* chainedMatches(
   sql: ReadSql,
   plans: readonly Plan[],
-  scan: Scan
+  scan: Scan,
+  end?: EndBound
 ): Generator<Match, void, undefined> {
   for (const plan of plans) {
-    yield* matchesOf(sql, plan, scan);
+    if (end?.reached === true) {
+      return;
+    }
+    yield* matchesOf(sql, plan, scan, end);
   }
 };
 
@@ -1826,10 +1851,10 @@ const isPast = (
 };
 
 /** The place of `match`, a row read with its order fields' values. */
-const placeOf = (match: Match, fields: number): Required<Anchor> => ({
-  id: match.row.record_id,
+const placeOf = (row: ReadRow, fields: number): Required<Anchor> => ({
+  id: row.record_id,
   values: Array.from({ length: fields }, (_field, position) =>
-    anchorValueOf(match.row[`o${position}`])
+    anchorValueOf(row[`o${position}`])
   ),
 });
 
@@ -1866,6 +1891,9 @@ export const readPage = (
   // Whether a record past the page's end was read.
   let more = false;
   let anchorFields: number | undefined;
+  // The page's matches in order, and its end as they are read.
+  let matches: Iterator<Match>;
+  let bound: EndBound | undefined;
   if (query.search === undefined) {
     const { orderFields } = accessOf(pinned, table, query);
     anchorFields = orderFields.length - 1;
@@ -1904,24 +1932,22 @@ export const readPage = (
       query,
       start ?? null
     );
-    for (const match of chainedMatches(sql, plans, scan)) {
-      if (
-        found.length >= limit ||
-        (endKey !== undefined &&
-          isPast(placeOf(match, anchorFields), endKey, query.order))
-      ) {
-        more = true;
-        break;
-      }
-      found.push(match);
-    }
+    const fields = anchorFields;
+    bound =
+      endKey === undefined
+        ? undefined
+        : {
+            past: (row) => isPast(placeOf(row, fields), endKey, query.order),
+            reached: false,
+          };
+    matches = chainedMatches(sql, plans, scan, bound);
   } else {
     // A search's anchor is its record's ID alone (`searchSeekOf`), and so
     // is its end: the page ends at that record's relevance as it is now,
     // the first row past it the next page's, whether or not the record
     // itself still passes the filter.
     anchorFields = undefined;
-    const { matches, until } = searchMatches(
+    ({ matches, bound } = searchMatches(
       sql,
       pinned,
       scope,
@@ -1929,18 +1955,17 @@ export const readPage = (
       query,
       { after: anchor, end },
       scan
-    );
-    for (let next = matches.next(); next.done !== true; next = matches.next()) {
-      if (
-        found.length >= limit ||
-        (until !== undefined && searchPast(next.value.row, until))
-      ) {
-        more = true;
-        break;
-      }
-      found.push(next.value);
-    }
+    ));
   }
+  for (let next = matches.next(); next.done !== true; next = matches.next()) {
+    if (found.length >= limit) {
+      more = true;
+      break;
+    }
+    found.push(next.value);
+  }
+  // A row past the page's end was read: more follow it.
+  more ||= bound?.reached === true;
   const items = found.map(({ row, valueJson }) =>
     documentOf(table, row, valueJson ?? "{}")
   );
@@ -1953,7 +1978,7 @@ export const readPage = (
           id: match.row.record_id,
           ...(anchorFields === undefined
             ? {}
-            : { values: placeOf(match, anchorFields).values }),
+            : { values: placeOf(match.row, anchorFields).values }),
         };
   // A page with an end grows as records move into it: past twice its
   // size it says where to split it, after its first `pageSize`, and past

@@ -14,6 +14,7 @@ import {
   operationErrors,
 } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { RunHistoryEntry } from "@grasp-os/shared/workflows";
@@ -246,6 +247,32 @@ const defaultPageSize = 50;
 
 const cursorPattern = /^(?<at>\d{1,16}):(?<id>[\w-]{1,128})$/u;
 
+/**
+ * The rows of a page of runs or decisions with an end, as read: every row
+ * up to it, refused past what one read may examine (`data.scan_limit`),
+ * never answered in part.
+ */
+const endedRows = <Row>(rows: readonly Row[]): Row[] => {
+  if (rows.length > queryMaxScannedEntries) {
+    throw dataErrors.create("data.scan_limit", {
+      scanned: queryMaxScannedEntries,
+    });
+  }
+  return [...rows];
+};
+
+/**
+ * Where a page of runs or decisions with an end is split, as a store's
+ * pages are (store-queries.ts, `readPage`): after its first `size` rows
+ * once it holds more than twice that.
+ */
+const splitRowOf = <Row>(
+  shown: readonly Row[],
+  until: Place | undefined,
+  size: number
+): Row | undefined =>
+  until !== undefined && shown.length > 2 * size ? shown[size - 1] : undefined;
+
 /** A place in a list of runs or decisions: a time, then an ID. */
 interface Place {
   readonly at: number;
@@ -381,7 +408,12 @@ const runsPage = async (
     after?: Place;
     until?: Place;
   }
-): Promise<{ items: Json[]; hasMore: boolean; last?: string }> => {
+): Promise<{
+  items: Json[];
+  hasMore: boolean;
+  last?: string;
+  split?: string;
+}> => {
   const statuses =
     options.status === undefined
       ? undefined
@@ -467,10 +499,11 @@ const runsPage = async (
       desc(workflowResourceRuns.createdAt),
       desc(workflowResourceRuns.id)
     )
-    // Up to its end, a page holds every run there; SQLite reads a
-    // negative limit as none.
-    .limit(until === undefined ? options.size + 1 : -1);
-  const shown = until === undefined ? rows.slice(0, options.size) : rows;
+    // Up to its end, a page holds every run there, within the bound of
+    // one read (`endedRows`).
+    .limit(until === undefined ? options.size + 1 : queryMaxScannedEntries + 1);
+  const shown =
+    until === undefined ? rows.slice(0, options.size) : endedRows(rows);
   const watchable = await followable(env, caller, from, shown);
   const items: Json[] = shown.map((row) => {
     const status = publicStatus[row.status];
@@ -502,12 +535,16 @@ const runsPage = async (
     };
   });
   const lastRow = shown.at(-1);
+  const splitRow = splitRowOf(shown, until, options.size);
   return {
     items,
     hasMore: until === undefined && rows.length > options.size,
     ...(lastRow === undefined
       ? {}
       : { last: `${lastRow.createdAt.getTime()}:${lastRow.id}` }),
+    ...(splitRow === undefined
+      ? {}
+      : { split: `${splitRow.createdAt.getTime()}:${splitRow.id}` }),
   };
 };
 
@@ -711,7 +748,12 @@ const historyPage = async (
     cursor,
     endCursor,
   }: { size: number; cursor: unknown; endCursor: unknown }
-): Promise<{ items: Json[]; nextCursor: string | null; hasMore: boolean }> => {
+): Promise<{
+  items: Json[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  splitCursor?: string;
+}> => {
   const nothing = { items: [], nextCursor: null, hasMore: false };
   const run = await historyRunOf(
     env,
@@ -746,9 +788,18 @@ const historyPage = async (
     }
   );
   const items = page.items.flatMap((entry) => historyRowOf(entry) ?? []);
-  // Given an end, a page answers it as its next cursor (`pageAnswer`).
+  // Given an end, a page answers it as its next cursor (`pageAnswer`). A
+  // span longer than one page's reads reach holds only its entries up to
+  // where they stopped, and says to split there: never a gap.
   return typeof endCursor === "string"
-    ? { items, nextCursor: endCursor, hasMore: true }
+    ? {
+        items,
+        nextCursor: endCursor,
+        hasMore: true,
+        ...(page.stoppedAt === undefined
+          ? {}
+          : { splitCursor: String(page.stoppedAt) }),
+      }
     : { items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 };
 
@@ -939,7 +990,12 @@ const decisionsPage = async (
     after?: Place;
     until?: Place;
   }
-): Promise<{ items: Json[]; hasMore: boolean; last?: string }> => {
+): Promise<{
+  items: Json[];
+  hasMore: boolean;
+  last?: string;
+  split?: string;
+}> => {
   const pinned = pinnedBound(query, binding);
   if (pinned === undefined || query.decisionKeys.size === 0) {
     return { items: [], hasMore: false };
@@ -977,10 +1033,11 @@ const decisionsPage = async (
     )
   )
     .orderBy(asc(workflowDecisions.openedAt), asc(workflowDecisions.id))
-    // Up to its end, a page holds every decision there; SQLite reads a
-    // negative limit as none.
-    .limit(until === undefined ? options.size + 1 : -1);
-  const shown = until === undefined ? rows.slice(0, options.size) : rows;
+    // Up to its end, a page holds every decision there, within the bound
+    // of one read (`endedRows`).
+    .limit(until === undefined ? options.size + 1 : queryMaxScannedEntries + 1);
+  const shown =
+    until === undefined ? rows.slice(0, options.size) : endedRows(rows);
   // One build a manifest: the pinned version's runs share it.
   const manifests = [...new Set(shown.map((row) => row.manifestHash))];
   const builds = new Map(
@@ -1010,12 +1067,16 @@ const decisionsPage = async (
     }
   }
   const lastRow = shown.at(-1);
+  const splitRow = splitRowOf(shown, until, options.size);
   return {
     items,
     hasMore: until === undefined && rows.length > options.size,
     ...(lastRow === undefined
       ? {}
       : { last: `${lastRow.openedAt.getTime()}:${lastRow.id}` }),
+    ...(splitRow === undefined
+      ? {}
+      : { split: `${splitRow.openedAt.getTime()}:${splitRow.id}` }),
   };
 };
 
@@ -1118,11 +1179,16 @@ const runIdOf = (args: Readonly<Record<string, Json | undefined>>): string => {
  * list's, goes on starting where it did, whether or not anything follows.
  */
 const pageAnswer = (
-  page: { items: Json[]; hasMore: boolean; last?: string },
+  page: { items: Json[]; hasMore: boolean; last?: string; split?: string },
   endCursor: Json | undefined
 ): Json => {
   if (typeof endCursor === "string") {
-    return { items: page.items, nextCursor: endCursor, hasMore: true };
+    return {
+      items: page.items,
+      nextCursor: endCursor,
+      hasMore: true,
+      ...(page.split === undefined ? {} : { splitCursor: page.split }),
+    };
   }
   return page.hasMore && page.last !== undefined
     ? { items: page.items, nextCursor: page.last, hasMore: true }
