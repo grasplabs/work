@@ -932,7 +932,7 @@ describe("an action starting a workflow", () => {
     });
   });
 
-  it("refuses input the declaration doesn't take before anything starts", async () => {
+  it("refuses args the declaration doesn't take before anything starts", async () => {
     const fx = await fixture();
     const blank = await call(fx, fx.bob, "requests.kickOff", { who: "   " });
     expect({
@@ -1752,7 +1752,7 @@ describe("what a start rechecks, and records", () => {
     });
   });
 
-  it("starts with the workflow's declared default when an action or a commit gives no input", async () => {
+  it("starts with the workflow's declared default when an action or a commit gives no args", async () => {
     const fx = await fixture();
     const started = await call(fx, fx.bob, "requests.kickOffPlain", {});
     const staged = await call(fx, fx.bob, "requests.submitPlain", {});

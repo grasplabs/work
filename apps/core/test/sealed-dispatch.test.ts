@@ -447,14 +447,14 @@ const requestsApp = async (
   return { app: app.app, resource: resource.id, release, files };
 };
 
-/** A start of `followUp` with `input`, as the SDK sends it. */
-const startOf = (input: unknown): string =>
+/** A start of `followUp` with `args`, as the SDK sends it. */
+const startOf = (args: unknown): string =>
   JSON.stringify({
     reference: {
       name: "workflows.followUp.mutations.start",
       kind: "mutation",
     },
-    input: { input },
+    input: { args },
   });
 
 /** The test's run of an App, and the pin the engine runs it by. */

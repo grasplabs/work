@@ -617,8 +617,8 @@ describe("test runs of a workflow's draft", () => {
     });
     const start = {
       revision,
-      input: { who: "Ada" },
-      fixtures: { ai: { output: { line: "Hi" } } },
+      args: { who: "Ada" },
+      fixtures: { ai: { result: { line: "Hi" } } },
     };
     // The output after its call is stopped once its code returned: tried
     // again, it reads the call's answer as recorded, and the call isn't
@@ -754,7 +754,7 @@ describe("test runs of a workflow's draft", () => {
       id: grace.userId,
       role: "builder",
     });
-    const start = { revision, input: { who: "Ada" }, fixtures: {} };
+    const start = { revision, args: { who: "Ada" }, fixtures: {} };
     const going = await Promise.all(
       Array.from(
         { length: maxLiveCandidateRuns },
@@ -928,7 +928,7 @@ describe("test runs of a workflow's draft", () => {
     const { workflow, revision } = await drafted(ada, {
       steps: [],
     });
-    const start = { revision, input: { who: "Ada" }, fixtures: {} };
+    const start = { revision, args: { who: "Ada" }, fixtures: {} };
     const { runId } = await startCandidateRun(env, ada, workflow.id, start);
     await ended(ada, workflow.id, runId);
     // The rest of what a person may keep, as if started and ended a week
@@ -1000,7 +1000,7 @@ describe("test runs of a workflow's draft", () => {
       id: user.userId,
       role: "user",
     });
-    const start = { revision, input: { who: "Ada" }, fixtures: {} };
+    const start = { revision, args: { who: "Ada" }, fixtures: {} };
     const { runId } = await startCandidateRun(env, ada, workflow.id, start);
     await ended(ada, workflow.id, runId);
     const starts = await Promise.all(

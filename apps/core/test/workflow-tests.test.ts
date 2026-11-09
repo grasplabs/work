@@ -373,7 +373,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     ]);
   });
 
-  it("refuse a start of what the release doesn't bind, or with input it doesn't take", async () => {
+  it("refuse a start of what the release doesn't bind, or with args it doesn't take", async () => {
     const { release, app } = await requestsApp(
       async (by) => await workflowOf(by, greeting())
     );
