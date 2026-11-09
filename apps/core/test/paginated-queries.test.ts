@@ -5,21 +5,16 @@ import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import {
   appFunctionPath,
-  rateLimitedRetryMs,
   pageLeaseHeader,
   pagePersonHeader,
 } from "@grasp-os/shared/pages";
 import type { Role } from "@grasp-os/shared/roles";
-import { liveWindowMaxItems } from "@grasp-os/shared/store-limits";
-import { runInDurableObject } from "cloudflare:test";
+import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
-import type { DataStore } from "../src/data-store.ts";
-import { appHost, inJurisdiction } from "../src/durable-objects.ts";
-import { windowPages } from "../src/query-windows.ts";
 import { commitApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { pastAccessRecheck } from "./apps.ts";
@@ -29,13 +24,14 @@ import { clientOrigin } from "./sign-in-config.ts";
 import { openRpc, routed, signedInApi } from "./sign-in.ts";
 
 // Live paginated lists (spec 10.6, 11.6) through the session client and
-// core, as a page's `usePaginatedQuery` reads them: a window of a
-// Notes App's list that stays one server-order prefix while notes are
-// inserted, deleted and moved between Load Mores and while it is shown;
-// Load Mores that join; a window that is never pushed torn while writes
-// land between its pages; cursors that can't be forged or carried to
-// another person; windows core refuses; and a list cleared once the
-// person loses access.
+// core, as a page's `usePaginatedQuery` reads them: pages of a Notes
+// App's list, each a live query ended where the next starts, that stay
+// one server-order prefix while notes are inserted, deleted and moved
+// between Load Mores and while they are shown; a write that pushes only
+// the pages it changed; lists past a thousand records; Load Mores that
+// join; a list that starts again once its cursors expire; cursors that
+// can't be forged or carried to another person; and a list cleared once
+// the person loses access.
 
 const idp = mockIdp();
 
@@ -288,22 +284,6 @@ const windowRequest = (
   });
 };
 
-/** A refusal core threw: its code, and how long it said to wait. */
-const refusalOf = (error: unknown) => {
-  const parsed = z
-    .object({
-      code: z.string(),
-      details: z.object({ retryAfterMs: z.number() }).optional(),
-    })
-    .safeParse(error);
-  return parsed.success
-    ? {
-        code: parsed.data.code,
-        retryAfterMs: parsed.data.details?.retryAfterMs,
-      }
-    : "failed";
-};
-
 /** What core answered a raw call: its value, or the code it failed with. */
 const answerOf = (answer: unknown): unknown => {
   const { result } = z
@@ -320,19 +300,7 @@ const answerOf = (answer: unknown): unknown => {
   return result.ok ? result.value : result.error.code;
 };
 
-/** The Notes App's store's object. */
-const storeObjectOf = (opened: Opened) => {
-  const storeId = opened.release.store?.storeId;
-  if (storeId === undefined) {
-    throw new Error("The Notes App has a store");
-  }
-  return inJurisdiction(env, env.DATA_STORES).getByName(storeId);
-};
-
-/**
- * 160 notes, saved by `client`: a window of all of them takes two pages
- * of core's.
- */
+/** 160 notes, saved by `client`. */
 const seeded = async (opened: Opened, client: GraspClient): Promise<void> => {
   const seed = referenceTo<{ prefix: string; count: number }, null, "mutation">(
     opened.release,
@@ -340,121 +308,6 @@ const seeded = async (opened: Opened, client: GraspClient): Promise<void> => {
   );
   await client.mutation(seed, { prefix: "A", count: 100 });
   await client.mutation(seed, { prefix: "B", count: 60 });
-};
-
-const pagedReadSchema = z.object({
-  kind: z.literal("query"),
-  query: z.object({
-    terminal: z.object({
-      kind: z.literal("paginate"),
-      cursor: z.string().nullable(),
-    }),
-  }),
-});
-
-/**
- * Runs `act` in the opened App's store's object just before each of the
- * next `times` reads of a page: the first page of a window (`"first"`,
- * no cursor) or a page after it (`"later"`, a cursor's). Answers what
- * puts the store's object back as it was.
- */
-const beforePageReads = async (
-  opened: Opened,
-  { times, which }: { times: number; which: "first" | "later" },
-  act: (sql: SqlStorage) => Promise<void>
-): Promise<() => void> => {
-  const storeId = opened.release.store?.storeId;
-  let left = times;
-  let undo: (() => void) | undefined;
-  await runInDurableObject(storeObjectOf(opened), (instance, state) => {
-    // SAFETY: a store's object's prototype holds its methods.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const methods = Object.getPrototypeOf(instance) as {
-      read: (...args: Parameters<DataStore["read"]>) => Promise<string>;
-    };
-    const original: unknown = Reflect.get(methods, "read");
-    if (typeof original !== "function") {
-      throw new TypeError("A store's object reads");
-    }
-    methods.read = async function read(
-      this: unknown,
-      ...args: Parameters<DataStore["read"]>
-    ): Promise<string> {
-      const [id, , request] = args;
-      const paged = pagedReadSchema.safeParse(request);
-      if (
-        id === storeId &&
-        left > 0 &&
-        paged.success &&
-        (paged.data.query.terminal.cursor === null) === (which === "first")
-      ) {
-        left -= 1;
-        await act(state.storage.sql);
-      }
-      const answer: unknown = await Reflect.apply(original, this, args);
-      return String(answer);
-    };
-    undo = () => {
-      Reflect.set(methods, "read", original);
-    };
-  });
-  return () => {
-    undo?.();
-  };
-};
-
-/**
- * Has a write land in the opened App's store just before each of the
- * next `times` reads of a page after the first: it retitles every note
- * and moves the table on, as a commit between two pages of a window
- * would.
- */
-const writeBetweenPages = async (
-  opened: Opened,
-  times: number
-): Promise<() => void> =>
-  await beforePageReads(opened, { times, which: "later" }, async (sql) => {
-    sql.exec(
-      "UPDATE sdk_records SET value_json = json_set(value_json, '$.title', 'Changed ' || record_id), revision = revision + 1"
-    );
-    sql.exec("UPDATE sdk_tables SET generation = generation + 1");
-    await Promise.resolve();
-  });
-
-const pushSchema = z.object({
-  revision: z.number(),
-  result: z.union([
-    z.object({ ok: z.literal(true), value: z.unknown() }),
-    z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }),
-  ]),
-});
-
-/**
- * A page's callback for a raw subscription: what reached it, and whether
- * core let go of it.
- */
-const pageFollower = () => {
-  const received: z.infer<typeof pushSchema>[] = [];
-  const state = { released: false };
-  const callback = Object.assign(
-    (push: unknown): void => {
-      received.push(pushSchema.parse(push));
-    },
-    {
-      [Symbol.dispose]: (): void => {
-        state.released = true;
-      },
-    }
-  );
-  return { received, state, callback };
-};
-
-/** The extent of the window a raw request asks for, if any. */
-const windowExtentIn = (request: string): number | undefined => {
-  const parsed = z
-    .object({ window: z.object({ extent: z.number() }) })
-    .safeParse(JSON.parse(request));
-  return parsed.success ? parsed.data.window.extent : undefined;
 };
 
 describe("live paginated lists", { timeout: 180_000 }, () => {
@@ -469,7 +322,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       ids.set(`Note ${note}`, id);
     }
     const list = listing(client, api.list, 3);
-    // Loading at first: no empty list shown before the first window.
+    // Loading at first: no empty list shown before the first page.
     expect(list.view()).toMatchObject({
       items: [],
       isLoading: true,
@@ -481,7 +334,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     expect(list.view()).toMatchObject({ isLoading: false, hasMore: true });
 
     // Another tab saves a note and deletes the one at the boundary: the
-    // shown window follows, still three long.
+    // first page, the last loaded, follows, still three long.
     const other = await otherTab(opened);
     await other.mutation(api.create, { title: "Note 8" });
     const six = ids.get("Note 6");
@@ -505,9 +358,10 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       "Note 2",
     ]);
 
-    // A note saved, one deleted inside the loaded window, and one from
-    // beyond it moved to the top by an edit: the window stays six long,
-    // the exact prefix of the list as it is now.
+    // A note saved, one deleted inside the loaded pages, and one from
+    // beyond them moved to the top by an edit: each page grows or shrinks
+    // as records move in and out of it, so the pages stay the exact
+    // prefix of the list as it is now, the last one as long as it was.
     await other.mutation(api.create, { title: "Note 9" });
     const four = ids.get("Note 4");
     const one = ids.get("Note 1");
@@ -522,20 +376,20 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     });
     const now = await allTitles(client, api);
     await eventually(() => {
-      expect(list.titles()).toStrictEqual(now.slice(0, 6));
+      expect(list.titles()).toStrictEqual(now);
     });
-    expect(now.slice(0, 6)).toStrictEqual([
+    expect(now).toStrictEqual([
       "Note 1, edited",
       "Note 9",
       "Note 8",
       "Note 7",
       "Note 5",
       "Note 3",
+      "Note 2",
     ]);
 
-    // The rest: the end of the list, with nothing more to load, where a
-    // Load More follows nothing more.
-    await list.pager.loadMore();
+    // The end of the list, with nothing more to load, where a Load More
+    // follows nothing more.
     const followed = counts.follows;
     await list.pager.loadMore();
     expect({
@@ -554,337 +408,214 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     list.stop();
   });
 
-  it("reads a window again when a write lands between its pages, and shows it whole", async () => {
+  it("pushes only the pages a write changed", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client } = clientFor(opened);
-    await seeded(opened, client);
-    const list = listing(client, api.list, 100);
-    await eventually(() => {
-      expect(list.titles()).toHaveLength(100);
-    });
-    const shownBefore = list.seen.length;
-
-    // A write lands between the first and second page of the next window
-    // read: it retitles every note.
-    const restore = await writeBetweenPages(opened, 1);
-    try {
-      await list.pager.loadMore(60);
-    } finally {
-      restore();
+    const ids: Id<"notes">[] = [];
+    for (let note = 1; note <= 6; note += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      ids.push(await client.mutation(api.create, { title: `Note ${note}` }));
     }
-
-    // Every window shown since is one state: all retitled, or none.
-    const since = list.seen
-      .slice(shownBefore)
-      .map((snapshot) => z.array(noteSchema).parse(snapshot.view.items))
-      .filter((items) => items.length > 0)
-      .map((items) => {
-        const changed = items.filter(({ title }) =>
-          title.startsWith("Changed")
-        ).length;
-        return {
-          count: items.length,
-          mixed: changed > 0 && changed < items.length,
-        };
-      });
-    expect({
-      titles: list.titles().every((title) => title.startsWith("Changed")),
-      count: list.titles().length,
-      mixed: since.filter(({ mixed }) => mixed),
-    }).toStrictEqual({ titles: true, count: 160, mixed: [] });
+    const list = listing(client, api.list, 2);
+    await eventually(() => {
+      expect(list.titles()).toHaveLength(2);
+    });
+    await list.pager.loadMore();
+    await list.pager.loadMore();
+    // Every page shows its own answer, each ended where the next starts.
+    await eventually(() => {
+      expect(list.pager.pages.map(({ held }) => held)).toStrictEqual([
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    });
+    const shown = () => list.pager.pages.map(({ entry }) => entry.settled);
+    const before = shown();
+    // Another tab deletes the oldest note, on the last page: core reads
+    // every page again, and pushes the one whose records changed.
+    const [oldest] = ids;
+    if (oldest === undefined) {
+      throw new Error("Six notes were saved");
+    }
+    const other = await otherTab(opened);
+    await other.mutation(api.remove, { id: oldest });
+    await eventually(() => {
+      expect(list.titles()).toStrictEqual([
+        "Note 6",
+        "Note 5",
+        "Note 4",
+        "Note 3",
+        "Note 2",
+      ]);
+    });
+    // Time for any other push to arrive.
+    await scheduler.wait(1000);
+    expect(
+      shown().map((count, page) => count - (before[page] ?? 0))
+    ).toStrictEqual([0, 0, 1]);
     list.stop();
   });
 
-  it("keeps showing a list whose read again finds the person's live-read budget spent between its pages, and updates once it recovers", async () => {
+  it("loads a list past a thousand records, page by page", async () => {
+    const opened = await openedApp();
+    const { client } = clientFor(opened);
+    const seed = referenceTo<
+      { prefix: string; count: number },
+      null,
+      "mutation"
+    >(opened.release, "notes.seed");
+    for (let batch = 0; batch < 11; batch += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(seed, { prefix: `N${batch}`, count: 100 });
+    }
+    const api = apiOf(opened.release);
+    const list = listing(client, api.list, 250);
+    await eventually(() => {
+      expect(list.titles()).toHaveLength(250);
+    });
+    while (list.view().hasMore) {
+      // oxlint-disable-next-line no-await-in-loop -- one Load More after the other
+      await list.pager.loadMore();
+    }
+    expect({
+      shown: list.titles().length,
+      unique: new Set(list.notes().map(({ _id }) => _id)).size,
+      pages: list.pager.pages.length,
+      error: list.pager.snapshot.error,
+    }).toStrictEqual({ shown: 1100, unique: 1100, pages: 5, error: undefined });
+    list.stop();
+  });
+
+  it("starts a list again, as long as it was, once a new version expires its cursors", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client } = clientFor(opened);
-    await seeded(opened, client);
-    const list = listing(client, api.list, 100);
+    for (let note = 1; note <= 6; note += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(api.create, { title: `Note ${note}` });
+    }
+    const list = listing(client, api.list, 2);
     await eventually(() => {
-      expect(list.titles()).toHaveLength(100);
+      expect(list.titles()).toHaveLength(2);
     });
-    await list.pager.loadMore(60);
-    const shownBefore = list.seen.length;
-
-    // Twice, a write lands between the window's pages and the person's
-    // live reads are all spent: the read again is torn, and its pages
-    // past what it paid are refused.
-    const spend = async (): Promise<void> => {
-      const host = appHost(env, opened.app);
-      let take = 200;
-      while (take >= 1) {
-        // One take after another, halving once one is refused.
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        if (!(await host.admitLiveRead(opened.builder.userId, take))) {
-          take = Math.floor(take / 2);
-        }
-      }
-    };
-    const restore = await beforePageReads(
-      opened,
-      { times: 2, which: "later" },
-      async (sql) => {
-        sql.exec("UPDATE sdk_tables SET generation = generation + 1");
-        await spend();
-      }
+    await list.pager.loadMore();
+    // A new version: every cursor read under the one before expires.
+    const { version } = await commitApp(
+      opened.builder.api.apps.files,
+      opened.app,
+      withFiles(files, {
+        "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// Second.\n`,
+      }),
+      "Second"
     );
-    try {
-      const other = await otherTab(opened);
-      await other.mutation(api.create, { title: "Fresh" });
-      await eventually(() => {
-        expect(list.titles()[0]).toBe("Fresh");
+    await opened.builder.api.apps.versions.setCurrent(opened.app, version);
+    await opened.builder.api.apps.publish(opened.app);
+    // A write reads every page again, under the new version: the list
+    // starts again with one first page as long as it was, showing what it
+    // showed meanwhile.
+    const other = await otherTab(opened);
+    await other.mutation(api.create, { title: "Note 7" });
+    await eventually(() => {
+      expect({
+        titles: list.titles(),
+        // Pages of its first size, one after the other, never one long
+        // page that could outgrow an answer.
+        pages: list.pager.pages.map(({ pageSize, cursor }) => ({
+          pageSize,
+          first: cursor === null,
+        })),
+        error: list.pager.snapshot.error,
+      }).toStrictEqual({
+        titles: ["Note 7", "Note 6", "Note 5", "Note 4"],
+        pages: [
+          { pageSize: 2, first: true },
+          { pageSize: 2, first: false },
+        ],
+        error: undefined,
       });
-    } finally {
-      restore();
-    }
-
-    expect({
-      failures: list.seen
-        .slice(shownBefore)
-        .map((snapshot) => snapshot.error?.code)
-        .filter((code) => code !== undefined),
-      shownThroughout: list.seen
-        .slice(shownBefore)
-        .every((snapshot) => snapshot.view.items.length === 160),
-      count: list.titles().length,
-    }).toStrictEqual({ failures: [], shownThroughout: true, count: 160 });
+    });
     list.stop();
   });
 
-  it("settles a window writes keep tearing: the Load More fails, the window shown stays, and a first read is refused", async () => {
+  it("splits a page that grows past twice its size, so a newest-first feed's first page never outgrows an answer", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client } = clientFor(opened);
-    await seeded(opened, client);
-    const list = listing(client, api.list, 100);
+    for (let note = 1; note <= 3; note += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(api.create, { title: `Note ${note}` });
+    }
+    const list = listing(client, api.list, 2);
     await eventually(() => {
-      expect(list.titles()).toHaveLength(100);
+      expect(list.titles()).toHaveLength(2);
     });
-
-    // Every second page read meets a write first.
-    const restore = await writeBetweenPages(opened, Number.POSITIVE_INFINITY);
-    try {
-      const loadMore = await codeOf(list.pager.loadMore(60));
-      // A window that showed nothing yet: refused as its last push.
-      const follower = pageFollower();
-      await opened.pages
-        .frame(opened.app, opened.lease)
-        .watchQuery(
-          windowRequest(opened, "notes.list", {}, { extent: 160 }),
-          follower.callback
-        );
-      await eventually(() => {
-        expect(follower.state.released).toBeTruthy();
-      });
-      // Through the function route as well.
-      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
-      const throughRoute = answerOf(
-        await call(windowRequest(opened, "notes.list", {}, { extent: 160 }))
-      );
+    await list.pager.loadMore();
+    // Every new note lands in the first page, which ends where it did.
+    const other = await otherTab(opened);
+    for (let note = 4; note <= 6; note += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await other.mutation(api.create, { title: `Note ${note}` });
+    }
+    await eventually(() => {
       expect({
-        loadMore,
+        titles: list.titles(),
+        // What each page's own query answers, once all have.
+        pages: list.pager.pages.map(({ entry, held }) =>
+          held === undefined
+            ? z
+                .object({ items: z.array(noteSchema) })
+                .parse(entry.snapshot.value)
+                .items.map(({ title }) => title)
+            : "held"
+        ),
+      }).toStrictEqual({
+        titles: ["Note 6", "Note 5", "Note 4", "Note 3", "Note 2", "Note 1"],
+        pages: [
+          ["Note 6", "Note 5"],
+          ["Note 4", "Note 3", "Note 2"],
+          ["Note 1"],
+        ],
+      });
+    });
+    list.stop();
+  });
+
+  it("reads a page too large to answer again at half its size, rather than fail the list for good", async () => {
+    const opened = await openedApp();
+    const { client } = clientFor(opened);
+    const seed = referenceTo<
+      { prefix: string; count: number; body: string },
+      null,
+      "mutation"
+    >(opened.release, "notes.seed");
+    // Five of these pass what one answer may be; two don't.
+    await client.mutation(seed, {
+      prefix: "Big",
+      count: 5,
+      body: "x".repeat(90_000),
+    });
+    const api = apiOf(opened.release);
+    const list = listing(client, api.list, 5);
+    await eventually(() => {
+      expect({
         shown: list.titles().length,
         error: list.pager.snapshot.error?.code,
-        isLoading: list.view().isLoading,
-        firstRead: follower.received.map(({ result }) =>
-          result.ok ? "value" : result.error.code
-        ),
-        routed: throughRoute,
-      }).toStrictEqual({
-        loadMore: "query.concurrent_change",
-        shown: 100,
-        error: undefined,
-        isLoading: false,
-        firstRead: ["query.concurrent_change"],
-        routed: "query.concurrent_change",
-      });
-    } finally {
-      restore();
-    }
-    list.stop();
-  });
-
-  it("fails a Load More whose larger window the client still holds, while writes keep tearing its fresh read", async () => {
-    const opened = await openedApp();
-    const api = apiOf(opened.release);
-    const { client } = clientFor(opened);
-    await seeded(opened, client);
-    const list = listing(client, api.list, 100);
-    const whole = listing(client, api.list, 80);
-    await eventually(() => {
-      expect(list.titles()).toHaveLength(100);
-      expect(whole.titles()).toHaveLength(80);
+        hasMore: list.view().hasMore,
+      }).toStrictEqual({ shown: 2, error: undefined, hasMore: true });
     });
-    // Another list loaded the larger window before writes began, and
-    // closed: the client still holds its notes, followed no more.
-    await whole.pager.loadMore(80);
-    expect(whole.titles()).toHaveLength(160);
-    whole.stop();
-    // Core lets go of what it followed for it, as the page released it.
-    await scheduler.wait(1000);
-
-    const restore = await writeBetweenPages(opened, Number.POSITIVE_INFINITY);
-    try {
-      // Never settling would be the failure: given far longer than core
-      // takes to refuse a torn window.
-      const hung = Promise.withResolvers<string>();
-      const timer = setTimeout(() => {
-        hung.resolve("hung");
-      }, 30_000);
-      const loadMore = await Promise.race([
-        codeOf(list.pager.loadMore(60)),
-        hung.promise,
-      ]);
-      clearTimeout(timer);
-      expect({ loadMore, shown: list.titles().length }).toStrictEqual({
-        loadMore: "query.concurrent_change",
-        shown: 100,
-      });
-    } finally {
-      restore();
-    }
-    list.stop();
-  });
-
-  it("gives a window's new subscription only a read begun after it, never one already on its way", async () => {
-    const opened = await openedApp();
-    const { client } = clientFor(opened);
-    await seeded(opened, client);
-    const request = windowRequest(opened, "notes.list", {}, { extent: 160 });
-    // Its first read is held between its pages, long enough for the
-    // second subscription to come while it is on its way.
-    const restore = await beforePageReads(
-      opened,
-      { times: 1, which: "later" },
-      async () => {
-        await scheduler.wait(3000);
-      }
-    );
-    // Every read of the window begins at its first page.
-    let reads = 0;
-    const restoreCount = await beforePageReads(
-      opened,
-      { times: Number.POSITIVE_INFINITY, which: "first" },
-      async () => {
-        reads += 1;
-        await Promise.resolve();
-      }
-    );
-    try {
-      const first = pageFollower();
-      await opened.pages
-        .frame(opened.app, opened.lease)
-        .watchQuery(request, first.callback);
-      // The first read is on its way, between its pages.
-      await scheduler.wait(1000);
-      const second = pageFollower();
-      await opened.pages
-        .frame(opened.app, opened.lease)
-        .watchQuery(request, second.callback);
-      await eventually(() => {
-        expect(second.received.length).toBeGreaterThan(0);
-      });
-      // Answered by a read of its own, though it found what the first did.
-      expect({ first: first.received.length, reads }).toStrictEqual({
-        first: 1,
-        reads: 2,
-      });
-    } finally {
-      restoreCount();
-      restore();
-    }
-  });
-
-  it("refuses a window's new subscription when writes keep tearing its first read, the one it joined keeping the window", async () => {
-    const opened = await openedApp();
-    const { client } = clientFor(opened);
-    await seeded(opened, client);
-    const request = windowRequest(opened, "notes.list", {}, { extent: 160 });
-    const first = pageFollower();
-    await opened.pages
-      .frame(opened.app, opened.lease)
-      .watchQuery(request, first.callback);
+    // Its first page, ended now, is past half an answer too: it is split,
+    // and settles once both halves answer.
+    await list.pager.loadMore(2);
     await eventually(() => {
-      expect(first.received).toHaveLength(1);
-    });
-    const restore = await writeBetweenPages(opened, Number.POSITIVE_INFINITY);
-    try {
-      const second = pageFollower();
-      await opened.pages
-        .frame(opened.app, opened.lease)
-        .watchQuery(request, second.callback);
-      await eventually(() => {
-        expect(second.state.released).toBeTruthy();
-      });
       expect({
-        second: second.received.map(({ result }) =>
-          result.ok ? "value" : result.error.code
-        ),
-        firstKept: first.state.released,
-      }).toStrictEqual({
-        second: ["query.concurrent_change"],
-        firstKept: false,
-      });
-    } finally {
-      restore();
-    }
-  });
-
-  it("never shows a larger window older than a smaller list's newer push when it loads more", async () => {
-    const opened = await openedApp();
-    const api = apiOf(opened.release);
-    // The page's network holds back every push of the first follow of
-    // the two-record window, as a slow delivery would.
-    const counts = { follows: 0 };
-    const page = pageTransport(opened, opened.pages, counts);
-    const held = { first: true, pushes: 0 };
-    const client = new GraspClient({
-      call: page.call,
-      watch: async (request, onSnapshot, onLost) => {
-        const holding = held.first && windowExtentIn(request) === 2;
-        held.first &&= !holding;
-        let delivered = 0;
-        return await page.watch(
-          request,
-          (push) => {
-            if (holding && delivered >= 1) {
-              held.pushes += 1;
-              return;
-            }
-            delivered += 1;
-            onSnapshot(push);
-          },
-          onLost
-        );
-      },
+        titles: list.titles().length,
+        unique: new Set(list.titles()).size,
+        error: list.pager.snapshot.error,
+      }).toStrictEqual({ titles: 4, unique: 4, error: undefined });
     });
-    for (const title of ["One", "Two"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after the other
-      await client.mutation(api.create, { title });
-    }
-    const two = listing(client, api.list, 2);
-    await eventually(() => {
-      expect(two.titles()).toStrictEqual(["Two", "One"]);
-    });
-    const one = listing(client, api.list, 1);
-    await eventually(() => {
-      expect(one.titles()).toStrictEqual(["Two"]);
-    });
-    // Saved elsewhere: the list of one shows it; the list of two's push
-    // is held back.
-    const other = await otherTab(opened);
-    await other.mutation(api.create, { title: "Three" });
-    await eventually(() => {
-      expect(one.titles()).toStrictEqual(["Three"]);
-    });
-
-    await one.pager.loadMore(1);
-
-    expect(one.titles()).toStrictEqual(["Three", "Two"]);
-    one.stop();
-    two.stop();
+    list.stop();
   });
 
   it("leaves nothing unhandled when a Load More nobody awaits fails", async () => {
@@ -956,49 +687,18 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     again.stop();
   });
 
-  it("refuses a window too large for one answer as soon as its records pass the bound, reading no page more", async () => {
-    const opened = await openedApp();
-    const { client } = clientFor(opened);
-    const seed = referenceTo<
-      { prefix: string; count: number; body: string },
-      null,
-      "mutation"
-    >(opened.release, "notes.seed");
-    // Two pages of these pass what one answer may be; one doesn't.
-    const body = "x".repeat(2000);
-    for (const prefix of ["A", "B", "C"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after the other
-      await client.mutation(seed, { prefix, count: 100, body });
-    }
-    let laterPages = 0;
-    const restore = await beforePageReads(
-      opened,
-      { times: Number.POSITIVE_INFINITY, which: "later" },
-      async () => {
-        laterPages += 1;
-        await Promise.resolve();
-      }
-    );
-    try {
-      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
-      const answered = answerOf(
-        await call(windowRequest(opened, "notes.list", {}, { extent: 300 }))
-      );
-      expect({ answered, laterPages }).toStrictEqual({
-        answered: "page.answer_too_large",
-        laterPages: 1,
-      });
-    } finally {
-      restore();
-    }
-  });
-
-  it("fills a window from a query that answers short pages, and loads more of it", async () => {
+  it("follows a query that answers pages shorter than asked, page by page", async () => {
     const opened = await openedApp();
     const { client } = clientFor(opened);
     await seeded(opened, client);
     const listTen = referenceTo<
-      { pagination: { cursor?: string | null; pageSize?: number } },
+      {
+        pagination: {
+          cursor?: string | null;
+          endCursor?: string | null;
+          pageSize?: number;
+        };
+      },
       unknown,
       "query"
     >(opened.release, "notes.listTen");
@@ -1013,7 +713,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       more: list.titles().length,
       unique: new Set(list.notes().map(({ _id }) => _id)).size,
       hasMore: list.view().hasMore,
-    }).toStrictEqual({ first: 30, more: 60, unique: 60, hasMore: true });
+    }).toStrictEqual({ first: 10, more: 20, unique: 20, hasMore: true });
     list.stop();
   });
 
@@ -1026,7 +726,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       await client.mutation(api.create, { title: `Note ${note}` });
     }
     const list = listing(client, api.list, 2);
-    // A Load More before the first window joins its load, adding nothing.
+    // A Load More before the first page shows joins its load, adding nothing.
     await list.pager.loadMore();
     expect(list.titles()).toStrictEqual(["Note 6", "Note 5"]);
     const before = counts.follows;
@@ -1037,14 +737,15 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       list.pager.loadMore(),
     ]);
 
+    // One Load More: the first page ended where it ends, and a page after.
     expect({
       titles: list.titles(),
-      extent: list.pager.extent,
+      pages: list.pager.pages.length,
       follows: counts.follows - before,
     }).toStrictEqual({
       titles: ["Note 6", "Note 5", "Note 4", "Note 3"],
-      extent: 4,
-      follows: 1,
+      pages: 2,
+      follows: 2,
     });
     // A batch of none: refused before anything is followed, and thrown
     // while rendering, as a failure of the list.
@@ -1054,7 +755,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     expect({
       follows: counts.follows - before,
       error: list.pager.snapshot.error?.code,
-    }).toStrictEqual({ follows: 1, error: "contract.invalid_args" });
+    }).toStrictEqual({ follows: 2, error: "contract.invalid_args" });
     list.stop();
   });
 
@@ -1069,8 +770,10 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
         internals.pager(api.list, { pagination: { pageSize: 5 } }, 5)
       ),
       none: thrownBy(() => internals.pager(api.list, {}, 0)),
-      tooMany: thrownBy(() => internals.pager(api.list, {}, 101)),
-      fine: thrownBy(() => internals.pager(api.list, {}, 100)),
+      tooMany: thrownBy(() =>
+        internals.pager(api.list, {}, queryMaxScannedEntries + 1)
+      ),
+      fine: thrownBy(() => internals.pager(api.list, {}, 500)),
     }).toStrictEqual({
       ownPagination: "contract.invalid_args",
       none: "contract.invalid_args",
@@ -1084,7 +787,7 @@ describe(
   "paginated windows and cursors core refuses",
   { timeout: 180_000 },
   () => {
-    it("refuses a cursor that isn't one, reads a carried one under its reader's access, and refuses a window it can't read", async () => {
+    it("refuses a cursor that isn't one, reads a carried one under its reader's access, and ends a page at its end cursor", async () => {
       const opened = await openedApp();
       const api = apiOf(opened.release);
       const { client } = clientFor(opened);
@@ -1126,6 +829,9 @@ describe(
       const carried = await theirs.query(api.list, {
         pagination: { pageSize: 2, cursor: nextCursor },
       });
+      const carriedEnd = await theirs.query(api.list, {
+        pagination: { pageSize: 2, endCursor: nextCursor },
+      });
       expect({
         own: second.items.map(({ title }) => title),
         edited: await codeOf(
@@ -1134,268 +840,35 @@ describe(
           })
         ),
         carried: carried.items,
-        // A window's pagination is core's: a caller can't slip a cursor in.
-        ownPagination: await raw(
-          windowRequest(
-            opened,
-            "notes.list",
-            { pagination: { pageSize: 2, cursor: nextCursor } },
-            { extent: 2 }
-          )
-        ),
-        tooLarge: await raw(
-          windowRequest(
-            opened,
-            "notes.list",
-            {},
-            { extent: liveWindowMaxItems + 1 }
-          )
-        ),
-        notPaged: await raw(
-          windowRequest(
-            opened,
-            "notes.get",
-            { id: first.items[0]?._id },
-            {
-              extent: 2,
-            }
-          )
-        ),
-        // Through the function route too, a window is read whole.
-        window: z
-          .object({
-            items: z.array(z.object({ title: z.string() })),
-            hasMore: z.boolean(),
+        // A live list's loaded page: from its start to where the next
+        // starts, whatever its size, that end its next cursor.
+        ended: await client.query(api.list, {
+          pagination: { pageSize: 1, endCursor: nextCursor },
+        }),
+        // Carried to another person, an end reads only their own records.
+        carriedEnd: carriedEnd.items,
+        editedEnd: await codeOf(
+          client.query(api.list, {
+            pagination: { pageSize: 2, endCursor: edited },
           })
-          .parse(
-            await raw(windowRequest(opened, "notes.list", {}, { extent: 2 }))
-          ),
+        ),
+        // A call that still asks for a window is no call core reads.
+        windowed: await raw(
+          windowRequest(opened, "notes.list", {}, { extent: 2 })
+        ),
       }).toStrictEqual({
         own: ["One"],
         edited: "data.invalid_cursor",
         carried: [],
-        ownPagination: "contract.invalid_args",
-        tooLarge: "contract.invalid_request",
-        notPaged: "contract.not_paginated",
-        window: {
-          items: [{ title: "Three" }, { title: "Two" }],
+        ended: {
+          items: first.items,
+          nextCursor,
           hasMore: true,
         },
+        carriedEnd: [],
+        editedEnd: "data.invalid_cursor",
+        windowed: "contract.invalid_request",
       });
-    });
-
-    it("charges the pages a window reads again past what its request paid", async () => {
-      const opened = await openedApp();
-      const api = apiOf(opened.release);
-      const { client } = clientFor(opened);
-      await seeded(opened, client);
-      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
-      const ask = async (request: string): Promise<string> => {
-        try {
-          const answered = answerOf(await call(request));
-          return typeof answered === "string" ? answered : "ok";
-        } catch (error) {
-          return error instanceof Error && "code" in error
-            ? String(error.code)
-            : "failed";
-        }
-      };
-      const one = JSON.stringify({
-        reference: { name: api.list.name, kind: "query" },
-        input: { pagination: { pageSize: 1 } },
-      });
-      // With the person's requests full and none coming back meanwhile: a
-      // window of two pages, paid as two requests, torn once, so read
-      // again, two more pages. Then single reads, until refused.
-      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 10 * 60_000 });
-      const restore = await writeBetweenPages(opened, 1);
-      try {
-        const window = await ask(
-          windowRequest(opened, "notes.list", {}, { extent: 160 })
-        );
-        let reads = 0;
-        while (reads < 20) {
-          // oxlint-disable-next-line no-await-in-loop -- one after the other
-          if ((await ask(one)) !== "ok") {
-            break;
-          }
-          reads += 1;
-        }
-        // Twenty at once: two paid up front, two charged as read again.
-        expect({ window, reads }).toStrictEqual({ window: "ok", reads: 16 });
-      } finally {
-        restore();
-        vi.useRealTimers();
-      }
-    });
-
-    it("counts a window as the pages it reads against the person's requests", async () => {
-      const opened = await openedApp();
-      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
-      const ask = async (): Promise<string> => {
-        try {
-          await call(
-            windowRequest(
-              opened,
-              "notes.list",
-              {},
-              {
-                extent: liveWindowMaxItems,
-              }
-            )
-          );
-          return "ok";
-        } catch (error) {
-          return error instanceof Error && "code" in error
-            ? String(error.code)
-            : "failed";
-        }
-      };
-      // A moment later, with the person's requests full and none coming
-      // back meanwhile: a window of ten pages counts as ten requests, so
-      // two of them spend the twenty a person may make at once.
-      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 10 * 60_000 });
-      try {
-        const answers: string[] = [];
-        for (let request = 0; request < 3; request += 1) {
-          // oxlint-disable-next-line no-await-in-loop -- one after the other
-          answers.push(await ask());
-        }
-        expect(answers).toStrictEqual(["ok", "ok", "page.rate_limited"]);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it("counts a window followed through a frame as the pages it reads, and says to wait for all of them", async () => {
-      const opened = await openedApp();
-      const frame = await opened.pages.frame(opened.app, opened.lease);
-      const window = windowRequest(
-        opened,
-        "notes.list",
-        {},
-        { extent: liveWindowMaxItems }
-      );
-      const follow = async (request: string): Promise<unknown> => {
-        try {
-          const subscription = await frame.watchQuery(
-            request,
-            pageFollower().callback
-          );
-          await subscription.release();
-          return "ok";
-        } catch (error) {
-          return refusalOf(error);
-        }
-      };
-      const plain = windowRequest(opened, "notes.list", {
-        pagination: { pageSize: 1, cursor: null },
-      });
-      // With the person's requests full and none coming back meanwhile.
-      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 10 * 60_000 });
-      try {
-        // A window of ten pages, then nine plain follows: one request is
-        // left, which the next window's own follow takes, not its pages.
-        const first = await follow(window);
-        const plains: unknown[] = [];
-        for (let request = 0; request < 9; request += 1) {
-          // oxlint-disable-next-line no-await-in-loop -- one after the other
-          plains.push(await follow(plain));
-        }
-        const refused = await follow(window);
-        expect({
-          first,
-          plains: plains.every((answer) => answer === "ok"),
-          refused,
-        }).toStrictEqual({
-          first: "ok",
-          plains: true,
-          refused: {
-            code: "page.rate_limited",
-            retryAfterMs: rateLimitedRetryMs * windowPages(liveWindowMaxItems),
-          },
-        });
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it("refuses an action sent with a window, under a key or not, before it runs", async () => {
-      const opened = await openedApp();
-      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
-      const reference = referenceTo<unknown, unknown, "action">(
-        opened.release,
-        "notes.echo"
-      );
-      const sent = (idempotencyKey?: string) =>
-        JSON.stringify({
-          reference: { name: reference.name, kind: "action" },
-          input: { word: "ran" },
-          window: { extent: 10 },
-          ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
-        });
-      const answers = [
-        answerOf(await call(sent())),
-        answerOf(await call(sent(crypto.randomUUID()))),
-      ];
-      expect(answers).toStrictEqual([
-        "contract.invalid_request",
-        "contract.invalid_request",
-      ]);
-    });
-
-    it("reads a window again when the person's roles change between its pages, rather than refuse its cursor", async () => {
-      const opened = await openedApp();
-      const member = await personApi("builder");
-      await opened.builder.api.apps.members.add(opened.app, {
-        type: "person",
-        id: member.userId,
-        role: "builder",
-      });
-      const { lease } = await member.api.pages.open(opened.app);
-      const theirs = {
-        ...opened,
-        lease,
-        cookie: member.session,
-        userId: member.userId,
-      };
-      const { client } = clientFor(theirs, member.api.pages);
-      await seeded(opened, client);
-      // Just as the window's first page is read, the member becomes a
-      // user: the second page is read under other roles than the cursor
-      // the first page sealed.
-      const restore = await beforePageReads(
-        opened,
-        { times: 1, which: "first" },
-        async () => {
-          await env.DB.prepare(
-            "UPDATE app_members SET role = 'user' WHERE app_id = ? AND member_id = ?"
-          )
-            .bind(opened.app, member.userId)
-            .run();
-        }
-      );
-      try {
-        const { call } = pageTransport(theirs, member.api.pages, {
-          follows: 0,
-        });
-        const window = z
-          .object({ items: z.array(z.unknown()), hasMore: z.boolean() })
-          .safeParse(
-            answerOf(
-              await call(
-                windowRequest(opened, "notes.list", {}, { extent: 160 })
-              )
-            )
-          );
-        expect(
-          window.success
-            ? { items: window.data.items.length, hasMore: window.data.hasMore }
-            : window.error.message
-        ).toStrictEqual({ items: 160, hasMore: false });
-      } finally {
-        restore();
-      }
     });
 
     it("clears a list once the person loses access, before anything more reaches it", async () => {
@@ -1431,6 +904,59 @@ describe(
         );
       });
 
+      expect({
+        error: list.pager.snapshot.error?.code,
+        items: list.view().items,
+        loadMore: await codeOf(list.pager.loadMore()),
+      }).toStrictEqual({
+        error: "app.not_found",
+        items: [],
+        loadMore: "app.not_found",
+      });
+    });
+
+    it("clears a list whose page splits as the person loses access, showing none of either half", async () => {
+      const opened = await openedApp();
+      const api = apiOf(opened.release);
+      const member = await personApi("builder");
+      const them = { type: "person", id: member.userId } as const;
+      await opened.builder.api.apps.members.add(opened.app, {
+        ...them,
+        role: "user",
+      });
+      const { lease } = await member.api.pages.open(opened.app);
+      const theirs = clientFor(
+        { ...opened, lease, cookie: member.session, userId: member.userId },
+        member.api.pages
+      ).client;
+      await theirs.mutation(api.create, { title: "Mine" });
+      await theirs.mutation(api.create, { title: "Also mine" });
+      const list = listing(theirs, api.list, 1);
+      await eventually(() => {
+        expect(list.titles()).toStrictEqual(["Also mine"]);
+      });
+      await list.pager.loadMore();
+      // Their first page grows past twice its size, so it splits, while
+      // their access is taken away.
+      for (const title of ["Third", "Fourth"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await theirs.mutation(api.create, { title });
+      }
+      // Split: three pages, the first page's two halves in place of it.
+      await eventually(() => {
+        expect(list.pager.pages).toHaveLength(3);
+      });
+      await opened.builder.api.apps.members.remove(opened.app, them);
+      const owner = clientFor(opened).client;
+      await pastAccessRecheck(async () => {
+        await vi.waitFor(
+          async () => {
+            await owner.mutation(api.create, { title: "Elsewhere" });
+            expect(list.pager.snapshot.error).toBeDefined();
+          },
+          { timeout: 10_000, interval: 250 }
+        );
+      });
       expect({
         error: list.pager.snapshot.error?.code,
         items: list.view().items,

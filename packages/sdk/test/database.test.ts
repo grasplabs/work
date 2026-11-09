@@ -314,6 +314,7 @@ describe("a query's descriptor", () => {
     await query.unique();
     await query.paginate({ pageSize: 20, cursor: null });
     await query.paginate({});
+    await query.paginate({ endCursor: "end" });
     await query.aggregate({ operation: "count" });
     await query.aggregate({ operation: "sum", field: "rank" });
     await query.aggregate({ operation: "max", field: "rank" });
@@ -324,8 +325,9 @@ describe("a query's descriptor", () => {
     ).toStrictEqual([
       { kind: "first" },
       { kind: "unique" },
-      { kind: "paginate", pageSize: 20, cursor: null },
-      { kind: "paginate", pageSize: 50, cursor: null },
+      { kind: "paginate", pageSize: 20, cursor: null, endCursor: null },
+      { kind: "paginate", pageSize: 50, cursor: null, endCursor: null },
+      { kind: "paginate", pageSize: 50, cursor: null, endCursor: "end" },
       { kind: "aggregate", operation: "count" },
       { kind: "aggregate", operation: "sum", field: "rank" },
       { kind: "aggregate", operation: "max", field: "rank" },
@@ -403,7 +405,7 @@ describe("a query the schema doesn't allow", () => {
       { rank: { like: "a" } },
       { rank: undefined },
       { AND: { rank: 1 } },
-      { rank: { in: Array.from({ length: 101 }, (_, index) => index) } },
+      { rank: { in: ["one"] } },
       [],
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one refusal at a time
@@ -453,7 +455,6 @@ describe("a query the schema doesn't allow", () => {
       {},
       { OR: [] },
       { AND: [] },
-      { title: "x".repeat(4097) },
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one refusal at a time
       await refusedWith("query.invalid_filter", () => notes().filter(filter));
@@ -487,7 +488,7 @@ describe("a query the schema doesn't allow", () => {
     );
     await refusedWith(
       "query.invalid_terminal",
-      async () => await notes().take(101)
+      async () => await notes().take(10_001)
     );
     await refusedWith(
       "query.invalid_terminal",
@@ -525,12 +526,13 @@ describe("the page contract", () => {
   test("fills in a page request's defaults", () => {
     const validate = validateOptions;
     expect(validate({})).toStrictEqual({
-      value: { pageSize: 50, cursor: null },
+      value: { pageSize: 50, cursor: null, endCursor: null },
     });
     for (const options of [
-      { pageSize: 101 },
+      { pageSize: 10_001 },
       { pageSize: 0 },
       { cursor: "" },
+      { endCursor: "" },
     ]) {
       expect(validate(options)).toHaveProperty("issues");
     }
@@ -545,8 +547,11 @@ describe("the page contract", () => {
     expect(
       validate({ items: [{ id: "a" }], nextCursor: "c", hasMore: true })
     ).not.toHaveProperty("issues");
+    // A page ended at its end cursor may hold nothing, more following.
+    expect(
+      validate({ items: [], nextCursor: "c", hasMore: true })
+    ).not.toHaveProperty("issues");
     for (const invalid of [
-      { items: [], nextCursor: "c", hasMore: true },
       { items: [{ id: "a" }], nextCursor: "", hasMore: true },
       { items: [{ id: "a" }], nextCursor: null, hasMore: true },
       { items: [{ id: "a" }], nextCursor: "c", hasMore: false },

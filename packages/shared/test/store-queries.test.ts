@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { queryRequestSchema, readRequestSchema } from "../src/store-queries.ts";
+import { searchTerms } from "../src/store-reads.ts";
 
 // The host's schema of a read: the store checks every descriptor App code
 // built with it, so it must refuse what is malformed or oversized without
@@ -56,7 +57,12 @@ describe("a query descriptor", () => {
               { field: "rank", op: "exists", value: false },
             ],
           },
-          terminal: { kind: "paginate", pageSize: 20, cursor: null },
+          terminal: {
+            kind: "paginate",
+            pageSize: 20,
+            cursor: null,
+            endCursor: null,
+          },
         })
       )
     ).toBeTruthy();
@@ -120,25 +126,27 @@ describe("a query descriptor", () => {
     ).toBeTruthy();
   });
 
-  it("refuses oversized or empty filter parts", () => {
+  it("refuses empty filter parts, and takes long lists and texts", () => {
+    // An `in` binds its list as one value, and a text is one value: their
+    // length costs a read nothing its scan bound doesn't count.
     expect(
       accepts(
         query({
           filter: {
             field: "rank",
             op: "in",
-            values: Array.from({ length: 101 }, (_, index) => index),
+            values: Array.from({ length: 1000 }, (_, index) => index),
           },
         })
       )
-    ).toBeFalsy();
-    expect(accepts(query({ filter: { and: [] } }))).toBeFalsy();
-    expect(accepts(query({ filter: { or: [] } }))).toBeFalsy();
+    ).toBeTruthy();
     expect(
       accepts(
-        query({ filter: { field: "title", op: "eq", value: "x".repeat(4097) } })
+        query({ filter: { field: "title", op: "eq", value: "x".repeat(5000) } })
       )
-    ).toBeFalsy();
+    ).toBeTruthy();
+    expect(accepts(query({ filter: { and: [] } }))).toBeFalsy();
+    expect(accepts(query({ filter: { or: [] } }))).toBeFalsy();
     expect(
       accepts(query({ filter: { field: "rank", op: "gt", value: Number.NaN } }))
     ).toBeFalsy();
@@ -220,11 +228,19 @@ describe("a query descriptor", () => {
 
   it("refuses terminals out of bounds", () => {
     for (const terminal of [
-      { kind: "take", count: 101 },
+      { kind: "take", count: 10_001 },
       { kind: "take", count: -1 },
-      { kind: "paginate", pageSize: 0, cursor: null },
-      { kind: "paginate", pageSize: 10, cursor: "" },
-      { kind: "paginate", pageSize: 10, cursor: "c".repeat(4097) },
+      { kind: "paginate", pageSize: 0, cursor: null, endCursor: null },
+      { kind: "paginate", pageSize: 10_001, cursor: null, endCursor: null },
+      { kind: "paginate", pageSize: 10, cursor: "", endCursor: null },
+      {
+        kind: "paginate",
+        pageSize: 10,
+        cursor: "c".repeat(4097),
+        endCursor: null,
+      },
+      { kind: "paginate", pageSize: 10, cursor: null, endCursor: "" },
+      { kind: "paginate", pageSize: 10, cursor: null },
       { kind: "aggregate", operation: "count", field: "rank" },
       { kind: "aggregate", operation: "avg", field: "rank" },
       { kind: "all" },
@@ -258,5 +274,31 @@ describe("a read request", () => {
     expect(
       readRequestSchema.safeParse({ kind: "sql", text: "SELECT 1" }).success
     ).toBeFalsy();
+  });
+});
+
+describe("a search's words", () => {
+  it("are the tokens the full-text index reads: letters, numbers, private-use characters and the accents it drops", () => {
+    expect({
+      // Split at punctuation, so an invoice number is three words.
+      invoice: searchTerms("INV-2024-001"),
+      // An accent as a combining mark stays within its word, as unicode61
+      // keeps it before dropping it; a spacing mark (Mc) splits.
+      accent: searchTerms("cafe\u0301s"),
+      mark: searchTerms("\u0915\u093F\u0924\u093E\u092C"),
+      // Private-use characters are word characters.
+      privateUse: searchTerms("\uE000x y"),
+      // Letters of any script, and numbers.
+      scripts: searchTerms("日本 Ünïcode ٣"),
+      // Nothing to look for.
+      none: searchTerms(" -- \u0301 "),
+    }).toStrictEqual({
+      invoice: ["INV", "2024", "001"],
+      accent: ["cafe\u0301s"],
+      mark: ["\u0915", "\u0924", "\u092C"],
+      privateUse: ["\uE000x", "y"],
+      scripts: ["日本", "Ünïcode", "٣"],
+      none: [],
+    });
   });
 });

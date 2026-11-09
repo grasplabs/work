@@ -69,14 +69,10 @@ export const checkedSearchFields = (
   state: TableState,
   keys: unknown
 ): readonly string[] => {
-  if (
-    !Array.isArray(keys) ||
-    keys.length === 0 ||
-    keys.length > schemaLimits.fieldsPerSearchIndex
-  ) {
+  if (!Array.isArray(keys) || keys.length === 0) {
     return refuse(
       "schema.invalid_index",
-      `A search index covers between 1 and ${schemaLimits.fieldsPerSearchIndex} text fields.`
+      "A search index covers one or more text fields."
     );
   }
   const fields: string[] = [];

@@ -123,13 +123,11 @@ const readTable = (name: string, input: unknown): AnyTable => {
   if (Object.hasOwn(input, "searchIndex")) {
     if (
       !(
-        hasExactly(searchIndex, ["fields"]) &&
-        Array.isArray(searchIndex.fields) &&
-        searchIndex.fields.length <= schemaLimits.fieldsPerSearchIndex
+        hasExactly(searchIndex, ["fields"]) && Array.isArray(searchIndex.fields)
       )
     ) {
       return invalid(
-        `${quoted(name, "Table")}'s search index is \`{ fields }\`, a short list.`
+        `${quoted(name, "Table")}'s search index is \`{ fields }\`, a list.`
       );
     }
     table = table.searchIndex(searchIndex.fields);

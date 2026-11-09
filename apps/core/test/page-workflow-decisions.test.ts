@@ -528,27 +528,17 @@ const decisionInbox = async (looped = false) => {
   const ask = async (
     who: Parameters<typeof callAppFunction>[1],
     name: "decisions" | "decision",
-    input: unknown,
-    window?: number
+    input: unknown
   ): Promise<unknown> => {
-    const request = JSON.stringify({
-      reference: queryReference(release, "review", name),
-      input,
-      ...(window === undefined ? {} : { window: { extent: window } }),
-    });
-    const { result } =
-      window === undefined
-        ? await callAppFunction(env, who, fixture.app, request)
-        : await callPageFunction(
-            env,
-            who,
-            fixture.app,
-            request,
-            Date.now() + 30_000,
-            async () => {
-              // A window's pages cost nothing here.
-            }
-          );
+    const { result } = await callAppFunction(
+      env,
+      who,
+      fixture.app,
+      JSON.stringify({
+        reference: queryReference(release, "review", name),
+        input,
+      })
+    );
     return answerOf(result);
   };
   return {
@@ -662,7 +652,13 @@ describe(
           runId: second.runId,
           pagination: {},
         }),
-        window: await ask(reviewer, "decisions", {}, 20),
+        // A live list's loaded page: up to where the next would start.
+        ended: await ask(reviewer, "decisions", {
+          pagination: {
+            pageSize: 1,
+            endCursor: `${opened + 1000}:${second.decisionId}`,
+          },
+        }),
         starter: await ask(starter, "decisions", { pagination: {} }),
         outsider: await ask(outsider, "decisions", { pagination: {} }),
         detail: await detail(reviewer, first),
@@ -678,12 +674,6 @@ describe(
           runId: first.runId,
           decisionId: "decision-1",
         }),
-        decisionWindow: await ask(
-          reviewer,
-          "decision",
-          { runId: first.runId, decisionId: first.decisionId },
-          20
-        ),
       };
       await env.DB.prepare(
         "UPDATE workflow_decisions SET status = 'approved', decided_by = ?, decided_at = ? WHERE id = ?"
@@ -712,9 +702,10 @@ describe(
           nextCursor: null,
           hasMore: false,
         },
-        window: {
+        ended: {
           items: [waitOf(first, opened), waitOf(second, opened + 1000)],
-          hasMore: false,
+          nextCursor: `${opened + 1000}:${second.decisionId}`,
+          hasMore: true,
         },
         // Their own run's decision is never theirs to answer (R8).
         starter: { items: [], nextCursor: null, hasMore: false },
@@ -732,8 +723,6 @@ describe(
         unnamed: "workflow.decision_unavailable",
         mismatched: "workflow.decision_unavailable",
         unknown: "workflow.decision_unavailable",
-        // One decision isn't a list a window reads.
-        decisionWindow: "contract.not_paginated",
         // Theirs to read, but no longer taking an answer.
         answered: null,
         afterAnswer: {
@@ -1286,10 +1275,7 @@ describe(
           runId: asked.runId,
           idempotencyKey: "0".repeat(32),
         }),
-        Date.now() + 30_000,
-        async () => {
-          // Nothing here is charged.
-        }
+        Date.now() + 30_000
       );
       const before = {
         reviewer: await shownTo(reviewer, asked.runId),
@@ -1445,10 +1431,7 @@ describe(
           input: { amount: 5 },
           idempotencyKey: "1".repeat(32),
         }),
-        Date.now() + 30_000,
-        async () => {
-          // Nothing here is charged.
-        }
+        Date.now() + 30_000
       );
       const { runId } = z.object({ runId: z.string() }).parse(answerOf(result));
       const decisionId = await vi.waitFor(

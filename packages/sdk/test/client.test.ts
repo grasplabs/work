@@ -246,11 +246,491 @@ describe("the session client's paginated list", () => {
     args.search = "changed";
     await pager.loadMore();
     expect(followed.map(({ input }) => input)).toStrictEqual([
-      // The first page, then the larger window Load More asks for.
-      { search: "launch" },
-      { search: "launch" },
+      // The first page; then, for the Load More once it shows, that page
+      // ended where it ends and the page after it.
+      { search: "launch", pagination: { pageSize: 2, cursor: null } },
+      {
+        search: "launch",
+        pagination: { pageSize: 2, cursor: null, endCursor: "next" },
+      },
+      { search: "launch", pagination: { pageSize: 2, cursor: "next" } },
     ]);
     stop();
+  });
+});
+
+/** A page a list asks the host for, as its `pagination` argument. */
+interface Asked {
+  readonly pageSize: number;
+  readonly cursor: string | null;
+  readonly endCursor?: string;
+}
+
+/**
+ * A host that answers a list of `titles` in title order, keyset pages
+ * whose cursors (`<version>:<title>`) expire with `version`, as core's
+ * do with a release. What the test controls: `version`, records `hidden`
+ * from the person, `broken` (every page with a cursor refused, as when
+ * its anchor ranks before its start), and `hold` (answers held until
+ * `release`: to pages with a cursor, or to all). `reread` pushes every page followed, as
+ * a write would; `asked` is every page followed, in order.
+ */
+/** The title a test host's cursor (`<version>:<title>`) is after. */
+const titleOf = (cursor: string): string =>
+  cursor.slice(cursor.indexOf(":") + 1);
+
+/** The page a followed request asks for, read from its JSON. */
+const askedOf = (request: string): Asked => {
+  const sent: unknown = JSON.parse(request);
+  const input: unknown =
+    typeof sent === "object" && sent !== null ? Reflect.get(sent, "input") : {};
+  const pagination: unknown =
+    typeof input === "object" && input !== null
+      ? Reflect.get(input, "pagination")
+      : {};
+  const field = (name: string): unknown =>
+    typeof pagination === "object" && pagination !== null
+      ? Reflect.get(pagination, name)
+      : undefined;
+  const pageSize = field("pageSize");
+  const cursor = field("cursor");
+  const endCursor = field("endCursor");
+  return {
+    pageSize: typeof pageSize === "number" ? pageSize : 0,
+    cursor: typeof cursor === "string" ? cursor : null,
+    ...(typeof endCursor === "string" ? { endCursor } : {}),
+  };
+};
+
+/** Which answers a test host holds back until it releases them. */
+type Holding = "none" | "cursors" | "all";
+
+const listHost = (titles: readonly string[]) => {
+  const state: {
+    titles: string[];
+    version: number;
+    hidden: Set<string>;
+    broken: boolean;
+    hold: Holding;
+  } = {
+    titles: [...titles],
+    version: 0,
+    hidden: new Set<string>(),
+    broken: false,
+    hold: "none",
+  };
+  interface Followed {
+    readonly asked: Asked;
+    readonly onSnapshot: (push: unknown) => void;
+    revision: number;
+  }
+  const followed = new Set<Followed>();
+  const held: Followed[] = [];
+  const asked: Asked[] = [];
+  const resultOf = ({ pageSize, cursor, endCursor }: Asked) => {
+    const cursors = [cursor, endCursor ?? null].filter(
+      (each): each is string => each !== null
+    );
+    if (
+      (state.broken && cursors.length > 0) ||
+      cursors.some((each) => !each.startsWith(`${state.version}:`))
+    ) {
+      return failedWith("data.cursor_expired", "domain").result;
+    }
+    const after = cursor === null ? undefined : titleOf(cursor);
+    const visible = state.titles
+      .toSorted()
+      .filter(
+        (title) =>
+          !state.hidden.has(title) && (after === undefined || title > after)
+      );
+    const until = endCursor === undefined ? undefined : titleOf(endCursor);
+    const items =
+      until === undefined
+        ? visible.slice(0, pageSize)
+        : visible.filter((title) => title <= until);
+    const last = items.at(-1);
+    const hasMore = visible.length > items.length;
+    const nextCursor =
+      endCursor ?? (last === undefined ? null : `${state.version}:${last}`);
+    // A page with an end past twice its size says where to split it.
+    const splitAfter =
+      endCursor !== undefined && items.length > 2 * pageSize
+        ? items[pageSize - 1]
+        : undefined;
+    const split =
+      splitAfter === undefined
+        ? {}
+        : { splitCursor: `${state.version}:${splitAfter}` };
+    return {
+      ok: true,
+      value:
+        hasMore && nextCursor !== null
+          ? {
+              items: items.map((title) => ({ title })),
+              hasMore,
+              nextCursor,
+              ...split,
+            }
+          : {
+              items: items.map((title) => ({ title })),
+              hasMore: false,
+              nextCursor: null,
+              ...split,
+            },
+    };
+  };
+  const push = (page: Followed): void => {
+    page.revision += 1;
+    page.onSnapshot({ revision: page.revision, result: resultOf(page.asked) });
+  };
+  const transport: ClientTransport = {
+    call: async () => await Promise.reject(new Error("No calls here")),
+    watch: async (request, onSnapshot) => {
+      const page: Followed = {
+        asked: askedOf(request),
+        onSnapshot,
+        revision: 0,
+      };
+      asked.push(page.asked);
+      followed.add(page);
+      await Promise.resolve();
+      if (
+        state.hold === "all" ||
+        (state.hold === "cursors" && page.asked.cursor !== null)
+      ) {
+        held.push(page);
+      } else {
+        push(page);
+      }
+      return {
+        release: () => {
+          followed.delete(page);
+        },
+      };
+    },
+  };
+  return {
+    state,
+    asked,
+    client: new GraspClient(transport),
+    reread: () => {
+      // Those followed now: a page followed meanwhile is read anew.
+      const now = [...followed];
+      for (const page of now) {
+        push(page);
+      }
+    },
+    /** Refuses every page `which` picks with `code`, as its last push. */
+    refuse: (which: (page: Asked) => boolean, code: string) => {
+      const now = [...followed];
+      for (const page of now.filter(({ asked: each }) => which(each))) {
+        page.revision += 1;
+        page.onSnapshot({
+          revision: page.revision,
+          result: failedWith(code).result,
+        });
+      }
+    },
+    release: () => {
+      state.hold = "none";
+      for (const page of held.splice(0)) {
+        if (followed.has(page)) {
+          push(page);
+        }
+      }
+    },
+  };
+};
+
+/** A list of `host`'s, followed, `size` a page, and what it shows. */
+const listOf = (host: ReturnType<typeof listHost>, size: number) => {
+  const internals = clientInternals(host.client);
+  const pager = internals.pager(api.notes.list, {}, size);
+  const stop = internals.subscribePager(pager, () => {});
+  const titles = (): unknown[] =>
+    pager.snapshot.view.items.map((item) =>
+      typeof item === "object" && item !== null && "title" in item
+        ? item.title
+        : item
+    );
+  return { pager, stop, titles };
+};
+
+describe("the session client's paginated list started again", () => {
+  it("recovers once what failed its pages passed, rather than start again for ever", async () => {
+    const host = listHost(["a", "b", "c", "d", "e", "f"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    await list.pager.loadMore();
+    // Every page with a cursor is refused once, then the cause passes:
+    // the pages it starts again with are the same queries, cached failed.
+    host.state.broken = true;
+    host.reread();
+    host.state.broken = false;
+    const settled = () => ({
+      titles: list.titles(),
+      error: list.pager.snapshot.error,
+      // Loaded back whole, every page showing its own answer.
+      refilling: list.pager.refill !== undefined,
+      pages: list.pager.pages.map(
+        ({ entry, held }) =>
+          held === undefined && entry.snapshot.error === undefined
+      ),
+    });
+    const recovered = {
+      titles: ["a", "b", "c", "d"],
+      error: undefined,
+      refilling: false,
+      pages: [true, true],
+    };
+    await vi.waitFor(() => {
+      expect(settled()).toStrictEqual(recovered);
+    });
+    // A write reads every page again: still as it is, never starting
+    // again and again.
+    host.reread();
+    await vi.waitFor(() => {
+      expect(settled()).toStrictEqual(recovered);
+    });
+    expect(host.asked.length).toBeLessThan(20);
+    list.stop();
+  });
+
+  it("never loads more from a cursor cached from before it started again", async () => {
+    const host = listHost(["a", "b", "c", "d", "e", "f"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    // Three more: the page a Load More of two would ask for after the
+    // first is one the list never asked for, so nothing cached answers it.
+    await list.pager.loadMore(3);
+    const before = host.asked.length;
+    // A new version: every cursor read before expires, and the first
+    // page's fresh answer is slow to come.
+    host.state.version = 1;
+    host.state.hold = "all";
+    host.reread();
+    // A Load More while the list starts again, its first page showing
+    // only what was cached from before.
+    const more = list.pager.loadMore();
+    host.release();
+    await more;
+    await vi.waitFor(() => {
+      expect({
+        titles: list.titles(),
+        refilling: list.pager.refill !== undefined,
+      }).toStrictEqual({
+        titles: ["a", "b", "c", "d", "e", "f"],
+        refilling: false,
+      });
+    });
+    expect(
+      host.asked
+        .slice(before)
+        .flatMap(({ cursor, endCursor }) => [cursor, endCursor ?? null])
+        .filter((cursor) => cursor?.startsWith("0:") === true)
+    ).toStrictEqual([]);
+    list.stop();
+  });
+
+  it("stops showing records the person may no longer see once its first page answers, the refill going on behind", async () => {
+    const host = listHost(["a", "b", "c", "d", "e", "f"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    await list.pager.loadMore();
+    // A rule now hides `b`, and a new version expires every cursor; the
+    // refill's later pages are slow to answer.
+    host.state.hidden.add("b");
+    host.state.version = 1;
+    host.state.hold = "cursors";
+    host.reread();
+    await vi.waitFor(() => {
+      expect({
+        titles: list.titles(),
+        refilling: list.pager.refill !== undefined,
+      }).toStrictEqual({ titles: ["a", "c"], refilling: true });
+    });
+    host.release();
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "c", "d", "e"]);
+    });
+    list.stop();
+  });
+
+  it("starts a new person's list at its first page, never refilling to the length of the person before's", async () => {
+    const host = listHost(["a", "b", "c", "d", "e", "f"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    await list.pager.loadMore();
+    // A new version: the list starts again, refilling to four records,
+    // its later pages slow to answer.
+    host.state.version = 1;
+    host.state.hold = "cursors";
+    host.reread();
+    await vi.waitFor(() => {
+      expect(list.pager.refill).toBe(4);
+    });
+    // Someone else signs in meanwhile; their lists are tried again.
+    host.refuse(() => true, "auth.principal_changed");
+    host.release();
+    clientInternals(host.client).retryFailed();
+    await vi.waitFor(() => {
+      expect({
+        titles: list.titles(),
+        error: list.pager.snapshot.error,
+      }).toStrictEqual({ titles: ["a", "b"], error: undefined });
+    });
+    // Settled: none of the person before's refill goes on.
+    await vi.waitFor(() => {
+      expect(host.asked.at(-1)?.cursor).toBeNull();
+    });
+    expect({
+      titles: list.titles(),
+      refill: list.pager.refill,
+      pages: list.pager.pages.length,
+    }).toStrictEqual({ titles: ["a", "b"], refill: undefined, pages: 1 });
+    list.stop();
+  });
+
+  it("reads an ended page of one record that grew too large to answer again, rather than fail the list", async () => {
+    const host = listHost(["b", "c"]);
+    const list = listOf(host, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["b"]);
+    });
+    await list.pager.loadMore();
+    // Records moved into the first page, ended after `b`, until its answer
+    // is past what one may carry, though each record fits on its own.
+    host.state.titles.push("a0", "a1", "a2", "a3");
+    host.refuse(
+      ({ endCursor }) => endCursor !== undefined,
+      "page.answer_too_large"
+    );
+    await vi.waitFor(() => {
+      expect({
+        error: list.pager.snapshot.error,
+        titles: list.titles(),
+        pages: list.pager.pages.map(({ cursor, endCursor, pageSize }) => ({
+          cursor,
+          endCursor,
+          pageSize,
+        })),
+      }).toStrictEqual({
+        error: undefined,
+        titles: ["a0"],
+        // Read again from its start, without its end.
+        pages: [{ cursor: null, endCursor: null, pageSize: 1 }],
+      });
+    });
+    list.stop();
+  });
+
+  it("never shows a split page's records twice once its second half is read again in its place", async () => {
+    const host = listHost(["b", "c"]);
+    const list = listOf(host, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["b"]);
+    });
+    await list.pager.loadMore();
+    host.state.titles.push("a0", "a1", "a2");
+    host.state.hold = "all";
+    host.reread();
+    await vi.waitFor(() => {
+      expect(
+        list.pager.pages.slice(0, 2).map(({ held }) => held !== undefined)
+      ).toStrictEqual([true, true]);
+    });
+    // The second half is too large to answer: it is read again in its
+    // place, and the first half holds the whole page no longer.
+    host.refuse(
+      ({ cursor, endCursor }) => cursor !== null && endCursor !== undefined,
+      "page.answer_too_large"
+    );
+    await vi.waitFor(() => {
+      expect(list.pager.pages.at(-1)?.endCursor).toBeNull();
+    });
+    expect(list.titles()).toStrictEqual([]);
+    host.release();
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a0", "a1"]);
+    });
+    list.stop();
+  });
+
+  it("splits a half again once both halves answered, the second saying to split", async () => {
+    const host = listHost(["b", "c"]);
+    const list = listOf(host, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["b"]);
+    });
+    await list.pager.loadMore();
+    // Records move into the first page, far past twice its size: it
+    // splits after its first record, and its second half, answering last,
+    // is itself past twice its size.
+    host.state.titles.push("a0", "a1", "a2", "a3", "a4", "a5");
+    host.state.hold = "all";
+    host.reread();
+    await vi.waitFor(() => {
+      expect(list.pager.pages).toHaveLength(3);
+    });
+    host.release();
+    // No further change comes: the second half splits on its own answer.
+    await vi.waitFor(() => {
+      expect({
+        ends: list.pager.pages.map(({ endCursor }) => endCursor),
+        titles: list.titles(),
+      }).toStrictEqual({
+        ends: ["0:a0", "0:a1", "0:b", null],
+        titles: ["a0", "a1", "a2", "a3", "a4", "a5", "b", "c"],
+      });
+    });
+    list.stop();
+  });
+
+  it("shows nothing of a page split mid-way once one of its halves is refused", async () => {
+    const host = listHost(["b", "c"]);
+    const list = listOf(host, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["b"]);
+    });
+    await list.pager.loadMore();
+    // Records move into the first page, past twice its size: it splits,
+    // and neither half's own answer comes yet.
+    host.state.titles.push("a0", "a1", "a2");
+    host.state.hold = "all";
+    host.reread();
+    await vi.waitFor(() => {
+      expect({
+        titles: list.titles(),
+        halvesHeld: list.pager.pages
+          .slice(0, 2)
+          .map(({ held }) => held !== undefined),
+      }).toStrictEqual({
+        titles: ["a0", "a1", "a2", "b", "c"],
+        halvesHeld: [true, true],
+      });
+    });
+    // The second half is refused: the person lost access to the table,
+    // which, unlike losing the App, doesn't clear the whole client.
+    host.refuse(
+      ({ cursor, endCursor }) => cursor !== null && endCursor !== undefined,
+      "data.access_denied"
+    );
+    await vi.waitFor(() => {
+      expect({
+        error: list.pager.snapshot.error?.code,
+        items: list.pager.snapshot.view.items,
+      }).toStrictEqual({ error: "data.access_denied", items: [] });
+    });
+    list.stop();
   });
 });
 

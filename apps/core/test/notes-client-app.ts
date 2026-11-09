@@ -259,7 +259,13 @@ export const referenceTo = <
 /** The App's `api`, as its pages import it from `@server/_generated/api`. */
 export const apiOf = (release: Release) => ({
   list: referenceTo<
-    { pagination: { cursor?: string | null; pageSize?: number } },
+    {
+      pagination: {
+        cursor?: string | null;
+        endCursor?: string | null;
+        pageSize?: number;
+      };
+    },
     Page,
     "query"
   >(release, "notes.list"),

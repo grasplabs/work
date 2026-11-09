@@ -104,14 +104,14 @@ const titlesSaying = (title: string): string =>
   );
 
 /**
- * The notes App's server code reading past what a query takes at once: it
- * fails its type check, so it doesn't build.
+ * The notes App's server code asking a query for a count that isn't a
+ * number: it fails its type check, so it doesn't build.
  */
 const titlesUnbuilt = (
   notesFiles("drafted").files["server/notes.ts"] ?? ""
 ).replace(
   'ctx.db.query("notes").take(100)).map',
-  'ctx.db.query("notes").take(1000)).map'
+  'ctx.db.query("notes").take("all")).map'
 );
 
 /** What a frame's policy lets run. */

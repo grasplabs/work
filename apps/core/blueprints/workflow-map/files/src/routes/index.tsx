@@ -119,7 +119,7 @@ const Workflows = ({
  */
 const WorkflowMap = () => {
   const client = useClient();
-  const listedTeams = useQuery(api.teams.list, {});
+  const listedTeams = useQuery(api.teams.list);
   const [writable, setWritable] = useState(false);
   const [view, setView] = useState<View>({ kind: "list" });
   // Why an opening failed, cleared when the next one succeeds.

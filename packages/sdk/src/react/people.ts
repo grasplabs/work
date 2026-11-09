@@ -12,8 +12,7 @@ import { useQuery } from "./queries.ts";
  * page: show it, but decide what someone may do in the App's server
  * functions, with `ctx.auth.getUser()`, which no page can change.
  */
-export const useUser = (): User | undefined =>
-  useQuery(peopleReferences.user, {});
+export const useUser = (): User | undefined => useQuery(peopleReferences.user);
 
 /** Each client's directory (`usePeople`). */
 const directories = new WeakMap<GraspClient, PeopleDirectory>();

@@ -36,16 +36,20 @@ import type { Id } from "./value-types.ts";
 // tables, indexes and fields as the schema does; it never holds SQL, a
 // physical ID, an owner or a role.
 //
-// Every terminal is bounded: `take` and `collect` return at most 100
-// records (`collect` fails rather than truncates), a page holds at most
-// 100, and there is no way to iterate a whole table in one read. Longer
-// lists page, through a table of any size, each page bounded on its own;
-// large exports and aggregates are a workflow's.
+// Every terminal is bounded as Convex's are, by what it reads: one read
+// examines at most 10,000 index entries and 16 MiB of documents
+// (`data.scan_limit` past them, never a part), whatever it answers. So
+// `collect` answers every record a read may reach, and longer lists page,
+// through a table of any size, each page bounded on its own; large
+// exports and aggregates are a workflow's. What a query answers a page in
+// the browser is bounded apart from that: at most 256 KiB a push
+// (`pageLimits.answerBytes`), which a live list keeps its pages within
+// by splitting them (`splitCursor`).
 //
 // Besides queries: `search(table, text)` reads a table's full-text search
 // index in order of relevance; `group` counts and aggregates per value of
-// one or two fields, at most 100 groups; `with` loads the records a
-// query's `v.id` fields name, under the caller's access to their tables.
+// one or more fields; `with` loads the records a query's `v.id` fields
+// name, under the caller's access to their tables.
 //
 // Adapted from Baseflare's query builder and structured filters (MIT,
 // © 2026 Baseflare contributors: packages/baseflare/src/server/db), with

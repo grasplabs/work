@@ -98,7 +98,7 @@ const AccessNote = ({ overview }: { overview: Overview | null }) =>
  * them: the store refuses anyone else, which a query throws.
  */
 const DraftList = ({ onOpen }: { onOpen: (id: Id<"drafts">) => void }) => {
-  const drafts = useQuery(api.drafts.list, {});
+  const drafts = useQuery(api.drafts.list);
   if (drafts === undefined) {
     return <p className="text-muted-foreground text-sm">Loading drafts…</p>;
   }
@@ -145,7 +145,7 @@ const DraftList = ({ onOpen }: { onOpen: (id: Id<"drafts">) => void }) => {
  * are saved. Mounted only for someone who may review drafts, as the list.
  */
 const SavedList = () => {
-  const saved = useQuery(api.drafts.saved, {});
+  const saved = useQuery(api.drafts.saved);
   if (saved === undefined || saved.length === 0) {
     return null;
   }

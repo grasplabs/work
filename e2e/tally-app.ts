@@ -32,12 +32,13 @@ export const Route = createFileRoute("/")({ component: Tally });
 `;
 
 /**
- * The tally's server code, its count saying `label` after the number,
- * reading `limit` records: past 100 it fails its type check.
+ * The tally's server code, its count saying `label` after the number.
+ * With `builds: false` it asks for a count that isn't a number, so it
+ * fails its type check.
  */
 export const tallyServer = (
   label: string,
-  limit = 100
+  { builds = true }: { readonly builds?: boolean } = {}
 ): string => `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -45,7 +46,7 @@ export const count = query({
   args: {},
   returns: v.string(),
   handler: async (ctx) => {
-    const added = await ctx.db.query("tally").take(${String(limit)});
+    const added = await ctx.db.query("tally").take(${builds ? "100" : '"all"'});
     return \`\${String(added.length)} ${label}\`;
   },
 });

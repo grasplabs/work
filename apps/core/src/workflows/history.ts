@@ -1,4 +1,5 @@
 import { isExpectedCode } from "@grasp-os/shared/errors";
+import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
   RunHistoryEntry,
@@ -645,6 +646,11 @@ export interface HistoryEntries {
   /** The engine event ID the page ended at, when more follow. */
   readonly nextCursor: string | null;
   readonly hasMore: boolean;
+  /**
+   * Given `until`, the event it stopped at short of it, its reads spent
+   * (`maxReads`): the span after it is not in the page.
+   */
+  readonly stoppedAt?: number;
 }
 
 /**
@@ -652,25 +658,33 @@ export interface HistoryEntries {
  * `after`, oldest first, told as `telling` says, from at most `maxReads`
  * reads of its engine journal. Empty for a run the engine has no record
  * of: still starting, or never started. Who may read it is the caller's
- * to have checked.
+ * to have checked. With `until`, the entries up to and including that
+ * event instead, however many: a live list's loaded page. The journal
+ * only grows, so that span reads the same events every time. A span
+ * longer than its reads reach ends early, saying where (`stoppedAt`).
  */
 export const historyEntries = async (
   env: Env,
   id: string,
-  { after: from, pageSize }: { after: number; pageSize: number },
+  {
+    after: from,
+    pageSize,
+    until,
+  }: { after: number; pageSize: number; until?: number },
   telling: HistoryTelling
 ): Promise<HistoryEntries> => {
   const done: HistoryEntries = { items: [], nextCursor: null, hasMore: false };
   const stub = runObjectOf(env, id);
-  const limit = Math.min(maxRecordsPerRead, pageSize * 4);
+  const limit =
+    until === undefined
+      ? Math.min(maxRecordsPerRead, pageSize * 4)
+      : maxRecordsPerRead;
   const items: RunHistoryEntry[] = [];
   let after = from;
   let more = true;
-  for (
-    let read = 0;
-    read < maxReads && more && items.length < pageSize;
-    read += 1
-  ) {
+  const wanted = (): boolean =>
+    until === undefined ? items.length < pageSize : after < until;
+  for (let read = 0; read < maxReads && more && wanted(); read += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each read goes on from the one before
     const page = await readWithRounds(stub, after, limit);
     if (page === undefined) {
@@ -683,7 +697,9 @@ export const historyEntries = async (
     const { records, more: followed } = page;
     more = followed;
     for (const record of records) {
-      if (items.length === pageSize) {
+      if (
+        until === undefined ? items.length === pageSize : record.eventId > until
+      ) {
         more = true;
         break;
       }
@@ -694,7 +710,15 @@ export const historyEntries = async (
       }
     }
   }
-  return more
+  const stoppedAt =
+    until !== undefined && more && after < until ? after : undefined;
+  // Stopped without getting past its start: no split could make progress,
+  // so the page's cursors no longer describe a span it can read.
+  if (stoppedAt !== undefined && stoppedAt <= from) {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  const page: HistoryEntries = more
     ? { items, nextCursor: String(after), hasMore: true }
     : { items, nextCursor: null, hasMore: false };
+  return stoppedAt === undefined ? page : { ...page, stoppedAt };
 };

@@ -796,10 +796,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
           notes.owner,
           notes.app,
           JSON.stringify({ reference, input }),
-          Date.now() + 30_000,
-          async () => {
-            // A window's pages cost nothing here.
-          }
+          Date.now() + 30_000
         )
       );
     const noteId = valueOf(

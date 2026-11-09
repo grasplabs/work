@@ -517,20 +517,24 @@ describe("conditions and ranges through the store", () => {
 });
 
 describe("bounds", () => {
-  it("fail a collect past 100 records, and a unique past one, rather than truncate", async () => {
+  it("collect and take as many records as a read examines, and fail a unique past one", async () => {
     const fixture = await storeWith("appMembers");
-    await insertMany(fixture, 101, { title: "same" });
+    await insertMany(fixture, 250, { title: "same" });
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
-    const taken = await db.query("notes").take(100);
+    const collected = await db.query("notes").collect();
+    const taken = await db.query("notes").take(200);
+    const page = await db.query("notes").paginate({ pageSize: 220 });
     expect({
-      collect: await refusal(db.query("notes").collect()),
-      unique: await refusal(db.query("notes").unique()),
+      collect: collected.length,
       take: taken.length,
+      page: page.items.length,
+      unique: await refusal(db.query("notes").unique()),
       none: await db.query("notes").take(0),
     }).toStrictEqual({
-      collect: "data.result_limit",
+      collect: 250,
+      take: 200,
+      page: 220,
       unique: "data.not_unique",
-      take: 100,
       none: [],
     });
   });
@@ -543,6 +547,7 @@ describe("bounds", () => {
     const first = await db.query("notes").first();
     expect({
       count: await refusal(db.query("notes").count()),
+      collect: await refusal(db.query("notes").collect()),
       filtered: await refusal(
         db.query("notes").filter({ title: "missing" }).first()
       ),
@@ -554,6 +559,7 @@ describe("bounds", () => {
         .count(),
     }).toStrictEqual({
       count: "data.scan_limit",
+      collect: "data.scan_limit",
       filtered: "data.scan_limit",
       first: "same",
       ranged: 1,

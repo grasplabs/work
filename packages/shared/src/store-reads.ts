@@ -1,7 +1,6 @@
 import { isRecord } from "./json.ts";
 import {
   filterMaxDepth,
-  filterMaxInValues,
   filterMaxNodes,
   queryMaxBoundValues,
   rangeMaxBounds,
@@ -85,7 +84,13 @@ export type QueryTerminal =
   | { kind: "unique" }
   | { kind: "count" }
   | { kind: "collect" }
-  | { kind: "paginate"; pageSize: number; cursor: string | null }
+  | {
+      kind: "paginate";
+      pageSize: number;
+      cursor: string | null;
+      /** Where the page ends, whatever `pageSize` says (a live list's). */
+      endCursor: string | null;
+    }
   | { kind: "aggregate"; operation: "count" }
   | { kind: "aggregate"; operation: "sum" | "min" | "max"; field: string }
   | GroupTerminal;
@@ -152,8 +157,8 @@ export const filterChildren = (node: FilterNode): readonly FilterNode[] => {
 
 /**
  * Why `value`, read as a filter tree, is past a filter's bounds (deeper
- * than `filterMaxDepth`, more than `filterMaxNodes` nodes, an `in` of more
- * than `filterMaxInValues`), or undefined if it isn't. Iterative, with an
+ * than `filterMaxDepth`, more than `filterMaxNodes` nodes), or undefined
+ * if it isn't. Iterative, with an
  * explicit stack, and it stops at the first node past a bound: run it on
  * untrusted input before anything recursive reads or copies it, so no
  * input can exhaust the stack or the clock. It checks only the bounds;
@@ -191,10 +196,6 @@ export const filterBudgetIssue = (value: unknown): string | undefined => {
     }
     if (Object.hasOwn(node, "not") && !push([node.not], depth + 1)) {
       return tooMany;
-    }
-    const values = Object.hasOwn(node, "values") ? node.values : undefined;
-    if (Array.isArray(values) && values.length > filterMaxInValues) {
-      return `An \`in\` lists at most ${filterMaxInValues} values`;
     }
   }
   return undefined;
@@ -306,17 +307,34 @@ export type WriteRequest =
   | { kind: "replace"; table: string; id: string; fields: WriteFields }
   | { kind: "delete"; table: string; id: string };
 
-/** What separates a search's words. */
-const searchSeparator = /\s+/u;
-
-/** A letter or digit: a word without one finds nothing. */
-const wordCharacter = /[\p{L}\p{N}]/u;
+// The combining accents unicode61 keeps inside a word, then drops, when it
+// removes diacritics (`remove_diacritics 2`): SQLite's own table of them
+// (`sqlite3Fts5UnicodeIsdiacritic`). So decomposed "cafe\u0301s" is one
+// word, "cafes", as its precomposed form is. Every other mark splits:
+// the rest of U+0300 to U+036F, spacing marks (Mc, such as Devanagari's
+// vowel signs), viramas and enclosing marks.
 
 /**
- * The words a search's text looks for, in order: split at white space,
- * each holding at least one letter or digit. A record matches when it
- * holds every word, the last one as a prefix, so a search box finds as
- * its person types.
+ * What separates a search's words: anything but a letter, a number, a
+ * private-use character or one of the accents above (the last ranges),
+ * the token classes of the full-text index's unicode61 tokenizer. So
+ * `INV-2024-001` is three words here as it is three tokens there, and a
+ * search's words are what FTS5 reads (`searchMaxTerms`), however they
+ * are joined.
+ */
+const searchSeparator =
+  /[^\p{L}\p{N}\p{Co}\u0300-\u0304\u0306-\u030C\u030F\u0311\u031B\u0323-\u0328\u032D\u032E\u0330\u0331]+/u;
+
+/**
+ * What a word holds at least one of, as unicode61 tokens do: accents
+ * alone, which it drops, make no word.
+ */
+const wordCharacter = /[\p{L}\p{N}\p{Co}]/u;
+
+/**
+ * The words a search's text looks for, in order, as the full-text index
+ * tokenizes them. A record matches when it holds every word, the last
+ * one as a prefix, so a search box finds as its person types.
  */
 export const searchTerms = (text: string): string[] =>
   text.split(searchSeparator).filter((term) => wordCharacter.test(term));

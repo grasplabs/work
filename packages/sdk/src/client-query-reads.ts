@@ -2,12 +2,7 @@ import type { AccessFence } from "./access-fence.ts";
 import type { Settled } from "./call-answers.ts";
 import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
-import {
-  settleRead,
-  settleWindow,
-  wanted,
-  worthRetrying,
-} from "./client-query-entry.ts";
+import { settleRead, wanted, worthRetrying } from "./client-query-entry.ts";
 import type { QueryEntry } from "./client-query-entry.ts";
 import { observe, waitAfter } from "./client-retry.ts";
 import { sleep } from "./client-shared.ts";
@@ -104,11 +99,6 @@ export class QueryReader {
           entry.listeners.size > 0 ||
           tries < imperativeAttempts ||
           waitingForBudget;
-        // A window is never read again here: whatever its read came to
-        // is the list's to settle, as over the frame (`#settleWindow`).
-        if (entry.window) {
-          return settleWindow(entry, { number, changes }, settled);
-        }
         if (!worthRetrying(settled) || !keepTrying || !wanted(entry)) {
           return settleRead(entry, { number, changes }, settled);
         }

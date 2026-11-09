@@ -25,6 +25,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { tiledPage } from "./split-pages.ts";
 import { accessedManifest, appliedTables } from "./store-schemas.ts";
 
 // Pages of a business store's records and their cursors (store-cursors.ts,
@@ -169,7 +170,7 @@ const pageAfter = async (
         range: [],
         filter: null,
         order: "asc",
-        terminal: { kind: "paginate", pageSize: 2, cursor },
+        terminal: { kind: "paginate", pageSize: 2, cursor, endCursor: null },
         ...changes,
       },
     })
@@ -407,7 +408,12 @@ const pageQuery = (index: string | null, order: "asc" | "desc") => ({
   range: [],
   filter: null,
   order,
-  terminal: { kind: "paginate" as const, pageSize: 2, cursor: null },
+  terminal: {
+    kind: "paginate" as const,
+    pageSize: 2,
+    cursor: null,
+    endCursor: null,
+  },
 });
 
 /** The length of the cursor an anchor of a `length`-character label makes. */
@@ -615,6 +621,400 @@ describe("cursors", () => {
       second: ["n-ada-00001"],
       gone: "data.cursor_expired",
     });
+  });
+});
+
+describe("pages ended at a cursor", () => {
+  it("tile the query as records move in and out, along an index with left-out and null values, both ways", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, ranked);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const along = (order: "asc" | "desc") =>
+      db.query("notes").withIndex("by_done_rank").order(order);
+    const loaded = {
+      asc: await allPages(
+        async (cursor) => await along("asc").paginate({ pageSize: 3, cursor })
+      ),
+      desc: await allPages(
+        async (cursor) => await along("desc").paginate({ pageSize: 3, cursor })
+      ),
+    };
+    // Records move in and out of the loaded pages: some inserted, with
+    // every state of the field, and two deleted, one each page's anchor.
+    await insertNotes(
+      fixture,
+      [
+        { title: "k", done: false },
+        { title: "l", done: false, rank: null },
+        { title: "m", done: false, rank: 2 },
+        { title: "n", done: true, rank: 0 },
+      ],
+      "ada",
+      100
+    );
+    const anchors = loaded.asc.pages
+      .slice(0, 2)
+      .map((page) => page.items.at(-1)?._id ?? "");
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        for (const id of anchors) {
+          state.storage.sql.exec(
+            "DELETE FROM sdk_records WHERE record_id = ?",
+            id
+          );
+        }
+      }
+    );
+    for (const order of ["asc", "desc"] as const) {
+      const cursors = loaded[order].pages.map((page) => page.nextCursor);
+      // Each page from where the one before ended to its own end, however
+      // small its size; the last up to its size, as a live list's is.
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const pages = await Promise.all(
+        cursors.map(
+          async (endCursor, page) =>
+            await along(order).paginate({
+              pageSize: 1,
+              cursor: cursors[page - 1] ?? null,
+              endCursor,
+            })
+        )
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const whole = await along(order).collect();
+      expect({
+        ids: idsOf(pages.flatMap((page) => page.items)),
+        ends: pages.slice(0, -1).map((page) => page.nextCursor),
+      }).toStrictEqual({
+        ids: idsOf(whole).slice(0, pages.flatMap((page) => page.items).length),
+        ends: cursors.slice(0, -1),
+      });
+    }
+  });
+
+  it("hold only the caller's own records of an owner-only table, another owner's interleaved", async () => {
+    const fixture = await storeWith("owner");
+    const notes = Array.from({ length: 9 }, (_, index) => ({
+      title: `t${index}`,
+      done: false,
+      rank: index % 3,
+    }));
+    await insertNotes(fixture, notes, "ada");
+    await insertNotes(fixture, notes, "grace", 1000);
+    const ada = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const grace = dbOf(
+      fixture,
+      scopeOf(fixture.schemaHash, { principal: "grace" })
+    );
+    const first = await ada
+      .query("notes")
+      .withIndex("by_done_rank")
+      .paginate({ pageSize: 4, cursor: null });
+    const end = first.nextCursor ?? "";
+    // Grace holding Ada's end cursor still reads only her own records.
+    const theirs = await grace
+      .query("notes")
+      .withIndex("by_done_rank")
+      .paginate({ pageSize: 1, endCursor: end });
+    const mine = await ada
+      .query("notes")
+      .withIndex("by_done_rank")
+      .paginate({ pageSize: 1, endCursor: end });
+    expect({
+      mine: idsOf(mine.items),
+      theirs: [...new Set(theirs.items.map(({ _ownerId }) => _ownerId))],
+    }).toStrictEqual({ mine: idsOf(first.items), theirs: ["grace"] });
+  });
+
+  it("expire with an end of its ID alone once that record went", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: long("a") },
+      { title: long("b") },
+      { title: long("c") },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const first = await byTitle().paginate({ pageSize: 2, cursor: null });
+    const endCursor = first.nextCursor ?? "";
+    const ended = await byTitle().paginate({ pageSize: 1, endCursor });
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "DELETE FROM sdk_records WHERE record_id = ?",
+          first.items.at(-1)?._id ?? ""
+        );
+      }
+    );
+    expect({
+      values: Object.keys(decoded(endCursor)).includes("values"),
+      ended: idsOf(ended.items),
+      gone: await outcome(byTitle().paginate({ pageSize: 1, endCursor })),
+    }).toStrictEqual({
+      values: false,
+      ended: idsOf(first.items),
+      gone: "data.cursor_expired",
+    });
+  });
+
+  it("say where to split them once past twice their size, after their first records", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(
+      fixture,
+      Array.from({ length: 6 }, (_, index) => ({ title: `b${index}` }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const first = await byTitle().paginate({ pageSize: 2 });
+    const end = first.nextCursor ?? "";
+    const within = await byTitle().paginate({ pageSize: 2, endCursor: end });
+    // Records that sort first move into the page: it holds eight.
+    await insertNotes(
+      fixture,
+      Array.from({ length: 6 }, (_, index) => ({ title: `a${index}` })),
+      "ada",
+      100
+    );
+    const grown = await byTitle().paginate({ pageSize: 2, endCursor: end });
+    const fresh = await byTitle().paginate({ pageSize: 2 });
+    expect({
+      within: "splitCursor" in within,
+      grown: grown.items.length,
+      // Where a page of its size from its start ends now.
+      split: grown.splitCursor,
+    }).toStrictEqual({ within: false, grown: 8, split: fresh.nextCursor });
+  });
+
+  it("say where to split them once their records pass half an answer, however few", async () => {
+    const fixture = await storeWith("appMembers");
+    // Four records of 60 KB: within twice a page of three, but past half
+    // of what one answer may carry.
+    await insertNotes(fixture, [
+      ...["a", "b", "c", "d"].map((letter) => ({
+        title: letter.repeat(60_000),
+      })),
+      { title: "e" },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const whole = await byTitle().paginate({ pageSize: 4 });
+    const grown = await byTitle().paginate({
+      pageSize: 3,
+      endCursor: whole.nextCursor ?? "",
+    });
+    const half = await byTitle().paginate({ pageSize: 2 });
+    expect({
+      grown: grown.items.length,
+      // After the records within the first half of their bytes.
+      split: grown.splitCursor,
+      // Answered whole while it fits one answer, and split where half of
+      // its bytes end.
+    }).toStrictEqual({ grown: 4, split: half.nextCursor });
+  });
+
+  it("stop at their end before any filter, never scanning on past it", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: "a0", done: true },
+      { title: "a1", done: true },
+      { title: "a2", done: true },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const doneByTitle = () =>
+      db.query("notes").withIndex("by_title").filter({ done: true });
+    const first = await doneByTitle().paginate({ pageSize: 2 });
+    // Between its end and the next record it matches, more records than
+    // one read may examine, none of them passing the filter.
+    await insertNotes(
+      fixture,
+      Array.from({ length: queryMaxScannedEntries + 1 }, (_, index) => ({
+        title: `a1-${String(index).padStart(6, "0")}`,
+        done: false,
+      })),
+      "ada",
+      100
+    );
+    const ended = await outcome(
+      doneByTitle().paginate({
+        pageSize: 1,
+        endCursor: first.nextCursor ?? "",
+      })
+    );
+    expect(pageIds(ended)).toStrictEqual(idsOf(first.items));
+  });
+
+  it("say where to split them once they grow past what one read may examine, never failing", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: "a" },
+      { title: "z" },
+      { title: "zz" },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const first = await byTitle().paginate({ pageSize: 2 });
+    const end = first.nextCursor ?? "";
+    // A bulk import lands inside the page: more records than one read may
+    // examine between its start and its end.
+    await insertNotes(
+      fixture,
+      Array.from({ length: queryMaxScannedEntries + 1 }, (_, index) => ({
+        title: `m${String(index).padStart(6, "0")}`,
+      })),
+      "ada",
+      100
+    );
+    // Split as a live list splits it, each half in turn. Large enough a
+    // page that only the scan and answer bounds split it.
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byTitle().paginate({
+          pageSize: 5000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      end
+    );
+    const titles = tiled.items.map(({ title }) => title);
+    expect({
+      split: tiled.reads > 1,
+      count: titles.length,
+      first: titles[0],
+      last: titles.at(-1),
+      unique: new Set(titles).size,
+    }).toStrictEqual({
+      split: true,
+      count: queryMaxScannedEntries + 3,
+      first: "a",
+      last: "z",
+      unique: queryMaxScannedEntries + 3,
+    });
+  });
+
+  it("say where to split them once a filter skips more than one read may examine, after the last record read", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: "a", done: true },
+      { title: "z", done: true },
+      { title: "zz", done: true },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const doneByTitle = () =>
+      db.query("notes").withIndex("by_title").filter({ done: true });
+    const first = await doneByTitle().paginate({ pageSize: 2 });
+    // Inside the page, more records than one read may examine, all but
+    // three of which the filter skips: a read stops at the scan bound
+    // having matched few, if any.
+    const stride = 5000;
+    await insertNotes(
+      fixture,
+      Array.from({ length: queryMaxScannedEntries + 1 }, (_, index) => ({
+        title: `m${String(index).padStart(6, "0")}`,
+        done: index % stride === 0,
+      })),
+      "ada",
+      100
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await doneByTitle().paginate({
+          pageSize: 5000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    expect({
+      split: tiled.reads > 1,
+      titles: tiled.items.map(({ title }) => title),
+    }).toStrictEqual({
+      split: true,
+      titles: ["a", "m000000", "m005000", "m010000", "z"],
+    });
+  });
+
+  it("expire with an end of its ID alone whose record moved to or before their start", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: long("a") },
+      { title: long("b") },
+      { title: long("c") },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const first = await byTitle().paginate({ pageSize: 1, cursor: null });
+    const start = first.nextCursor ?? "";
+    const second = await byTitle().paginate({ pageSize: 1, cursor: start });
+    const end = second.nextCursor ?? "";
+    // The record the second page ends at is retitled to sort first.
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE sdk_records SET value_json = json_set(value_json, '$.title', ?) WHERE record_id = ?",
+          long("0"),
+          second.items[0]?._id ?? ""
+        );
+      }
+    );
+    await expect(
+      outcome(
+        byTitle().paginate({ pageSize: 1, cursor: start, endCursor: end })
+      )
+    ).resolves.toBe("data.cursor_expired");
+  });
+
+  it("order text by its code points, as SQLite does, past the Basic Multilingual Plane", async () => {
+    const fixture = await storeWith("appMembers");
+    // UTF-16 puts a surrogate pair (U+1F600) before U+FF21; code points,
+    // and SQLite's bytes, put it after. Accents and other scripts too.
+    const titles = ["a", "é", "z", "Ａ", "😀", "日本", "ß", "Z"];
+    await insertNotes(
+      fixture,
+      titles.map((title) => ({ title }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    for (const order of ["asc", "desc"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const whole = await byTitle().order(order).collect();
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const { pages } = await allPages(
+        async (cursor) =>
+          await byTitle().order(order).paginate({ pageSize: 1, cursor })
+      );
+      const cursors = pages.map((page) => page.nextCursor);
+      // Each page ended where the next starts holds exactly its records.
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const ended = await Promise.all(
+        cursors.slice(0, -1).map(
+          async (endCursor, page) =>
+            await byTitle()
+              .order(order)
+              .paginate({
+                pageSize: 1,
+                cursor: cursors[page - 1] ?? null,
+                endCursor,
+              })
+        )
+      );
+      expect({
+        titles: whole.map(({ title }) => title),
+        ended: ended.map((page) => page.items.map(({ title }) => title)),
+      }).toStrictEqual({
+        titles:
+          order === "asc"
+            ? ["Z", "a", "z", "ß", "é", "日本", "Ａ", "😀"]
+            : ["😀", "Ａ", "日本", "é", "ß", "z", "a", "Z"],
+        ended: pages
+          .slice(0, -1)
+          .map((page) => page.items.map(({ title }) => title)),
+      });
+    }
   });
 });
 

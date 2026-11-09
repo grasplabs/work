@@ -35,7 +35,7 @@ export interface ClientInternals {
   /**
    * Adds a reader of `pager`, which `onChange` tells of every new
    * snapshot; answers the function that removes it. The last one out
-   * releases its window's subscription.
+   * releases its pages' subscriptions.
    */
   subscribePager: (pager: Pager, onChange: () => void) => () => void;
   /** Reads again every query that failed and is still read. */

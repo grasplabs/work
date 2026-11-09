@@ -225,12 +225,11 @@ export class App extends DurableObject<Env> {
   /**
    * Whether core may read one more of `userId`'s live queries of the App
    * now because a write changed what it read
-   * (`querySubscriptionLimits.liveReads`), at `cost` reads: a paginated
-   * list's window costs one per page it reads (query-windows.ts), never
-   * more than the burst. One that may not waits.
+   * (`querySubscriptionLimits.liveReads`): each page a paginated list
+   * follows is one. One that may not waits.
    */
-  admitLiveRead(userId: string, cost = 1): boolean {
-    return this.#liveReads.take(userId, Date.now(), cost);
+  admitLiveRead(userId: string): boolean {
+    return this.#liveReads.take(userId, Date.now(), 1);
   }
 
   /**
@@ -286,14 +285,12 @@ export class App extends DurableObject<Env> {
 
   /**
    * Whether `userId`'s page may ask the App one more thing now
-   * (`pageLimits.requests`), at `count` requests: a paginated list's
-   * window counts one per page it reads (query-windows.ts), never more
-   * than the burst. Asked before the request is read, so one that is
-   * refused or malformed counts too.
+   * (`pageLimits.requests`). Asked before the request is read, so one
+   * that is refused or malformed counts too.
    */
-  admitRequest(userId: string, count = 1): boolean {
+  admitRequest(userId: string): boolean {
     const now = Date.now();
-    const admitted = this.#requests.take(userId, now, count);
+    const admitted = this.#requests.take(userId, now, 1);
     if (!admitted) {
       this.#refused.requests += 1;
       // One line a minute for whoever audits it, not one a request.

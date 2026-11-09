@@ -27,7 +27,6 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { jsonOf } from "@grasp-os/shared/operations";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { queryMaxResults } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
 import { dataErrors, storedFieldsSchema } from "@grasp-os/shared/stores";
@@ -283,7 +282,7 @@ const pageQuery = (
   range: [],
   filter: null,
   order: "desc",
-  terminal: { kind: "paginate", pageSize: size, cursor },
+  terminal: { kind: "paginate", pageSize: size, cursor, endCursor: null },
 });
 
 /** Who `by`'s reads of `open` are recorded as (sensitive-reads.ts). */
@@ -380,6 +379,12 @@ const readPage = async (
 // read with a conformant parser (csv-parse).
 
 /** The kinds whose values are text in a CSV cell, never JSON. */
+/**
+ * How many records each page of an export reads: each page reads the
+ * person's teams and session again first, so fewer, fuller pages.
+ */
+const exportPageSize = 100;
+
 const textKinds: ReadonlySet<string> = new Set(["string", "enum", "id"]);
 
 /** A text cell a spreadsheet would read as a formula, or the guard itself. */
@@ -899,7 +904,7 @@ const exportStream = (
       if (cancelled) {
         return;
       }
-      const page = await readPage(now, table, queryMaxResults, cursor, reached);
+      const page = await readPage(now, table, exportPageSize, cursor, reached);
       if (cancelled) {
         // Let go of meanwhile: the cancel keeps what this page read,
         // once this settles, and nothing more is sent.

@@ -293,9 +293,16 @@ export interface AppErrorLog {
  * delivers.
  */
 export const querySubscriptionLimits = {
-  /** Live queries one connection follows at once. */
+  /**
+   * Live queries one connection follows at once, the pages of one
+   * paginated list counting as one.
+   */
   perConnection: 100,
-  /** Live queries one person follows of one App at once, across tabs. */
+  /**
+   * Live queries one person follows of one App at once, across tabs, and
+   * subscriptions one connection holds, every page of a list counted:
+   * each holds a watch in the App's store.
+   */
   perPerson: 500,
   /** How long core gathers a query's changes before it reads it again. */
   coalesceMs: 50,

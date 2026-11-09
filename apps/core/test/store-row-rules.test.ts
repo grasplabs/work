@@ -13,10 +13,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
-import {
-  queryMaxResults,
-  queryMaxScannedEntries,
-} from "@grasp-os/shared/store-limits";
+import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import { storedFieldsSchema } from "@grasp-os/shared/stores";
 import type { Commit, StoreFields, WriterRoles } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
@@ -1345,8 +1342,8 @@ export const Route = createFileRoute("/")({ component: Requests });
   it("finishes an export of a table no team rule reads, whatever teams the builder joins meanwhile", async () => {
     const { builderId, appId, version, sales } = await dataPage();
     const rpc = dataRpcOf(builderId);
-    // More memos than one page of an export reads.
-    const count = queryMaxResults + 50;
+    // More memos than one page of an export reads (100).
+    const count = 150;
     await rpc.import(appId, "memos", {
       version,
       csv: `text\n${Array.from({ length: count }, (_, index) => `Memo ${index}`).join("\n")}\n`,

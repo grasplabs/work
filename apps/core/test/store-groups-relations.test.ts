@@ -2,11 +2,7 @@ import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import type { Id } from "@grasp-os/sdk";
 import { databaseReader, manifestText } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
-import {
-  queryMaxGroups,
-  queryMaxRelations,
-  queryMaxScannedEntries,
-} from "@grasp-os/shared/store-limits";
+import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
 import type { StoreFields } from "@grasp-os/shared/stores";
@@ -18,6 +14,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { tiledPage } from "./split-pages.ts";
 import { accessedManifest, appliedTables } from "./store-schemas.ts";
 
 // Grouped aggregates and related records of a business store
@@ -200,6 +197,9 @@ const orders: Row[] = [
   { id: "o7", fields: { status: "won", region: "US", paid: true, amount: -4 } },
 ];
 
+/** `index` as five digits, so records sort in its order. */
+const numbered = (index: number): string => String(index).padStart(5, "0");
+
 describe("groups", () => {
   it("count and aggregate every record the query reads, null and absence apart, in key order", async () => {
     const fixture = await storeWith();
@@ -327,31 +327,29 @@ describe("groups", () => {
     });
   });
 
-  it("are refused past their bounds, clearly", async () => {
+  it("answer every group the read examines, and refuse what isn't one, clearly", async () => {
+    // More groups than a page of records: a grouped read answers as many
+    // as the records it examines make, bounded only by what it reads.
+    const manyGroups = 150;
     const fixture = await storeWith();
     await put(
       fixture,
       "orders",
-      Array.from({ length: queryMaxGroups + 1 }, (_, index) => ({
+      Array.from({ length: manyGroups }, (_, index) => ({
         id: `g${index}`,
         fields: { status: `s${index}`, region: "EU", paid: true },
       }))
     );
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
     const scope = scopeOf(fixture.schemaHash);
+    const byStatus = await db.query("orders").group({ by: ["status"] });
+    const byThree = await db
+      .query("orders")
+      .group({ by: ["status", "region", "paid"] });
     expect({
-      groups: await outcome(
-        async () => await db.query("orders").group({ by: ["status"] })
-      ),
-      // Within the bound, by a field with fewer values.
+      groups: byStatus.length,
       regions: await db.query("orders").group({ by: ["region"] }),
-      sdkThree: await outcome(
-        async () =>
-          await db.query("orders").group({
-            // @ts-expect-error -- at most two fields
-            by: ["status", "region", "paid"],
-          })
-      ),
+      threeFields: byThree.length,
       sdkText: await outcome(
         async () =>
           await db.query("orders").group({
@@ -367,13 +365,11 @@ describe("groups", () => {
             .with("customer")
             .group({ by: ["region"] })
       ),
-      storeThree: await outcome(
+      storeTwice: await outcome(
         async () =>
           await fixture.store.read(
             scope,
-            ordersRequest({
-              terminal: groupBy(["status", "region", "paid"]),
-            })
+            ordersRequest({ terminal: groupBy(["region", "region"]) })
           )
       ),
       storeText: await outcome(
@@ -400,21 +396,21 @@ describe("groups", () => {
           )
       ),
     }).toStrictEqual({
-      groups: "data.group_limit",
+      groups: manyGroups,
       regions: [
         {
           key: { region: "EU" },
-          count: queryMaxGroups + 1,
+          count: manyGroups,
           sum: {},
           avg: {},
           min: {},
           max: {},
         },
       ],
-      sdkThree: "query.invalid_terminal",
+      threeFields: manyGroups,
       sdkText: "query.invalid_terminal",
       sdkWith: "query.invalid_terminal",
-      storeThree: "data.invalid_query",
+      storeTwice: "data.invalid_query",
       storeText: "data.invalid_query",
       storeManaged: "data.invalid_query",
       storeObject: "data.invalid_query",
@@ -566,6 +562,307 @@ describe("related records", () => {
     });
   });
 
+  it("count toward splitting a page with an end, so a page loading them splits before it passes an answer", async () => {
+    const fixture = await storeWith();
+    // Small orders, each naming a customer of 60 KB: only what `with`
+    // loads makes the page large.
+    await put(
+      fixture,
+      "customers",
+      Array.from({ length: 4 }, (_, index) => ({
+        id: `big${index}`,
+        fields: { name: String(index).repeat(60_000) },
+      }))
+    );
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: 5 }, (_, index) => ({
+        id: `w${index}`,
+        fields: { region: "EU", paid: true, customer: `big${index % 4}` },
+      }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const withCustomers = () => db.query("orders").with("customer");
+    const whole = await withCustomers().paginate({ pageSize: 4 });
+    const grown = await withCustomers().paginate({
+      pageSize: 3,
+      endCursor: whole.nextCursor ?? "",
+    });
+    const half = await withCustomers().paginate({ pageSize: 2 });
+    expect({
+      grown: grown.items.length,
+      split: grown.splitCursor,
+      // Answered whole while it fits one answer, and split where half of
+      // its bytes end.
+    }).toStrictEqual({ grown: 4, split: half.nextCursor });
+  });
+
+  it("count toward what a page with an end may examine, so one loading them past it splits instead of failing", async () => {
+    const fixture = await storeWith();
+    await put(fixture, "orders", [
+      { id: "m", fields: { region: "M", paid: true } },
+      { id: "z", fields: { region: "Z", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRegion = () =>
+      db.query("orders").withIndex("by_region").with("customer");
+    const first = await byRegion().paginate({ pageSize: 1 });
+    // An import lands inside the page: 6,000 orders, each naming its own
+    // customer. Their records and the customers loaded with them are
+    // more than one read may examine.
+    const imported = 6000;
+    await put(
+      fixture,
+      "customers",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `c${numbered(index)}`,
+        fields: { name: `c${numbered(index)}` },
+      }))
+    );
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `i${numbered(index)}`,
+        fields: {
+          region: `A${numbered(index)}`,
+          paid: true,
+          customer: `c${numbered(index)}`,
+        },
+      }))
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byRegion().paginate({
+          pageSize: 10_000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    // Each order with the customer it names.
+    const loaded = tiled.items.filter(
+      ({ customer, _with }) =>
+        _with.customer !== null &&
+        !("_withheld" in _with.customer) &&
+        _with.customer.name === customer
+    );
+    expect({
+      split: tiled.reads > 1,
+      orders: tiled.items.length,
+      unique: new Set(tiled.items.map(({ _id }) => _id)).size,
+      last: tiled.items.at(-1)?._id,
+      loaded: loaded.length,
+    }).toStrictEqual({
+      split: true,
+      orders: imported + 1,
+      unique: imported + 1,
+      last: "m",
+      loaded: imported,
+    });
+  });
+
+  it("load record by record for a page with an end, so lists of IDs past what one read may examine split it instead of failing", async () => {
+    const fixture = await storeWith({ products: "appMembers" });
+    await put(fixture, "orders", [
+      { id: "m", fields: { region: "M", paid: true } },
+      { id: "z", fields: { region: "Z", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRegion = () =>
+      db.query("orders").withIndex("by_region").with("items");
+    const first = await byRegion().paginate({ pageSize: 1 });
+    // An import lands inside the page: 5,000 small orders of five
+    // products each, far more IDs than one read may examine.
+    const imported = 5000;
+    const perOrder = 5;
+    await put(
+      fixture,
+      "products",
+      Array.from({ length: imported * perOrder }, (_, index) => ({
+        id: `p${numbered(index)}`,
+        fields: { title: `p${numbered(index)}` },
+      }))
+    );
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `i${numbered(index)}`,
+        fields: {
+          region: `A${numbered(index)}`,
+          paid: true,
+          items: Array.from(
+            { length: perOrder },
+            (_item, at) => `p${numbered(index * perOrder + at)}`
+          ),
+        },
+      }))
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byRegion().paginate({
+          pageSize: 10_000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    // Each order with every product it names, in its order.
+    const loaded = tiled.items.filter(
+      ({ items, _with }) =>
+        Array.isArray(_with.items) &&
+        _with.items.length === perOrder &&
+        _with.items.every(
+          (product, at) => product !== null && product.title === items?.[at]
+        )
+    );
+    expect({
+      split: tiled.reads > 1,
+      orders: tiled.items.length,
+      unique: new Set(tiled.items.map(({ _id }) => _id)).size,
+      last: tiled.items.at(-1)?._id,
+      loaded: loaded.length,
+    }).toStrictEqual({
+      split: true,
+      orders: imported + 1,
+      unique: imported + 1,
+      last: "m",
+      loaded: imported,
+    });
+  });
+
+  it("load record by record for a page with an end, so IDs of records gone past what one read may examine split it instead of failing", async () => {
+    const fixture = await storeWith({ products: "appMembers" });
+    await put(fixture, "orders", [
+      { id: "m", fields: { region: "M", paid: true } },
+      { id: "z", fields: { region: "Z", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRegion = () =>
+      db.query("orders").withIndex("by_region").with("items");
+    const first = await byRegion().paginate({ pageSize: 1 });
+    // An import lands inside the page: 5,000 orders naming ten products
+    // each that are gone. Each ID costs an entry to look up, yet adds
+    // almost nothing to an answer.
+    const imported = 5000;
+    const perOrder = 10;
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `i${numbered(index)}`,
+        fields: {
+          region: `A${numbered(index)}`,
+          paid: true,
+          items: Array.from(
+            { length: perOrder },
+            (_item, at) => `g${numbered(index * perOrder + at)}`
+          ),
+        },
+      }))
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byRegion().paginate({
+          pageSize: 10_000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    // Each order with null for every product it names.
+    const looked = tiled.items.filter(
+      ({ _with }) =>
+        Array.isArray(_with.items) &&
+        _with.items.length === perOrder &&
+        _with.items.every((product) => product === null)
+    );
+    expect({
+      split: tiled.reads > 1,
+      orders: tiled.items.length,
+      unique: new Set(tiled.items.map(({ _id }) => _id)).size,
+      last: tiled.items.at(-1)?._id,
+      looked: looked.length,
+    }).toStrictEqual({
+      split: true,
+      orders: imported + 1,
+      unique: imported + 1,
+      last: "m",
+      looked: imported,
+    });
+  });
+
+  it("load record by record for a page with an end, so large related records past what one read may examine split it instead of failing", async () => {
+    const fixture = await storeWith();
+    await put(fixture, "orders", [
+      { id: "m", fields: { region: "M", paid: true } },
+      { id: "z", fields: { region: "Z", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRegion = () =>
+      db.query("orders").withIndex("by_region").with("customer");
+    const first = await byRegion().paginate({ pageSize: 1 });
+    // An import lands inside the page: 400 small orders, each naming a
+    // customer of 50 KB, more bytes than one read may examine.
+    const imported = 400;
+    const padding = "x".repeat(50_000);
+    await put(
+      fixture,
+      "customers",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `c${numbered(index)}`,
+        fields: { name: `c${numbered(index)}${padding}` },
+      }))
+    );
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `i${numbered(index)}`,
+        fields: {
+          region: `A${numbered(index)}`,
+          paid: true,
+          customer: `c${numbered(index)}`,
+        },
+      }))
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byRegion().paginate({
+          pageSize: 10_000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    // Each order with the customer it names.
+    const loaded = tiled.items.filter(
+      ({ customer, _with }) =>
+        _with.customer !== null &&
+        !("_withheld" in _with.customer) &&
+        _with.customer.name === `${customer}${padding}`
+    );
+    expect({
+      split: tiled.reads > 1,
+      orders: tiled.items.length,
+      unique: new Set(tiled.items.map(({ _id }) => _id)).size,
+      last: tiled.items.at(-1)?._id,
+      loaded: loaded.length,
+    }).toStrictEqual({
+      split: true,
+      orders: imported + 1,
+      unique: imported + 1,
+      last: "m",
+      loaded: imported,
+    });
+  });
+
   it("are refused past their bounds, clearly", async () => {
     const fixture = await storeWith();
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
@@ -583,18 +880,6 @@ describe("related records", () => {
         async () =>
           await fixture.store.read(scope, ordersRequest({ with: ["region"] }))
       ),
-      storeMany: await outcome(
-        async () =>
-          await fixture.store.read(
-            scope,
-            ordersRequest({
-              with: Array.from(
-                { length: queryMaxRelations + 1 },
-                (_, index) => `f${index}`
-              ),
-            })
-          )
-      ),
       storeCount: await outcome(
         async () =>
           await fixture.store.read(
@@ -606,8 +891,55 @@ describe("related records", () => {
       sdkField: "query.invalid_terminal",
       sdkCount: "query.invalid_terminal",
       storeField: "data.invalid_query",
-      storeMany: "data.invalid_query",
       storeCount: "data.invalid_query",
     });
+  });
+});
+
+describe("a grouped read past SQLite's own limits", () => {
+  it("is refused as an invalid query, never a raw SQLite error", async () => {
+    // Very many numeric fields, each aggregated four ways: a statement
+    // longer, and wider, than SQLite takes.
+    const fields = Array.from({ length: 600 }, (_, index) => `m${index}`);
+    const wide = defineSchema({
+      metrics: defineTable(
+        Object.fromEntries(
+          fields.map((field) => [field, v.number().optional()])
+        )
+      ),
+    });
+    const store = await openStore(env, await storeOfNewApp(env, builder));
+    const { schemaHash } = await appliedTables(
+      store,
+      manifestText(
+        accessedManifest(wide, {
+          tables: { metrics: { read: "appMembers", write: "appMembers" } },
+        })
+      )
+    );
+    await expect(
+      outcome(
+        async () =>
+          await store.read(scopeOf(schemaHash), {
+            kind: "query",
+            query: {
+              descriptorVersion: 1,
+              table: "metrics",
+              index: null,
+              range: [],
+              filter: null,
+              order: "asc",
+              terminal: {
+                kind: "group",
+                by: ["m0"],
+                sum: fields,
+                avg: fields,
+                min: fields,
+                max: fields,
+              },
+            },
+          })
+      )
+    ).resolves.toBe("data.invalid_query");
   });
 });

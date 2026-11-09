@@ -1,18 +1,16 @@
 import type { Json } from "@grasp-os/shared/json";
-import { queryMaxResults } from "@grasp-os/shared/store-limits";
+import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 
 import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
-import { loading, show } from "./client-query-entry.ts";
 import type { QueryEntry } from "./client-query-entry.ts";
 import type { ReadReference } from "./client-request.ts";
-import { nothingRanCodes } from "./refusals.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 /**
- * What a paginated list shows: the ordered records of its
- * loaded window, whether more follow, whether it is loading, and how to
- * load more. Pagination controls, not an operation result.
+ * What a paginated list shows: the ordered records of its loaded pages,
+ * whether more follow, whether it is loading, and how to load more.
+ * Pagination controls, not an operation result.
  */
 export interface PaginatedQueryView<Item = unknown> {
   readonly items: Item[];
@@ -20,7 +18,7 @@ export interface PaginatedQueryView<Item = unknown> {
   readonly isLoading: boolean;
   /**
    * Loads `pageSize` more records (the list's `initialPageSize` unless
-   * set, 1 to 100): resolves once the larger window shows, or at once
+   * set) as one more page: resolves once that page shows, or at once
    * when there is no more or the list isn't read; rejects with a
    * structured error, which the list also throws while rendering. A call
    * while the list loads joins that load.
@@ -34,59 +32,91 @@ export interface PagerSnapshot {
   readonly error: GraspError | undefined;
 }
 
-/** A Load More under way: the larger window, followed until core pushes it. */
-export interface Extension {
-  readonly extent: number;
+/** A page as its query answered it. */
+export interface PageValue {
+  readonly items: readonly unknown[];
+  readonly hasMore: boolean;
+  readonly nextCursor: string | null;
+  /** Where core says to split the page (`readPage`), if it grew too long. */
+  readonly splitCursor?: string;
+}
+
+/** One of a list's pages: a live query of its own. */
+export interface ListPage {
+  /** Where it starts: null for the first page. */
+  readonly cursor: string | null;
+  /**
+   * Where it ends, once a page follows it: the cursor that page starts
+   * at, so records moving in and out of it never shift the pages after.
+   */
+  readonly endCursor: string | null;
+  readonly pageSize: number;
   readonly entry: QueryEntry;
+  /** What stops following it, while the list has readers. */
   stop: (() => void) | undefined;
-  /** How many snapshots its entry had shown when it began. */
-  readonly since: number;
-  /** Whether its entry was current already: followed, and pushed to. */
-  current: boolean;
-  readonly done: PromiseWithResolvers<null>;
+  /**
+   * What it showed before it was given its end or split, shown instead
+   * of its own answer until that comes (and, once split, its other half's
+   * too): the same records, so nothing flickers.
+   */
+  held: PageValue | undefined;
+  /** The other half of the page it was split from, if it was. */
+  twin: ListPage | undefined;
 }
 
 /** One paginated list, by reference, arguments and first page size. */
 export interface Pager {
   readonly key: string;
   readonly reference: ReadReference;
+  /** Its arguments, without `pagination`. */
   readonly input: Json;
   readonly initialPageSize: number;
-  /** How many records its window holds at most: what it loaded so far. */
-  extent: number;
-  /** The query of the window it shows. */
-  current: QueryEntry;
-  /** What stops following it, while the list has readers. */
-  stopCurrent: (() => void) | undefined;
-  extension: Extension | undefined;
-  /** What a Load More before the first window waits on. */
-  first: PromiseWithResolvers<null> | undefined;
+  /** Its pages in order, each followed while the list has readers. */
+  pages: ListPage[];
+  /** What Load Mores wait on: the last page's first answer. */
+  waiting: PromiseWithResolvers<null> | undefined;
+  /**
+   * The records it showed before it started again (a cursor expired),
+   * shown until its first page answers.
+   */
+  held: readonly unknown[] | undefined;
+  /** How many records it loads again after starting again, if it does. */
+  refill: number | undefined;
   /** A Load More's failure, shown until the list is tried again. */
   failure: GraspError | undefined;
   snapshot: PagerSnapshot;
-  /** The window value its snapshot shows, to tell a new one. */
-  shown: unknown;
+  /** The page values its snapshot shows, to tell a new one. */
+  shown: readonly unknown[];
   readonly listeners: Set<() => void>;
   evict: ReturnType<typeof setTimeout> | undefined;
   loadMore: (pageSize?: number) => Promise<void>;
 }
 
-/** A window's records and whether more follow, as core pushed it. */
-export const windowOf = (
-  value: unknown
-): { items: unknown[]; hasMore: boolean } | undefined =>
+/** A page's records, whether more follow and where, as core pushed it. */
+export const pageOf = (value: unknown): PageValue | undefined =>
   isPlainObject(value) &&
   Array.isArray(value.items) &&
-  typeof value.hasMore === "boolean"
-    ? { items: value.items, hasMore: value.hasMore }
+  typeof value.hasMore === "boolean" &&
+  (value.nextCursor === null || typeof value.nextCursor === "string")
+    ? {
+        items: value.items,
+        hasMore: value.hasMore,
+        nextCursor: value.nextCursor,
+        ...(typeof value.splitCursor === "string"
+          ? { splitCursor: value.splitCursor }
+          : {}),
+      }
     : undefined;
 
-/** Whether `size` is a page size a list asks for: 1 to `queryMaxResults`. */
+/**
+ * Whether `size` is a page size a list asks for: 1 up to the most records
+ * one read may examine, which no page answers past.
+ */
 export const isPageSize = (size: unknown): size is number =>
   typeof size === "number" &&
   Number.isInteger(size) &&
   size >= 1 &&
-  size <= queryMaxResults;
+  size <= queryMaxScannedEntries;
 
 /** A page size a list can't ask for, named by `name`. */
 export const pageSizeError = (name: string): GraspError =>
@@ -94,7 +124,7 @@ export const pageSizeError = (name: string): GraspError =>
     issues: [
       {
         code: "invalid_page_size",
-        message: `${name} is a whole number from 1 to ${queryMaxResults}.`,
+        message: `${name} is a whole number from 1 to ${queryMaxScannedEntries}.`,
         path: [name],
       },
     ],
@@ -113,115 +143,101 @@ export const skippedPage: PagerSnapshot = Object.freeze({
   error: undefined,
 });
 
+/** What `page`'s own query answered, if it answered a page. */
+export const ownPage = (page: ListPage): PageValue | undefined =>
+  page.entry.snapshot.error === undefined
+    ? pageOf(page.entry.snapshot.value)
+    : undefined;
+
+/** What `page` shows now: what it holds, else its own answer. */
+export const shownPage = (page: ListPage): PageValue | undefined =>
+  page.held ?? ownPage(page);
+
 /**
- * What a list's readers see: the window `current`
- * shows, or its failure or the list's own (`failure`); loading until the
- * first window shows, and while a Load More is `extending` it.
+ * What `page` shows once core pushed it since it was followed: never an
+ * answer cached from before (a list started again may get one), whose
+ * cursor may no longer apply.
+ */
+export const freshPage = (page: ListPage): PageValue | undefined =>
+  (page.entry.live?.revision ?? 0) > 0 ? shownPage(page) : undefined;
+
+/**
+ * What a list's readers see: the records of its pages in order, up to the
+ * first that shows nothing yet; a page's failure or the list's own
+ * (`failure`); loading while any page shows nothing yet.
  */
 export const snapshotOf = (
-  current: QueryEntry,
-  failure: GraspError | undefined,
-  extending: boolean,
-  loadMore: Pager["loadMore"]
-): PagerSnapshot => {
-  const { error, value } = current.snapshot;
-  const failed = error ?? failure;
-  const window = error === undefined ? windowOf(value) : undefined;
+  pager: Pager
+): { snapshot: PagerSnapshot; shown: unknown[] } => {
+  const items: unknown[] = [];
+  const shown: unknown[] = [];
+  let hasMore = false;
+  let isLoading = false;
+  let error: GraspError | undefined;
+  for (const page of pager.pages) {
+    const own = ownPage(page);
+    const value = page.held ?? own;
+    ({ error } = page.entry.snapshot);
+    if (error !== undefined) {
+      break;
+    }
+    if (value === undefined) {
+      isLoading = pager.failure === undefined;
+      break;
+    }
+    // By what core pushed, or what the page held: the same objects until
+    // either changes.
+    shown.push(page.held ?? page.entry.snapshot.value);
+    items.push(...value.items);
+    ({ hasMore } = value);
+  }
+  // Started again: what it showed stays until its first page answers.
+  const restarting = pager.held !== undefined;
+  const failed = error ?? pager.failure;
+  // A list whose page failed shows nothing: a page refused (access lost,
+  // say) takes the pages before it with it, a split half's held records
+  // too. A Load More's own failure keeps what shows.
+  let shownItems: unknown[] = items;
+  if (error !== undefined) {
+    shownItems = [];
+  } else if (restarting) {
+    shownItems = [...(pager.held ?? [])];
+  }
   return {
-    view: {
-      items: window?.items ?? [],
-      hasMore: window?.hasMore ?? false,
-      isLoading: failed === undefined && (window === undefined || extending),
-      loadMore,
+    snapshot: {
+      view: {
+        items: shownItems,
+        hasMore,
+        isLoading,
+        loadMore: pager.loadMore,
+      },
+      error: failed,
     },
-    error: failed,
+    shown: restarting ? [pager.held] : shown,
   };
 };
 
 /**
- * Something `pager` shows changed: its Load More's window shows once
- * core pushed it after the Load More began (or at once, when it was
- * current already), or fails it; then the list's readers are told of
- * its new snapshot, if it is new.
+ * Tells `pager`'s readers of its new snapshot, if it is new: another
+ * page's value, failure, loading state or whether more follow.
  */
 export const pagerChanged = (pager: Pager): void => {
-  const { extension } = pager;
-  if (extension !== undefined) {
-    const { entry } = extension;
-    const fresh = extension.current || entry.settled > extension.since;
-    const { error } = entry.snapshot;
-    if (fresh && error !== undefined) {
-      // Writes kept the larger window from being read whole, say: the
-      // Load More fails, the window shown stays, a later one afresh.
-      // oxlint-disable-next-line no-use-before-define -- the two call each other
-      failExtension(pager, extension, error);
-      return;
-    } else if (fresh && windowOf(entry.snapshot.value) !== undefined) {
-      // The larger window, whole: it replaces the smaller one at once.
-      const before = pager.stopCurrent;
-      pager.current = entry;
-      pager.stopCurrent = extension.stop;
-      pager.extent = extension.extent;
-      pager.extension = undefined;
-      before?.();
-      extension.done.resolve(null);
-    }
-  }
-  const { error, value } = pager.current.snapshot;
-  if (pager.first !== undefined) {
-    if (error !== undefined) {
-      pager.first.reject(error);
-      pager.first = undefined;
-    } else if (windowOf(value) !== undefined) {
-      pager.first.resolve(null);
-      pager.first = undefined;
-    }
-  }
-  const next = snapshotOf(
-    pager.current,
-    pager.failure,
-    pager.extension !== undefined,
-    pager.loadMore
-  );
+  const { snapshot, shown } = snapshotOf(pager);
   const before = pager.snapshot;
   if (
-    next.error === before.error &&
-    next.view.hasMore === before.view.hasMore &&
-    next.view.isLoading === before.view.isLoading &&
-    value === pager.shown
+    snapshot.error === before.error &&
+    snapshot.view.hasMore === before.view.hasMore &&
+    snapshot.view.isLoading === before.view.isLoading &&
+    shown.length === pager.shown.length &&
+    shown.every((value, position) => value === pager.shown[position])
   ) {
     return;
   }
-  pager.shown = value;
-  pager.snapshot = next;
+  pager.shown = shown;
+  pager.snapshot = snapshot;
   for (const listener of pager.listeners) {
     listener();
   }
-};
-
-/**
- * Ends `extension` with `error`: the Load More rejects. A failure that
- * may pass (writes tearing the window, the person's budget, a busy
- * sandbox) keeps the list as it is, to try again; any other is the
- * list's failure, thrown while rendering.
- */
-export const failExtension = (
-  pager: Pager,
-  extension: Extension,
-  error: GraspError
-): void => {
-  pager.extension = undefined;
-  extension.stop?.();
-  if (error.retryable || nothingRanCodes.has(error.code)) {
-    // Nothing of it stays to be taken for a fresh answer later.
-    if (extension.entry.listeners.size === 0) {
-      show(extension.entry, loading);
-    }
-  } else {
-    pager.failure = error;
-  }
-  extension.done.reject(error);
-  pagerChanged(pager);
 };
 
 /** Records `failure` as `pager`'s, to throw while rendering, and answers it. */

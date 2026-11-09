@@ -48,8 +48,6 @@ export interface QueryEntry {
   readonly input: Json;
   /** Its request as the host reads it. */
   readonly request: string;
-  /** Whether it reads a paginated list's window (core's query-windows.ts). */
-  readonly window: boolean;
   snapshot: QuerySnapshot;
   /** Components reading it now. */
   readonly listeners: Set<() => void>;
@@ -148,36 +146,6 @@ export const settleRead = (
     show(entry, { value: settled.value, error: undefined });
   }
   return settled.value;
-};
-
-/**
- * Settles one read of a window, the one way every such read ends (core's query-windows.ts): its window is shown; or its
- * failure (writes kept tearing it, the person's budget spent partway, a
- * lost answer) is thrown to the read's caller, the window already shown
- * kept, or shown when nothing is, so a first load throws it. Never read
- * again here: a window too large for the person's budget is refused,
- * with when to try again, not started over.
- */
-export const settleWindow = (
-  entry: QueryEntry,
-  read: { readonly number: number; readonly changes: number },
-  settled: Settled
-): unknown => {
-  // Only a failure that may pass keeps the window shown; any other is
-  // shown, as an ordinary query's would be, and thrown while rendering.
-  const passing =
-    settled.kind === "lost" ||
-    (settled.kind === "failed" &&
-      (settled.error.retryable || nothingRanCodes.has(settled.error.code)));
-  if (passing && entry.snapshot.value !== undefined) {
-    // Kept, and old: writes may have landed since (a torn read says
-    // they did), so trying again reads it, whichever list shows it.
-    entry.stale = true;
-    throw settled.kind === "failed"
-      ? settled.error
-      : clientError("function.unreachable");
-  }
-  return settleRead(entry, read, settled);
 };
 
 /** How long a query no one reads stays cached: across a quick remount. */

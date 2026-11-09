@@ -139,10 +139,10 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
     const drafted = notesFiles("drafted");
     const broken = await write(
       {
-        // Past what a query takes at once: it fails its type check.
+        // A count that isn't a number: it fails its type check.
         "server/notes.ts": (drafted.files["server/notes.ts"] ?? "").replace(
           'ctx.db.query("notes").take(100)).map',
-          'ctx.db.query("notes").take(1000)).map'
+          'ctx.db.query("notes").take("all")).map'
         ),
         "src/routes/index.tsx": (
           drafted.files["src/routes/index.tsx"] ?? ""

@@ -258,9 +258,19 @@ import {
 //   inside the object.
 
 /**
+ * SQLite's refusals of a statement past its own limits: a value too big
+ * (a filter comparing with a huge text), a statement too long or with too
+ * many columns (a `group` over very many fields), an expression too deep.
+ * What the query asked for, never the store's fault.
+ */
+const sqliteLimit =
+  /SQLITE_TOOBIG|too big|too many columns|statement too long|too large|too complex|too many terms/iu;
+
+/**
  * `read()`, with SQLite's refusal of an index it doesn't hold (one an
  * older layout or a damaged store lacks) as `data.index_required`, never
- * a scan.
+ * a scan, and its refusal of a query past its limits (`sqliteLimit`) as
+ * `data.invalid_query`, never a raw SQLite error.
  */
 const indexRequired = <Answer>(read: () => Answer): Answer => {
   try {
@@ -268,14 +278,16 @@ const indexRequired = <Answer>(read: () => Answer): Answer => {
   } catch (error) {
     // SQLite's own error, never one of the store's (whose messages may
     // say as much).
-    if (
-      error instanceof Error &&
-      dataErrors.codeOf(error) === undefined &&
-      /no such index/u.test(error.message)
-    ) {
+    if (!(error instanceof Error) || dataErrors.codeOf(error) !== undefined) {
+      throw error;
+    }
+    if (/no such index/u.test(error.message)) {
       // A store whose indexes don't match its schemas needs looking at.
       log.error("store.index_missing", errorFields(error));
       throw dataErrors.create("data.index_required");
+    }
+    if (sqliteLimit.test(error.message)) {
+      throw dataErrors.create("data.invalid_query");
     }
     throw error;
   }
@@ -2163,7 +2175,7 @@ export class StoreHost {
    * compares later (store-reader.ts), handed back with its answer and
    * added to a data error it fails with (`details.generations`), since a
    * read that failed after it looked at records (`data.not_unique`,
-   * `data.result_limit`, ...) depended on them as much as one that
+   * `data.scan_limit`, ...) depended on them as much as one that
    * answered.
    *
    * Handed back the same way (`sensitive`, and `details.sensitive` on a
@@ -2509,6 +2521,13 @@ export class StoreHost {
       terminal.cursor === null
         ? null
         : await decodeCursor(binding, terminal.cursor);
+    // Where a live list's loaded page ends: a cursor of the same query,
+    // checked as its start is, and handed back as the page's next cursor
+    // unchanged, so the page after it goes on starting where it did.
+    const end =
+      terminal.endCursor === null
+        ? null
+        : await decodeCursor(binding, terminal.endCursor);
     const {
       value: read,
       generations,
@@ -2520,16 +2539,28 @@ export class StoreHost {
       [query.table, ...relatedTables(pinned, reader, query)],
       preview,
       (statements) =>
-        indexRequired(() => readPage(statements, pinned, reader, query, anchor))
+        indexRequired(() =>
+          readPage(statements, pinned, reader, query, anchor, end)
+        )
     );
+    let nextCursor: string | null = null;
+    if (read.hasMore) {
+      nextCursor =
+        terminal.endCursor ??
+        (read.last === undefined
+          ? null
+          : await encodeCursor(binding, read.last));
+    }
+    const splitCursor =
+      read.split === undefined
+        ? undefined
+        : await encodeCursor(binding, read.split);
+    const answer: PageAnswer =
+      nextCursor === null
+        ? { items: read.items, nextCursor: null, hasMore: false }
+        : { items: read.items, nextCursor, hasMore: true };
     const value: PageAnswer =
-      read.hasMore && read.last !== undefined
-        ? {
-            items: read.items,
-            nextCursor: await encodeCursor(binding, read.last),
-            hasMore: true,
-          }
-        : { items: read.items, nextCursor: null, hasMore: false };
+      splitCursor === undefined ? answer : { ...answer, splitCursor };
     return { value, generations, sensitive };
   }
 

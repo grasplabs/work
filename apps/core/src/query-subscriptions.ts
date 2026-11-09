@@ -3,7 +3,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
-import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -22,14 +22,12 @@ import {
   callsWorkflowQuery,
   evaluateAppQuery,
   refusalOf,
-  windowExtentOf,
 } from "./app-functions.ts";
 import type { EvaluatedQuery } from "./app-functions.ts";
 import { callDraftOn } from "./draft-runs.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { delivering, leaseKey } from "./page-delivery.ts";
 import type { PageLease } from "./page-delivery.ts";
-import { windowPages } from "./query-windows.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { Subscription } from "./subscription.ts";
 
@@ -40,10 +38,11 @@ import { Subscription } from "./subscription.ts";
 // changed a table the query read (store-watches.ts), and core reads it
 // again and pushes the new result. The page never asks again, and no
 // App code subscribes or broadcasts.
-// A paginated list (`usePaginatedQuery`) follows its window the same
-// way: the request names the extent, and every read reads the whole
-// window again from the start as one state of the store
-// (query-windows.ts), so a push never mixes a fresh page with a stale one.
+// A paginated list (`usePaginatedQuery`) follows each of its pages the
+// same way, as a query of its own: a page's request carries its cursor
+// and, once a page follows it, the cursor it ends at, so it keeps its
+// bounds as records move in and out (store-queries.ts, `readPage`), and
+// a write re-reads and pushes only the pages whose answer changed.
 //
 // Who a connection reads for, and how, is its `LiveReads`: a page's are
 // the person behind its session, the App's current release and its
@@ -125,12 +124,14 @@ import { Subscription } from "./subscription.ts";
 //   from a fresh read; the page orders pushes by subscription and
 //   revision, so an older connection's late push is dropped.
 // - Fan-out cost: a connection follows at most `perConnection` queries
-//   (`page.too_many_queries`), a person `perPerson` of one App's store,
-//   held by the store. Reads a write causes are charged to the person's
+//   (`page.too_many_queries`), the pages of one paginated list counting
+//   as one, and at most `perPerson` subscriptions in all, every page
+//   counted; a person follows `perPerson` of one App's store, held by
+//   the store. So one list holds up to about `perPerson` pages, each kept
+//   near its size by splitting (store-queries.ts, `readPage`). Reads a write causes are charged to the person's
 //   `liveReads` budget of the App, held by the App's host across tabs;
-//   past it a read waits and gathers every change meanwhile; a paginated
-//   list's window is charged one read per page it takes (query-windows.ts,
-//   whose own threat model covers its coherence and bounds). A connection
+//   past it a read waits and gathers every change meanwhile; each page a
+//   paginated list follows is one live query, charged as one. A connection
 //   runs `concurrentReads` reads at once, the rest queued, and gathers a
 //   query's changes for longer the more of its queries wait (up to
 //   `maxCoalesceMs`). A query is never read twice at once.
@@ -191,8 +192,6 @@ interface Snapshot {
   readonly bytes: number;
   /** The roles it was read under (`rolesOf`): it goes out under those only. */
   readonly roles: string;
-  /** Which of its evaluation's reads it came from (`Evaluation.reads`). */
-  readonly read: number;
   /**
    * Where it stands among its evaluation's pushes (`Evaluation.revision`):
    * what each subscription is sent by, whatever revision the push names.
@@ -255,13 +254,10 @@ export interface SnapshotCallback {
 /** One page's subscription to a query. */
 interface Listener {
   readonly toPage: SnapshotCallback;
+  /** The list it counts toward (`listKeyOf`). */
+  readonly list: string;
   /** The latest of its evaluation's pushes sent to it (`Snapshot.seq`). */
   sent: number;
-  /**
-   * The first of its evaluation's reads it takes a result of: one begun
-   * after it subscribed, for a window another subscription reads.
-   */
-  firstRead: number;
   inFlight: boolean;
   /** The one result waiting while one is in flight. */
   pending: Snapshot | undefined;
@@ -320,10 +316,6 @@ interface Evaluation {
   dirty: boolean;
   /** Its next read is one a write caused, charged to the person's budget. */
   charged: boolean;
-  /** What one read costs of that budget: a window's pages, else one. */
-  readonly cost: number;
-  /** Whether it reads a paginated list's window (query-windows.ts). */
-  readonly window: boolean;
   /**
    * Whether it is a workflow reference's query, read again when the
    * person's runs of the App change (`#runsChanged`): it reads no store.
@@ -338,8 +330,6 @@ interface Evaluation {
   budgetWaitMs: number;
   /** Reads in a row that writes tore (`maxTornReads`). */
   torn: number;
-  /** How many reads of it began: the latest is the one running, if any. */
-  reads: number;
   closed: boolean;
   /** The roles its latest result was read under (`rolesOf`). */
   roles?: string;
@@ -405,11 +395,10 @@ export interface LiveReads<By extends Reader> {
    */
   roles: (by: By, app: AppId) => Promise<string | undefined>;
   /**
-   * Whether a read costing `cost` of `by`'s live reads may run now, within
-   * their budget: a read a write caused, or a window's pages past what
-   * its read paid.
+   * Whether a read a write caused may run now, within `by`'s budget of
+   * live reads.
    */
-  admit: (by: By, app: AppId, cost: number) => Promise<boolean>;
+  admit: (by: By, app: AppId) => Promise<boolean>;
   /**
    * Whether the connection follows each App's revocations (`#follow`):
    * a page's do, for the person behind its session; a test's fixtures
@@ -420,16 +409,14 @@ export interface LiveReads<By extends Reader> {
   forget: () => void;
   /**
    * Reads the query `request` names as `by`, as `build`, by
-   * `deadline`, a window's pages past what its read paid charged through
-   * `chargePages`; a throw is a refusal that ends the subscription.
+   * `deadline`; a throw is a refusal that ends the subscription.
    */
   evaluate: (
     by: By,
     app: AppId,
     build: PageLease | undefined,
     request: string,
-    deadline: number,
-    chargePages: (pages: number) => Promise<void>
+    deadline: number
   ) => Promise<LiveRead>;
 }
 
@@ -444,8 +431,7 @@ const evaluatePage = async (
   app: AppId,
   lease: PageLease | undefined,
   request: string,
-  deadline: number,
-  chargePages: (pages: number) => Promise<void>
+  deadline: number
 ): Promise<EvaluatedQuery> => {
   if (lease?.kind === "draft") {
     let reads: EvaluatedQuery["reads"];
@@ -457,7 +443,6 @@ const evaluatePage = async (
       {
         deadline,
         kind: "query",
-        chargeWindow: chargePages,
         observeReads: (storeId, readSet) => {
           reads = { storeId: storeIdSchema.parse(storeId), readSet };
         },
@@ -471,8 +456,7 @@ const evaluatePage = async (
     app,
     lease?.build,
     "watchQuery",
-    async () =>
-      await evaluateAppQuery(env, by, app, request, deadline, chargePages)
+    async () => await evaluateAppQuery(env, by, app, request, deadline)
   );
 };
 
@@ -490,21 +474,19 @@ export const pageReads = (
   check,
   access,
   roles: async (by, app) => await rolesOf(env, by, app),
-  admit: async (by, app, cost) =>
-    await appHost(env, app).admitLiveRead(by.userId, cost),
+  admit: async (by, app) => await appHost(env, app).admitLiveRead(by.userId),
   revocable: true,
   forget: () => {
     check.forget?.();
   },
-  evaluate: async (by, app, build, request, deadline, chargePages) => {
+  evaluate: async (by, app, build, request, deadline) => {
     const { answer, reads, revision } = await evaluatePage(
       env,
       by,
       app,
       build,
       request,
-      deadline,
-      chargePages
+      deadline
     );
     return {
       result: answer.result,
@@ -541,13 +523,27 @@ const keyOf = (
 };
 
 /**
- * What one read of `request` costs of the person's live-read budget, at
- * least: a paginated list's window one per page (`windowPages`), any
- * other query one. Pages past those are charged as they are read.
+ * What a subscription counts toward the queries a connection follows:
+ * its key (`keyOf`) without its arguments' `pagination`, so the pages of
+ * one paginated list are one query.
  */
-const costOf = (request: string): number => {
-  const extent = windowExtentOf(request);
-  return extent === undefined ? 1 : windowPages(extent);
+const listKeyOf = (
+  app: AppId,
+  build: PageLease | undefined,
+  userId: string,
+  request: string
+): string => {
+  let call: unknown = request;
+  try {
+    const parsed: unknown = JSON.parse(request);
+    if (isRecord(parsed) && isRecord(parsed.input)) {
+      const { pagination: _pagination, ...input } = parsed.input;
+      call = { ...parsed, input };
+    }
+  } catch {
+    // Keyed by its text, as `keyOf` keys it.
+  }
+  return keyOf(app, build, userId, JSON.stringify(call));
 };
 
 /** A refusal as a push carries it. */
@@ -590,8 +586,6 @@ const allHaveLatest = (evaluation: Evaluation): boolean =>
       // One behind the connection's bound reads afresh once the page has
       // room (`#catchUp`), so nothing is kept for it meanwhile.
       listener.behind ||
-      (evaluation.latest !== undefined &&
-        evaluation.latest.read < listener.firstRead) ||
       (listener.pending === undefined &&
         listener.sent >= (evaluation.latest?.seq ?? 0))
   );
@@ -620,6 +614,8 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   #running = 0;
   /** Subscriptions not released. */
   #count = 0;
+  /** How many subscriptions each list it follows holds (`listKeyOf`). */
+  readonly #lists = new Map<string, number>();
   /** Bytes of snapshots handed to the page and not yet taken. */
   #unsent = 0;
   /** The latest look at access, per App and build (`#gate`). */
@@ -681,16 +677,26 @@ export class QuerySubscriptions<By extends Reader = Identity> {
      */
     ended?: () => void
   ): Subscription {
-    if (this.#count >= querySubscriptionLimits.perConnection) {
+    // A paginated list's pages count as one query (`listKeyOf`), so a
+    // long list isn't cut off by the queries a connection follows; every
+    // page still counts toward the connection's subscriptions, as each
+    // holds a watch of the person's in the store (`perPerson`).
+    const list = listKeyOf(app, build, by.userId, request);
+    if (
+      this.#count >= querySubscriptionLimits.perPerson ||
+      (!this.#lists.has(list) &&
+        this.#lists.size >= querySubscriptionLimits.perConnection)
+    ) {
       throw pageErrors.create("page.too_many_queries");
     }
+    this.#lists.set(list, (this.#lists.get(list) ?? 0) + 1);
     const key = keyOf(app, build, by.userId, request);
     const evaluation =
       this.#evaluations.get(key) ?? this.#start(key, app, build, request);
     const listener: Listener = {
       toPage: onSnapshot.dup(),
+      list,
       sent: 0,
-      firstRead: 0,
       inFlight: false,
       pending: undefined,
       behind: false,
@@ -708,19 +714,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // aged since (a run's output past its retention, say), so a
     // subscription that has had nothing is answered by a read of its own.
     const kept = evaluation.latest;
-    if (evaluation.window && (evaluation.revision > 0 || evaluation.running)) {
-      // A window already read, or being read, for another subscription:
-      // this one, a Load
-      // More's, gets only a read begun after it, never a result read
-      // before, which may be older than a smaller window the page shows
-      // already. A read on its way is not its; the next one is.
-      listener.firstRead = evaluation.reads + 1;
-      if (evaluation.running) {
-        evaluation.dirty = true;
-      } else if (!evaluation.queued && evaluation.timer === undefined) {
-        this.#enqueue(evaluation, false);
-      }
-    } else if (kept !== undefined) {
+    if (kept !== undefined) {
       // A result kept for another subscription that hasn't taken it yet
       // goes to this one too; otherwise a read on its way answers it, or a
       // fresh one, admitted as the person's request, so not charged.
@@ -760,13 +754,10 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       running: false,
       dirty: false,
       charged: false,
-      cost: costOf(request),
-      window: windowExtentOf(request) !== undefined,
       followsRuns: callsWorkflowQuery(request),
       followsDecisions: callsDecisionQuery(request),
       budgetWaitMs: 0,
       torn: 0,
-      reads: 0,
       closed: false,
     };
     this.#evaluations.set(key, evaluation);
@@ -833,7 +824,6 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   /** Reads `evaluation`'s query, keeps it watched and pushes the result. */
   async #evaluate(evaluation: Evaluation): Promise<void> {
     evaluation.running = true;
-    evaluation.reads += 1;
     evaluation.dirty = false;
     this.#running += 1;
     try {
@@ -866,10 +856,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       await this.#end(evaluation, refusalResult(error));
       return;
     }
-    if (
-      evaluation.charged &&
-      !(await this.#reads.admit(by, app, evaluation.cost))
-    ) {
+    if (evaluation.charged && !(await this.#reads.admit(by, app))) {
       this.#waitForBudget(evaluation);
       return;
     }
@@ -892,14 +879,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         app,
         build,
         request,
-        Date.now() + evaluationMs,
-        // Pages past what this read paid, and every read again, are
-        // charged to the reader's live reads (query-windows.ts).
-        async (pages) => {
-          if (!(await this.#reads.admit(by, app, pages))) {
-            throw pageErrors.create("page.rate_limited");
-          }
-        }
+        Date.now() + evaluationMs
       );
     } catch (error) {
       await this.#end(evaluation, refusalResult(error));
@@ -911,9 +891,6 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     const { result } = evaluated;
     if (!result.ok && endsSubscription(result.error.code)) {
       await this.#end(evaluation, result);
-      return;
-    }
-    if (!result.ok && (await this.#settledWindow(evaluation, result))) {
       return;
     }
     if (QuerySubscriptions.#tornAgain(evaluation, result)) {
@@ -949,9 +926,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       evaluation.dirty = true;
       return;
     }
-    // Waited for the budget no more only once a read went through whole:
-    // a window that spent it partway waits longer each time, so the
-    // budget can refill enough for all of it.
+    // Waited for the budget no more once a read went through.
     evaluation.budgetWaitMs = 0;
     this.#publish(
       evaluation,
@@ -984,74 +959,6 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     evaluation.torn = 0;
     return false;
-  }
-
-  /**
-   * Settles a window's read that failed for a reason of its own (see
-   * query-windows.ts), answering whether it did:
-   *
-   * - Its pages past what it paid found the person's live-read budget
-   *   spent (`page.rate_limited`): it waits for the budget, as a read
-   *   the budget refuses up front does, still watched, the window shown
-   *   kept.
-   * - Writes kept tearing it (`query.concurrent_change`): one that showed
-   *   nothing yet is refused, as its last push, so a Load More waiting on
-   *   it fails rather than wait forever, and the page keeps the window
-   *   it shows; one that showed a window is read again, on the person's
-   *   live-read budget, still watched, the window shown kept.
-   */
-  async #settledWindow(
-    evaluation: Evaluation,
-    result: Extract<Result, { ok: false }>
-  ): Promise<boolean> {
-    if (!evaluation.window) {
-      return false;
-    }
-    if (result.error.code === "page.rate_limited") {
-      this.#waitForBudget(evaluation);
-      return true;
-    }
-    if (result.error.code !== "query.concurrent_change") {
-      return false;
-    }
-    if (evaluation.revision > 0) {
-      // Read again for whoever shows the window; one still waiting for
-      // its first (a Load More's) is refused now, as a first read is,
-      // rather than wait for a read writes may keep tearing.
-      this.#refuseUnanswered(evaluation, result);
-      // Read again after a longer while each time, as any torn read is
-      // (`#changed`); a read writes didn't tear starts over.
-      evaluation.torn = Math.min(evaluation.torn + 1, maxTornReads);
-      evaluation.dirty = !evaluation.closed;
-    } else {
-      await this.#end(evaluation, result);
-    }
-    return true;
-  }
-
-  /**
-   * Refuses, with `result` as its last push, every subscription of
-   * `evaluation` that has had no result yet, and lets go of it.
-   */
-  #refuseUnanswered(
-    evaluation: Evaluation,
-    result: Extract<Result, { ok: false }>
-  ): void {
-    for (const listener of evaluation.listeners) {
-      if (listener.sent === 0) {
-        evaluation.listeners.delete(listener);
-        const toPage = this.#detach(listener);
-        void QuerySubscriptions.#pushLast(toPage, {
-          revision: evaluation.revision + 1,
-          result,
-        });
-      }
-    }
-    if (evaluation.listeners.size === 0 && !evaluation.closed) {
-      this.#close(evaluation);
-      void this.#unwatch(evaluation);
-    }
-    this.#catchUp();
   }
 
   /**
@@ -1337,17 +1244,15 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         ? carried === evaluation.carried && shown.value
         : shown.digest === digest);
     if (same) {
-      // Nothing new, but whoever hasn't had it yet gets it, a subscription
-      // waiting for a read begun after it (a Load More's) included: as the
-      // push still held for one, or else as this read, numbered as shown.
+      // Nothing new, but whoever hasn't had it yet gets it: as the push
+      // still held for one, or else as this read, numbered as shown.
       const held = evaluation.latest;
       const again: Snapshot =
         held?.seq === shown.seq
-          ? { ...held, read: evaluation.reads }
+          ? held
           : {
               ...pushOf(result, shown.revision),
               roles,
-              read: evaluation.reads,
               seq: shown.seq,
             };
       evaluation.latest = again;
@@ -1378,7 +1283,6 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       push,
       bytes,
       roles,
-      read: evaluation.reads,
       seq: evaluation.revision,
     };
     evaluation.latest = snapshot;
@@ -1409,11 +1313,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * leaves it owed the latest.
    */
   #offer(evaluation: Evaluation, listener: Listener, snapshot: Snapshot): void {
-    if (
-      listener.released ||
-      snapshot.seq <= listener.sent ||
-      snapshot.read < listener.firstRead
-    ) {
+    if (listener.released || snapshot.seq <= listener.sent) {
       return;
     }
     if (listener.pending !== undefined) {
@@ -1886,6 +1786,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       listener.pending = undefined;
     }
     this.#count -= 1;
+    const pages = (this.#lists.get(listener.list) ?? 1) - 1;
+    if (pages > 0) {
+      this.#lists.set(listener.list, pages);
+    } else {
+      this.#lists.delete(listener.list);
+    }
     listener.ended?.();
     return listener.toPage;
   }

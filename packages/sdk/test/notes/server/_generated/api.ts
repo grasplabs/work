@@ -17,7 +17,7 @@ export const api: {
     readonly create: FunctionReference<"mutation", "public", { body?: string; title: string }, Id<"notes">>;
     readonly exportAll: FunctionReference<"action", "public", { format: "csv" | "json" }, string, { done: number }>;
     readonly get: FunctionReference<"query", "public", { id: Id<"notes"> }, { _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string } | null>;
-    readonly list: FunctionReference<"query", "public", { pagination: { cursor?: string | null; pageSize?: number } }, ({ hasMore: false; items: Array<{ _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string }>; nextCursor: null }) | ({ hasMore: true; items: Array<{ _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string }>; nextCursor: string })>;
+    readonly list: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number } }, ({ hasMore: false; items: Array<{ _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string }>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<{ _createdAt: number; _id: Id<"notes">; _ownerId: string; _updatedAt: number; body: string; summary: string | null; title: string }>; nextCursor: string; splitCursor?: string })>;
     readonly remove: FunctionReference<"mutation", "public", { id: Id<"notes"> }, null>;
     readonly setSummary: FunctionReference<"mutation", "public", { id: Id<"notes">; summary: string }, null>;
     readonly tally: FunctionReference<"action", "public", Record<never, never>, number>;
@@ -233,7 +233,6 @@ export const api: {
                   "presence": "required"
                 },
                 "kind": "array",
-                "max": 100,
                 "nullable": false,
                 "presence": "required"
               },
@@ -242,6 +241,16 @@ export const api: {
                 "kind": "null",
                 "nullable": false,
                 "presence": "required"
+              },
+              "splitCursor": {
+                "descriptorVersion": 1,
+                "email": false,
+                "kind": "string",
+                "max": 4096,
+                "min": 1,
+                "nullable": false,
+                "presence": "optional",
+                "trim": false
               }
             },
             "kind": "object",
@@ -327,8 +336,6 @@ export const api: {
                   "presence": "required"
                 },
                 "kind": "array",
-                "max": 100,
-                "min": 1,
                 "nullable": false,
                 "presence": "required"
               },
@@ -340,6 +347,16 @@ export const api: {
                 "min": 1,
                 "nullable": false,
                 "presence": "required",
+                "trim": false
+              },
+              "splitCursor": {
+                "descriptorVersion": 1,
+                "email": false,
+                "kind": "string",
+                "max": 4096,
+                "min": 1,
+                "nullable": false,
+                "presence": "optional",
                 "trim": false
               }
             },
@@ -467,9 +484,9 @@ export const workflows: {
     },
     {
       readonly decision: FunctionReference<"query", "public", { decisionId: string; runId: string }, WorkflowDecisionDetail<"confirmArchive", null, { count: number }> | null>;
-      readonly decisions: FunctionReference<"query", "public", { pagination: { cursor?: string | null; pageSize?: number }; runId?: string }, WorkflowQueryPage<WorkflowDecisionInboxItem<"confirmArchive", null>>>;
-      readonly history: FunctionReference<"query", "public", { pagination: { cursor?: string | null; pageSize?: number }; runId: string }, ({ hasMore: false; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "confirmed"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "confirmArchive"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: null }) | ({ hasMore: true; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "confirmed"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "confirmArchive"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: string })>;
-      readonly runs: FunctionReference<"query", "public", { pagination: { cursor?: string | null; pageSize?: number }; status?: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled" }, ({ hasMore: false; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: null }) | ({ hasMore: true; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: string })>;
+      readonly decisions: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId?: string }, WorkflowQueryPage<WorkflowDecisionInboxItem<"confirmArchive", null>>>;
+      readonly history: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId: string }, ({ hasMore: false; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "confirmed"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "confirmArchive"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "confirmed"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "confirmArchive"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: string; splitCursor?: string })>;
+      readonly runs: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; status?: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled" }, ({ hasMore: false; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: string; splitCursor?: string })>;
     }
   >;
   readonly summarizeNote: WorkflowReference<
@@ -491,9 +508,9 @@ export const workflows: {
     },
     {
       readonly decision: FunctionReference<"query", "public", { decisionId: string; runId: string }, WorkflowDecisionDetail<"approveSummary", { comment: string; rating?: number }, { noteId: Id<"notes">; summary: string }> | WorkflowDecisionDetail<"chooseLength", "short" | "long", { words: number }> | null>;
-      readonly decisions: FunctionReference<"query", "public", { pagination: { cursor?: string | null; pageSize?: number }; runId?: string }, WorkflowQueryPage<WorkflowDecisionInboxItem<"approveSummary", { comment: string; rating?: number }> | WorkflowDecisionInboxItem<"chooseLength", "short" | "long">>>;
-      readonly history: FunctionReference<"query", "public", { pagination: { cursor?: string | null; pageSize?: number }; runId: string }, ({ hasMore: false; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "noteEdited" | "styleChosen"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "approveSummary" | "chooseLength"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: null }) | ({ hasMore: true; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "noteEdited" | "styleChosen"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "approveSummary" | "chooseLength"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: string })>;
-      readonly runs: FunctionReference<"query", "public", { pagination: { cursor?: string | null; pageSize?: number }; status?: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled" }, ({ hasMore: false; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: null }) | ({ hasMore: true; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: string })>;
+      readonly decisions: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId?: string }, WorkflowQueryPage<WorkflowDecisionInboxItem<"approveSummary", { comment: string; rating?: number }> | WorkflowDecisionInboxItem<"chooseLength", "short" | "long">>>;
+      readonly history: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId: string }, ({ hasMore: false; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "noteEdited" | "styleChosen"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "approveSummary" | "chooseLength"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "noteEdited" | "styleChosen"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "approveSummary" | "chooseLength"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: string; splitCursor?: string })>;
+      readonly runs: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; status?: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled" }, ({ hasMore: false; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: string; splitCursor?: string })>;
     }
   >;
 } = frozen({
@@ -841,7 +858,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -850,6 +866,16 @@ export const workflows: {
                   "kind": "null",
                   "nullable": false,
                   "presence": "required"
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "trim": false
                 }
               },
               "kind": "object",
@@ -992,8 +1018,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
-                  "min": 1,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -1005,6 +1029,16 @@ export const workflows: {
                   "min": 1,
                   "nullable": false,
                   "presence": "required",
+                  "trim": false
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
                   "trim": false
                 }
               },
@@ -1810,7 +1844,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -1819,6 +1852,16 @@ export const workflows: {
                   "kind": "null",
                   "nullable": false,
                   "presence": "required"
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "trim": false
                 }
               },
               "kind": "object",
@@ -2612,8 +2655,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
-                  "min": 1,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -2625,6 +2666,16 @@ export const workflows: {
                   "min": 1,
                   "nullable": false,
                   "presence": "required",
+                  "trim": false
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
                   "trim": false
                 }
               },
@@ -2851,7 +2902,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -2860,6 +2910,16 @@ export const workflows: {
                   "kind": "null",
                   "nullable": false,
                   "presence": "required"
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "trim": false
                 }
               },
               "kind": "object",
@@ -3074,8 +3134,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
-                  "min": 1,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -3087,6 +3145,16 @@ export const workflows: {
                   "min": 1,
                   "nullable": false,
                   "presence": "required",
+                  "trim": false
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
                   "trim": false
                 }
               },
@@ -3851,7 +3919,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -3860,6 +3927,16 @@ export const workflows: {
                   "kind": "null",
                   "nullable": false,
                   "presence": "required"
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "trim": false
                 }
               },
               "kind": "object",
@@ -4133,8 +4210,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
-                  "min": 1,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -4146,6 +4221,16 @@ export const workflows: {
                   "min": 1,
                   "nullable": false,
                   "presence": "required",
+                  "trim": false
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
                   "trim": false
                 }
               },
@@ -4953,7 +5038,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -4962,6 +5046,16 @@ export const workflows: {
                   "kind": "null",
                   "nullable": false,
                   "presence": "required"
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "trim": false
                 }
               },
               "kind": "object",
@@ -5757,8 +5851,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
-                  "min": 1,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -5770,6 +5862,16 @@ export const workflows: {
                   "min": 1,
                   "nullable": false,
                   "presence": "required",
+                  "trim": false
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
                   "trim": false
                 }
               },
@@ -5996,7 +6098,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -6005,6 +6106,16 @@ export const workflows: {
                   "kind": "null",
                   "nullable": false,
                   "presence": "required"
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "trim": false
                 }
               },
               "kind": "object",
@@ -6219,8 +6330,6 @@ export const workflows: {
                     "presence": "required"
                   },
                   "kind": "array",
-                  "max": 100,
-                  "min": 1,
                   "nullable": false,
                   "presence": "required"
                 },
@@ -6232,6 +6341,16 @@ export const workflows: {
                   "min": 1,
                   "nullable": false,
                   "presence": "required",
+                  "trim": false
+                },
+                "splitCursor": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 4096,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "optional",
                   "trim": false
                 }
               },

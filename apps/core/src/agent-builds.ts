@@ -1794,18 +1794,19 @@ const buildDeclaration = `/**
  * started with \`ctx.workflows.alias.start(input)\`) and bind it to the App
  * under that alias.
  *
- * Reading the App's data (\`ctx.db\` in queries and mutations) is bounded:
- * \`take\`/\`collect\` return at most 100 records, so lists page with
- * \`.paginate({ pageSize, cursor })\` (pages: \`usePaginatedQuery\`), through
- * any number of records, ordered along an index (\`.withIndex(name)\`, then
+ * Reading the App's data (\`ctx.db\` in queries and mutations) is bounded
+ * by what one read examines (10,000 index entries, \`data.scan_limit\`
+ * past them), not by what it answers: \`collect\` suits a list that stays
+ * small, and a list that grows pages with \`.paginate(args.pagination)\`,
+ * passed on as it came (pages: \`usePaginatedQuery\`), through any number
+ * of records, ordered along an index (\`.withIndex(name)\`, then
  * \`.order("desc")\`). For a search box, declare
  * a search index (\`addIndex\` with \`search\`, over \`["name", "notes"]\`) and read
  * \`ctx.db.search("customers", text)\`: best match first, \`.filter(...)\`
  * and \`.paginate(...)\` as a query; a search's cursor expires when the
  * record it ends at is gone or no longer matches (\`data.cursor_expired\`):
  * load it again from the first page then. For totals per status or month,
- * \`.group({ by: ["status"], sum: ["amount"], avg: ["amount"] })\` (one or
- * two fields, at most 100 groups). To show a record's related records,
+ * \`.group({ by: ["status"], sum: ["amount"], avg: ["amount"] })\`. To show a record's related records,
  * \`.with("customer")\` on a query or search loads what its \`v.id\` fields
  * name into \`_with.customer\`: the record, null, or \`{ _withheld: true }\`
  * when the person can't read that table. To say who sees and changes which

@@ -1,10 +1,7 @@
 import {
   cursorMaxLength,
-  groupMaxAggregates,
-  groupMaxFields,
   queryDefaultPageSize,
-  queryMaxRelations,
-  queryMaxResults,
+  queryMaxScannedEntries,
   searchMaxTerms,
   searchTextMaxLength,
 } from "@grasp-os/shared/store-limits";
@@ -16,7 +13,10 @@ import { baseOf, hasOnly } from "./query-values.ts";
 import { relationOf } from "./schema-fields.ts";
 import type { TableState } from "./schema-types.ts";
 
-/** A count a terminal takes, checked: a whole number from `min` to 100. */
+/**
+ * A count a terminal takes, checked: a whole number from `min` up to the
+ * most records one read may examine, which no terminal answers past.
+ */
 export const checkedCount = (
   value: unknown,
   min: number,
@@ -26,11 +26,11 @@ export const checkedCount = (
     typeof value !== "number" ||
     !Number.isInteger(value) ||
     value < min ||
-    value > queryMaxResults
+    value > queryMaxScannedEntries
   ) {
     return refuse(
       "query.invalid_terminal",
-      `${what} is a whole number from ${min} to ${queryMaxResults}.`
+      `${what} is a whole number from ${min} to ${queryMaxScannedEntries}.`
     );
   }
   return value;
@@ -62,10 +62,10 @@ export const relatedOf = (
       all.push(field);
     }
   }
-  if (all.length === 0 || all.length > queryMaxRelations) {
+  if (all.length === 0) {
     return refuse(
       "query.invalid_terminal",
-      `\`.with\` loads the related records of 1 to ${queryMaxRelations} fields.`
+      "`.with` names at least one field."
     );
   }
   return Object.freeze(all);
@@ -94,7 +94,8 @@ const numericFieldsOf = (
       `\`group\`'s \`${what}\` lists declared numeric fields of the table.`
     );
   }
-  return value.map(String);
+  // Each field once: the host refuses a list that names one twice.
+  return [...new Set(value.map(String))];
 };
 
 /** The terminal `group(options)` asks for, checked. */
@@ -112,7 +113,6 @@ export const groupTerminal = (
   if (
     !Array.isArray(by) ||
     by.length === 0 ||
-    by.length > groupMaxFields ||
     new Set(by).size !== by.length ||
     !by.every(
       (field) =>
@@ -123,29 +123,17 @@ export const groupTerminal = (
   ) {
     return refuse(
       "query.invalid_terminal",
-      `\`group\` groups by 1 to ${groupMaxFields} different scalar fields of the table.`
+      "`group` groups by one or more different scalar fields of the table."
     );
   }
-  const terminal = {
-    kind: "group" as const,
+  return {
+    kind: "group",
     by: by.map(String),
     sum: numericFieldsOf(table, options.sum, "sum"),
     avg: numericFieldsOf(table, options.avg, "avg"),
     min: numericFieldsOf(table, options.min, "min"),
     max: numericFieldsOf(table, options.max, "max"),
   };
-  const aggregates =
-    terminal.sum.length +
-    terminal.avg.length +
-    terminal.min.length +
-    terminal.max.length;
-  if (aggregates > groupMaxAggregates) {
-    return refuse(
-      "query.invalid_terminal",
-      `\`group\` computes at most ${groupMaxAggregates} aggregates, all together.`
-    );
-  }
-  return terminal;
 };
 
 /** The text `search` looks for, checked. */
@@ -199,15 +187,8 @@ export const aggregateTerminal = (
   return { kind: "aggregate", operation, field };
 };
 
-/** The terminal `paginate(options)` asks for, checked. */
-export const pageTerminal = (options: unknown): QueryTerminal => {
-  if (!hasOnly(options, ["pageSize", "cursor"])) {
-    return refuse(
-      "query.invalid_terminal",
-      "`paginate` takes `{ pageSize, cursor }`."
-    );
-  }
-  const { pageSize = queryDefaultPageSize, cursor = null } = options;
+/** A cursor `paginate` takes, checked: null is `nullMeans`. */
+const checkedCursor = (cursor: unknown, nullMeans: string): string | null => {
   if (
     cursor !== null &&
     (typeof cursor !== "string" ||
@@ -216,12 +197,29 @@ export const pageTerminal = (options: unknown): QueryTerminal => {
   ) {
     return refuse(
       "query.invalid_terminal",
-      `A cursor is a non-empty string of at most ${cursorMaxLength} characters, or null for the first page.`
+      `A cursor is a non-empty string of at most ${cursorMaxLength} characters, or null ${nullMeans}.`
     );
   }
+  return cursor;
+};
+
+/** The terminal `paginate(options)` asks for, checked. */
+export const pageTerminal = (options: unknown): QueryTerminal => {
+  if (!hasOnly(options, ["pageSize", "cursor", "endCursor"])) {
+    return refuse(
+      "query.invalid_terminal",
+      "`paginate` takes `{ pageSize, cursor, endCursor }`."
+    );
+  }
+  const {
+    pageSize = queryDefaultPageSize,
+    cursor = null,
+    endCursor = null,
+  } = options;
   return {
     kind: "paginate",
     pageSize: checkedCount(pageSize, 1, "`pageSize`"),
-    cursor,
+    cursor: checkedCursor(cursor, "for the first page"),
+    endCursor: checkedCursor(endCursor, "for a page that ends where it may"),
   };
 };

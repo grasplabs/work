@@ -296,6 +296,47 @@ describe("a search", () => {
     });
   });
 
+  it("splits words where the index splits them: accents within a word, other marks between words", async () => {
+    const fixture = await storeWith("appMembers");
+    await insert(
+      fixture,
+      "ada",
+      // An accent as a combining mark of its own, and the same word
+      // precomposed: one word either way.
+      { name: "Cafés Paris", notes: null },
+      { name: "Cafés Lyon", notes: null },
+      // Devanagari, whose vowel signs are spacing marks (Mc), and whose
+      // virama is a mark too: both split a word in the index.
+      { name: "किताब घर", notes: null },
+      { name: "नमस्ते", notes: null },
+      // A spacing mark between two Latin letters.
+      { name: "Kaःlu", notes: null }
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const found = async (text: string) =>
+      namesOf(await db.search("customers", text).collect()).toSorted();
+    const cafes = ["Cafés Lyon", "Cafés Paris"].toSorted();
+    expect({
+      decomposed: await found("cafés"),
+      precomposed: await found("cafés"),
+      plain: await found("cafes"),
+      devanagari: await found("किताब"),
+      virama: await found("नमस्ते"),
+      spacingMark: await found("kaःlu"),
+      // Eight words as the index reads them, each accented one counting
+      // once: within what a search may look for.
+      eightWords: await found(`${"cafés ".repeat(7)}paris`),
+    }).toStrictEqual({
+      decomposed: cafes,
+      precomposed: cafes,
+      plain: cafes,
+      devanagari: ["किताब घर"],
+      virama: ["नमस्ते"],
+      spacingMark: ["Kaःlu"],
+      eightWords: ["Cafés Paris"],
+    });
+  });
+
   it("is filtered, counted and paged, every match once", async () => {
     const fixture = await storeWith("appMembers");
     await insertMany(fixture, 250, (index) => ({
@@ -440,30 +481,110 @@ describe("a search", () => {
   });
 });
 
+/** The record IDs of a page, in order. */
+const ids = (page: { items: readonly { _id: string }[] }): string[] =>
+  page.items.map(({ _id }) => _id);
+
+describe("a search's page ended at a cursor", () => {
+  it("ends at its end's relevance though that record no longer passes the filter, and expires an end ranked before its start", async () => {
+    const fixture = await storeWith("appMembers");
+    await insert(
+      fixture,
+      "ada",
+      ...Array.from({ length: 24 }, (_, index) => ({
+        name: `Widget maker ${index}`,
+        notes: index % 3 === 0 ? "widget widget" : "parts",
+        archived: false,
+      }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const live = () =>
+      db.search("customers", "widget").filter({ archived: false });
+    const first = await live().paginate({ pageSize: 8 });
+    const second = await live().paginate({
+      pageSize: 8,
+      cursor: first.nextCursor,
+    });
+    const end = first.nextCursor ?? "";
+    // The record the first page ends at no longer passes the filter: the
+    // page still ends where it did, never running on into the next.
+    await commit(fixture, "ada", [
+      {
+        op: "patch",
+        table: "customers",
+        id: first.items.at(-1)?._id ?? "",
+        fields: { archived: true },
+      },
+    ]);
+    const ended = await live().paginate({ pageSize: 1, endCursor: end });
+    const after = await live().paginate({ pageSize: 8, cursor: end });
+    // The second page's end now says the word more than any record: it
+    // ranks before that page's start.
+    await commit(fixture, "ada", [
+      {
+        op: "patch",
+        table: "customers",
+        id: second.items.at(-1)?._id ?? "",
+        fields: { notes: "widget widget widget widget widget" },
+      },
+    ]);
+    expect({
+      ended: ids(ended),
+      endedAt: ended.nextCursor,
+      after: ids(after),
+      reranked: await attempt(
+        async () =>
+          await live().paginate({
+            pageSize: 1,
+            cursor: end,
+            endCursor: second.nextCursor,
+          })
+      ),
+    }).toStrictEqual({
+      ended: ids(first).slice(0, -1),
+      endedAt: end,
+      after: ids(second),
+      reranked: "data.cursor_expired",
+    });
+  });
+});
+
 describe("a search's bounds", () => {
   it("are refused clearly, by the SDK and again by the store", async () => {
     const fixture = await storeWith("appMembers");
     await insert(fixture, "ada", { name: "Globex" });
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
     const scope = scopeOf(fixture.schemaHash);
-    const long = "a".repeat(searchTextMaxLength + 1);
     const many = Array.from(
       { length: searchMaxTerms + 1 },
       (_, index) => `w${index}`
     ).join(" ");
+    // One word to a white-space split, but as many tokens as the index's
+    // tokenizer reads: counted as those.
+    const joined = Array.from(
+      { length: searchMaxTerms + 1 },
+      (_, index) => `w${index}`
+    ).join("-");
+    const long = "a".repeat(searchTextMaxLength + 1);
     expect({
-      sdkLong: await attempt(
-        async () => await db.search("customers", long).collect()
-      ),
       sdkMany: await attempt(
         async () => await db.search("customers", many).collect()
+      ),
+      sdkJoined: await attempt(
+        async () => await db.search("customers", joined).collect()
+      ),
+      sdkLong: await attempt(
+        async () => await db.search("customers", long).collect()
       ),
       // A search has no order; App code could call one anyway.
       sdkOrder: await attempt(() =>
         callAnyway(db.search("customers", "globex"), "order", "desc")
       ),
-      storeLong: await outcome(fixture.store.read(scope, searchRequest(long))),
       storeMany: await outcome(fixture.store.read(scope, searchRequest(many))),
+      storeJoined: await outcome(
+        fixture.store.read(scope, searchRequest(joined))
+      ),
+      storeLong: await outcome(fixture.store.read(scope, searchRequest(long))),
       storeIndex: await outcome(
         fixture.store.read(scope, searchRequest("globex", { index: "by_city" }))
       ),
@@ -489,11 +610,13 @@ describe("a search's bounds", () => {
         )
       ),
     }).toStrictEqual({
-      sdkLong: "query.invalid_terminal",
       sdkMany: "query.invalid_terminal",
+      sdkJoined: "query.invalid_terminal",
+      sdkLong: "query.invalid_terminal",
       sdkOrder: "query.invalid_terminal",
-      storeLong: "data.invalid_query",
       storeMany: "data.invalid_query",
+      storeJoined: "data.invalid_query",
+      storeLong: "data.invalid_query",
       storeIndex: "data.invalid_query",
       storeGroup: "data.invalid_query",
       storeUnique: "data.invalid_query",

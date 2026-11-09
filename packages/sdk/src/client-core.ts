@@ -228,15 +228,13 @@ export class GraspClient {
       // Nothing of anyone's is held now: whoever comes next joins no save
       // made before.
       this.#submissions.clear();
-      this.#pagers.cancelExtensions(refusal);
+      this.#pagers.cancelLoads(refusal);
       this.#queries.fence(refusal);
       // How far the person loaded is theirs too: tried again, whoever is
       // signed in then starts at the first page.
       this.#pagers.restartPagers(refusal);
     });
-    this.#queries = new QueryCache(transport, this.#fence, (entry, error) => {
-      this.#pagers.failExtensionsOf(entry, error);
-    });
+    this.#queries = new QueryCache(transport, this.#fence);
     this.#pagers = new Pagers(this.#queries);
     const changed = (): void => {
       this.#queries.changed();

@@ -13,7 +13,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   jsonBytes,
   rateLimited,
-  rateLimitedRetryMs,
   pageErrors,
   pageLimits,
   pageHrefSchema,
@@ -34,7 +33,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { z } from "zod";
 
-import { windowExtentOf } from "./app-functions.ts";
 import { sealedSurfaces } from "./app-releases.ts";
 import {
   appFor,
@@ -61,7 +59,6 @@ import type { LeasedBuild, PageLease } from "./page-delivery.ts";
 import { frameAccess, stageFrame } from "./page-frame.ts";
 import { versionPageCodes } from "./page-references.ts";
 import { QuerySubscriptions, pageReads } from "./query-subscriptions.ts";
-import { windowPages } from "./query-windows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -145,42 +142,6 @@ export const admitted = async (
 ): Promise<AppId> => {
   const { id } = await admittedApp(env, by, app);
   return id;
-};
-
-/**
- * What charges `by` for a paginated list's pages of App `app`, past what
- * its request paid (query-windows.ts): `pages` more of their requests,
- * or `page.rate_limited` with how long to wait: long enough for the
- * budget to give back all of them and the request asking again, so a
- * caller that waits as told isn't refused again for the same window.
- */
-export const windowCharger =
-  (env: Env, by: Identity, app: AppId) =>
-  async (pages: number, whole = pages): Promise<void> => {
-    if (!(await appHost(env, app).admitRequest(by.userId, pages))) {
-      throw pageErrors.create("page.rate_limited", {
-        retryAfterMs: rateLimitedRetryMs * (whole + 1),
-      });
-    }
-  };
-
-/**
- * Counts a request for a paginated list's window (`request`, as its
- * caller sent it) as the pages the window takes: the one request
- * `admitted` counted, and one more for every page past the first. A
- * request without a window counts nothing more.
- */
-export const admitWindow = async (
-  env: Env,
-  by: Identity,
-  app: AppId,
-  request: unknown
-): Promise<void> => {
-  const extent = windowExtentOf(request);
-  const more = extent === undefined ? 0 : windowPages(extent) - 1;
-  if (more > 0) {
-    await windowCharger(env, by, app)(more);
-  }
 };
 
 /**
@@ -800,8 +761,6 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
     ) {
       throw pageErrors.create("page.invalid");
     }
-    // A window counts as the pages it reads (query-windows.ts).
-    await admitWindow(env, by, id, request);
     // A draft's builder is checked as it is read (draft-runs.ts).
     if (lease?.kind !== "draft") {
       await requireDelivery(env, by, id, this.#build, {
