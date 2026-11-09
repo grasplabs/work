@@ -1,11 +1,7 @@
-import {
-  declaredWorkflows,
-  schemaFromDescriptor,
-  workflowQueries,
-} from "@grasp-os/sdk/host";
+import { declaredWorkflows, workflowFunctions } from "@grasp-os/sdk/host";
 import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { canonicalText, isRecord } from "@grasp-os/shared/json";
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -48,7 +44,13 @@ import {
 } from "./decisions/decisions.ts";
 import { appHost } from "./durable-objects.ts";
 import { answerSize, pageCut } from "./page-splits.ts";
-import { followableOrigins } from "./page-workflows.ts";
+import {
+  checkedValue,
+  followableOrigins,
+  mayStartNow,
+  readRun,
+} from "./page-workflows.ts";
+import type { WorkflowCaller } from "./page-workflows.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
 import { historyEntries } from "./workflows/history.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
@@ -56,11 +58,14 @@ import { sealedStepOf, sealedStepsOf } from "./workflows/sealed-steps.ts";
 import type { SealedSteps } from "./workflows/sealed-steps.ts";
 
 // A workflow reference's ordinary queries, as an App's pages read them
-// (spec 10.7.2): `workflows.<alias>.queries.runs`, `.history`,
-// `.decisions` and `.decision`, whose arguments and answers the SDK
-// declares (workflow-queries.ts) and generates into `@server/_generated/api`. They aren't
-// the App's functions: core serves them itself, from the independent
-// workflow the App's binding of `<alias>` names now. Threat model (also on
+// (spec 10.7.2): `workflows.<alias>.queries.run`, `.canStart`, `.runs`,
+// `.history`, `.decisions` and `.decision`, whose arguments and answers
+// the SDK declares (workflow-functions.ts) and generates into
+// `@server/_generated/api`. They aren't the App's functions: core serves
+// them itself, from the independent workflow the App's binding of
+// `<alias>` names now. `run` and `canStart` are `useWorkflow`'s, read
+// only for a page (app-functions.ts, `FunctionCallOptions.page`), and
+// their threat model is page-workflows.ts's. The others' (also on
 // GRA-673), and how each is closed:
 //
 // - A reference made up, or kept from another release: it is a name and
@@ -128,19 +133,26 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   of its journal.
 
 const queryPath =
-  /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})\.queries\.(?<name>runs|history|decisions|decision)$/u;
+  /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})\.queries\.(?<name>run|canStart|runs|history|decisions|decision)$/u;
 
 /** Whether `contractId` names one of a workflow reference's queries. */
 export const isWorkflowQueryPath = (contractId: string): boolean =>
   queryPath.test(contractId);
 
-/** Whether `contractId` names a workflow reference's decision queries. */
+/**
+ * Whether `contractId` names a query a decision's change may change for
+ * people other than its run's: the decision queries, and `run`, which a
+ * reviewer reads only while one of its decisions asks them
+ * (page-workflows.ts, `seenRun`).
+ */
 export const isDecisionQueryPath = (contractId: string): boolean => {
   const name = queryPath.exec(contractId)?.groups?.name;
-  return name === "decisions" || name === "decision";
+  return name === "decisions" || name === "decision" || name === "run";
 };
 
 const names: ReadonlySet<string> = new Set([
+  "run",
+  "canStart",
   "runs",
   "history",
   "decisions",
@@ -189,7 +201,7 @@ export const workflowQueryOf = (
   const operation =
     bound === undefined || name === undefined
       ? undefined
-      : workflowQueries(bound)[toName(name)];
+      : workflowFunctions(bound).queries[toName(name)];
   if (operation === undefined || name === undefined) {
     throw operationErrors.create("function.not_found");
   }
@@ -208,12 +220,7 @@ export const workflowQueryOf = (
 };
 
 /** Who reads a workflow query, and through which App. */
-export interface WorkflowQueryCaller {
-  readonly app: string;
-  readonly userId: string;
-  /** Grasp staff: asked no client's decision, so listed none. */
-  readonly staff?: boolean;
-}
+export type WorkflowQueryCaller = WorkflowCaller;
 
 /** A run's status as a page sees it, from what core keeps of it. */
 const publicStatus = {
@@ -635,7 +642,7 @@ const errorRow = (error: { code: string; message: string }): Json => ({
 });
 
 /**
- * Entry `entry` as a history row of the SDK's (workflow-queries.ts); none
+ * Entry `entry` as a history row of the SDK's (workflow-functions.ts); none
  * for what a row doesn't tell: an unreadable event, a compensation's
  * attempt about to be tried again.
  */
@@ -1164,33 +1171,6 @@ const decisionDetail = async (
   };
 };
 
-/**
- * `value` checked by `descriptor`, normalized: the arguments a caller sent
- * (`contract.invalid_args` otherwise) or an answer about to leave, which
- * must already be in the form its descriptor gives it.
- */
-const checked = (
-  descriptor: unknown,
-  value: unknown,
-  code: "contract.invalid_args" | "contract.invalid_return"
-): Json => {
-  const schema = schemaFromDescriptor(JSON.stringify(descriptor));
-  const result = schema["~standard"].validate(value);
-  if (result.issues !== undefined) {
-    throw operationErrors.create(code);
-  }
-  // SAFETY: what the descriptor admits is JSON.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const normalized = result.value as Json;
-  if (
-    code === "contract.invalid_return" &&
-    canonicalText(normalized) !== canonicalText(value)
-  ) {
-    throw operationErrors.create(code);
-  }
-  return normalized;
-};
-
 /** The run checked arguments name. */
 const runIdOf = (args: Readonly<Record<string, Json | undefined>>): string => {
   if (typeof args.runId !== "string") {
@@ -1228,7 +1208,21 @@ const answerOf = async (
   query: ResolvedWorkflowQuery,
   args: Readonly<Record<string, Json | undefined>>
 ): Promise<Json> => {
-  // The binding in force, for every query: none, and nothing is read.
+  // A run and whether one may be started, as `useWorkflow` reads them
+  // (page-workflows.ts): each checks the binding in force itself.
+  if (query.name === "run") {
+    return await readRun(
+      env,
+      caller,
+      query.release,
+      query.alias,
+      runIdOf(args)
+    );
+  }
+  if (query.name === "canStart") {
+    return await mayStartNow(env, caller, query.release, query.alias);
+  }
+  // The binding in force, for every other query: none, and nothing is read.
   const binding = await bindingOf(env, caller.app, query.alias);
   const { workflowId } = binding;
   switch (query.name) {
@@ -1318,13 +1312,13 @@ export const callWorkflowQuery = async (
   query: ResolvedWorkflowQuery,
   input: unknown
 ): Promise<OperationResult> => {
-  const args = checked(query.args, input, "contract.invalid_args");
+  const args = checkedValue(query.args, input, "contract.invalid_args");
   if (!isRecord(args)) {
     throw operationErrors.create("contract.invalid_args");
   }
   const answer = await answerOf(env, caller, query, args);
   return {
     ok: true,
-    value: checked(query.returns, answer, "contract.invalid_return"),
+    value: checkedValue(query.returns, answer, "contract.invalid_return"),
   };
 };

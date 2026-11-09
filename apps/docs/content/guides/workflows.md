@@ -111,6 +111,8 @@ Before its first start, `useWorkflow` is `idle`, and `loading` while the run you
 
 `pause`, `resume` and `cancel` control the run, for whoever may. `send` sends it an event its workflow declares, typed by that event: `review.send(workflows.review.events.<name>, data)`.
 
+`useWorkflow` is built on the workflow reference's own queries and mutations, which a Page can also use directly: `useQuery(workflows.review.queries.run, { runId })` follows one run (`null` for a run the person may not see), `useQuery(workflows.review.queries.canStart)` says whether they may start one, and `useMutation(workflows.review.mutations.start)` starts one with `{ input }`. `mutations.pause`, `.resume` and `.cancel` take `{ runId }`, and `mutations.send` takes `{ runId, event, data }`, the event by its name. `queries.runs` lists the person's runs, and `queries.history` one run's history.
+
 ## Events from outside
 
 An outside system, such as a payment provider or a shop, sends events into Grasp through a webhook source. An admin creates one per sender in Settings › Webhooks, and gives the sender its URL and secret. The sender POSTs each event as JSON, with its type and its data, signed with the secret as [Standard Webhooks](https://www.standardwebhooks.com) describes:

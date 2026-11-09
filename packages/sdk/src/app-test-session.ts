@@ -35,9 +35,8 @@ export interface AppTestSession {
     onLost: () => void
   ) => Promise<{ subscription: AppTestSubscription } | { refusal: string }>;
   /**
-   * Starts a workflow as principal `name`: `request` is a page's start's
-   * JSON text (`{ workflow, command: "start", input, idempotencyKey }`),
-   * and the answer the JSON text of an `OperationResult` holding the run's
+   * Starts a workflow as principal `name`: `request` is a call of its
+   * reference's `start` mutation, as `call` takes one, and the answer the JSON text of an `OperationResult` holding the run's
    * number in the session (`{ run }`).
    */
   start: (name: string, request: string) => Promise<string>;

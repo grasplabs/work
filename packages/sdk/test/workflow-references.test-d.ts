@@ -80,8 +80,9 @@ expectTypeOf<Extract<keyof typeof summarize, string>>().toEqualTypeOf<
   | "listens"
   | "decisions"
   | "queries"
+  | "mutations"
 >();
-// @ts-expect-error -- no generated start: runs go through useWorkflow
+// @ts-expect-error -- no start of its own: a run starts through mutations.start
 void summarize.start;
 // @ts-expect-error -- nor get
 void summarize.get;
@@ -281,7 +282,7 @@ void respond(archiveDecision, { approved: true, value: { comment: "" } });
 export const useQueryChecks = (): void => {
   const { queries } = summarize;
   expectTypeOf<keyof typeof queries>().toEqualTypeOf<
-    "runs" | "history" | "decisions" | "decision"
+    "run" | "canStart" | "runs" | "history" | "decisions" | "decision"
   >();
   // @ts-expect-error -- a query, never a command
   void useMutation(queries.runs);
@@ -377,4 +378,26 @@ export const useQueryChecks = (): void => {
     expectTypeOf(detail.context).toEqualTypeOf<{ words: number }>();
   }
   expectTypeOf(detail).toExtend<null | undefined | { readonly key: string }>();
+};
+
+// The ordinary mutations: typed public mutation references, called through
+// useMutation, each taking what its descriptor declares.
+export const useMutationChecks = (): void => {
+  const { mutations } = summarize;
+  expectTypeOf<keyof typeof mutations>().toEqualTypeOf<
+    "start" | "pause" | "resume" | "cancel" | "send"
+  >();
+  const start = useMutation(mutations.start);
+  void start({ input: { noteId } });
+  // @ts-expect-error -- the workflow's input goes under `input`
+  void start({ noteId });
+  void useMutation(mutations.cancel)({ runId: "run-1" });
+  const sent = useMutation(mutations.send);
+  void sent({ runId: "run-1", event: "styleChosen", data: { style: "short" } });
+  // @ts-expect-error -- styleChosen's data is a style
+  void sent({ runId: "run-1", event: "styleChosen", data: { style: 1 } });
+  // @ts-expect-error -- an event the workflow doesn't declare
+  void sent({ runId: "run-1", event: "documentUploaded", data: {} });
+  // @ts-expect-error -- a mutation, never a query
+  void useQuery(mutations.start, { input: { noteId } });
 };

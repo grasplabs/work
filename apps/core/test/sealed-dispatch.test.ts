@@ -1,5 +1,4 @@
 import { v } from "@grasp-os/sdk";
-import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -8,7 +7,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
-import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { releaseIdsOf } from "../src/apps.ts";
@@ -454,26 +452,14 @@ const requestsApp = async (
 };
 
 /** A start of `followUp` with `input`, as the SDK sends it. */
-const startOf = async (release: Release, input: unknown): Promise<string> => {
-  const declared = declaredWorkflows(release.app, release.workflows).find(
-    ({ alias }) => alias === "followUp"
-  );
-  if (declared === undefined) {
-    throw new Error("No followUp");
-  }
-  return JSON.stringify({
-    workflow: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: "workflows.followUp",
-      fingerprint: await workflowFingerprint(declared),
-      kind: "workflow",
+const startOf = (input: unknown): string =>
+  JSON.stringify({
+    reference: {
+      name: "workflows.followUp.mutations.start",
+      kind: "mutation",
     },
-    command: "start",
-    input,
-    idempotencyKey: "0".repeat(32),
+    input: { input },
   });
-};
 
 /** The test's run of an App, and the pin the engine runs it by. */
 const fixtureRunOf = async (app: string) => {
@@ -550,10 +536,7 @@ describe(
         await releaseIdsOf(env, app.release)
       );
       const session = await host.open("desk", `test-${unique()}`);
-      await session.start(
-        "desk-user",
-        await startOf(app.release, { who: "Ada" })
-      );
+      await session.start("desk-user", startOf({ who: "Ada" }));
       // The test's first run, by its number in the test.
       const run = 0;
       const completed = await vi.waitFor(
@@ -587,10 +570,7 @@ describe(
         await releaseIdsOf(env, app.release)
       );
       const session = await host.open("desk", `test-${unique()}`);
-      await session.start(
-        "desk-user",
-        await startOf(app.release, { who: "Ada" })
-      );
+      await session.start("desk-user", startOf({ who: "Ada" }));
       const { runId, pin } = await fixtureRunOf(app.app);
       const ended = await ranOnRunHost(
         await fixtureActivation(env, pin, runId)
@@ -613,10 +593,7 @@ describe(
         await releaseIdsOf(env, app.release)
       );
       const session = await host.open("desk", `test-${unique()}`);
-      await session.start(
-        "desk-user",
-        await startOf(app.release, { who: "Ada" })
-      );
+      await session.start("desk-user", startOf({ who: "Ada" }));
       const { runId, pin } = await fixtureRunOf(app.app);
       const activation = await fixtureActivation(env, pin, runId);
       // One run's engine and memory across its activations: the first is
@@ -644,10 +621,7 @@ describe(
         await releaseIdsOf(env, app.release)
       );
       const session = await host.open("desk", `test-${unique()}`);
-      await session.start(
-        "desk-user",
-        await startOf(app.release, { who: "Ada" })
-      );
+      await session.start("desk-user", startOf({ who: "Ada" }));
       const { runId, pin } = await fixtureRunOf(app.app);
       const ended = await ranOnRunHost(
         await fixtureActivation(env, pin, runId)
@@ -738,12 +712,7 @@ describe(
       const started = z
         .object({ ok: z.literal(true), value: z.object({ run: z.number() }) })
         .parse(
-          JSON.parse(
-            await session.start(
-              "desk-user",
-              await startOf(app.release, { who: "Ada" })
-            )
-          )
+          JSON.parse(await session.start("desk-user", startOf({ who: "Ada" })))
         );
       const { runId, pin } = await fixtureRunOf(app.app);
       // Its answer owes the run no wake: the run looks again after its
@@ -818,12 +787,7 @@ describe(
       const started = z
         .object({ ok: z.literal(true), value: z.object({ run: z.number() }) })
         .parse(
-          JSON.parse(
-            await session.start(
-              "desk-user",
-              await startOf(app.release, { who: "Ada" })
-            )
-          )
+          JSON.parse(await session.start("desk-user", startOf({ who: "Ada" })))
         );
       const { runId, pin } = await fixtureRunOf(app.app);
       // Each wait answers the item it waits for: the first approved, the

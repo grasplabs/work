@@ -22,9 +22,9 @@
  * value directly, or `undefined` while loading or skipped (`"skip"`): a
  * `null` result is the App's data. A query's failure is thrown while
  * rendering, to the platform's error boundary; a mutation's or action's
- * rejects its promise. `useWorkflow` is the client side of starting,
- * following and controlling a workflow the App binds, through its
- * generated workflow reference.
+ * rejects its promise. `useWorkflow` starts, follows and controls a run
+ * of a workflow the App binds, on its generated reference's own queries
+ * and mutations.
  *
  * A query that answers pages is shown as a live list with
  * `usePaginatedQuery`:

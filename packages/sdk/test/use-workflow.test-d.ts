@@ -122,7 +122,7 @@ export const usePendingChecks = (): void => {
   expectTypeOf(workflow.pendingControl).toEqualTypeOf<PendingControl | null>();
   if (workflow.pendingControl?.kind === "pause") {
     expectTypeOf(workflow.pendingControl.stage).toEqualTypeOf<
-      "submitting" | "applying" | "recovering"
+      "submitting" | "applying"
     >();
   }
   if (workflow.pendingControl !== null) {

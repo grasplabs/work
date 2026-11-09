@@ -1,4 +1,3 @@
-import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -9,14 +8,17 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction, evaluateAppQuery } from "../src/app-functions.ts";
+import {
+  callAppFunction,
+  callPageFunction,
+  evaluateAppQuery,
+} from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
-import { readWorkflowWatch } from "../src/page-workflows.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import {
@@ -856,20 +858,19 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
     // receipt names no version that started it.
     await startedRuns(app, workflow.id, bob.userId, 1);
     const runs = queryReference(release, "followUp", "runs");
-    const declared = declaredWorkflows(release.app, release.workflows).find(
-      (bound) => bound.alias === "followUp"
-    );
-    if (declared === undefined) {
-      throw new Error("No followUp");
-    }
-    const workflowRef = {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: "workflows.followUp",
-      fingerprint: await workflowFingerprint(declared),
-      kind: "workflow" as const,
-    };
-    // Each listed run: what its row offers, and whether a watch shows it.
+    /** What the reference's `run` query answers of run `runId`. */
+    const runOf = async (runId: string) =>
+      await callPageFunction(
+        env,
+        bob,
+        app,
+        JSON.stringify({
+          reference: queryReference(release, "followUp", "run"),
+          input: { runId },
+        }),
+        Date.now() + 30_000
+      );
+    // Each listed run: what its row offers, and whether `run` shows it.
     const offered = async () => {
       const { result } = await callAppFunction(
         env,
@@ -891,19 +892,12 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
         : [];
       const rows = await Promise.all(
         items.map(async ({ run, canWatch }) => {
-          let watched: string;
-          try {
-            await readWorkflowWatch(env, bob, app, {
-              workflow: workflowRef,
-              watch: "run",
-              runId: run.runId,
-            });
-            watched = "shown";
-          } catch (error) {
-            watched =
-              error instanceof Error
-                ? String(Reflect.get(error, "code"))
-                : String(error);
+          const { result: read } = await runOf(run.runId);
+          let watched = "shown";
+          if (!read.ok) {
+            watched = read.error.code;
+          } else if (read.value === null) {
+            watched = "unavailable";
           }
           return { started: run.runId === started, canWatch, watched };
         })
@@ -934,12 +928,11 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
     // them: its watch has no output to show.
     await vi.waitFor(
       async () => {
-        const { value } = await readWorkflowWatch(env, bob, app, {
-          workflow: workflowRef,
-          watch: "run",
-          runId: started,
+        const { result: read } = await runOf(started);
+        expect(read).toMatchObject({
+          ok: true,
+          value: { status: "completed" },
         });
-        expect(value).toMatchObject({ status: "completed" });
       },
       { timeout: 30_000, interval: 100 }
     );
@@ -960,19 +953,19 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
         {
           started: false,
           canWatch: false,
-          watched: "workflow.run_unavailable",
+          watched: "unavailable",
         },
       ],
       rebound: [
         {
           started: true,
           canWatch: false,
-          watched: "workflow.run_unavailable",
+          watched: "unavailable",
         },
         {
           started: false,
           canWatch: false,
-          watched: "workflow.run_unavailable",
+          watched: "unavailable",
         },
       ],
       back: [
@@ -980,7 +973,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
         {
           started: false,
           canWatch: false,
-          watched: "workflow.run_unavailable",
+          watched: "unavailable",
         },
       ],
       removed: {

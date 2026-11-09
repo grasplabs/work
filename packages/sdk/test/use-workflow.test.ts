@@ -8,77 +8,69 @@ import {
 } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
-import { clientError, GraspError } from "../src/client-error.ts";
+import { GraspError } from "../src/client-error.ts";
 import type { ClientTransport } from "../src/client-transport.ts";
-import { workflowChannel } from "../src/client-workflow.ts";
-import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
-import { maxWaits } from "../src/run-wire.ts";
+import type { WorkflowViewOf } from "../src/react.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
+import { WorkflowCalls } from "../src/workflow-calls.ts";
 import { readWorkflowReference } from "../src/workflow-reference-read.ts";
-import { workflowReferenceLimits } from "../src/workflow-references.ts";
-import { WorkflowStore } from "../src/workflow-store.ts";
-import type { Selection } from "../src/workflow-store.ts";
+import { workflowView } from "../src/workflow-view.ts";
+import type { RunSnapshot } from "../src/workflow-view.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 
-// What `useWorkflow` shows and does (spec 10.4–10.4.7, 10.7.2, 10.7.3),
-// through the hook's store and the session client's workflow channel,
-// exactly as the hook drives them (subscribe on commit, read the view on
-// render, commands from handlers), against the page the client reaches
-// the host through: core's answers to commands, its pushes of runs and
-// bindings, refusals, and a connection that loses answers. Core's own
-// side of the contract is its own test, once it serves it.
+// What `useWorkflow` shows and does (spec 10.4–10.4.7, 10.7.3), through
+// the session client exactly as the hook drives it: its two live queries
+// (`queries.run`, `queries.canStart`), read on render, and its starts and
+// controls as calls of the reference's mutations (workflow-calls.ts),
+// against the page the client reaches the host through. How a query is
+// followed and a call recovered is the client's own (client.test.ts);
+// core's side of these functions is its own test.
 
-/** A command the host was sent, as the client wrote it. */
-interface Command {
-  readonly command: string;
-  readonly runId: string | undefined;
+/** A call the host was sent, as the client wrote it. */
+interface Call {
+  readonly name: string;
+  readonly kind: string;
+  readonly input: unknown;
   readonly idempotencyKey: string;
 }
 
-/** What the host answers a command: a value, a refusal, or nothing at all. */
-type Reply =
-  | { readonly value: unknown }
-  | { readonly failed: string; readonly category?: string }
-  | "lost";
+/** What the host answers a call: a value, a refusal, or nothing at all. */
+type Reply = { readonly value: unknown } | { readonly failed: string } | "lost";
 
-/** A subscription the client made, and how the host speaks over it. */
-interface Subscription {
-  readonly runId: string | undefined;
+/** A live query the client follows, and how the host pushes to it. */
+interface Followed {
+  readonly name: string;
+  readonly input: unknown;
   released: boolean;
-  lost: boolean;
-  readonly push: (revision: number, value: unknown) => void;
-  readonly refuse: (
-    revision: number,
-    code: string,
-    category: string,
-    details?: Record<string, unknown>
-  ) => void;
-  readonly lose: () => void;
+  readonly push: (value: unknown) => void;
 }
 
-/** A field of the request `text` names, if it is a string. */
-const fieldOf = (text: string, key: string): string | undefined => {
-  const parsed: unknown = JSON.parse(text);
-  const value = isPlainObject(parsed) ? parsed[key] : undefined;
-  return typeof value === "string" ? value : undefined;
-};
-
-const refusal = (
-  code: string,
-  category: string,
-  details?: Record<string, unknown>
-) => ({
+const refusal = (code: string) => ({
   ok: false,
   error: {
     code,
     message: code,
-    category,
+    category: "contract",
     retryable: false,
     requestId: "r",
-    ...(details === undefined ? {} : { details }),
   },
 });
+
+/** The reference and input of a request's JSON text. */
+const requestOf = (text: string) => {
+  const parsed: unknown = JSON.parse(text);
+  if (!isPlainObject(parsed) || !isPlainObject(parsed.reference)) {
+    throw new Error("Not a call");
+  }
+  const { reference, input, idempotencyKey } = parsed;
+  return {
+    name: String(reference.name),
+    kind: String(reference.kind),
+    input,
+    idempotencyKey: typeof idempotencyKey === "string" ? idempotencyKey : "",
+  };
+};
 
 const handleOf = (runId: string) => ({
   runId,
@@ -87,125 +79,102 @@ const handleOf = (runId: string) => ({
   manifestHash: "m".repeat(64),
 });
 
-/** What a test doesn't listen to. */
-const unheard = (): void => {
-  // Nothing to hear.
-};
-
-/** The page's answer to a decision, once its dialog and core took it. */
-const recorded = async (): Promise<unknown> =>
-  await Promise.resolve({ status: "approved" });
+const path = (name: string): string => `workflows.summarizeNote.${name}`;
 
 /** The page and host a client reaches, scripted by each test. */
 const host = () => {
-  const commands: Command[] = [];
-  const subscriptions: Subscription[] = [];
-  /** What the client asked the page to answer, through its own dialog. */
+  const calls: Call[] = [];
+  const followed: Followed[] = [];
   const responses: { run: string; decision: string; answer: unknown }[] = [];
-  let decide: () => Promise<unknown> = recorded;
-  let watchRefusal: Error | undefined;
-  let reply: (command: Command) => Reply | Promise<Reply> = (command) =>
-    command.command === "start"
+  let reply: (call: Call) => Reply | Promise<Reply> = (call) =>
+    call.name === path("mutations.start")
       ? { value: handleOf("run-1") }
-      : { value: { kind: command.command, state: "admitted", revision: 2 } };
+      : { value: { kind: call.name.split(".").at(-1), state: "admitted" } };
   const transport: ClientTransport = {
     call: async (text) => {
-      const command: Command = {
-        command: fieldOf(text, "command") ?? "",
-        runId: fieldOf(text, "runId"),
-        idempotencyKey: fieldOf(text, "idempotencyKey") ?? "",
-      };
-      commands.push(command);
-      const answer = await reply(command);
+      const call = requestOf(text);
+      calls.push(call);
+      const answer = await reply(call);
       if (answer === "lost") {
         throw new Error("The connection was reset.");
       }
       if ("failed" in answer) {
-        return {
-          result: refusal(answer.failed, answer.category ?? "contract"),
-        };
+        return { result: refusal(answer.failed) };
       }
       return { result: { ok: true, value: answer.value } };
+    },
+    watch: async (text, onSnapshot) => {
+      const { name, input } = requestOf(text);
+      let revision = 0;
+      const query: Followed = {
+        name,
+        input,
+        released: false,
+        push: (value) => {
+          revision += 1;
+          onSnapshot({ revision, result: { ok: true, value } });
+        },
+      };
+      followed.push(query);
+      await Promise.resolve();
+      return {
+        release: () => {
+          query.released = true;
+        },
+      };
     },
     decisions: {
       respond: async (run, decision, answer) => {
         responses.push({ run, decision, answer });
-        return await decide();
+        return await Promise.resolve({ status: "approved" });
       },
     },
-    watch: async (text, onSnapshot, onLost) => {
-      const refused = watchRefusal;
-      if (refused !== undefined && fieldOf(text, "runId") !== undefined) {
-        watchRefusal = undefined;
-        await Promise.resolve();
-        throw refused;
-      }
-      const subscription: Subscription = {
-        runId: fieldOf(text, "runId"),
-        released: false,
-        lost: false,
-        push: (revision, value) => {
-          onSnapshot({ revision, result: { ok: true, value } });
-        },
-        refuse: (revision, code, category, details) => {
-          onSnapshot({ revision, result: refusal(code, category, details) });
-        },
-        lose: () => {
-          subscription.lost = true;
-          onLost();
-        },
-      };
-      subscriptions.push(subscription);
-      await Promise.resolve();
-      return {
-        release: () => {
-          subscription.released = true;
-        },
-      };
-    },
   };
-  /** The subscriptions still open to run `runId`, or to the binding. */
-  const open = (runId?: string): Subscription[] =>
-    subscriptions.filter(
-      (subscription) =>
-        !subscription.released &&
-        !subscription.lost &&
-        subscription.runId === runId
+  /** The one open live query of `name` with `input`. */
+  const one = (name: string, input: unknown): Followed => {
+    const open = followed.filter(
+      (query) =>
+        !query.released &&
+        query.name === path(name) &&
+        JSON.stringify(query.input) === JSON.stringify(input)
     );
-  /** The one open subscription to run `runId`, or to the binding. */
-  const one = (runId?: string): Subscription => {
-    const [found, ...more] = open(runId);
+    const [found, ...more] = open;
     if (found === undefined || more.length > 0) {
-      throw new Error(`Expected one subscription to ${runId ?? "the binding"}`);
+      throw new Error(`Expected one live ${name}`);
     }
     return found;
   };
   return {
     client: new GraspClient(transport),
-    commands,
+    calls,
+    followed,
     responses,
-    /** How the page answers the next decisions: its dialog and core. */
-    decideWith: (next: typeof decide) => {
-      decide = next;
-    },
-    open,
     one,
+    /** The live `run` query of `runId`. */
+    run: (runId: string) => one("queries.run", { runId }),
+    /** The live `canStart` query. */
+    canStart: () => one("queries.canStart", {}),
     answer: (next: typeof reply) => {
       reply = next;
     },
-    /** Refuses the next subscription to a run with `error`. */
-    refuseNextWatch: (error: Error) => {
-      watchRefusal = error;
+    /** Holds every answer from now on: each call's, to give by hand. */
+    holdAnswers: (): ((answer: Reply) => void)[] => {
+      const held: ((answer: Reply) => void)[] = [];
+      reply = async () => {
+        const { promise, resolve } = Promise.withResolvers<Reply>();
+        held.push(resolve);
+        return await promise;
+      };
+      return held;
     },
   };
 };
 
 type Host = ReturnType<typeof host>;
 
-/** A run of `summarizeNote` as the host projects it, running. */
+/** A run of `summarizeNote` as its `run` query answers it, running. */
 const snapshotOf = (overrides: Record<string, unknown> = {}) => ({
   ...handleOf("run-1"),
-  fingerprint: workflows.summarizeNote.fingerprint,
   status: "running",
   startedAt: 1000,
   finishedAt: null,
@@ -219,7 +188,7 @@ const snapshotOf = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-/** An event wait of `summarizeNote` as the host names it, changed by `event`. */
+/** An event wait of `summarizeNote` as its `run` query names it. */
 const listening = (event: Record<string, unknown> = {}) => ({
   kind: "event",
   id: "wait-1",
@@ -237,50 +206,65 @@ const listening = (event: Record<string, unknown> = {}) => ({
   canSend: true,
 });
 
-/** The control part of a snapshot. */
-const controlOf = (
-  can: { pause?: boolean; resume?: boolean; cancel?: boolean },
-  pendingControl: { kind: string; stage: "applying" } | null = null
-) => ({
-  control: {
-    canPause: can.pause ?? false,
-    canResume: can.resume ?? false,
-    canCancel: can.cancel ?? false,
-    pendingControl,
-  },
-});
-
 // SAFETY: the form of the store's IDs; nothing here reads it further.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 const noteId = "01890000-0000-7000-8000-000000000001" as Id<"notes">;
 
+const unheard = (): void => {
+  // A test reads the view when it asks.
+};
+
 /**
  * A hook showing `selection` of `summarizeNote` through `page`'s client,
- * mounted as React mounts it: how to read its view and render error, run
- * its commands, select another run (React's resubscription) and unmount.
+ * as `useWorkflow` composes it: its calls, its live `run` query (while a
+ * run is selected) and `canStart`, read and followed as `useQuery` does.
  */
-const mount = (
-  page: Host,
-  selection: Selection,
-  reference: unknown = workflows.summarizeNote
-) => {
-  const store = new WorkflowStore(
-    workflowChannel(page.client),
-    readWorkflowReference(reference)
-  );
-  let shown = selection;
-  let stop = store.subscribe(shown, unheard);
+const mount = (page: Host, selection?: string) => {
+  const internals = clientInternals(page.client);
+  const read = readWorkflowReference(workflows.summarizeNote);
+  const calls = new WorkflowCalls(page.client, read);
+  const stops = new Map<string, () => void>();
+  /** What `reference` with `args` shows now, followed from now on. */
+  const follow = (reference: unknown, args: unknown) => {
+    const entry = internals.entry(reference, args);
+    if (!stops.has(entry.key)) {
+      stops.set(entry.key, internals.subscribe(entry, unheard));
+    }
+    if (entry.snapshot.error !== undefined) {
+      throw entry.snapshot.error;
+    }
+    return entry.snapshot.value;
+  };
+  const view = () => {
+    const local = calls.local();
+    const runId = selection ?? local.startedRunId;
+    // SAFETY: what the `run` query's descriptor declares, which the host
+    // checked its answer against.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const snapshot = (
+      runId === undefined ? undefined : follow(read.functions.run, { runId })
+    ) as RunSnapshot | null | undefined;
+    const canStart = follow(read.functions.canStart, {});
+    // SAFETY: as `useWorkflow` types it, by the reference it reads.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return workflowView({
+      read,
+      runId,
+      snapshot,
+      canStart: typeof canStart === "boolean" ? canStart : undefined,
+      starting: local.starting > 0,
+      submitting: local.submitting,
+      commands: calls.commandsFor(runId, snapshot),
+    }) as WorkflowViewOf<typeof workflows.summarizeNote>;
+  };
   return {
-    store,
-    view: () => store.view(shown),
-    error: () => store.error(shown),
-    select: (next: Selection) => {
-      stop();
-      shown = next;
-      stop = store.subscribe(shown, unheard);
-    },
+    calls,
+    view,
     unmount: () => {
-      stop();
+      for (const stop of stops.values()) {
+        stop();
+      }
+      stops.clear();
     },
   };
 };
@@ -290,34 +274,30 @@ const flush = async (): Promise<void> => {
   await vi.advanceTimersByTimeAsync(0);
 };
 
-/** The structured error `promise` rejected with. */
-const failureOf = async (promise: Promise<unknown>): Promise<GraspError> => {
+/** The code of the structured error `promise` rejected with. */
+const codeOf = async (promise: Promise<unknown>): Promise<string> => {
   try {
     await promise;
   } catch (error) {
     if (error instanceof GraspError) {
-      return error;
+      return error.code;
     }
     throw error;
   }
   throw new Error("It resolved");
 };
 
-/** The code of the structured error `promise` rejected with. */
-const codeOf = async (promise: Promise<unknown>): Promise<string> => {
-  const error = await failureOf(promise);
-  return error.code;
-};
-
-/** A hook showing run-1, its snapshot `snapshot` pushed at `revision`. */
-const showing = async (page: Host, snapshot = snapshotOf(), revision = 1) => {
+/** A hook showing run-1, its `run` query answering `snapshot`. */
+const showing = async (page: Host, snapshot: unknown = snapshotOf()) => {
   const hook = mount(page, "run-1");
+  hook.view();
   await flush();
-  page.one("run-1").push(revision, snapshot);
+  page.run("run-1").push(snapshot);
+  page.canStart().push(true);
   return hook;
 };
 
-describe("what a hook shows", () => {
+describe("useWorkflow", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -325,1512 +305,411 @@ describe("what a hook shows", () => {
     vi.useRealTimers();
   });
 
-  it("permits nothing until the host says so, and starts or controls nothing by itself", async () => {
-    const page = host();
-    const hook = mount(page, null);
-    await flush();
-    expect(hook.view()).toMatchObject({
-      status: "idle",
-      canRun: false,
-      canPause: false,
-      canResume: false,
-      canCancel: false,
-      isStarting: false,
-      pendingControl: null,
-      waits: [],
+  describe("what a hook shows", () => {
+    it("is idle and may start nothing until canStart says so, and calls nothing by itself", async () => {
+      const page = host();
+      const hook = mount(page);
+      expect(hook.view()).toMatchObject({
+        status: "idle",
+        canRun: false,
+        canPause: false,
+        waits: [],
+      });
+      await flush();
+      page.canStart().push(true);
+      expect(hook.view()).toMatchObject({ status: "idle", canRun: true });
+      expect(page.calls).toStrictEqual([]);
     });
-    page.one().push(1, { canRun: true });
-    expect(hook.view().canRun).toBeTruthy();
-    expect(page.commands).toStrictEqual([]);
-  });
 
-  it("follows a run once for every hook that shows it, each keeping its own selection", async () => {
-    const page = host();
-    const first = mount(page, "run-1");
-    // React's Strict Mode subscribes, unsubscribes and subscribes again.
-    first.select("run-1");
-    const second = mount(page, "run-1");
-    const third = mount(page, "run-2");
-    await flush();
-    expect([
-      page.open("run-1").length,
-      page.open("run-2").length,
-      page.open().length,
-    ]).toStrictEqual([1, 1, 1]);
-    page.one("run-1").push(1, snapshotOf());
-    expect([first.view().status, second.view().status]).toStrictEqual([
-      "running",
-      "running",
-    ]);
-    expect(third.view()).toMatchObject({ status: "loading", runId: "run-2" });
-    expect(page.commands).toStrictEqual([]);
-  });
-
-  it("keeps a lost run on screen without permitting anything until a fresh push, and never sends a command to recover it", async () => {
-    const page = host();
-    const hook = await showing(page);
-    expect(hook.view().canPause).toBeTruthy();
-    page.one("run-1").lose();
-    expect(hook.view()).toMatchObject({
-      status: "running",
-      canPause: false,
-      canCancel: false,
-    });
-    await vi.advanceTimersByTimeAsync(31_000);
-    page.one("run-1").push(1, snapshotOf());
-    expect(hook.view()).toMatchObject({ canPause: true, canCancel: true });
-    expect(page.commands).toStrictEqual([]);
-  });
-
-  it("shows no older revision after following again than it showed before", async () => {
-    const page = host();
-    const hook = await showing(page, snapshotOf({ status: "paused" }), 5);
-    page.one("run-1").lose();
-    await vi.advanceTimersByTimeAsync(31_000);
-    page.one("run-1").push(4, snapshotOf({ status: "running" }));
-    expect(hook.view()).toMatchObject({ status: "paused", canCancel: false });
-    page.one("run-1").push(5, snapshotOf({ status: "paused" }));
-    expect(hook.view()).toMatchObject({ status: "paused", canCancel: true });
-  });
-
-  it("keeps a lost run's waits on screen, answerable or sendable only once a fresh push arrives", async () => {
-    const page = host();
-    const fields = { taskId: "review", title: "Wait", openedAt: 1000 };
-    const decision = {
-      ...fields,
-      kind: "decision",
-      id: "wait-1",
-      key: "approveSummary",
-      deadline: null,
-      canRespond: true,
-    };
-    const event = {
-      ...fields,
-      kind: "event",
-      id: "wait-2",
-      key: "do/2/awaitEdit",
-      deadline: null,
-      event: {
-        kind: "workflowEvent",
-        alias: "noteEdited",
-        fingerprint: workflows.summarizeNote.events.noteEdited.fingerprint,
-      },
-      canSend: true,
-    };
-    const waiting = snapshotOf({ status: "waiting", waits: [decision, event] });
-    const hook = await showing(page, waiting);
-    page.one("run-1").lose();
-    expect(hook.view().waits).toMatchObject([
-      { id: "wait-1", canRespond: false },
-      { id: "wait-2", canSend: false },
-    ]);
-    await vi.advanceTimersByTimeAsync(31_000);
-    page.one("run-1").push(1, waiting);
-    expect(hook.view().waits).toMatchObject([
-      { canRespond: true },
-      { canSend: true },
-    ]);
-  });
-
-  it("shows a run listening for an event with the event's own generated reference", async () => {
-    const page = host();
-    const hook = await showing(
-      page,
-      snapshotOf({ status: "waiting", waits: [listening()] })
-    );
-    const [wait] = hook.view().waits;
-    expect(wait?.kind === "event" && wait.event).toBe(
-      workflows.summarizeNote.events.noteEdited
-    );
-  });
-
-  it("shows an event wait keyed by a listen task's path as long as a reference holds", async () => {
-    const path = "t".repeat(workflowReferenceLimits.taskPathLength);
-    const reference = {
-      ...workflows.summarizeNote,
-      listens: { ...workflows.summarizeNote.listens, [path]: ["noteEdited"] },
-    };
-    const page = host();
-    const hook = mount(page, "run-1", reference);
-    await flush();
-    page.one("run-1").push(
-      1,
-      snapshotOf({
-        status: "waiting",
-        waits: [{ ...listening(), taskId: path, key: path }],
-      })
-    );
-    expect(hook.error()).toBeUndefined();
-    expect(hook.view().waits).toMatchObject([{ key: path }]);
-  });
-
-  it("waits as long as a refused subscription says before following again", async () => {
-    const page = host();
-    page.refuseNextWatch(
-      Object.assign(new Error("Too much at once."), {
-        code: "page.rate_limited",
-        details: { retryAfterMs: 20_000 },
-      })
-    );
-    mount(page, "run-1");
-    await vi.advanceTimersByTimeAsync(15_000);
-    expect(page.open("run-1")).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(page.open("run-1")).toHaveLength(1);
-  });
-
-  it("waits as long as a refusal pushed over a subscription says once it is lost", async () => {
-    const page = host();
-    await showing(page);
-    const subscription = page.one("run-1");
-    subscription.refuse(2, "page.rate_limited", "operational", {
-      retryAfterMs: 40_000,
-    });
-    subscription.lose();
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(page.open("run-1")).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(page.open("run-1")).toHaveLength(1);
-  });
-
-  it("shows a run's snapshot again at the same revision once a refusal that keeps following clears, and no older one", async () => {
-    const page = host();
-    const hook = await showing(page, snapshotOf(), 3);
-    const subscription = page.one("run-1");
-    subscription.refuse(3, "page.rate_limited", "operational", {
-      retryAfterMs: 1000,
-    });
-    const refused = hook.view();
-    subscription.push(2, snapshotOf({ status: "paused" }));
-    const older = hook.view();
-    subscription.push(3, snapshotOf());
-    const recovered = hook.view();
-    // Shown fresh again: the same revision once more changes nothing.
-    subscription.push(3, snapshotOf({ status: "paused" }));
-    expect({ refused, older, recovered, again: hook.view() }).toMatchObject({
-      refused: { status: "running", canPause: false, canCancel: false },
-      older: { status: "running", canPause: false, canCancel: false },
-      recovered: { status: "running", canPause: true, canCancel: true },
-      again: { status: "running", canPause: true, canCancel: true },
-    });
-    expect(page.commands).toStrictEqual([]);
-  });
-
-  it("hears nothing a lost subscription delivers late, however its revision compares", async () => {
-    const page = host();
-    const hook = await showing(page, snapshotOf(), 3);
-    const lost = page.one("run-1");
-    lost.lose();
-    lost.push(3, snapshotOf());
-    const sameRevision = hook.view();
-    lost.push(4, snapshotOf({ status: "paused" }));
-    expect({ sameRevision, newer: hook.view() }).toMatchObject({
-      sameRevision: { status: "running", canPause: false, canCancel: false },
-      newer: { status: "running", canPause: false, canCancel: false },
-    });
-  });
-
-  it("shows a followed run whose access ends as unavailable, never thrown, and keeps following it until the host shows it again", async () => {
-    const page = host();
-    const hook = await showing(page, snapshotOf(), 2);
-    const subscription = page.one("run-1");
-    subscription.refuse(2, "workflow.run_unavailable", "domain");
-    const refused = { view: hook.view(), error: hook.error()?.code };
-    await vi.advanceTimersByTimeAsync(60_000);
-    const following = page.open("run-1").length;
-    subscription.push(2, snapshotOf());
-    expect({
-      refused,
-      following,
-      back: hook.view(),
-      commands: page.commands,
-    }).toMatchObject({
-      refused: {
-        view: {
-          status: "unavailable",
-          runId: "run-1",
-          waits: [],
-          canPause: false,
-          canCancel: false,
-        },
-        error: undefined,
-      },
-      following: 1,
-      back: { status: "running", canPause: true, canCancel: true },
-      commands: [],
-    });
-  });
-
-  it("shows why a run never shown is unavailable, and the run once access comes back", async () => {
-    const page = host();
-    const hook = mount(page, "run-1");
-    await flush();
-    const subscription = page.one("run-1");
-    subscription.refuse(1, "workflow.run_unavailable", "domain");
-    const refused = hook.error()?.code;
-    subscription.push(1, snapshotOf());
-    expect({ refused, error: hook.error(), back: hook.view() }).toMatchObject({
-      refused: "workflow.run_unavailable",
-      error: undefined,
-      back: { status: "running", canCancel: true },
-    });
-  });
-
-  it("follows a run again, later, once its subscription is refused as unavailable, shown as unavailable", async () => {
-    const page = host();
-    const hook = await showing(page);
-    page.one("run-1").lose();
-    page.refuseNextWatch(
-      Object.assign(new Error("This run isn't available."), {
-        code: "workflow.run_unavailable",
-      })
-    );
-    // Refused as it follows again, then followed again after that.
-    await vi.advanceTimersByTimeAsync(62_000);
-    expect({
-      following: page.open("run-1").length,
-      view: hook.view(),
-      error: hook.error()?.code,
-    }).toMatchObject({
-      following: 1,
-      view: { status: "unavailable", canPause: false, canCancel: false },
-      error: undefined,
-    });
-  });
-
-  it("shows no older revision over a newer one", async () => {
-    const page = host();
-    const hook = await showing(page, snapshotOf({ status: "paused" }), 5);
-    page.one("run-1").push(4, snapshotOf({ status: "running" }));
-    expect(hook.view().status).toBe("paused");
-  });
-
-  it("shows waits only with the snapshot they belong to, and an empty unconfirmed list before it", async () => {
-    const page = host();
-    const hook = mount(page, "run-1");
-    await flush();
-    expect(hook.view()).toMatchObject({ status: "loading", waits: [] });
-    const decision = {
-      kind: "decision",
-      id: "wait-1",
-      taskId: "review",
-      key: "approveSummary",
-      title: "Approve the summary",
-      openedAt: 1000,
-      deadline: 9000,
-      canRespond: true,
-    };
-    const held = {
-      kind: "blocked",
-      id: "wait-2",
-      taskId: "summarize",
-      key: "$run",
-      title: "Held for the quota",
-      openedAt: 1000,
-      deadline: null,
-      reason: "quota",
-      message: "The client's quota is used up for now.",
-    };
-    page
-      .one("run-1")
-      .push(1, snapshotOf({ status: "waiting", waits: [decision, held] }));
-    const view = hook.view();
-    expect(view).toMatchObject({ status: "waiting", waits: [decision, held] });
-    expect(view.waits[1]).not.toHaveProperty("canRespond");
-    expect(Object.isFrozen(view.waits)).toBeTruthy();
-  });
-
-  it("permits no control of a compensating run, whatever the host says, and shows no outcome before cleanup ends", async () => {
-    const page = host();
-    const hook = await showing(
-      page,
-      snapshotOf({
-        status: "compensating",
-        compensation: {
-          cause: "failure",
-          activity: "running",
-          originalError: {
-            code: "invoice.rejected",
-            message: "The invoice was rejected.",
-            category: "domain",
-            retryable: false,
-            requestId: null,
+    it("shows a run's status, its output once completed, and what the host says may be done with it", async () => {
+      const page = host();
+      const hook = await showing(page);
+      expect(hook.view()).toMatchObject({
+        status: "running",
+        runId: "run-1",
+        canPause: true,
+        canResume: false,
+        canCancel: true,
+        pendingControl: null,
+      });
+      page.run("run-1").push(
+        snapshotOf({
+          status: "completed",
+          finishedAt: 2000,
+          output: { summary: "Short.", words: 1 },
+          control: {
+            canPause: true,
+            canResume: true,
+            canCancel: true,
+            pendingControl: { kind: "pause", stage: "applying" },
           },
-        },
-        ...controlOf({ pause: true, resume: true, cancel: true }),
-      })
-    );
-    const view = hook.view();
-    expect(view).toMatchObject({
-      status: "compensating",
-      cause: "failure",
-      activity: "running",
-      finishedAt: null,
-      canPause: false,
-      canResume: false,
-      canCancel: false,
-    });
-    expect(view).not.toHaveProperty("output");
-    expect(view).not.toHaveProperty("error");
-  });
-
-  it("shows a completed run's validated output, and permits no control of an ended run", async () => {
-    const page = host();
-    const hook = await showing(
-      page,
-      snapshotOf({
+        })
+      );
+      // An ended run has nothing left to control, whatever the snapshot says.
+      expect(hook.view()).toMatchObject({
         status: "completed",
         finishedAt: 2000,
         output: { summary: "Short.", words: 1 },
-      })
-    );
-    const view = hook.view();
-    expect(view).toMatchObject({
-      status: "completed",
-      finishedAt: 2000,
-      output: { summary: "Short.", words: 1 },
-      canPause: false,
-      canCancel: false,
+        canPause: false,
+        canResume: false,
+        canCancel: false,
+        pendingControl: null,
+      });
     });
-    expect(Object.isFrozen(view)).toBeTruthy();
-  });
-});
 
-const sleeping = {
-  kind: "timer",
-  id: "wait-1",
-  taskId: "pause",
-  key: "pause",
-  title: "Sleeping",
-  openedAt: 1000,
-  deadline: 5000,
-  purpose: "sleep",
-};
-
-const malformed = Object.entries({
-  "output that doesn't fit the contract": snapshotOf({
-    status: "completed",
-    finishedAt: 2000,
-    output: { summary: 7, words: 1 },
-  }),
-  "a completed run without output": snapshotOf({
-    status: "completed",
-    finishedAt: 2000,
-  }),
-  "output before it completed": snapshotOf({
-    output: { summary: "Early.", words: 1 },
-  }),
-  "a failed run without its error": snapshotOf({
-    status: "failed",
-    finishedAt: 2000,
-  }),
-  "an ended run without its end": snapshotOf({ status: "cancelled" }),
-  "a compensation without its cause": snapshotOf({ status: "compensating" }),
-  "a wait on an ended run": snapshotOf({
-    status: "cancelled",
-    finishedAt: 2000,
-    waits: [sleeping],
-  }),
-  "a held run offered as answerable": snapshotOf({
-    status: "waiting",
-    waits: [
-      {
-        kind: "blocked",
-        id: "wait-1",
-        taskId: "summarize",
-        key: "$run",
-        title: "Held",
-        openedAt: 1000,
-        deadline: null,
-        reason: "policy",
-        message: "Held by policy.",
-        canRespond: true,
-      },
-    ],
-  }),
-  "more waits than a snapshot holds": snapshotOf({
-    status: "waiting",
-    waits: Array.from({ length: maxWaits + 1 }, (_, index) => ({
-      ...sleeping,
-      id: `wait-${index}`,
-    })),
-  }),
-  "an event the workflow doesn't declare": snapshotOf({
-    status: "waiting",
-    waits: [listening({ alias: "documentUploaded" })],
-  }),
-  "a declared event under a task that doesn't listen for it": snapshotOf({
-    status: "waiting",
-    waits: [{ ...listening(), key: "do/0/chooseStyle" }],
-  }),
-  "a declared event under a task the workflow doesn't have": snapshotOf({
-    status: "waiting",
-    waits: [{ ...listening(), key: "do/9/elsewhere" }],
-  }),
-  "another contract of a declared event": snapshotOf({
-    status: "waiting",
-    waits: [listening({ fingerprint: "e".repeat(64) })],
-  }),
-  "an event as a whole reference rather than its alias": snapshotOf({
-    status: "waiting",
-    waits: [
-      listening({
-        ...workflows.summarizeNote.events.noteEdited,
-      }),
-    ],
-  }),
-  "a decision the workflow doesn't declare": snapshotOf({
-    status: "waiting",
-    waits: [
-      {
-        kind: "decision",
-        id: "wait-1",
-        taskId: "review",
-        key: "reviewInvoice",
-        title: "Review",
-        openedAt: 1000,
-        deadline: null,
-        canRespond: true,
-      },
-    ],
-  }),
-  "a field the contract doesn't have": snapshotOf({ owner: "user-1" }),
-  "another run's snapshot": snapshotOf({ runId: "run-9" }),
-});
-
-describe("what is never shown", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it.each(malformed)(
-    "refuses %s before showing any of it",
-    async (_what, snapshot) => {
+    it("offers no control of a run that rolls back", async () => {
       const page = host();
-      const hook = await showing(page);
-      page.one("run-1").push(2, snapshot);
-      expect(hook.error()?.code).toBe("contract.invalid_snapshot");
+      const hook = await showing(
+        page,
+        snapshotOf({
+          status: "compensating",
+          compensation: { cause: "cancellation", activity: "running" },
+        })
+      );
       expect(hook.view()).toMatchObject({
-        status: "loading",
+        status: "compensating",
+        cause: "cancellation",
         canPause: false,
         canCancel: false,
       });
-    }
-  );
-
-  it("refuses a run that pins another contract than the reference", async () => {
-    const page = host();
-    const hook = await showing(
-      page,
-      snapshotOf({ fingerprint: "6".repeat(64) })
-    );
-    expect(hook.error()?.code).toBe("contract.mismatch");
-    expect(hook.view().status).toBe("loading");
-  });
-
-  it.each([
-    "summarizeNote",
-    { ...workflows.summarizeNote, kind: "mutation" },
-    { ...workflows.summarizeNote, visibility: "internal" },
-    { ...workflows.summarizeNote, fingerprint: "not a hash" },
-    { ...workflows.summarizeNote, output: { kind: "anything" } },
-    { ...workflows.summarizeNote, events: undefined },
-    { ...workflows.summarizeNote, listens: undefined },
-    {
-      ...workflows.summarizeNote,
-      listens: { "do/0/chooseStyle": ["documentUploaded"] },
-    },
-    {
-      ...workflows.summarizeNote,
-      listens: { "do/0/chooseStyle": ["styleChosen", "styleChosen"] },
-    },
-    {
-      ...workflows.summarizeNote,
-      events: { noteEdited: workflows.archiveNotes.events.confirmed },
-    },
-    {
-      ...workflows.summarizeNote,
-      events: {
-        noteEdited: {
-          ...workflows.summarizeNote.events.noteEdited,
-          workflowFingerprint: workflows.archiveNotes.fingerprint,
-        },
-      },
-    },
-    {
-      ...workflows.summarizeNote,
-      events: {
-        noteEdited: {
-          ...workflows.summarizeNote.events.noteEdited,
-          data: { kind: "anything" },
-        },
-      },
-    },
-    { ...workflows.summarizeNote, decisions: undefined },
-    {
-      ...workflows.summarizeNote,
-      decisions: {
-        approveSummary: workflows.archiveNotes.decisions.confirmArchive,
-      },
-    },
-    {
-      ...workflows.summarizeNote,
-      decisions: {
-        approveSummary: {
-          ...workflows.summarizeNote.decisions.approveSummary,
-          valueSchema: v.object({ comment: v.string() }),
-        },
-      },
-    },
-    {
-      ...workflows.summarizeNote,
-      decisions: {
-        approveSummary: {
-          ...workflows.summarizeNote.decisions.approveSummary,
-          context: { kind: "anything" },
-        },
-      },
-    },
-  ])("refuses %o as a workflow reference", (reference) => {
-    expect(() => readWorkflowReference(reference)).toThrow(
-      expect.objectContaining({ code: "contract.invalid_request" })
-    );
-  });
-
-  it("refuses input the workflow doesn't take before sending anything", async () => {
-    const page = host();
-    const hook = mount(page, null);
-    const code = await codeOf(hook.store.run({ noteId: "not an ID" }));
-    expect(code).toBe("contract.invalid_args");
-    expect(page.commands).toStrictEqual([]);
-  });
-});
-
-describe("starting runs", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("selects the latest admitted start and answers every caller its own handle", async () => {
-    const page = host();
-    const answers = [
-      Promise.withResolvers<Reply>(),
-      Promise.withResolvers<Reply>(),
-    ];
-    const [first, second] = answers;
-    page.answer(async () => await (answers.shift()?.promise ?? "lost"));
-    const hook = mount(page, null);
-    const older = hook.store.run({ noteId });
-    const newer = hook.store.run({ noteId });
-    await flush();
-    expect(hook.view()).toMatchObject({ status: "idle", isStarting: true });
-    second?.resolve({ value: handleOf("run-2") });
-    await expect(newer).resolves.toStrictEqual(handleOf("run-2"));
-    first?.resolve({ value: handleOf("run-1") });
-    await expect(older).resolves.toStrictEqual(handleOf("run-1"));
-    expect(hook.view()).toMatchObject({
-      status: "loading",
-      runId: "run-2",
-      isStarting: false,
     });
-    // Two deliberate starts are two submissions, never one deduplicated.
-    const keys = new Set(page.commands.map((sent) => sent.idempotencyKey));
-    expect(keys.size).toBe(2);
-  });
 
-  it("keeps the run shown when a start is refused, and never shows the refusal as the run's error", async () => {
-    const page = host();
-    const hook = mount(page, null);
-    await hook.store.run({ noteId });
-    await flush();
-    page.one("run-1").push(1, snapshotOf());
-    page.answer(() => ({
-      failed: "workflow.start_denied",
-      category: "authorization",
-    }));
-    const code = await codeOf(hook.store.run({ noteId }));
-    expect(code).toBe("workflow.start_denied");
-    expect(hook.view()).toMatchObject({ status: "running", runId: "run-1" });
-    expect(hook.view()).not.toHaveProperty("error");
-  });
-
-  it("never moves an explicit selection to the run it started", async () => {
-    const page = host();
-    page.answer(() => ({ value: handleOf("run-8") }));
-    const hook = mount(page, "run-7");
-    await hook.store.run({ noteId });
-    expect(hook.view()).toMatchObject({ status: "loading", runId: "run-7" });
-  });
-
-  it("follows the latest admitted start once it selects automatically again, whatever it showed meanwhile", async () => {
-    const page = host();
-    const older = Promise.withResolvers<Reply>();
-    const answers: Promise<Reply>[] = [
-      Promise.resolve({ value: handleOf("run-1") }),
-      older.promise,
-      Promise.resolve({ value: handleOf("run-3") }),
-    ];
-    page.answer(async () => await (answers.shift() ?? "lost"));
-    const hook = mount(page, null);
-    await hook.store.run({ noteId });
-    hook.select("run-7");
-    const late = hook.store.run({ noteId });
-    await hook.store.run({ noteId });
-    older.resolve({ value: handleOf("run-2") });
-    await late;
-    hook.select(null);
-    expect(hook.view()).toMatchObject({ status: "loading", runId: "run-3" });
-  });
-
-  it("recovers an admission answer that isn't a run's handle under the same key, never as a second start", async () => {
-    const page = host();
-    let attempts = 0;
-    page.answer(() => {
-      attempts += 1;
-      return attempts === 1
-        ? { value: { runId: 7 } }
-        : { value: handleOf("run-1") };
-    });
-    const hook = mount(page, null);
-    const started = hook.store.run({ noteId });
-    await vi.advanceTimersByTimeAsync(1000);
-    await expect(started).resolves.toStrictEqual(handleOf("run-1"));
-    const [sent, again] = page.commands;
-    expect(again?.idempotencyKey).toBe(sent?.idempotencyKey);
-    expect(hook.view()).toMatchObject({ runId: "run-1", isStarting: false });
-  });
-
-  it("leaves a start whose answers never fit uncertain, with its key, never retried afresh", async () => {
-    const page = host();
-    page.answer(() => ({ value: { runId: 7 } }));
-    const hook = mount(page, null);
-    const refusing = failureOf(hook.store.run({ noteId }));
-    await vi.advanceTimersByTimeAsync(6 * 60_000);
-    const refused = await refusing;
-    const keys = new Set(page.commands.map((sent) => sent.idempotencyKey));
-    expect(refused).toMatchObject({
-      code: "submission.outcome_unknown",
-      details: { idempotencyKey: page.commands[0]?.idempotencyKey },
-    });
-    expect(keys.size).toBe(1);
-    expect(hook.view()).toMatchObject({ status: "idle", isStarting: false });
-  });
-
-  it("recovers a lost admission answer under the same key, never as a second start", async () => {
-    const page = host();
-    let attempts = 0;
-    page.answer(() => {
-      attempts += 1;
-      return attempts === 1 ? "lost" : { value: handleOf("run-1") };
-    });
-    const hook = mount(page, null);
-    const started = hook.store.run({ noteId });
-    await vi.advanceTimersByTimeAsync(1000);
-    await expect(started).resolves.toStrictEqual(handleOf("run-1"));
-    const [sent, again] = page.commands;
-    expect(page.commands).toHaveLength(2);
-    expect(again?.idempotencyKey).toBe(sent?.idempotencyKey);
-  });
-});
-
-describe("selecting another run", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("clears the old run's view and shows none of its late pushes", async () => {
-    const page = host();
-    const hook = await showing(page);
-    const old = page.one("run-1");
-    hook.select("run-2");
-    expect(hook.view()).toMatchObject({ status: "loading", runId: "run-2" });
-    old.push(2, snapshotOf({ status: "paused" }));
-    await flush();
-    expect(hook.view()).toMatchObject({ status: "loading", runId: "run-2" });
-    expect(old.released).toBeTruthy();
-  });
-
-  it("never lets a control asked of the old run show on the new one", async () => {
-    const page = host();
-    const answered = Promise.withResolvers<Reply>();
-    page.answer(async () => await answered.promise);
-    const hook = await showing(page);
-    const paused = hook.store.pause();
-    expect(hook.view().pendingControl).toStrictEqual({
-      kind: "pause",
-      stage: "submitting",
-    });
-    hook.select("run-2");
-    await flush();
-    page.one("run-2").push(1, snapshotOf(handleOf("run-2")));
-    answered.resolve({
-      value: { kind: "pause", state: "admitted", revision: 2 },
-    });
-    await paused;
-    expect(page.commands).toStrictEqual([
-      expect.objectContaining({ command: "pause", runId: "run-1" }),
-    ]);
-    expect(hook.view()).toMatchObject({
-      runId: "run-2",
-      pendingControl: null,
-      canPause: true,
-    });
-  });
-
-  it("shows nothing of a control asked before the selection moved away and back", async () => {
-    const page = host();
-    const answered = Promise.withResolvers<Reply>();
-    page.answer(async () => await answered.promise);
-    const hook = await showing(page);
-    const paused = hook.store.pause();
-    hook.select("run-2");
-    hook.select("run-1");
-    expect(hook.view().pendingControl).toBeNull();
-    answered.resolve({
-      value: { kind: "pause", state: "admitted", revision: 2 },
-    });
-    await paused;
-    expect(hook.view().pendingControl).toBeNull();
-  });
-});
-
-describe("controlling the selected run", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("refuses to control a run that isn't shown yet", async () => {
-    const page = host();
-    const idle = mount(page, null);
-    const loading = mount(page, "run-1");
-    const codes = [
-      await codeOf(idle.store.cancel()),
-      await codeOf(loading.store.pause()),
-    ];
-    expect(codes).toStrictEqual([
-      "workflow.not_attached",
-      "workflow.not_attached",
-    ]);
-    expect(page.commands).toStrictEqual([]);
-  });
-
-  it("resolves once admitted, recovering a lost answer under the same key", async () => {
-    const page = host();
-    let attempts = 0;
-    page.answer(() => {
-      attempts += 1;
-      return attempts === 1
-        ? "lost"
-        : { value: { kind: "pause", state: "admitted", revision: 2 } };
-    });
-    const hook = await showing(page);
-    const paused = hook.store.pause();
-    await flush();
-    expect(hook.view().pendingControl).toStrictEqual({
-      kind: "pause",
-      stage: "recovering",
-    });
-    await vi.advanceTimersByTimeAsync(1000);
-    await paused;
-    const [sent, again] = page.commands;
-    expect(again?.idempotencyKey).toBe(sent?.idempotencyKey);
-    expect(hook.view().pendingControl).toStrictEqual({
-      kind: "pause",
-      stage: "applying",
-    });
-  });
-
-  it("rejects a refused control without touching the run's view", async () => {
-    const page = host();
-    page.answer(() => ({ failed: "workflow.control_conflict" }));
-    const hook = await showing(page);
-    const code = await codeOf(hook.store.resume());
-    expect(code).toBe("workflow.control_conflict");
-    expect(hook.view()).toMatchObject({
-      status: "running",
-      pendingControl: null,
-      canPause: true,
-    });
-    expect(hook.view()).not.toHaveProperty("error");
-  });
-
-  it("keeps an admitted control applying until a newer snapshot settles it", async () => {
-    const page = host();
-    const hook = await showing(page, snapshotOf(), 3);
-    page.answer(() => ({
-      value: { kind: "pause", state: "admitted", revision: 4 },
-    }));
-    await hook.store.pause();
-    expect(hook.view()).toMatchObject({
-      pendingControl: { kind: "pause", stage: "applying" },
-      canPause: false,
-      canCancel: true,
-    });
-    page
-      .one("run-1")
-      .push(
-        4,
-        snapshotOf(
-          controlOf({ cancel: true }, { kind: "pause", stage: "applying" })
-        )
-      );
-    expect(hook.view().pendingControl).toStrictEqual({
-      kind: "pause",
-      stage: "applying",
-    });
-    page.one("run-1").push(
-      5,
-      snapshotOf({
-        status: "paused",
-        ...controlOf({ resume: true, cancel: true }),
-      })
-    );
-    expect(hook.view()).toMatchObject({
-      status: "paused",
-      pendingControl: null,
-      canResume: true,
-    });
-  });
-
-  it("settles a control whose settling snapshot arrived before its answer", async () => {
-    const page = host();
-    const answered = Promise.withResolvers<Reply>();
-    page.answer(async () => await answered.promise);
-    const hook = await showing(page);
-    const paused = hook.store.pause();
-    // Admitted at revision 2, applied at 3, both pushed before the answer.
-    page.one("run-1").push(
-      3,
-      snapshotOf({
-        status: "paused",
-        ...controlOf({ resume: true, cancel: true }),
-      })
-    );
-    answered.resolve({
-      value: { kind: "pause", state: "admitted", revision: 2 },
-    });
-    await paused;
-    expect(hook.view()).toMatchObject({
-      status: "paused",
-      pendingControl: null,
-      canResume: true,
-    });
-  });
-
-  it("keeps a receipt already applied applying until the snapshot of its revision arrives", async () => {
-    const page = host();
-    page.answer(() => ({
-      value: { kind: "pause", state: "applied", revision: 3 },
-    }));
-    const hook = await showing(page);
-    await hook.store.pause();
-    expect(hook.view()).toMatchObject({
-      pendingControl: { kind: "pause", stage: "applying" },
-      canPause: false,
-    });
-    page.one("run-1").push(2, snapshotOf());
-    expect(hook.view().pendingControl).toStrictEqual({
-      kind: "pause",
-      stage: "applying",
-    });
-    page.one("run-1").push(
-      3,
-      snapshotOf({
-        status: "paused",
-        ...controlOf({ resume: true, cancel: true }),
-      })
-    );
-    expect(hook.view()).toMatchObject({
-      pendingControl: null,
-      canResume: true,
-    });
-  });
-
-  it("refuses a receipt for another control than the one asked for", async () => {
-    const page = host();
-    page.answer(() => ({
-      value: { kind: "cancel", state: "admitted", revision: 2 },
-    }));
-    const hook = await showing(page);
-    const refusing = codeOf(hook.store.pause());
-    await vi.advanceTimersByTimeAsync(6 * 60_000);
-    await expect(refusing).resolves.toBe("submission.outcome_unknown");
-    expect(hook.view().pendingControl).toBeNull();
-  });
-
-  it("keeps the shown run's applying control when a start is admitted beside it", async () => {
-    const page = host();
-    const hook = await showing(page);
-    await hook.store.pause();
-    page.answer(() => ({ value: handleOf("run-2") }));
-    await hook.store.run({ noteId });
-    expect(hook.view()).toMatchObject({
-      runId: "run-1",
-      pendingControl: { kind: "pause", stage: "applying" },
-    });
-  });
-
-  it("keeps an applying control when the same run is selected another way", async () => {
-    const page = host();
-    const hook = mount(page, null);
-    await hook.store.run({ noteId });
-    await flush();
-    page.one("run-1").push(1, snapshotOf());
-    await hook.store.pause();
-    hook.select("run-1");
-    expect(hook.view().pendingControl).toStrictEqual({
-      kind: "pause",
-      stage: "applying",
-    });
-  });
-
-  it("joins an identical control still unanswered", async () => {
-    const page = host();
-    const answered = Promise.withResolvers<Reply>();
-    page.answer(async () => await answered.promise);
-    const hook = await showing(page);
-    const first = hook.store.cancel();
-    const second = hook.store.cancel();
-    answered.resolve({
-      value: { kind: "cancel", state: "admitted", revision: 2 },
-    });
-    await Promise.all([first, second]);
-    expect(page.commands).toHaveLength(1);
-  });
-
-  it("lets cancel overtake a stalled pause, whose late answer never brings the pause back", async () => {
-    const page = host();
-    const pauseAnswer = Promise.withResolvers<Reply>();
-    page.answer(async (command) =>
-      command.command === "pause"
-        ? await pauseAnswer.promise
-        : { value: { kind: "cancel", state: "admitted", revision: 2 } }
-    );
-    const hook = await showing(page);
-    const paused = hook.store.pause();
-    await hook.store.cancel();
-    expect(page.commands.map(({ command }) => command)).toStrictEqual([
-      "pause",
-      "cancel",
-    ]);
-    expect(hook.view()).toMatchObject({
-      pendingControl: { kind: "cancel", stage: "applying" },
-      canCancel: false,
-    });
-    pauseAnswer.resolve({
-      value: { kind: "pause", state: "admitted", revision: 2 },
-    });
-    await paused;
-    expect(hook.view().pendingControl).toStrictEqual({
-      kind: "cancel",
-      stage: "applying",
-    });
-    page
-      .one("run-1")
-      .push(
-        3,
-        snapshotOf({ status: "cancelled", finishedAt: 3000, ...controlOf({}) })
-      );
-    expect(hook.view()).toMatchObject({
-      status: "cancelled",
-      pendingControl: null,
-      canPause: false,
-      canResume: false,
-      canCancel: false,
-    });
-  });
-
-  it("shows no control still awaiting its answer once the run has ended", async () => {
-    const page = host();
-    const pauseAnswer = Promise.withResolvers<Reply>();
-    page.answer(async (command) =>
-      command.command === "pause"
-        ? await pauseAnswer.promise
-        : { value: { kind: "cancel", state: "admitted", revision: 2 } }
-    );
-    const hook = await showing(page);
-    const paused = hook.store.pause();
-    await hook.store.cancel();
-    page
-      .one("run-1")
-      .push(
-        3,
-        snapshotOf({ status: "cancelled", finishedAt: 3000, ...controlOf({}) })
-      );
-    expect(hook.view()).toMatchObject({
-      status: "cancelled",
-      pendingControl: null,
-    });
-    pauseAnswer.resolve({ failed: "workflow.control_refused" });
-    const code = await codeOf(paused);
-    expect(code).toBe("workflow.control_refused");
-  });
-
-  it("keeps showing an unanswered cancel over a pause asked for after it", async () => {
-    const page = host();
-    const cancelAnswer = Promise.withResolvers<Reply>();
-    page.answer(async (command) =>
-      command.command === "cancel"
-        ? await cancelAnswer.promise
-        : { failed: "workflow.control_conflict" }
-    );
-    const hook = await showing(page);
-    const cancelled = hook.store.cancel();
-    const paused = hook.store.pause();
-    expect(hook.view().pendingControl).toStrictEqual({
-      kind: "cancel",
-      stage: "submitting",
-    });
-    const code = await codeOf(paused);
-    expect(code).toBe("workflow.control_conflict");
-    cancelAnswer.resolve({
-      value: { kind: "cancel", state: "admitted", revision: 2 },
-    });
-    await cancelled;
-  });
-
-  it("shows another page's admitted cancel over this hook's own pause", async () => {
-    const page = host();
-    const pauseAnswer = Promise.withResolvers<Reply>();
-    page.answer(async () => await pauseAnswer.promise);
-    const hook = await showing(page);
-    const paused = hook.store.pause();
-    page
-      .one("run-1")
-      .push(
-        2,
-        snapshotOf(controlOf({}, { kind: "cancel", stage: "applying" }))
-      );
-    expect(hook.view()).toMatchObject({
-      pendingControl: { kind: "cancel", stage: "applying" },
-      canCancel: false,
-    });
-    pauseAnswer.resolve({ failed: "workflow.control_conflict" });
-    const code = await codeOf(paused);
-    expect(code).toBe("workflow.control_conflict");
-  });
-});
-
-describe("losing access", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it.each([
-    ["page.revoked", "binding"],
-    ["auth.session_expired", "run"],
-  ] as const)(
-    "clears every run and permits nothing once %s arrives on a %s",
-    async (code, on) => {
+    it("shows a run the person may not see as unavailable, never thrown, and shows it again once the host does", async () => {
       const page = host();
-      const hook = await showing(page);
-      const other = mount(page, null);
-      await flush();
-      page.one().push(1, { canRun: true });
-      expect(hook.view()).toMatchObject({ canRun: true, canPause: true });
+      const hook = await showing(page, null);
+      expect(hook.view()).toMatchObject({
+        status: "unavailable",
+        runId: "run-1",
+      });
+      page.run("run-1").push(snapshotOf());
+      expect(hook.view()).toMatchObject({ status: "running" });
+    });
+
+    it("shows an event wait with the event's own generated reference, and refuses a snapshot naming an event the reference doesn't hold", async () => {
+      const page = host();
+      const hook = await showing(page, snapshotOf({ waits: [listening()] }));
+      const [wait] = hook.view().waits;
+      expect(wait?.kind === "event" ? wait.event : undefined).toBe(
+        workflows.summarizeNote.events.noteEdited
+      );
       page
-        .one(on === "binding" ? undefined : "run-1")
-        .refuse(2, code, "authorization");
-      expect([hook.error()?.code, other.error()?.code]).toStrictEqual([
-        code,
-        code,
+        .run("run-1")
+        .push(
+          snapshotOf({ waits: [listening({ alias: "documentUploaded" })] })
+        );
+      expect(() => hook.view()).toThrow(
+        expect.objectContaining({ code: "contract.invalid_snapshot" })
+      );
+    });
+  });
+
+  describe("starting runs", () => {
+    it("calls the reference's start mutation with the input under one key, and shows the run it admitted", async () => {
+      const page = host();
+      const hook = mount(page);
+      hook.view();
+      const started = hook.view().run({ noteId });
+      expect(hook.view().isStarting).toBeTruthy();
+      await expect(started).resolves.toStrictEqual(handleOf("run-1"));
+      expect(page.calls).toMatchObject([
+        {
+          name: path("mutations.start"),
+          kind: "mutation",
+          input: { input: { noteId } },
+        },
       ]);
       expect(hook.view()).toMatchObject({
         status: "loading",
-        canRun: false,
+        runId: "run-1",
+        isStarting: false,
+      });
+      page.run("run-1").push(snapshotOf());
+      expect(hook.view()).toMatchObject({ status: "running", runId: "run-1" });
+    });
+
+    it("selects the latest admitted start, never one admitted later but asked before", async () => {
+      const page = host();
+      const answers = page.holdAnswers();
+      const hook = mount(page);
+      const older = hook.view().run({ noteId });
+      const newer = hook.view().run({ noteId });
+      await flush();
+      answers[1]?.({ value: handleOf("run-2") });
+      await newer;
+      answers[0]?.({ value: handleOf("run-1") });
+      await expect(older).resolves.toMatchObject({ runId: "run-1" });
+      expect(hook.view()).toMatchObject({ runId: "run-2", isStarting: false });
+    });
+
+    it("keeps the run shown when a start is refused, which rejects its own promise and is never the run's error", async () => {
+      const page = host();
+      const hook = await showing(page);
+      page.answer(() => ({ failed: "workflow.start_denied" }));
+      await expect(codeOf(hook.view().run({ noteId }))).resolves.toBe(
+        "workflow.start_denied"
+      );
+      expect(hook.view()).toMatchObject({ status: "running", runId: "run-1" });
+    });
+
+    it("recovers a lost answer under the same key, never as a second start", async () => {
+      const page = host();
+      let lost = true;
+      page.answer(() => {
+        if (lost) {
+          lost = false;
+          return "lost";
+        }
+        return { value: handleOf("run-1") };
+      });
+      const hook = mount(page);
+      const started = hook.view().run({ noteId });
+      await vi.advanceTimersByTimeAsync(5000);
+      await expect(started).resolves.toMatchObject({ runId: "run-1" });
+      const [first, again] = page.calls;
+      expect({
+        calls: page.calls.length,
+        sameKey: first?.idempotencyKey === again?.idempotencyKey,
+      }).toStrictEqual({ calls: 2, sameKey: true });
+    });
+
+    it("never moves a run given by ID to the run it started", async () => {
+      const page = host();
+      const hook = await showing(page);
+      page.answer(() => ({ value: handleOf("run-2") }));
+      await hook.view().run({ noteId });
+      expect(hook.view()).toMatchObject({ runId: "run-1" });
+    });
+  });
+
+  describe("controlling the run shown", () => {
+    it("refuses to control a run whose snapshot hasn't loaded, sending nothing", async () => {
+      const page = host();
+      const hook = mount(page, "run-1");
+      await expect(codeOf(hook.view().pause())).resolves.toBe(
+        "workflow.not_attached"
+      );
+      expect(page.calls).toStrictEqual([]);
+    });
+
+    it("calls the control's mutation for the run, submitting until answered, applying until a newer snapshot shows where it stands", async () => {
+      const page = host();
+      const answers = page.holdAnswers();
+      const hook = await showing(page);
+      const paused = hook.view().pause();
+      expect(hook.view()).toMatchObject({
+        pendingControl: { kind: "pause", stage: "submitting" },
         canPause: false,
+        canCancel: true,
+      });
+      await flush();
+      answers[0]?.({ value: { kind: "pause", state: "admitted" } });
+      await paused;
+      expect(page.calls).toMatchObject([
+        { name: path("mutations.pause"), input: { runId: "run-1" } },
+      ]);
+      // Admitted, before any snapshot read after it: never settled-looking.
+      const admitted = hook.view();
+      page.run("run-1").push(
+        snapshotOf({
+          status: "paused",
+          control: {
+            canPause: false,
+            canResume: true,
+            canCancel: true,
+            pendingControl: null,
+          },
+        })
+      );
+      expect({
+        admitted: {
+          pendingControl: admitted.pendingControl,
+          canPause: admitted.canPause,
+        },
+        settled: {
+          status: hook.view().status,
+          pendingControl: hook.view().pendingControl,
+          canResume: hook.view().canResume,
+        },
+      }).toStrictEqual({
+        admitted: {
+          pendingControl: { kind: "pause", stage: "applying" },
+          canPause: false,
+        },
+        settled: { status: "paused", pendingControl: null, canResume: true },
+      });
+    });
+
+    it("leaves a control to the host's snapshot when the host applied it at once, or a snapshot of where it leads came first", async () => {
+      const page = host();
+      const hook = await showing(page);
+      page.answer(() => ({ value: { kind: "pause", state: "applied" } }));
+      await hook.view().pause();
+      const applied = hook.view().pendingControl;
+      // The paused run's snapshot overtakes the admission's answer, and
+      // is the last the host pushes of it.
+      const answers = page.holdAnswers();
+      const paused = hook.view().pause();
+      await flush();
+      page.run("run-1").push(
+        snapshotOf({
+          status: "paused",
+          control: {
+            canPause: false,
+            canResume: true,
+            canCancel: true,
+            pendingControl: null,
+          },
+        })
+      );
+      answers[0]?.({ value: { kind: "pause", state: "admitted" } });
+      await paused;
+      expect({
+        applied,
+        overtaken: {
+          pendingControl: hook.view().pendingControl,
+          canResume: hook.view().canResume,
+        },
+      }).toStrictEqual({
+        applied: null,
+        overtaken: { pendingControl: null, canResume: true },
+      });
+    });
+
+    it("shows a cancel, this hook's or the host's, over a pause", async () => {
+      const page = host();
+      page.holdAnswers();
+      const hook = await showing(page);
+      void hook.view().pause();
+      expect(hook.view().pendingControl).toStrictEqual({
+        kind: "pause",
+        stage: "submitting",
+      });
+      page.run("run-1").push(
+        snapshotOf({
+          control: {
+            canPause: false,
+            canResume: false,
+            canCancel: false,
+            pendingControl: { kind: "cancel", stage: "applying" },
+          },
+        })
+      );
+      expect(hook.view().pendingControl).toStrictEqual({
+        kind: "cancel",
+        stage: "applying",
+      });
+      void hook.view().cancel();
+      expect(hook.view()).toMatchObject({
+        pendingControl: { kind: "cancel", stage: "submitting" },
         canCancel: false,
       });
-      const refused = await codeOf(hook.store.pause());
-      expect(refused).toBe("workflow.not_attached");
-      expect({
-        open: page.open("run-1"),
-        commands: page.commands,
-      }).toStrictEqual({ open: [], commands: [] });
-    }
-  );
-
-  it("hears a revocation pushed at the revision already shown", async () => {
-    const page = host();
-    const hook = await showing(page, snapshotOf(), 7);
-    page.one("run-1").refuse(7, "page.revoked", "authorization");
-    expect(hook.error()?.code).toBe("page.revoked");
-    expect(hook.view()).toMatchObject({ status: "loading", canCancel: false });
-  });
-
-  it("hears a role taken away on the binding at the revision already sent", async () => {
-    const page = host();
-    const hook = await showing(page);
-    page.one().push(1, { canRun: true });
-    page.one().refuse(1, "role.forbidden", "authorization");
-    expect(hook.error()?.code).toBe("role.forbidden");
-    expect(hook.view()).toMatchObject({ canRun: false, canPause: false });
-  });
-
-  it("turns only canRun off for a binding refusal that doesn't fence, and keeps the run shown", async () => {
-    const page = host();
-    const hook = await showing(page);
-    page.one().push(1, { canRun: true });
-    page.one().refuse(2, "workflow.binding_unavailable", "contract");
-    expect(hook.error()).toBeUndefined();
-    expect(hook.view()).toMatchObject({
-      status: "running",
-      canRun: false,
-      canPause: true,
     });
-  });
 
-  it("hears a revocation pushed after following again, whatever revision it carries", async () => {
-    const page = host();
-    const hook = await showing(page, snapshotOf(), 10);
-    page.one("run-1").lose();
-    await vi.advanceTimersByTimeAsync(31_000);
-    page.one("run-1").refuse(1, "page.revoked", "authorization");
-    expect(hook.error()?.code).toBe("page.revoked");
-    expect(hook.view()).toMatchObject({ status: "loading", canCancel: false });
-  });
-
-  it("stops following on unmount, without pausing or cancelling the run", async () => {
-    const page = host();
-    const hook = await showing(page);
-    hook.unmount();
-    await flush();
-    expect({
-      run: page.open("run-1"),
-      binding: page.open(),
-      commands: page.commands,
-    }).toStrictEqual({ run: [], binding: [], commands: [] });
-  });
-});
-
-const style = workflows.summarizeNote.events.styleChosen;
-
-/** The host's answer to a send: the ID it minted; any other command refused. */
-const sent = (command: Command): Reply =>
-  command.command === "send"
-    ? { value: { eventId: `evt_${command.idempotencyKey}` } }
-    : { failed: "workflow.control_refused" };
-
-describe("sending the selected run an event", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("refuses to send to a run that isn't shown yet", async () => {
-    const page = host();
-    const idle = mount(page, null);
-    const loading = mount(page, "run-1");
-    const codes = [
-      await codeOf(idle.store.send(style, { style: "short" })),
-      await codeOf(loading.store.send(style, { style: "short" })),
-    ];
-    expect(codes).toStrictEqual([
-      "workflow.not_attached",
-      "workflow.not_attached",
-    ]);
-    expect(page.commands).toStrictEqual([]);
-  });
-
-  it("resolves once the host committed it, recovers a lost answer under the same key, and sends each call as its own event", async () => {
-    const page = host();
-    let attempts = 0;
-    page.answer((command) => {
-      attempts += 1;
-      return attempts === 1 ? "lost" : sent(command);
-    });
-    const hook = await showing(page);
-    const first = hook.store.send(style, { style: "short" });
-    await vi.advanceTimersByTimeAsync(1000);
-    await first;
-    await hook.store.send(style, { style: "short" });
-    const [lost, recovered, second] = page.commands;
-    expect({
-      commands: page.commands.map(({ command, runId }) => ({ command, runId })),
-      recoveredSameKey: recovered?.idempotencyKey === lost?.idempotencyKey,
-      secondFresh: second?.idempotencyKey !== lost?.idempotencyKey,
-      view: hook.view().pendingControl,
-    }).toStrictEqual({
-      commands: Array.from({ length: 3 }, () => ({
-        command: "send",
-        runId: "run-1",
-      })),
-      recoveredSameKey: true,
-      secondFresh: true,
-      view: null,
-    });
-  });
-
-  it("sends nothing for another workflow's event, one made up, or data its event doesn't take", async () => {
-    const page = host();
-    page.answer(sent);
-    const hook = await showing(page);
-    const codes = {
-      otherWorkflow: await codeOf(
-        hook.store.send(workflows.archiveNotes.events.confirmed, {
-          confirmed: true,
-        })
-      ),
-      madeUp: await codeOf(
-        hook.store.send(
-          { ...style, fingerprint: "0".repeat(64) },
-          {
-            style: "short",
-          }
-        )
-      ),
-      byName: await codeOf(hook.store.send("styleChosen", { style: "short" })),
-      extraField: await codeOf(
-        hook.store.send(style, { style: "short", source: "urn:forged" })
-      ),
-      wrongValue: await codeOf(hook.store.send(style, { style: "medium" })),
-    };
-    expect({ codes, commands: page.commands }).toStrictEqual({
-      codes: {
-        otherWorkflow: "contract.invalid_request",
-        madeUp: "contract.invalid_request",
-        byName: "contract.invalid_request",
-        extraField: "contract.invalid_args",
-        wrongValue: "contract.invalid_args",
-      },
-      commands: [],
-    });
-  });
-
-  it("keeps sending to the run it was called for once the selection moves on", async () => {
-    const page = host();
-    const answered = Promise.withResolvers<Reply>();
-    page.answer(async () => await answered.promise);
-    const hook = await showing(page);
-    const sending = hook.store.send(style, { style: "long" });
-    await flush();
-    hook.select("run-2");
-    answered.resolve({ value: { eventId: "evt_1" } });
-    await sending;
-    expect(page.commands.map(({ runId }) => runId)).toStrictEqual(["run-1"]);
-  });
-});
-
-/** A decision wait of `summarizeNote` as the host names it. */
-const reviewing = {
-  kind: "decision",
-  id: "decision-1",
-  taskId: "review",
-  key: "approveSummary",
-  title: "review",
-  openedAt: 1000,
-  deadline: null,
-  canRespond: true,
-} as const;
-
-/** A sign-in refusal, as the page rejects an answer with it. */
-const refusedSignIn = () =>
-  Object.assign(new Error("Signed out."), {
-    code: "auth.principal_changed",
-  });
-
-describe("answering a decision the selected run is held at", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("refuses to answer for a run that isn't shown yet", async () => {
-    const page = host();
-    const idle = mount(page, null);
-    await expect(
-      codeOf(
-        idle.store.respond(reviewing, {
-          approved: true,
-          value: { comment: "Fine" },
-        })
-      )
-    ).resolves.toBe("workflow.not_attached");
-    expect(page.responses).toStrictEqual([]);
-  });
-
-  it("asks the page to answer the exact wait of the run shown, once, with the value as its decision declares it", async () => {
-    const page = host();
-    const hook = await showing(
-      page,
-      snapshotOf({ status: "waiting", waits: [reviewing] })
-    );
-    await hook.store.respond(reviewing, {
-      approved: false,
-      value: { comment: "Too long", rating: 2 },
-    });
-    expect({
-      responses: page.responses,
-      commands: page.commands,
-    }).toStrictEqual({
-      responses: [
-        {
-          run: "run-1",
-          decision: "decision-1",
-          answer: {
-            approved: false,
-            payload: { comment: "Too long", rating: 2 },
-          },
-        },
-      ],
-      // Nothing over the command path: only the page records an answer.
-      commands: [],
-    });
-  });
-
-  it("sends nothing for a value its decision doesn't take, another kind of wait, or another workflow's decision", async () => {
-    const page = host();
-    const hook = await showing(page);
-    const answered = async (wait: unknown, response: unknown) =>
-      // Untyped, as the store takes what any code may pass.
-      await codeOf(hook.store.respond(wait, response));
-    const codes = {
-      wrongValue: await answered(reviewing, {
-        approved: true,
-        value: "short",
-      }),
-      extraField: await answered(reviewing, {
-        approved: true,
-        value: { comment: "", by: "ada" },
-      }),
-      noApproval: await answered(reviewing, { value: { comment: "" } }),
-      eventWait: await answered(listening(), {
-        approved: true,
-        value: null,
-      }),
-      unknownKey: await answered(
-        { ...reviewing, key: "confirmArchive" },
-        { approved: true, value: null }
-      ),
-      noId: await answered(
-        { ...reviewing, id: "" },
-        { approved: true, value: { comment: "" } }
-      ),
-    };
-    expect({ codes, responses: page.responses }).toStrictEqual({
-      codes: {
-        wrongValue: "contract.invalid_args",
-        extraField: "contract.invalid_args",
-        noApproval: "contract.invalid_args",
-        eventWait: "contract.invalid_request",
-        unknownKey: "contract.invalid_request",
-        noId: "contract.invalid_request",
-      },
-      responses: [],
-    });
-  });
-
-  it("rejects with the page's refusal, a cancelled confirmation included, and leaves a lost answer uncertain, never sent again", async () => {
-    const page = host();
-    const hook = await showing(page);
-    const answer = { approved: true, value: { comment: "Fine" } };
-    page.decideWith(async () => {
-      await Promise.resolve();
-      throw Object.assign(new Error("Cancelled."), {
-        code: "decision.cancelled",
+    it("rejects a refused control without touching the run's view", async () => {
+      const page = host();
+      const hook = await showing(page);
+      page.answer(() => ({ failed: "workflow.control_conflict" }));
+      await expect(codeOf(hook.view().resume())).resolves.toBe(
+        "workflow.control_conflict"
+      );
+      expect(hook.view()).toMatchObject({
+        status: "running",
+        pendingControl: null,
+        canPause: true,
       });
     });
-    const cancelled = await codeOf(hook.store.respond(reviewing, answer));
-    page.decideWith(async () => {
-      await Promise.resolve();
-      throw new Error("The connection was reset.");
-    });
-    const lost = await codeOf(hook.store.respond(reviewing, answer));
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect({ cancelled, lost, asked: page.responses.length }).toStrictEqual({
-      cancelled: "decision.cancelled",
-      lost: "decision.outcome_unknown",
-      asked: 2,
-    });
-  });
 
-  it("fences on a sign-in refusal of its answer, unless a fence came since it was sent", async () => {
-    const answer = { approved: true, value: { comment: "Fine" } };
-
-    // Refused as the latest thing that happened: the client is fenced.
-    const plain = host();
-    const shown = await showing(plain);
-    plain.decideWith(async () => {
-      await Promise.resolve();
-      throw refusedSignIn();
-    });
-    const plainCode = await codeOf(shown.store.respond(reviewing, answer));
-
-    // Refused late: a fence came while it waited, which the old refusal
-    // must not repeat.
-    const raced = host();
-    const racing = await showing(raced);
-    const pending = Promise.withResolvers<never>();
-    raced.decideWith(async () => await pending.promise);
-    const late = codeOf(racing.store.respond(reviewing, answer));
-    await flush();
-    clientInternals(raced.client).workflowLink.fence(
-      clientError("auth.principal_changed")
-    );
-    pending.reject(refusedSignIn());
-    const lateCode = await late;
-
-    expect({
-      plain: {
-        code: plainCode,
-        fences: clientInternals(plain.client).fences(),
-      },
-      raced: {
-        code: lateCode,
-        fences: clientInternals(raced.client).fences(),
-      },
-    }).toStrictEqual({
-      plain: { code: "auth.principal_changed", fences: 1 },
-      raced: { code: "auth.principal_changed", fences: 1 },
+    it("stops following on unmount, pausing or cancelling nothing", async () => {
+      const page = host();
+      const hook = await showing(page);
+      hook.unmount();
+      await flush();
+      expect({
+        open: page.followed.filter((query) => !query.released).length,
+        calls: page.calls.length,
+      }).toStrictEqual({ open: 0, calls: 0 });
     });
   });
 
-  it("answers nothing where no trusted host can confirm it", async () => {
-    const page = host();
-    const bare = new GraspClient({
-      call: async () => await Promise.reject(new Error("Unused")),
-      watch: async (text, onSnapshot) => {
-        await Promise.resolve();
-        if (fieldOf(text, "runId") !== undefined) {
-          onSnapshot({
-            revision: 1,
-            result: { ok: true, value: snapshotOf() },
-          });
-        }
-        return { release: unheard };
-      },
+  describe("sending the run shown an event", () => {
+    it("calls the send mutation with the event's alias and its data", async () => {
+      const page = host();
+      page.answer(() => ({ value: { eventId: "event-1" } }));
+      const hook = await showing(page);
+      await hook
+        .view()
+        .send(workflows.summarizeNote.events.styleChosen, { style: "short" });
+      expect(page.calls).toMatchObject([
+        {
+          name: path("mutations.send"),
+          input: {
+            runId: "run-1",
+            event: "styleChosen",
+            data: { style: "short" },
+          },
+        },
+      ]);
     });
-    const store = new WorkflowStore(
-      workflowChannel(bare),
-      readWorkflowReference(workflows.summarizeNote)
-    );
-    const stop = store.subscribe("run-1", unheard);
-    await flush();
-    await expect(
-      codeOf(
-        store.respond(reviewing, { approved: true, value: { comment: "" } })
-      )
-    ).resolves.toBe("decision.unavailable");
-    stop();
-    expect(page.responses).toStrictEqual([]);
+
+    it("sends nothing for another workflow's event or one made up", async () => {
+      const page = host();
+      const hook = await showing(page);
+      // Untyped, as a page that skips its types would send them.
+      const send = async (event: unknown, data: unknown): Promise<void> => {
+        await Reflect.apply(hook.view().send, undefined, [event, data]);
+      };
+      const codes = await Promise.all([
+        codeOf(send(workflows.archiveNotes.events.confirmed, {})),
+        codeOf(
+          send(
+            { ...workflows.summarizeNote.events.styleChosen, type: "made.up" },
+            { style: "short" }
+          )
+        ),
+        codeOf(send({ alias: "styleChosen" }, { style: "short" })),
+      ]);
+      expect({ codes, calls: page.calls }).toStrictEqual({
+        codes: Array.from({ length: 3 }, () => "contract.invalid_request"),
+        calls: [],
+      });
+    });
+  });
+
+  describe("answering a decision the run shown is held at", () => {
+    it("asks the page to answer the exact wait, once, with the value its decision declares", async () => {
+      const page = host();
+      const wait = {
+        kind: "decision",
+        id: "decision-1",
+        taskId: "review",
+        key: "approveSummary",
+        title: "Approve",
+        openedAt: 1000,
+        deadline: null,
+        canRespond: true,
+      };
+      const hook = await showing(page, snapshotOf({ waits: [wait] }));
+      const [shown] = hook.view().waits;
+      if (shown?.kind !== "decision") {
+        throw new Error("Expected the decision wait");
+      }
+      await hook.view().respond(shown, {
+        approved: true,
+        value: { comment: "Fine." },
+      });
+      await expect(
+        codeOf(hook.view().respond(shown, { approved: true, value: "long" }))
+      ).resolves.toBe("contract.invalid_args");
+      expect({ responses: page.responses, calls: page.calls }).toStrictEqual({
+        responses: [
+          {
+            run: "run-1",
+            decision: "decision-1",
+            answer: { approved: true, payload: { comment: "Fine." } },
+          },
+        ],
+        calls: [],
+      });
+    });
   });
 });

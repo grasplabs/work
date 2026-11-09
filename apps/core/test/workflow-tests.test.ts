@@ -1,5 +1,5 @@
 import { v } from "@grasp-os/sdk";
-import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
+import { declaredWorkflows } from "@grasp-os/sdk/host";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -188,7 +188,7 @@ const requestsApp = async (
 const startOf = async (
   release: Release,
   input: unknown,
-  change: (wire: Record<string, unknown>) => void = () => {
+  change: (reference: Record<string, unknown>) => void = () => {
     // As generated.
   }
 ): Promise<string> => {
@@ -198,20 +198,12 @@ const startOf = async (
   if (declared === undefined) {
     throw new Error("No followUp");
   }
-  const wire: Record<string, unknown> = {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-    contractId: "workflows.followUp",
-    fingerprint: await workflowFingerprint(declared),
-    kind: "workflow",
+  const reference: Record<string, unknown> = {
+    name: "workflows.followUp.mutations.start",
+    kind: "mutation",
   };
-  change(wire);
-  return JSON.stringify({
-    workflow: wire,
-    command: "start",
-    input,
-    idempotencyKey: "0".repeat(32),
-  });
+  change(reference);
+  return await Promise.resolve(JSON.stringify({ reference, input: { input } }));
 };
 
 const resultSchema = z.union([
@@ -396,27 +388,27 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     );
     const session = await sessionOf(release);
     const refused = {
-      fingerprint: startedAs(
-        await session.start(
-          "desk-user",
-          await startOf(release, { who: "Ada" }, (wire) => {
-            wire.fingerprint = "f".repeat(64);
-          })
-        )
-      ),
       alias: startedAs(
         await session.start(
           "desk-user",
-          await startOf(release, { who: "Ada" }, (wire) => {
-            wire.contractId = "workflows.elsewhere";
+          await startOf(release, { who: "Ada" }, (reference) => {
+            reference.name = "workflows.elsewhere.mutations.start";
           })
         )
       ),
-      release: startedAs(
+      control: startedAs(
         await session.start(
           "desk-user",
-          await startOf(release, { who: "Ada" }, (wire) => {
-            wire.resourceVersion = 2;
+          await startOf(release, { who: "Ada" }, (reference) => {
+            reference.name = "workflows.followUp.mutations.cancel";
+          })
+        )
+      ),
+      query: startedAs(
+        await session.start(
+          "desk-user",
+          await startOf(release, { who: "Ada" }, (reference) => {
+            reference.kind = "query";
           })
         )
       ),
@@ -433,9 +425,9 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     await session.close();
     expect({ refused, recorded: await recordedRuns(app) }).toStrictEqual({
       refused: {
-        fingerprint: "version.mismatch",
         alias: "function.not_found",
-        release: "version.mismatch",
+        control: "contract.invalid_request",
+        query: "contract.invalid_request",
         input: "contract.invalid_args",
         notAStart: "contract.invalid_request",
       },

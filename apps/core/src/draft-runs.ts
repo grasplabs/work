@@ -51,7 +51,7 @@ import type { OpenStore } from "./data-stores.ts";
 import { workspace } from "./durable-objects.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation, ProgressSink } from "./operations.ts";
-import { isWorkflowRequest } from "./page-workflows.ts";
+import { isWorkflowMutationPath } from "./page-workflows.ts";
 import { appCodeAndTestFiles } from "./pages.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { functionProblem } from "./preview-reports.ts";
@@ -478,20 +478,19 @@ const answerOf = (result: OperationResult, run?: DraftRun): FunctionAnswer => ({
 
 /**
  * The call `request` asks of a preview, as `options` take it: refused as
- * the preview's side effect when it is a page's request of a workflow,
- * as `resource.unavailable` for a workflow reference's queries, which
- * read runs through the App's binding of the workflow, a preview has none
- * of; and as `contract.invalid_request` when it isn't of the kind asked
- * for.
+ * the preview's side effect when it calls a workflow reference's
+ * mutations, as `resource.unavailable` for its queries, which read runs
+ * through the App's binding of the workflow, a preview has none of; and
+ * as `contract.invalid_request` when it isn't of the kind asked for.
  */
 const draftCallOf = (
   request: unknown,
   { kind }: Pick<DraftCallOptions, "kind">
 ): FunctionRequest => {
-  if (isWorkflowRequest(request)) {
+  const call = readFunctionRequest(request);
+  if (isWorkflowMutationPath(call.reference.name)) {
     throw appErrors.create("app.preview_side_effect");
   }
-  const call = readFunctionRequest(request);
   if (isWorkflowQueryPath(call.reference.name)) {
     throw operationErrors.create("resource.unavailable");
   }

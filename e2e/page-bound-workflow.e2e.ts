@@ -190,10 +190,10 @@ const openDesk = async (page: Page, app: string): Promise<FrameLocator> => {
 const field = (appPage: FrameLocator, name: string) =>
   appPage.getByRole("status", { name, exact: true });
 
-/** Whether `route` relays the page's workflow command `command`. */
-const relays = (route: Route, command: "start" | "cancel"): boolean =>
+/** Whether `route` relays the page's call of the workflow's mutation `name`. */
+const relays = (route: Route, name: "start" | "cancel"): boolean =>
   route.request().method() === "POST" &&
-  (route.request().postData() ?? "").includes(`"command":"${command}"`);
+  (route.request().postData() ?? "").includes(`.mutations.${name}"`);
 
 test("a page starts and cancels a bound workflow's run, and a reload during a start doesn't start it twice", async ({
   pageOf,
