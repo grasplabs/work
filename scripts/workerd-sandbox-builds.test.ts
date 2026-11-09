@@ -2,59 +2,32 @@
  * The package builder on the on-prem sandbox, on plain workerd: a
  * stand-in core (apps/core/test/workerd/builds-worker.ts) runs the same
  * `runBuilder` a build runs, with `SANDBOX_HOST` bound to
- * the supervisor (workerd-sandbox.ts) and the builder core's build makes.
+ * the supervisor (workerd-sandbox.ts) and the builder core's build makes
+ * (workerd-builder-stand-in.ts).
  * Plain workerd ignores an isolate's CPU limit, so a package that holds
  * or exhausts the builder must never run in core's own process. (The
  * page compiler's own on-prem tests are core's test/on-prem/builds.test.ts.)
+ * How builds share the pool is workerd-sandbox-builds-share.test.ts and
+ * workerd-sandbox-builds-apps.test.ts.
  */
-import { execFileSync } from "node:child_process";
-import { readdirSync } from "node:fs";
-import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
+import {
+  ANSWER_MS,
+  DEADLINE_MS,
+  builtModulesSchema,
+  callStandIn,
+  serveBuilderStandIn,
+} from "./workerd-builder-stand-in.ts";
 import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
-import { serveStandIn } from "./workerd-stand-in.ts";
-import { cleanUp, tempDir } from "./workerd-test-server.ts";
-
-const repo = path.join(import.meta.dirname, "..");
-
-/** How long core may take to answer another request meanwhile. */
-const ANSWER_MS = 500;
-
-/**
- * How long a builder's call may take on the sandbox host here: longer than
- * a session waits for its owner's room (3 s), so a second call gives up
- * waiting while the first still holds the owner's share.
- */
-const DEADLINE_MS = 6000;
-
-const outcomeSchema = z.object({
-  status: z.enum(["ok", "bound", "unavailable", "failed"]),
-  value: z.unknown().optional(),
-  error: z.string().optional(),
-  httpStatus: z.number().nullable().optional(),
-  ms: z.number(),
-});
-
-/** What the stand-in says of each module a build returned. */
-const builtModulesSchema = z
-  .array(
-    z.object({ entry: z.string(), bytes: z.number(), holdsExport: z.boolean() })
-  )
-  .min(1);
+import { cleanUp } from "./workerd-test-server.ts";
 
 describe("the package builder on the on-prem sandbox", () => {
   let supervisor: SandboxSupervisor;
   let coreUrl: string;
-  /** A pool of four, so the builder's share is two: one each for two Apps. */
-  let wide: SandboxSupervisor;
-  let wideUrl: string;
-  /** A second core isolate on that pool, so one App's builds come from two isolates at once. */
-  let otherUrl: string;
 
   beforeAll(async () => {
     supervisor = await startSandboxSupervisor({
@@ -62,52 +35,16 @@ describe("the package builder on the on-prem sandbox", () => {
       processes: 2,
       log: () => {},
     });
-    // The builder as core's build makes it, esbuild and all.
-    const assets = tempDir();
-    execFileSync(
-      process.execPath,
-      [
-        path.join(repo, "packages/compiler/build.ts"),
-        assets,
-        path.join(assets, "version.ts"),
-      ],
-      { cwd: path.join(repo, "packages/compiler"), stdio: "ignore" }
-    );
-    const [release] = readdirSync(path.join(assets, "_compiler"));
-    const built = path.join(assets, "_compiler", release ?? "");
-    const standIn = async (socket: string): Promise<string> =>
-      await serveStandIn(
-        "builds-worker.ts",
-        socket,
-        { SANDBOX_DEADLINE_MS: String(DEADLINE_MS) },
-        { PACKAGE_BUILDER: path.join(built, "package-builder.js") },
-        { ESBUILD_WASM: path.join(built, "esbuild.wasm") }
-      );
-    coreUrl = await standIn(supervisor.socket);
-    wide = await startSandboxSupervisor({
-      workerd: nativeWorkerd,
-      processes: 4,
-      log: () => {},
-    });
-    wideUrl = await standIn(wide.socket);
-    otherUrl = await standIn(wide.socket);
-  }, 300_000);
+    coreUrl = await serveBuilderStandIn(supervisor.socket);
+  }, 120_000);
 
   afterAll(async () => {
-    await Promise.all([supervisor.stop(), wide.stop()]);
+    await supervisor.stop();
     cleanUp();
   });
 
-  const call = async (
-    query: string,
-    route = "/build",
-    url = coreUrl
-  ): Promise<z.infer<typeof outcomeSchema>> => {
-    const response = await fetch(`${url}${route.slice(1)}?${query}`, {
-      method: "POST",
-    });
-    return outcomeSchema.parse(await response.json());
-  };
+  const call = async (query: string, route = "/build") =>
+    await callStandIn(query, route, coreUrl);
 
   /** How long core takes to answer a request that builds nothing. */
   const answerTime = async (): Promise<number> => {
@@ -184,23 +121,6 @@ describe("the package builder on the on-prem sandbox", () => {
     expect(outcome.ms).toBeLessThan(15_000);
   }, 60_000);
 
-  it("keeps running App code while builds hold the builders' share of the pool", async () => {
-    // One build holds its owner's share, and another waits for it: an App's
-    // call takes the pool's other process meanwhile, at once.
-    const first = call("builder=busy");
-    await sleep(500);
-    const second = call("builder=busy");
-    await sleep(200);
-    const app = await call("", "/app");
-    await Promise.all([first, second]);
-
-    expect({ status: app.status, value: app.value }).toStrictEqual({
-      status: "ok",
-      value: 42,
-    });
-    expect(app.ms).toBeLessThan(2000);
-  }, 60_000);
-
   it("builds an approved lock on the sandbox host and puts back each module it wrote, whole and in order", async () => {
     const outcome = await call("package=built");
 
@@ -250,57 +170,5 @@ describe("the package builder on the on-prem sandbox", () => {
     expect(
       after.memory - before.memory + (after.crashed - before.crashed)
     ).toBe(1);
-  }, 60_000);
-
-  it("holds builds to one owner's share of the pool: past it, a build waits for a place, then runs, never the package's fault", async () => {
-    // Two processes, so the builders hold one: the second build, another
-    // App's in another isolate of core, asks again until the first's place
-    // comes free, then runs to its own deadline.
-    const first = call("builder=busy&app=app-first");
-    await sleep(500);
-    const second = await call("builder=busy&app=app-second");
-
-    expect({
-      second: second.status,
-      waitedForTheFirst: second.ms > DEADLINE_MS,
-    }).toStrictEqual({ second: "bound", waitedForTheFirst: true });
-    await expect(first).resolves.toMatchObject({ status: "bound" });
-  }, 60_000);
-
-  it("runs an App's next build once a build of its was given up on by its caller, never waiting on that one for good", async () => {
-    const next = await call("app=app-cancelled", "/cancelled-build", wideUrl);
-
-    expect(next.status).toBe("ok");
-  }, 60_000);
-
-  it("holds one App's builds to part of the builders' share, so another App's build still runs", async () => {
-    // The builders' share of four processes is two. One App's build holds
-    // one; its build from another isolate of core waits for that one.
-    const held = call("builder=busy&app=app-a", "/build", wideUrl);
-    await expect
-      .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 50 })
-      .toBe(1);
-    const waiting = call("builder=busy&app=app-a", "/build", otherUrl);
-    await expect
-      .poll(() => wide.stats().waitingForOwners, {
-        timeout: 5000,
-        interval: 50,
-      })
-      .toBe(1);
-    // The other place is another App's, while the first App's builds hold
-    // theirs and wait.
-    const other = await call("builder=busy&app=app-b", "/build", wideUrl);
-    const [first, second] = await Promise.all([held, waiting]);
-
-    expect({
-      other: other.status,
-      held: first.status,
-      // It asked again until the App's place came free, then ran.
-      waiting: second.status,
-    }).toStrictEqual({ other: "bound", held: "bound", waiting: "bound" });
-    // Every App's place given back once its process is gone.
-    await expect
-      .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 100 })
-      .toBe(0);
   }, 60_000);
 });

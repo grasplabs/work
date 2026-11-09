@@ -45,6 +45,12 @@ import type { InlineConfig, Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
 
 import { withBuildLock } from "./build-lock.ts";
+import {
+  buildPackageBuilder,
+  chunksOf,
+  esbuildWasm,
+  production,
+} from "./build-package-builder.ts";
 import { oxcWasm, oxcWasmModule } from "./oxc-wasm/wasm.ts";
 import { serverSdkImports } from "./src/app-code.ts";
 import { extractCandidates } from "./src/candidates.ts";
@@ -226,17 +232,6 @@ const iconEntries = (): { entries: Entry[]; icons: Kit["icons"] } => {
 };
 
 /**
- * What a release is built as, whatever `NODE_ENV` the building process has:
- * `vp test` runs with `test`, and a shell may have anything. React's
- * packages pick their development build by it, and Vite puts it in the
- * code, so without this the same sources built into another kit, under
- * another version, depending on who built them.
- */
-const production = {
-  "process.env.NODE_ENV": JSON.stringify("production"),
-};
-
-/**
  * What the preview kit is built as (spec 19.2.1): React's development
  * builds, the only ones React Fast Refresh works with, whatever `NODE_ENV`
  * the building process has, as for `production`.
@@ -383,14 +378,6 @@ const reactCompiler: Plugin = {
     return { code: compiled.code };
   },
 };
-
-const chunksOf = (
-  result: Awaited<ReturnType<typeof build>>
-): Rolldown.OutputChunk[] =>
-  [result]
-    .flat()
-    .flatMap((output) => ("output" in output ? output.output : []))
-    .filter((file) => file.type === "chunk");
 
 /** Built modules by flat name: their code, imports and source files. */
 interface FlatModules {
@@ -1545,39 +1532,6 @@ const buildUltracite = async (): Promise<string> =>
   );
 
 /**
- * The package builder's module (src/packages/worker.ts), which core runs
- * in an isolate of its own for each use. It runs without Node.js
- * compatibility: nothing it bundles may import Node's built-ins.
- */
-const buildPackageBuilder = async (): Promise<string> => {
-  const config: InlineConfig = {
-    configFile: false,
-    root,
-    logLevel: "warn",
-    mode: "production",
-    resolve: { conditions: ["workerd", "worker", "browser"] },
-    ssr: { noExternal: true, target: "webworker" },
-    define: production,
-    build: {
-      ssr: "src/packages/worker.ts",
-      write: false,
-      minify: true,
-      target: "es2022",
-      rolldownOptions: {
-        // esbuild's WebAssembly is a module of the isolate of its own.
-        external: ["cloudflare:workers", "./esbuild.wasm"],
-        output: { format: "es", codeSplitting: false },
-      },
-    },
-  };
-  const [chunk, ...rest] = chunksOf(await build(config));
-  if (chunk === undefined || rest.length > 0) {
-    throw new Error("The package builder should build to one module");
-  }
-  return chunk.code;
-};
-
-/**
  * The type checker's module (src/checker.ts), which core runs in an
  * isolate of its own beside the compiler's, with tsrs's WebAssembly and
  * the kit's types as modules of their own. It runs without Node.js
@@ -1794,9 +1748,7 @@ const buildAppCompiler = async (
   // The WebAssembly the type checker runs, as the package ships it.
   const tsrsWasm = tsrsBytes;
   // The WebAssembly the builder's esbuild runs, as the package ships it.
-  const esbuildWasm = readFileSync(
-    require.resolve("esbuild-wasm/esbuild.wasm")
-  );
+  const esbuild = esbuildWasm();
   // oxc's transform and parser, which the compiler's isolate runs, and
   // oxlint's and oxfmt's, which Ultracite's does, as pinned.
   const oxc = await oxcWasm();
@@ -1828,7 +1780,7 @@ const buildAppCompiler = async (
     .update(ultracite)
     .update(oxc)
     .update(packageBuilder)
-    .update(esbuildWasm)
+    .update(esbuild)
     .update(checker)
     .update(typesJson)
     .update(tsrsWasm)
@@ -1844,7 +1796,7 @@ const buildAppCompiler = async (
     [compilerAssets.workflowSdkModules]: JSON.stringify(workflowSdkModules),
     [compilerAssets.serverSdkModules]: JSON.stringify(serverSdkModules),
     [compilerAssets.packageBuilder]: packageBuilder,
-    [compilerAssets.esbuildWasm]: esbuildWasm,
+    [compilerAssets.esbuildWasm]: esbuild,
     [compilerAssets.checker]: checker,
     [compilerAssets.types]: typesJson,
     [compilerAssets.tsrsWasm]: tsrsWasm,
