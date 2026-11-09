@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { transform } from "lightningcss";
@@ -15,7 +15,7 @@ import type { Declaration, SelectorComponent } from "lightningcss";
 
 /** What the table says of one icon's moves. */
 export interface IconMoves {
-  /** The parts its moves name, by number; 0 stands for the icon itself or all of its parts. */
+  /** The parts its moves name, by number; 0 stands for the icon itself or all of its parts. None: it has no move. */
   parts: Set<number>;
   /** Whether a move of the icon itself makes it larger or smaller, which is no move. */
   sized: boolean;
@@ -50,7 +50,11 @@ const customProperties = (declarations: Declaration[]): Set<string> =>
     )
   );
 
-/** The table's moves, by the icon's Lucide name (`trash` for `.lucide-trash`). Only rules that set a move count. */
+/**
+ * The table's moves, by the icon's Lucide name (`trash` for `.lucide-trash`):
+ * the parts each rule that sets a move names, and whether a rule of the
+ * whole icon sizes it, a move or not.
+ */
 export const iconMovesOf = (css: string): Map<string, IconMoves> => {
   const icons = new Map<string, IconMoves>();
   transform({
@@ -63,14 +67,15 @@ export const iconMovesOf = (css: string): Map<string, IconMoves> => {
             ...rule.value.declarations.declarations,
             ...rule.value.declarations.importantDeclarations,
           ]);
-          if (!set.has("--icon-move")) {
-            return;
-          }
+          const moving = set.has("--icon-move");
+          const sizing = set.has("--icon-wide") || set.has("--icon-tall");
           for (const selector of rule.value.selectors) {
             const [first, ...rest] = selector;
+            const whole = rest.length === 0;
             if (
               first?.type !== "class" ||
-              !first.name.startsWith(lucideClass)
+              !first.name.startsWith(lucideClass) ||
+              !(moving || (whole && sizing))
             ) {
               continue;
             }
@@ -79,14 +84,13 @@ export const iconMovesOf = (css: string): Map<string, IconMoves> => {
               parts: new Set<number>(),
               sized: false,
             };
-            const numbers = nthChildren(rest);
-            for (const number of numbers.length > 0 ? numbers : [0]) {
-              moves.parts.add(number);
+            if (moving) {
+              const numbers = nthChildren(rest);
+              for (const number of numbers.length > 0 ? numbers : [0]) {
+                moves.parts.add(number);
+              }
             }
-            if (
-              rest.length === 0 &&
-              (set.has("--icon-wide") || set.has("--icon-tall"))
-            ) {
+            if (whole && sizing) {
               moves.sized = true;
             }
             icons.set(icon, moves);
@@ -171,6 +175,20 @@ export const drawIcon = (file: string, name: string): DrawnIcon | undefined => {
   return icon;
 };
 
-/** The table at `path`, read anew each time: an editor's lint sees each change to it. */
-export const iconMovesAt = (path: string): Map<string, IconMoves> =>
-  iconMovesOf(readFileSync(path, "utf-8"));
+/** Each table read, by its path, with when it was last changed. */
+const tables = new Map<
+  string,
+  { changed: number; moves: Map<string, IconMoves> }
+>();
+
+/** The table at `path`, read again once it changes: an editor's lint sees each change. */
+export const iconMovesAt = (path: string): Map<string, IconMoves> => {
+  const changed = statSync(path).mtimeMs;
+  const known = tables.get(path);
+  if (known?.changed === changed) {
+    return known.moves;
+  }
+  const moves = iconMovesOf(readFileSync(path, "utf-8"));
+  tables.set(path, { changed, moves });
+  return moves;
+};

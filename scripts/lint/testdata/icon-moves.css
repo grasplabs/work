@@ -18,10 +18,12 @@
   --icon-move: icon-pop;
 }
 
-/* The whole bell made larger and smaller. */
+/* The whole bell made larger and smaller, beside its clapper's move. */
 .lucide-bell {
-  --icon-move: icon-swing;
   --icon-wide: 1.2;
+}
+.lucide-bell > :nth-child(2) {
+  --icon-move: icon-swing;
 }
 
 /* A rule that sets no move is none. */

@@ -7,7 +7,8 @@ pnpm-lock.yaml linguist-generated=true
 **/routeTree.gen.ts linguist-generated=true
 **/worker-configuration.d.ts linguist-generated=true
 **/migrations/meta/** linguist-generated=true
-**/native-tool-classes.gen.ts linguist-generated=true
+# Not native-tool-classes.gen.ts: generated too, but each change to a
+# tool's class is reviewed in it, so it shows in full.
 
 # Binary assets are never line-ending normalized.
 *.gif binary

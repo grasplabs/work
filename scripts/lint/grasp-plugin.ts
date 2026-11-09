@@ -713,7 +713,7 @@ const iconHasMove = {
           }
           const { icon, parts } = drawn;
           const move = moves.get(icon);
-          if (move === undefined) {
+          if (move === undefined || move.parts.size === 0) {
             context.report({
               node: specifier,
               messageId: "missing",
