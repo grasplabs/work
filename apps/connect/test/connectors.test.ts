@@ -20,8 +20,10 @@ import {
   probe,
   providers,
   refused,
+  tools,
 } from "./connectors-harness.ts";
 import { sampleHost, storageHost } from "./fixtures/sample-connector.ts";
+import { nativeToolsOf } from "./native-tool-checks.ts";
 import { callTool as call, claimedAgo } from "./tool-calls.ts";
 
 // Native connectors run in isolates of their own, and reach their provider
@@ -36,6 +38,22 @@ import { callTool as call, claimedAgo } from "./tool-calls.ts";
 // isolate, as connector code gone wrong would.
 
 describe("a native connector", () => {
+  // The files the check of every tool's input is split over, by name (Vite
+  // lists them without loading them): a file deleted or renamed leaves
+  // tools unchecked, and this fails.
+  it("has every tool's input checked by the native-tools files, each tool once", () => {
+    const checked = Object.keys(
+      import.meta.glob("./native-tools-*-of-*.test.ts")
+    ).flatMap((file) =>
+      nativeToolsOf(file).map(
+        ({ connector, action }) => `${connector} ${action}`
+      )
+    );
+    expect(checked.toSorted()).toStrictEqual(
+      tools.map(({ connector, action }) => `${connector} ${action}`).toSorted()
+    );
+  });
+
   it("can't write from a lookup of a call's effect: only the action's GETs leave", async () => {
     const connection = await connectionTo("sample");
     const file = async () =>
