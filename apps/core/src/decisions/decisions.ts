@@ -79,7 +79,7 @@ import {
 } from "./confirmations.ts";
 import type { ReviewContext } from "./confirmations.ts";
 
-// Decisions workflow runs wait for (`step.decision`), and the only ways to
+// Decisions workflow runs wait for (`ctx.decisions.<alias>.ask`), and the only ways to
 // answer one. Threat model R3, R8 and WF1 to WF4:
 //
 // - Only a signed-in member the decision is from answers it, as they are

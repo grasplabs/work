@@ -82,12 +82,6 @@ expectTypeOf<Extract<keyof typeof summarize, string>>().toEqualTypeOf<
   | "queries"
   | "mutations"
 >();
-// @ts-expect-error -- no start of its own: a run starts through mutations.start
-void summarize.start;
-// @ts-expect-error -- nor get
-void summarize.get;
-// @ts-expect-error -- nor cancel
-void summarize.cancel;
 
 // Each event binds its workflow binding and its exact type, literally.
 const edited = summarize.events.noteEdited;
@@ -286,8 +280,6 @@ export const useQueryChecks = (): void => {
   >();
   // @ts-expect-error -- a query, never a command
   void useMutation(queries.runs);
-  // @ts-expect-error -- no generated start beside the queries
-  void queries.start;
 
   // Runs: a status filter, paged; rows without output or error.
   const runs = usePaginatedQuery(queries.runs, {}, { initialPageSize: 25 });

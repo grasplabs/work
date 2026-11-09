@@ -1852,12 +1852,9 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
       // Refused before it waits: the engine is asked for nothing.
       asked,
     }).toStrictEqual({
-      // No catch takes it, whatever its code does: the run ends with it.
-      caught: {
-        ended: null,
-        tampered: [],
-        untaken: "workflow.event_denied",
-      },
+      // No catch takes it: its catch of everything throws it on, so the
+      // run ends with it, never as code that went on past it.
+      caught: failedWith("workflow.event_denied"),
       bare: failedWith("workflow.event_denied"),
       asked: [],
     });
@@ -1921,11 +1918,7 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
       ranAgain: [],
       // The path the run took is gone: its code's catch can't take the
       // failure, so the run ends with it, never on a path it never took.
-      afterRevoking: {
-        ended: null,
-        tampered: [],
-        untaken: "workflow.event_denied",
-      },
+      afterRevoking: failedWith("workflow.event_denied"),
       ranRevoked: [],
       asked: ["reply:task"],
     });

@@ -783,12 +783,18 @@ export const repairResourceStarts = async (
   }
 };
 
-/** How the run's code ended: as it reports it, or as loading it failed. */
+/**
+ * How the run's code ended: as it reports it (`reported`), or as the host
+ * failed it (loading it, or stopping it past its CPU time), which is the
+ * host's own word, never held to what the build seals.
+ */
 const settledRun = async (
   run: () => Promise<unknown>
-): Promise<Settled<unknown>> => {
+): Promise<{ result: Settled<unknown>; reported: boolean }> => {
   const outer = await settle(run);
-  return outer.ok ? fromIsolate(outer.value) : outer;
+  return outer.ok
+    ? { result: fromIsolate(outer.value), reported: true }
+    : { result: outer, reported: false };
 };
 
 /** What an activation of a run is given by its object (run-object.ts). */
@@ -1000,6 +1006,25 @@ export interface SealedActivation {
 }
 
 /**
+ * What a run whose code ended as `result` fails with, if it failed: what
+ * its code reported as the build may fail it (a raise it seals, a failure
+ * no catch took, else the platform's: `SealedRunKind.runFailure`); what
+ * the host failed it with (`reported` false) as the host did.
+ */
+const codeFailure = (
+  result: Settled<unknown>,
+  reported: boolean,
+  kind: SealedRunKind | undefined
+): StepError | undefined => {
+  if (result.ok) {
+    return undefined;
+  }
+  return reported && kind !== undefined
+    ? kind.runFailure(result.error)
+    : result.error;
+};
+
+/**
  * Runs one activation of a sealed build's run, `activation.run`: its
  * modules (`modules`, its verified build's: `sealedRunModules`) in an
  * isolate of its own, on the run host as a sealed run (sealed-run.ts),
@@ -1077,7 +1102,7 @@ export const sealedActivation = async (
       ...(memory.current === undefined ? {} : { current: memory.current }),
     }
   );
-  const result = await settledRun(async () => {
+  const { result, reported } = await settledRun(async () => {
     try {
       return await code.run(host, await sealedRunStart(env, run));
     } catch (error) {
@@ -1093,15 +1118,11 @@ export const sealedActivation = async (
   // longer read what it recalled, a tampered run's checked first: the
   // refusal can hold what the run said.
   const evidenceRefused = await evidenceRefusal(env, run.calling);
-  // Its code's own failure as the build may fail it: a raise it seals, a
-  // failure no catch took, else the platform's (`SealedRunKind.runFailure`).
-  const codeFailed =
-    result.ok || kind === undefined ? undefined : kind.runFailure(result.error);
   const failed =
     evidenceRefused ??
     tampered ??
     untaken ??
-    (result.ok ? undefined : (codeFailed ?? result.error));
+    codeFailure(result, reported, kind);
   if (failed !== undefined) {
     throw namedError(failed.name, failed.message, failed.code);
   }

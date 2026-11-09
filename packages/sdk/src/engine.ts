@@ -114,9 +114,8 @@ export interface WorkflowEngine {
     options: EngineStepOptions,
     fn: () => Promise<T>,
     /**
-     * A generated workflow's choice of a retry once the step failed (see
-     * `DoOptions.retry`): only a sealed build's run host asks it; any other
-     * engine ignores it.
+     * Whether the step runs again once it failed (a call's `retry`):
+     * only a sealed build's run host asks it, and decides the rest.
      */
     retry?: (error: Json) => Promise<unknown>
   ) => Promise<T>;
@@ -124,26 +123,16 @@ export interface WorkflowEngine {
   sleep: (name: string, milliseconds: number) => Promise<void>;
   /**
    * Durably pauses the run until `until`, in ms since the epoch, recorded
-   * by an earlier step: a generated workflow's (`step.sleepUntil`). Only a
-   * sealed build's run host has it.
+   * by an earlier step (`ctx.sleepUntil`). Only a sealed build's run host
+   * has it.
    */
   sleepUntil?: (name: string, until: number) => Promise<void>;
   /**
-   * A generated workflow's event wait (`step.listen`): the engine decides
-   * what it waits for, and how long, from the step alone, and answers how
-   * it ended. Only a sealed build's run host has it.
+   * An event wait (`ctx.events.<alias>.waitFor`): the engine decides what
+   * it waits for, and how long, from the step alone, and answers how it
+   * ended. Only a sealed build's run host has it.
    */
   listen?: (name: string) => Promise<unknown>;
-  /**
-   * A generated workflow's catch step (`step.caught`): `takes` is asked
-   * whether its catch takes the error the engine offers, and the step
-   * answers what it recorded. Only a sealed build's run host has it.
-   */
-  caught?: (
-    name: string,
-    options: EngineStepOptions,
-    takes: (error: Json) => Promise<boolean>
-  ) => Promise<unknown>;
   /**
    * Opens a decision on `step` in this run, answered only by the people
    * `from` names, never the run's starter unless `from` is exactly

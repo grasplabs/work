@@ -299,16 +299,16 @@ export const takeFixtureDecision = async (
 /** A task's ID, as a workflow names it. */
 const taskIdSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u);
 
-/** The most loops a task's step names around it: the format's nesting. */
-const maxLoopDepth = 8;
-
 /** An answer as a test principal gives it (`respond`). */
 const answerSchema = z.strictObject({
   task: taskIdSchema,
   approved: z.boolean(),
   value: z.json().optional(),
-  /** The item of each loop around the task, outermost first. */
-  at: z.array(z.int().min(0).max(9999)).max(maxLoopDepth).optional(),
+  /**
+   * Which time the run asks the task's decision, from 0, as the run host
+   * counts a task's runs across the loops around it.
+   */
+  run: z.int().min(0).max(9999).optional(),
 });
 
 /**
@@ -341,11 +341,9 @@ const itemOf = (step: string): string => {
 };
 
 /**
- * The decision of task `task` that run `runId` asks at item `at` (each
- * loop's, outermost first: the run of its task the last names, as the
- * run host counts a task's runs in a loop's items), or, without one, its
- * latest. Until the run
- * asks it, waits while the run goes on, until `until` or `stopped`
+ * The decision of task `task` that run `runId` asks the `time`-th time
+ * (from 0, as the run host counts a task's runs across the loops around
+ * it), or, without one, its latest. Until the run asks it, waits while the run goes on, until `until` or `stopped`
  * (`decision.not_found` when it asked none); one answered or out of time
  * is `decision.closed`, never waited on, as a second answer to it would be.
  */
@@ -353,11 +351,11 @@ const openDecisionOf = async (
   env: Env,
   runId: string,
   task: string,
-  at: readonly number[] | undefined,
+  time: number | undefined,
   { until, stopped }: { until: number; stopped: () => boolean }
 ) => {
   const db = drizzle(env.DB);
-  const item = at === undefined ? undefined : String(at.at(-1) ?? 0);
+  const item = time === undefined ? undefined : String(time);
   for (;;) {
     // One look after another, as the run goes on.
     // oxlint-disable-next-line no-await-in-loop
@@ -408,8 +406,8 @@ export const answerFixtureDecision = async (
   if (!answer.success) {
     throw decisionErrors.create("decision.invalid");
   }
-  const { task, approved, value = null, at } = answer.data;
-  const open = await openDecisionOf(env, runId, task, at, wait);
+  const { task, approved, value = null, run: asked } = answer.data;
+  const open = await openDecisionOf(env, runId, task, asked, wait);
   if (!open.recipients.includes(by)) {
     throw decisionErrors.create("decision.forbidden");
   }

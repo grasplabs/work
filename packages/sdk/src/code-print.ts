@@ -281,6 +281,18 @@ interface Context {
   arrowBody: boolean;
 }
 
+/**
+ * A template's raw part with its line breaks as escapes, which read the
+ * same (a raw CR or CRLF reads as LF): code the generator indents line
+ * by line must hold no line break inside a template's text.
+ */
+const unbroken = (raw: string): string =>
+  raw
+    .replaceAll(/\r\n?/gu, "\\n")
+    .replaceAll("\n", "\\n")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+
 /** `node` printed (see the header). */
 // One case per node type: its length is the tree's, not complexity.
 // oxlint-disable-next-line eslint/complexity -- see above
@@ -323,9 +335,9 @@ const printed = (node: Code, context: Context): string => {
     case "Template": {
       const parts = node.expressions.map(
         (expression, at) =>
-          `${node.quasis[at] ?? ""}\${${child(expression, "other")}}`
+          `${unbroken(node.quasis[at] ?? "")}\${${child(expression, "other")}}`
       );
-      return `\`${parts.join("")}${node.quasis.at(-1) ?? ""}\``;
+      return `\`${parts.join("")}${unbroken(node.quasis.at(-1) ?? "")}\``;
     }
     case "Array": {
       const elements = node.elements.map((element) =>

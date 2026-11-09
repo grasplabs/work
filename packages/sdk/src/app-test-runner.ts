@@ -138,7 +138,7 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
     respond: async (
       handle: WorkflowTestRun,
       task: string,
-      { approved, value, at }: TestDecisionAnswer
+      { approved, value, run: asked }: TestDecisionAnswer
     ): Promise<void> => {
       unwrapped(
         await session.respond(
@@ -148,7 +148,7 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
             task,
             approved,
             ...(value === undefined ? {} : { value }),
-            ...(at === undefined ? {} : { at }),
+            ...(asked === undefined ? {} : { run: asked }),
           })
         )
       );

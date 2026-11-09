@@ -39,6 +39,14 @@ export const executionErrors = defineErrorFamily({
 export const expressionFailed = "expression.failed";
 
 /**
+ * The name a run host gives a step's failure no catch may take, as the
+ * isolate hears it (an effect already made, a refusal, a timeout): the
+ * workflow SDK throws it on from every catch, so the run ends with it,
+ * whatever catch the code has.
+ */
+export const uncatchableFailureName = "UncatchableFailure";
+
+/**
  * Why a workflow's expression failed as it ran: the one code the SDK's
  * expression guards throw (`ExpressionFailedError`). The run host keeps
  * it, in these words, never the guard's own message.

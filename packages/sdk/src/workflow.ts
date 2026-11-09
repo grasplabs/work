@@ -1,6 +1,7 @@
 import type { RunId } from "@grasp-os/shared/ids";
 
 import type { WorkflowEngine } from "./engine.ts";
+import { unlistedInheritedNames } from "./expression-runtime.ts";
 import type { MemberName } from "./member-names.ts";
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
@@ -72,10 +73,13 @@ import type {
  *   of its earlier runs (`<step>:task@2`): deterministic as long as the
  *   code is, which it is, as its expressions read only journaled values
  *   and frozen inputs. Flow (an `if`, a loop's items) is evaluated again
- *   on replay from the same values, so it takes the same path; a call's
- *   arguments are evaluated again too, and the host holds every call to
- *   its sealed template, so a replay that diverged is refused where it
- *   differs, never acted on.
+ *   on replay from the same values, so it takes the same path. A step
+ *   already journaled answers from the journal, its arguments not
+ *   compared again: what keeps a replay on the same path is that the code
+ *   is a pure function of journaled values, not a check. What a replay
+ *   does past the journal is a call like any other, held to its sealed
+ *   template and to the next run of its step (`@n`), so a replay that
+ *   diverged reaches nothing the build doesn't seal.
  * - A call the build didn't seal. The members are the code's convenience:
  *   the host decides every call by the build's sealed table (the step a
  *   call names, its permission, its action, every literal of its
@@ -301,6 +305,16 @@ export const defineWorkflow = <
     engine: WorkflowEngine,
     rawArgs: unknown
   ): Promise<unknown> => {
+    // Its expressions were lowered for the value prototypes
+    // `inheritedNames` lists: a runtime whose prototypes hold another
+    // function would read a field of its name as that function.
+    const unlisted = unlistedInheritedNames();
+    if (unlisted.length > 0) {
+      throw new WorkflowError(
+        "workflow.invalid_definition",
+        `This runtime's values inherit functions its expressions weren't lowered for: ${unlisted.join(", ")}.`
+      );
+    }
     // SAFETY: checked by `config.args`, or to be an empty object when there
     // is none, as the default of `Args` says.
     const args = checkOrThrow(

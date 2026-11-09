@@ -1528,8 +1528,6 @@ export type HostStepUse = StepUse | "sleepUntil" | "listen";
 
 /** What a retry's decision step records (`RunHost.#retried`). */
 export interface RetryDecision {
-  /** The catch it said takes the failure (a `try` task's ID; null for none). */
-  by?: string | null;
   /** Whether the step runs again. */
   retry: boolean;
   /** After how long. */
@@ -1544,18 +1542,11 @@ export interface RetryDecision {
  */
 export interface RetryOffer {
   readonly error: Json;
-  /**
-   * The decision when the build leaves its code nothing to decide (a
-   * catch and a policy with no conditions): the host takes it without
-   * asking, so no code can withhold it.
-   */
-  readonly alone?: () => RetryDecision;
   /** `choice` is `undefined` when its code failed to choose. */
   decided: (choice: unknown) => RetryDecision;
 }
 
 const retryDecisionSchema = z.strictObject({
-  by: z.string().nullable().optional(),
   retry: z.boolean(),
   delayMs: z.int().min(0),
 });
@@ -2470,16 +2461,12 @@ export class RunHost extends RpcTarget {
     if (offer === undefined) {
       return undefined;
     }
-    // Taken alone where the build leaves nothing to decide; else asked of
-    // its code, if it gave a way to ask.
-    const { alone } = offer;
-    let decide: ((context: unknown) => Promise<RetryDecision>) | undefined;
-    if (alone !== undefined) {
-      decide = async () => await Promise.resolve(alone());
-    } else if (retry !== undefined) {
-      decide = async (context) =>
-        await this.#decideRetry(step, context, offer, { retry, stepDone });
-    }
+    // Asked of its code, if it gave a way to ask.
+    const decide =
+      retry === undefined
+        ? undefined
+        : async (context: unknown): Promise<RetryDecision> =>
+            await this.#decideRetry(step, context, offer, { retry, stepDone });
     if (decide === undefined) {
       // Its policy asks its code, which gave no way to ask: code past the
       // SDK, skipping what its policy says.
@@ -2589,6 +2576,21 @@ export class RunHost extends RpcTarget {
   }
 
   /**
+   * How a wait step `step` that started ended, as its code hears it: a
+   * failure as its kind words it for a catch (`RunKind.failureForCode`),
+   * one no catch may take named so, as a call's failure is.
+   */
+  #forCode<T>(step: string, settled: Settled<T>): Settled<T> {
+    return settled.ok
+      ? settled
+      : {
+          ok: false,
+          error:
+            this.#kind.failureForCode?.(step, settled.error) ?? settled.error,
+        };
+  }
+
+  /**
    * Calls `attempt`'s function in the run's isolate, through a host whose
    * every call `admission` admits as one of its lineage's host calls,
    * `stepDone` settling
@@ -2656,7 +2658,7 @@ export class RunHost extends RpcTarget {
     if (started) {
       this.#kind.stepEnded?.(step, slept);
     }
-    return slept;
+    return started ? this.#forCode(step, slept) : slept;
   }
 
   /**
@@ -2685,7 +2687,7 @@ export class RunHost extends RpcTarget {
     if (started) {
       this.#kind.stepEnded?.(step, slept);
     }
-    return slept;
+    return started ? this.#forCode(step, slept) : slept;
   }
 
   /**
@@ -2759,7 +2761,7 @@ export class RunHost extends RpcTarget {
     if (started) {
       this.#kind.stepEnded?.(step, waited);
     }
-    return waited;
+    return started ? this.#forCode(step, waited) : waited;
   }
 
   /**
@@ -3196,6 +3198,6 @@ export class RunHost extends RpcTarget {
     if (started) {
       this.#kind.stepEnded?.(step, waited);
     }
-    return waited;
+    return started ? this.#forCode(step, waited) : waited;
   }
 }

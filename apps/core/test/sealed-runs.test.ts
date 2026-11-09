@@ -1,4 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowErrors } from "@grasp-os/shared/workflows";
@@ -793,6 +794,17 @@ describe("a sealed run's catches, raises, retries and sleeps on the run host", (
       ),
       // A raise has no step of its own.
       asStep: await run(`return ${taskStep("stop", "{ output: null }")};`),
+      // What the isolate claims of its own failure, a platform's code, a
+      // timeout or a code of no shape, its words quoting what it read.
+      platformCode: await run(
+        'throw Object.assign(new Error("The secret is 42."), { code: "connect.forbidden" });'
+      ),
+      timedOut: await run(
+        'const error = new Error("The secret is 42."); error.name = "TimeoutError"; throw error;'
+      ),
+      noCode: await run(
+        'throw Object.assign(new Error("The secret is 42."), { code: "x" });'
+      ),
     }).toStrictEqual({
       sealedCode: { ended: "test.stop", why: "Stopped.", tampered: [] },
       unsealedCode: {
@@ -802,6 +814,13 @@ describe("a sealed run's catches, raises, retries and sleeps on the run host", (
       },
       caughtInCode: { ended: "test.stop", tampered: [] },
       asStep: refusedAs(`Step "stop:task" isn't one the build seals.`),
+      platformCode: { ended: undefined, why: "The task failed.", tampered: [] },
+      timedOut: {
+        ended: "expression.failed",
+        why: expectedMessageOf("expression.failed"),
+        tampered: [],
+      },
+      noCode: { ended: undefined, why: "The task failed.", tampered: [] },
     });
   });
 

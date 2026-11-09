@@ -802,7 +802,7 @@ describe(
                 await session.respond(
                   "approver",
                   started.value.run,
-                  JSON.stringify({ task: "sign", approved: at === 0, at: [at] })
+                  JSON.stringify({ task: "sign", approved: at === 0, run: at })
                 )
               )
             );

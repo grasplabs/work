@@ -1,7 +1,10 @@
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
-import { expressionFailed } from "@grasp-os/shared/workflows";
+import {
+  expressionFailed,
+  uncatchableFailureName,
+} from "@grasp-os/shared/workflows";
 
 import { AppError } from "./app-error.ts";
 import type { WorkflowEngine } from "./engine.ts";
@@ -85,13 +88,6 @@ export const jsonValue = (value: unknown): Json => {
   return Object.fromEntries(members);
 };
 
-/**
- * `value` as data a workflow reads: JSON (`jsonValue`: `undefined` is
- * `null` in a list and left out of an object), every object copied into
- * one with no prototype and every object and list frozen, all the way
- * down. A field named `__proto__` or `constructor` is an own field holding
- * data like any other.
- */
 /** `value`'s objects with no prototype, and every object and list frozen, in place. */
 const frozenInPlace = <Value>(value: Value): Value => {
   if (typeof value === "object" && value !== null) {
@@ -113,6 +109,13 @@ const frozenInPlace = <Value>(value: Value): Value => {
 export const frozenCopy = <Value>(value: Value): Value =>
   frozenInPlace(structuredClone(value));
 
+/**
+ * `value` as data a workflow reads: JSON (`jsonValue`: `undefined` is
+ * `null` in a list and left out of an object), every object copied into
+ * one with no prototype and every object and list frozen, all the way
+ * down. A field named `__proto__` or `constructor` is an own field holding
+ * data like any other.
+ */
 export const frozenData = (value: unknown): Json => {
   const json = jsonValue(value);
   if (json === null || typeof json !== "object") {
@@ -187,12 +190,19 @@ const caughtFrom = (failure: Json): CaughtError => {
 export class StepFailureError extends Error {
   readonly code: string;
   readonly caught: CaughtError;
+  /**
+   * Whether a catch may take it: the run host says one may not (an effect
+   * already made, a refusal, a timeout), and every catch throws it on
+   * (`caughtError`), so the run ends with it.
+   */
+  readonly catchable: boolean;
 
-  constructor(caught: CaughtError) {
+  constructor(caught: CaughtError, catchable = true) {
     super(caught.message);
     this.name = "StepFailureError";
     this.code = caught.code;
     this.caught = caught;
+    this.catchable = catchable;
   }
 }
 
@@ -201,10 +211,15 @@ export class StepFailureError extends Error {
  * prototype (`CaughtError`). A run host's failure keeps its code, its
  * message and its details; the workflow's own `AppError` likewise; a
  * failure of the code itself (an expression that read a field of `null`)
- * is `expression.failed`, its words the platform's, never a value's.
+ * is `expression.failed`, its words the platform's, never a value's. A
+ * failure the run host says no catch may take is thrown on, so every
+ * catch ends the run with it.
  */
 export const caughtError = (thrown: unknown): CaughtError => {
   if (thrown instanceof StepFailureError) {
+    if (!thrown.catchable) {
+      throw thrown;
+    }
     return thrown.caught;
   }
   if (thrown instanceof AppError) {
@@ -218,6 +233,18 @@ export const caughtError = (thrown: unknown): CaughtError => {
 
 /** `error`, as a call's step failed with it, for its catch. */
 const failureOf = (error: unknown, step: string): unknown => {
+  if (error instanceof Error && error.name === uncatchableFailureName) {
+    const code: unknown = Reflect.get(error, "code");
+    return new StepFailureError(
+      caughtOf(
+        typeof code === "string" ? code : "internal.unexpected",
+        error.message,
+        undefined,
+        step
+      ),
+      false
+    );
+  }
   if (
     error instanceof StepFailureError ||
     error instanceof WorkflowError ||
@@ -395,10 +422,22 @@ export const journaledCtx = (
         'A ctx call names its step: `{ step: "<id>" }`, an identifier'
       );
     }
+    // Counted only as its first engine step is named: a call that fails
+    // before it journals anything (its arguments not JSON, say) uses no
+    // run of its step, so the host's count and the code's stay alike.
     const count = runs.get(step) ?? 0;
-    runs.set(step, count + 1);
     const suffix = count === 0 ? "" : `@${String(count)}`;
-    return { step, part: (part) => `${step}:${part}${suffix}` };
+    let counted = false;
+    return {
+      step,
+      part: (part) => {
+        if (!counted) {
+          counted = true;
+          runs.set(step, count + 1);
+        }
+        return `${step}:${part}${suffix}`;
+      },
+    };
   };
 
   /** Runs `call`, the only one running, its failures its step's. */

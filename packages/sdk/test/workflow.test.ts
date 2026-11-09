@@ -513,6 +513,59 @@ describe("a workflow's journal", () => {
     });
   });
 
+  it("uses no run of a step for a call that fails before it journals anything", async () => {
+    const workflow = defineWorkflow({
+      permissions,
+      handler: async (ctx) => {
+        for (const args of [{ late: 1n }, { id: 1 }, { id: 2 }]) {
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- calls run one after another
+            await ctx.connections.mail.send(args, { step: "send" });
+          } catch {
+            // The BigInt one isn't JSON: it fails before its step runs.
+          }
+        }
+        return null;
+      },
+    });
+    const { engine, names } = engineOf();
+    await workflow.run(engine, {});
+    expect(names).toStrictEqual(["$params", "send:task", "send:task@1"]);
+  });
+
+  it("throws on from every catch a failure the run host says no catch may take", async () => {
+    let went = false;
+    const workflow = defineWorkflow({
+      permissions,
+      handler: async (ctx) => {
+        try {
+          await ctx.connections.mail.send({}, { step: "send" });
+        } catch (error) {
+          caughtError(error);
+        }
+        went = true;
+        return null;
+      },
+    });
+    const { engine } = engineOf();
+    const failing: WorkflowEngine = {
+      ...engine,
+      do: async (name, options, fn) =>
+        name === "send:task"
+          ? await Promise.reject(
+              Object.assign(new Error("It may have been sent."), {
+                name: "UncatchableFailure",
+                code: "connect.outcome_unknown",
+              })
+            )
+          : await engine.do(name, options, fn),
+    };
+    await expect(workflow.run(failing, {})).rejects.toMatchObject({
+      code: "connect.outcome_unknown",
+    });
+    expect(went).toBeFalsy();
+  });
+
   it("records each call with what it keeps, and a decision's ask as it was computed", async () => {
     const { engine, journal } = engineOf({
       answers: new Map([["mail.send", parsed('{"id": "m-1"}')]]),

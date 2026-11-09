@@ -119,11 +119,12 @@ export interface TestDecisionAnswer {
   /** What the answer carries, as the decision's contract takes it. */
   readonly value?: Json;
   /**
-   * For a task inside `for` loops, the item it asks for: each loop's
-   * index, outermost first, such as `[1, 0]`. Without it, the task's
-   * latest decision.
+   * For a task inside loops, which time the run asks it: `0` the first,
+   * `1` the second, counting every time it asked, across all the loops
+   * around it, as the run host counts a task's runs. Without it, the
+   * task's latest decision.
    */
-  readonly at?: readonly number[];
+  readonly run?: number;
 }
 
 /**

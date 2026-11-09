@@ -22,7 +22,7 @@ import {
   requireWorkflowRole,
   workflowDefinition,
 } from "../workflow-resources.ts";
-import { runObjectOf } from "./engine.ts";
+import { runEngine, runObjectOf } from "./engine.ts";
 import { waitKeyOf, waitStepPrefix } from "./host.ts";
 import { resourceRunFor } from "./resource-runs.ts";
 import { detailsRemoved } from "./retention.ts";
@@ -517,6 +517,29 @@ const reachedAround = (
 };
 
 /**
+ * The raise task that failed run `runId`, by the code the engine kept of
+ * its failure: the one raise of its build that seals that code, if any.
+ * A raise's code is the build's own literal, never what the run read.
+ */
+const raiseThatEnded = async (
+  env: Env,
+  runId: string,
+  built: () => Promise<LoadedBuild>
+): Promise<string | undefined> => {
+  const status = await runEngine(env).status(runId);
+  const code =
+    status?.status === "errored" ? (status.error.code ?? undefined) : undefined;
+  if (code === undefined) {
+    return undefined;
+  }
+  const build = await built();
+  const raises = build.tasks.filter(
+    (task) => task.kind === "raise" && task.error.code === code
+  );
+  return raises.length === 1 ? raises[0]?.id : undefined;
+};
+
+/**
  * The trace of run `runId` of workflow `id`, for `by`, who must build it:
  * its version's diagram and the tasks its journal reached.
  */
@@ -559,11 +582,12 @@ export const resourceRunTrace = async (
       detailsRemoved: true,
     };
   }
-  const { steps, truncated } = await tracedSteps(
-    env,
-    run.id,
-    async () => await loadWorkflowBuild(env, workflow.id, run.version)
-  );
+  let build: LoadedBuild | undefined;
+  const builtOnce = async (): Promise<LoadedBuild> => {
+    build ??= await loadWorkflowBuild(env, workflow.id, run.version);
+    return build;
+  };
+  const { steps, truncated } = await tracedSteps(env, run.id, builtOnce);
   // A task's steps together: the most telling of their states, the most
   // attempts any made.
   const tasks = new Map<string, WorkflowRunTrace["tasks"][number]>();
@@ -577,6 +601,15 @@ export const resourceRunTrace = async (
           : known.state,
       attempts: Math.max(step.attempts, known?.attempts ?? 0),
     });
+  }
+  // A raise has no step: the one whose sealed code the run failed with
+  // is what ended it, told only where no other raise names that code.
+  const raise =
+    run.status === "failed"
+      ? await raiseThatEnded(env, run.id, builtOnce)
+      : undefined;
+  if (raise !== undefined) {
+    tasks.set(raise, { task: raise, state: "failed", attempts: 0 });
   }
   reachedAround(diagram.tasks, tasks);
   return {

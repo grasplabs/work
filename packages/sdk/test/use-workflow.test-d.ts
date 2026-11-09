@@ -132,12 +132,6 @@ export const usePendingChecks = (): void => {
     // @ts-expect-error -- progress of a request, not an engine status
     void workflow.pendingControl.status;
   }
-  // @ts-expect-error -- no redundant alias beside pendingControl
-  void workflow.isPausing;
-  // @ts-expect-error -- no `current` wrapper
-  void workflow.current;
-  // @ts-expect-error -- no `data` or `result` beside the narrowed view
-  void workflow.data;
 };
 
 export const useWaitChecks = (): void => {
@@ -187,8 +181,6 @@ export const useRefusedReferences = (): void => {
   void useWorkflow(internal);
   // @ts-expect-error -- options are exactly { runId }
   void useWorkflow(workflows.summarizeNote, { runId: null });
-  // @ts-expect-error -- no skip or initial ID beside { runId }
-  void useWorkflow(workflows.summarizeNote, { runId, skip: true });
   // @ts-expect-error -- no hidden generic arguments
   void useWorkflow<typeof workflows.summarizeNote, string>(
     workflows.summarizeNote

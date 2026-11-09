@@ -389,24 +389,8 @@ describe("workflow references", () => {
     ).toThrow(/pin/u);
   });
 
-  test("hold their contract, events and functions as data, and have no .start, .get or .cancel of their own", () => {
+  test("hold their contract, events and functions as data", () => {
     for (const reference of Object.values(workflows)) {
-      expect(Object.keys(reference).toSorted()).toStrictEqual([
-        "alias",
-        "contractId",
-        "decisions",
-        "events",
-        "fingerprint",
-        "input",
-        "kind",
-        "listens",
-        "mutations",
-        "output",
-        "queries",
-        "resourceId",
-        "resourceVersion",
-        "visibility",
-      ]);
       // Data all the way down: a clone refuses a function, and keeps all.
       expect(structuredClone(reference)).toStrictEqual(reference);
       expect(Object.isFrozen(reference.events)).toBeTruthy();

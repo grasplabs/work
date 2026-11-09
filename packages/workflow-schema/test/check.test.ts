@@ -49,6 +49,21 @@ const mailing = (id: string, subject: unknown) => ({
 const reading = (source: string) =>
   followedBy(mailing("probe", { $expr: source }));
 
+/** A raise of `invoice.rejected` in `message`, as step `id`. */
+const raise = (id: string, message: string) => ({
+  id,
+  type: "raise",
+  error: { code: "invoice.rejected", message },
+});
+
+/** A call of the mail connection's `action`, as step `id`. */
+const sending = (id: string, action: string) => ({
+  id,
+  type: "call",
+  connection: "mail",
+  action,
+});
+
 describe("checking a workflow", () => {
   it("accepts every step kind of the format, and every call", () => {
     expect(
@@ -364,6 +379,29 @@ describe("checking a workflow", () => {
         })
       )
     ).toStrictEqual({ "/steps/5/error/code": "workflow.invalid_name" });
+  });
+
+  it("holds one code to one error, so a run that fails with it is that raise", () => {
+    expect({
+      same: codesAt(followedBy(raise("first", "No."), raise("again", "No."))),
+      other: codesAt(
+        followedBy(raise("first", "No."), raise("again", "Not now."))
+      ),
+    }).toStrictEqual({
+      same: "ok",
+      other: { "/steps/6/error": "workflow.duplicate" },
+    });
+  });
+
+  it("refuses two actions of a connection that a call would read as one member", () => {
+    expect(
+      codesAt(
+        followedBy(
+          sending("plain", "mail.send-mail"),
+          sending("camel", "mail.sendMail")
+        )
+      )
+    ).toStrictEqual({ "/steps/6/action": "workflow.duplicate" });
   });
 
   it("refuses a duration longer than a year", () => {

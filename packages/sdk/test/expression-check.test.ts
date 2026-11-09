@@ -30,6 +30,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkExpression } from "../src/expression-check.ts";
+import { own } from "../src/expression-runtime.ts";
 
 /** The code an expression runs as. */
 const generated = (source: string): string => {
@@ -38,6 +39,17 @@ const generated = (source: string): string => {
     throw new Error(`${source} is refused: ${checked.errors[0]?.code}`);
   }
   return checked.code;
+};
+
+/**
+ * What an expression answers on `args`, run as the code it generates is,
+ * with the guard it imports (`$own`).
+ */
+const evaluated = (source: string, args: unknown): unknown => {
+  // oxlint-disable-next-line typescript/no-implied-eval, no-new-func -- runs the code the check generated, as a workflow's isolate does
+  const code = new Function("args", "$own", `return ${generated(source)};`);
+  const answered: unknown = Reflect.apply(code, undefined, [args, own]);
+  return answered;
 };
 
 /** The code of the first error an expression fails with, or `ok`. */
@@ -411,16 +423,55 @@ describe("the code generated from an expression", () => {
     expect(generated("args.lines[0].total")).toBe("(args.lines[0].total)");
   });
 
-  it("reads a field named like a built-in's method only through `$own`, never the method", () => {
-    expect(generated("args.values.length + args.lines.at(0)")).toBe(
-      '($own(args, "values").length + args.lines.at(0))'
-    );
-    expect(generated("args.a?.toString")).toBe(
-      '($own(args.a, "toString", true))'
-    );
-    expect(generated("({ at: args.lines.at, map: args.lines.forEach })")).toBe(
-      '({\n  at: $own(args.lines, "at"),\n  map: $own(args.lines, "forEach")\n})'
-    );
+  it("reads a field named like a built-in's method as the value's own field, never the method", () => {
+    const lines = Object.freeze([{ total: 3 }]);
+    expect({
+      values: evaluated("args.values.length", { values: [1, 2] }),
+      noField: evaluated("args.lines.at", { lines }),
+      held: evaluated("({ at: args.lines.at, map: args.lines.forEach })", {
+        lines,
+      }),
+      called: evaluated("args.lines.at(0).total", { lines }),
+    }).toStrictEqual({
+      values: 2,
+      noField: undefined,
+      held: { at: undefined, map: undefined },
+      called: 3,
+    });
+  });
+
+  it("short-circuits a `?.` chain past such a field as JavaScript does", () => {
+    const thrown = (source: string, args: unknown): string => {
+      try {
+        evaluated(source, args);
+        return "read";
+      } catch {
+        return "threw";
+      }
+    };
+    expect({
+      nullish: evaluated("args.a?.toString.x", { a: null }),
+      own: evaluated("args.a?.toString.x", { a: { toString: { x: 1 } } }),
+      inherited: thrown("args.a?.toString.x", { a: {} }),
+      after: thrown("args.a?.b.toString", { a: {} }),
+      shortCircuited: evaluated("args.a?.b.toString", { a: undefined }),
+    }).toStrictEqual({
+      nullish: undefined,
+      own: 1,
+      inherited: "threw",
+      after: "threw",
+      shortCircuited: undefined,
+    });
+  });
+
+  it("keeps a template's line breaks in its text, whatever indents the code around it", () => {
+    // A line break written in the template, which the code must not carry
+    // as one: the generator indents every line of the code it writes.
+    const written = "`${args.a}\n\u2028${args.b}`";
+    expect({
+      read: evaluated(written, { a: "x", b: "y" }),
+      breaks: /[\n\r\u2028\u2029]/u.test(generated(written)),
+    }).toStrictEqual({ read: "x\n\u2028y", breaks: false });
   });
 
   it("puts every comparison in parentheses, so TypeScript reads no type arguments", () => {

@@ -339,9 +339,15 @@ const codeOf = (error: unknown): string | null =>
     ? error.code
     : null;
 
-/** A failure as the test is told it: the platform's code and words alone. */
-const failed = (code: string | null): FixtureRunOutcome => {
-  const told = failureOf({ code });
+/**
+ * A failure as the test is told it (`failureOf`): the platform's code and
+ * words, or a raise's code and its sealed words.
+ */
+const failed = (code: string | null, message?: string): FixtureRunOutcome => {
+  const told = failureOf({
+    code,
+    ...(message === undefined ? {} : { message }),
+  });
   return { status: "failed", code: told.code, message: told.message };
 };
 
@@ -375,7 +381,7 @@ export const fixtureRunOutcome = async (
       }
     }
     if (status?.status === "errored") {
-      return failed(status.error.code ?? null);
+      return failed(status.error.code ?? null, status.error.message);
     }
     if (status?.status === "terminated") {
       return { status: "cancelled" };

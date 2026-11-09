@@ -68,6 +68,21 @@ type Link =
   | { kind: "member"; key: string | number; optional: boolean }
   | { kind: "call"; method: string; args: Argument[]; optional: boolean };
 
+/** Whether `link` reads an array's item by its index. */
+const isIndexLink = (link: Link): boolean =>
+  link.kind === "member" &&
+  Number.isSafeInteger(link.key) &&
+  Number(link.key) >= 0;
+
+/**
+ * Whether `link` reads a field of an inherited function's name, which
+ * only `$own` reads (`inheritedNames`).
+ */
+const isOwnLink = (link: Link): boolean =>
+  link.kind === "member" &&
+  !isIndexLink(link) &&
+  inheritedNames.has(String(link.key));
+
 /** Whether `node` is a chain of reads and calls. */
 const isChain = (node: Expression): boolean =>
   node.type === "MemberExpression" || node.type === "CallExpression";
@@ -344,52 +359,75 @@ class Lowering {
   /**
    * `links` applied to `value`, in order, as JavaScript reads them: a `?.`
    * short-circuits the rest natively. A field of an inherited function's
-   * name is `$own(value, "name")`, optional (giving `undefined` for a
-   * nullish value) where a `?.` came before it in the chain.
+   * name is `$own(value, "name")`, a call, which a `?.` before it can't
+   * short-circuit past: from such a `?.` on, the chain is
+   * `(value == null ? undefined : <the rest>)`, so it reads exactly as
+   * JavaScript would. An expression is pure, so reading `value` twice
+   * reads the same.
    */
   private links(value: Code, links: readonly Link[]): Code {
     let applied = value;
-    let optional = false;
-    for (const link of links) {
-      optional ||= link.optional;
-      if (link.kind === "call") {
-        applied = {
-          type: "Call",
-          callee: {
-            type: "Member",
-            object: applied,
-            property: link.method,
-            optional: link.optional,
+    for (const [index, link] of links.entries()) {
+      const rest = links.slice(index);
+      if (link.optional && rest.some((each) => isOwnLink(each))) {
+        return {
+          type: "Parenthesized",
+          expression: {
+            type: "Conditional",
+            test: {
+              type: "Binary",
+              operator: "==",
+              left: applied,
+              right: { type: "Null" },
+            },
+            consequent: identifier("undefined"),
+            alternate: this.links(applied, [
+              { ...link, optional: false },
+              ...links.slice(index + 1),
+            ]),
           },
-          arguments: link.args.map((arg) => this.argument(arg)),
-        };
-      } else if (Number.isSafeInteger(link.key) && Number(link.key) >= 0) {
-        applied = {
-          type: "Index",
-          object: applied,
-          index: Number(link.key),
-          optional: link.optional,
-        };
-      } else if (inheritedNames.has(String(link.key))) {
-        applied = {
-          type: "Call",
-          callee: identifier(runtimeNames.own),
-          arguments: [
-            applied,
-            { type: "String", value: String(link.key) },
-            ...(optional ? [{ type: "Boolean", value: true } as const] : []),
-          ],
-        };
-      } else {
-        applied = {
-          type: "Member",
-          object: applied,
-          property: String(link.key),
-          optional: link.optional,
         };
       }
+      applied = this.link(applied, link);
     }
     return applied;
+  }
+
+  /** `link` applied to `value`. */
+  private link(value: Code, link: Link): Code {
+    if (link.kind === "call") {
+      return {
+        type: "Call",
+        callee: {
+          type: "Member",
+          object: value,
+          property: link.method,
+          optional: link.optional,
+        },
+        arguments: link.args.map((arg) => this.argument(arg)),
+      };
+    }
+    if (isIndexLink(link)) {
+      return {
+        type: "Index",
+        object: value,
+        index: Number(link.key),
+        optional: link.optional,
+      };
+    }
+    if (isOwnLink(link)) {
+      return {
+        type: "Call",
+        callee: identifier(runtimeNames.own),
+        arguments: [value, { type: "String", value: String(link.key) }],
+      };
+    }
+    return {
+      type: "Member",
+      object: value,
+      property: String(link.key),
+      optional: link.optional,
+    };
   }
 
   /** A call's argument: a value, or the callback arrow written there. */

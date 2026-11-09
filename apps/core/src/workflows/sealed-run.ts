@@ -3,7 +3,6 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
-import { isAppErrorCode } from "@grasp-os/shared/function-limits";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
@@ -24,6 +23,7 @@ import {
   paramsStep,
   placeholderOf,
   stepIdempotencyKey,
+  uncatchableFailureName,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import { namedError } from "@grasp-os/workerflow/errors";
@@ -920,6 +920,39 @@ const raisedFailure = (
 };
 
 /**
+ * The codes the workflow SDK fails a run's code with outside any step,
+ * each in fixed words: never the isolate's, which could quote what the
+ * run read.
+ */
+const sdkFailures: ReadonlyMap<string, string> = new Map([
+  [expressionFailed, expectedMessageOf(expressionFailed) ?? taskFailed],
+  [
+    "workflow.collection_invalid",
+    expectedMessageOf("workflow.collection_invalid") ?? taskFailed,
+  ],
+  [
+    "workflow.invalid_input",
+    "The run's arguments don't fit its workflow's args.",
+  ],
+  ["workflow.invalid_param", "A parameter's value doesn't fit its type."],
+  [
+    "workflow.invalid_step_call",
+    "The workflow's code called the SDK otherwise than it takes.",
+  ],
+  [
+    "workflow.invalid_definition",
+    "The workflow's code defines it otherwise than the SDK takes.",
+  ],
+]);
+
+/** The run's failure of SDK code `code`, in its fixed words. */
+const sdkFailure = (code: string): StepError => ({
+  name: "Error",
+  message: sdkFailures.get(code) ?? taskFailed,
+  code,
+});
+
+/**
  * Whether a catch or its retry policy decides with no condition of its
  * own (`when`): the isolate has nothing to decide for it.
  */
@@ -991,7 +1024,7 @@ export const retryDecided = (
   round: number,
   choice: unknown
 ): RetryDecision => {
-  const stop = { retry: false, delayMs: 0, by: around.id };
+  const stop = { retry: false, delayMs: 0 };
   if (choice === undefined) {
     return stop;
   }
@@ -1000,7 +1033,7 @@ export const retryDecided = (
   }
   const policy = around.catch.retry;
   return choice && policy !== undefined && round < policy.attempts
-    ? { ...scheduled(policy, round), by: around.id }
+    ? scheduled(policy, round)
     : stop;
 };
 
@@ -1412,14 +1445,20 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
-   * What the run fails with when its code fails with `error`: the failure
-   * pending that no catch may take, as the engine journaled it (its code
-   * threw it on, or failed past it); an `AppError` of a code its build
-   * seals as a raise, as sealed (`raisedFailure`); any other `AppError`
-   * code, which only the workflow's own code throws, as the platform's
-   * unexpected failure (`isolateFailure`), so no raise its build doesn't
-   * seal ends a run; anything else (the SDK's own refusal of the run's
-   * args, say) as its code reported it.
+   * What the run fails with when its code fails with `error`, which only
+   * the isolate reports, so nothing of it is trusted but what the host
+   * can hold to the build: the failure pending that no catch may take, as
+   * the engine journaled it (its code threw it on, or failed past it); an
+   * `AppError` of a code its build seals as a raise, as sealed
+   * (`raisedFailure`); one of the few codes the SDK itself fails a run's
+   * code with outside a step (`sdkFailures`), in the platform's words; and
+   * anything else as the platform's unexpected failure (`isolateFailure`):
+   * a code of the platform's namespaces, a malformed one, a message it
+   * chose. A failure of the build's code with no code (a timeout it
+   * claims too) is `expression.failed`: outside a step, the generated
+   * code only evaluates its expressions and hands their values to the
+   * SDK. What the host itself failed the run with (a CPU kill) never comes
+   * here (resource-runs.ts).
    */
   runFailure(error: StepError): StepError {
     const pending = this.#pendingError;
@@ -1434,17 +1473,12 @@ class SealedRun implements SealedRunKind {
     if (raised !== undefined) {
       return raised;
     }
-    if (error.code === undefined && error.name !== "TimeoutError") {
-      // A failure of the build's code itself, outside any step: the only
-      // code of it that can throw is an expression's (a field of `null`
-      // read, say), in the platform's words, never the error's own.
-      return {
-        name: "Error",
-        message: expectedMessageOf(expressionFailed) ?? taskFailed,
-        code: expressionFailed,
-      };
+    if (error.code === undefined) {
+      return sdkFailure(expressionFailed);
     }
-    return isAppErrorCode(error.code) ? isolateFailure(error) : error;
+    return error.code !== undefined && sdkFailures.has(error.code)
+      ? sdkFailure(error.code)
+      : isolateFailure({ name: "Error", message: taskFailed });
   }
 
   /**
@@ -2018,15 +2052,7 @@ class SealedRun implements SealedRunKind {
     if (!outcome.ok) {
       this.#pendingError = outcome.error;
       this.#pendingTask = task;
-      // An event wait's failure is the host's refusal of the wait (its
-      // binding's authority, its person, a test run's limit), asked again
-      // on every replay and never journaled before it: a catch taking it
-      // would let a replay after a revocation take a path the run never
-      // took, so none does.
-      this.#pending =
-        task === undefined || (sealed?.kind === "task" && isEventWait(task))
-          ? notCaught()
-          : failureOf(outcome.error, task, false);
+      this.#pending = this.#failureOfStep(step, outcome.error);
       return;
     }
     if (sealed?.kind === undefined || task === undefined) {
@@ -2043,6 +2069,23 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
+   * What step `step`'s failure `error` is to a catch (`failureOf`), the
+   * one reading of it both the host's record and what its code hears
+   * take. An event wait's failure is the host's refusal of the wait (its
+   * binding's authority, its person, a test run's limit), asked again on
+   * every replay and never journaled before it: a catch taking it would
+   * let a replay after a revocation take a path the run never took, so
+   * none does.
+   */
+  #failureOfStep(step: string, error: StepError): Failure {
+    const sealed = this.#stepOf(step);
+    const task = sealed?.task;
+    return task === undefined || (sealed?.kind === "task" && isEventWait(task))
+      ? notCaught()
+      : failureOf(error, task, false);
+  }
+
+  /**
    * The failure step `step` answers its code with: what a catch reads of
    * it (`failureOf`: its code and the platform's words, never what the
    * step's own message held), so nothing a failure's message quoted
@@ -2050,19 +2093,18 @@ class SealedRun implements SealedRunKind {
    * host failed it, since the run ends with it whatever its code does.
    */
   failureForCode(step: string, error: StepError): StepError {
-    const task = this.#stepOf(step)?.task;
-    const failure =
-      task === undefined ? notCaught() : failureOf(error, task, false);
+    const failure = this.#failureOfStep(step, error);
     // One no catch may take ends the run, whatever the code does: its
     // words are the host's own (a refusal's, a timeout's), as the run ends
-    // with them.
+    // with them, and its name tells the SDK to throw it on from any catch
+    // (`uncatchableFailureName`), so honest code never goes on past it.
     return failure.catchable
       ? {
           name: error.name,
           message: failure.error.message,
           code: failure.error.code,
         }
-      : error;
+      : { ...error, name: uncatchableFailureName };
   }
 
   /**

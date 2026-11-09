@@ -16,6 +16,7 @@ import {
   isExpectedCode,
   isExpectedError,
 } from "@grasp-os/shared/errors";
+import { isAppErrorCode } from "@grasp-os/shared/function-limits";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
@@ -633,24 +634,33 @@ export const followableOrigins = async (
 const stepFailed = workflowErrors.create("workflow.step_failed");
 
 /**
- * What a failed run's snapshot says of why: only a code the platform
- * defines, with the platform's own words for it, any other as
- * `workflow.step_failed`. Neither the engine's message nor a code merely
- * in a platform namespace leaves: either can be made of what the run
- * read through grants the App doesn't hold.
+ * What a failed run's snapshot says of why: a code the platform defines,
+ * with the platform's own words for it; a raise's code (an `AppError`
+ * code, outside the platform's namespaces), with its words, since a run
+ * fails with such a code only as a raise its build seals, with that
+ * raise's sealed message (sealed-run.ts, `runFailure`): text the
+ * workflow's builder wrote, never what the run read; any other as
+ * `workflow.step_failed`. Neither the engine's message for anything else
+ * nor a code merely in a platform namespace leaves: either can be made of
+ * what the run read through grants the App doesn't hold.
  */
 export const failureOf = (
   error: { code: string | null; message?: string } | undefined
 ) => {
-  const code =
-    error?.code !== null &&
-    error?.code !== undefined &&
-    isExpectedCode(error.code)
-      ? error.code
-      : stepFailed.code;
+  const given = error?.code ?? undefined;
+  const raised =
+    given !== undefined &&
+    isAppErrorCode(given) &&
+    typeof error?.message === "string";
+  let code: string = stepFailed.code;
+  if (given !== undefined && (raised || isExpectedCode(given))) {
+    code = given;
+  }
   return {
     code,
-    message: expectedMessageOf(code) ?? stepFailed.message,
+    message:
+      expectedMessageOf(code) ??
+      (raised ? (error?.message ?? stepFailed.message) : stepFailed.message),
     category: categoryOf(code),
     retryable: isRetryableCode(code),
     requestId: null,

@@ -2445,7 +2445,7 @@ export const workflowRunWakes = sqliteTable(
 );
 
 /**
- * Every decision a workflow run waits for (`step.decision`, src/decisions/),
+ * Every decision a workflow run waits for (`ctx.decisions.<alias>.ask`, src/decisions/),
  * one per run and step: who answers it (`deciders`: `person:<id>`,
  * `role:<role>` or `team:<id>`), until when (`expires_at`), and how it
  * ended. `status` moves from `open` once, in one conditional update, to an

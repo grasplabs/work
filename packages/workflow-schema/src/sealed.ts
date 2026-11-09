@@ -2,6 +2,7 @@ import {
   appErrorCodeMaxLength,
   appErrorCodePattern,
   appErrorMessageMaxLength,
+  isAppErrorCode,
 } from "@grasp-os/shared/function-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
@@ -245,7 +246,8 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
      * platform's, never with that code.
      */
     error: z.strictObject({
-      code: errorCodeSchema,
+      // Never in a platform namespace: a raise is the workflow's own.
+      code: errorCodeSchema.refine((code) => isAppErrorCode(code)),
       message: z.string().min(1).max(appErrorMessageMaxLength),
       details: z.json().optional(),
     }),

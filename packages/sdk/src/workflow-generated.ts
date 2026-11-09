@@ -25,19 +25,22 @@ export const own: (value: unknown, name: string, optional?: boolean) => Read =
 export const caughtError: (thrown: unknown) => CaughtError = caughtErrorOf;
 
 /**
- * A loop's items: a list of at most the platform's 1,000
- * (`workflow.collection_invalid` past them), each as every value an
- * expression reads (`Read`), so an item read bare (`100 * item`) compiles
- * as its expression was checked. Anything else is a `TypeError`, never
- * iterated (a string would be, a character at a time).
+ * A loop's items: a list of at most the platform's 1,000, each as every
+ * value an expression reads (`Read`), so an item read bare (`100 * item`)
+ * compiles as its expression was checked. Anything else fails the run's
+ * code with `workflow.collection_invalid`, never iterated (a string would
+ * be, a character at a time): the loop's data, which a catch may take.
  */
 export const itemsOf = (items: unknown): readonly Read[] => {
   if (!Array.isArray(items)) {
-    throw new TypeError("A loop's items are a list.");
+    throw new WorkflowError(
+      "workflow.collection_invalid",
+      "A loop's items are a list."
+    );
   }
   if (items.length > platformLimits.workflowCollectionItems) {
     throw new WorkflowError(
-      "workflow.invalid_step_call",
+      "workflow.collection_invalid",
       `A loop takes at most ${platformLimits.workflowCollectionItems} items.`
     );
   }

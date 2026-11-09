@@ -10,6 +10,7 @@ import {
   CompactDescriptorError,
   descriptorFromCompact,
   schemaFromDescriptor,
+  memberName,
 } from "@grasp-os/sdk/host";
 import {
   appErrorDetailsMaxBytes,
@@ -592,6 +593,16 @@ interface Walk {
   readonly params: ReadonlySet<string>;
   readonly sensitive: ReadonlySet<string>;
   readonly ids: Set<string>;
+  /**
+   * Each raise's error by its code, as JSON: a run fails with the raise
+   * its code names, so one code is one error.
+   */
+  readonly raises: Map<string, string>;
+  /**
+   * Each connection's actions by the member a call reads them by
+   * (`memberName` of each dotted part), so no two read alike.
+   */
+  readonly members: Map<string, Map<string, string>>;
   readonly problems: Problem[];
   readonly code: Map<string, string>;
   readonly placeholders: Map<string, string>;
@@ -1046,7 +1057,19 @@ const checkRaise = (
       "Name the workflow's own code, such as `invoice.rejected`."
     );
   }
-  const { details } = step.error;
+  const { code, message, details } = step.error;
+  const error = JSON.stringify({ message, details });
+  const raised = walk.raises.get(code);
+  if (raised !== undefined && raised !== error) {
+    problem(
+      walk,
+      join(pointer, "error"),
+      "workflow.duplicate",
+      `Another raise names \`${code}\` with another message or details: a run that fails with \`${code}\` could be either.`,
+      "Give each error its own code, or raise this one with the same message and details."
+    );
+  }
+  walk.raises.set(code, error);
   if (
     details !== undefined &&
     new TextEncoder().encode(JSON.stringify(details)).byteLength >
@@ -1077,6 +1100,24 @@ const checkCall = (
       "connections",
       join(pointer, "connection")
     );
+    const member = step.action
+      .split(".")
+      .map((part) => memberName(part))
+      .join(".");
+    const actions =
+      walk.members.get(step.connection) ?? new Map<string, string>();
+    const other = actions.get(member);
+    if (other !== undefined && other !== step.action) {
+      problem(
+        walk,
+        join(pointer, "action"),
+        "workflow.duplicate",
+        `\`${step.action}\` and \`${other}\` read as the same member of \`${step.connection}\`.`,
+        "Call one of them only, or through a connection of its own."
+      );
+    }
+    actions.set(member, step.action);
+    walk.members.set(step.connection, actions);
   } else {
     permissionFor(
       walk,
@@ -1437,6 +1478,8 @@ export const checkWorkflow = (json: unknown): CheckResult => {
         .map(([name]) => name)
     ),
     ids: new Set(),
+    raises: new Map(),
+    members: new Map(),
     problems: [],
     code: new Map(),
     placeholders: new Map(),

@@ -93,8 +93,10 @@ import type {
 //   as the runtime reads it (expression-check.ts, workflow.ts).
 // - Replay determinism without enter steps: each call's journal name is
 //   its step's (`{ step }`); flow and arguments are evaluated again from
-//   journaled values, and the host holds each call to its template, so a
-//   replay that diverged is refused where it differs.
+//   journaled values, which is what keeps a replay on its path (a step
+//   already journaled answers from the journal, its arguments unread);
+//   every call past the journal is held to its template and its step's
+//   next run, so a replay that diverged reaches nothing unsealed.
 // - Members exposing undeclared names. The module declares exactly the
 //   permissions its steps use, by alias, with exactly the actions and
 //   event types they name; the SDK builds `ctx`'s members from that alone
@@ -197,7 +199,8 @@ const bare = (code: string): string => code.slice(1, -1);
  * `text` at `depth`, each of its lines (a declaration or an object the
  * printer spread over several) two spaces further in a level. A line
  * break inside a string never reaches here: every string is a literal,
- * escaped.
+ * escaped, and a template's text carries its breaks as escapes too
+ * (`@grasp-os/sdk`'s printer).
  */
 const indented = (text: string, depth: number): string =>
   text
@@ -976,16 +979,25 @@ class Generator {
             result: "boolean",
             caught: [{ variable: "error", taskId: step.id }],
           }).code;
+    // A retry runs only for a failure its catch would take: the catch's
+    // `when` with the retry's own, so a failure the catch then throws on
+    // is never tried again first. Its code filter is the host's to hold.
+    const retryHolds = [
+      ...(when === undefined ? [] : [when]),
+      ...(retryWhen === undefined ? [] : [retryWhen]),
+    ];
     let inner = retrying;
     if (retry !== undefined) {
-      inner = { retry: retryWhen === undefined ? "true" : retriesOf(step.id) };
+      inner = {
+        retry: retryHolds.length === 0 ? "true" : retriesOf(step.id),
+      };
     }
     this.#guarded(step, depth, (at) => {
-      if (retryWhen !== undefined) {
+      if (retry !== undefined && retryHolds.length > 0) {
         this.#imports.add("type CaughtError");
         this.#line(
           at,
-          `const ${retriesOf(step.id)} = (error: CaughtError) => Boolean(${bare(retryWhen)});`
+          `const ${retriesOf(step.id)} = (error: CaughtError) => Boolean(${retryHolds.length === 1 ? bare(retryHolds[0] ?? "") : retryHolds.join(" && ")});`
         );
       }
       this.#line(at, "try {");
@@ -996,13 +1008,15 @@ class Generator {
           : [`error.code === ${literal(step.catch.code)}`]),
         ...(when === undefined ? [] : [when]),
       ];
+      // `caughtError` throws on what no catch may take, so even a catch of
+      // everything ends the run with it.
+      this.#generatedImports.add("caughtError");
+      this.#line(at, "} catch (thrown) {");
       if (conditions.length === 0 && step.catch.do === undefined) {
-        this.#line(at, "} catch {");
+        this.#line(at + 1, "caughtError(thrown);");
         this.#line(at, "}");
         return;
       }
-      this.#generatedImports.add("caughtError");
-      this.#line(at, "} catch (thrown) {");
       this.#line(at + 1, "const error = caughtError(thrown);");
       if (conditions.length > 0) {
         this.#line(at + 1, `if (!(${conditions.join(" && ")})) throw thrown;`);

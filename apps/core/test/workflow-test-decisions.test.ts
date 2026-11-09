@@ -273,7 +273,7 @@ const respond = async (
   session: Session,
   who: string,
   run: number,
-  answer: { approved: boolean; value?: unknown; at?: number[] }
+  answer: { approved: boolean; value?: unknown; run?: number }
 ): Promise<string> =>
   codeOf(
     await session.respond(
@@ -645,15 +645,15 @@ describe(
       );
       const { session, run, runId } = await runningIn(app);
       expect({
-        end: await endOf(session, run),
+        end: z.unknown().parse(JSON.parse(await session.runOutcome(run))),
         decisions: await decisionsOf(runId),
         late: await respond(session, "approver", run, { approved: true }),
       }).toStrictEqual({
-        // Its raise's code is the workflow's own, never one the platform
-        // defines: its outcome says only that it failed.
+        // Its raise, as the workflow declares it: its code and its words.
         end: {
           status: "failed",
-          code: "workflow.step_failed",
+          code: "test.unanswered",
+          message: "Failed.",
         },
         decisions: [
           { recipients: '["approver"]', status: "timed_out", decidedBy: null },
@@ -669,15 +669,15 @@ describe(
       // The second item's answer first: it waits for the run to ask it,
       // which it does only once the first is answered.
       const [second, first] = await Promise.all([
-        respond(session, "approver", run, { approved: false, at: [1] }),
-        respond(session, "approver", run, { approved: true, at: [0] }),
+        respond(session, "approver", run, { approved: false, run: 1 }),
+        respond(session, "approver", run, { approved: true, run: 0 }),
       ]);
       expect({
         first,
         second,
         again: await respond(session, "approver", run, {
           approved: false,
-          at: [0],
+          run: 0,
         }),
         end: await endOf(session, run),
         decisions: await answersInOrder(runId),

@@ -12,6 +12,7 @@ import type {
 } from "@grasp-os/shared/workflow-resources";
 import {
   formatLimits,
+  reservedStepIds,
   workflowSchemaUrl,
 } from "@grasp-os/workflow-schema/format";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
@@ -526,9 +527,9 @@ const workflowBuildDeclaration = `/**
  * most 64 KB in all.
  *
  * Each step is \`{ id, type, title?, if?, ... }\`: \`id\` is a stable key and an identifier (a lower-case
- * letter, then letters and digits, as \`sendInvoice\`; never a JavaScript word such as \`if\` or \`new\`,
- * nor \`args\`, \`params\`, \`run\`, \`state\`, \`inbox\`, \`error\`, \`item\`, \`output\` or \`ctx\`; never
- * changed once made; rename by \`title\`), \`if\` an expression that skips it (its result is then \`null\`).
+ * letter, then letters and digits, as \`sendInvoice\`; never one of ${[...reservedStepIds].map((name) => `\`${name}\``).join(", ")},
+ * nor \`<id>Retries\` of a retrying try's ID; never changed once made; rename by \`title\`), \`if\` an
+ * expression that skips it (its result is then \`null\`).
  * - \`call\`: \`{ connection, action, args?, timeout? }\` calls an action of a connection (one its contract's
  *   \`operations\` names), or \`{ module, args?, timeout? }\` the workflow's own compute or action;
  * - \`generate\`: \`{ instructions, input, returns, timeout? }\` asks the workflow's model (\`permissions.ai\`)
@@ -563,7 +564,7 @@ const workflowBuildDeclaration = `/**
  * earlier step's result by its ID (\`extract.total\`), \`run.id\`, \`inbox.<alias>\` (the run's reply
  * address for event permission \`<alias>\`: give it a mail as its reply-to, then wait on that permission
  * for the reply), \`state.<key>\` (what earlier runs kept, \`undefined\` until written) and, in a catch,
- * \`error\` (\`{ code, message, details? }\`). It reads fields by name (\`a.b\`, \`list[0]\`), never by a
+ * \`error\` (\`{ code, message, details?, step? }\`, \`step\` the ID of the step that failed). It reads fields by name (\`a.b\`, \`list[0]\`), never by a
  * computed name, and never \`constructor\`, \`prototype\` or \`__proto__\`. A string is always text, never
  * interpolated. At most ${formatLimits.steps} steps in all.
  * Never write judgement, an outside system or a person's approval as code: when the catalog

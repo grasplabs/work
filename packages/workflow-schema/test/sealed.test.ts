@@ -74,104 +74,32 @@ describe("a sealed table", () => {
     expect(sealedTableSchema.safeParse(genuine()).success).toBeTruthy();
   });
 
-  it("doesn't load holding anything the generator never writes", () => {
+  it("doesn't load holding anything the run host has no rule for", () => {
     const task = { pointer: "/steps/9", steps: ["task"], scope: [] };
+    // One of each kind of strictness the table holds to.
     const forged: Record<string, unknown> = {
-      fork: withNewTask({
-        ...task,
-        id: "split",
-        kind: "fork",
-        fork: { branches: 2, compete: false, concurrency: 1 },
-      }),
-      childRun: withNewTask({
-        ...task,
-        id: "child",
-        kind: "run",
-        run: { binding: "other", input: { literal: null } },
-      }),
-      set: withNewTask({ ...task, id: "assign", kind: "set" }),
-      clock: withTask("send", (send) => ({
+      taskKind: withNewTask({ ...task, id: "split", kind: "fork" }),
+      callName: withTask("send", (send) => ({
         ...send,
         call: { name: "grasp.now" },
       })),
-      itemsAtOnce: withTask("pages", (pages) =>
-        changed(pages, "loop", { concurrency: 4 })
-      ),
-      loopKeys: withTask("pages", (pages) =>
-        changed(pages, "loop", { keys: 0 })
-      ),
-      forkBranch: withTask("mailed", (mail) => ({ ...mail, branches: [0, 1] })),
-      taskSchemas: withTask("send", (send) => ({ ...send, schemas: {} })),
-      inputFrom: withTask("send", (send) => ({
-        ...send,
-        inputFrom: { slot: 0 },
-      })),
-      catchExceptWhen: withTask("guarded", (guarded) =>
+      taskKey: withTask("send", (send) => ({ ...send, schemas: {} })),
+      nestedKey: withTask("guarded", (guarded) =>
         changed(guarded, "catch", { exceptWhen: 0 })
       ),
-      retryJitter: withTask("guarded", (guarded) => {
-        const caught = partOf(guarded, "catch");
-        return {
-          ...guarded,
-          catch: {
-            ...caught,
-            retry: {
-              ...partOf(caught, "retry"),
-              jitter: { fromMs: 0, toMs: 1000 },
-            },
-          },
-        };
-      }),
-      retryLimit: withTask("guarded", (guarded) => {
-        const caught = partOf(guarded, "catch");
-        return {
-          ...guarded,
-          catch: {
-            ...caught,
-            retry: { ...partOf(caught, "retry"), limitMs: 60_000 },
-          },
-        };
-      }),
-      modelChosen: withTask("greet", (greet) =>
-        changed(greet, "call", { model: { literal: "another" } })
-      ),
-      outputTokens: withTask("greet", (greet) =>
-        changed(greet, "call", { maxOutputTokens: { literal: 10 } })
-      ),
-      decisionAsks: withTask("approve", (approve) =>
-        changed(approve, "call", {
-          ask: { binding: "notify", module: "code/notify.ts", export: "ask" },
-        })
-      ),
-      decisionReminds: withTask("approve", (approve) =>
-        changed(approve, "call", { remindAfterMs: 60_000 })
-      ),
-      waitOfExpression: withTask("linger", (linger) => ({
-        ...without(linger, "milliseconds"),
-        duration: { slot: 0 },
-      })),
-      // grasp-workflow/1's step kinds, gone with its enter and catch steps.
-      catchStep: withTask("guarded", (guarded) => ({
+      stepPart: withTask("guarded", (guarded) => ({
         ...guarded,
         steps: ["catch"],
       })),
-      itemStep: withTask("rows", (rows) => ({ ...rows, steps: ["item"] })),
-      loopIndex: withTask("pages", (pages) =>
-        changed(pages, "loop", { at: "index" })
-      ),
-      catchByStatus: withTask("guarded", (guarded) =>
-        changed(guarded, "catch", { errors: { status: 500 } })
-      ),
-      raiseByType: withTask("stop", (stop) => ({
-        ...stop,
-        error: { type: "urn:acme:error:stop", status: 422 },
+      valueOfOtherType: withTask("linger", (linger) => ({
+        ...without(linger, "milliseconds"),
+        duration: { slot: 0 },
       })),
-      raisePlatformCode: withTask("stop", (stop) =>
-        changed(stop, "error", { code: "Not a code" })
+      raiseOfPlatform: withTask("stop", (stop) =>
+        changed(stop, "error", { code: "workflow.failed" })
       ),
-      workflowInput: { ...genuine(), workflow: { input: true, output: true } },
-      ownLimits: { ...genuine(), limits: { maxSteps: 1 } },
-      inputExpression: {
+      tableKey: { ...genuine(), limits: { maxSteps: 1 } },
+      expressionStage: {
         ...genuine(),
         expressions: genuine().expressions.map((expression) =>
           expression.slot === 0
