@@ -11,7 +11,11 @@ import type {
 } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
+import {
+  expectedMessageOf,
+  isExpectedCode,
+  isExpectedError,
+} from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
@@ -1493,22 +1497,50 @@ const sent = async (
   // conflict.
   const refuse = async (refusal: Error) =>
     await unlessAccepted(env, delivery, refusal);
-  let admitted: AdmittedEvent;
-  if (!(await holds(env, maySendSql(asking, resolved.alias, pin)))) {
-    admitted = await refuse(
-      workflowResourceErrors.create("workflow.event_denied")
-    );
-  } else if (
-    !row.restricted &&
-    (await appHost(env, asking.app).isRestricted())
-  ) {
-    // What a restricted App's page sends may carry what it read: never
-    // into a run that isn't restricted itself (restricted.ts).
-    admitted = await refuse(permissionErrors.create("permission.restricted"));
-  } else {
-    admitted = await admitRunEvent(env, delivery);
-  }
   const db = drizzle(env.DB);
+  /** What a send names of the run, the workflow and the event, audited. */
+  const detail = {
+    workflow: pin.workflowId,
+    version: pin.version,
+    binding: alias,
+    type,
+    app: asking.app,
+    appVersion: asking.version,
+    via: "page",
+  };
+  let admitted: AdmittedEvent;
+  try {
+    if (!(await holds(env, maySendSql(asking, resolved.alias, pin)))) {
+      admitted = await refuse(
+        workflowResourceErrors.create("workflow.event_denied")
+      );
+    } else if (
+      !row.restricted &&
+      (await appHost(env, asking.app).isRestricted())
+    ) {
+      // What a restricted App's page sends may carry what it read: never
+      // into a run that isn't restricted itself (restricted.ts).
+      admitted = await refuse(permissionErrors.create("permission.restricted"));
+    } else {
+      admitted = await admitRunEvent(env, delivery);
+    }
+  } catch (error) {
+    // Every send refused, the grant's, restricted mode's or the run's
+    // inbox's, is recorded with why, as every send taken is; one the host
+    // couldn't decide (no code it defines) is the caller's to send again.
+    const code = isExpectedError(error) ? error.code : undefined;
+    if (code !== undefined) {
+      await auditedBatch(env, db, [
+        outboxed(db, {
+          actor: { type: "person", userId: asking.by.userId },
+          action: "workflow.event.refused",
+          target: { type: "workflow_run", id: row.id },
+          detail: { ...detail, code },
+        }),
+      ]);
+    }
+    throw error;
+  }
   // Every send the run took, a resend of one too: a resend may follow a
   // first answer lost before it was recorded here.
   await auditedBatch(env, db, [
@@ -1518,14 +1550,8 @@ const sent = async (
       action: "workflow.event.sent",
       target: { type: "workflow_run", id: row.id },
       detail: {
+        ...detail,
         event: admitted.id,
-        workflow: pin.workflowId,
-        version: pin.version,
-        binding: alias,
-        type,
-        app: asking.app,
-        appVersion: asking.version,
-        via: "page",
         redelivered: !admitted.accepted,
       },
     }),

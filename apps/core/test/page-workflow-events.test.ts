@@ -367,6 +367,17 @@ const snapshotOf = async (
     await called(person, app, lease, queryCall(reference, "run", { runId }))
   );
 
+/** The refused sends `events` recorded, as the audit names them. */
+const refusals = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
+  events
+    .filter(({ action }) => action === "workflow.event.refused")
+    .map(({ actor, target, detail }) => ({
+      actor,
+      target,
+      code: detail?.code,
+      via: detail?.via,
+    }));
+
 /** The status run `runId` ended with. */
 const runStatus = async (runId: string): Promise<unknown> =>
   await vi.waitFor(
@@ -545,13 +556,17 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     const send = async (runId: string) =>
       outcomeOf(await called(builder, app, lease, sendText(reference, runId)));
 
-    const withoutSend = await send(first);
+    const refusedWithout = await auditedDuring(async () => {
+      await expect(send(first)).resolves.toBe("workflow.event_denied");
+    });
     const grant = await granted(admin, builder, app, workflow, ["send"]);
     const accepted = sendText(reference, first);
     const withSend = outcomeOf(await called(builder, app, lease, accepted));
     const second = await startedRun(builder, app, lease, reference, "job-2");
     await revokePermission(env, admin.acting, grant);
-    const revoked = await send(second);
+    const refusedRevoked = await auditedDuring(async () => {
+      await expect(send(second)).resolves.toBe("workflow.event_denied");
+    });
     // A send the run took before the revocation, its answer lost: still
     // the event it was.
     const resent = outcomeOf(await called(builder, app, lease, accepted));
@@ -560,17 +575,23 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     );
 
     expect({
-      withoutSend,
       withSend: isEvent(withSend),
-      revoked,
       resent,
       resentOther,
+      // Every refused send is recorded with why, as every taken one is.
+      refused: [refusals(refusedWithout), refusals(refusedRevoked)],
     }).toStrictEqual({
-      withoutSend: "workflow.event_denied",
       withSend: true,
-      revoked: "workflow.event_denied",
       resent: withSend,
       resentOther: "workflow.event_conflict",
+      refused: [first, second].map((runId) => [
+        {
+          actor: { type: "person", userId: builder.userId },
+          target: { type: "workflow_run", id: runId },
+          code: "workflow.event_denied",
+          via: "page",
+        },
+      ]),
     });
   });
 
