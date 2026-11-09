@@ -1,7 +1,10 @@
 /**
  * The overlays on the gallery's pages (apps/web, `/kit/…`), by page: how
  * each opens and what then shows. The kit's component tests open every one
- * and close it with Escape (test/kit.browser.test.tsx).
+ * and close it with Escape (test/kit.browser.test.tsx), and so does the
+ * check of core's Content Security Policy over the gallery
+ * (e2e/catalog.e2e.ts), as a popup may load something only once open.
+ * Data only, so both the browser and Node read it.
  */
 
 /** An element found by its role and accessible name, or by its text. */
