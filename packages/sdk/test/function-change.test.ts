@@ -26,6 +26,15 @@ const fn = (
   stream: null,
 });
 
+/** Arguments holding `field` in an object at each depth and container. */
+const nested = (field: AnySchema): Record<string, AnySchema> => ({
+  config: v.object({ status: field }),
+  items: v.array(v.object({ status: field })),
+  byKey: v.record(v.object({ status: field })),
+  either: v.union(v.object({ status: field }), v.string()),
+  deep: v.object({ inner: v.array(v.object({ status: field })) }),
+});
+
 const before = fn({ title: v.string().max(200) }, v.object({ id: v.string() }));
 
 describe(functionBreak, () => {
@@ -45,6 +54,60 @@ describe(functionBreak, () => {
         fn({ title: v.string(), status: v.string() }, null)
       ),
     ]).toStrictEqual([undefined, expect.stringMatching(/arguments/u)]);
+  });
+
+  test("takes a nested argument a caller may leave out as one it may still leave out", () => {
+    const status = v.string().default("open");
+    const defaulted = fn(nested(status), null);
+
+    expect(
+      functionBreak(defaulted, fn(nested(v.string().optional()), null))
+    ).toBeUndefined();
+    // Each place made required on its own: a call sending `{}` there fails.
+    for (const [place, schema] of Object.entries(nested(v.string()))) {
+      const required = { ...nested(status), [place]: schema };
+      expect(functionBreak(defaulted, fn(required, null))).toMatch(
+        /arguments/u
+      );
+    }
+  });
+
+  test("lets a field be added to an answer inside a record, a union or deeper", () => {
+    const answers: [AnySchema, AnySchema][] = [
+      [
+        v.record(v.object({ id: v.string() })),
+        v.record(v.object({ id: v.string(), at: v.number() })),
+      ],
+      [
+        v.union(v.object({ id: v.string() }), v.null()),
+        v.union(v.object({ id: v.string(), at: v.number() }), v.null()),
+      ],
+      [
+        v.object({
+          pages: v.array(
+            v.record(v.union(v.object({ id: v.string() }), v.string()))
+          ),
+        }),
+        v.object({
+          pages: v.array(
+            v.record(
+              v.union(v.object({ id: v.string(), at: v.number() }), v.string())
+            )
+          ),
+          total: v.number(),
+        }),
+      ],
+    ];
+    for (const [read, answered] of answers) {
+      expect(functionBreak(fn({}, read), fn({}, answered))).toBeUndefined();
+    }
+    // A field the caller reads, removed inside a record: still a break.
+    expect(
+      functionBreak(
+        fn({}, v.record(v.object({ id: v.string() }))),
+        fn({}, v.record(v.object({ at: v.number() })))
+      )
+    ).toMatch(/answer/u);
   });
 
   test("lets through what serves every call the workflow makes", () => {
