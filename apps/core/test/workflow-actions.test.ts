@@ -254,10 +254,10 @@ const resealed = async (
 /** A step calling `mail`'s `op`. */
 const mailTask = (op: string) => ({
   id: `call-${op.replace(".", "-")}`,
-  type: "do",
-  binding: "mail",
-  operation: op,
-  arguments: { to: { $expr: "input.who" }, subject: "Hi" },
+  type: "call",
+  connection: "mail",
+  action: op,
+  args: { to: { $expr: "args.who" }, subject: "Hi" },
 });
 /** A version review flagging `writes` alike, published and listed by every role. */
 const flagged = (writes: unknown[]) => ({
@@ -330,9 +330,10 @@ const notifyCall = {
 /** What a definition holds besides its action: its steps before, its `mail`. */
 interface DefinitionParts {
   readonly before?: readonly unknown[];
-  readonly mail?: { readonly kind: string; readonly contract: string };
+  /** The contract of its `mail` connection. */
+  readonly mail?: string;
   /** A files binding of the run's own files, if the workflow has one. */
-  readonly files?: { readonly kind: "files"; readonly contract: string };
+  readonly files?: string;
 }
 
 /**
@@ -341,28 +342,28 @@ interface DefinitionParts {
  */
 const definitionOf = ({
   before = [],
-  mail = { kind: "connector", contract: "" },
+  mail = "",
   files,
 }: DefinitionParts = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: "steps.notify.output.status" } },
-    },
-    bindings: {
-      notify: { kind: "action", contract: "local:code/notify.ts#notify" },
-      mail,
-      ...(files === undefined ? {} : { files }),
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: "notify.status" } },
+    permissions: {
+      modules: {
+        notify: { kind: "action", contract: "local:code/notify.ts#notify" },
+      },
+      connections: { mail: { contract: mail } },
+      ...(files === undefined ? {} : { files: { files: { contract: files } } }),
     },
     steps: [
       ...before,
       {
         id: "notify",
-        type: "do",
-        binding: "notify",
-        arguments: { to: { $expr: "input.who" } },
+        type: "call",
+        module: "notify",
+        args: { to: { $expr: "args.who" } },
       },
       { id: "pause", type: "wait", for: "1 second" },
     ],
@@ -370,7 +371,9 @@ const definitionOf = ({
 
 /** A definition's bindings, to change them. */
 const definitionSchema = z.looseObject({
-  bindings: z.record(z.string(), z.unknown()),
+  permissions: z.looseObject({
+    connections: z.record(z.string(), z.unknown()).optional(),
+  }),
 });
 
 /**
@@ -393,8 +396,8 @@ const actingWorkflow = async (
   const published = await publishWorkflowVersion(env, by, workflow.id, {
     definition: definitionOf({
       before,
-      mail: { kind: "connector", contract: key },
-      ...(files ? { files: { kind: "files", contract: filesKey } } : {}),
+      mail: key,
+      ...(files ? { files: filesKey } : {}),
     }),
     basedOn: null,
     modules: { "code/notify.ts": module },
@@ -714,7 +717,7 @@ describe("a JSON workflow's own actions", () => {
     const model = `writer-${unique()}`;
     await publishCatalogContract(env, admin, { key: model, kind: "model" });
     const writer =
-      'resource.model("writer", { output: v.object({ line: v.string() }) })';
+      'resource.model("ai", { output: v.object({ line: v.string() }) })';
     /** Publishes an action with `uses`; answers its flag, published and listed. */
     const reviewed = async (uses: string) => {
       const workflow = await createWorkflowResource(
@@ -728,18 +731,14 @@ describe("a JSON workflow's own actions", () => {
         role: "user",
       });
       const definition = definitionSchema.parse(
-        JSON.parse(
-          definitionOf({
-            mail: { kind: "connector", contract: mail },
-          })
-        )
+        JSON.parse(definitionOf({ mail }))
       );
-      const { bindings } = definition;
-      if (uses.includes("writer")) {
-        bindings.writer = { kind: "model", contract: model };
+      const { permissions } = definition;
+      if (uses.includes('"ai"')) {
+        permissions.ai = { contract: model };
       }
       if (!uses.includes('"mail"')) {
-        delete bindings.mail;
+        delete permissions.connections;
       }
       const published = await publishWorkflowVersion(env, ada, workflow.id, {
         definition: JSON.stringify(definition),
@@ -885,11 +884,10 @@ describe("a JSON workflow's own actions", () => {
     await publishCatalogContract(env, admin, { key: model, kind: "model" });
     const ask = {
       id: "ask",
-      type: "agent",
-      binding: "writer",
+      type: "generate",
       instructions: "Write a line.",
-      input: { who: { $expr: "input.who" } },
-      output: objectSchema({ line: { kind: "string" } }),
+      input: { who: { $expr: "args.who" } },
+      returns: objectSchema({ line: { kind: "string" } }),
     };
     /** Publishes `before` ahead of the action, which uses `operations` of mail. */
     const reviewed = async (
@@ -913,14 +911,14 @@ describe("a JSON workflow's own actions", () => {
         JSON.parse(
           definitionOf({
             before,
-            mail: { kind: "connector", contract: mail },
+            mail,
           })
         )
       );
-      const { bindings } = definition;
+      const { permissions } = definition;
       const text = JSON.stringify(before);
-      if (text.includes('"writer"')) {
-        bindings.writer = { kind: "model", contract: model };
+      if (text.includes('"ai"')) {
+        permissions.ai = { contract: model };
       }
       const published = await publishWorkflowVersion(env, ada, workflow.id, {
         definition: JSON.stringify(definition),
@@ -1012,15 +1010,14 @@ describe("a JSON workflow's own actions", () => {
     const key = await mailContract(admin);
     const ask = {
       id: "ask",
-      type: "agent",
-      binding: "writer",
+      type: "generate",
       instructions: "Write a line.",
-      input: { who: { $expr: "input.who" } },
-      output: objectSchema({ line: { kind: "string" } }),
+      input: { who: { $expr: "args.who" } },
+      returns: objectSchema({ line: { kind: "string" } }),
     };
     const problems: string[] = [];
-    // No `writer` binding at all, then `writer` bound as a connector.
-    for (const writer of [undefined, { kind: "connector", contract: key }]) {
+    // No `ai` permission at all, then `ai` declared as a connection.
+    for (const ai of [undefined, { contract: key }]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const workflow = await createWorkflowResource(
         env,
@@ -1031,12 +1028,15 @@ describe("a JSON workflow's own actions", () => {
         JSON.parse(
           definitionOf({
             before: [ask],
-            mail: { kind: "connector", contract: key },
+            mail: key,
           })
         )
       );
-      if (writer !== undefined) {
-        definition.bindings.writer = writer;
+      if (ai !== undefined) {
+        definition.permissions.connections = {
+          ...definition.permissions.connections,
+          ai,
+        };
       }
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const error = await refusal(
@@ -1059,8 +1059,8 @@ describe("a JSON workflow's own actions", () => {
       );
     }
     expect(problems).toStrictEqual([
-      "workflow.definition_invalid: workflow.unknown_binding",
-      "workflow.definition_invalid: workflow.binding_kind",
+      "workflow.definition_invalid: workflow.unknown_permission",
+      "workflow.definition_invalid: workflow.duplicate_alias, workflow.permission_kind",
     ]);
   });
 
@@ -1070,18 +1070,15 @@ describe("a JSON workflow's own actions", () => {
     const key = await mailContract(admin);
     for (const [uses, mail] of [
       // Declares a use the definition has no binding for.
-      [
-        '[resource.connector("other", { operations: ["mail.send"] })]',
-        { kind: "connector", contract: key },
-      ],
+      ['[resource.connector("other", { operations: ["mail.send"] })]', key],
       // Uses `mail` as a template, which the definition binds a connector.
-      ['[resource.template("mail")]', { kind: "connector", contract: key }],
+      ['[resource.template("mail")]', key],
       // Uses the workflow's own action: never one of its own modules.
-      ['[resource.template("notify")]', { kind: "connector", contract: key }],
+      ['[resource.template("notify")]', key],
       // Uses `mail` as a model, which the definition binds a connector.
       [
         '[resource.model("mail", { output: v.object({ line: v.string() }) })]',
-        { kind: "connector", contract: key },
+        key,
       ],
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
@@ -1135,9 +1132,7 @@ describe("a JSON workflow's own actions", () => {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const error = await refusal(
         publishWorkflowVersion(env, ada, workflow.id, {
-          definition: definitionOf({
-            mail: { kind: "connector", contract: key },
-          }),
+          definition: definitionOf({ mail: key }),
           basedOn: null,
           modules: {
             "code/notify.ts": notifyModule('return { status: "x" };', uses),
@@ -1776,29 +1771,22 @@ export const notify = action({
     const mailKey = await mailContract(admin);
     const workflow = await createWorkflowResource(env, ada, `act-${unique()}`);
     const definition = definitionSchema.parse(
-      JSON.parse(
-        definitionOf({
-          mail: { kind: "connector", contract: mailKey },
-        })
-      )
+      JSON.parse(definitionOf({ mail: mailKey }))
     );
-    definition.bindings.writer = {
-      kind: "model",
-      contract: model,
-    };
+    definition.permissions.ai = { contract: model };
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: JSON.stringify(definition),
       basedOn: null,
       modules: {
         // A paid model call, then a write to what may be busy.
         "code/notify.ts": notifyModule(
-          `const { subject } = await ctx.resources.writer.generate({
+          `const { subject } = await ctx.resources.ai.generate({
       instructions: "Write a subject.",
       input: { to: args.to },
     });
     await ctx.resources.mail.call("mail.send", { to: args.to, subject });
     return { status: "sent" };`,
-          `[resource.connector("mail", { operations: ["mail.send"] }), resource.model("writer", { output: v.object({ subject: v.string() }) })]`
+          `[resource.connector("mail", { operations: ["mail.send"] }), resource.model("ai", { output: v.object({ subject: v.string() }) })]`
         ),
       },
     });

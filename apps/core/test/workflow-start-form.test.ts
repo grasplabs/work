@@ -40,7 +40,7 @@ const person = async (role: Role): Promise<Acting> => {
 };
 
 /**
- * A grasp-workflow/1 definition whose input is an object of `fields`, its
+ * A grasp-workflow/2 definition whose input is an object of `fields`, its
  * one step titled `version`, so each version's document differs.
  */
 const definitionOf = (
@@ -49,11 +49,9 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: { kind: "object", fields },
-    output: {
-      schema: { kind: "object", fields: { status: { kind: "string" } } },
-      value: { status: "done" },
-    },
+    args: { kind: "object", fields },
+    returns: { kind: "object", fields: { status: { kind: "string" } } },
+    result: { status: "done" },
     steps: [{ id: "pause", title: version, type: "wait", for: "1 second" }],
   });
 

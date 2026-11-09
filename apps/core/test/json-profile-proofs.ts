@@ -33,7 +33,7 @@ import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
-// grasp-workflow/1 proved end to end (GRA-1132, spec 13.10): each step
+// grasp-workflow/2 proved end to end (GRA-1132, spec 13.10): each step
 // kind that needs no outside system, and the calls of a model and a
 // connector, in a definition published as a builder publishes it, started
 // as a person starts it, run by the real engine, and read back as the
@@ -48,24 +48,24 @@ import { testBinding } from "./test-env.ts";
 interface Shape {
   /** The run's steps. */
   readonly steps: unknown[];
-  /** Its bindings, by alias. */
-  readonly bindings?: Record<string, unknown>;
-  /** Its input's properties: `{ who }` unless given. */
-  readonly input?: Record<string, unknown>;
+  /** Its permissions, by kind. */
+  readonly permissions?: Record<string, unknown>;
+  /** Its args' properties: `{ who }` unless given. */
+  readonly args?: Record<string, unknown>;
   /** What its output's `status` is. */
   readonly status: unknown;
 }
 
-/** A grasp-workflow/1 definition of `shape`, its output `{ status }`. */
+/** A grasp-workflow/2 definition of `shape`, its output `{ status }`. */
 const definitionOf = (shape: Shape): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema(shape.input ?? { who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: shape.status },
-    },
-    ...(shape.bindings === undefined ? {} : { bindings: shape.bindings }),
+    args: objectSchema(shape.args ?? { who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: shape.status },
+    ...(shape.permissions === undefined
+      ? {}
+      : { permissions: shape.permissions }),
     steps: shape.steps,
   });
 
@@ -299,7 +299,7 @@ const enveloped = (text: string): string =>
 /** The proofs, where they run (Cloudflare's runtime, or plain workerd). */
 export const profileProofs = (where: string): void => {
   describe(
-    `grasp-workflow/1's steps and calls, end to end ${where}`,
+    `grasp-workflow/2's steps and calls, end to end ${where}`,
     {
       timeout: 180_000,
     },
@@ -312,7 +312,7 @@ export const profileProofs = (where: string): void => {
         const by = await person("builder");
         const workflow = await published(by, {
           steps: [],
-          status: { $expr: '"Hello, " + input.who' },
+          status: { $expr: '"Hello, " + args.who' },
         });
         const run = await ended(
           by,
@@ -332,18 +332,18 @@ export const profileProofs = (where: string): void => {
             {
               id: "route",
               type: "if",
-              condition: { $expr: 'input.who === "Ada"' },
+              condition: { $expr: 'args.who === "Ada"' },
               then: [],
               else: [
                 {
                   id: "stranger",
                   type: "raise",
-                  error: { type: "urn:grasp:error:stranger", status: 422 },
+                  error: { code: "test.stranger", message: "Failed." },
                 },
               ],
             },
           ],
-          status: { $expr: '"Hello, " + input.who' },
+          status: { $expr: '"Hello, " + args.who' },
         });
         const [ada, grace] = await Promise.all([
           started(by, workflow.id, { who: "Ada" }),
@@ -361,12 +361,12 @@ export const profileProofs = (where: string): void => {
       it("wait: sleeps its length and until an expression's deadline, through a restart while it sleeps", async () => {
         const by = await person("builder");
         const workflow = await published(by, {
-          input: { who: { kind: "string" }, deadline: { kind: "number" } },
+          args: { who: { kind: "string" }, deadline: { kind: "number" } },
           steps: [
             pause(2),
-            { id: "linger", type: "wait", until: { $expr: "input.deadline" } },
+            { id: "linger", type: "wait", until: { $expr: "args.deadline" } },
           ],
-          status: { $expr: '"Hello, " + input.who' },
+          status: { $expr: '"Hello, " + args.who' },
         });
         const deadline = Date.now() + 5000;
         const runId = await started(by, workflow.id, { who: "Ada", deadline });
@@ -402,9 +402,8 @@ export const profileProofs = (where: string): void => {
               id: "deny",
               type: "raise",
               error: {
-                type: "urn:grasp:error:invoice.conflict",
-                status: 409,
-                title: "The invoice changed meanwhile.",
+                code: "invoice.conflict",
+                message: "The invoice changed meanwhile.",
               },
             },
             pause(60),
@@ -431,19 +430,18 @@ export const profileProofs = (where: string): void => {
           kind: "model",
         });
         const workflow = await published(by, {
-          bindings: { summary: { kind: "model", contract } },
+          permissions: { ai: { contract } },
           steps: [
             {
               id: "greet",
-              type: "agent",
-              binding: "summary",
+              type: "generate",
               instructions: "Greet them.",
-              input: { who: { $expr: "input.who" } },
-              output: objectSchema({ line: { kind: "string" } }),
+              input: { who: { $expr: "args.who" } },
+              returns: objectSchema({ line: { kind: "string" } }),
             },
             pause(2),
           ],
-          status: { $expr: "steps.greet.output.line" },
+          status: { $expr: "greet.line" },
         });
         // The provider behind connect, the one outside system here: the
         // model chosen before the binding to it is approved.
@@ -453,7 +451,7 @@ export const profileProofs = (where: string): void => {
           outputTokens: 20,
         });
         await approveWorkflowBinding(env, admin, workflow.id, {
-          alias: "summary",
+          alias: "ai",
           target: { kind: "model", model: allowedModel },
           reviewed: { version: 1 },
         });
@@ -505,8 +503,8 @@ export const profileProofs = (where: string): void => {
           },
         });
         const workflow = await published(builder.identity, {
-          bindings: { mail: { kind: "connector", contract: key } },
-          input: {
+          permissions: { connections: { mail: { contract: key } } },
+          args: {
             mailbox: { kind: "string" },
             message: { kind: "string" },
             attachment: { kind: "string" },
@@ -514,19 +512,19 @@ export const profileProofs = (where: string): void => {
           steps: [
             {
               id: "read",
-              type: "do",
-              binding: "mail",
-              operation: "mail.readAttachment",
-              arguments: {
-                mailbox: { $expr: "input.mailbox" },
-                message: { $expr: "input.message" },
-                attachment: { $expr: "input.attachment" },
+              type: "call",
+              connection: "mail",
+              action: "mail.readAttachment",
+              args: {
+                mailbox: { $expr: "args.mailbox" },
+                message: { $expr: "args.message" },
+                attachment: { $expr: "args.attachment" },
                 as: "text",
               },
             },
             pause(2),
           ],
-          status: { $expr: "steps.read.output.content" },
+          status: { $expr: "read.content" },
         });
         const asked = await requestPermission(
           env,

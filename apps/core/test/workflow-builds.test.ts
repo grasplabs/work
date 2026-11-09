@@ -49,17 +49,15 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 });
 
 /**
- * A grasp-workflow/1 definition running `steps`, ending with `status`: a
+ * A grasp-workflow/2 definition running `steps`, ending with `status`: a
  * plain parameter `greeting` and a sensitive one, `token`.
  */
 const definitionOf = (status: unknown, steps: unknown[] = []): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     params: {
       greeting: {
         label: "Greeting",
@@ -86,15 +84,15 @@ const finish = (title?: string) => ({
   id: "finish",
   ...(title === undefined ? {} : { title }),
   type: "raise",
-  if: { $expr: 'input.who === ""' },
-  error: { type: "urn:grasp:error:nameless", status: 422 },
+  if: { $expr: 'args.who === ""' },
+  error: { code: "test.nameless", message: "Failed." },
 });
 
 /** A publication refused for `code`, at the output's status. */
 const refused = (code: string) => ({
   code: "workflow.definition_invalid",
   details: {
-    problems: [{ code, pointer: "/output/value/status/$expr" }],
+    problems: [{ code, pointer: "/result/status/$expr" }],
   },
 });
 
@@ -198,8 +196,8 @@ describe("JSON workflow builds", () => {
         {
           id: "late",
           type: "raise",
-          if: { $expr: 'input.who === ""' },
-          error: { type: "urn:grasp:error:nameless", status: 422 },
+          if: { $expr: 'args.who === ""' },
+          error: { code: "test.nameless", message: "Failed." },
         },
       ])
     );
@@ -208,8 +206,8 @@ describe("JSON workflow builds", () => {
     const source = files[generatedPath] ?? "";
     // Real statements, one per step, in order: not the definition handed
     // to an interpreter.
-    const places = ['step.sleep("pause"', '"late"'].map((statement) =>
-      source.indexOf(statement)
+    const places = ['{ step: "pause" }', 'new AppError("test.nameless"'].map(
+      (statement) => source.indexOf(statement)
     );
     expect({
       inOrder: places.every(
@@ -250,13 +248,11 @@ describe("JSON workflow builds", () => {
       by,
       JSON.stringify({
         $schema: workflowSchemaUrl,
-        output: {
-          schema: objectSchema({
-            status: { kind: "string" },
-            [hostile[0] ?? ""]: { kind: "array", item: { kind: "string" } },
-          }),
-          value: { status: "done", [hostile[0] ?? ""]: hostile },
-        },
+        returns: objectSchema({
+          status: { kind: "string" },
+          [hostile[0] ?? ""]: { kind: "array", item: { kind: "string" } },
+        }),
+        result: { status: "done", [hostile[0] ?? ""]: hostile },
         steps: [],
       })
     );
@@ -281,7 +277,7 @@ describe("JSON workflow builds", () => {
     // A title changes no program.
     const relabelled = await publish(1, [finish("Finish up")]);
     const changed = await publish(2, [
-      { ...finish(), if: { $expr: 'input.who === "nobody"' } },
+      { ...finish(), if: { $expr: 'args.who === "nobody"' } },
     ]);
     expect(identityOf(first)).not.toBe("");
     expect(identityOf(relabelled)).toBe(identityOf(first));
@@ -508,7 +504,7 @@ describe("JSON workflow builds", () => {
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
     // A read the type check takes, unique so no earlier check answers it.
     const request = (name: string) => ({
-      definition: definitionOf({ $expr: `input.who + '${name}'` }),
+      definition: definitionOf({ $expr: `args.who + '${name}'` }),
       basedOn: null,
     });
     const hung = checkerThat(

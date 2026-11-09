@@ -56,14 +56,12 @@ const deciding = async (): Promise<Identity> => {
 const definitionOf = (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({
+    args: objectSchema({
       invoice: { kind: "string" },
       amount: { kind: "number", integer: true },
     }),
-    output: {
-      schema: objectSchema({ invoice: { kind: "string" } }),
-      value: { invoice: { $expr: "input.invoice" } },
-    },
+    returns: objectSchema({ invoice: { kind: "string" } }),
+    result: { invoice: { $expr: "args.invoice" } },
     steps: [],
   });
 

@@ -45,7 +45,7 @@ import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { reached } from "./teams-door.ts";
 
-// The decision step in JSON workflows (grasp-workflow/1's `decision`, the
+// The decision step in JSON workflows (grasp-workflow/2's `decision`, the
 // run host's `step.decision`, resource-decisions.ts and the decision
 // service in src/decisions/), from its threat model: only the
 // person the binding allows answers, never the run's own person, and only
@@ -96,8 +96,8 @@ const theReviewer = { $expr: "[params.reviewer]" };
  */
 const reviewOf = (recipients: unknown = theReviewer) => ({
   id: "review",
-  type: "decision",
-  binding: "invoiceApproval",
+  type: "decide",
+  decision: "invoiceApproval",
   recipients,
   prompt: { $expr: "params.approvalPrompt" },
   input: { $expr: "input" },
@@ -110,8 +110,8 @@ const reviewOf = (recipients: unknown = theReviewer) => ({
 const unanswered = {
   id: "unanswered",
   type: "raise",
-  if: { $expr: "steps.review.output !== null && steps.review.output.timedOut" },
-  error: { type: "urn:grasp:error:unanswered", status: 408 },
+  if: { $expr: "review !== null && review.timedOut" },
+  error: { code: "test.unanswered", message: "Failed." },
 };
 
 /**
@@ -122,14 +122,13 @@ const unanswered = {
 const approvalSteps = (
   review: Record<string, unknown> = reviewOf()
 ): unknown[] => [
-  { ...review, if: { $expr: "input.amount > params.approvalThreshold" } },
+  { ...review, if: { $expr: "args.amount > params.approvalThreshold" } },
   unanswered,
 ];
 
 /** What an approval ends with: approved, unless its review declined it. */
 const approvalStatus = {
-  $expr:
-    'steps.review.output === null || steps.review.output.approved ? "approved" : "rejected"',
+  $expr: 'review === null || review.approved ? "approved" : "rejected"',
 };
 
 /**
@@ -145,11 +144,9 @@ const definitionOf = (
 ) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ amount: { kind: "number" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ amount: { kind: "number" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     params: {
       approvalThreshold: {
         label: "Approval threshold",
@@ -167,7 +164,7 @@ const definitionOf = (
         sensitive: false,
       },
     },
-    bindings: { invoiceApproval: { kind: "decision", contract } },
+    permissions: { decisions: { invoiceApproval: { contract } } },
     steps,
   });
 
@@ -525,7 +522,7 @@ const answerInTurn = async (
  * was answered, its decision's row has.
  */
 const askEach = (items: string, input: unknown) => ({
-  id: "each-invoice",
+  id: "eachInvoice",
   type: "forEach",
   items: { $expr: items },
   do: [{ ...reviewOf(), input }],
@@ -1200,7 +1197,7 @@ describe("a JSON workflow's decision in a loop", () => {
     const { owner, reviewer, workflow } = await approvalWorkflow({
       steps: [
         {
-          id: "each-batch",
+          id: "eachBatch",
           type: "forEach",
           items: { $expr: "[1, 2]" },
           // The inner loop's items are read in the outer item's scope.

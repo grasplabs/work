@@ -18,7 +18,7 @@ import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { resumed, runInstance, sleeping, stopped, woken } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 
-// Typed failures of grasp-workflow/1 runs, published and started as a
+// Typed failures of grasp-workflow/2 runs, published and started as a
 // builder would, from their threat model. A catch takes only a failure
 // of a step in its own `try` list, decided by the host from its own
 // record of the run (never from what the isolate threw), filtered by the
@@ -54,9 +54,8 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 
 /** A domain error a raise raises: of the workflow's own type. */
 const conflict = {
-  type: "urn:grasp:error:invoice.conflict",
-  status: 409,
-  title: "The invoice changed meanwhile.",
+  code: "invoice.conflict",
+  message: "The invoice changed meanwhile.",
 };
 
 /** A raise of the domain conflict, as step `deny`. */
@@ -76,11 +75,9 @@ const guarded = (
 const definitionOf = (steps: unknown[]) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: "done" },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "done" },
     steps,
   });
 
@@ -186,11 +183,11 @@ describe("raise and catch", () => {
   it("lets a failure a catch's filter doesn't name go on unchanged, to the catch around it", async () => {
     const inner = guarded(
       [deny],
-      { errors: { status: 404 }, do: [mark("inner")] },
-      "inner-guard"
+      { code: "invoice.missing", do: [mark("inner")] },
+      "innerGuard"
     );
     const outer = guarded([inner], {
-      errors: { type: conflict.type, status: 409 },
+      code: conflict.code,
       do: [mark("outer")],
     });
     expect({
@@ -235,9 +232,8 @@ describe("raise and catch", () => {
               id: "undo",
               type: "raise",
               error: {
-                type: "urn:grasp:error:invoice.undo_failed",
-                status: 500,
-                title: "The invoice couldn't be put back.",
+                code: "invoice.undo_failed",
+                message: "The invoice couldn't be put back.",
               },
             },
           ],
@@ -317,7 +313,7 @@ const unlessCaught = (id: string, when: string) => ({
   id,
   type: "raise",
   if: { $expr: when },
-  error: { type: "urn:grasp:error:not.caught", status: 500 },
+  error: { code: "not.caught", message: "Failed." },
 });
 
 describe("a caught failure's recovery, through a crash", () => {
@@ -330,11 +326,14 @@ describe("a caught failure's recovery, through a crash", () => {
       definitionOf([
         guarded([deny], {
           do: [
-            unlessCaught("note", "error.status !== 409"),
+            unlessCaught(
+              "note",
+              `error.code !== ${JSON.stringify(conflict.code)}`
+            ),
             { id: "pause", type: "wait", for: "1 hour" },
             unlessCaught(
               "report",
-              `error.title !== ${JSON.stringify(conflict.title)}`
+              `error.message !== ${JSON.stringify(conflict.message)}`
             ),
           ],
         }),

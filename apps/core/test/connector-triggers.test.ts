@@ -100,13 +100,11 @@ const filing = async (admin: Identity) => {
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema(fields),
-      output: {
-        schema: objectSchema(fields),
-        value: {
-          subject: { $expr: "input.subject" },
-          folder: { $expr: "input.folder" },
-        },
+      args: objectSchema(fields),
+      returns: objectSchema(fields),
+      result: {
+        subject: { $expr: "args.subject" },
+        folder: { $expr: "args.folder" },
       },
       steps: [],
     }),

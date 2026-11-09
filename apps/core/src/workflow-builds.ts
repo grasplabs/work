@@ -219,10 +219,10 @@ export const compileWorkflow = async (
   whose: string,
   compiled?: CompiledModules
 ): Promise<CompiledBuild> => {
-  // Named alike for every workflow: the code carries nothing of this
+  // The same for every workflow: the code carries nothing of this
   // deployment (an export packages it), and one document is one program,
   // one build identity, whichever workflow publishes it.
-  const generated = generateWorkflow(checked, "workflow");
+  const generated = generateWorkflow(checked);
   // A build that runs past the build wait, or whose isolate gave up (its
   // CPU on a large module, or any stop of the sandbox host's: CPU, memory,
   // a crash, its deadline, never cached, pages.ts), is the platform's to

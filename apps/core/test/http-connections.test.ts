@@ -378,21 +378,21 @@ describe("the chat and an outside API", () => {
 const invoicingTasks = [
   {
     id: "create",
-    type: "do",
-    binding: "api",
-    operation: "send",
-    arguments: {
+    type: "call",
+    connection: "api",
+    action: "send",
+    args: {
       method: "POST",
       path: "/v1/invoices",
       headers: { "content-type": "application/json" },
-      body: { $expr: `'{"who":"' + input.who + '"}'` },
+      body: { $expr: "'{\"who\":\"' + args.who + '\"}'" },
     },
   },
 ];
 
 /** What the workflow running `invoicingTasks` ends with: the API's answer. */
 const invoicedStatus = {
-  $expr: 'steps.create.output.status + " " + steps.create.output.body',
+  $expr: 'create.status + " " + create.body',
 };
 
 describe("a JSON workflow calling an outside API", () => {
@@ -410,7 +410,7 @@ describe("a JSON workflow calling an outside API", () => {
     });
     const workflow = await publishedWorkflow(builder, () =>
       definitionOf(invoicingTasks, {
-        bindings: { api: { kind: "connector", contract: httpContract } },
+        permissions: { connections: { api: { contract: httpContract } } },
         status: invoicedStatus,
       })
     );
@@ -462,10 +462,10 @@ describe("a JSON workflow calling an outside API", () => {
 const listingTasks = [
   {
     id: "list",
-    type: "do",
-    binding: "api",
-    operation: "get",
-    arguments: { path: "/v1/invoices" },
+    type: "call",
+    connection: "api",
+    action: "get",
+    args: { path: "/v1/invoices" },
   },
 ];
 
@@ -486,7 +486,7 @@ describe("a JSON workflow's HTTP contract", () => {
     const granted = async (tasks: unknown[], contract: string) => {
       const workflow = await publishedWorkflow(builder, () =>
         definitionOf(tasks, {
-          bindings: { api: { kind: "connector", contract } },
+          permissions: { connections: { api: { contract } } },
         })
       );
       const requested = await builder.api.permissions.request({

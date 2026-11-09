@@ -80,25 +80,23 @@ const newTeam = async (): Promise<string> => {
 
 interface Draft {
   status?: string;
-  bindings?: Record<string, { kind: string; contract: string }>;
+  permissions?: Record<string, unknown>;
   steps?: unknown[];
   instructions?: string;
 }
 
-/** A grasp-workflow/1 definition's text: a greeting, by default. */
+/** A grasp-workflow/2 definition's text: a greeting, by default. */
 const definitionOf = ({
   status = "done",
-  bindings = {},
+  permissions = {},
   steps = [],
   instructions = "Greet the person.",
 }: Draft = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     params: {
       instructions: {
         label: "Instructions",
@@ -106,7 +104,7 @@ const definitionOf = ({
         sensitive: false,
       },
     },
-    bindings,
+    permissions,
     steps,
   });
 
@@ -181,7 +179,7 @@ describe("publishing a version", () => {
       resourceId: workflow.id,
       version: 1,
       definitionVersion: "1.0.0",
-      profile: "grasp-workflow/1",
+      profile: "grasp-workflow/2",
       bindings: [],
       // No actions of its own: an empty list, recorded as such.
       actions: [],
@@ -289,7 +287,7 @@ describe("publishing a version", () => {
     const secret = `secret-${unique()}`;
     const definition = definitionOf({
       instructions: secret,
-      steps: [{ id: "finish", type: "do", binding: secret }],
+      steps: [{ id: "finish", type: "call", module: secret }],
     });
     const error = await refusal(publish(ada, workflow.id, definition));
     expect(error).toMatchObject({ code: "workflow.definition_invalid" });
@@ -502,15 +500,14 @@ const modelContract = async (): Promise<string> => {
 const bindingDefinition = (key: string, status = "done") =>
   definitionOf({
     status,
-    bindings: { greeting: { kind: "model", contract: key } },
+    permissions: { ai: { contract: key } },
     steps: [
       {
         id: "greet",
-        type: "agent",
-        binding: "greeting",
+        type: "generate",
         instructions: "Greet them.",
-        input: { who: { $expr: "input.who" } },
-        output: objectSchema({ line: { kind: "string" } }),
+        input: { who: { $expr: "args.who" } },
+        returns: objectSchema({ line: { kind: "string" } }),
       },
     ],
   });
@@ -851,7 +848,7 @@ describe("stored versions", () => {
       contract: await problemCodes(publish(ada, workflow.id, big)),
     }).toStrictEqual({
       definition: "workflow.resource_invalid",
-      contract: ["contract.too_large /input"],
+      contract: ["contract.too_large /args"],
     });
   });
 });

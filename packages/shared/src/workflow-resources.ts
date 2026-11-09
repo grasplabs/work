@@ -134,7 +134,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.build_slow":
     "Building the code generated from this definition took longer than a publication waits, so nothing was published. Publish it again in a moment.",
   "workflow.output_invalid":
-    "The workflow's result doesn't match its output schema, so the run failed.",
+    "The workflow's result doesn't match what it returns (`returns`), so the run failed.",
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
   "workflow.arguments_too_deep": `This step's arguments are nested deeper than ${sealedBuildLimits.callDepth} levels, so its call wasn't made.`,

@@ -79,18 +79,16 @@ const person = async (role: Role): Promise<Identity> => {
 const definitionOf = (field: string, version = "1"): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ [field]: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ [field]: { kind: "string" } }),
-      value: { [field]: { $expr: `input.${field}` } },
-    },
+    args: objectSchema({ [field]: { kind: "string" } }),
+    returns: objectSchema({ [field]: { kind: "string" } }),
+    result: { [field]: { $expr: `args.${field}` } },
     steps: [
       {
         id: "mark",
         title: `Version ${version}`,
         type: "raise",
         if: { $expr: "false" },
-        error: { type: "urn:grasp:error:never", status: 422 },
+        error: { code: "test.never", message: "Failed." },
       },
     ],
   });

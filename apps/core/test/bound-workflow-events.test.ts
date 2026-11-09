@@ -54,7 +54,7 @@ describe("a bound workflow's events", () => {
           alias: "documentUploaded",
           types: ["invoice.document.scanned", "invoice.document.uploaded"],
         },
-        "await-job": { alias: "jobEvents", types: ["grasp.job.completed"] },
+        awaitJob: { alias: "jobEvents", types: ["grasp.job.completed"] },
       }
     );
     expect(bound).toStrictEqual({

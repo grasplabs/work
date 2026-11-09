@@ -69,11 +69,9 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const definitionOf = (status = "done"): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     steps: [],
   });
 
@@ -206,20 +204,17 @@ describe("the agent building an independent workflow", () => {
     });
     const definition = JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({ claim: { kind: "string" } }),
-      output: {
-        schema: objectSchema({ summary: { kind: "string" } }),
-        value: { summary: { $expr: "steps.assess.output.summary" } },
-      },
-      bindings: { judge: { kind: "model", contract: judge } },
+      args: objectSchema({ claim: { kind: "string" } }),
+      returns: objectSchema({ summary: { kind: "string" } }),
+      result: { summary: { $expr: "assess.summary" } },
+      permissions: { ai: { contract: judge } },
       steps: [
         {
           id: "assess",
-          type: "agent",
-          binding: "judge",
+          type: "generate",
           instructions: "Summarise the expense claim.",
-          input: { claim: { $expr: "input.claim" } },
-          output: objectSchema({ summary: { kind: "string" } }),
+          input: { claim: { $expr: "args.claim" } },
+          returns: objectSchema({ summary: { kind: "string" } }),
         },
       ],
     });
@@ -272,13 +267,20 @@ describe("the agent building an independent workflow", () => {
         (type) => !declared.includes(`\`${type}\`: `)
       )
     ).toStrictEqual([]);
-    // And each example expression in it is one the format takes.
+    // And each example expression in it is one the format takes, reading
+    // the steps its examples name by their IDs.
+    const exampleSteps = ["send", "invoice", "extract", "invoiceBody"];
     const examples = [...declared.matchAll(exampleExpression)].map(
       (match) => match.groups?.source ?? ""
     );
     expect(examples.length).toBeGreaterThan(0);
     expect(
-      examples.filter((source) => !checkExpression(source).ok)
+      examples.filter(
+        (source) =>
+          !checkExpression(source, {
+            roots: exampleSteps,
+          }).ok
+      )
     ).toStrictEqual([]);
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
@@ -288,7 +290,7 @@ describe("the agent building an independent workflow", () => {
         ["settle", null],
         ["assess", "Assess the claim"],
       ],
-      bindings: [{ alias: "judge", kind: "model", contractId: judge }],
+      bindings: [{ alias: "ai", kind: "model", contractId: judge }],
     });
   });
 

@@ -47,31 +47,28 @@ interface Flow {
 /** A workflow of `flow`, its input `who` and output `status`. */
 const definitionOf = (
   { steps, status }: Flow,
-  bindings: Record<string, unknown>
+  permissions: Record<string, unknown>
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
-    bindings,
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
+    permissions,
     steps,
   });
 
 /** Asks the `summary` model binding for a line about the input's `who`. */
 const summarize = {
   id: "summarize",
-  type: "agent",
-  binding: "summary",
+  type: "generate",
   instructions: "Greet them.",
-  input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { kind: "string" } }),
+  input: { who: { $expr: "args.who" } },
+  returns: objectSchema({ line: { kind: "string" } }),
 };
 
 /** The line `summarize` answered. */
-const line = { $expr: "steps.summarize.output.line" };
+const line = { $expr: "summarize.line" };
 
 /** A wait of `duration` (`"1 second"`) in step `hold`. */
 const hold = (duration: string) => ({
@@ -162,9 +159,7 @@ const requestsApp = async (
     `greet-${unique()}`
   );
   await publishWorkflowVersion(env, builder, resource.id, {
-    definition: definitionOf(flow, {
-      summary: { kind: "model", contract: model },
-    }),
+    definition: definitionOf(flow, { ai: { contract: model } }),
     basedOn: null,
   });
   await bindWorkflowToApp(env, builder, resource.id, {
@@ -391,9 +386,9 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
               steps: [
                 {
                   id: "save",
-                  type: "do",
-                  binding: "save",
-                  arguments: { who: { $expr: "input.who" } },
+                  type: "call",
+                  module: "save",
+                  args: { who: { $expr: "args.who" } },
                 },
               ],
               status: "saved",

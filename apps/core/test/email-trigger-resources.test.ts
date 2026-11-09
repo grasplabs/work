@@ -829,7 +829,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
   it("try a message again, never refuse it for good, when its trigger moves to another version as it starts, then start it at that version", async () => {
     const { builder, workflow, trigger, address } = await emailTrigger();
     await builder.api.workflowResources.publish(workflow, {
-      definition: definitionOf("input.subject.trim()"),
+      definition: definitionOf("args.subject.trim()"),
       basedOn: 1,
     });
     const message = invoiceMail({
@@ -940,21 +940,21 @@ export const read = action({
 const readerOf = (key: string) => (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectOf({ attachments: { kind: "array", item: attachment } }),
-    output: {
-      schema: objectOf({ content: { kind: "string" } }),
-      value: { content: { $expr: "steps.read.output.content" } },
-    },
-    bindings: {
-      read: { kind: "action", contract: "local:code/reader.ts#read" },
-      files: { kind: "files", contract: key },
+    args: objectOf({ attachments: { kind: "array", item: attachment } }),
+    returns: objectOf({ content: { kind: "string" } }),
+    result: { content: { $expr: "read.content" } },
+    permissions: {
+      modules: {
+        read: { kind: "action", contract: "local:code/reader.ts#read" },
+      },
+      files: { files: { contract: key } },
     },
     steps: [
       {
         id: "read",
-        type: "do",
-        binding: "read",
-        arguments: { file: { $expr: "input.attachments[0].file?.id" } },
+        type: "call",
+        module: "read",
+        args: { file: { $expr: "args.attachments[0].file?.id" } },
       },
     ],
   });
@@ -963,15 +963,13 @@ const readerOf = (key: string) => (): string =>
 const takingAttachments = (fields: readonly string[]) => (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectOf(
+    args: objectOf(
       Object.fromEntries(
         fields.map((field) => [field, { kind: "array", item: attachment }])
       )
     ),
-    output: {
-      schema: objectOf({ subject: { kind: "string" } }),
-      value: { subject: "Read" },
-    },
+    returns: objectOf({ subject: { kind: "string" } }),
+    result: { subject: "Read" },
     steps: [],
   });
 

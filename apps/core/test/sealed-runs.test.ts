@@ -995,7 +995,7 @@ try {
     // Its `rows` slot is three levels into the arguments, so an
     // evaluation's result there, at most 32 deep, may nest them 35 levels
     // deep; its `who` slot is two levels in.
-    const whoInput = { $expr: "input.who" };
+    const whoInput = { $expr: "args.who" };
     const deep = await sealedWorkflow([
       {
         id: "careful",
@@ -1003,11 +1003,10 @@ try {
         try: [
           {
             id: "ask",
-            type: "agent",
-            binding: "summary",
+            type: "generate",
             instructions: "Sum up.",
             input: { who: whoInput, rows: [whoInput] },
-            output: objectOf({ line: { kind: "string" } }),
+            returns: objectOf({ line: { kind: "string" } }),
           },
         ],
         catch: { errors: { type: `${standardErrors}validation` } },
@@ -1016,7 +1015,7 @@ try {
     /** `ask`'s step, sending `instructions`, `who` and a row `levels` deep. */
     const ask = ({
       instructions = '"Sum up."',
-      who = "input.who",
+      who = "args.who",
       levels = 1,
     }: {
       instructions?: string;

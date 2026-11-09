@@ -1,7 +1,7 @@
 /**
  * The demo company's Apps, each binding independent
  * workflows that run on the local stack as they would anywhere:
- * grasp-workflow/1 definitions, their calculations
+ * grasp-workflow/2 definitions, their calculations
  * in compute modules, with `workflowTest` suites in the App, calling
  * nothing outside Grasp, so a run needs no connection. Inputs stand in
  * for what a connection would bring (an email, an invoice from the
@@ -210,18 +210,16 @@ const clientOnboarding: WorkflowSeed = {
   title: "Client onboarding",
   owner: "nina",
   parts: {
-    input: objectOf({ client: text, town: text, documents: listOf(text) }),
-    output: {
-      schema: objectOf({
-        client: text,
-        town: text,
-        complete: boolean,
-        chase: listOf(text),
-      }),
-      value: { $expr: "steps.check.output" },
-    },
-    bindings: { check: computeBinding("onboarding", "check") },
-    steps: [computeStep("check", "check", "input")],
+    args: objectOf({ client: text, town: text, documents: listOf(text) }),
+    returns: objectOf({
+      client: text,
+      town: text,
+      complete: boolean,
+      chase: listOf(text),
+    }),
+    result: { $expr: "check" },
+    permissions: { modules: { check: computeBinding("onboarding", "check") } },
+    steps: [computeStep("check", "check", "args")],
   },
   modules: { "code/onboarding.ts": onboardingModule },
   declared: {
@@ -344,13 +342,11 @@ const emailTriage: WorkflowSeed = {
   alias: "emailTriage",
   title: "Email triage",
   parts: {
-    input: objectOf({ from: text, subject: text, body: text }),
-    output: {
-      schema: objectOf({ from: text, queue: text, urgent: boolean }),
-      value: { $expr: "steps.sort.output" },
-    },
-    bindings: { sort: computeBinding("triage", "sort") },
-    steps: [computeStep("sort", "sort", "input")],
+    args: objectOf({ from: text, subject: text, body: text }),
+    returns: objectOf({ from: text, queue: text, urgent: boolean }),
+    result: { $expr: "sort" },
+    permissions: { modules: { sort: computeBinding("triage", "sort") } },
+    steps: [computeStep("sort", "sort", "args")],
   },
   modules: { "code/triage.ts": triageModule },
   declared: {
@@ -458,17 +454,15 @@ const weeklyReport: WorkflowSeed = {
   alias: "weeklyReport",
   title: "Weekly report",
   parts: {
-    input: objectOf({ week: text }, ["week"]),
-    output: {
-      schema: objectOf({
-        week: text,
-        sections: listOf(objectOf({ section: text, from: text })),
-        due: text,
-      }),
-      value: { $expr: "steps.plan.output" },
-    },
-    bindings: { plan: computeBinding("report", "plan") },
-    steps: [computeStep("plan", "plan", "{ week: input.week ?? null }")],
+    args: objectOf({ week: text }, ["week"]),
+    returns: objectOf({
+      week: text,
+      sections: listOf(objectOf({ section: text, from: text })),
+      due: text,
+    }),
+    result: { $expr: "plan" },
+    permissions: { modules: { plan: computeBinding("report", "plan") } },
+    steps: [computeStep("plan", "plan", "{ week: args.week ?? null }")],
   },
   modules: { "code/report.ts": reportModule },
   declared: {
@@ -557,7 +551,7 @@ Everything around employees, from hiring to leaving. Nothing runs here yet.
  * The prototype's processes (`lib/processes.ts`), each one App,
  * with the workflows of the prototype's that core can run: those that ask
  * someone to decide (mortgage handovers, complaint compensation, invoice
- * approval, enhanced due diligence) come back once grasp-workflow/1 has
+ * approval, enhanced due diligence) come back once grasp-workflow/2 has
  * its decision step.
  */
 export const apps: AppSeed[] = [

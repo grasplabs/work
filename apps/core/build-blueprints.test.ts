@@ -155,7 +155,7 @@ describe("the built-in blueprints' build", () => {
 
   it("embeds the workflows a built-in ships, their definitions' text, and the contracts they bind", () => {
     const definition =
-      '{"$schema":"https://grasp.work/schemas/grasp-workflow/1.json","steps":[]}';
+      '{"$schema":"https://grasp.work/schemas/grasp-workflow/2.json","steps":[]}';
     const contract = { key: "fixture/greeter", kind: "model" };
     const out = build(
       fixture(

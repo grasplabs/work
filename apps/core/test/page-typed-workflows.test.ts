@@ -240,7 +240,7 @@ const callOn = async (
  */
 const failingOf = (): string =>
   definitionOf([], {
-    status: { $expr: 'input.who.split("")[9999].toUpperCase()' },
+    status: { $expr: 'args.who.split("")[9999].toUpperCase()' },
   });
 
 /**
@@ -250,14 +250,12 @@ const failingOf = (): string =>
 const widerOf = (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({
-        status: { kind: "string" },
-        secret: { kind: "string" },
-      }),
-      value: { status: "hello", secret: "ultramarine" },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({
+      status: { kind: "string" },
+      secret: { kind: "string" },
+    }),
+    result: { status: "hello", secret: "ultramarine" },
     steps: [],
   });
 
@@ -333,15 +331,15 @@ const askingOf = (contract: string, recipient: string): string =>
     [
       {
         id: "ask",
-        type: "decision",
-        binding: "approval",
+        type: "decide",
+        decision: "approval",
         recipients: [recipient],
         prompt: "Greet them?",
-        input: { who: { $expr: "input.who" } },
+        input: { who: { $expr: "args.who" } },
       },
       passing("greet"),
     ],
-    { bindings: { approval: { kind: "decision", contract } } }
+    { permissions: { decisions: { approval: { contract } } } }
   );
 
 /** What a failed run's snapshot says of `error`: its code and words. */

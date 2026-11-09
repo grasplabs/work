@@ -59,7 +59,7 @@ export interface Asking {
 }
 
 /** What the approval's decision answered, as its output reads it. */
-const answered = "steps.review.output";
+const answered = "review";
 
 /**
  * The approval workflow's definition: it asks `from` to approve the
@@ -71,37 +71,35 @@ const answered = "steps.review.output";
 const approvalOf = (contract: string, { from, timeout }: Asking): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ invoice: { kind: "string" } }),
-    output: {
-      schema: objectSchema({
-        answered: { kind: "boolean" },
-        approved: { kind: "boolean" },
-        by: { kind: "string" },
-        value: responseSchema,
-      }),
-      value: {
-        answered: true,
-        approved: { $expr: `${answered}.approved` },
-        by: { $expr: `${answered}.by` },
-        value: { $expr: `${answered}.payload` },
-      },
+    args: objectSchema({ invoice: { kind: "string" } }),
+    returns: objectSchema({
+      answered: { kind: "boolean" },
+      approved: { kind: "boolean" },
+      by: { kind: "string" },
+      value: responseSchema,
+    }),
+    result: {
+      answered: true,
+      approved: { $expr: `${answered}.approved` },
+      by: { $expr: `${answered}.by` },
+      value: { $expr: `${answered}.payload` },
     },
-    bindings: { approval: { kind: "decision", contract } },
+    permissions: { decisions: { approval: { contract } } },
     steps: [
       {
         id: "review",
-        type: "decision",
-        binding: "approval",
+        type: "decide",
+        decision: "approval",
         recipients: [from],
         prompt: "Approve the invoice",
-        input: { invoice: { $expr: "input.invoice" } },
+        input: { invoice: { $expr: "args.invoice" } },
         timeout: `${timeout / 1000} seconds`,
       },
       {
         id: "unanswered",
         type: "raise",
         if: { $expr: `${answered}.timedOut` },
-        error: { type: "urn:grasp:error:unanswered", status: 408 },
+        error: { code: "test.unanswered", message: "Failed." },
       },
     ],
   });

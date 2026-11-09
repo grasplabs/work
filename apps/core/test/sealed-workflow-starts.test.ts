@@ -97,8 +97,8 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const passing = (id: string) => ({
   id,
   type: "raise",
-  if: { $expr: 'input.who === ""' },
-  error: { type: "urn:grasp:error:nameless", status: 422 },
+  if: { $expr: 'args.who === ""' },
+  error: { code: "test.nameless", message: "Failed." },
 });
 
 /**
@@ -108,11 +108,9 @@ const passing = (id: string) => ({
 const definitionOf = (wait?: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: '"Hello, " + input.who' } },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: '"Hello, " + args.who' } },
     steps: [
       ...(wait === undefined ? [] : [{ id: "pause", type: "wait", for: wait }]),
       passing("greet"),
@@ -793,11 +791,9 @@ const pinnedApp = async (
 const longDefinitionOf = (tasks: number): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: "done" },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "done" },
     steps: Array.from({ length: tasks }, (_, index) =>
       passing(`step-${index}`)
     ),
@@ -809,15 +805,13 @@ const longDefinitionOf = (tasks: number): string =>
  */
 const failingDefinition = JSON.stringify({
   $schema: workflowSchemaUrl,
-  input: objectSchema({ who: { kind: "string" } }),
-  output: {
-    schema: objectSchema({ status: { kind: "string" } }),
-    value: { status: "done" },
-  },
+  args: objectSchema({ who: { kind: "string" } }),
+  returns: objectSchema({ status: { kind: "string" } }),
+  result: { status: "done" },
   steps: [
     {
       ...passing("greet"),
-      if: { $expr: 'input.who.split("")[9999].toUpperCase() === ""' },
+      if: { $expr: 'args.who.split("")[9999].toUpperCase() === ""' },
     },
   ],
 });
@@ -1308,11 +1302,9 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     await publishWorkflowVersion(env, owner, workflow.id, {
       definition: JSON.stringify({
         $schema: workflowSchemaUrl,
-        input: objectSchema({ who: { kind: "string" } }),
-        output: {
-          schema: objectSchema({ status: { kind: "string" } }),
-          value: { status: "done" },
-        },
+        args: objectSchema({ who: { kind: "string" } }),
+        returns: objectSchema({ status: { kind: "string" } }),
+        result: { status: "done" },
         steps: [
           {
             id: "each",

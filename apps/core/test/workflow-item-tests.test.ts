@@ -70,7 +70,7 @@ const definitionOf = (
     bindings,
     who = { kind: "string" },
     steps = [passing("echo", label)],
-    status = { $expr: "input.who" },
+    status = { $expr: "args.who" },
   }: {
     bindings?: Record<string, unknown>;
     who?: Record<string, unknown>;
@@ -80,11 +80,9 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ who }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     ...(bindings === undefined ? {} : { bindings }),
     steps,
   });
@@ -117,17 +115,17 @@ const mailContract = async (admin: Identity): Promise<string> => {
 
 /** The draft's way with an item: it mails who it is for, through `mail`. */
 const mailing = (key: string) => ({
-  bindings: { mail: { kind: "connector", contract: key } },
+  permissions: { connections: { mail: { contract: key } } },
   steps: [
     {
       id: "send",
-      type: "do",
-      binding: "mail",
-      operation: "mail.send",
-      arguments: { to: { $expr: "input.who" }, subject: "Hello" },
+      type: "call",
+      connection: "mail",
+      action: "mail.send",
+      args: { to: { $expr: "args.who" }, subject: "Hello" },
     },
   ],
-  status: { $expr: 'input.who + " " + steps.send.output.messageId' },
+  status: { $expr: 'args.who + " " + send.messageId' },
 });
 
 /**

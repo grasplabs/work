@@ -49,33 +49,31 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 });
 
 /** What a greeting ends with: `{ status: "Hello, <who>" }`. */
-const greetingStatus = { $expr: '"Hello, " + input.who' };
+const greetingStatus = { $expr: '"Hello, " + args.who' };
 
 /**
- * A grasp-workflow/1 workflow of `steps`, its input `who` and output
- * `status` (a greeting unless said), with `bindings` and `params`.
+ * A grasp-workflow/2 workflow of `steps`, its input `who` and output
+ * `status` (a greeting unless said), with `permissions` and `params`.
  */
 const definitionOf = (
   steps: unknown[],
   {
-    bindings = {},
+    permissions = {},
     params = {},
     status = greetingStatus,
   }: {
-    bindings?: Record<string, unknown>;
+    permissions?: Record<string, unknown>;
     params?: Record<string, unknown>;
     status?: unknown;
   } = {}
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     params,
-    bindings,
+    permissions,
     steps,
   });
 
@@ -367,7 +365,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
           {
             id: "greet",
             type: "raise",
-            error: { type: "urn:grasp:error:greet", status: 422 },
+            error: { code: "test.greet", message: "Failed." },
           },
         ]),
       {
@@ -446,16 +444,15 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
           [
             {
               id: "greet",
-              type: "agent",
-              binding: "summary",
+              type: "generate",
               instructions: "Greet them.",
-              input: { who: { $expr: "input.who" } },
-              output: objectSchema({ line: { kind: "string" } }),
+              input: { who: { $expr: "args.who" } },
+              returns: objectSchema({ line: { kind: "string" } }),
             },
           ],
           {
-            bindings: { summary: { kind: "model", contract: key } },
-            status: { $expr: "steps.greet.output.line" },
+            permissions: { ai: { contract: key } },
+            status: { $expr: "greet.line" },
           }
         )
     );
@@ -839,14 +836,14 @@ export default workflowTest({
           [
             {
               id: "send",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: "Ada", subject: { $expr: "params.word" } },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: "Ada", subject: { $expr: "params.word" } },
             },
           ],
           {
-            bindings: { mail: { kind: "connector", contract: key } },
+            permissions: { connections: { mail: { contract: key } } },
             params: {
               word: {
                 label: "Word",
@@ -912,14 +909,14 @@ export default workflowTest({
           [
             {
               id: "send",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: "Ada", subject: "Hi" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: "Ada", subject: "Hi" },
             },
           ],
           {
-            bindings: { mail: { kind: "connector", contract: key } },
+            permissions: { connections: { mail: { contract: key } } },
             status: "sent",
           }
         )
@@ -931,16 +928,18 @@ export default workflowTest({
           [
             {
               id: "notify",
-              type: "do",
-              binding: "notify",
-              arguments: { to: { $expr: "input.who" } },
+              type: "call",
+              module: "notify",
+              args: { to: { $expr: "args.who" } },
             },
           ],
           {
-            bindings: {
-              notify: {
-                kind: "action",
-                contract: "local:code/notify.ts#notify",
+            permissions: {
+              modules: {
+                notify: {
+                  kind: "action",
+                  contract: "local:code/notify.ts#notify",
+                },
               },
             },
             status: "notified",
@@ -1047,7 +1046,7 @@ export const notify = action({
       builder = by;
       workflowId = await workflowOf(by, [], {
         params,
-        status: { $expr: 'params.greeting + ", " + input.who' },
+        status: { $expr: 'params.greeting + ", " + args.who' },
       });
       return workflowId;
     });

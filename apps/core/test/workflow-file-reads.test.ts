@@ -194,31 +194,31 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const definitionOf = (mail: string, files: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({
+    args: objectSchema({
       mailbox: { kind: "string" },
       message: { kind: "string" },
       attachment: { kind: "string" },
       into: { kind: "string" },
     }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { $expr: "steps.read.output" },
-    },
-    bindings: {
-      read: { kind: "action", contract: "local:code/read.ts#read" },
-      mail: { kind: "connector", contract: mail },
-      files: { kind: "files", contract: files },
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { $expr: "read" },
+    permissions: {
+      modules: {
+        read: { kind: "action", contract: "local:code/read.ts#read" },
+      },
+      connections: { mail: { contract: mail } },
+      files: { files: { contract: files } },
     },
     steps: [
       {
         id: "read",
-        type: "do",
-        binding: "read",
-        arguments: {
-          mailbox: { $expr: "input.mailbox" },
-          message: { $expr: "input.message" },
-          attachment: { $expr: "input.attachment" },
-          into: { $expr: "input.into" },
+        type: "call",
+        module: "read",
+        args: {
+          mailbox: { $expr: "args.mailbox" },
+          message: { $expr: "args.message" },
+          attachment: { $expr: "args.attachment" },
+          into: { $expr: "args.into" },
         },
       },
     ],

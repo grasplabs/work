@@ -6,7 +6,7 @@ import type { z } from "zod";
 
 // One step of a draft edited on the canvas or by the agent (GRA-514): a
 // change of a step's fields, or a step inserted into a list of steps,
-// applied to the draft's grasp-workflow/1 text as JSON. Pure: the draft
+// applied to the draft's grasp-workflow/2 text as JSON. Pure: the draft
 // saves what it answers as its next revision (workflow-drafts.ts,
 // `editWorkflowStep`), checked like any edit, so a step the format refuses
 // is saved with its problems and never becomes a checkpoint.
@@ -19,7 +19,7 @@ import type { z } from "zod";
 //   step in such a list, by its index. Anything else is
 //   `workflow.step_not_found`.
 // - Changing a step's identity. A change keeps the ID the step has, whatever
-//   the edit says: IDs are stable keys (`steps.<id>`), renamed by `title`.
+//   the edit says: IDs are stable keys (an expression reads `<id>`), renamed by `title`.
 // - Prototype keys. The document is walked by own keys and array indexes
 //   only, and a step is written as a new object, so no pointer token or
 //   field reaches an object's prototype.

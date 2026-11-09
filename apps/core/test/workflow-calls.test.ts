@@ -111,7 +111,7 @@ import {
 import { webhookConfig } from "./source-config.ts";
 import { testBinding } from "./test-env.ts";
 
-// The calls of grasp-workflow/1 workflows on the run host (sealed-run.ts,
+// The calls of grasp-workflow/2 workflows on the run host (sealed-run.ts,
 // resource-calls.ts and resource-authority.ts), from their threat model:
 // a call reaches only the target its start froze; authority revoked while
 // a run runs stops its next call; a replay repeats no effect; a sensitive
@@ -201,7 +201,7 @@ const granted = async (
 };
 
 interface Draft {
-  bindings?: Record<string, { kind: string; contract: string }>;
+  permissions?: Record<string, unknown>;
   params?: Record<string, unknown>;
   steps: readonly unknown[];
   /** What the run's `status` ends as: an expression, the text `done` if none. */
@@ -212,20 +212,18 @@ interface Draft {
 
 /** A definition: its input `{ who }`, its output `{ status }`. */
 const definitionOf = ({
-  bindings = {},
+  permissions = {},
   params = {},
   steps,
   status,
 }: Draft): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: status === undefined ? "done" : { $expr: status } },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: status === undefined ? "done" : { $expr: status } },
     params,
-    bindings,
+    permissions,
     steps,
   });
 
@@ -406,7 +404,7 @@ const mailingWorkflow = async (
   admin: Identity,
   {
     before = [],
-    to = { $expr: "input.who" },
+    to = { $expr: "args.who" },
     plan = [],
     sharing,
     plain = false,
@@ -434,21 +432,21 @@ const mailingWorkflow = async (
   const key = await mailContract(admin, input);
   const send = {
     id: "send",
-    type: "do",
-    binding: "mail",
-    operation: "mail.send",
-    arguments: {
+    type: "call",
+    connection: "mail",
+    action: "mail.send",
+    args: {
       to,
       subject: { $expr: "params.token" },
       ...(attachments === undefined ? {} : { attachments }),
     },
   };
   const { workflow, executable } = await published(by, {
-    bindings: {
-      mail: { kind: "connector", contract: key },
-      ...(sharing === undefined
-        ? {}
-        : { [sharing]: { kind: "connector", contract: key } }),
+    permissions: {
+      connections: {
+        mail: { contract: key },
+        ...(sharing === undefined ? {} : { [sharing]: { contract: key } }),
+      },
     },
     params: { token: { label: "Token", type: { kind: "string" } } },
     steps: [
@@ -459,11 +457,11 @@ const mailingWorkflow = async (
         : [
             {
               id: "skipped",
-              type: "do",
+              type: "call",
               if: { $expr: "false" },
-              binding: sharing,
-              operation: "mail.send",
-              arguments: { to: "Nobody", subject: "Never" },
+              connection: sharing,
+              action: "mail.send",
+              args: { to: "Nobody", subject: "Never" },
             },
           ]),
       retry === undefined
@@ -472,7 +470,7 @@ const mailingWorkflow = async (
       ...(plain ? [] : [pause]),
     ],
     // A step in a try is read by nothing after it: a catch may take it.
-    status: retry === undefined ? "steps.send.output.messageId" : '"sent"',
+    status: retry === undefined ? "send.messageId" : '"sent"',
   });
   await setWorkflowParams(env, by, workflow.id, {
     values: { token },
@@ -764,7 +762,7 @@ describe("connector calls", () => {
     const ada = await person("builder");
     // `to` is text in the contract; this one is a number.
     const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
-      to: { $expr: "input.who.length" },
+      to: { $expr: "args.who.length" },
     });
     const runId = await started(ada, workflow.id, serving);
     const run = await ended(ada, workflow.id, runId);
@@ -804,11 +802,10 @@ const sleepOf = async (run: string): Promise<string> =>
 /** An agent step asking binding `summary` to greet the run's `who`. */
 const greetStep = (id = "greet", timeout?: string) => ({
   id,
-  type: "agent",
-  binding: "summary",
+  type: "generate",
   instructions: "Greet them.",
-  input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { kind: "string" } }),
+  input: { who: { $expr: "args.who" } },
+  returns: objectSchema({ line: { kind: "string" } }),
   ...(timeout === undefined ? {} : { timeout }),
 });
 
@@ -825,12 +822,12 @@ const greetingWorkflow = async (
   const key = `summary-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "model" });
   const { workflow, executable } = await published(by, {
-    bindings: { summary: { kind: "model", contract: key } },
+    permissions: { ai: { contract: key } },
     steps: [...before, greetStep(), pause],
-    status: "steps.greet.output.line",
+    status: "greet.line",
   });
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "summary",
+    alias: "ai",
     target: { kind: "model", model: allowedModel },
     reviewed: { version: 1 },
   });
@@ -878,7 +875,7 @@ describe("model calls", () => {
       requests: 1,
       receipts: ["started", "done"].map((outcome) => ({
         call: "grasp.model",
-        binding: "summary",
+        binding: "ai",
         person: ada.userId,
         outcome,
       })),
@@ -2090,12 +2087,12 @@ describe("a step's own timeout", () => {
     const key = `summary-${unique()}`;
     await publishCatalogContract(env, admin, { key, kind: "model" });
     const { workflow } = await published(by, {
-      bindings: { summary: { kind: "model", contract: key } },
+      permissions: { ai: { contract: key } },
       steps: [greetStep("greet", "2 seconds")],
-      status: "steps.greet.output.line",
+      status: "greet.line",
     });
     await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "summary",
+      alias: "ai",
       target: { kind: "model", model: allowedModel },
       reviewed: { version: 1 },
     });
@@ -2137,7 +2134,7 @@ const greetModule = (
   asks = 2
 ) => `import { action, resource, v } from "@grasp-os/sdk/action";
 
-const writer = resource.model("writer", {
+const writer = resource.model("ai", {
   output: v.object({ line: v.string() }),
 });
 
@@ -2148,7 +2145,7 @@ export const greet = action({
   handler: async (ctx, args) => {
     const lines: string[] = [];
     for (let ask = 0; ask < ${asks}; ask += 1) {
-      const { line } = await ctx.resources.writer.generate({
+      const { line } = await ctx.resources.ai.generate({
         instructions: "Greet them.",
         input: { who: args.who, ask },
       });
@@ -2162,9 +2159,9 @@ export const greet = action({
 /** The step calling action `greet` with the run's `who`. */
 const greetTask = {
   id: "greet",
-  type: "do",
-  binding: "greet",
-  arguments: { who: { $expr: "input.who" } },
+  type: "call",
+  module: "greet",
+  args: { who: { $expr: "args.who" } },
 };
 
 /**
@@ -2185,16 +2182,18 @@ const writingWorkflow = async (
   const key = `writer-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "model" });
   const { workflow, executable } = await published(by, {
-    bindings: {
-      greet: { kind: "action", contract: "local:code/greet.ts#greet" },
-      writer: { kind: "model", contract: key },
+    permissions: {
+      modules: {
+        greet: { kind: "action", contract: "local:code/greet.ts#greet" },
+      },
+      ai: { contract: key },
     },
     steps,
-    status: "steps.greet.output.status",
+    status: "greet.status",
     modules: { "code/greet.ts": greetModule(asks) },
   });
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "writer",
+    alias: "ai",
     target: { kind: "model", model: allowedModel },
     reviewed: { version: 1 },
   });
@@ -2209,11 +2208,10 @@ const writingWorkflow = async (
 /** An agent step asking `writer` once more, as a step of the run's own. */
 const writeAgain = {
   id: "again",
-  type: "agent",
-  binding: "writer",
+  type: "generate",
   instructions: "Greet them again.",
-  input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { kind: "string" } }),
+  input: { who: { $expr: "args.who" } },
+  returns: objectSchema({ line: { kind: "string" } }),
 };
 
 describe("model resources of a workflow's own actions", () => {
@@ -2266,7 +2264,7 @@ describe("model resources of a workflow's own actions", () => {
       listed: [
         {
           binding: "greet",
-          uses: [{ alias: "writer", kind: "model", output: "object" }],
+          uses: [{ alias: "ai", kind: "model", output: "object" }],
         },
       ],
       executable: true,
@@ -2274,7 +2272,7 @@ describe("model resources of a workflow's own actions", () => {
       requests: 2,
       receipts: ["started", "done", "started", "done"].map((outcome) => ({
         call: "grasp.model",
-        binding: "writer",
+        binding: "ai",
         outcome,
       })),
     });
@@ -2410,7 +2408,7 @@ describe("model resources of a workflow's own actions", () => {
     const big = `import { action, resource, v } from "@grasp-os/sdk/action";
 
 const values = Array.from({ length: 400 }, (_, index) => \`\${"x".repeat(190)}\${index}\`);
-const writer = resource.model("writer", {
+const writer = resource.model("ai", {
   output: v.object({ pick: v.enum(values as [string, ...string[]]) }),
 });
 
@@ -2424,9 +2422,11 @@ export const greet = action({
     const error = await refusal(
       publishWorkflowVersion(env, ada, workflow.id, {
         definition: definitionOf({
-          bindings: {
-            greet: { kind: "action", contract: "local:code/greet.ts#greet" },
-            writer: { kind: "model", contract: key },
+          permissions: {
+            modules: {
+              greet: { kind: "action", contract: "local:code/greet.ts#greet" },
+            },
+            ai: { contract: key },
           },
           steps: [greetTask],
         }),
@@ -2455,7 +2455,7 @@ export const greet = action({
       problems: [
         {
           code: "manifest.too_large",
-          pointer: "/bindings/greet",
+          pointer: "/permissions/modules/greet",
         },
       ],
     });

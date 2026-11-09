@@ -162,9 +162,9 @@ export const go = action({
 /** A step `id` calling action `binding` with `args`. */
 const call = (id: string, binding: string, args: Record<string, unknown>) => ({
   id,
-  type: "do",
+  type: "call",
   binding,
-  arguments: args,
+  args,
 });
 
 /** Suspends a run before its action: time to change what it relies on. */
@@ -172,8 +172,8 @@ const hold = { id: "hold", type: "wait", for: "1 second" };
 
 /** What `go` does: its mode and file, as the run's input. */
 const goTask = call("go", "go", {
-  mode: { $expr: "input.mode" },
-  file: { $expr: "input.file" },
+  mode: { $expr: "args.mode" },
+  file: { $expr: "args.file" },
 });
 
 /**
@@ -186,20 +186,23 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({
+    args: objectSchema({
       mode: { kind: "string" },
       file: { kind: "string" },
       size: { kind: "number" },
     }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { $expr: `steps[${JSON.stringify(steps.at(-1)?.id)}].output` },
-    },
-    bindings: {
-      writeFile: { kind: "action", contract: "local:code/files.ts#writeFile" },
-      readFile: { kind: "action", contract: "local:code/files.ts#readFile" },
-      go: { kind: "action", contract: "local:code/files.ts#go" },
-      files: { kind: "files", contract: key },
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { $expr: `steps[${JSON.stringify(steps.at(-1)?.id)}].output` },
+    permissions: {
+      modules: {
+        writeFile: {
+          kind: "action",
+          contract: "local:code/files.ts#writeFile",
+        },
+        readFile: { kind: "action", contract: "local:code/files.ts#readFile" },
+        go: { kind: "action", contract: "local:code/files.ts#go" },
+      },
+      files: { files: { contract: key } },
     },
     steps,
   });
@@ -419,7 +422,7 @@ describe("a workflow run's own files", () => {
     const ada = await person("builder");
     const size = 3 * 1024 * 1024 + 7;
     const { workflow } = await filesWorkflow(ada, admin, [
-      call("write-file", "writeFile", { size: { $expr: "input.size" } }),
+      call("write-file", "writeFile", { size: { $expr: "args.size" } }),
       call("read-file", "readFile", {
         file: { $expr: 'steps["write-file"].output.file' },
       }),

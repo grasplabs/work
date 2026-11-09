@@ -99,8 +99,8 @@ describe("a JSON workflow run's history", () => {
       {
         id: "mark",
         type: "raise",
-        if: { $expr: 'input.who.startsWith("secret-")' },
-        error: { type: "urn:grasp:error:marked", status: 422 },
+        if: { $expr: 'args.who.startsWith("secret-")' },
+        error: { code: "test.marked", message: "Failed." },
       },
     ]);
     const runId = await startedBy(builder, workflow.id, {

@@ -62,7 +62,7 @@ import { testBinding } from "./test-env.ts";
 // The run host's harness for a sealed build's run (sealed-run.ts), shared
 // by the tests that run a module of their own against a real published
 // workflow's sealed build: sealed-runs.test.ts, and the runs of
-// grasp-workflow/1's generated code (workflow-schema-runs.test.ts).
+// grasp-workflow/2's generated code (workflow-schema-runs.test.ts).
 
 /** The model the organization chose, the one the model binding names. */
 export const allowedModel = "mistral/mistral-large-latest";
@@ -100,7 +100,7 @@ export const objectOf = (fields: Record<string, unknown>) => ({
 
 /** Where the standard error types are, as a catch's filter names them. */
 export const standardErrors =
-  "https://grasp.work/schemas/grasp-workflow/1/errors/";
+  "https://grasp.work/schemas/grasp-workflow/2/errors/";
 
 /** What mail.send takes, `{ to, subject }`, and answers, `{ messageId }`. */
 export const mailInput = v.object({ to: v.string(), subject: v.string() });
@@ -182,38 +182,35 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { kind: "string" } }),
-      output: {
-        schema: objectOf({ status: { kind: "string" } }),
-        value: { status: "done" },
-      },
+      args: objectOf({ who: { kind: "string" } }),
+      returns: objectOf({ status: { kind: "string" } }),
+      result: { status: "done" },
       params: { token: { label: "Token", type: { kind: "string" } } },
-      bindings: {
-        mail: { kind: "connector", contract: mailKey },
-        summary: { kind: "model", contract: modelKey },
+      permissions: {
+        connections: { mail: { contract: mailKey } },
+        ai: { contract: modelKey },
       },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "send",
-          type: "do",
-          binding: "mail",
-          operation: "mail.send",
-          arguments: {
-            to: { $expr: "input.who" },
+          type: "call",
+          connection: "mail",
+          action: "mail.send",
+          args: {
+            to: { $expr: "args.who" },
             subject: { $expr: "params.token" },
           },
         },
         ...["greet", "again"].map((id) => ({
           id,
-          type: "agent",
-          binding: "summary",
+          type: "generate",
           instructions: "Greet them.",
           input: {
-            who: { $expr: "input.who" },
-            tags: ["vip", { $expr: "input.who" }],
+            who: { $expr: "args.who" },
+            tags: ["vip", { $expr: "args.who" }],
           },
-          output: objectOf({ line: { kind: "string" } }),
+          returns: objectOf({ line: { kind: "string" } }),
         })),
         { id: "pause", type: "wait", until: { $expr: "0" } },
         {
@@ -222,11 +219,11 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
           try: [
             {
               id: "fetch",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
               timeout: "20 seconds",
-              arguments: { to: { $expr: "input.who" }, subject: "x" },
+              args: { to: { $expr: "args.who" }, subject: "x" },
             },
           ],
           catch: {
@@ -245,17 +242,13 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
                 {
                   id: "stop",
                   type: "raise",
-                  error: {
-                    type: "urn:grasp:error:stop",
-                    status: 422,
-                    title: "Stopped.",
-                  },
+                  error: { code: "test.stop", message: "Stopped." },
                 },
               ],
-              catch: { errors: { status: 409 } },
+              catch: { code: "test.unrelated" },
             },
           ],
-          catch: { errors: { status: 422 } },
+          catch: { code: "test.stop" },
         },
         {
           id: "wrapped",
@@ -268,13 +261,13 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
                 {
                   id: "boom",
                   type: "raise",
-                  error: { type: "urn:grasp:error:boom", status: 418 },
+                  error: { code: "test.boom", message: "Failed." },
                 },
               ],
-              catch: { errors: { status: 418 } },
+              catch: { code: "test.boom" },
             },
           ],
-          catch: { errors: { status: 418 } },
+          catch: { code: "test.boom" },
         },
         {
           id: "layered",
@@ -286,15 +279,15 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
               try: [
                 {
                   id: "ping",
-                  type: "do",
-                  binding: "mail",
-                  operation: "mail.send",
-                  arguments: { to: { $expr: "input.who" }, subject: "y" },
+                  type: "call",
+                  connection: "mail",
+                  action: "mail.send",
+                  args: { to: { $expr: "args.who" }, subject: "y" },
                 },
               ],
               catch: {
                 errors: { status: 500 },
-                when: { $expr: 'input.who === "Ada"' },
+                when: { $expr: 'args.who === "Ada"' },
               },
             },
           ],
@@ -313,10 +306,10 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "loop" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "loop" },
             },
             {
               id: "guard",
@@ -325,14 +318,10 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
                 {
                   id: "check",
                   type: "raise",
-                  error: {
-                    type: "urn:grasp:error:bad",
-                    status: 422,
-                    title: "Bad row.",
-                  },
+                  error: { code: "test.bad", message: "Bad row." },
                 },
               ],
-              catch: { errors: { status: 422 } },
+              catch: { code: "test.bad" },
             },
           ],
         },
@@ -355,7 +344,7 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
     reviewed: { version: 1 },
   });
   await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "summary",
+    alias: "ai",
     target: { kind: "model", model: allowedModel },
     reviewed: { version: 1 },
   });
@@ -856,30 +845,28 @@ export const decisionWorkflow = async () => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectOf({
+      args: objectOf({
         reviewer: { kind: "string" },
         invoice: { kind: "string" },
       }),
-      output: {
-        schema: objectOf({
-          approved: { kind: "boolean" },
-          by: { kind: "string" },
-        }),
-        value: {
-          approved: { $expr: "steps.review.output.approved" },
-          by: { $expr: "steps.review.output.by" },
-        },
+      returns: objectOf({
+        approved: { kind: "boolean" },
+        by: { kind: "string" },
+      }),
+      result: {
+        approved: { $expr: "review.approved" },
+        by: { $expr: "review.by" },
       },
-      bindings: { approval: { kind: "decision", contract } },
+      permissions: { decisions: { approval: { contract } } },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "review",
-          type: "decision",
-          binding: "approval",
-          recipients: [{ $expr: "input.reviewer" }],
+          type: "decide",
+          decision: "approval",
+          recipients: [{ $expr: "args.reviewer" }],
           prompt: "Approve the invoice",
-          input: { invoice: { $expr: "input.invoice" } },
+          input: { invoice: { $expr: "args.invoice" } },
           timeout: "7 days",
         },
         {
@@ -889,9 +876,9 @@ export const decisionWorkflow = async () => {
           do: [
             {
               id: "sign",
-              type: "decision",
-              binding: "approval",
-              recipients: [{ $expr: "input.reviewer" }],
+              type: "decide",
+              decision: "approval",
+              recipients: [{ $expr: "args.reviewer" }],
               prompt: "Approve this one",
               input: { invoice: { $expr: "item" } },
               timeout: "7 days",

@@ -92,23 +92,21 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const documentOf = (
   steps: unknown[],
   status: unknown,
-  bindings: Record<string, unknown> = {}
+  permissions: Record<string, unknown> = {}
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
-    bindings,
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
+    permissions,
     steps,
   });
 
 /** A greeting workflow's definition: it waits an hour, then greets. */
 const definitionOf = (): string =>
   documentOf([{ id: "hold", type: "wait", for: "1 hour" }], {
-    $expr: '"Hello, " + input.who',
+    $expr: '"Hello, " + args.who',
   });
 
 /** Someone signed in, and as core's own calls take them. */
@@ -287,11 +285,11 @@ const decidingDefinitionOf = (contract: string): string =>
     [
       {
         id: "ask",
-        type: "decision",
-        binding: "approval",
+        type: "decide",
+        decision: "approval",
         recipients: ["role:admin"],
         prompt: "Approve this request?",
-        input: { who: { $expr: "input.who" } },
+        input: { who: { $expr: "args.who" } },
       },
     ],
     "done",

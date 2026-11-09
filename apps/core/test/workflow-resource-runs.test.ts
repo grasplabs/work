@@ -84,7 +84,7 @@ const builder = async (role: Role = "builder"): Promise<Acting> => {
 const statusOutput = { status: { kind: "string" } };
 
 /**
- * A grasp-workflow/1 definition running `steps` on input `{ who }`, its
+ * A grasp-workflow/2 definition running `steps` on input `{ who }`, its
  * output `value` of `output`'s fields: `{ status: "done" }` unless said.
  */
 const definitionOf = (
@@ -96,7 +96,7 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
+    args: objectSchema({ who: { kind: "string" } }),
     output: { schema: objectSchema(output), value },
     params: {
       greeting: {
@@ -108,8 +108,8 @@ const definitionOf = (
     steps,
   });
 
-/** The greeting `params.greeting + ", " + input.who`, as an expression. */
-const greeting = { $expr: 'params.greeting + ", " + input.who' };
+/** The greeting `params.greeting + ", " + args.who`, as an expression. */
+const greeting = { $expr: 'params.greeting + ", " + args.who' };
 
 /** A run that waits an hour, then ends with `{ status: "done" }`. */
 const waitingDefinition = definitionOf([
@@ -121,7 +121,7 @@ const waitingDefinition = definitionOf([
  * `who` hasn't.
  */
 const failingDefinition = definitionOf([], {
-  value: { status: { $expr: 'input.who.split("")[9999].toUpperCase()' } },
+  value: { status: { $expr: 'args.who.split("")[9999].toUpperCase()' } },
 });
 
 /** A workflow of `by`'s, published once from `definition`. */
@@ -1459,7 +1459,7 @@ const loadWaitsOf = async (id: string | null): Promise<number> =>
 const deciding = (id: string) => ({
   id,
   type: "if",
-  condition: { $expr: 'input.who !== ""' },
+  condition: { $expr: 'args.who !== ""' },
   // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
   then: [],
 });
@@ -1469,7 +1469,7 @@ const deciding = (id: string) => ({
  * greeting called out.
  */
 const greetThenCall = definitionOf([deciding("greet"), deciding("call")], {
-  value: { status: { $expr: 'params.greeting + ", " + input.who + "!"' } },
+  value: { status: { $expr: 'params.greeting + ", " + args.who + "!"' } },
 });
 
 /**

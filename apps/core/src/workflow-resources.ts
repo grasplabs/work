@@ -50,16 +50,17 @@ import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import type { CheckedWorkflow, Problem } from "@grasp-os/workflow-schema/check";
 import { expressionTypeRequest } from "@grasp-os/workflow-schema/expression-scope";
 import {
-  bindingKinds,
+  bindingsOf as documentBindings,
   definitionFormat,
   eachStep,
   formatLimits,
   isSensitive,
+  permissionKinds,
 } from "@grasp-os/workflow-schema/format";
 import type {
   Binding,
-  EventWaitStep,
   Step,
+  WaitForEventStep,
 } from "@grasp-os/workflow-schema/format";
 import type { SealedTask } from "@grasp-os/workflow-schema/sealed";
 import {
@@ -160,7 +161,7 @@ import { quotaLimits } from "./workflows/quotas.ts";
 // - Authority from source text. The resource a version is published to is
 //   the one the call names by its host-minted ID, which the caller must
 //   build; its owner is whoever created it, never anything the definition
-//   says: a grasp-workflow/1 document names no workflow, and its semantic
+//   says: a grasp-workflow/2 document names no workflow, and its semantic
 //   version is the one publication gives it (`writeVersion`).
 // - "latest" and ranges. A binding to another workflow names an exact
 //   `namespace/name/semver` contract; anything else isn't in the catalog,
@@ -698,18 +699,13 @@ const storedContractSchema = z.strictObject({
 });
 type StoredContract = z.infer<typeof storedContractSchema>;
 
-/** Where a document declares its bindings, as far as a lookup needs. */
-const declaredBindingsSchema = z.object({
-  bindings: z.record(z.string(), z.unknown()),
+/** Where a document declares its permissions, as far as a lookup needs. */
+const declaredPermissionsSchema = z.object({
+  permissions: z.partialRecord(z.enum(permissionKinds), z.unknown()),
 });
 
-/** A binding that names a contract of the catalog, not of the workflow's own modules. */
-const catalogBindingSchema = z.object({
-  kind: z
-    .enum(bindingKinds)
-    .refine((kind) => contractKindOf(kind) !== undefined),
-  contract: catalogKeySchema,
-});
+/** A permission that names a contract of the catalog. */
+const catalogPermissionSchema = z.object({ contract: catalogKeySchema });
 
 /** `text` read as JSON, or undefined when it isn't. */
 const parsedJson = (text: string): unknown => {
@@ -727,15 +723,23 @@ const parsedJson = (text: string): unknown => {
  * names none, and the check refuses it.
  */
 const namedKeys = (parsed: unknown): string[] => {
-  const declared = declaredBindingsSchema.safeParse(parsed);
+  const declared = declaredPermissionsSchema.safeParse(parsed);
   if (!declared.success) {
     return [];
   }
   const keys = new Set<string>();
-  for (const binding of Object.values(declared.data.bindings)) {
-    const contract = catalogBindingSchema.safeParse(binding);
-    if (contract.success) {
-      keys.add(contract.data.contract);
+  for (const [kind, held] of Object.entries(declared.data.permissions)) {
+    // The workflow's own modules are its code's, never the catalog's.
+    if (kind === "modules" || typeof held !== "object" || held === null) {
+      continue;
+    }
+    // `ai` is one permission; every other kind holds them by alias.
+    const permissions: unknown[] = kind === "ai" ? [held] : Object.values(held);
+    for (const permission of permissions) {
+      const contract = catalogPermissionSchema.safeParse(permission);
+      if (contract.success) {
+        keys.add(contract.data.contract);
+      }
     }
   }
   // No more than a document may bind: the check refuses the rest.
@@ -759,9 +763,9 @@ const definitionInvalid = (problems: WorkflowDefinitionProblem[]) =>
     problems: problems.map((problem) => ({ ...problem })),
   });
 
-/** The types an event wait takes, as a list (`EventFilter.type`). */
-const eventTypesOf = (step: EventWaitStep): readonly string[] =>
-  typeof step.event.type === "string" ? [step.event.type] : step.event.type;
+/** The types an event wait takes, as a list (`WaitForEventStep.eventType`). */
+const eventTypesOf = (step: WaitForEventStep): readonly string[] =>
+  typeof step.eventType === "string" ? [step.eventType] : step.eventType;
 
 /** The contract of a checked document: what a caller of it relies on. */
 const contractOf = (checked: CheckedWorkflow): StoredContract => {
@@ -776,18 +780,13 @@ const contractOf = (checked: CheckedWorkflow): StoredContract => {
     };
   }
   return {
-    input: z.json().parse(structuredClone(checked.contract.input)),
-    output: z.json().parse(structuredClone(checked.contract.output)),
+    input: z.json().parse(structuredClone(checked.contract.args)),
+    output: z.json().parse(structuredClone(checked.contract.returns)),
     // Each event wait, by its step's ID: what an App may send the run.
     listens: Object.fromEntries(
       eachStep(checked.document.steps).flatMap(({ step }) =>
-        step.type === "wait" && "event" in step
-          ? [
-              [
-                step.id,
-                { alias: step.event.from, types: [...eventTypesOf(step)] },
-              ],
-            ]
+        step.type === "waitForEvent"
+          ? [[step.id, { alias: step.events, types: [...eventTypesOf(step)] }]]
           : []
       )
     ),
@@ -837,6 +836,27 @@ export const firstFreeVersion = async (
   return `${highest + 1n}.0.0`;
 };
 
+/** Where each kind of binding's permission stands under `permissions`. */
+const permissionKeys: Readonly<Record<Binding["kind"], string>> = {
+  model: "ai",
+  connector: "connections",
+  decision: "decisions",
+  event: "events",
+  files: "files",
+  brain: "brain",
+  compute: "modules",
+  action: "modules",
+};
+
+/**
+ * Where permission `alias`, bound as `binding`, stands in the document:
+ * `/permissions/ai`, or `/permissions/<kind>/<alias>`.
+ */
+const permissionPointer = (binding: Binding, alias: string): string =>
+  binding.kind === "model"
+    ? "/permissions/ai"
+    : `/permissions/${permissionKeys[binding.kind]}/${alias}`;
+
 /** The kind of the workflow's own module a `local:` binding of `kind` names. */
 const moduleKinds = { compute: "compute", action: "operation" } as const;
 
@@ -863,9 +883,9 @@ const actionUseProblems = (
       const kind = bindingKindOf(use.kind);
       problems.push({
         code: "binding.use_undeclared",
-        message: `The action reaches \`${use.alias}\`, a ${kind} binding the workflow doesn't declare.`,
+        message: `The action reaches \`${use.alias}\`, a ${kind} permission the workflow doesn't declare.`,
         pointer,
-        remedy: `Declare \`${use.alias}\` as a ${kind} binding.`,
+        remedy: `Declare \`${use.alias}\` as a ${kind} permission.`,
       });
       continue;
     }
@@ -891,25 +911,26 @@ const actionUseProblems = (
  * timeout. A binding the catalog doesn't have is refused as such.
  */
 const eventTypeProblems = (
-  step: EventWaitStep,
+  step: WaitForEventStep,
   pointer: string,
   bindings: Readonly<Record<string, Binding>>,
   catalog: ReadonlyMap<string, ResolvedCatalogContract>
 ): WorkflowDefinitionProblem[] => {
-  const contract = catalog.get(bindings[step.event.from]?.contract ?? "");
+  const contract = catalog.get(bindings[step.events]?.contract ?? "");
   if (contract?.kind !== "event") {
     return [];
   }
   const admitted = contract.contract.events ?? {};
-  const listed = typeof step.event.type !== "string";
-  const matched = step.event.match !== undefined;
+  const listed = typeof step.eventType !== "string";
+  const matched = step.match !== undefined;
   return eventTypesOf(step).flatMap((type, index) => {
-    const at = `${pointer}/event/type${listed ? `/${index}` : ""}`;
+    const at = `${pointer}/eventType${listed ? `/${index}` : ""}`;
     if (!Object.hasOwn(admitted, type)) {
       return [
         {
           code: "event.unknown_type",
-          message: "The event binding's contract admits no event of this type.",
+          message:
+            "The event permission's contract admits no event of this type.",
           pointer: at,
           remedy: "Wait for a type its contract's events name.",
         },
@@ -928,7 +949,7 @@ const eventTypeProblems = (
                 "A webhook source's events reach a run only by a `match` on what the run is waiting for.",
               pointer: where,
               remedy:
-                "Give the wait `event.match`: the field of the event's data, and the value it must have.",
+                "Give the wait `match`: the field of the event's data, and the value it must have.",
             },
           ]
         : [];
@@ -961,10 +982,10 @@ const bindingProblems = (
   modules: ModuleContracts | undefined
 ): WorkflowDefinitionProblem[] => {
   const problems: WorkflowDefinitionProblem[] = [];
-  const bindings = checked.document.bindings ?? {};
+  const bindings = documentBindings(checked.document);
   const local = moduleLookup(modules);
   for (const [alias, binding] of Object.entries(bindings)) {
-    const pointer = `/bindings/${alias}/contract`;
+    const pointer = `${permissionPointer(binding, alias)}/contract`;
     if (binding.kind === "compute" || binding.kind === "action") {
       const contract = local(binding.contract);
       if (contract?.kind !== moduleKinds[binding.kind]) {
@@ -995,27 +1016,24 @@ const bindingProblems = (
     }
   }
   for (const { step, pointer } of eachStep(checked.document.steps)) {
-    if (step.type === "wait" && "event" in step) {
+    if (step.type === "waitForEvent") {
       problems.push(...eventTypeProblems(step, pointer, bindings, catalog));
       continue;
     }
-    if (step.type !== "do" || step.operation === undefined) {
+    if (step.type !== "call" || !("connection" in step)) {
       continue;
     }
-    const binding = bindings[step.binding];
+    const binding = bindings[step.connection];
     const operations =
       binding === undefined
         ? undefined
         : catalog.get(binding.contract)?.contract.operations;
-    if (
-      operations !== undefined &&
-      !Object.hasOwn(operations, step.operation)
-    ) {
+    if (operations !== undefined && !Object.hasOwn(operations, step.action)) {
       problems.push({
         code: "connector.unknown_operation",
-        message: `The connector's contract doesn't allow \`${step.operation}\`.`,
-        pointer: `${pointer}/operation`,
-        remedy: "Call one of the operations its contract allows.",
+        message: `The connection's contract doesn't allow \`${step.action}\`.`,
+        pointer: `${pointer}/action`,
+        remedy: "Call one of the actions its contract allows.",
       });
     }
   }
@@ -1040,16 +1058,21 @@ const expressionTypeProblems = async (
   catalog: ReadonlyMap<string, ResolvedCatalogContract>,
   whose: string
 ): Promise<WorkflowDefinitionProblem[]> => {
-  const bindings = checked.document.bindings ?? {};
-  // A `do` step's output, as its call's contract answers it.
+  const bindings = documentBindings(checked.document);
+  // A `call` step's result, as its call's contract answers it.
   const outputOf = (step: Step) => {
+    const called = step.type === "call" ? step : undefined;
+    let alias = "";
+    if (called !== undefined) {
+      alias = "connection" in called ? called.connection : called.module;
+    }
     const contract =
-      step.type === "do"
-        ? catalog.get(bindings[step.binding]?.contract ?? "")?.contract
-        : undefined;
+      called === undefined
+        ? undefined
+        : catalog.get(bindings[alias]?.contract ?? "")?.contract;
     const text =
-      step.type === "do" && step.operation !== undefined
-        ? contract?.operations?.[step.operation]?.output
+      called !== undefined && "connection" in called
+        ? contract?.operations?.[called.action]?.output
         : contract?.output;
     // A contract whose output isn't a descriptor the SDK reads (one stated
     // as a JSON Schema) leaves the step untyped, as the check passes what
@@ -1109,7 +1132,7 @@ const expressionTypeProblems = async (
 };
 
 /**
- * `definition` checked for publication by `by`: it is grasp-workflow/1
+ * `definition` checked for publication by `by`: it is grasp-workflow/2
  * (`checkWorkflow`), and its bindings resolve against the host's catalog
  * and `modules`, the workflow's own (`bindingProblems`). Returns it with
  * what each binding resolved to, or its problems.
@@ -1157,8 +1180,8 @@ const inspectDefinition = async (
         {
           code: "contract.too_large",
           message:
-            "The workflow's input, output and parameter schemas together are larger than a version may hold.",
-          pointer: "/input",
+            "The workflow's args, returns and parameter schemas together are larger than a version may hold.",
+          pointer: "/args",
           remedy: "Keep the schemas smaller: move large constants into data.",
         },
       ],
@@ -1166,7 +1189,7 @@ const inspectDefinition = async (
   }
   const bindings: PinnedBinding[] = [];
   for (const [alias, binding] of Object.entries(
-    checked.document.bindings ?? {}
+    documentBindings(checked.document)
   )) {
     // A binding of the workflow's own modules is sealed with its build
     // (workflow-builds.ts): no approval serves it, so nothing pins it here.
@@ -1264,7 +1287,7 @@ const tooLargeProblem = (
     return {
       code: "manifest.too_large",
       message: "What the version pins is larger than a version may hold.",
-      pointer: "/bindings",
+      pointer: "/permissions",
       remedy: "Bind fewer workflows.",
     };
   }
@@ -1274,7 +1297,7 @@ const tooLargeProblem = (
     // the largest shape.
     message:
       "The output shapes the version's actions declare for their model calls are larger than a version may hold.",
-    pointer: `/bindings/${largest.binding}`,
+    pointer: `/permissions/modules/${largest.binding}`,
     remedy: "Declare smaller output shapes for the actions' model uses.",
   };
 };
@@ -2142,7 +2165,7 @@ const publish = async (
       compiled,
       modulesHash,
       actions: versionActionsOf(
-        new Map(Object.entries(checked.document.bindings ?? {})),
+        new Map(Object.entries(documentBindings(checked.document))),
         modules
       ),
       packages: sealed?.manifest,
@@ -2239,7 +2262,7 @@ export const definitionProblems = async (
 /**
  * Publishes a version of workflow `id` for `by`, who must build it, from
  * `input`: the definition's text and the current version it built on.
- * The definition must be grasp-workflow/1, its bindings resolved against
+ * The definition must be grasp-workflow/2, its bindings resolved against
  * the host's catalog (refused with its problems,
  * `workflow.definition_invalid`). Its version is the next publication
  * number; it becomes the current version. A retry of a publication that

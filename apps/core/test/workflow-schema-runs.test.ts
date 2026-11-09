@@ -102,7 +102,7 @@ const guardedRan = (tries: ReadonlyMap<string, number>) => {
   };
 };
 
-// grasp-workflow/1's generated code, run end to end on the run host
+// grasp-workflow/2's generated code, run end to end on the run host
 // (sealed-run.ts) with the sealed table its generator made: a real
 // published workflow's run, its bindings approved and its sensitive token
 // set, its build's module and table in place of the old generator's. So
@@ -111,14 +111,14 @@ const guardedRan = (tries: ReadonlyMap<string, number>) => {
 // sensitive value put in by the host, the model asked, the waits slept,
 // the `if` taken, the raise failing its step and the catch taking it.
 
-/** The bindings and the sensitive token of `sealedWorkflow`'s workflow. */
+/** The permissions and the sensitive token of `sealedWorkflow`'s workflow. */
 const declared = {
   params: {
     token: { label: "Token", type: { kind: "string" }, sensitive: true },
   },
-  bindings: {
-    mail: { kind: "connector", contract: "composio.mail@1" },
-    summary: { kind: "model", contract: "summary" },
+  permissions: {
+    connections: { mail: { contract: "composio.mail@1" } },
+    ai: { contract: "summary" },
   },
   /** What the workflow keeps between runs: what the state tests write. */
   state: {
@@ -163,23 +163,25 @@ const generatedPath = generatedWorkflowEntry;
 const generated = async (
   steps: unknown[],
   output?: { schema: unknown; value: unknown },
-  bindings: Record<string, unknown> = declared.bindings,
+  permissions: Record<string, unknown> = declared.permissions,
   state: Record<string, unknown> = declared.state,
   input: unknown = greeted
 ) => {
   const result = checkWorkflow({
-    $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
-    input,
+    $schema: "https://grasp.work/schemas/grasp-workflow/2.json",
+    args: input,
     params: declared.params,
-    bindings,
+    permissions,
     state,
-    ...(output === undefined ? {} : { output }),
+    ...(output === undefined
+      ? {}
+      : { returns: output.schema, result: output.value }),
     steps,
   });
   if (!result.ok) {
     throw new Error(`Not a valid workflow: ${JSON.stringify(result.problems)}`);
   }
-  const generation = generateWorkflow(result.workflow, "sealed");
+  const generation = generateWorkflow(result.workflow);
   // The table as core seals it (tasks.json): its own schema reads it.
   const table = sealedTableSchema.parse(
     structuredClone({
@@ -209,7 +211,7 @@ const generated = async (
   };
 };
 
-describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
+describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
   let sealed: Sealed;
 
   beforeAll(async () => {
@@ -228,33 +230,32 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "send",
-          type: "do",
-          binding: "mail",
-          operation: "mail.send",
-          arguments: {
-            to: { $expr: "input.who" },
+          type: "call",
+          connection: "mail",
+          action: "mail.send",
+          args: {
+            to: { $expr: "args.who" },
             subject: { $expr: "params.token" },
           },
         },
         {
           id: "greet",
-          type: "agent",
-          binding: "summary",
+          type: "generate",
           instructions: "Greet them.",
-          input: { who: { $expr: "input.who" } },
-          output: greeting,
+          input: { who: { $expr: "args.who" } },
+          returns: greeting,
         },
         {
           id: "known",
           type: "if",
-          condition: { $expr: 'steps.greet.output.line === "Hello Ada"' },
+          condition: { $expr: 'greet.line === "Hello Ada"' },
           // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
           then: [{ id: "pause", type: "wait", until: { $expr: "0" } }],
           else: [
             {
               id: "stop",
               type: "raise",
-              error: { type: "urn:grasp:error:stop", status: 422 },
+              error: { code: "test.stop", message: "Failed." },
             },
           ],
         },
@@ -264,10 +265,10 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
           try: [
             {
               id: "fetch",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "input.who" }, subject: "x" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "args.who" }, subject: "x" },
             },
           ],
           catch: {
@@ -282,8 +283,8 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
           sent: { kind: "string" },
         }),
         value: {
-          line: { $expr: "steps.greet.output.line" },
-          sent: { $expr: "typeof steps.send.output.messageId" },
+          line: { $expr: "greet.line" },
+          sent: { $expr: "typeof send.messageId" },
         },
       }
     );
@@ -313,7 +314,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       ],
       checked: [
         { step: "send:task", call: "grasp.connector", binding: "mail" },
-        { step: "greet:task", call: "grasp.model", binding: "summary" },
+        { step: "greet:task", call: "grasp.model", binding: "ai" },
         { step: "fetch:task", call: "grasp.connector", binding: "mail" },
       ],
     });
@@ -325,15 +326,15 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           while: { $expr: 'item !== "stop"' },
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "row" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "row" },
             },
             {
               id: "guard",
@@ -343,16 +344,16 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
                   id: "check",
                   type: "raise",
                   if: { $expr: 'item === "b"' },
-                  error: { type: "urn:grasp:error:bad", status: 409 },
+                  error: { code: "test.bad", message: "Failed." },
                 },
               ],
-              catch: { errors: { status: 409 } },
+              catch: { code: "test.unrelated" },
             },
           ],
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );
@@ -390,23 +391,23 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "replayed row" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "replayed row" },
             },
           ],
         },
       ],
       {
         schema: { kind: "array", item: { kind: "string" } },
-        value: { $expr: "input.rows" },
+        value: { $expr: "args.rows" },
       },
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );
@@ -448,15 +449,15 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               id: "notify",
-              type: "do",
+              type: "call",
               if: { $expr: 'item !== "skip"' },
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "passed over" },
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "passed over" },
             },
             {
               id: "late",
@@ -468,7 +469,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );
@@ -497,7 +498,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               id: "guard",
@@ -505,22 +506,22 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
               try: [
                 {
                   id: "notify",
-                  type: "do",
+                  type: "call",
                   // Item 0 is null: reading its `to` throws.
                   if: { $expr: 'item.to !== ""' },
-                  binding: "mail",
-                  operation: "mail.send",
-                  arguments: { to: { $expr: "item.to" }, subject: "throwing" },
+                  connection: "mail",
+                  action: "mail.send",
+                  args: { to: { $expr: "item.to" }, subject: "throwing" },
                 },
               ],
               catch: {
                 do: [
                   {
                     id: "report",
-                    type: "do",
-                    binding: "mail",
-                    operation: "mail.send",
-                    arguments: {
+                    type: "call",
+                    connection: "mail",
+                    action: "mail.send",
+                    args: {
                       to: "ops",
                       subject: { $expr: 'error.type + " | " + error.title' },
                     },
@@ -532,7 +533,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({
         kind: "object",
@@ -579,15 +580,15 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          // `input.missing` isn't there: the list's item is `null`.
-          items: { $expr: "[input.first, input.missing]" },
+          // `args.missing` isn't there: the list's item is `null`.
+          items: { $expr: "[args.first, args.missing]" },
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: {
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: {
                 to: { $expr: 'item ?? "nobody"' },
                 subject: "listed",
               },
@@ -596,7 +597,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       objectOf({
         first: { kind: "string" },
@@ -626,20 +627,20 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "ceiling" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "ceiling" },
             },
           ],
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );
@@ -672,17 +673,17 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       [
         {
           id: "skipped",
-          type: "do",
-          if: { $expr: 'input.who === "Bob"' },
-          binding: "mail",
-          operation: "mail.send",
-          arguments: { to: "bob", subject: "never" },
+          type: "call",
+          if: { $expr: 'args.who === "Bob"' },
+          connection: "mail",
+          action: "mail.send",
+          args: { to: "bob", subject: "never" },
         },
         {
           id: "unraised",
           type: "raise",
-          if: { $expr: 'input.who === "Bob"' },
-          error: { type: "urn:grasp:error:bob", status: 409 },
+          if: { $expr: 'args.who === "Bob"' },
+          error: { code: "test.bob", message: "Failed." },
         },
         {
           id: "guarded",
@@ -691,23 +692,19 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
             {
               id: "stop",
               type: "raise",
-              error: {
-                type: "urn:grasp:error:stop",
-                status: 422,
-                title: "Stopped.",
-              },
+              error: { code: "test.stop", message: "Stopped." },
             },
           ],
           catch: {
-            errors: { status: 422 },
+            code: "test.stop",
             do: [
               {
                 id: "notice",
-                type: "do",
-                binding: "mail",
-                operation: "mail.send",
-                arguments: {
-                  to: { $expr: "input.who" },
+                type: "call",
+                connection: "mail",
+                action: "mail.send",
+                args: {
+                  to: { $expr: "args.who" },
                   subject: { $expr: "error.type" },
                 },
               },
@@ -717,7 +714,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       ],
       {
         schema: objectOf({ skipped: { kind: "boolean" } }),
-        value: { skipped: { $expr: "steps.skipped.output === null" } },
+        value: { skipped: { $expr: "skipped === null" } },
       }
     );
     const ran = await ranAs(await waitingRun(sealed), source, {
@@ -736,7 +733,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       {
         id: "stop",
         type: "raise",
-        error: { type: "urn:grasp:error:stop", status: 422 },
+        error: { code: "test.stop", message: "Failed." },
       },
     ]);
     const ran = await ranAs(await waitingRun(sealed), source, {
@@ -757,14 +754,14 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         type: "try",
         try: [
           // Reads past a field that isn't there: it throws.
-          { id: "pause", type: "wait", until: { $expr: "input.missing.at" } },
+          { id: "pause", type: "wait", until: { $expr: "args.missing.at" } },
         ],
         catch: {
           retry: {
             attempts: 2,
             delay: "1 second",
             backoff: "constant",
-            when: { $expr: "error.status >= 400" },
+            when: { $expr: 'error.code !== ""' },
           },
         },
       },
@@ -819,11 +816,13 @@ export const note = action({
 });
 `;
 
-/** The bindings of `localWorkflow`'s workflow, as grasp-workflow/1 declares them. */
+/** The permissions of `localWorkflow`'s workflow, as grasp-workflow/2 declares them. */
 const local = {
-  total: { kind: "compute", contract: "local:code/total.ts#total" },
-  broken: { kind: "compute", contract: "local:code/total.ts#broken" },
-  note: { kind: "action", contract: "local:code/note.ts#note" },
+  modules: {
+    total: { kind: "compute", contract: "local:code/total.ts#total" },
+    broken: { kind: "compute", contract: "local:code/total.ts#broken" },
+    note: { kind: "action", contract: "local:code/note.ts#note" },
+  },
 };
 
 /**
@@ -837,21 +836,19 @@ const localWorkflow = async () => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { kind: "string" } }),
-      output: {
-        schema: objectOf({ status: { kind: "string" } }),
-        value: { status: "done" },
-      },
-      bindings: local,
+      args: objectOf({ who: { kind: "string" } }),
+      returns: objectOf({ status: { kind: "string" } }),
+      result: { status: "done" },
+      permissions: local,
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
-        { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
-        { id: "fail", type: "do", binding: "broken", arguments: 1 },
+        { id: "add", type: "call", module: "total", args: [1, 2, 3] },
+        { id: "fail", type: "call", module: "broken", args: 1 },
         {
           id: "tell",
-          type: "do",
-          binding: "note",
-          arguments: { to: { $expr: "input.who" } },
+          type: "call",
+          module: "note",
+          args: { to: { $expr: "args.who" } },
         },
       ],
     }),
@@ -862,7 +859,7 @@ const localWorkflow = async () => {
 };
 
 /** A step calling `broken`, which always fails. */
-const fail = { id: "fail", type: "do", binding: "broken", arguments: 1 };
+const fail = { id: "fail", type: "call", module: "broken", args: 1 };
 
 /** Try `guarded` around `inside`: its catch takes, and retries, while these hold. */
 const guarded = (
@@ -883,9 +880,9 @@ const guarded = (
     do: [
       {
         id: "tell",
-        type: "do",
-        binding: "note",
-        arguments: { to: { $expr: "error.type" } },
+        type: "call",
+        module: "note",
+        args: { to: { $expr: "error.type" } },
       },
     ],
   },
@@ -917,7 +914,7 @@ const inPages = (when: { catch: string; retry?: string }) => [
   },
 ];
 
-describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
+describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
   let owned: Awaited<ReturnType<typeof localWorkflow>>;
 
   beforeAll(async () => {
@@ -932,15 +929,15 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "add",
-          type: "do",
-          binding: "total",
-          arguments: [1, { $expr: "input.who.length" }, 3],
+          type: "call",
+          module: "total",
+          args: [1, { $expr: "args.who.length" }, 3],
         },
         {
           id: "tell",
-          type: "do",
-          binding: "note",
-          arguments: { to: { $expr: "input.who" } },
+          type: "call",
+          module: "note",
+          args: { to: { $expr: "args.who" } },
         },
       ],
       {
@@ -949,8 +946,8 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
           told: { kind: "string" },
         }),
         value: {
-          total: { $expr: "steps.add.output" },
-          told: { $expr: "steps.tell.output.status" },
+          total: { $expr: "add" },
+          told: { $expr: "tell.status" },
         },
       },
       local
@@ -1032,7 +1029,7 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
         {
           id: "guarded",
           type: "try",
-          try: [{ id: "fail", type: "do", binding: "broken", arguments: 1 }],
+          try: [{ id: "fail", type: "call", module: "broken", args: 1 }],
           catch: {
             retry: {
               attempts: 3,
@@ -1044,9 +1041,9 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
             do: [
               {
                 id: "tell",
-                type: "do",
-                binding: "note",
-                arguments: { to: { $expr: "error.type" } },
+                type: "call",
+                module: "note",
+                args: { to: { $expr: "error.type" } },
               },
             ],
           },
@@ -1075,9 +1072,7 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
 });
 
 /** `decisionWorkflow`'s decision binding, as a document declares it. */
-const approval = {
-  approval: { kind: "decision", contract: "grasp.approvals@1" },
-};
+const approval = { decisions: { approval: { contract: "grasp.approvals@1" } } };
 
 /** `decisionWorkflow`'s input: who reviews, and which invoice. */
 const reviewing = objectOf({
@@ -1088,11 +1083,11 @@ const reviewing = objectOf({
 /** A decision of binding `approval` on input `{ reviewer, invoice }`. */
 const review = (change: Record<string, unknown> = {}) => ({
   id: "review",
-  type: "decision",
-  binding: "approval",
-  recipients: [{ $expr: "input.reviewer" }, "role:builder"],
+  type: "decide",
+  decision: "approval",
+  recipients: [{ $expr: "args.reviewer" }, "role:builder"],
   prompt: "Approve the invoice",
-  input: { invoice: { $expr: "input.invoice" } },
+  input: { invoice: { $expr: "args.invoice" } },
   timeout: "7 days",
   ...change,
 });
@@ -1106,10 +1101,10 @@ const decided = {
     comment: { kind: "string" },
   }),
   value: {
-    timedOut: { $expr: "steps.review.output.timedOut" },
-    approved: { $expr: "steps.review.output.approved === true" },
-    by: { $expr: 'steps.review.output.by ?? ""' },
-    comment: { $expr: 'steps.review.output.payload?.comment ?? ""' },
+    timedOut: { $expr: "review.timedOut" },
+    approved: { $expr: "review.approved === true" },
+    by: { $expr: 'review.by ?? ""' },
+    comment: { $expr: 'review.payload?.comment ?? ""' },
   },
 };
 
@@ -1117,7 +1112,7 @@ const decided = {
 // enter step records, `from` exactly the first of them, the run's own
 // person never answering, a timeout answering `{ timedOut: true }`, and
 // a decision in each item of a loop under that item's keys.
-describe("a grasp-workflow/1 decision's generated code on the run host", () => {
+describe("a grasp-workflow/2 decision's generated code on the run host", () => {
   let reviewed: Reviewed;
 
   beforeAll(async () => {
@@ -1224,11 +1219,11 @@ describe("a grasp-workflow/1 decision's generated code on the run host", () => {
       [
         {
           id: "review",
-          type: "decision",
-          binding: "approval",
-          recipients: [{ $expr: "input.reviewer" }],
+          type: "decide",
+          decision: "approval",
+          recipients: [{ $expr: "args.reviewer" }],
           prompt,
-          input: { invoice: { $expr: "input.invoice" } },
+          input: { invoice: { $expr: "args.invoice" } },
         },
       ],
       decided,
@@ -1405,14 +1400,15 @@ const eventWorkflow = async () => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { kind: "string" } }),
-      bindings: { replies: { kind: "event", contract } },
+      args: objectOf({ who: { kind: "string" } }),
+      permissions: { events: { replies: { contract } } },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "reply",
-          type: "wait",
-          event: { from: "replies", type: [received, bounced] },
+          type: "waitForEvent",
+          events: "replies",
+          eventType: [received, bounced],
           timeout: "3 days",
         },
       ],
@@ -1430,15 +1426,14 @@ const eventWorkflow = async () => {
 type Listening = Awaited<ReturnType<typeof eventWorkflow>>;
 
 /** `eventWorkflow`'s event binding, as a document declares it. */
-const replies = {
-  replies: { kind: "event", contract: "grasp.replies@1" },
-};
+const replies = { events: { replies: { contract: "grasp.replies@1" } } };
 
 /** An event wait for a reply or a bounce through `replies`. */
 const replyWait = (change: Record<string, unknown> = {}) => ({
   id: "reply",
-  type: "wait",
-  event: { from: "replies", type: [received, bounced] },
+  type: "waitForEvent",
+  events: "replies",
+  eventType: [received, bounced],
   timeout: "3 days",
   ...change,
 });
@@ -1452,10 +1447,10 @@ const replied = {
     source: { kind: "string" },
   }),
   value: {
-    timedOut: { $expr: "steps.reply.output.timedOut" },
-    type: { $expr: 'steps.reply.output.event?.type ?? ""' },
-    from: { $expr: 'steps.reply.output.event?.data.from ?? ""' },
-    source: { $expr: 'steps.reply.output.event?.source ?? ""' },
+    timedOut: { $expr: "reply.timedOut" },
+    type: { $expr: 'reply.event?.type ?? ""' },
+    from: { $expr: 'reply.event?.data.from ?? ""' },
+    source: { $expr: 'reply.event?.source ?? ""' },
   },
 };
 
@@ -1579,7 +1574,7 @@ const pointers = (error: unknown) =>
     .parse(error)
     .details.problems.map(({ code, pointer }) => `${code} ${pointer}`);
 
-describe("a grasp-workflow/1 event wait's generated code on the run host", () => {
+describe("a grasp-workflow/2 event wait's generated code on the run host", () => {
   let listening: Listening;
 
   beforeAll(async () => {
@@ -1603,12 +1598,13 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
       await publishWorkflowVersion(env, by, workflow.id, {
         definition: JSON.stringify({
           $schema: workflowSchemaUrl,
-          bindings: { replies: { kind: "event", contract } },
+          permissions: { events: { replies: { contract } } },
           steps: [
             {
               id: "reply",
-              type: "wait",
-              event: { from: "replies", type: types },
+              type: "waitForEvent",
+              events: "replies",
+              eventType: types,
               timeout: "3 days",
             },
           ],
@@ -1631,8 +1627,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
         .parse(JSON.parse(stored?.contract ?? "{}")).listens,
     }).toStrictEqual({
       // A wait for a type it can never be sent would end only by timing out.
-      refused: ["event.unknown_type /steps/0/event/type/1"],
-      single: ["event.unknown_type /steps/0/event/type"],
+      refused: ["event.unknown_type /steps/0/eventType/1"],
+      single: ["event.unknown_type /steps/0/eventType"],
       listens: { reply: { alias: "replies", types: [received] } },
     });
   });
@@ -1683,7 +1679,7 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
         {
           id: "chase",
           type: "wait",
-          if: { $expr: "steps.reply.output.timedOut" },
+          if: { $expr: "reply.timedOut" },
           for: "1 hour",
         },
       ],
@@ -1724,7 +1720,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
           do: [
             replyWait({
               id: "each",
-              event: { from: "replies", type: received },
+              events: "replies",
+              eventType: received,
             }),
           ],
         },
@@ -1768,10 +1765,10 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
 
   it("skips a wait whose own `if` doesn't hold, at the top level and in an item, and the next item's wait takes its event", async () => {
     const skipped = await generated(
-      [replyWait({ if: { $expr: 'input.who !== "Ada"' } })],
+      [replyWait({ if: { $expr: 'args.who !== "Ada"' } })],
       {
         schema: objectOf({ skipped: { kind: "boolean" } }),
-        value: { skipped: { $expr: "steps.reply.output === null" } },
+        value: { skipped: { $expr: "reply === null" } },
       },
       replies
     );
@@ -1785,7 +1782,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
             replyWait({
               id: "each",
               if: { $expr: 'item === "take"' },
-              event: { from: "replies", type: received },
+              events: "replies",
+              eventType: received,
             }),
           ],
         },
@@ -1979,23 +1977,24 @@ const replyingWorkflow = async () => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { kind: "string" } }),
-      bindings: {
-        ask: { kind: "action", contract: "local:code/ask.ts#ask" },
-        replies: { kind: "event", contract: reply.contract.key },
+      args: objectOf({ who: { kind: "string" } }),
+      permissions: {
+        modules: { ask: { kind: "action", contract: "local:code/ask.ts#ask" } },
+        events: { replies: { contract: reply.contract.key } },
       },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "ask",
-          type: "do",
-          binding: "ask",
-          arguments: { to: { $expr: "input.who" }, replyTo: "x" },
+          type: "call",
+          module: "ask",
+          args: { to: { $expr: "args.who" }, replyTo: "x" },
         },
         {
           id: "reply",
-          type: "wait",
-          event: { from: "replies", type: reply.type },
+          type: "waitForEvent",
+          events: "replies",
+          eventType: reply.type,
           timeout: "7 days",
         },
       ],
@@ -2037,7 +2036,7 @@ const replyFrom = (address: string) => ({
 // binding `replies`, which its mail gives as its Reply-To, sealed as any
 // argument the isolate fills in, and the wait on `replies` after it,
 // which takes the reply.
-describe("a grasp-workflow/1 run's inbox on the run host", () => {
+describe("a grasp-workflow/2 run's inbox on the run host", () => {
   afterAll(endLiveResourceRuns);
 
   it("mails its reply address as the Reply-To, and its wait on that binding takes the reply", async () => {
@@ -2046,18 +2045,19 @@ describe("a grasp-workflow/1 run's inbox on the run host", () => {
       [
         {
           id: "ask",
-          type: "do",
-          binding: "ask",
+          type: "call",
+          module: "ask",
           if: { $expr: 'typeof inbox.replies === "string"' },
-          arguments: {
-            to: { $expr: "input.who" },
+          args: {
+            to: { $expr: "args.who" },
             replyTo: { $expr: "inbox.replies" },
           },
         },
         {
           id: "reply",
-          type: "wait",
-          event: { from: "replies", type: replying.replyType },
+          type: "waitForEvent",
+          events: "replies",
+          eventType: replying.replyType,
           timeout: "7 days",
         },
       ],
@@ -2069,18 +2069,17 @@ describe("a grasp-workflow/1 run's inbox on the run host", () => {
           dmarc: { kind: "string" },
         }),
         value: {
-          mailed: { $expr: 'steps.ask.output?.replyTo ?? ""' },
+          mailed: { $expr: 'ask?.replyTo ?? ""' },
           replyTo: { $expr: 'inbox.replies ?? ""' },
-          from: { $expr: 'steps.reply.output.event?.data.from.address ?? ""' },
+          from: { $expr: 'reply.event?.data.from.address ?? ""' },
           dmarc: {
-            $expr:
-              'steps.reply.output.event?.data.authentication.dmarc?.result ?? ""',
+            $expr: 'reply.event?.data.authentication.dmarc?.result ?? ""',
           },
         },
       },
       {
-        ask: { kind: "action", contract: "local:code/ask.ts#ask" },
-        replies: { kind: "event", contract: "grasp/email-reply" },
+        modules: { ask: { kind: "action", contract: "local:code/ask.ts#ask" } },
+        events: { replies: { contract: "grasp/email-reply" } },
       }
     );
     const runId = await waitingRun(replying);
@@ -2144,11 +2143,11 @@ const stateWrites = async (runId: string): Promise<number> => {
 /** A mail to the run's person, its subject what the state kept, or "none". */
 const remember = {
   id: "remember",
-  type: "do",
-  binding: "mail",
-  operation: "mail.send",
-  arguments: {
-    to: { $expr: "input.who" },
+  type: "call",
+  connection: "mail",
+  action: "mail.send",
+  args: {
+    to: { $expr: "args.who" },
     subject: { $expr: 'state.last ?? "none"' },
   },
   state: {
@@ -2180,7 +2179,7 @@ const readState = {
 // succeeded, and read by the workflow's next run as `state.<key>`, the
 // snapshot its start froze. Each test has a workflow of its own, so its
 // state starts empty.
-describe("a grasp-workflow/1 workflow's state on the run host", () => {
+describe("a grasp-workflow/2 workflow's state on the run host", () => {
   // Its workflows bind a model, as every sealed workflow does: approved
   // only once the organization has one, whichever tests ran before.
   beforeAll(async () => {
@@ -2199,11 +2198,11 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
         remember,
         {
           id: "never",
-          type: "do",
-          if: { $expr: 'input.who === "nobody"' },
-          binding: "mail",
-          operation: "mail.send",
-          arguments: { to: { $expr: "input.who" }, subject: "skipped" },
+          type: "call",
+          if: { $expr: 'args.who === "nobody"' },
+          connection: "mail",
+          action: "mail.send",
+          args: { to: { $expr: "args.who" }, subject: "skipped" },
           state: { never: true },
         },
       ],
@@ -2387,7 +2386,7 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
           schema: objectOf({ read: { kind: "string" } }),
           value: { read: { $expr: "typeof state.count" } },
         },
-        declared.bindings,
+        declared.permissions,
         { count: schema }
       );
     const v1 = await version({ kind: "string" }, "many");
@@ -2418,7 +2417,7 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               ...remember,
@@ -2432,7 +2431,7 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
         schema: objectOf({ last: { kind: "string" } }),
         value: { last: { $expr: 'state.last ?? "none"' } },
       },
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );

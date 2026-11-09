@@ -93,7 +93,7 @@ const daysOn = (days: number): Date => new Date(Date.now() + days * day);
 /** A definition that fails on what the run read: a text this short has no ten-thousandth letter. */
 const failing = (): string =>
   definitionOf([], {
-    status: { $expr: 'input.who.split("")[9999].toUpperCase()' },
+    status: { $expr: 'args.who.split("")[9999].toUpperCase()' },
   });
 
 /** What run `id`'s start receipt keeps of it. */
@@ -152,13 +152,11 @@ const response = v.union(v.null(), v.object({ comment: v.string() }));
 const approvalDefinition = (contract: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: {
-        status: {
-          $expr: 'steps.review.output.approved ? "approved" : "rejected"',
-        },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: {
+      status: {
+        $expr: 'review.approved ? "approved" : "rejected"',
       },
     },
     params: {
@@ -168,14 +166,14 @@ const approvalDefinition = (contract: string): string =>
         sensitive: false,
       },
     },
-    bindings: { approval: { kind: "decision", contract } },
+    permissions: { decisions: { approval: { contract } } },
     steps: [
       {
         id: "review",
-        type: "decision",
-        binding: "approval",
+        type: "decide",
+        decision: "approval",
         recipients: { $expr: "[params.reviewer]" },
-        prompt: { $expr: '"Approve: " + input.who' },
+        prompt: { $expr: '"Approve: " + args.who' },
         input: { $expr: "input" },
       },
     ],

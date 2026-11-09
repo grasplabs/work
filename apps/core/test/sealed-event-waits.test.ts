@@ -116,14 +116,15 @@ const listen = (
   binding = "jobEvents"
 ) => ({
   id,
-  type: "wait",
-  event: { from: binding, type },
+  type: "waitForEvent",
+  events: binding,
+  eventType: type,
   timeout: "5 minutes",
 });
 
 /**
  * A workflow on input `{ jobId }` whose run waits out its hour, then has
- * event waits `await-job` (a job's completion or failure through
+ * event waits `awaitJob` (a job's completion or failure through
  * `jobEvents`), `await-again` (its completion), `await-guarded` (its
  * completion, in a try whose catch takes anything) and `await-other` (a
  * completion through `otherEvents`). Its bindings `jobEvents` and
@@ -149,14 +150,13 @@ const eventWorkflow = async () => {
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({ jobId: { kind: "string" } }),
-      bindings: {
-        jobEvents: { kind: "event", contract },
-        otherEvents: { kind: "event", contract },
+      args: objectSchema({ jobId: { kind: "string" } }),
+      permissions: {
+        events: { jobEvents: { contract }, otherEvents: { contract } },
       },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
-        listen("await-job", [completed, failed]),
+        listen("awaitJob", [completed, failed]),
         listen("await-again", completed),
         {
           id: "guarded",
@@ -509,7 +509,7 @@ describe(
       const ran = await ranAs(
         runId,
         moduleOf(
-          `return [${wait("await-job")}, ${wait("await-again")}, ${wait("await-other")}];`
+          `return [${wait("awaitJob")}, ${wait("await-again")}, ${wait("await-other")}];`
         ),
         { engine: inboxEngine(runId, keptOfTest(), asked) }
       );
@@ -544,7 +544,7 @@ describe(
         },
         asked: [
           {
-            name: "await-job:task",
+            name: "awaitJob:task",
             match: [
               { type: await eventTypeKey("jobEvents", completed) },
               { type: await eventTypeKey("jobEvents", failed) },
@@ -581,7 +581,7 @@ describe(
       const before = Date.now();
       const first = await ranAs(
         runId,
-        moduleOf(`return ${wait("await-job")};`),
+        moduleOf(`return ${wait("awaitJob")};`),
         {
           engine: inboxEngine(runId, kept, asked),
         }
@@ -589,7 +589,7 @@ describe(
       const after = Date.now();
       const replay = await ranAs(
         runId,
-        moduleOf(`return ${wait("await-job")};`),
+        moduleOf(`return ${wait("awaitJob")};`),
         { engine: inboxEngine(runId, kept, asked) }
       );
       const reachedStep: unknown = expect.stringMatching(
@@ -629,14 +629,14 @@ describe(
       const noteOf = (id: string) => `(${wait(id)}).event?.data.note`;
       const first = await ranAs(
         runId,
-        moduleOf(`return [${noteOf("await-job")}];`),
+        moduleOf(`return [${noteOf("awaitJob")}];`),
         {
           engine: inboxEngine(runId, kept),
         }
       );
       const resumed = await ranAs(
         runId,
-        moduleOf(`return [${noteOf("await-job")}, ${noteOf("await-again")}];`),
+        moduleOf(`return [${noteOf("awaitJob")}, ${noteOf("await-again")}];`),
         { engine: inboxEngine(runId, kept) }
       );
       expect({ first, resumed }).toStrictEqual({
@@ -658,13 +658,13 @@ describe(
         });
       expect({
         recorded: await run(
-          `return await step.do("await-job", { key: "task", description: "Its event" }, async () => (${forged}));`
+          `return await step.do("awaitJob", { key: "task", description: "Its event" }, async () => (${forged}));`
         ),
         notAWait: await run(
           `return await step.listen("linger", { key: "task", description: "Its event" });`
         ),
         itsEnter: await run(
-          `return await step.listen("await-job", { key: "enter", description: "Its event" });`
+          `return await step.listen("awaitJob", { key: "enter", description: "Its event" });`
         ),
         noStep: await run(`return ${wait("await-none")};`),
       }).toStrictEqual({
@@ -679,8 +679,8 @@ describe(
       const twice = await ranAs(
         runId,
         `export default { run: async (engine) => {
-  await engine.listen("await-job:task");
-  try { await engine.listen("await-job:task"); } catch (error) { return error.code; }
+  await engine.listen("awaitJob:task");
+  try { await engine.listen("awaitJob:task"); } catch (error) { return error.code; }
   return "waited twice";
 } };`,
         { engine: inboxEngine(runId, keptOfTest(), asked) }
@@ -697,7 +697,7 @@ describe(
       const { workflow, admin, approvals } = revoking;
       const runId = await waitingRun(revoking);
       await admitRunEvent(env, delivery(workflow.id, runId, { note: "sent" }));
-      const waiting = moduleOf(`return ${wait("await-job")};`);
+      const waiting = moduleOf(`return ${wait("awaitJob")};`);
       const unfrozen = await ranAs(runId, waiting, {
         calling: (frozen) => ({
           ...frozen,
@@ -742,7 +742,7 @@ try {
     it("holds a test run's wait to its wait limit, measured from its start", async () => {
       const runId = await waitingRun(sealed);
       await expect(
-        ranAs(runId, moduleOf(`return ${wait("await-job")};`), {
+        ranAs(runId, moduleOf(`return ${wait("awaitJob")};`), {
           maxSleepMs: timeoutMs - 1,
         })
       ).resolves.toStrictEqual({

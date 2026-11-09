@@ -137,29 +137,27 @@ const nullValue = {
 const modelKey = () => `summary-${unique()}`;
 
 /**
- * A grasp-workflow/1 document running `steps` through `bindings`, with
+ * A grasp-workflow/2 document running `steps` through `permissions`, with
  * `params`, on input `{ who }`, ending with `{ status }`.
  */
 const documentOf = ({
   steps = [],
-  bindings = {},
+  permissions = {},
   params = {},
   status = "done",
 }: {
   steps?: unknown[];
-  bindings?: Record<string, unknown>;
+  permissions?: Record<string, unknown>;
   params?: Record<string, unknown>;
   status?: string;
 }): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     params,
-    bindings,
+    permissions,
     steps,
   });
 
@@ -219,13 +217,11 @@ const definitionOf = ({
                   },
           }),
     },
-    bindings: {
-      ...(model === undefined
-        ? {}
-        : { summary: { kind: "model", contract: model } }),
+    permissions: {
+      ...(model === undefined ? {} : { ai: { contract: model } }),
       ...(events === undefined
         ? {}
-        : { jobEvents: { kind: "event", contract: events } }),
+        : { events: { jobEvents: { contract: events } } }),
     },
     steps: [
       ...(model === undefined
@@ -233,20 +229,20 @@ const definitionOf = ({
         : [
             {
               id: "summarize",
-              type: "agent",
-              binding: "summary",
+              type: "generate",
               instructions: "Greet them.",
-              input: { who: { $expr: "input.who" } },
-              output: objectSchema({ line: { kind: "string" } }),
+              input: { who: { $expr: "args.who" } },
+              returns: objectSchema({ line: { kind: "string" } }),
             },
           ]),
       ...(waits ? [{ id: "pause", type: "wait", for: "1 hour" }] : []),
       ...(events === undefined
         ? []
         : Array.from({ length: listenTasks }, (_, index) => ({
-            id: index === 0 ? "await-job" : `await-job-${index}`,
-            type: "wait",
-            event: { from: "jobEvents", type: listensFor },
+            id: index === 0 ? "awaitJob" : `awaitJob${index}`,
+            type: "waitForEvent",
+            events: "jobEvents",
+            eventType: listensFor,
             timeout: "24 hours",
           }))),
     ],
@@ -439,7 +435,7 @@ describe("the host catalog", () => {
       })),
       missing,
     }).toStrictEqual({
-      bindings: [{ alias: "summary", kind: "model", contractId: key }],
+      bindings: [{ alias: "ai", kind: "model", contractId: key }],
       missing: "workflow.definition_invalid",
     });
   });
@@ -561,7 +557,7 @@ describe("event contracts", () => {
     }).toStrictEqual({
       bindings: [{ alias: "jobEvents", kind: "event", contractId: events }],
       listens: {
-        "await-job": { alias: "jobEvents", types: ["grasp.job.completed"] },
+        awaitJob: { alias: "jobEvents", types: ["grasp.job.completed"] },
       },
       unadmitted: "workflow.definition_invalid",
     });
@@ -606,7 +602,7 @@ describe("event contracts", () => {
       timeout: timeout.listens,
       events: Object.keys(timeout.events),
     }).toStrictEqual({
-      sent: { "await-job": ["jobEvents"] },
+      sent: { awaitJob: ["jobEvents"] },
       timeout: {},
       events: ["jobEvents"],
     });
@@ -674,13 +670,11 @@ describe("event contracts", () => {
         swapped.id,
         definitionOf({ status: "2.0.0", model: second })
       ),
-      // The same alias, now a model's.
+      // A model in place of the events: no alias holds two kinds (`ai`
+      // is only ever the model), so another kind is another alias.
       kind: await asStaff(
         kinds.id,
-        definitionOf({
-          status: "2.0.0",
-          model: first,
-        }).replaceAll('"summary"', '"jobEvents"')
+        definitionOf({ status: "2.0.0", model: first })
       ),
       same: await asStaff(
         swapped.id,
@@ -705,7 +699,7 @@ describe("approving a workflow's binding", () => {
     const workflow = await workflowOf(ada, key);
     const approve = async (by: Person, target: unknown, version = 1) =>
       await approveWorkflowBinding(env, by, workflow.id, {
-        alias: "summary",
+        alias: "ai",
         target,
         reviewed: { version },
       });
@@ -755,14 +749,14 @@ describe("approving a workflow's binding", () => {
     const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: documentOf({
-        bindings: { mail: { kind: "connector", contract: key } },
+        permissions: { connections: { mail: { contract: key } } },
         steps: [
           {
             id: "send",
-            type: "do",
-            binding: "mail",
-            operation: "mail.send",
-            arguments: {},
+            type: "call",
+            connection: "mail",
+            action: "mail.send",
+            args: {},
           },
         ],
       }),
@@ -916,7 +910,7 @@ describe("bindings waiting on an admin", () => {
       throw new Error("No target offered");
     }
     await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "summary",
+      alias: "ai",
       target: offered.target,
       reviewed: { version: 1 },
     });
@@ -929,7 +923,7 @@ describe("bindings waiting on an admin", () => {
       live: isLive,
       bindings: [
         {
-          alias: "summary",
+          alias: "ai",
           kind: "model",
           contractId: key,
           offered: [
@@ -974,14 +968,14 @@ describe("bindings waiting on an admin", () => {
     const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: documentOf({
-        bindings: { mail: { kind: "connector", contract: mailKey } },
+        permissions: { connections: { mail: { contract: mailKey } } },
         steps: [
           {
             id: "send",
-            type: "do",
-            binding: "mail",
-            operation: "mail.send",
-            arguments: {},
+            type: "call",
+            connection: "mail",
+            action: "mail.send",
+            args: {},
           },
         ],
       }),
@@ -1113,7 +1107,7 @@ describe("bindings waiting on an admin", () => {
       revision: asked.revision,
     });
     await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "summary",
+      alias: "ai",
       target: { kind: "model", model: allowedModel },
       reviewed: { version: 1 },
     });
@@ -1136,7 +1130,7 @@ describe("bindings waiting on an admin", () => {
       })),
       inbox: inbox.filter((each) => each.workflow.id === workflow.id),
     }).toStrictEqual({
-      own: [{ version: 2, live: false, aliases: ["summary"] }],
+      own: [{ version: 2, live: false, aliases: ["ai"] }],
       // Neither live nor asked to go live: not the inbox's.
       inbox: [],
     });
@@ -1150,7 +1144,7 @@ describe("bindings waiting on an admin", () => {
     const workflow = await workflowOf(ada, key);
     const approve = async () =>
       await approveWorkflowBinding(env, admin, workflow.id, {
-        alias: "summary",
+        alias: "ai",
         target: { kind: "model", model: allowedModel },
         reviewed: { version: 1 },
       });
@@ -1207,7 +1201,7 @@ describe("bindings waiting on an admin", () => {
       refusedTo: { builder: "role.forbidden", staff: "role.forbidden" },
       stillApproved: "ok",
       revoked: {
-        waiting: [{ version: 1, live: true, aliases: ["summary"] }],
+        waiting: [{ version: 1, live: true, aliases: ["ai"] }],
         start: "workflow.binding_unapproved",
       },
       approvedAgain: { waiting: [], start: "ok" },
@@ -1253,7 +1247,7 @@ describe("approving a store's operation", () => {
     const store = await storeOfNewApp(env, ada);
     const approved = await outcome(
       approveWorkflowBinding(env, admin, workflow.id, {
-        alias: "summary",
+        alias: "ai",
         target: {
           kind: "storeOperation",
           permissionId: crypto.randomUUID(),
@@ -1291,7 +1285,7 @@ describe("what a start freezes", () => {
       });
     const approve = async (version: number) =>
       await approveWorkflowBinding(env, admin, workflow.id, {
-        alias: "summary",
+        alias: "ai",
         target: { kind: "model", model: allowedModel },
         reviewed: { version },
       });
@@ -1331,7 +1325,7 @@ describe("what a start freezes", () => {
     const workflow = await workflowOf(ada, key);
     const unapproved = await outcome(start(ada, workflow.id));
     const approval = await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "summary",
+      alias: "ai",
       target: { kind: "model", model: allowedModel },
       reviewed: { version: 1 },
     });
@@ -1381,7 +1375,7 @@ describe("what a start freezes", () => {
       unapproved: "workflow.binding_unapproved",
       frozen: [
         {
-          alias: "summary",
+          alias: "ai",
           kind: "model",
           contractId: key,
           fingerprint: approval.fingerprint,
@@ -1399,21 +1393,24 @@ describe("what a start freezes", () => {
   it("admits a version with as many catalog bindings as the profile allows", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const key = await modelContract(admin);
-    const aliases = Array.from({ length: 40 }, (_, index) => `model${index}`);
+    const key = await eventContract(admin);
+    // One workflow has one model (`ai`): what fills the profile's
+    // permissions is event permissions, each waited on once.
+    const aliases = Array.from({ length: 40 }, (_, index) => `events${index}`);
     const workflow = await createWorkflowResource(env, ada, `many-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: documentOf({
-        bindings: Object.fromEntries(
-          aliases.map((alias) => [alias, { kind: "model", contract: key }])
-        ),
+        permissions: {
+          events: Object.fromEntries(
+            aliases.map((alias) => [alias, { contract: key }])
+          ),
+        },
         steps: aliases.map((alias) => ({
-          id: `ask-${alias.toLowerCase()}`,
-          type: "agent",
-          binding: alias,
-          instructions: "Greet them.",
-          input: { who: { $expr: "input.who" } },
-          output: objectSchema({ line: { kind: "string" } }),
+          id: `wait${alias}`,
+          type: "waitForEvent",
+          events: alias,
+          eventType: "grasp.job.completed",
+          timeout: "1 hour",
         })),
       }),
       basedOn: null,
@@ -1422,7 +1419,7 @@ describe("what a start freezes", () => {
       // oxlint-disable-next-line no-await-in-loop -- one approval at a time, as an admin gives them
       await approveWorkflowBinding(env, admin, workflow.id, {
         alias,
-        target: { kind: "model", model: allowedModel },
+        target: { kind: "event" },
         reviewed: { version: 1 },
       });
     }

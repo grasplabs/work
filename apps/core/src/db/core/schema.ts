@@ -3660,7 +3660,7 @@ export const workflowResources = sqliteTable(
  * unique per workflow, so a semantic version always names the same
  * content. `definition` is the workflow.json exactly as published (at
  * most the format's 1 MiB), `profile_version` its format
- * (`grasp-workflow/1`), `contract` the canonical JSON of its input, output
+ * (`grasp-workflow/2`), `contract` the canonical JSON of its input, output
  * and parameter schemas, and `manifest` the canonical JSON of what the
  * version pins: its definition, contract, build and the exact versions its
  * bindings resolved to (also in `sdk_resource_bindings`), each with its

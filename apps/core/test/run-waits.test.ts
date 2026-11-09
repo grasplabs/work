@@ -29,10 +29,10 @@ const context: WaitContext = {
     ["hold", { kind: "wait", ...ownStep }],
     ["send", { kind: "call", ...ownStep }],
     ["ask", { kind: "call", decision: "approval", ...ownStep }],
-    ["await-job", { kind: "listen", ...ownStep }],
+    ["awaitJob", { kind: "listen", ...ownStep }],
   ]),
   decisionKeys: new Set(["approval"]),
-  listens: { "await-job": ["jobEvents"] },
+  listens: { awaitJob: ["jobEvents"] },
   events: new Map([["jobEvents", "f".repeat(64)]]),
   canSend: true,
 };

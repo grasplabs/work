@@ -109,8 +109,9 @@ const completed = "grasp.job.completed";
 /** An event wait `id` for `type` through `binding`, five minutes at most. */
 const listen = (id: string, type: string, binding: string) => ({
   id,
-  type: "wait",
-  event: { from: binding, type },
+  type: "waitForEvent",
+  events: binding,
+  eventType: type,
   timeout: "5 minutes",
 });
 
@@ -157,16 +158,19 @@ const inboxWorkflow = async () => {
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({}),
-      output: { schema: objectSchema({}), value: {} },
-      bindings: {
-        replies: { kind: "event", contract: emailReplyContract },
-        jobs: { kind: "event", contract: jobs },
+      args: objectSchema({}),
+      returns: objectSchema({}),
+      result: {},
+      permissions: {
+        events: {
+          replies: { contract: emailReplyContract },
+          jobs: { contract: jobs },
+        },
       },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
         listen("await-reply", emailReplyType, "replies"),
-        listen("await-job", completed, "jobs"),
+        listen("awaitJob", completed, "jobs"),
       ],
     }),
     basedOn: null,

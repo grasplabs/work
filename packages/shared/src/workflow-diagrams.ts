@@ -19,13 +19,13 @@ export interface DiagramTask {
   id: string;
   /** JSON Pointer to it in the definition. */
   pointer: string;
-  /** Its step type (`do`, `agent`, `wait`, `if`, `try`, `raise`). */
+  /** Its step type (`call`, `generate`, `decide`, `waitForEvent`, `wait`, `forEach`, `if`, `try`, `raise`). */
   kind: string;
   /** Its `title`, if any: display text only. */
   label: string | null;
   /**
-   * What it does, as literal source says it: the named call and binding,
-   * the error raised, the event binding. Null when the
+   * What it does, as literal source says it: the connection and action,
+   * the error code raised, the event permission. Null when the
    * source says it through an expression or doesn't say.
    */
   detail: string | null;

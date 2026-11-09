@@ -106,14 +106,15 @@ describe("a JSON workflow's run on-prem", () => {
         [
           {
             id: "job",
-            type: "wait",
-            event: { from: "jobEvents", type: "grasp.job.completed" },
+            type: "waitForEvent",
+            events: "jobEvents",
+            eventType: "grasp.job.completed",
             timeout: "5 minutes",
           },
         ],
         {
-          bindings: { jobEvents: { kind: "event", contract } },
-          status: { $expr: 'steps.job.output.event?.data.note ?? ""' },
+          permissions: { events: { jobEvents: { contract } } },
+          status: { $expr: 'job.event?.data.note ?? ""' },
         }
       ),
       basedOn: null,

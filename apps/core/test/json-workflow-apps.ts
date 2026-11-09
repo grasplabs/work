@@ -66,7 +66,7 @@ export const objectSchema = (fields: Record<string, unknown>) => ({
 });
 
 /** What a greeting ends with: `{ status: "Hello, <who>" }`. */
-const greeting = { $expr: '"Hello, " + input.who' };
+const greeting = { $expr: '"Hello, " + args.who' };
 
 /**
  * A step `id` that runs and ends at once: a raise its `if` skips for
@@ -76,8 +76,8 @@ export const passing = (id: string, title?: string) => ({
   id,
   ...(title === undefined ? {} : { title }),
   type: "raise",
-  if: { $expr: 'input.who === ""' },
-  error: { type: "urn:grasp:error:nameless", status: 422 },
+  if: { $expr: 'args.who === ""' },
+  error: { code: "test.nameless", message: "Failed." },
 });
 
 /**
@@ -90,25 +90,23 @@ export const greetingTasks = (hold?: string, title?: string): unknown[] => [
 ];
 
 /**
- * A grasp-workflow/1 definition running `steps`, input `{ who }` and
+ * A grasp-workflow/2 definition running `steps`, input `{ who }` and
  * output `{ status }` (`status`, a greeting unless said), with the
- * catalog `bindings` it declares (a model's, say).
+ * catalog `permissions` it declares (a model's, say).
  */
 export const definitionOf = (
   steps: unknown[],
   {
-    bindings,
+    permissions,
     status = greeting,
-  }: { bindings?: Record<string, unknown>; status?: unknown } = {}
+  }: { permissions?: Record<string, unknown>; status?: unknown } = {}
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
-    ...(bindings === undefined ? {} : { bindings }),
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
+    ...(permissions === undefined ? {} : { permissions }),
     steps,
   });
 
@@ -187,7 +185,7 @@ export const endedRun = async (
   await runOnce(by, id, runId, ({ endedAt }) => endedAt !== null);
 
 /** What the decision step `ask` answered, as expressions read it. */
-const decided = "steps.ask.output";
+const decided = "ask";
 
 /**
  * The steps of a workflow that asks `recipient` its `approval` decision
@@ -200,18 +198,18 @@ export const decisionTasks = (
 ): unknown[] => [
   {
     id: "ask",
-    type: "decision",
-    binding: "approval",
+    type: "decide",
+    decision: "approval",
     recipients: [recipient],
     prompt: "Greet them?",
-    input: { who: { $expr: "input.who" } },
+    input: { who: { $expr: "args.who" } },
     ...(timeout === undefined ? {} : { timeout: `${timeout} seconds` }),
   },
   {
     id: "unanswered",
     type: "raise",
     if: { $expr: `${decided}.timedOut` },
-    error: { type: "urn:grasp:error:unanswered", status: 408 },
+    error: { code: "test.unanswered", message: "Failed." },
   },
 ];
 
@@ -256,7 +254,7 @@ export const decidingWorkflow = async (
   });
   const workflow = await publishedWorkflow(builder, () =>
     definitionOf(around(decisionTasks(recipient, timeout)), {
-      bindings: { approval: { kind: "decision", contract } },
+      permissions: { decisions: { approval: { contract } } },
       status: answeredStatus,
     })
   );
@@ -686,15 +684,14 @@ export const askedModel = "mistral/mistral-large-latest";
 /** A step that asks the model binding `reader` for a line to greet `who` with. */
 export const askTask = {
   id: "ask",
-  type: "agent",
-  binding: "reader",
+  type: "generate",
   instructions: "Greet them.",
-  input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { kind: "string" } }),
+  input: { who: { $expr: "args.who" } },
+  returns: objectSchema({ line: { kind: "string" } }),
 };
 
 /** What a workflow that asks its model ends with: the line it answered. */
-export const askedLine = { $expr: "steps.ask.output.line" };
+export const askedLine = { $expr: "ask.line" };
 
 /** The steps of a workflow that asks its model for a line, then ends with it. */
 export const askingTasks = (): unknown[] => [askTask];
@@ -719,12 +716,12 @@ export const askingWorkflow = async (
   });
   const workflow = await publishedWorkflow(builder, () =>
     definitionOf(tasks, {
-      bindings: { reader: { kind: "model", contract } },
+      permissions: { ai: { contract } },
       status,
     })
   );
   await admin.api.workflowResources.approveBinding(workflow.id, {
-    alias: "reader",
+    alias: "ai",
     target: { kind: "model", model },
     reviewed: { version: 1 },
   });

@@ -150,7 +150,7 @@ export const definitionPackageSchema = z.strictObject({
         /** The version's manifest hash. */
         manifestHash: sha256Schema,
         /**
-         * The SHA-256 of its grasp-workflow/1 definition as published,
+         * The SHA-256 of its grasp-workflow/2 definition as published,
          * which stays with the version: the code was generated from it.
          */
         definitionHash: sha256Schema,

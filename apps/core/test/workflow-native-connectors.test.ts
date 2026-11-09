@@ -188,26 +188,24 @@ const refusal = async (promise: Promise<unknown>) => {
 const definitionOf = (mail: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({
+    args: objectSchema({
       mailbox: { kind: "string" },
       message: { kind: "string" },
       attachment: { kind: "string" },
     }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: "steps.read.output.content" } },
-    },
-    bindings: { mail: { kind: "connector", contract: mail } },
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: "read.content" } },
+    permissions: { connections: { mail: { contract: mail } } },
     steps: [
       {
         id: "read",
-        type: "do",
-        binding: "mail",
-        operation: "mail.readAttachment",
-        arguments: {
-          mailbox: { $expr: "input.mailbox" },
-          message: { $expr: "input.message" },
-          attachment: { $expr: "input.attachment" },
+        type: "call",
+        connection: "mail",
+        action: "mail.readAttachment",
+        args: {
+          mailbox: { $expr: "args.mailbox" },
+          message: { $expr: "args.message" },
+          attachment: { $expr: "args.attachment" },
           as: "text",
         },
       },

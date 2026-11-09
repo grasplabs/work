@@ -10,7 +10,7 @@ import {
   checked,
   decision,
   emojiType,
-  everyBinding,
+  everyCall,
   eventWait,
   everyOperator,
   everyStep,
@@ -22,7 +22,7 @@ import {
 } from "../../../packages/workflow-schema/test/fixtures.ts";
 import { buildGeneratedWorkflow } from "../src/pages.ts";
 
-// grasp-workflow/1's generated code, held to the compiler's own type
+// grasp-workflow/2's generated code, held to the compiler's own type
 // check against the SDK's real declarations, as the host's generated
 // workflow module is built (`buildGeneratedWorkflow`): the generator's
 // output is the host's own, so a type error in it is the generator's, and
@@ -32,15 +32,15 @@ import { buildGeneratedWorkflow } from "../src/pages.ts";
 /** Every fixture the generator is tested on, by name. */
 const fixtures = {
   everyStep,
-  everyBinding,
+  everyCall,
   everyOperator,
   decisions: () =>
     withDecisions(
       decision(),
       decision({
         id: "later",
-        if: { $expr: "steps.approve.output.timedOut" },
-        recipients: { $expr: "[input.who]" },
+        if: { $expr: "approve.timedOut" },
+        recipients: { $expr: "[args.who]" },
         timeout: "2 days",
       })
     ),
@@ -49,26 +49,26 @@ const fixtures = {
     ...withLoops({
       id: "approvals",
       type: "forEach",
-      items: { $expr: "input.pages" },
+      items: { $expr: "args.pages" },
       while: { $expr: "item.open" },
       do: [
         decision({ recipients: [{ $expr: "item.owner" }] }),
         {
           id: "refused",
           type: "raise",
-          if: { $expr: "!steps.approve.output.approved" },
-          error: { type: "urn:grasp:error:refused", status: 409 },
+          if: { $expr: "!approve.approved" },
+          error: { code: "test.refused", message: "Failed." },
         },
       ],
     }),
-    bindings: withDecisions().bindings,
+    permissions: withDecisions().permissions,
   }),
   // A loop's item read bare, as arithmetic takes it, in nested loops.
   bareItems: () =>
     withLoops({
       id: "scores",
       type: "forEach",
-      items: { $expr: "input.pages" },
+      items: { $expr: "args.pages" },
       do: [
         {
           id: "marks",
@@ -86,12 +86,12 @@ const fixtures = {
     withEventWaits(
       {
         id: "ask",
-        type: "do",
-        binding: "mail",
-        operation: "mail.send",
+        type: "call",
+        connection: "mail",
+        action: "mail.send",
         if: { $expr: 'typeof inbox.replies === "string"' },
-        arguments: {
-          to: { $expr: "input.who" },
+        args: {
+          to: { $expr: "args.who" },
           subject: { $expr: '"Reply to " + (inbox.replies ?? "")' },
           replyTo: { $expr: "inbox.replies" },
         },
@@ -100,26 +100,26 @@ const fixtures = {
     ),
   eventWaits: () =>
     withEventWaits(
-      eventWait({ if: { $expr: 'input.who !== "Ada"' } }),
+      eventWait({ if: { $expr: 'args.who !== "Ada"' } }),
       {
         id: "answer",
-        type: "do",
-        binding: "mail",
-        operation: "mail.send",
-        if: { $expr: "!steps.reply.output.timedOut" },
-        arguments: {
-          to: { $expr: "steps.reply.output.event.data.from" },
-          subject: { $expr: "steps.reply.output.event.type" },
+        type: "call",
+        connection: "mail",
+        action: "mail.send",
+        if: { $expr: "!reply.timedOut" },
+        args: {
+          to: { $expr: "reply.event.data.from" },
+          subject: { $expr: "reply.event.type" },
         },
       },
       {
         id: "rounds",
         type: "forEach",
-        items: { $expr: "input.rounds" },
+        items: { $expr: "args.rounds" },
         do: [
           eventWait({
             id: "each",
-            event: { from: "replies", type: ["grasp.a", "grasp.b"] },
+            eventType: ["grasp.a", "grasp.b"],
           }),
         ],
       }
@@ -129,39 +129,35 @@ const fixtures = {
   state: () =>
     followedBy(
       keeping(),
-      keeping({ id: "maybe", if: { $expr: "input.who === state.last" } }),
+      keeping({ id: "maybe", if: { $expr: "args.who === state.last" } }),
       {
         id: "rows",
         type: "forEach",
         items: { $expr: "state.kept" },
-        do: [keeping({ id: "row", state: { row: { $expr: "item" } } })],
+        do: [keeping({ id: "row", state: { last: { $expr: "item" } } })],
       },
       {
         id: "ask",
-        type: "agent",
-        binding: "summary",
+        type: "generate",
         instructions: { $expr: '"Runs so far: " + (state.runs ?? 0)' },
         input: { last: { $expr: "state.last" } },
-        output: everyStep().state.summary,
-        state: { summary: { $expr: "output" } },
+        returns: { kind: "string" },
+        state: { last: { $expr: "output" } },
       }
     ),
 };
 
 /** A workflow waiting for an event of `type` through `replies`. */
 const waitingFor = (type: string) =>
-  withEventWaits(eventWait({ event: { from: "replies", type } }));
+  withEventWaits(eventWait({ eventType: type }));
 
-describe("grasp-workflow/1's generated code", () => {
+describe("grasp-workflow/2's generated code", () => {
   it("type-checks against the SDK, for every fixture", async () => {
     const diagnostics = Object.fromEntries(
       await Promise.all(
         Object.entries(fixtures).map(
           async ([name, fixture]): Promise<[string, string[]]> => {
-            const { source } = generateWorkflow(
-              checked(fixture()),
-              "generated"
-            );
+            const { source } = generateWorkflow(checked(fixture()));
             const build = await buildGeneratedWorkflow(
               env,
               { [generatedWorkflowEntry]: source },
@@ -186,7 +182,7 @@ describe("grasp-workflow/1's generated code", () => {
 
   it("seals a table the host reads back, for every fixture", () => {
     const refused = Object.entries(fixtures).flatMap(([name, fixture]) => {
-      const generation = generateWorkflow(checked(fixture()), "generated");
+      const generation = generateWorkflow(checked(fixture()));
       const read = sealedTableSchema.safeParse(
         structuredClone({
           tasks: generation.tasks,
@@ -203,10 +199,7 @@ describe("grasp-workflow/1's generated code", () => {
   it("holds an event type to one length, in code points, from the check to the sealed table", () => {
     const longest = emojiType(sealedBuildLimits.eventTypeLength);
     const tooLong = emojiType(sealedBuildLimits.eventTypeLength + 1);
-    const generation = generateWorkflow(
-      checked(waitingFor(longest)),
-      "generated"
-    );
+    const generation = generateWorkflow(checked(waitingFor(longest)));
     const sealed = JSON.stringify({
       tasks: generation.tasks,
       expressions: generation.expressions,

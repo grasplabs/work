@@ -59,16 +59,14 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 /** A definition of `steps`, input `{ who }`, ending `{ status: "done" }`. */
 const definitionOf = (
   steps: unknown[],
-  bindings: Record<string, unknown> = {}
+  permissions: Record<string, unknown> = {}
 ) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: "done" },
-    },
-    bindings,
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "done" },
+    permissions,
     steps,
   });
 
@@ -79,15 +77,15 @@ const definitionOf = (
 const passing = (id: string) => ({
   id,
   type: "raise",
-  if: { $expr: 'input.who === ""' },
-  error: { type: "urn:grasp:error:nameless", status: 422 },
+  if: { $expr: 'args.who === ""' },
+  error: { code: "test.nameless", message: "Failed." },
 });
 
 /** A step `id` that always fails: a raise. */
 const failing = (id: string) => ({
   id,
   type: "raise",
-  error: { type: "urn:grasp:error:refused", status: 409, title: "Refused." },
+  error: { code: "test.refused", message: "Refused." },
 });
 
 /** Routing by who: one branch or the other, then on. */
@@ -95,7 +93,7 @@ const routing = [
   {
     id: "route",
     type: "if",
-    condition: { $expr: 'input.who === "Ada"' },
+    condition: { $expr: 'args.who === "Ada"' },
     then: [passing("greet-ada")],
     else: [passing("greet-other")],
   },
@@ -214,7 +212,7 @@ describe("a run's trace", () => {
       definition: definitionOf([
         passing("init"),
         {
-          id: "each-name",
+          id: "eachName",
           type: "forEach",
           items: { $expr: '["Ada", "Grace"]' },
           do: [passing("note")],
@@ -264,7 +262,7 @@ describe("a run's trace", () => {
         {
           ...passing("mark"),
           // Fails as it runs: the input has no ten-thousandth letter.
-          if: { $expr: 'input.who.split("")[9999].toUpperCase() === ""' },
+          if: { $expr: 'args.who.split("")[9999].toUpperCase() === ""' },
         },
       ]),
       basedOn: null,
@@ -409,10 +407,10 @@ describe("a run's trace, read over the session API", () => {
             type: "try",
             try: [
               {
-                id: "fetch-rates",
-                type: "do",
-                binding: "rates",
-                arguments: { $expr: "input.who" },
+                id: "fetchRates",
+                type: "call",
+                module: "rates",
+                args: { $expr: "args.who" },
               },
             ],
             catch: {
@@ -421,7 +419,11 @@ describe("a run's trace, read over the session API", () => {
             },
           },
         ],
-        { rates: { kind: "compute", contract: "local:code/rates.ts#fail" } }
+        {
+          modules: {
+            rates: { kind: "compute", contract: "local:code/rates.ts#fail" },
+          },
+        }
       ),
       basedOn: null,
       modules: { "code/rates.ts": failingModule },
@@ -436,7 +438,7 @@ describe("a run's trace, read over the session API", () => {
     expect({
       status: whole.status,
       steps: toldOf(whole),
-      task: whole.tasks.find(({ task }) => task === "fetch-rates"),
+      task: whole.tasks.find(({ task }) => task === "fetchRates"),
     }).toStrictEqual({
       status: "completed",
       // One step of three attempts in all, failed at the last, which the
@@ -446,7 +448,7 @@ describe("a run's trace, read over the session API", () => {
         "guard reached 1 -",
         "fell-back reached 1 -",
       ],
-      task: { task: "fetch-rates", state: "failed", attempts: 3 },
+      task: { task: "fetchRates", state: "failed", attempts: 3 },
     });
   });
 
@@ -471,11 +473,11 @@ describe("a run's trace, read over the session API", () => {
         [
           {
             id: "ask",
-            type: "decision",
-            binding: "approval",
+            type: "decide",
+            decision: "approval",
             recipients: [`person:${reviewer.userId}`],
             prompt: "Greet them?",
-            input: { who: { $expr: "input.who" } },
+            input: { who: { $expr: "args.who" } },
           },
           passing("finish"),
         ],
@@ -585,7 +587,7 @@ describe("a run's trace, read over the session API", () => {
       await publishWorkflowVersion(env, builder.acting, long.id, {
         definition: definitionOf([
           {
-            id: "each-name",
+            id: "eachName",
             type: "forEach",
             items: { $expr: `${JSON.stringify("x".repeat(items))}.split("")` },
             do: [passing("note")],

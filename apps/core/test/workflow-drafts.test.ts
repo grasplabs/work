@@ -57,11 +57,9 @@ const definitionOf = ({
 }: { status?: string; steps?: unknown[] } = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     steps,
   });
 
@@ -385,25 +383,22 @@ describe("a workflow's draft", () => {
     const typed = (status: string, refuse: string) =>
       JSON.stringify({
         $schema: workflowSchemaUrl,
-        input: objectSchema({
+        args: objectSchema({
           who: { kind: "string" },
           count: { kind: "number" },
         }),
-        output: {
-          schema: objectSchema({ status: { kind: "string" } }),
-          value: { status: { $expr: status } },
-        },
-        bindings: { summary: { kind: "model", contract: model } },
+        returns: objectSchema({ status: { kind: "string" } }),
+        result: { status: { $expr: status } },
+        permissions: { ai: { contract: model } },
         // What it keeps between runs, read as `state`, typed by its schema.
         state: { count: { kind: "number" }, line: { kind: "string" } },
         steps: [
           {
             id: "greet",
-            type: "agent",
-            binding: "summary",
+            type: "generate",
             instructions: "Greet them.",
-            input: { who: { $expr: "input.who" } },
-            output: objectSchema({ line: { kind: "string" } }),
+            input: { who: { $expr: "args.who" } },
+            returns: objectSchema({ line: { kind: "string" } }),
             // `output` in its state: the answer, as it keeps it.
             state: {
               count: { $expr: "(state.count ?? 0) + 1" },
@@ -414,13 +409,13 @@ describe("a workflow's draft", () => {
             id: "refuse",
             type: "raise",
             if: { $expr: refuse },
-            error: { type: "urn:grasp:error:too-many", status: 422 },
+            error: { code: "test.too_many", message: "Failed." },
           },
         ],
       });
     const good = typed(
-      '"Hello, " + input.who + (state.line ?? "")',
-      "input.count > (state.count ?? 3)"
+      '"Hello, " + args.who + (state.line ?? "")',
+      "args.count > (state.count ?? 3)"
     );
     const passed = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
@@ -428,7 +423,7 @@ describe("a workflow's draft", () => {
       modules: {},
     });
     // A state key reads its schema's type: a number is no string.
-    const mistyped = typed("input.missing.x", 'state.count === "many"');
+    const mistyped = typed("args.missing.x", 'state.count === "many"');
     const kept = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 1,
       source: mistyped,
@@ -461,8 +456,8 @@ describe("a workflow's draft", () => {
         },
         {
           code: "expression.type",
-          pointer: "/output/value/status/$expr",
-          at: "(TS2339, line 1, column 7)",
+          pointer: "/result/status/$expr",
+          at: "(TS2339, line 1, column 6)",
         },
       ],
       checkpoint: 1,
@@ -636,7 +631,7 @@ describe("a workflow's draft", () => {
     );
     const source = JSON.stringify({
       ...JSON.parse(definitionOf()),
-      input: { kind: "object", fields: properties },
+      args: { kind: "object", fields: properties },
     });
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
@@ -647,7 +642,7 @@ describe("a workflow's draft", () => {
       problems: saved.problems.map(({ code, pointer }) => `${code} ${pointer}`),
       checkpoint: saved.checkpoint,
     }).toStrictEqual({
-      problems: ["contract.too_large /input"],
+      problems: ["contract.too_large /args"],
       checkpoint: null,
     });
   });
@@ -774,7 +769,7 @@ describe("a step edited on the canvas", () => {
           {
             id: "group",
             type: "if",
-            condition: { $expr: "input.who === 'ada'" },
+            condition: { $expr: "args.who === 'ada'" },
             // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
             then: [waitStep("inner")],
           },
@@ -853,7 +848,7 @@ describe("a step edited on the canvas", () => {
         {
           id: "group",
           type: "if",
-          condition: { $expr: "input.who === 'ada'" },
+          condition: { $expr: "args.who === 'ada'" },
           // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
           then: [
             { id: "inner", type: "wait", for: "4 seconds", title: "Pause" },
@@ -949,12 +944,12 @@ describe("a step edited on the canvas", () => {
       return refused;
     };
     const refusals = {
-      notAStep: await change("/input/fields"),
+      notAStep: await change("/args/fields"),
       theList: await change("/steps"),
       pastTheEnd: await change("/steps/1"),
       leadingZero: await change("/steps/00"),
       prototype: await change("/__proto__/0"),
-      notAList: await insert("/input"),
+      notAList: await insert("/args"),
       listItsTypeHasNot: await insert("/steps/0/then"),
       beyondTheList: await insert("/steps", 2),
       stale: await change("/steps/0", 0),
