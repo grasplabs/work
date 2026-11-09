@@ -170,7 +170,7 @@ describe(AppsOverview, () => {
     });
   });
 
-  it("offers New App to who builds alone, also before there is any App", async () => {
+  it("offers New App to who builds alone, also before there is any App, and tells someone who doesn't build where Apps shared with them show", async () => {
     await shown([], true);
     const builder = {
       newApp: newApp(),
@@ -182,9 +182,16 @@ describe(AppsOverview, () => {
     document.body.replaceChildren();
     await shown([], false);
 
-    expect({ builder, user: newApp() }).toStrictEqual({
+    const user = {
+      newApp: newApp(),
+      said: document.body.textContent.includes(
+        "The Apps your colleagues share with you show here."
+      ),
+    };
+
+    expect({ builder, user }).toStrictEqual({
       builder: { newApp: "/apps/new", said: true },
-      user: undefined,
+      user: { newApp: undefined, said: true },
     });
   });
 });
