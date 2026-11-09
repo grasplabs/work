@@ -12,13 +12,17 @@ import { warmPlatform } from "./platform-warm-up.ts";
  */
 const setup = async (config: FullConfig): Promise<void> => {
   const retries = config.projects.map((project) => project.retries);
+  const t0 = Date.now();
   const cast = await signInCast(Math.max(0, ...retries) + 1);
+  console.error("TIMING cast", Date.now() - t0);
   await seedConnections(cast);
+  console.error("TIMING seed", Date.now() - t0);
   const builder = cast[0]?.platformWarmUp?.builder;
   if (builder === undefined) {
     throw new Error("Nobody is signed in to warm the platform up");
   }
   await warmPlatform(builder);
+  console.error("TIMING warm", Date.now() - t0);
 };
 
 export default setup;
