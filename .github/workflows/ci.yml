@@ -394,13 +394,14 @@ jobs:
           DRAFT: ${{ github.event.pull_request.draft == true }}
           EVENT: ${{ github.event_name }}
 
-  # The e2e stack's code, built once for every e2e part: the frontend in
-  # development mode with the App compiler, the extractor and the docs
-  # beside it, core's generated modules and connect's build (`vp run
-  # --filter @grasp-os/core dev:build`). Each part built it for itself,
-  # about 60 s of its 3 to 6 minutes (November 2026); now it only starts
-  # it (GRASP_E2E_PREBUILT, playwright.config.ts). Chromium's headless shell is cached here too, by Playwright's
-  # version, for the parts to restore.
+  # The e2e stack, built once for every e2e part (`vp run e2e:build`,
+  # e2e/build.ts): the frontend in development mode with the App compiler,
+  # the extractor and the docs beside it, core's generated modules,
+  # connect's build, and the stack's empty state with every migration
+  # applied. Each part built it for itself, about 80 s of its 3 to 6
+  # minutes (November 2026); now it only starts it (GRASP_E2E_PREBUILT,
+  # playwright.config.ts). Chromium's headless shell is cached here too, by Playwright's version, for the
+  # parts to restore.
   e2e-build:
     name: e2e-build
     if: github.event_name != 'push' && github.event.pull_request.draft != true
@@ -425,7 +426,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      - run: vp run --filter @grasp-os/core dev:build
+      - run: vp run e2e:build
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-stack
@@ -434,7 +435,10 @@ jobs:
             apps/core/dist
             apps/connect/dist
             packages/compiler/dist
+            apps/core/.wrangler/e2e-state
           if-no-files-found: error
+          # The state sits under .wrangler.
+          include-hidden-files: true
           retention-days: 1
           # Mostly minified code and wasm: the fastest level packs it
           # nearly as small.
@@ -449,12 +453,14 @@ jobs:
   # scripts/e2e-parts.ts gives it by their times (scripts/e2e-durations.json),
   # test by test; its Firefox and WebKit tests in a part of their own; and
   # each serial project on a stack of its own, where nothing runs before
-  # it, the journeys a file a stack (`--shard`). Ten parallel parts: their
-  # tests take about 70 s each, as long as the longest test, so the job
-  # ends within about 2.5 minutes of setup, stack and tests (November
-  # 2026). Add a parallel part by adding an entry and raising the count in
-  # every entry's `part`. Part of the required `check` (above), in the merge
-  # queue too: it is the run that tests the tree that lands.
+  # it, the journeys a file a stack (`--shard`). Fourteen parallel parts:
+  # their tests take about a minute each, near the longest test's 82 s
+  # (setup-voice.e2e.ts's story), after about a minute of setup and
+  # starting the stack (November 2026). Add a parallel part by adding an
+  # entry and raising the count in every entry's `part`. Part of the
+  # required `check` (above), in the merge queue too: it is the run that
+  # tests the tree that lands.
+
   #
   # On the runner itself, with Chromium's headless shell from e2e-build's
   # cache: the runner's image has the system packages Chromium needs.
@@ -478,16 +484,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { part: 1/10, project: parallel, artifact: 1-of-10 }
-          - { part: 2/10, project: parallel, artifact: 2-of-10 }
-          - { part: 3/10, project: parallel, artifact: 3-of-10 }
-          - { part: 4/10, project: parallel, artifact: 4-of-10 }
-          - { part: 5/10, project: parallel, artifact: 5-of-10 }
-          - { part: 6/10, project: parallel, artifact: 6-of-10 }
-          - { part: 7/10, project: parallel, artifact: 7-of-10 }
-          - { part: 8/10, project: parallel, artifact: 8-of-10 }
-          - { part: 9/10, project: parallel, artifact: 9-of-10 }
-          - { part: 10/10, project: parallel, artifact: 10-of-10 }
+          - { part: 1/14, project: parallel, artifact: 1-of-14 }
+          - { part: 2/14, project: parallel, artifact: 2-of-14 }
+          - { part: 3/14, project: parallel, artifact: 3-of-14 }
+          - { part: 4/14, project: parallel, artifact: 4-of-14 }
+          - { part: 5/14, project: parallel, artifact: 5-of-14 }
+          - { part: 6/14, project: parallel, artifact: 6-of-14 }
+          - { part: 7/14, project: parallel, artifact: 7-of-14 }
+          - { part: 8/14, project: parallel, artifact: 8-of-14 }
+          - { part: 9/14, project: parallel, artifact: 9-of-14 }
+          - { part: 10/14, project: parallel, artifact: 10-of-14 }
+          - { part: 11/14, project: parallel, artifact: 11-of-14 }
+          - { part: 12/14, project: parallel, artifact: 12-of-14 }
+          - { part: 13/14, project: parallel, artifact: 13-of-14 }
+          - { part: 14/14, project: parallel, artifact: 14-of-14 }
           - { part: onboarding, project: onboarding, artifact: onboarding }
           - { part: interview, project: interview, artifact: interview }
           - {
