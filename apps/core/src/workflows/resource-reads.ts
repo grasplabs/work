@@ -36,8 +36,7 @@ import {
   recordRunEvidence,
 } from "./run-evidence.ts";
 
-// A run's reads of Knowledge, for its
-// workflow's own actions (GRA-700; the threat model is on the issue). Each
+// A run's reads of Knowledge (GRA-700; the threat model is on the issue). Each
 // is one of the run's named calls (resource-calls.ts, `makeCall`): its
 // binding frozen at the start, its authority decided again first, its
 // receipts kept. What each closes:

@@ -1,4 +1,5 @@
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 
 import { own as ownField } from "./expression-runtime.ts";
 import { WorkflowError } from "./workflow-error.ts";
@@ -26,14 +27,34 @@ export const own: (value: unknown, name: string) => Read = ownField;
  * reads is, so a `__proto__` or `constructor` key in it is an own field
  * holding data, never a prototype. Only text parses; anything else is a
  * `TypeError` (never converted to text, which would run a `toString`),
- * and text that isn't JSON is JSON's own `SyntaxError`. Generated code
- * imports it as `$parse`.
+ * and text that isn't JSON is JSON's own `SyntaxError`. A value nested
+ * deeper than any value may be (`valueDepth`, its leaf included) is a
+ * `RangeError`, found without recursion before anything walks it: text
+ * from outside (an email's body) could otherwise make a value no other
+ * expression can, which the host takes for a tampered build once a call,
+ * a state key or a decision is given it. Each is the step's own failure,
+ * which a catch takes. Generated code imports it as `$parse`.
  */
 export const parse = (text: unknown): Read => {
   if (typeof text !== "string") {
     throw new TypeError("`JSON.parse` takes text.");
   }
-  return frozenData(JSON.parse(text));
+  const value: unknown = JSON.parse(text);
+  const pending: [unknown, number][] = [[value, 1]];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [held, depth] = next;
+    if (depth > valueDepth) {
+      throw new RangeError(
+        `\`JSON.parse\` takes text nested at most ${valueDepth} levels.`
+      );
+    }
+    if (typeof held === "object" && held !== null) {
+      for (const inner of Object.values(held)) {
+        pending.push([inner, depth + 1]);
+      }
+    }
+  }
+  return frozenData(value);
 };
 
 /**

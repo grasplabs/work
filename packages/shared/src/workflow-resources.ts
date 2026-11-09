@@ -258,8 +258,7 @@ export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
 
 /**
  * A host catalog contract key: lowercase segments, never one of this
- * deployment's workflows (`workspace/...`) nor a workflow's own module
- * (`local:`).
+ * deployment's workflows (`workspace/...`).
  */
 export const catalogKeySchema = z
   .string()

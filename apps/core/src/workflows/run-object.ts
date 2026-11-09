@@ -133,8 +133,7 @@ export const sentCallsIn = (sql: SqlStorage): SentCalls => ({
 });
 
 /**
- * Where a run keeps the model calls it and its actions made
- * (sealed-run.ts, `RunModelCalls`; GRA-700): a table of its object's
+ * Where a run keeps the model calls it made (sealed-run.ts, `RunModelCalls`; GRA-700): a table of its object's
  * SQLite beside the engine's journal, dropped with it by the engine's
  * removal of the run. Only the host writes it, never the run's code. Written before the
  * call goes out: the object's output gate holds the call until the write
@@ -142,7 +141,7 @@ export const sentCallsIn = (sql: SqlStorage): SentCalls => ({
  */
 const modelCallsTable = "grasp_action_model_calls";
 
-/** The model calls the run's actions made, kept with it (`modelCallsTable`). */
+/** The model calls the run made, kept with it (`modelCallsTable`). */
 export const modelCallsIn = (sql: SqlStorage): RunModelCalls => ({
   count: () => {
     const there =

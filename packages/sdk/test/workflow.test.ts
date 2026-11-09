@@ -189,6 +189,10 @@ const permissions = {
   events: { replies: ["grasp.reply.received"] },
 } as const;
 
+/** JSON text of `levels` levels: lists around a leaf. */
+const nested = (levels: number): string =>
+  `${"[".repeat(levels - 1)}0${"]".repeat(levels - 1)}`;
+
 describe("a workflow's data", () => {
   /** What a run of a mail and a wait reads, on a first run and on its replay. */
   const readsOf = async () => {
@@ -330,6 +334,17 @@ describe("a workflow's data", () => {
     expect(() => {
       parse("{");
     }).toThrow(SyntaxError);
+  });
+
+  it("parses text nested as deep as any value may be, and refuses deeper", () => {
+    expect(Object.isFrozen(parse(nested(32)))).toBeTruthy();
+    expect(() => {
+      parse(nested(33));
+    }).toThrow(RangeError);
+    // Far past it, as text from outside may be: refused, never walked.
+    expect(() => {
+      parse(nested(100_000));
+    }).toThrow(RangeError);
   });
 
   it("knows when its run started, as frozen data, the same on replay", async () => {

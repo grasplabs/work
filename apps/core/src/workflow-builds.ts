@@ -344,13 +344,18 @@ const manifestBindingKindsSchema = z.object({
  * Refuses (`workflow.binding_kind_removed`) a version whose manifest
  * binds a kind the platform no longer serves: an `operation` binding, an
  * App's public store operation, which no workflow reaches now that each
- * App's store is its own. Read before the rest of the manifest, so such a
+ * App's store is its own, or a `template` one, which only a workflow's own
+ * actions read. Read before the rest of the manifest, so such a
  * version is told to be published again, never taken for one that was
  * changed (`workflow.version_corrupt`).
  */
 export const requireServedBindingKinds = (manifest: unknown): void => {
   const { data } = manifestBindingKindsSchema.safeParse(manifest);
-  if (data?.bindings.some(({ kind }) => kind === "operation") === true) {
+  if (
+    data?.bindings.some(
+      ({ kind }) => kind === "operation" || kind === "template"
+    ) === true
+  ) {
     throw workflowResourceErrors.create("workflow.binding_kind_removed");
   }
 };

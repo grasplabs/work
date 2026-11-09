@@ -348,6 +348,9 @@ export const chatPackageRequests = async (
     .where(
       and(
         eq(dependencyRequests.status, "pending"),
+        // A workflow's, from before workflows lost their packages, is no
+        // one's to decide.
+        eq(dependencyRequests.subjectType, "app"),
         sql`EXISTS (SELECT 1 FROM json_each(coalesce(${dependencyRequests.requestedIn}, json_array(json(${dependencyRequests.requestedVia})))) AS asked
           WHERE json_extract(asked.value, '$.chatId') = ${chatId}
             AND json_extract(asked.value, '$.onBehalfOf') = ${userId})`

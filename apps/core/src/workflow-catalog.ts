@@ -558,7 +558,7 @@ const termsOf = ({
 
 /**
  * The catalog's contracts with their terms, for builders: what a
- * definition can bind besides its own code and other workflows. Only
+ * definition can bind besides other workflows. Only
  * those intact, as validation resolves them (`resolveCatalogKeys`).
  */
 export const catalogContractTerms = async (
