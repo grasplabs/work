@@ -115,10 +115,14 @@ type Builder = Awaited<ReturnType<typeof signedInApi>>;
  * Commits `app` over App `id` and makes it current, as an admin (made
  * current by its builder, the App's grants would be asked for again).
  */
-const published = async (builder: Builder, id: string, app: TestApp) => {
+const published = async (
+  builder: Builder,
+  id: string,
+  app: TestApp
+): Promise<unknown> => {
   const { version } = await commitApp(builder.api.apps.files, id, app, "Next");
   const admin = await signedInApi(idp, "admin");
-  await admin.api.apps.versions.setCurrent(id, version);
+  return await refusal(admin.api.apps.versions.setCurrent(id, version));
 };
 
 /**
@@ -276,6 +280,36 @@ const resumed = async (runId: string, create: string) =>
       `return await step.do("made", { key: "task", description: "made" }, async () => ({ output: await env.notes.call(${JSON.stringify(create)}, { title: "Later" }) }));`
     )
   );
+
+/** A waiting run of a workflow whose `create` is granted, and its setting. */
+const waitingRun = async () => {
+  const set = await setUp();
+  await publishWorkflowVersion(env, set.acting, set.workflow.id, {
+    definition: writingNotes(set.app, set.create, set.titles, true),
+    basedOn: null,
+  });
+  const grant = await requestGranted(
+    idp,
+    set.builder,
+    callRequest(set.workflow.id, set.app, set.create)
+  );
+  const { runId } = await set.builder.api.workflowResources.start(
+    set.workflow.id,
+    { version: 1, input: { title: "Later" }, key: unique() }
+  );
+  return { ...set, grant, runId };
+};
+
+/** What `resumed` ends with: a note's ID it wrote, or the code it failed with. */
+const endOf = (ran: unknown): unknown =>
+  z
+    .union([
+      z
+        .object({ ended: z.object({ output: z.string().min(1) }) })
+        .transform(() => "wrote"),
+      z.object({ ended: z.string() }).transform((failed) => failed.ended),
+    ])
+    .parse(ran);
 
 describe("a workflow calling an App's functions", () => {
   it("calls the functions it was granted by their IDs, and fails on one it wasn't", async () => {
@@ -439,27 +473,10 @@ export const create = mutation({
   });
 
   it("fails a waiting run's next call once its grant is revoked, or its App removed", async () => {
-    const waiting = async () => {
-      const set = await setUp();
-      await publishWorkflowVersion(env, set.acting, set.workflow.id, {
-        definition: writingNotes(set.app, set.create, set.titles, true),
-        basedOn: null,
-      });
-      const grant = await requestGranted(
-        idp,
-        set.builder,
-        callRequest(set.workflow.id, set.app, set.create)
-      );
-      const { runId } = await set.builder.api.workflowResources.start(
-        set.workflow.id,
-        { version: 1, input: { title: "Later" }, key: unique() }
-      );
-      return { ...set, grant, runId };
-    };
-    const revoked = await waiting();
+    const revoked = await waitingRun();
     const admin = await signedInApi(idp, "admin");
     await admin.api.permissions.revoke(revoked.grant);
-    const removed = await waiting();
+    const removed = await waitingRun();
     await removed.builder.api.apps.archive(removed.app);
     await removed.builder.api.apps.remove(removed.app);
 
@@ -469,6 +486,51 @@ export const create = mutation({
     }).toMatchObject({
       revoked: { ended: "workflow.call_denied", tampered: [] },
       removed: { ended: "workflow.call_denied", tampered: [] },
+    });
+  });
+
+  it("keeps a waiting run's call working through an App rolled back, and keeps its function from being removed", async () => {
+    // Rolled back past a rename while the run waits: the ID is the
+    // function it always was.
+    const rolled = await waitingRun();
+    await published(
+      rolled.builder,
+      rolled.app,
+      await redefined(
+        rolled.app,
+        rolled.source,
+        { "server/notes.ts": notesCode("add") },
+        { op: "renameFunction", function: "notes.create", name: "notes.add" }
+      )
+    );
+    const admin = await signedInApi(idp, "admin");
+    const rolledBack = await refusal(
+      admin.api.apps.versions.setCurrent(rolled.app, 1)
+    );
+    // A new version without the function the waiting run calls: refused
+    // while the workflow holds its grant, so the run still reaches it.
+    const removing = await waitingRun();
+    const removal = await published(
+      removing.builder,
+      removing.app,
+      withFiles(removing.source, {
+        "server/notes.ts": notesCode().replace(
+          /export const create[\s\S]*?\}\);\n/u,
+          ""
+        ),
+      })
+    );
+
+    expect({
+      rolledBack,
+      rolled: endOf(await resumed(rolled.runId, rolled.create)),
+      removal: z.object({ code: z.string() }).parse(removal).code,
+      removing: endOf(await resumed(removing.runId, removing.create)),
+    }).toStrictEqual({
+      rolledBack: "ok",
+      rolled: "wrote",
+      removal: "version.functions_in_use",
+      removing: "wrote",
     });
   });
 

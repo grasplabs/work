@@ -68,7 +68,11 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
  * version names that function, for `by`: so after a rename, the next save
  * shows, and the next build calls, the function by its new name, while
  * what is called stays its ID. The text as given when nothing changed, or
- * when it isn't a document with App permissions.
+ * when it isn't a document with App permissions. When a name changed, the
+ * document is written again as `JSON.stringify` writes it, two spaces
+ * deep: drafts are written by the canvas and the chat, never kept for
+ * their layout, and JSON keeps every value (a number as it reads back),
+ * so only the layout of hand-typed text changes, and only on a rename.
  */
 export const withCurrentFunctionNames = async (
   env: Env,

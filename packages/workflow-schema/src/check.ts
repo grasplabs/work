@@ -1143,7 +1143,10 @@ const checkAppCall = (
 const checkAppMembers = (walk: Walk): void => {
   const apps = walk.document.permissions?.apps ?? {};
   const aliasOf = new Map<string, string>();
-  let count = 0;
+  // What a test run answers: each permission of every other kind (`ai`
+  // among them), and each App function, so a workflow that publishes can
+  // always be test-run.
+  let count = Object.keys(walk.bindings).length;
   for (const [alias, { app, functions }] of Object.entries(apps)) {
     count += Object.keys(functions).length;
     const first = aliasOf.get(app);
@@ -1164,7 +1167,7 @@ const checkAppMembers = (walk: Walk): void => {
       walk,
       "/permissions/apps",
       "workflow.out_of_bounds",
-      `A workflow calls at most ${maxCandidateFixtures} App functions in all.`,
+      `A workflow holds at most ${maxCandidateFixtures} permissions and App functions in all, as a test run answers them.`,
       "Call fewer functions, or split the work across workflows."
     );
   }
