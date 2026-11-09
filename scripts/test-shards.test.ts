@@ -135,6 +135,21 @@ describe("splitting the test files between shards", () => {
     }
   });
 
+  it("runs the UI kit's browser checks in the first shard, where CI installs Chromium", () => {
+    const browser = "@grasp-os/ui:browser test/kit.browser.test.tsx";
+    const files = [
+      ...suite,
+      file(browser, 30),
+      ...Array.from({ length: 300 }, (_, index) =>
+        file(`scripts ${index}`, 30)
+      ),
+    ];
+
+    expect(splitIntoShards(files, 8)[0]?.map(({ key }) => key)).toContain(
+      browser
+    );
+  });
+
   it("knows every test file that installs offline from pnpm's store", () => {
     const offlineFlag = ["--", "offline"].join("");
     const installing = execFileSync(

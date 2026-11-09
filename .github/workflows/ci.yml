@@ -171,12 +171,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm's store only where a test installs offline from it: the first
-      # shard holds every such file (scripts/test-shards.ts,
-      # `installsOffline`). The rest restore node_modules alone, 9 s sooner.
+      # pnpm's store, and Chromium for the UI kit's browser checks, only
+      # where a test needs them: the first shard holds every such file
+      # (scripts/test-shards.ts, `runsInFirstShard`). The rest restore
+      # node_modules alone, 9 s sooner.
       - uses: ./.github/actions/setup
         with:
           store: ${{ matrix.shard == 1 }}
+      - if: matrix.shard == 1
+        uses: ./.github/actions/playwright-browser
       # Core's global setup's builds (the App compiler, the extractor, the
       # connect bundle: about 30 s a shard), by the hash of their inputs
       # (apps/core/test/prebuilt.ts): on a hit, global setup only copies

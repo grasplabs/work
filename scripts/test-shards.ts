@@ -116,6 +116,15 @@ const unitsOf = (files: readonly ShardFile[]): ShardFile[][] => {
 export const installsOffline = (key: string): boolean =>
   /^scripts scripts\/package-definition[\w-]*\.test\.ts$/u.test(key);
 
+/**
+ * Whether a test file runs in the first shard, whatever the split: those
+ * that install offline (`installsOffline`), and the UI kit's checks in a
+ * real Chromium (`@grasp-os/ui:browser`), as CI installs Chromium for the
+ * test shards only there too.
+ */
+export const runsInFirstShard = (key: string): boolean =>
+  installsOffline(key) || key.startsWith("@grasp-os/ui:browser ");
+
 /** A unit by its first file's key, for an order that is the same on every runner. */
 const keyOfUnit = (unit: readonly ShardFile[]): string => unit[0]?.key ?? "";
 
@@ -131,7 +140,7 @@ export const spreadOver = (
   const shards: ShardFile[][] = Array.from({ length: count }, () => []);
   const units = unitsOf(files);
   const pinned = (unit: readonly ShardFile[]): boolean =>
-    unit.some(({ key }) => installsOffline(key));
+    unit.some(({ key }) => runsInFirstShard(key));
   for (const unit of units.filter(pinned)) {
     shards[0]?.push(...unit);
   }
@@ -187,7 +196,7 @@ export const splitIntoShards = (
     );
   }
   const misplaced = files.filter(
-    ({ key, group }) => installsOffline(key) && group !== order[0]
+    ({ key, group }) => runsInFirstShard(key) && group !== order[0]
   );
   if (misplaced.length > 0) {
     throw new Error(
