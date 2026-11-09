@@ -9,8 +9,8 @@ const bodyBackground = async (page: Page): Promise<string> =>
     .evaluate((body) => getComputedStyle(body).backgroundColor);
 
 // Which theme the page paints is the browser's cascade, from the system's
-// scheme: what a component does is its own tests' (packages/ui), and how a
-// person's choice is kept apps/web/src/frame/theme.test.ts.
+// scheme. What the components do, the journeys that use them show; how a
+// person's choice is kept, apps/web/src/frame/theme.test.ts.
 test("paints the system's scheme, dark from the start and following a change without a reload", async ({
   page,
 }) => {
