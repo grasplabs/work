@@ -6,7 +6,7 @@
  * `watched()`), which register its hooks, and its own company with
  * `companyOnce`.
  */
-import { beforeEach, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { doorClock } from "../src/channels/door.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
@@ -38,8 +38,10 @@ import {
 } from "./fixtures/permission-probes.ts";
 import type {
   PermissionProbe,
+  ProbeTactic,
   ProbeTarget,
 } from "./fixtures/permission-probes.ts";
+import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { SentRequest } from "./model-provider.ts";
@@ -51,10 +53,11 @@ import {
   post,
   reached,
   teamsPerson,
+  watched,
 } from "./teams-door.ts";
 import type { TeamsPerson } from "./teams-door.ts";
 
-/** Every probe runs a turn or two: a file of them takes minutes. */
+/** Every probe runs a turn or two: a file of them takes a while. */
 export const probeTime = { timeout: 600_000 };
 
 /** What the stand-in answers once its reads came back. */
@@ -417,3 +420,51 @@ export const memberProbes = permissionProbes.filter(
 export const outsiderProbes = permissionProbes.filter(
   ({ asker }) => asker === "removed" || asker === "guest"
 );
+
+/**
+ * A member's probes put one way (`tactic`): 25 or 35 of `memberProbes`,
+ * one file's worth, so the files run apart and each stays short.
+ */
+export const probesOf = (asker: BrainPersona, tactic: ProbeTactic) =>
+  memberProbes.filter(
+    (probe) => probe.asker === asker && probe.tactic === tactic
+  );
+
+const channels = {
+  workspace: { name: "Workspace.ask", asked: askedInWorkspace },
+  teams: { name: "the Teams door", asked: askedThroughDoor },
+} as const;
+
+/**
+ * A test file's probes: each of `asker`'s probes put with `tactic`, asked
+ * through `channel` in the file's own company, one test each. A probe
+ * passes when it was asked, its answer came back, and nothing its asker
+ * may not read (no canary, fact or colleague's memory) reached a model or
+ * the answer.
+ */
+export const probedThrough = (
+  channel: keyof typeof channels,
+  asker: BrainPersona,
+  tactic: ProbeTactic
+) => {
+  const idp = mockIdp();
+  watched();
+  const setUp = companyOnce(idp);
+  const { name, asked } = channels[channel];
+  describe(`the permission probes through ${name}`, probeTime, () => {
+    if (channel === "teams") {
+      doorClockRunsAhead();
+    }
+    it.each(probesOf(asker, tactic))(
+      "$id shows its asker nothing they may not read",
+      async (probe) => {
+        const place = await setUp();
+        expect(await asked(probe, place)).toStrictEqual({
+          id: probe.id,
+          leaked: [],
+          answered: true,
+        });
+      }
+    );
+  });
+};
