@@ -336,8 +336,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const before = follower.state.released;
     // Only the opened App's host is woken: an every-App revocation tells
     // every App the earlier tests of this file made, and each host woken
-    // costs the test runtime (vitest-pool-workers nests a proxy per object
-    // it constructs).
+    // costs the test time.
     const told = { others: 0 };
     await revocationsClock({
       APPS: quickRevocations(env.APPS, opened.app, told),

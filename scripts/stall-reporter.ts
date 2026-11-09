@@ -51,7 +51,7 @@
 // order its events arrive in. Those events are not reliable on their own:
 // a test's start can arrive after its result (seen with the forks pool,
 // where messages from a worker are handled concurrently), and
-// vitest-pool-workers can send a batch of events late, from the runner's
+// the Workers test pool can send a batch of events late, from the runner's
 // own I/O context, after Vitest's runner has emptied and refilled the
 // array it handed over (`eventsPacks` in @vitest/runner), so a batch's
 // events are lost or arrive beside another batch's results. Results

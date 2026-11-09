@@ -69,13 +69,13 @@ catalog:
   # module): the same version as vitest's.
   "@vitest/expect": 4.1.11
   # Same workerd as Wrangler; runs the on-prem smoke test.
-  workerd: 1.20261023.1
-  wrangler: 4.154.0
+  workerd: 1.20261104.1
+  wrangler: 4.158.0
 
   # Workers runtime and data
   "@cloudflare/vite-plugin": 1.66.0
-  "@cloudflare/vitest-pool-workers": 0.22.0
-  "@cloudflare/workers-types": 5.20261023.1
+  "@cloudflare/vitest-plugin": 1.6.0
+  "@cloudflare/workers-types": 5.20261104.1
   capnweb: 0.12.0
   # A mutation's seeded randomness, in its isolate (the SDK's runner):
   # ChaCha20's keystream from the seed its receipt keeps.
@@ -288,18 +288,11 @@ catalogs:
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
-  # The test pool bundles an older workerd; align it with Wrangler's so tests
-  # run on the same compatibility date as production.
-  "@cloudflare/vitest-pool-workers>miniflare": 5.20261023.1-beta
-  # The test pool also pins zod 4.4.3 and Wrangler 4.124.0, whose miniflare
-  # pins undici 7.29.0 and sharp 0.35.2: all below their security fixes
-  # (zod GHSA-mrhx-c7xc-m3w5; undici GHSA-4w7w-5xrc-9h26 and others; sharp
-  # GHSA-wq5f-xc86-pv6w, GHSA-rgj7-g3m4-5g8c). No pool release moves off
-  # them (0.23.0 pins the same), so they are lifted here to patch releases
-  # of the same lines. Drop these once the pool moves on.
-  "@cloudflare/vitest-pool-workers>zod": "catalog:"
-  "miniflare@5.20260815.0-alpha>undici": 7.30.1
-  "miniflare@5.20260815.0-alpha>sharp": 0.35.5
+  # The test plugin's miniflare, kept in lockstep with Wrangler's so tests
+  # run the workerd production deploys with (and the patched one, below).
+  "@cloudflare/vitest-plugin>miniflare": 5.20261104.0-beta
+  # The test plugin pins zod 4.6.6; the workspace's one zod instead.
+  "@cloudflare/vitest-plugin>zod": "catalog:"
 
 peerDependencyRules:
   allowedVersions:
@@ -313,13 +306,5 @@ peerDependencyRules:
     "@typescript-eslint/tsconfig-utils>typescript": "7"
     "@typescript-eslint/typescript-estree>typescript": "7"
 
-# vitest-pool-workers wraps each Durable Object class's prototype in one
-# more Proxy on every construction (0.23.0 too); with `isolate: false`, a
-# shard that constructs about 1,800 objects of one class overflows the
-# stack, and every file after fails (GRA-972). The patch wraps it once.
-# It likewise patches a worker's module runner once, not once more per
-# file it runs, which slowed every module load of a worker's later files.
-# Both are fixed in @cloudflare/vitest-plugin, the pool's new name.
 patchedDependencies:
-  "@cloudflare/vitest-pool-workers@0.22.0": patches/@cloudflare__vitest-pool-workers@0.22.0.patch
-  miniflare@5.20261023.1-beta: patches/miniflare@5.20261023.1-beta.patch
+  miniflare@5.20261104.0-beta: patches/miniflare@5.20261104.0-beta.patch

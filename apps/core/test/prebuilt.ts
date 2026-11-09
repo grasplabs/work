@@ -140,7 +140,11 @@ export const restorePrebuilt = (key: string, files: PrebuiltFiles): boolean => {
   for (const [what, name] of names) {
     const to = files[what];
     mkdirSync(path.dirname(to), { recursive: true });
-    cpSync(path.join(kept, name), to, { recursive: true });
+    // Copied aside and moved in whole: the version module is shared by
+    // the runs in a checkout (compiler-version.ts).
+    const aside = `${to}.${process.pid}.tmp`;
+    cpSync(path.join(kept, name), aside, { recursive: true });
+    renameSync(aside, to);
   }
   return true;
 };
