@@ -344,6 +344,28 @@ export const querySubscriptionLimits = {
   unsentBytes: 512 * 1024,
 } as const;
 
+const lower = (set: number | undefined, most: number): number =>
+  set !== undefined && Number.isInteger(set) && set > 0 && set < most
+    ? set
+    : most;
+
+/**
+ * The live-read budget (`querySubscriptionLimits.liveReads`), or a lower
+ * one a test sets as `burst/perMinute` (core's `LIVE_READ_LIMITS`), so it
+ * spends the budget in dozens of sandboxed reads instead of hundreds;
+ * never higher.
+ */
+export const liveReadLimitsOf = (
+  value: string | undefined
+): { burst: number; perMinute: number } => {
+  const [burst, perMinute] = (value ?? "").split("/").map(Number);
+  const { liveReads } = querySubscriptionLimits;
+  return {
+    burst: lower(burst, liveReads.burst),
+    perMinute: lower(perMinute, liveReads.perMinute),
+  };
+};
+
 /**
  * What core pushes to a page following a query (`watchQuery`): the
  * query's result (spec 32.6's `OperationResult`, as a function call

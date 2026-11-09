@@ -149,6 +149,11 @@ interface __BaseEnv_Env {
    * perMinute` (src/app.ts, `claimStatisticMinute`).
    */
   STATISTICS_READ_LIMITS?: string;
+  /**
+   * Tests only: a lower live-read budget of a person's pages,
+   * `burst/perMinute` (`liveReadLimitsOf`, src/app.ts); never higher.
+   */
+  LIVE_READ_LIMITS?: string;
   /** The router secret before the current one, while rotating (src/router-secret.ts). */
   ROUTER_SECRET_PREVIOUS?: string;
   /** Local dev only (src/router-secret.ts). */
