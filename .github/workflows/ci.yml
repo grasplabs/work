@@ -112,12 +112,12 @@ jobs:
   # of every project's test files, split by how long each takes
   # (scripts/test-sequencer.ts, with the times in
   # scripts/test-durations.json), so the shards end together and together
-  # run every file once; `--shard` takes the count from the matrix. 28
-  # shards end within about 3 minutes, setup included, each set by its
-  # longest file or two rather than by how many files it has: more shards
-  # end no sooner (scripts/test-shards.ts gives a shard left over only to
-  # a group it shortens), and each is one of the account's 60 concurrent
-  # runners. Part of the required `check` (below).
+  # run every file once; `--shard` takes the count from the matrix. Forty
+  # shards, each about a minute of setup and start-up and two of tests;
+  # more would end little sooner, as most are then set by their longest
+  # file and the shards no group ends sooner with are left empty
+  # (scripts/test-shards.ts), and each is one of the account's 60
+  # concurrent runners. Part of the required `check` (below).
   test:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.event_name != 'push' && github.event.pull_request.draft != true
@@ -159,6 +159,18 @@ jobs:
             26,
             27,
             28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
           ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
