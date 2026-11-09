@@ -1005,13 +1005,11 @@ export const notify = action({
       await publishWorkflowVersion(env, by, workflow.id, {
         definition: JSON.stringify({
           ...JSON.parse(definitionOf([])),
-          output: {
-            schema: objectSchema({
-              status: { kind: "string" },
-              secret: { kind: "string" },
-            }),
-            value: { status: "hello", secret: "ultramarine" },
-          },
+          returns: objectSchema({
+            status: { kind: "string" },
+            secret: { kind: "string" },
+          }),
+          result: { status: "hello", secret: "ultramarine" },
         }),
         basedOn: null,
       });

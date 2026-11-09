@@ -732,16 +732,16 @@ describe(
     it("list and answer a decision asked in a loop's item, as the run host names its step", async () => {
       const { fixture, opened, reviewer, runAsking, ask } =
         await decisionInbox(true);
-      // As the SDK names the item's step: its key, `task@0`, URI-encoded.
+      // As the SDK names its task's second run in a loop's items.
       const looped = await runAsking(fixture.app, opened, {
-        step: "ask:task%400",
+        step: "ask:task@1",
       });
-      // Its key in no encoding the SDK writes, and a part of a decision.
+      // A count in a form the SDK never writes, and a part of a decision.
       const unencoded = await runAsking(fixture.app, opened + 1000, {
-        step: "ask:task@0",
+        step: "ask:task%401",
       });
       const part = await runAsking(fixture.app, opened + 2000, {
-        step: "ask:task%400#answer",
+        step: "ask:task@1#answer",
       });
       const list = await ask(reviewer, "decisions", { pagination: {} });
       const listed =
