@@ -36,6 +36,14 @@ const portOf = (value: string | undefined): number => {
 };
 
 export const corePort = portOf(process.env.E2E_PORT);
+
+/**
+ * How many tests a stack runs at once (playwright.config.ts's `workers`),
+ * locally as in CI's parts (scripts/e2e-parts.ts): one local dev server
+ * serves every test, and more at once slow it past the tests' waits
+ * (pages, live updates).
+ */
+export const workersPerStack = 2;
 export const idpPort = corePort + 1;
 /** The fake AI providers' (e2e/model-fake.ts). */
 export const modelFakePort = corePort + 2;

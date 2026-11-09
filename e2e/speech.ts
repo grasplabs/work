@@ -1,4 +1,3 @@
-import { expect } from "@playwright/test";
 import type { Locator, Page, Request } from "@playwright/test";
 
 // Stephen's voice on the onboarding's pages (apps/web/src/voice) is
@@ -88,28 +87,44 @@ export const answerSpeech = async (page: Page): Promise<Asked[]> => {
  */
 const readingStepMs = 1000;
 
-/** How long a test may wait, in real time, for what it reads to be read. */
-const readingTimeoutMs = 60_000;
+/**
+ * How long a step's way on may take to come on the page's clock: its
+ * line's reading time, or with the voice on and never heard that and
+ * 3.5 s more (apps/web/src/onboarding/setup-parts.tsx's `explainedWait`),
+ * for the longest line with room to spare.
+ */
+const wayOnMs = 30_000;
 
 /**
- * Goes on the page's clock a second at a time until `ready` passes. A
- * line read silently, and the way on after it, wait the time it takes to
- * read the line on the page's clock (apps/web/src/voice/voice.ts's `hold`,
+ * Goes on the page's clock a second at a time until `ready` passes, for at
+ * most `withinMs` of it, then fails as `ready` last did. A line read
+ * silently, and the way on after it, wait the time it takes to read the
+ * line on the page's clock (apps/web/src/voice/voice.ts's `hold`,
  * apps/web/src/onboarding/setup-parts.tsx's `explainedWait`): over a
  * minute of a walkthrough's steps in real time. With Playwright's clock
  * (`page.clock.install()` before the page loads) a test reads them at
- * once. Only that wait goes faster: what the test then checks is checked
- * as before. Sound the browser plays runs on its own clock, so a line
- * heard still takes its time.
+ * once. Only that wait goes faster, still bounded as a real wait was:
+ * what the test then checks is checked as before. Sound the browser plays
+ * runs on its own clock, so a line heard still takes its time.
  */
 export const readUntil = async (
   page: Page,
-  ready: () => Promise<void>
+  ready: () => Promise<void>,
+  withinMs: number
 ): Promise<void> => {
-  await expect(async () => {
+  for (let forwarded = 0; ; forwarded += readingStepMs) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one look per step of the clock
+      await ready();
+      return;
+    } catch (error) {
+      if (forwarded >= withinMs) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one step of the clock at a time
     await page.clock.fastForward(readingStepMs);
-    await ready();
-  }).toPass({ intervals: [0], timeout: readingTimeoutMs });
+  }
 };
 
 /**
@@ -117,7 +132,11 @@ export const readUntil = async (
  * inert until then, once the step's line has been read.
  */
 export const readOn = async (page: Page, wayOn: Locator): Promise<void> => {
-  await readUntil(page, async () => {
-    await wayOn.click({ trial: true, timeout: 100 });
-  });
+  await readUntil(
+    page,
+    async () => {
+      await wayOn.click({ trial: true, timeout: 100 });
+    },
+    wayOnMs
+  );
 };

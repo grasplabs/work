@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
+import { workersPerStack } from "../e2e/stack.ts";
 import { byKey } from "./test-shards.ts";
 
 const root = path.join(import.meta.dirname, "..");
@@ -31,11 +32,11 @@ export const e2eDurationsFile = fileURLToPath(
 );
 
 /**
- * How many tests a part runs at once: playwright.config.ts's `workers`.
- * The tests of one file a part runs go to one worker, one after another,
- * as Playwright hands a worker a file's tests together.
+ * How many tests a part runs at once: its stack's (e2e/stack.ts). The
+ * tests of one file a part runs go to one worker, one after another, as
+ * Playwright hands a worker a file's tests together.
  */
-export const workersPerPart = 2;
+const workersPerPart = workersPerStack;
 
 /** What this reads of a Playwright JSON report or listing. */
 export interface ReportSuite {

@@ -18,6 +18,7 @@ import {
   modelFakePort,
   origin,
   stateDir,
+  workersPerStack,
 } from "./e2e/stack.ts";
 
 /**
@@ -131,7 +132,9 @@ const serialProjects = (before: string[]): Project[] => [
  * stack, unless CI splits it. Playwright runs a project's dependencies in
  * full on every shard, so `--shard` alone can't split a suite whose
  * serial tail depends on everything before it. CI runs the parallel part
- * in parts (`parallel`, with the files of each), and each serial project
+ * in parts (`parallel`, with a test list of each, scripts/e2e-parts.ts:
+ * Chromium's tests in fourteen, Firefox's and WebKit's a part each), and
+ * each serial project
  * on a stack of its own (`onboarding`, `interview`, `journeys`, the
  * journeys a file a stack with `--shard`): they run one after another
  * only so that what one does can't change what the next sees, and a
@@ -173,9 +176,7 @@ export default defineConfig({
   timeout: 180_000,
   forbidOnly: ci,
   retries: ci ? 2 : 0,
-  // Two workers, locally as in CI: one local dev server serves every test,
-  // and more at once slow it past the tests' waits (pages, live updates).
-  workers: 2,
+  workers: workersPerStack,
   globalSetup: "./e2e/setup.ts",
   reporter: ci ? "github" : "list",
   use: {

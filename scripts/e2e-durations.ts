@@ -5,7 +5,7 @@
 //   gh run download <run> -p 'e2e-results-*-of-*' -D runs/<run>
 //   vp run e2e:durations runs/*/*/e2e-results.json
 //
-// A test's time is its passing attempt's, in each browser it runs in.
+// A Chromium test's time is its passing attempt's: only Chromium's are split.
 // Several runs make it steadier: each test takes the median of the runs it
 // ran in. Tests the reports don't name keep the time they had. Rewrites
 // scripts/e2e-durations.json.
@@ -16,13 +16,19 @@ import { z } from "zod";
 import { e2eDurationsFile, testsIn } from "./e2e-parts.ts";
 import { byKey } from "./test-shards.ts";
 
+/** The project whose tests the parts split; the others run whole. */
+const splitProject = "[chromium] › ";
+
 /**
- * Seconds per test (`testsIn`'s key) in one report: its passing attempt,
- * or its last when none passed.
+ * Seconds per Chromium test (`testsIn`'s key) in one report: its passing
+ * attempt, or its last when none passed.
  */
 export const testSecondsIn = (json: string): Map<string, number> => {
   const tests = new Map<string, number>();
   for (const { key, results } of testsIn(json)) {
+    if (!key.startsWith(splitProject)) {
+      continue;
+    }
     const counted =
       results.find(({ status }) => status === "passed") ?? results.at(-1);
     if (counted !== undefined) {
