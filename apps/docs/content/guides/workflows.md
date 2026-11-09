@@ -123,26 +123,52 @@ An outside system, such as a payment provider or a shop, sends events into Grasp
 
 Grasp checks the signature, refuses a delivery more than five minutes old or larger than 64 KiB, and takes a retry with the same `webhook-id` as the same event. A provider that signs its webhooks its own way comes in through its connector instead.
 
-A workflow starts on a source's events from its Triggers tab: a webhook trigger names the source and the event type, and each such event's `data` is the run's input, checked against the workflow's input. It starts nothing until an admin allows it. App code never handles the request itself: a workflow started this way calls the App's mutations through its binding.
+A workflow starts on a source's events from its Triggers tab: a webhook trigger names the source and the event type, and each such event's `data` is the run's `args`, checked against the workflow's. It starts nothing until an admin allows it. App code never handles the request itself: a workflow started this way calls the App's mutations through its permission.
 
 ### Waiting for a webhook event
 
-A workflow can also wait for an event about its own run, such as the payment for the invoice it just sent. Its event binding's contract takes the event's type from a webhook source (`ingress: "webhook"`), and an admin names the source as they approve the binding. The wait says which event is the run's own with `match`: a field of the event's data, as a JSON Pointer, and the value it must have.
+A workflow can also wait for an event about its own run, such as the payment for the invoice it just sent. Its `events` permission's contract takes the event's type from a webhook source (`ingress: "webhook"`), and an admin names the source as they approve the permission. The wait says which event is the run's own with `match`: a field of the event's data, as a JSON Pointer, and the value it must have.
 
 ```json
 {
   "id": "paid",
-  "type": "wait",
-  "event": {
-    "from": "payments",
-    "type": "payment.paid",
-    "match": {
-      "field": "/invoice",
-      "equals": { "$expr": "steps.send.output.invoice" }
-    }
+  "type": "waitForEvent",
+  "events": "payments",
+  "eventType": "payment.paid",
+  "match": {
+    "field": "/invoice",
+    "equals": { "$expr": "send.invoice" }
   },
   "timeout": "5 days"
 }
 ```
 
-Grasp works the value out as the wait is reached, and hands the run only the event whose data has it. A source's events are kept for a day, so a run that starts waiting after its event came still gets it; each run whose wait matches an event gets it once. A wait on a source's type always names its `match`, so no run takes another's event. Approving the binding lets the workflow receive any event the source sends of the types its contract takes.
+Grasp works the value out as the wait is reached, and hands the run only the event whose data has it. A source's events are kept for a day, so a run that starts waiting after its event came still gets it; each run whose wait matches an event gets it once. A wait on a source's type always names its `match`, so no run takes another's event. Approving the permission lets the workflow receive any event the source sends of the types its contract takes.
+
+## What a workflow is made of
+
+A workflow is saved as JSON in the `grasp-workflow/2` format, which the canvas draws and the chat edits. It uses the same words as an App: the run's `args` and what it `returns` (with its `result`), its `params`, and the `permissions` it needs, by kind (`ai`, `connections`, `decisions`, `events`), each of which an admin approves. Its steps are `call` (a connection's action), `generate` (an answer from the workflow's model), `decide` (a person's decision), `waitForEvent`, `wait`, `forEach`, `if`, `try` and `raise`.
+
+A value a step passes may be an expression in JavaScript, `{ "$expr": "invoice.total > params.limit" }`. It reads the run's `args`, `params`, `state` and `run`, and each earlier step's result by the step's ID. Expressions only read: they can't reach an object's prototype (`constructor`, `prototype`, `__proto__`), use a computed name such as `lines[index]`, or call anything but the methods of strings, numbers and lists.
+
+From the JSON, Grasp generates the TypeScript that runs, which reads like an App's code:
+
+```text
+export default defineWorkflow({
+  args: v.object({ email: v.string(), total: v.number() }),
+  returns: v.object({ sent: v.boolean() }),
+  permissions: { connections: { mail: { send: "mail.send" } } },
+  handler: async (ctx, args) => {
+    if (args.total > 1000) {
+      throw new AppError("billing.too_large", "The invoice is over the limit.");
+    }
+    const send = await ctx.connections.mail.send(
+      { to: args.email, subject: "Your invoice" },
+      { step: "send" }
+    );
+    return { sent: send.sent };
+  },
+});
+```
+
+Each `ctx` call is a durable step: its result is recorded, and a run that picks up again after a failure gets it back rather than calling again. `{ step: "send" }` names the canvas step it belongs to. A step fails with an error that has a `code`, such as `connect.rate_limited`, a `message` and sometimes `details`; a `try` step's `catch` takes errors by `code`, and a `raise` step fails the run with an error of the workflow's own, in its own namespace (`billing.too_large`), never the platform's.
