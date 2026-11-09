@@ -331,8 +331,9 @@ const goesOn = (
   status.status !== "terminated";
 
 /**
- * The item of each loop around the step named `step`, outermost first, as
- * its decoded name scopes it (`<task>:task@<i>/<j>`): none outside a loop.
+ * Which run of its task the step named `step` is, as its name counts it
+ * (`<task>:task@<n>`, from its second run in a loop's items on): none
+ * for its first, or outside a loop.
  */
 const itemOf = (step: string): string => {
   const at = step.indexOf("@");

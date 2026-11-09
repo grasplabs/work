@@ -104,7 +104,8 @@ const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
 
 /**
  * The alias of the binding task step `step` (a step's name, as the run
- * host names it: `<id>:task`, in a loop's item `<id>:task%40<i>`) of run
+ * host names it: `<id>:task`, from its second run in a loop's items
+ * `<id>:task@<n>`) of run
  * `run` calls, as its sealed build has it: only a connector call's.
  */
 const heldAliasOf = async (

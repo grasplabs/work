@@ -1,15 +1,13 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { categoryOf, isRetryableCode } from "@grasp-os/shared/operations";
-import { errorTypeBase } from "@grasp-os/workflow-schema/format";
 import type { SealedTask } from "@grasp-os/workflow-schema/sealed";
 
 import type { StepError } from "./sealed-isolate.ts";
 
 // The failures of a JSON workflow's steps as its `try` tasks' catches see
-// them (spec 13.7): each an upstream error (its type, status, title,
-// detail and the task it came from as its instance), mapped once, here,
-// from what the host knows of the failure, never from what the isolate
-// threw. Threat model, and how each is closed:
+// them (spec 13.7): each an `AppError`-shaped failure, `{ code, message,
+// step }`, mapped once, here, from what the host knows of the failure,
+// never from what the isolate threw. Threat model, and how each is closed:
 //
 // - A catch swallowing what must stop the run. Only a failure of a step
 //   of the run's own tasks may be caught, and not every one: the host's
@@ -18,65 +16,50 @@ import type { StepError } from "./sealed-isolate.ts";
 //   unknown (its category `uncertain`, connect's `outcome_unknown`, and
 //   a call that runs its effect once, or a connector call, that ran out
 //   of time), and a step whose call took effect before it failed, are
-//   never `catchable`, so a run with them fails, whatever its catches
-//   say: an unknown effect is reconciled first, never taken as one that
-//   didn't happen. A wait, a pause or a cancellation isn't a failure at
-//   all: the engine never settles the call it suspends.
-// - A workflow passing its own error off as the host's. A `raise` raises
-//   only the literal error its build sealed, of a domain type: its check
-//   refuses the host's kinds and the statuses of authentication and
-//   authorization (@grasp-os/workflow-schema's check.ts, `checkRaise`), so an authorization error a
-//   catch sees is always the host's.
+//   never `catchable`: a run whose code goes on past one is refused
+//   (sealed-run.ts), whatever its catches say. A wait, a pause or a
+//   cancellation isn't a failure at all: the engine never settles the
+//   call it suspends.
+// - A workflow passing its own error off as the host's. A raise is the
+//   workflow's own `AppError`, thrown by its code, never a step's
+//   failure: `AppError` refuses a code in the platform's namespaces, the
+//   format's check refuses one, and the host fails a run with an
+//   `AppError` only of a code its build seals as a raise (sealed-run.ts,
+//   `raisedFailure`). So a failure of a platform code a catch sees is
+//   always the host's.
 // - A module relabelling a failure. What a step failed with is what the
 //   host answered one of its calls with (sealed-run.ts, `#hostFailures`),
 //   never what the isolate reports; a failure only the isolate reports is
 //   an expression's, a task's data's or the task's own runtime failure, in
 //   the platform's words (sealed-run.ts, `isolateFailure`).
-// - A caught error carrying what the run read. A host error's title is
-//   the platform's own words for its code, or a fixed one for its type;
-//   it has no detail. The message a step failed with (which can hold
-//   data) never reaches a catch.
+// - A caught error carrying what the run read. A host failure's message
+//   is the platform's own words for its code, or a fixed one; it has no
+//   details. The message a step failed with (which can hold data) never
+//   reaches a catch.
 
-/** Where the host's own error kinds are, as a catch's filter names them. */
-const standardTypes = errorTypeBase;
+/** The code of a task's own failure that names none. */
+const unexpectedCode = "internal.unexpected";
 
-/** The standard error types, each with its status, as upstream gives them. */
-const standard = {
-  configuration: 400,
-  validation: 400,
-  expression: 400,
-  authentication: 401,
-  authorization: 403,
-  timeout: 408,
-  communication: 500,
-  runtime: 500,
-} as const;
+/** The platform's words for a failure that has none of its own. */
+const taskFailed = "The task failed.";
 
-type StandardType = keyof typeof standard;
-
-/** A standard type's own title, for a failure with no words of the platform's. */
-const titles: Readonly<Record<StandardType, string>> = {
-  configuration: "The workflow is configured in a way the host can't run.",
-  validation: "A task's data didn't fit its contract.",
-  expression: "An expression failed.",
-  authentication: "The run's person isn't signed in.",
-  authorization: "The run isn't allowed to do that.",
-  timeout: "The task ran out of time.",
-  communication: "A call outside the platform failed.",
-  runtime: "The task failed.",
-};
-
-/** The code a `raise` task's step fails with. */
-export const raisedCode = "workflow.raised";
-
-/** An upstream error, as a catch's variable holds it. */
+/** A step's failure, as a catch's `error` holds it (the SDK's `CaughtError`). */
 export interface CaughtError {
-  readonly type: string;
-  readonly status: number;
-  readonly instance: string;
-  readonly title?: string;
-  readonly detail?: string;
+  readonly code: string;
+  readonly message: string;
+  /** The step that failed: its task's ID. */
+  readonly step: string;
 }
+
+/** The kinds of failure, as retrying reads them. */
+type StandardType =
+  | "authentication"
+  | "authorization"
+  | "communication"
+  | "expression"
+  | "runtime"
+  | "timeout"
+  | "validation";
 
 /** A step's failure as a catch sees it: an error, or nothing it may take. */
 export type Failure =
@@ -173,9 +156,10 @@ const typeOf = (error: StepError): StandardType => {
 };
 
 /**
- * The failure `error` of a step of `task` is to a catch: the error the
- * task's build sealed for a `raise`, a standard one for anything else the
- * host may let a catch take, nothing for what it may not (see above), nor
+ * The failure `error` of a step of `task` is to a catch: its code and the
+ * platform's words for it, for anything the host may let a catch take
+ * (a timeout as `function.deadline_exceeded`, a failure with no code as
+ * `internal.unexpected`), nothing for what it may not (see above), nor
  * for a step of no task (the workflow's own data flow), nor once the run
  * was refused (`tampered`).
  */
@@ -200,35 +184,15 @@ export const failureOf = (
   if (timedOut && task.kind === "call" && timesOutUnknown.has(task.call.name)) {
     return uncatchable;
   }
-  if (code === raisedCode) {
-    // Only a raise fails with it, as the host fails its step.
-    if (task.kind !== "raise") {
-      return uncatchable;
-    }
-    const { type, status, title, detail } = task.error;
-    return Object.freeze({
-      catchable: true,
-      code,
-      error: Object.freeze({
-        type,
-        status,
-        instance: task.pointer,
-        ...(title === undefined ? {} : { title }),
-        ...(detail === undefined ? {} : { detail }),
-      }),
-    });
-  }
-  const type = typeOf(error);
+  const caughtCode =
+    code ?? (timedOut ? "function.deadline_exceeded" : unexpectedCode);
   return Object.freeze({
     catchable: true,
     ...(code === undefined ? {} : { code }),
     error: Object.freeze({
-      type: `${standardTypes}${type}`,
-      status: standard[type],
-      instance: task.pointer,
-      title:
-        (code === undefined ? undefined : expectedMessageOf(code)) ??
-        titles[type],
+      code: caughtCode,
+      message: expectedMessageOf(caughtCode) ?? taskFailed,
+      step: task.id,
     }),
   });
 };
@@ -237,30 +201,20 @@ export const failureOf = (
 export const notCaught = (): Failure => uncatchable;
 
 /**
- * Whether `error` has every property `filter` names, exactly (a catch's
- * `errors.with`): no filter takes every error.
+ * Whether `error` has the code a catch takes (`SealedCatch.code`): a
+ * catch with none takes every error.
  */
 export const matchesFilter = (
   error: CaughtError,
-  filter: Readonly<Record<string, string | number | undefined>> | undefined
-): boolean => {
-  if (filter === undefined) {
-    return true;
-  }
-  const own = new Map<string, string | number | undefined>(
-    Object.entries(error)
-  );
-  return Object.entries(filter).every(
-    ([key, value]) => value === undefined || own.get(key) === value
-  );
-};
+  code: string | undefined
+): boolean => code === undefined || error.code === code;
 
-/** The standard types whose failures trying again may fix. */
-const transientTypes: ReadonlySet<string> = new Set(
-  (["timeout", "communication", "runtime"] as const).map(
-    (type) => `${standardTypes}${type}`
-  )
-);
+/** The kinds of failure trying again may fix. */
+const transientTypes: ReadonlySet<StandardType> = new Set([
+  "timeout",
+  "communication",
+  "runtime",
+]);
 
 /**
  * Failures trying again never fixes, however a retry policy reads (spec
@@ -293,15 +247,16 @@ const permanentCodes: ReadonlySet<string> = new Set([
  * that says nothing was sent. No policy overrides this.
  */
 export const retryable = (failure: Failure, task: SealedTask): boolean => {
-  if (!failure.catchable || !transientTypes.has(failure.error.type)) {
+  if (
+    !failure.catchable ||
+    !transientTypes.has(
+      typeOf({ name: "Error", message: "", code: failure.error.code })
+    )
+  ) {
     return false;
   }
   const { code } = failure;
-  if (
-    failure.error.status === 409 ||
-    code === raisedCode ||
-    (code !== undefined && permanentCodes.has(code))
-  ) {
+  if (code !== undefined && permanentCodes.has(code)) {
     return false;
   }
   // A call whose effect runs once runs again only after a failure that

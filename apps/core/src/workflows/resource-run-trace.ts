@@ -32,12 +32,13 @@ import type { SealedSteps } from "./sealed-steps.ts";
 // (platform specification 13.10): the tasks its journal reached, read from
 // the engine's own history (workerflow's `history`), never inferred from
 // the diagram, the run's status or its code. The run host (sealed-run.ts)
-// names a task's steps `<task>:<kind>`, a loop item's indices after `@`,
-// each placed by its build's table of tasks (sealed-steps.ts), and core
+// names a task's steps `<task>:<kind>`, from a task's second run in a
+// loop's items on its count after `@`, each placed by its build's table
+// of tasks (sealed-steps.ts), and core
 // adds steps of its own to a step of a task, by the step's key under its
 // prefix (`$grasp:wait:<key>:…`, host.ts), read here as part of that step:
 //
-// - a catch's retry of a failed step runs it again
+// - a try's retry of a failed step runs it again
 //   (`…:retry:<n>:run`), after a backoff sleep (`…:retry:<n>:wait`) it
 //   decided in a step of its own (`…:decide`): each round more attempts of
 //   the same step, waiting while it backs off, its state the latest
@@ -55,7 +56,7 @@ import type { SealedSteps } from "./sealed-steps.ts";
 //
 // Any other step adds nothing. A failure a catch took still shows as its
 // task's: it happened. Each step is shown too, in the order the run
-// reached it, with its loop item, attempts and times (GRA-513): a run's
+// reached it, with its run in a loop, attempts and times (GRA-513): a run's
 // step detail. Records are metadata: no value of the run's reaches the
 // trace, and a failure only by a code the platform defines. For the
 // workflow's builders, who read its definitions.

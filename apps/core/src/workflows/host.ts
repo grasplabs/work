@@ -1411,26 +1411,18 @@ export interface RunKind {
    */
   stepRecording?: (attempt: StepAttempt) => Promise<StepError | undefined>;
   /**
-   * The error `attempt`, of a catch step (`RunHost.caught`), offers its
-   * code to decide on, if its catch may take the failure pending; none
-   * when it may not, and its code isn't asked.
-   */
-  caughtOffer?: (attempt: StepAttempt) => Json | undefined;
-  /**
    * Hears how step `step`, one it let start (`stepRefusal`), ended, fresh
    * or replayed, as every activation reaches it, in order: what it
    * recorded, or what it failed with in the end, past its retries, as the
    * engine journaled it.
    */
-  stepEnded?: (
-    step: string,
-    outcome: Settled<unknown>,
-    /**
-     * For a failure, the catch its last retry decision said takes it (the
-     * `try` task's ID; null for none), if one decided.
-     */
-    takenBy?: string | null
-  ) => void;
+  stepEnded?: (step: string, outcome: Settled<unknown>) => void;
+  /**
+   * What step `step`'s code is answered with when it failed with `error`
+   * (a sealed run's: the failure's code and the platform's words for it,
+   * never what its message held); `error` itself without it.
+   */
+  failureForCode?: (step: string, error: StepError) => StepError;
   /**
    * The retry the host may run of step `step` after its round `round`
    * failed with `error`, under a catch's retry policy (sealed-run.ts);
@@ -1530,10 +1522,9 @@ export interface StepLimits {
 /**
  * How the host is asked to run a step: as the SDK's steps are
  * (`StepUse`), or as a sleep until the deadline its step recorded
- * (`sleepUntil`), a `try` task's catch (`caught`) or an event wait
- * (`listen`).
+ * (`sleepUntil`) or an event wait (`listen`).
  */
-export type HostStepUse = StepUse | "sleepUntil" | "caught" | "listen";
+export type HostStepUse = StepUse | "sleepUntil" | "listen";
 
 /** What a retry's decision step records (`RunHost.#retried`). */
 export interface RetryDecision {
@@ -2084,33 +2075,7 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Runs a `try` task's catch step of a sealed run: its code is handed the
-   * error its catch may take (`RunKind.caughtOffer`), and decides whether
-   * it does; it isn't asked when the catch may take nothing, and the step
-   * records that it took none. What the step records is the kind's to
-   * check (`RunKind.attemptSettled`), and what it answers, fresh or
-   * replayed, is what it recorded.
-   */
-  async caught(
-    name: unknown,
-    options: unknown,
-    fn: (attempt: AttemptHost, error: Json) => Promise<unknown>
-  ): Promise<Settled<unknown>> {
-    return await this.#doStep(
-      name,
-      options,
-      "caught",
-      async (host, attempt) => {
-        const offered = this.#kind.caughtOffer?.(attempt);
-        return offered === undefined
-          ? { ok: true, value: false }
-          : await fn(host, offered);
-      }
-    );
-  }
-
-  /**
-   * `do`'s work, and a catch's (`caught`), run as `use`: `call` is the
+   * `do`'s work, run as `use`: `call` is the
    * attempt's function in the isolate. A failure a catch's retry policy
    * may try again runs the step again in its place (`#retried`), each
    * round under steps of its own, its call under the same key.
@@ -2118,13 +2083,11 @@ export class RunHost extends RpcTarget {
   async #doStep(
     name: unknown,
     options: unknown,
-    use: "do" | "caught",
+    use: "do",
     call: (host: AttemptHost, attempt: StepAttempt) => Promise<unknown>,
     retry?: (error: Json) => Promise<unknown>
   ): Promise<Settled<unknown>> {
     let failed: StepError | undefined;
-    // The catch its last retry decision said takes the failure, if any.
-    let takenBy: string | null | undefined;
     let attempted = false;
     // Whether its kind let it start: only such a step's end is its to hear.
     let started = false;
@@ -2401,8 +2364,6 @@ export class RunHost extends RpcTarget {
             retry,
             stepDone: stepDone.promise,
           });
-          // This round's own decision, none if it had none.
-          takenBy = retried?.by;
           if (retried?.retry !== true) {
             throw error;
           }
@@ -2427,7 +2388,7 @@ export class RunHost extends RpcTarget {
           : journaledFailure(error);
       const reported = journaled ?? failed ?? forIsolate(error);
       if (started && journaled !== undefined) {
-        this.#kind.stepEnded?.(step, { ok: false, error: journaled }, takenBy);
+        this.#kind.stepEnded?.(step, { ok: false, error: journaled });
       }
       if (attempted) {
         this.#hooks.stepFailed({ step, input, error: reported });
@@ -2437,7 +2398,10 @@ export class RunHost extends RpcTarget {
           reported.code ?? "workflow.step_failed"
         );
       }
-      return { ok: false, error: reported };
+      return {
+        ok: false,
+        error: this.#kind.failureForCode?.(step, reported) ?? reported,
+      };
     } finally {
       stepDone.resolve(null);
     }

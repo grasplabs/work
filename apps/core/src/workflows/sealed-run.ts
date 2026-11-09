@@ -3,6 +3,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
+import { isAppErrorCode } from "@grasp-os/shared/function-limits";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
@@ -94,7 +95,6 @@ import {
   failureOf,
   matchesFilter,
   notCaught,
-  raisedCode,
   retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
@@ -102,6 +102,7 @@ import { inboxOf } from "./run-inboxes.ts";
 import { sealedMainModules } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
+import { engineStepOf } from "./sealed-steps.ts";
 
 // What a run of a sealed build of a generated JSON workflow may do on the
 // run host (host.ts, `RunHost`), with its workflow's resource authority:
@@ -125,40 +126,36 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   isolate can be loaded with exactly that build's modules
 //   (`sealedRunModules`, which takes only a run so loaded). A
 //   tampered build never runs (`workflow.version_corrupt`).
-// - A step the build doesn't have. Each engine step's name is one of the
-//   sealed table's (`stepTableOf`): `<task>:<step>` for a step of a task
-//   in no loop, `<task>:<step>@<i>/<j>…` inside items (`stepNameOf`), a
-//   decision task's parts as the SDK's `#ask`, `#asked` and `#answer`
-//   after either, `workflow:output` where the workflow has an output, and
-//   the SDK's `$params`. Any other name, one in another encoding of the
-//   same key included, or a step run otherwise than it runs (a task's
-//   step as a `do`, a sleeping task's own as its sleep, an event wait's
-//   own as its wait, a try's catch as a catch), beside another step, or
-//   again, is refused, and fails the run. A listen that isn't an event
-//   wait (`isEventWait`), and a task whose scope names anything but `for`
-//   tasks, have no steps in the table. The table holds only what the
-//   generator writes (@grasp-os/workflow-schema's sealed.ts): one that
-//   holds anything else doesn't load (workflow-builds.ts).
-// - A loop's item it never had, or out of its order. A loop's items run
-//   one after another. A task inside loops names its item's index in each
-//   loop its build seals around it, and nothing else: its loops are its
-//   task's.
-//   Each index must be of an item the loop's enter step recorded (at most
-//   the platform's 1,000 a collection, `workflow.collection_invalid`
-//   past them), in a loop the run is still in, and of the item running
-//   now; only the innermost may move on, to a later item only, by its
-//   item step where its loop seals one (its `while`) and never by a catch.
-//   An item passed over ran no step, its work all skipped: flow decided in
-//   the isolate, as an `if` is, every call still held to its template.
-//   A loop the run left (a step outside its items ran) runs no item more,
-//   and no step starts twice, so its enter step can't open it again: so
-//   items run in increasing order, none repeated, and a run's
-//   steps stay bounded by its tasks and its recorded items (and the run's
-//   own step ceiling). Stopping early is flow too. Each item's
-//   steps have names, effects' keys, deadlines and retries of their own,
-//   and a failure pending in an item holds every step but a catch back,
-//   taken only by a try around its task: one in its own item (the item
-//   running now) or around the loop, whose catch leaves the loop.
+// - A step the build doesn't have. The build's code is a handler whose
+//   every `ctx` call journals itself (@grasp-os/sdk's workflow-journal.ts)
+//   under its step's name: `<task>:<step>` (`enter` or `task`), from a
+//   task's second run on, which only a task inside a loop's items has,
+//   `<task>:<step>@<n>`, its count of earlier runs, a decision task's parts
+//   as `#ask`, `#asked` and `#answer` after its task step,
+//   `workflow:output` where the workflow returns a result, and the SDK's
+//   `$params`. Each must be one of the sealed table's (`stepTableOf`,
+//   `stepNameOf`), run as it runs (a task's step as a `do`, a sleeping
+//   task's own as its sleep, an event wait's own as its wait), never
+//   beside another step, never again. An `if`, a loop, a `try` and a raise
+//   have no steps: their flow is the code's, decided in the isolate from
+//   journaled values and the run's frozen data, as a replay decides it
+//   again alike (the format's expressions are pure: no clock, no
+//   randomness, no globals), every call still held to its template. A
+//   listen that isn't an event wait, and a task whose scope names
+//   anything but `for` tasks, have no steps in the table. The table holds
+//   only what the generator writes (@grasp-os/workflow-schema's
+//   sealed.ts): one that holds anything else doesn't load
+//   (workflow-builds.ts).
+// - A task run out of its order, or more often than its place allows. A
+//   task in no loop runs once: its names carry no count. A task inside a
+//   loop's items runs again only after its run before, each run once, its
+//   next run started only by its first step, every other step of it in
+//   the run running now (`#runRefusal`): so its runs go in increasing
+//   order, none repeated, and a run's steps stay bounded by its tasks and
+//   the run's own step ceiling (`workflow.too_many_steps`), which is what
+//   ends a long loop. Which items a loop goes over, and when it stops, is
+//   flow, as an `if` is. Each run of a task has names, effects' keys,
+//   deadlines and retries of its own.
 // - A call outside its task's step, or more than one. A call goes through
 //   the host of the attempt whose code makes it (attempt-host.ts), only
 //   while that attempt holds its lease and is the step running now, and
@@ -225,46 +222,49 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   calls are answered by its fixture (`fixtureCall`), tried once as a
 //   real call is; and `makeCall` refuses every call of it again.
 // - A catch taking what it mustn't (spec 13.7). The host keeps its own
-//   record of the failure no catch took yet (`#pending`), mapped by
-//   resource-errors.ts from what it knows. A failure the host made keeps
-//   its mapping: an attempt one of whose calls the host failed or refused
-//   fails with that, whatever its code reports, throws instead, or
-//   swallows, a function that rejects rather than reports included. One
-//   only the isolate reports is an expression's, a task's data's, or the
-//   task's own runtime failure, as the platform's unexpected one
-//   (`isolateFailure`): never one no catch may take, so never a host's
-//   relabelled. Each is decided on as the engine journaled it, so a
-//   replay decides alike (host.ts, `#doStep`). While one is pending, the only step
-//   that runs is a `try`'s catch (`RunHost.caught`): its code is offered
-//   the error only when that catch may take it (one a catch may take, of
-//   a task in its try's list, with every property of its sealed
-//   `errors.with`) and decides by its `when` (decision 2); saying it took
-//   what it wasn't offered, or that a catch with no conditions didn't
-//   take what it was, is tampering. The step journals the error it
-//   took, so a replay binds the same one. A run whose code goes on past a
-//   failure no catch took is refused at its next step, or, ending well,
-//   fails with that failure (`failureUntaken`, resource-runs.ts), as the
-//   build's code, which rethrows it, would have.
+//   record of the failure the code hasn't gone on past (`#pending`),
+//   mapped by resource-errors.ts from what it knows. A failure the host
+//   made keeps its mapping: an attempt one of whose calls the host failed
+//   or refused fails with that, whatever its code reports, throws
+//   instead, or swallows, a function that rejects rather than reports
+//   included. One only the isolate reports is an expression's, a task's
+//   data's, or the task's own runtime failure, as the platform's
+//   unexpected one (`isolateFailure`): never one no catch may take, so
+//   never a host's relabelled. Each is decided on as the engine journaled
+//   it, so a replay decides alike (host.ts, `#doStep`). The code's catches
+//   are its own JavaScript: what its code is answered with is the
+//   failure's code and the platform's words for it, never what its
+//   message held (`failureForCode`). The code goes on past a failure (its
+//   next step, or ending well) only where a `try` around the failed
+//   task's step may take it: one the host lets a catch take, of the code
+//   that `try`'s catch names, if it names one (`#takenPending`);
+//   anything else is refused, and fails the run with the failure.
+//   Whether that catch's `when` holds, and which of the steps it lists
+//   run, is flow, as an `if` is. A run whose code fails past a failure no
+//   catch may take fails with that failure (`runFailure`).
 // - A retry past its limits. The host runs a step's rounds (host.ts,
 //   `#retried`), only after a failure that may be tried again
-//   (`retryable`) of a task in the list of a try whose catch has a retry
-//   policy with rounds left. The isolate only chooses which catch takes
-//   the failure and whether its retry's `when` holds; the host holds that
-//   to a try around the task whose filter the error has, and computes the
-//   backoff and the limits itself, recorded (`retryDecided`): never past
-//   the innermost catch with no conditions, which takes the failure, nor
-//   without a retry of a policy with none.
-// - A raise forged or swallowed. A raise's step fails with the error its
-//   build sealed, by the host, unless its record says the task was
-//   skipped (its `if`, decision 2).
+//   (`retryable`) of a task in the list of the one `try` around it whose
+//   catch retries (the format's check allows one), whose code the failure
+//   has, and where no catch further in takes it first whatever the code
+//   says (`retryingTry`). The isolate only says whether that retry's
+//   `when` holds (a boolean); the host computes the backoff and the
+//   limits itself, recorded (`retryDecided`). Declining a retry only
+//   fails the step sooner.
+// - A raise forged. A raise is the workflow's own `AppError`, thrown by
+//   its code: the run fails with it only when its code is one a raise of
+//   the build seals, with that raise's sealed message (`raisedFailure`);
+//   an `AppError` of any other code fails the run as the platform's
+//   unexpected failure, and no code of the platform's namespaces is ever
+//   a raise's (the format's check, and `AppError` itself).
 // - Waking early, or a replay waiting otherwise. A literal wait sleeps
 //   exactly its sealed length; a deadline's wait until exactly the
 //   deadline its task's enter step recorded, at most a year ahead. The
-//   isolate computes that deadline as it does any expression (decision
-//   1), and leaving a wait out is flow, as an `if` is.
+//   isolate computes that deadline as it does any expression, and leaving
+//   a wait out is flow, as an `if` is.
 // - A decision asked of someone the binding doesn't allow, answered by
 //   anyone else, or taken otherwise than it was answered. A decision task
-//   (`grasp.decision`) runs as the SDK's `step.decision` does: its enter
+//   (`grasp.decision`) runs as the SDK's `ask` (`ctx.decisions.<alias>.ask`) does: its enter
 //   step records what it asks, its task step opens it, a step of its own
 //   asks its people, and a wait takes the answer.
 //   - The enter step's record is held to the build's templates as a
@@ -542,7 +542,7 @@ const isDecisionTask = (task: SealedTask | undefined): task is DecisionTask =>
   task?.kind === "call" && task.call.name === "grasp.decision";
 
 /**
- * The parts `step.decision` runs of a decision task's step besides its
+ * The parts the SDK's `ask` runs of a decision task's step besides its
  * opening: asking its people, noting when, and waiting for the answer.
  */
 const decisionParts = ["ask", "asked", "answer"] as const;
@@ -575,7 +575,7 @@ const isEventWait = (task: SealedTask | undefined): task is ListenTask =>
   task?.kind === "listen" && task.timeoutMs <= maxDeadlineMs;
 
 /**
- * The steps `build` seals, by `<task>:<kind>`, the item indices of their
+ * The steps `build` seals, by `<task>:<kind>`, the run counts of their
  * engine names left out (`stepNameOf`): the workflow's output, and every
  * task's, outside loops or inside them. A listen that isn't an event wait,
  * and a task whose scope names anything but loops, have no steps here, so
@@ -595,7 +595,7 @@ const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
       for (const kind of task.steps) {
         table.set(`${task.id}:${kind}`, { task, kind });
       }
-      // `step.decision`'s parts of a decision task's own step (the SDK's
+      // The SDK's `ask`'s parts of a decision task's own step (the SDK's
       // `#part`): its asking, when it asked, and its wait for the answer.
       if (isDecisionTask(task) && task.steps.includes("task")) {
         for (const part of decisionParts) {
@@ -608,85 +608,46 @@ const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
 };
 
 /**
- * A step's key, as generated code gives it: its kind, and inside loop
- * items `@` and the index of its item in each loop around it, outermost
- * first (`item@2/5`). The loops are its task's sealed `scope`, so the key
- * names only the indices.
- */
-const stepKeyPattern =
-  /^(?<kind>[a-z]+)(?:@(?<path>(?:0|[1-9]\d{0,3})(?:\/(?:0|[1-9]\d{0,3}))*))?$/u;
-
-/**
- * An engine step name, read: its name, its kind, its item indices, and
- * the SDK's part of a decision's step (`#ask`), if any.
+ * An engine step name, read: its task, its part, its run's count (from
+ * its second run on, `@<count>`), and the SDK's part of a decision's
+ * step (`#ask`), if any (sealed-steps.ts, `engineStepOf`).
  */
 interface StepName {
   readonly id: string;
   readonly kind: string;
-  readonly path: readonly number[];
+  readonly count: number;
   readonly part?: string;
 }
 
-/** A part of a step, as the SDK names it after its key (`#ask`). */
-const stepPartPattern = /^[\w-]+$/u;
-
-/**
- * Engine step `step` (`name:key`, its key URI-encoded, then `#part` for a
- * decision's parts, as the SDK names it) read as `stepKeyPattern` has
- * it; nothing for one that isn't in exactly that form, an encoding of the
- * same key otherwise included.
- */
+/** Engine step `step` read; nothing for one that isn't in exactly that form. */
 const stepNameOf = (step: string): StepName | undefined => {
-  const colon = step.indexOf(":");
-  if (colon <= 0) {
-    return undefined;
-  }
-  const id = step.slice(0, colon);
-  // An encoded key holds no `#`: the first is the part's.
-  const [encoded = "", part, ...more] = step.slice(colon + 1).split("#");
-  if (more.length > 0 || (part !== undefined && !stepPartPattern.test(part))) {
-    return undefined;
-  }
-  let key: string;
-  try {
-    key = decodeURIComponent(encoded);
-  } catch {
-    return undefined;
-  }
-  const groups = stepKeyPattern.exec(key)?.groups;
-  if (groups?.kind === undefined || encodeURIComponent(key) !== encoded) {
+  const named = engineStepOf(step);
+  if (named === undefined) {
     return undefined;
   }
   return {
-    id,
-    kind: groups.kind,
-    path: groups.path === undefined ? [] : groups.path.split("/").map(Number),
-    ...(part === undefined ? {} : { part }),
+    id: named.task,
+    kind: named.kind,
+    count: named.count,
+    ...(named.part === "" ? {} : { part: named.part.slice(1) }),
   };
 };
 
-/** A step of the sealed table, as run in the items `path` names. */
+/** A step of the sealed table, as run in the run of its task `path` names. */
 interface ResolvedStep extends SealedStep {
-  /** Its item's index in each loop around it, outermost first. */
+  /**
+   * Which run of its task it is, for a task inside a loop's items (`[n]`,
+   * from 0); none for any other, which runs once.
+   */
   readonly path: readonly number[];
-  /** The loops `path` indexes: an item step's own loop last. */
-  readonly loops: readonly string[];
 }
 
 /**
- * Where task `id` runs in items `path` of its loops: `id`, then
- * `@<indices>` inside items. One place per run of a task.
+ * Where task `id` runs in run `path` of it: `id`, then `@<n>` inside a
+ * loop's items. One place per run of a task.
  */
 const placeOf = (id: string, path: readonly number[]): string =>
   path.length === 0 ? id : `${id}@${path.join("/")}`;
-
-/** A loop whose items the run may still reach, by the place of its task. */
-interface OpenLoop {
-  /** How many items its enter step recorded. */
-  readonly count: number;
-  /** The item running now: -1 before its first. */
-  current: number;
-}
 
 /** What an event wait's enter step records, with a match: the value it matches. */
 const matchRecordSchema = z.strictObject({ key: z.json() });
@@ -696,11 +657,6 @@ const matchesBy = (
   task: SealedTask | undefined
 ): task is Extract<SealedTask, { kind: "listen" }> =>
   task?.kind === "listen" && task.listen.match !== undefined;
-
-/** What a loop's enter step records, when not skipped. */
-const itemsRecordSchema = z.object({
-  items: z.array(z.json()).max(platformLimits.workflowCollectionItems),
-});
 
 /** The sealed calls a task's step makes through a binding. */
 type BoundCall = Extract<
@@ -841,13 +797,10 @@ const sleepsUntil = (task: SealedTask): boolean =>
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
 const maxRetryDelayMs = sealedBuildLimits.deadlineMs;
 
-/** A task's step that records that its `if` skipped it. */
-const skippedSchema = z.strictObject({ skipped: z.literal(true) });
-
-/** What a deadline's enter step records, when not skipped. */
+/** What a deadline's enter step records. */
 const deadlineRecordSchema = z.object({ until: z.int().min(0) });
 
-/** What a decision task's enter step records, when not skipped. */
+/** What a decision task's enter step records. */
 const decisionRecordSchema = z.strictObject({
   recipients: z.json(),
   prompt: z.json(),
@@ -860,7 +813,7 @@ const openedSchema = z.strictObject({
   deadline: z.number(),
 });
 
-/** How the SDK opens a decision (`step.decision`). */
+/** How the SDK opens a decision (the SDK's `ask`). */
 const openingSchema = z.strictObject({
   step: z.string(),
   from: z.string(),
@@ -880,21 +833,6 @@ interface DecisionAsks {
   readonly prompt: string;
   readonly input: Json;
 }
-
-/** What a catch step journals (`RunHost.caught`): what it took, if any. */
-const caughtJournalSchema = z.union([
-  z.strictObject({ caught: z.literal(false) }),
-  z.strictObject({ caught: z.literal(true), error: z.json() }),
-]);
-
-/**
- * Which catch takes a failure, as a retry function chooses it: the `try`
- * task whose catch does (`by`), and whether its retry's `when` holds; or
- * none.
- */
-const retryChoiceSchema = z
-  .strictObject({ by: z.string(), retry: z.boolean() })
-  .nullable();
 
 /**
  * A sealed run's steps' engine retries, whatever its code declares: a
@@ -954,13 +892,31 @@ const failedAfterEffect: StepError = {
   code: "workflow.failed_after_effect",
 };
 
-/** What a raise task's step fails with: its sealed error, the workflow's own. */
-const raisedBy = (task: Extract<SealedTask, { kind: "raise" }>): StepError => ({
-  name: "Error",
-  message:
-    task.error.title ?? workflowResourceErrors.create(raisedCode).message,
-  code: raisedCode,
-});
+/**
+ * What a run whose code failed with `error` fails with, by what `build`
+ * seals as its raises: an `AppError` of a code one of its raises throws,
+ * with that raise's sealed message (never the isolate's words); nothing
+ * for any other code, which the run's own mapping takes
+ * (`SealedRun.runFailure`). So a workflow raises only what its build
+ * seals, and passes nothing off as the platform's: a raise's code is
+ * never in a platform namespace (the format's check, and `AppError`).
+ */
+const raisedFailure = (
+  build: LoadedBuild,
+  error: StepError
+): StepError | undefined => {
+  const raise = build.tasks.find(
+    (task): task is Extract<SealedTask, { kind: "raise" }> =>
+      task.kind === "raise" && task.error.code === error.code
+  );
+  return raise === undefined
+    ? undefined
+    : {
+        name: "AppError",
+        message: raise.error.message,
+        code: raise.error.code,
+      };
+};
 
 /**
  * Whether a catch or its retry policy decides with no condition of its
@@ -968,34 +924,6 @@ const raisedBy = (task: Extract<SealedTask, { kind: "raise" }>): StepError => ({
  */
 const unconditional = (conditions: { when?: number } | undefined): boolean =>
   conditions !== undefined && conditions.when === undefined;
-
-/**
- * Where among `tries` (innermost first) the innermost catch is that takes
- * `error` whatever its code says: its filter has it, and it has no
- * conditions; -1 for none.
- */
-const forcedOf = (
-  tries: readonly Extract<SealedTask, { kind: "try" }>[],
-  error: CaughtError
-): number =>
-  tries.findIndex(
-    (around) =>
-      matchesFilter(error, around.catch.errors) && unconditional(around.catch)
-  );
-
-/**
- * Whether `around`'s catch retries round `round` whatever its code says:
- * its policy has rounds left and no conditions.
- */
-const forcedRetry = (
-  around: Extract<SealedTask, { kind: "try" }> | undefined,
-  round: number
-): boolean => {
-  const policy = around?.catch.retry;
-  return (
-    policy !== undefined && round < policy.attempts && unconditional(policy)
-  );
-};
 
 /** The backoff before round `round + 1` of `policy`. */
 const backoffOf = (
@@ -1023,61 +951,56 @@ const scheduled = (
 };
 
 /**
- * What the isolate's retry `choice` of round `round`, of a task in the
- * lists of `tries` (innermost first), decides. It names the try whose
- * catch takes `error` (decision 2: its `when`), which must be one of
- * them whose filter `error` has, and none past the innermost such catch
- * with no conditions, which takes it whatever the isolate says; and
- * whether that catch's retry `when` holds, which a policy with no
- * conditions does. Anything else is tampering. It retries while the
- * policy has rounds left, after its backoff, and none past a year.
+ * The retry of a failure, `error`, of a task in the lists of `tries`
+ * (innermost first), after round `round`: the one try around it whose
+ * catch retries (the format's check allows one), when its code filter
+ * has the error and no catch further in takes it first whatever the
+ * code says (one whose filter has it, with no `when`); undefined when
+ * none retries it.
+ */
+export const retryingTry = (
+  tries: readonly Extract<SealedTask, { kind: "try" }>[],
+  error: CaughtError
+): Extract<SealedTask, { kind: "try" }> | undefined => {
+  const at = tries.findIndex((around) => around.catch.retry !== undefined);
+  const around = tries[at];
+  if (around === undefined || !matchesFilter(error, around.catch.code)) {
+    return undefined;
+  }
+  const takenFirst = tries
+    .slice(0, at)
+    .some(
+      (inner) =>
+        matchesFilter(error, inner.catch.code) && unconditional(inner.catch)
+    );
+  return takenFirst ? undefined : around;
+};
+
+/**
+ * What the isolate's retry `choice` of round `round` decides for
+ * `around`, the try whose catch retries the failure (`retryingTry`):
+ * whether its retry's `when` holds, a boolean (`undefined` when its code
+ * failed to choose: no retry). Anything else is tampering. It retries
+ * while the policy has rounds left, after its backoff, and none past a
+ * year. The isolate may decline a retry its policy has no `when` for:
+ * the step then fails sooner, as it would past its rounds.
  */
 export const retryDecided = (
-  tries: readonly Extract<SealedTask, { kind: "try" }>[],
-  error: CaughtError,
+  around: Extract<SealedTask, { kind: "try" }>,
   round: number,
   choice: unknown
 ): RetryDecision => {
-  const stop = { retry: false, delayMs: 0 };
-  const forced = forcedOf(tries, error);
+  const stop = { retry: false, delayMs: 0, by: around.id };
   if (choice === undefined) {
-    // Its code failed to choose (an expression of a `when` that failed):
-    // no retry, and no catch it named. (Where the build leaves it nothing
-    // to decide, the host decides alone: `RetryOffer.alone`.)
     return stop;
   }
-  const chosen = retryChoiceSchema.safeParse(choice);
-  if (!chosen.success) {
-    throw tampering("A retry's choice names a catch and whether it retries.");
-  }
-  const by = chosen.data?.by;
-  const at = tries.findIndex(({ id }) => id === by);
-  const around = tries[at];
-  if (chosen.data === null) {
-    if (forced !== -1) {
-      throw tampering(
-        `Task "${tries[forced]?.id ?? ""}"'s catch takes the failure.`
-      );
-    }
-    return { ...stop, by: null };
-  }
-  if (
-    around === undefined ||
-    !matchesFilter(error, around.catch.errors) ||
-    (forced !== -1 && at > forced)
-  ) {
-    throw tampering(`Task "${by ?? ""}"'s catch can't take the failure.`);
-  }
-  if (!chosen.data.retry && forcedRetry(around, round)) {
-    throw tampering(`Task "${around.id}"'s catch retries the failure.`);
+  if (typeof choice !== "boolean") {
+    throw tampering("A retry's choice is whether its retry holds.");
   }
   const policy = around.catch.retry;
-  return {
-    ...(chosen.data.retry && policy !== undefined && round < policy.attempts
-      ? scheduled(policy, round)
-      : stop),
-    by: around.id,
-  };
+  return choice && policy !== undefined && round < policy.attempts
+    ? { ...scheduled(policy, round), by: around.id }
+    : stop;
 };
 
 /**
@@ -1094,15 +1017,6 @@ const deadlineUnfit = (value: unknown): StepError | undefined => {
         })
       );
 };
-
-/**
- * What a loop's enter step whose record is `value` fails with, if it
- * records no items, or more than a run fans out over (1,000).
- */
-const itemsUnfit = (value: unknown): StepError | undefined =>
-  itemsRecordSchema.safeParse(value).success
-    ? undefined
-    : forIsolate(workflowResourceErrors.create("workflow.collection_invalid"));
 
 /**
  * Whether `value` is one the host records of a step: JSON within a step's
@@ -1390,21 +1304,17 @@ class SealedRun implements SealedRunKind {
   readonly #effected = new WeakSet<StepAttempt>();
   /** What each state step's accepted attempt keeps (`#stateChecked`). */
   readonly #keeps = new WeakMap<StepAttempt, Record<string, Json>>();
-  /** The error each catch step's attempt was offered (`caughtOffer`). */
-  readonly #offers = new WeakMap<StepAttempt, CaughtError>();
   /**
-   * The failure no catch took yet, fresh or replayed, as this activation
-   * reaches the steps (`stepEnded`): while there is one, only a catch
-   * step runs.
+   * The failure the code hasn't gone on past yet, fresh or replayed, as
+   * this activation reaches the steps (`stepEnded`): the code goes on
+   * past it only where a catch around its task may take it
+   * (`#takenPending`).
    */
   #pending: Failure | undefined;
   /** The pending failure as the engine journaled it (`failureUntaken`). */
   #pendingError: StepError | undefined;
-  /**
-   * The catch the pending failure's step's last retry decision said takes
-   * it (null for none), if one decided: no other catch is offered it.
-   */
-  #pendingBy: string | null | undefined;
+  /** The task whose step failed with the pending failure. */
+  #pendingTask: SealedTask | undefined;
   /**
    * Each sleeping task's deadline, as its enter step recorded it, by the
    * place it runs in (`placeOf`): each item of a loop has its own.
@@ -1424,15 +1334,12 @@ class SealedRun implements SealedRunKind {
     StepAttempt,
     { decision: string; deadline: number }
   >();
-  /** The `for` tasks, by ID. */
-  readonly #loopTasks: ReadonlyMap<string, ForTask>;
   /**
-   * The loops whose items the run may still reach, by the place of their
-   * task, as this activation reaches their enter steps: those around the
-   * step that ran last, and one just entered. Any other is over: none of
-   * its items runs again (`#loopRefusal`).
+   * The run of each task inside a loop's items running now, by its ID
+   * (`#runRefusal`): its steps carry it (`@<n>`), and only its first
+   * step starts the next, so its runs go in order, each once.
    */
-  readonly #loops = new Map<string, OpenLoop>();
+  readonly #runs = new Map<string, number>();
   /**
    * The steps this activation let start: none starts twice, so no loop
    * is entered again to run its items over.
@@ -1461,11 +1368,6 @@ class SealedRun implements SealedRunKind {
     this.#host = host;
     this.#memory = memory;
     this.#steps = stepTableOf(run.build);
-    this.#loopTasks = new Map(
-      run.build.tasks.flatMap((task) =>
-        isLoop(task) ? [[task.id, task] as const] : []
-      )
-    );
     this.run = run;
     this.audit = {
       actor: { type: "system" },
@@ -1503,7 +1405,53 @@ class SealedRun implements SealedRunKind {
    * code, which rethrows what no catch took, would have.
    */
   get failureUntaken(): StepError | undefined {
-    return this.#pending === undefined ? undefined : this.#pendingError;
+    return this.#pending === undefined || this.#takenPending()
+      ? undefined
+      : this.#pendingError;
+  }
+
+  /**
+   * What the run fails with when its code fails with `error`: the failure
+   * pending that no catch may take, as the engine journaled it (its code
+   * threw it on, or failed past it); an `AppError` of a code its build
+   * seals as a raise, as sealed (`raisedFailure`); any other `AppError`
+   * code, which only the workflow's own code throws, as the platform's
+   * unexpected failure (`isolateFailure`), so no raise its build doesn't
+   * seal ends a run; anything else (the SDK's own refusal of the run's
+   * args, say) as its code reported it.
+   */
+  runFailure(error: StepError): StepError {
+    const pending = this.#pendingError;
+    if (
+      pending !== undefined &&
+      this.#pending !== undefined &&
+      (!this.#takenPending() || error.code === pending.code)
+    ) {
+      return pending;
+    }
+    const raised = raisedFailure(this.run.build, error);
+    if (raised !== undefined) {
+      return raised;
+    }
+    return isAppErrorCode(error.code) ? isolateFailure(error) : error;
+  }
+
+  /**
+   * Whether a catch around the task whose step failed may take the
+   * failure pending: one the host lets a catch take (`failureOf`), of a
+   * task in the list of a `try` whose code filter it has. Which of them
+   * takes it, and whether its `when` holds, is the code's, as an `if`
+   * is: what runs after is held to the build all the same.
+   */
+  #takenPending(): boolean {
+    const pending = this.#pending;
+    const task = this.#pendingTask;
+    if (pending?.catchable !== true || task === undefined) {
+      return false;
+    }
+    return triesAround(this.run.build, task).some((around) =>
+      matchesFilter(pending.error, around.catch.code)
+    );
   }
 
   /**
@@ -1526,11 +1474,12 @@ class SealedRun implements SealedRunKind {
    * Refuses a step the sealed table doesn't have, or not as it runs: a
    * task's step as a `do`, but a sleeping task's own as its sleep (of
    * exactly its sealed length, or until exactly its recorded deadline),
-   * an event wait's own as its wait, and a try's catch as a catch; in an item its loops don't have, or out
-   * of their order (`#loopRefusal`). While a failure no catch took is
-   * pending, any step but a catch; while another step runs, any step; a
-   * step that started already, again. A step it lets start runs until it
-   * ends (`stepEnded`).
+   * and an event wait's own as its wait; a run of its task out of their
+   * order (`#runRefusal`). While a failure is pending, any step where no
+   * catch around its task may take it (`#takenPending`): the code goes
+   * on past a failure only where its build catches it. While another
+   * step runs, any step; a step that started already, again. A step it
+   * lets start runs until it ends (`stepEnded`).
    */
   stepRefusal(
     step: string,
@@ -1542,10 +1491,15 @@ class SealedRun implements SealedRunKind {
         `Step "${step}" starts only once step "${this.#running}" ended.`
       );
     }
-    if (this.#pending !== undefined && use !== "caught") {
-      return tampering(
-        "A run goes on past a failure only once a catch took it."
-      );
+    if (this.#pending !== undefined) {
+      if (!this.#takenPending()) {
+        return tampering(
+          "A run goes on past a failure only where a catch around its step takes it."
+        );
+      }
+      this.#pending = undefined;
+      this.#pendingError = undefined;
+      this.#pendingTask = undefined;
     }
     if (this.#started.has(step)) {
       return tampering(`Step "${step}" runs once.`);
@@ -1559,11 +1513,10 @@ class SealedRun implements SealedRunKind {
       if (sealed === undefined || !this.#runsAs(sealed, use, time)) {
         return tampering(`Step "${step}" isn't one the build seals.`);
       }
-      const refusal = this.#loopRefusal(sealed, use);
+      const refusal = this.#runRefusal(sealed);
       if (refusal !== undefined) {
         return tampering(refusal);
       }
-      this.#enterItems(sealed);
     }
     this.#started.add(step);
     this.#running = step;
@@ -1571,9 +1524,9 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
-   * Engine step `step` as the sealed table has it, in the items its name
-   * says: its task's sealed loops, one index for each (an item step's own
-   * loop last). Nothing for any other name.
+   * Engine step `step` as the sealed table has it, in the run of its task
+   * its name says: a count (`@<n>`) only of a task inside a loop's items.
+   * Nothing for any other name.
    */
   #stepOf(step: string): ResolvedStep | undefined {
     const name = stepNameOf(step);
@@ -1586,70 +1539,37 @@ class SealedRun implements SealedRunKind {
     if (name === undefined || sealed === undefined) {
       return undefined;
     }
-    const scope = sealed.task?.scope ?? [];
-    const loops =
-      sealed.kind === "item" && sealed.task !== undefined
-        ? [...scope, sealed.task.id]
-        : scope;
-    return loops.length === name.path.length
-      ? { ...sealed, path: name.path, loops }
-      : undefined;
+    const inLoop = (sealed.task?.scope.length ?? 0) > 0;
+    if (!inLoop && name.count > 0) {
+      return undefined;
+    }
+    return { ...sealed, path: inLoop ? [name.count] : [] };
   }
 
   /**
-   * Why `step` may not run in the items its path names, run as `use`; or
-   * nothing. Each item must be one its loop's enter step recorded, in a
-   * loop the run is still in (`#loops`), and the one running now; only at
-   * the innermost level may the step start a later item of that loop than
-   * the one running: its item step when the loop seals one, otherwise any
-   * step but a catch. An item between them ran no step (its work all
-   * skipped, or the code's choice, as an `if` is). So items run in
-   * increasing order, none again, none after the run left their loop, and
-   * an item step starts its item, once.
+   * Why `step` may not run in the run of its task its name says, or
+   * nothing: a task inside a loop's items runs again only after its run
+   * before, each run once, the next started only by its task's first
+   * step (`SealedTask.steps`), every other step of it in the run running
+   * now. So its runs go in increasing order, none repeated, and a run's
+   * steps stay bounded by its tasks and the run's own step ceiling.
    */
-  #loopRefusal(step: ResolvedStep, use: HostStepUse): string | undefined {
-    const { path, loops, kind } = step;
-    for (const [depth, index] of path.entries()) {
-      const id = loops[depth] ?? "";
-      const loop = this.#loops.get(placeOf(id, path.slice(0, depth)));
-      if (loop === undefined || index >= loop.count) {
-        return `Loop "${id}" has no item ${index} here.`;
-      }
-      const innermost = depth === path.length - 1;
-      const startsItem = innermost && kind === "item";
-      const next =
-        innermost &&
-        index > loop.current &&
-        use !== "caught" &&
-        (startsItem ||
-          this.#loopTasks.get(id)?.steps.includes("item") === false);
-      if (index === loop.current ? startsItem : !next) {
-        return `Item ${index} of loop "${id}" doesn't run now: its items run in increasing order, each once.`;
-      }
+  #runRefusal({ task, kind, path }: ResolvedStep): string | undefined {
+    const [count] = path;
+    if (task === undefined || count === undefined) {
+      return undefined;
     }
-    return undefined;
-  }
-
-  /**
-   * Notes that `step`, which `#loopRefusal` let run, runs in the items
-   * its path names: an item it names past the one running starts; any
-   * loop it runs in none of the items of is over.
-   */
-  #enterItems({ path, loops }: ResolvedStep): void {
-    const around = new Set<string>();
-    for (const [depth, index] of path.entries()) {
-      const place = placeOf(loops[depth] ?? "", path.slice(0, depth));
-      around.add(place);
-      const loop = this.#loops.get(place);
-      if (loop !== undefined) {
-        loop.current = index;
-      }
+    const current = this.#runs.get(task.id) ?? -1;
+    const [first] = task.steps;
+    if (count === current + 1 && kind === first) {
+      this.#runs.set(task.id, count);
+      return undefined;
     }
-    for (const place of this.#loops.keys()) {
-      if (!around.has(place)) {
-        this.#loops.delete(place);
-      }
-    }
+    // Another step of the run running now: a step started already is
+    // refused as such (`#started`).
+    return count === current
+      ? undefined
+      : `Run ${count} of task "${task.id}" doesn't run now: its runs go in increasing order, each once.`;
   }
 
   /** `stepRefusal`'s check of a step of the sealed table, `sealed`. */
@@ -1662,16 +1582,13 @@ class SealedRun implements SealedRunKind {
     const sleeps = kind === "task" && task !== undefined && sleepsOf(task);
     const listens = kind === "task" && isEventWait(task);
     if (use === "do") {
-      return kind !== "catch" && kind !== "answer" && !sleeps && !listens;
+      return kind !== "answer" && !sleeps && !listens;
     }
     if (use === "listen") {
       return listens;
     }
     if (use === "waitForDecision") {
       return kind === "answer";
-    }
-    if (use === "caught") {
-      return kind === "catch" && task?.kind === "try";
     }
     return (
       sleeps &&
@@ -1719,47 +1636,10 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
-   * The error a catch step's `attempt` offers its code: the failure
-   * pending, if its catch may take it (one a catch may take, of a task in
-   * its try's list, with every property of its `errors.with`).
-   */
-  caughtOffer(attempt: StepAttempt): Json | undefined {
-    const task = this.#stepOf(attempt.step)?.task;
-    const pending = this.#pending;
-    if (
-      task?.kind !== "try" ||
-      pending?.catchable !== true ||
-      !pending.error.instance.startsWith(`${task.pointer}/try/`) ||
-      !matchesFilter(pending.error, task.catch.errors)
-    ) {
-      return undefined;
-    }
-    // A catch further in with no conditions takes it, whatever the code
-    // asks of this one.
-    const { error } = pending;
-    const takenFurtherIn = this.run.build.tasks.some(
-      (inner) =>
-        inner.kind === "try" &&
-        inner.pointer.startsWith(`${task.pointer}/try/`) &&
-        error.instance.startsWith(`${inner.pointer}/try/`) &&
-        matchesFilter(error, inner.catch.errors) &&
-        unconditional(inner.catch)
-    );
-    // Its retry's decision said which catch takes it: no other.
-    const decided = this.#pendingBy;
-    if (takenFurtherIn || (decided !== undefined && decided !== task.id)) {
-      return undefined;
-    }
-    this.#offers.set(attempt, pending.error);
-    return { ...pending.error };
-  }
-
-  /**
    * What `attempt` settled with, as the host takes it: the failure the
    * host made of its calls, if any; a failure only its code reports, as
-   * `isolateFailure` maps it; a catch's answer as what it journals; a
-   * raise not skipped as its sealed error; a deadline's enter step only
-   * with a deadline at most a year ahead.
+   * `isolateFailure` maps it; a deadline's enter step only with a
+   * deadline at most a year ahead.
    */
   async attemptSettled(
     attempt: StepAttempt,
@@ -1786,10 +1666,9 @@ class SealedRun implements SealedRunKind {
   /**
    * A failure only `attempt`'s code reports, `error` (or its cut-off past
    * its CPU time), as the host takes it: once a call of it took effect,
-   * `workflow.failed_after_effect`,
-   * which no catch takes, as a catch would take it as a call that didn't;
-   * of a raise's step, its sealed error, unless its `if` failed as an
-   * expression; otherwise as `isolateFailure` maps it.
+   * `workflow.failed_after_effect`, which no catch takes, as a catch
+   * would take it as a call that didn't; otherwise as `isolateFailure`
+   * maps it.
    */
   #reportedFailure(
     attempt: StepAttempt,
@@ -1800,52 +1679,7 @@ class SealedRun implements SealedRunKind {
     if (this.#effected.has(attempt)) {
       return failedAfterEffect;
     }
-    const reported = cut ? error : isolateFailure(error);
-    const { task, kind } = this.#stepOf(attempt.step) ?? {};
-    return kind === "task" &&
-      task?.kind === "raise" &&
-      expressionErrors.codeOf(reported) === undefined
-      ? raisedBy(task)
-      : reported;
-  }
-
-  /**
-   * A catch step's answer, `value`: whether its catch takes the error it
-   * was offered, as what it journals. Taking what it wasn't offered, or
-   * leaving what a catch with no conditions was offered, is tampering.
-   */
-  async #caughtChecked(
-    attempt: StepAttempt,
-    task: SealedTask | undefined,
-    value: unknown
-  ): Promise<Settled<unknown>> {
-    const offered = this.#offers.get(attempt);
-    if (typeof value !== "boolean" || (value && offered === undefined)) {
-      return await this.#refused(
-        attempt,
-        "A catch takes only the error it was offered."
-      );
-    }
-    // A catch with no conditions takes what it is offered: there is
-    // nothing for its code to decide (decision 2).
-    if (
-      !value &&
-      offered !== undefined &&
-      task?.kind === "try" &&
-      unconditional(task.catch)
-    ) {
-      return await this.#refused(
-        attempt,
-        "A catch with no conditions takes the error it was offered."
-      );
-    }
-    return {
-      ok: true,
-      value:
-        value && offered !== undefined
-          ? { caught: true, error: offered }
-          : { caught: false },
-    };
+    return cut ? error : isolateFailure(error);
   }
 
   /** `attemptSettled`'s checks of what `attempt`'s step records, `value`. */
@@ -1859,38 +1693,25 @@ class SealedRun implements SealedRunKind {
       return { ok: false, error: failedAfterEffect };
     }
     const { task, kind } = this.#stepOf(attempt.step) ?? {};
-    if (kind === "catch") {
-      return await this.#caughtChecked(attempt, task, value);
-    }
-    const skipped = skippedSchema.safeParse(value).success;
     if (isDecisionTask(task)) {
-      return await this.#decisionRecordChecked(
-        attempt,
-        task,
-        kind === "enter" && skipped ? undefined : kind,
-        value
-      );
+      return await this.#decisionRecordChecked(attempt, task, kind, value);
     }
-    if (kind === "task" && task?.kind === "raise" && !skipped) {
-      return { ok: false, error: raisedBy(task) };
-    }
-    if (kind === "enter" && task !== undefined && !skipped) {
+    if (kind === "enter" && task !== undefined) {
       const entered = await this.#enterChecked(attempt, task, value);
       if (entered !== undefined) {
         return entered;
       }
     }
-    const keeps = skipped ? undefined : keepsOf(task, kind);
+    const keeps = keepsOf(task, kind);
     return keeps === undefined
       ? { ok: true, value }
       : await this.#stateChecked(attempt, keeps, value);
   }
 
   /**
-   * What an enter step of `task` that its `if` didn't skip records,
-   * `value`, settles as, when its task holds it to anything: a deadline's
-   * (`deadlineUnfit`), a loop's items (`itemsUnfit`), an event wait's
-   * match (`#matchKeyChecked`).
+   * What an enter step of `task` records, `value`, settles as, when its
+   * task holds it to anything: a deadline's (`deadlineUnfit`), an event
+   * wait's match (`#matchKeyChecked`).
    */
   async #enterChecked(
     attempt: StepAttempt,
@@ -1900,12 +1721,7 @@ class SealedRun implements SealedRunKind {
     if (matchesBy(task)) {
       return await this.#matchKeyChecked(attempt, task, value);
     }
-    let unfit: StepError | undefined;
-    if (sleepsUntil(task)) {
-      unfit = deadlineUnfit(value);
-    } else if (task.kind === "for") {
-      unfit = itemsUnfit(value);
-    }
+    const unfit = sleepsUntil(task) ? deadlineUnfit(value) : undefined;
     return unfit === undefined ? undefined : { ok: false, error: unfit };
   }
 
@@ -2095,8 +1911,7 @@ class SealedRun implements SealedRunKind {
 
   /**
    * `#recordChecked`'s checks of what a step of kind `kind` of decision
-   * task `task` records, `value` (no kind for an enter step its `if`
-   * skipped): its enter step's (`#decisionEntered`), and its task step's,
+   * task `task` records, `value`: its enter step's (`#decisionEntered`), and its task step's,
    * exactly the decision the host opened in that attempt.
    */
   async #decisionRecordChecked(
@@ -2159,7 +1974,7 @@ class SealedRun implements SealedRunKind {
     try {
       const { recipients } = record.data;
       recipientsOf(recipients);
-      // As deciders already, so its code's `from` (`step.decision`, a
+      // As deciders already, so its code's `from` (the SDK's `ask`, a
       // person value) can be the first of them exactly. One named twice
       // is asked once (`recipientsOf`), the first still first.
       const named: readonly Json[] = Array.isArray(recipients)
@@ -2176,42 +1991,31 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
-   * Notes how step `step` ended, fresh or replayed: a catch that took the
-   * failure pending ends it; a deadline's enter step's deadline is kept
-   * for its sleep; a loop's enter step's items open its loop (`#loops`);
-   * a failure, past its retries, is pending, as a catch
-   * would see it (a catch step's own, or one of no task's, none may take).
+   * Notes how step `step` ended, fresh or replayed: a deadline's enter
+   * step's deadline is kept for its sleep, an event wait's match for its
+   * wait, a decision's asks and opening for its parts; a failure, past
+   * its retries, is pending, as a catch would see it (one of no task's,
+   * or an event wait's, none may take), until the code goes on past it
+   * (`stepRefusal`) or ends (`failureUntaken`, `runFailure`).
    */
-  stepEnded(
-    step: string,
-    outcome: Settled<unknown>,
-    takenBy?: string | null
-  ): void {
+  stepEnded(step: string, outcome: Settled<unknown>): void {
     if (this.#running === step) {
       this.#running = undefined;
     }
     const sealed = this.#stepOf(step);
     const task = sealed?.task;
     if (!outcome.ok) {
-      this.#pendingBy = takenBy;
       this.#pendingError = outcome.error;
+      this.#pendingTask = task;
       // An event wait's failure is the host's refusal of the wait (its
       // binding's authority, its person, a test run's limit), asked again
       // on every replay and never journaled before it: a catch taking it
       // would let a replay after a revocation take a path the run never
       // took, so none does.
       this.#pending =
-        task === undefined ||
-        sealed?.kind === "catch" ||
-        (sealed?.kind === "task" && isEventWait(task))
+        task === undefined || (sealed?.kind === "task" && isEventWait(task))
           ? notCaught()
           : failureOf(outcome.error, task, false);
-      return;
-    }
-    if (sealed?.kind === "catch") {
-      if (caughtJournalSchema.parse(outcome.value).caught) {
-        this.#pending = undefined;
-      }
       return;
     }
     if (sealed?.kind === undefined || task === undefined) {
@@ -2228,19 +2032,39 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
+   * The failure step `step` answers its code with: what a catch reads of
+   * it (`failureOf`: its code and the platform's words, never what the
+   * step's own message held), or, for one no catch may take, its code and
+   * the platform's words alone. So nothing a failure's message quoted
+   * reaches the code, which a catch would hand on.
+   */
+  failureForCode(step: string, error: StepError): StepError {
+    const task = this.#stepOf(step)?.task;
+    const failure =
+      task === undefined ? notCaught() : failureOf(error, task, false);
+    if (failure.catchable) {
+      return {
+        name: error.name,
+        message: failure.error.message,
+        code: failure.error.code,
+      };
+    }
+    return {
+      name: error.name,
+      message: expectedMessageOf(error.code ?? "") ?? taskFailed,
+      ...(error.code === undefined ? {} : { code: error.code }),
+    };
+  }
+
+  /**
    * Keeps what task `task`'s enter step at `place` recorded, `value`: a
-   * deadline's, for its sleep; a loop's items, which open its loop.
+   * deadline's, for its sleep; an event wait's match, for its wait.
    */
   #entered(task: SealedTask, place: string, value: unknown): void {
     if (sleepsUntil(task)) {
       const until = deadlineRecordSchema.safeParse(value).data?.until;
       if (until !== undefined) {
         this.#deadlines.set(place, until);
-      }
-    } else if (task.kind === "for") {
-      const items = itemsRecordSchema.safeParse(value).data?.items;
-      if (items !== undefined) {
-        this.#loops.set(place, { count: items.length, current: -1 });
       }
     } else if (task.kind === "listen" && task.listen.match !== undefined) {
       const key = matchRecordSchema.safeParse(value).data?.key;
@@ -2450,10 +2274,9 @@ class SealedRun implements SealedRunKind {
   /**
    * The retry the host may run of step `step` after round `round` failed
    * with `error`: one that may be tried again (`retryable`), of a task in
-   * the list of a try whose catch may take it (its filter has it, and it
-   * is no further out than the innermost with no conditions) and retries
-   * with rounds left. Decided alone, without asking the code, when the
-   * first catch to take it has no conditions, nor has its policy.
+   * the list of the try whose catch retries it (`retryingTry`), with
+   * rounds left. Its code says whether its retry's `when` holds (`retry:
+   * true` where it has none); the host holds that to the policy.
    */
   retryOffer(
     step: string,
@@ -2462,43 +2285,31 @@ class SealedRun implements SealedRunKind {
   ): RetryOffer | undefined {
     const sealed = this.#stepOf(step);
     const task = sealed?.task;
-    if (task === undefined || sealed?.kind === "catch") {
+    // Only a call's own step, which the SDK runs with the call's `retry`:
+    // a decision's, a wait's and a deadline's steps are retried by the
+    // engine alone.
+    if (
+      task === undefined ||
+      sealed?.kind !== "task" ||
+      task.kind !== "call" ||
+      callTemplateOf(task.call) === undefined
+    ) {
       return undefined;
     }
     const failure = failureOf(error, task, false);
     if (!failure.catchable || !retryable(failure, task)) {
       return undefined;
     }
-    const tries = triesAround(this.run.build, task);
-    const forced = forcedOf(tries, failure.error);
-    // The catches that may take it: their filters have it, and none past
-    // the innermost with no conditions, which takes it whatever the code.
-    const takers = (forced === -1 ? tries : tries.slice(0, forced + 1)).filter(
-      (around) => matchesFilter(failure.error, around.catch.errors)
+    const around = retryingTry(
+      triesAround(this.run.build, task),
+      failure.error
     );
-    if (!takers.some((around) => round < (around.catch.retry?.attempts ?? 0))) {
+    if (around === undefined || round >= (around.catch.retry?.attempts ?? 0)) {
       return undefined;
     }
-    const [first] = takers;
-    // The first to take it has no conditions, nor has its policy (an
-    // offer means it has one, with rounds left): nothing for the code to
-    // decide.
-    const fixed =
-      first !== undefined &&
-      unconditional(first.catch) &&
-      unconditional(first.catch.retry);
     return {
       error: { ...failure.error },
-      decided: (choice) => retryDecided(tries, failure.error, round, choice),
-      ...(fixed
-        ? {
-            alone: () =>
-              retryDecided(tries, failure.error, round, {
-                by: first.id,
-                retry: forcedRetry(first, round),
-              }),
-          }
-        : {}),
+      decided: (choice) => retryDecided(around, round, choice),
     };
   }
 
@@ -2506,7 +2317,7 @@ class SealedRun implements SealedRunKind {
   async #refused(
     attempt: StepAttempt,
     message: string,
-    call = "caught"
+    call = "record"
   ): Promise<Settled<never>> {
     return await settle(
       async () => await this.#host.refuseIn(attempt, tampering(message), call)
@@ -2589,7 +2400,7 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
-   * Opens the decision of decision task step `attempt`, as `step.decision`
+   * Opens the decision of decision task step `attempt`, as the SDK's `ask`
    * asks (`request`), from what its enter step recorded alone
    * (`openRunDecision`): its recipients the binding covers, never the
    * run's person, its deadline the sealed timeout's. Its code's `from`
@@ -3157,8 +2968,13 @@ export const sealedRun =
 
 /** A sealed run's kind, and what its run's end checks of it. */
 export interface SealedRunKind extends RunKind {
-  /** The failure no catch took, if one is pending (`SealedRun`). */
+  /**
+   * The failure no catch may take, if one is pending as the run's code
+   * ends well (`SealedRun`).
+   */
   readonly failureUntaken: StepError | undefined;
+  /** What the run fails with when its code fails with `error` (`SealedRun`). */
+  runFailure: (error: StepError) => StepError;
 }
 
 /**

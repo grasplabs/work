@@ -1005,9 +1005,9 @@ export interface SealedActivation {
  * isolate of its own, on the run host as a sealed run (sealed-run.ts),
  * whose sent calls and model calls its object keeps across activations
  * (run-object.ts). It fails with the refusal that caught its isolate
- * tampering; with the failure no catch took, should its code end well
- * past one (`SealedRunKind.failureUntaken`), as the build's code, which
- * rethrows it, ends; or as its code failed. Its end is the engine's,
+ * tampering; with the failure no catch may take, should its code end
+ * well past one (`SealedRunKind.failureUntaken`); or as its code failed,
+ * a raise only as its build seals it (`SealedRunKind.runFailure`). Its end is the engine's,
  * recorded and audited as any run's (`projectResourceRun`). Answers the
  * run's output, once it matches its version's output schema.
  */
@@ -1093,11 +1093,15 @@ export const sealedActivation = async (
   // longer read what it recalled, a tampered run's checked first: the
   // refusal can hold what the run said.
   const evidenceRefused = await evidenceRefusal(env, run.calling);
+  // Its code's own failure as the build may fail it: a raise it seals, a
+  // failure no catch took, else the platform's (`SealedRunKind.runFailure`).
+  const codeFailed =
+    result.ok || kind === undefined ? undefined : kind.runFailure(result.error);
   const failed =
     evidenceRefused ??
     tampered ??
     untaken ??
-    (result.ok ? undefined : result.error);
+    (result.ok ? undefined : (codeFailed ?? result.error));
   if (failed !== undefined) {
     throw namedError(failed.name, failed.message, failed.code);
   }
