@@ -69,11 +69,12 @@ jobs:
           # history's took most of this job's 9 s checkout.
           fetch-depth: 0
           filter: blob:none
-      # Saves node_modules when their cache missed (a changed lockfile), for
-      # this pull request's next run. No test here reads pnpm's store.
+      # Saves what its setup missed (a changed lockfile, a new Vite+), for
+      # this branch's next run: static runs on every event but a push, where
+      # release saves. No test here reads pnpm's store.
       - uses: ./.github/actions/setup
         with:
-          save: ${{ github.event_name == 'pull_request' }}
+          save: true
           store: false
       - run: vp check
       - run: vp run check:secrets
