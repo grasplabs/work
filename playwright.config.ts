@@ -51,10 +51,11 @@ export const journeyTests = /journey\.e2e\.ts$/u;
 const adminTests = /\/e2e\/admin\//u;
 const ci = process.env.CI === "true";
 /**
- * Whether the stack's code is built already (`GRASP_E2E_PREBUILT=true`):
- * CI builds it once, in a job of its own, for every part's stack
- * (`vp run --filter @grasp-os/core dev:build`), so a part only starts it.
- * Locally it builds each time, as the checkout changes between runs.
+ * Whether the stack's code and its migrated empty state are built already
+ * (`GRASP_E2E_PREBUILT=true`): CI builds them once, in a job of its own,
+ * for every part's stack (`vp run e2e:build`, e2e/build.ts), so a part
+ * only starts it. Locally it builds each time, as the checkout changes
+ * between runs.
  */
 const prebuilt = process.env.GRASP_E2E_PREBUILT === "true";
 
@@ -196,9 +197,15 @@ export default defineConfig({
         // Connect's config, which sends the AI providers' requests to the
         // fake ones below (e2e/connect-config.ts).
         "node e2e/connect-config.ts &&",
+        // Prebuilt, the state is the migrated empty one e2e/build.ts made.
         // The dir comes from `env` below, so no path is ever shell syntax.
-        'rm -rf "$DEV_PERSIST_TO" &&',
-        `vp run --filter @grasp-os/core ${prebuilt ? "dev:serve" : "dev"} --local --port ${corePort} --inspector-port ${coreInspectorPort}`,
+        ...(prebuilt
+          ? ["vp run --filter @grasp-os/core dev:start"]
+          : [
+              'rm -rf "$DEV_PERSIST_TO" &&',
+              "vp run --filter @grasp-os/core dev",
+            ]),
+        `--local --port ${corePort} --inspector-port ${coreInspectorPort}`,
         devVar("BETTER_AUTH_SECRET", testAuthSecret),
         ...Object.entries(localSignIn(origin, idpOrigin)).map(([name, value]) =>
           devVar(

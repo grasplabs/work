@@ -12,6 +12,7 @@
     "seed:onboarding": "node scripts/seed-onboarding.ts",
     "e2e": "playwright test",
     "e2e:admin": "playwright test -c playwright.admin.config.ts",
+    "e2e:build": "node e2e/build.ts",
     "smoke:workerd": "node scripts/workerd-smoke.ts",
     "smoke:code-mode": "node scripts/workerd-code-mode.ts",
     "check:docs": "node scripts/check-docs.ts",

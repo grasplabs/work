@@ -101,6 +101,22 @@ const report = (
     })),
   });
 
+describe("keeping a serial file's tests together", () => {
+  it("puts a file whose tests run one after another in one part", () => {
+    const serial = new Set(["notes-app.e2e.ts"]);
+    const parts = Array.from({ length: 3 }, (_, index) =>
+      partOf(tests, durations, index + 1, 3, serial)
+    );
+
+    expect(
+      parts.filter((keys) => keys.some((key) => key.includes("notes-app")))
+    ).toHaveLength(1);
+    expect(parts.flat().toSorted()).toStrictEqual(
+      tests.map(({ key }) => key).toSorted()
+    );
+  });
+});
+
 describe("reading Playwright's tests", () => {
   it("names each test as a test list does: project, file, describe blocks and title", () => {
     expect(
