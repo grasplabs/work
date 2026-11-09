@@ -462,7 +462,7 @@ describe("generating a workflow", () => {
     const { source } = generated(everyStep());
     expect(
       [
-        "const guardedRetries = (error) => Boolean(error.details);",
+        "const guardedRetries = (error: CaughtError) => Boolean(error.details);",
         '{ step: "fetch", retry: guardedRetries }',
         "const error = caughtError(thrown);",
         'if (!(error.code === "connect.unavailable" && (error.message !== "final"))) throw thrown;',
@@ -504,7 +504,9 @@ describe("generating a workflow", () => {
     );
     const lines = source.split("\n");
     const declared = lines.findIndex((line) =>
-      line.includes("const pageRetries = (error) => Boolean(item.open);")
+      line.includes(
+        "const pageRetries = (error: CaughtError) => Boolean(item.open);"
+      )
     );
     const inner = lines.findIndex((line) =>
       line.includes("for (const item of $rowsLoop)")

@@ -982,9 +982,10 @@ class Generator {
     }
     this.#guarded(step, depth, (at) => {
       if (retryWhen !== undefined) {
+        this.#imports.add("type CaughtError");
         this.#line(
           at,
-          `const ${retriesOf(step.id)} = (error) => Boolean(${bare(retryWhen)});`
+          `const ${retriesOf(step.id)} = (error: CaughtError) => Boolean(${bare(retryWhen)});`
         );
       }
       this.#line(at, "try {");
