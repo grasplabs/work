@@ -361,7 +361,7 @@ describe("a person starting a workflow", () => {
       other: await outcome(
         startWorkflow(env, personOf(ada), workflow.id, {
           ...first,
-          input: { who: "Grace" },
+          args: { who: "Grace" },
         })
       ),
     }).toStrictEqual({ again: started, other: "workflow.start_conflict" });

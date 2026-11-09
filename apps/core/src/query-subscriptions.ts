@@ -513,9 +513,9 @@ const listKeyOf = (
   let call: unknown = request;
   try {
     const parsed: unknown = JSON.parse(request);
-    if (isRecord(parsed) && isRecord(parsed.input)) {
-      const { pagination: _pagination, ...input } = parsed.input;
-      call = { ...parsed, input };
+    if (isRecord(parsed) && isRecord(parsed.args)) {
+      const { pagination: _pagination, ...args } = parsed.args;
+      call = { ...parsed, args };
     }
   } catch {
     // Keyed by its text, as `keyOf` keys it.

@@ -172,10 +172,7 @@ describe("connector events", () => {
     const events = await allEvents();
 
     expect({
-      runs: runs.map(({ status, result: output }) => ({
-        status,
-        result: output,
-      })),
+      runs: runs.map(({ status, result }) => ({ status, output: result })),
       reads: events
         .filter(
           ({ action, target }) =>

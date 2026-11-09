@@ -135,13 +135,13 @@ const endedReading = async (by: Person, tasks: unknown[] | (() => string)) => {
 /** What a read of a run says of its details. */
 const detailsOf = ({
   status,
-  output,
+  result,
   error,
 }: {
   status: string;
-  output?: unknown;
+  result?: unknown;
   error?: { code: string | null; message: string };
-}) => ({ status, output, error });
+}) => ({ status, output: result, error });
 
 /** What a reviewer may answer with: a comment, or nothing. */
 const response = v.union(v.null(), v.object({ comment: v.string() }));

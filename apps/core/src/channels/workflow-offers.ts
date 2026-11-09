@@ -88,7 +88,7 @@ export const shownValues = (
         label,
         value: shownValue(value),
       }))
-    : [{ label: "input", value: shownValue(input) }];
+    : [{ label: "args", value: shownValue(input) }];
 
 /**
  * Offers workflow `workflowId` with `input` to the person the chat's

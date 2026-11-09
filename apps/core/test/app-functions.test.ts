@@ -1483,7 +1483,7 @@ describe("a request", { timeout: 120_000 }, () => {
   it.each([
     ["isn't text", { reference: {} }],
     ["isn't JSON", "{"],
-    ["lacks its reference", JSON.stringify({ input: {} })],
+    ["lacks its reference", JSON.stringify({ args: {} })],
     [
       "has a key no request has",
       JSON.stringify({ reference: {}, args: {}, principal: "someone" }),

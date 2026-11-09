@@ -97,7 +97,7 @@ const started = async (
   );
 
 describe("starting an independent workflow by hand", () => {
-  it("gives anyone with a role the version a start runs and the exact schema of its input, which the start takes", async () => {
+  it("gives anyone with a role the version a start runs and the exact schema of its args, which the start takes", async () => {
     const { ada, uma, workflow } = await greetingWorkflow();
 
     const [byBuilder, byUser] = await Promise.all([
@@ -128,7 +128,7 @@ describe("starting an independent workflow by hand", () => {
       byBuilder: byUser,
       byUser: {
         version: 1,
-        input: {
+        args: {
           type: "object",
           properties: {
             who: { type: "string" },
@@ -255,7 +255,7 @@ describe("starting an independent workflow by hand", () => {
     }).toStrictEqual({
       live: { version: 1, fields: ["times", "who"] },
       starts: "ok",
-      unpublished: { version: null, input: null, people: null },
+      unpublished: { version: null, args: null, people: null },
     });
   });
 });

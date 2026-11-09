@@ -262,7 +262,7 @@ export const holdStart = async (
   // person's role, its input as the version takes it.
   const decided = await decideWorkflowStart(env, invoker, workflow.id, {
     version,
-    input,
+    args: input,
     key: startKeyOf(scope.chatId, key),
   });
   const accepted =

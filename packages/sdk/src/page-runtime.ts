@@ -47,7 +47,7 @@ export type Theme = "light" | "dark";
 export interface PageBridge {
   /**
    * Calls one of the App's functions, for the person using the
-   * page: `request` is the call as JSON text (its reference, input and
+   * page: `request` is the call as JSON text (its reference, args and
    * idempotency key), passed to core as it is; the answer is core's
    * `{ result, fingerprint, manifestHash }`, the last null for an action
    * answered by its invocation, which keeps no release. The transport the page
