@@ -12,9 +12,13 @@ describe("a currency's decimals", () => {
     ).toStrictEqual([2, 2, 2, 0, 0, 3, 3]);
   });
 
-  it("are none for a code the catalog lacks, or a unit with no minor unit", () => {
-    expect(
-      ["ZZZ", "eur", "XDR", "XSU", "", "__proto__"].map(currencyDecimals)
-    ).toStrictEqual(Array.from({ length: 6 }));
+  it("are none for a unit with no minor unit: its units as they are", () => {
+    expect(["XDR", "XSU"].map(currencyDecimals)).toStrictEqual([0, 0]);
+  });
+
+  it("are unknown for a code the catalog lacks", () => {
+    expect(["ZZZ", "eur", "", "__proto__"].map(currencyDecimals)).toStrictEqual(
+      Array.from({ length: 4 })
+    );
   });
 });

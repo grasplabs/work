@@ -21,6 +21,21 @@ const typed = (parts: Record<string, string>): string => {
 };
 
 describe("a workflow parameter's field", () => {
+  it("takes money in a unit with no minor unit (XDR) as its whole units: shown, edited and saved", () => {
+    const shown = paramText("money", { minorUnits: 250, currency: "XDR" });
+    const edited = withPart(shown, "amount", "300");
+
+    expect({
+      shown,
+      saved: paramValueOf("money", edited),
+      fraction: paramValueOf("money", withPart(shown, "amount", "1.5")),
+    }).toStrictEqual({
+      shown: '{"amount":"250","currency":"XDR"}',
+      saved: { value: { minorUnits: 300, currency: "XDR" } },
+      fraction: undefined,
+    });
+  });
+
   it("takes money as an amount and a currency, and a schedule as cron fields and a time zone", () => {
     const money = { type: "object", "x-grasp-value": { kind: "money" } };
     const schedule = { type: "object", "x-grasp-value": { kind: "schedule" } };
@@ -40,9 +55,9 @@ describe("a workflow parameter's field", () => {
         paramValueOf("money", typed({ amount: "12.34", currency: "HUF" })),
         paramValueOf("money", typed({ amount: "1.5", currency: "IQD" })),
         paramValueOf("money", typed({ amount: "12.5", currency: "JPY" })),
-        // A currency the catalog doesn't have, or with no minor unit.
+        // A currency the catalog doesn't have.
         paramValueOf("money", typed({ amount: "1", currency: "ZZZ" })),
-        paramValueOf("money", typed({ amount: "1", currency: "XDR" })),
+
         // More decimals than the currency has, no currency, not a number.
         paramValueOf("money", typed({ amount: "1.234", currency: "EUR" })),
         paramValueOf("money", typed({ amount: "12" })),
@@ -74,7 +89,6 @@ describe("a workflow parameter's field", () => {
         { value: { minorUnits: -7, currency: "EUR" } },
         { value: { minorUnits: 1234, currency: "HUF" } },
         { value: { minorUnits: 1500, currency: "IQD" } },
-        undefined,
         undefined,
         undefined,
         undefined,

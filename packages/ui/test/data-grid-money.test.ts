@@ -30,10 +30,10 @@ describe("money in a cell", () => {
     });
   });
 
-  it("shows a currency it has no decimals for as its code and units", () => {
-    expect([shown(5, "ZZZ"), shown(5, "XDR")]).toStrictEqual([
+  it("shows a unit with no minor unit as its units, and a code it doesn't know as it is", () => {
+    expect([shown(5, "XDR"), shown(5, "ZZZ")]).toStrictEqual([
+      "XDR\u00A05",
       "ZZZ 5",
-      "XDR 5",
     ]);
   });
 });

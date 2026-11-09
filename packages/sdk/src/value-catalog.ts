@@ -27,8 +27,9 @@ export const currencyCodes = words(
 /**
  * The currencies of ISO 4217 whose minor unit isn't two decimals, by its
  * decimals (List One, as amended to 2026): those with none, and those
- * with three. Every other code of `currencyCodes` has two, but for the
- * units that have no minor unit at all (`XDR`, `XSU`).
+ * with three, and the units ISO gives no minor unit at all (`XDR`, `XSU`),
+ * whose amounts are their whole units as they are. Every other code of
+ * `currencyCodes` has two.
  */
 const otherDecimals: Readonly<Record<string, number>> = {
   BIF: 0,
@@ -54,20 +55,20 @@ const otherDecimals: Readonly<Record<string, number>> = {
   LYD: 3,
   OMR: 3,
   TND: 3,
+  XDR: 0,
+  XSU: 0,
 };
-
-/** The units ISO 4217 gives no minor unit: no amount of them is shown. */
-const noMinorUnit: ReadonlySet<string> = new Set(["XDR", "XSU"]);
 
 /**
  * How many decimals a major unit of `currency` has, as ISO 4217 says:
  * what whole minor units (`v.money()`'s `minorUnits`) are divided by to
  * show an amount. Pinned, as `currencyCodes` is: `Intl` answers otherwise
- * in some engines (HUF, IDR and IQD on Node). Undefined for a code this
- * catalog doesn't have, or one with no minor unit.
+ * in some engines (HUF, IDR and IQD on Node). A unit with no minor unit
+ * (`XDR`, `XSU`) has none: its amount is its units as they are, as
+ * `v.money()` takes them. Undefined for a code this catalog doesn't have.
  */
 export const currencyDecimals = (currency: string): number | undefined => {
-  if (!currencyCodes.has(currency) || noMinorUnit.has(currency)) {
+  if (!currencyCodes.has(currency)) {
     return undefined;
   }
   return Object.hasOwn(otherDecimals, currency) ? otherDecimals[currency] : 2;
