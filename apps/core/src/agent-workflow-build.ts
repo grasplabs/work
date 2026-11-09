@@ -570,12 +570,15 @@ const workflowBuildDeclaration = `/**
  *   the platform's (\`workflow\`, \`connect\`, \`permission\`...).
  * Only \`call\`, \`generate\`, \`decide\` and \`waitForEvent\` steps have a result. Values are JSON; any part may be
  * an expression \`{ "$expr": "extract.total" }\`, a JavaScript expression over \`args\`, \`params\`, an
- * earlier step's result by its ID (\`extract.total\`), \`run.id\`, \`inbox.<alias>\` (the run's reply
+ * earlier step's result by its ID (\`extract.total\`), \`run.id\`, \`run.startedAt\` (when the run started,
+ * in ms since the epoch: a scheduled run finds its day or week from it, as an expression has no
+ * clock), \`inbox.<alias>\` (the run's reply
  * address for event permission \`<alias>\`: give it a mail as its reply-to, then wait on that permission
  * for the reply), \`state.<key>\` (what earlier runs kept, \`undefined\` until written) and, in a catch,
  * \`error\` (\`{ code, message, details?, step? }\`, \`step\` the ID of the step that failed). It reads fields by name (\`a.b\`, \`list[0]\`), never by a
- * computed name, and never \`constructor\`, \`prototype\` or \`__proto__\`. A string is always text, never
- * interpolated. At most ${formatLimits.steps} steps in all.
+ * computed name, and never \`constructor\`, \`prototype\` or \`__proto__\`. It may call
+ * \`JSON.stringify(value)\` and \`JSON.parse(text)\`, each on one value and nothing more. A string is
+ * always text, never interpolated. At most ${formatLimits.steps} steps in all.
  * Never write judgement, an outside system or a person's approval as code: when the catalog
  * has no contract for such a step, say which one (its kind, input and output) an admin
  * should publish.
@@ -584,13 +587,8 @@ const workflowBuildDeclaration = `/**
  * (\`get\` and \`send\`; \`"grasp/http-read"\` for \`get\` alone, on a connection that allows no change) and
  * call it with a \`call\` step, \`action: "get"\` (a read: \`{ path, method?: "GET" | "HEAD", headers? }\`)
  * or \`"send"\` (a change: \`{ method: "POST" | "PUT" | "PATCH" | "DELETE", path, headers?, body? }\`, body
- * as text). An expression can't write JSON (no \`JSON\`): a \`call\` step of the workflow's own compute turns
- * a value into text, such as \`code/body.ts\`'s (importing \`compute\` and \`v\` from \`"@grasp-os/sdk/compute"\`)
- * \`export const invoiceBody = compute({ input: <the invoice's schema>, output:
- * v.string(), handler: (invoice) => JSON.stringify(invoice) })\` declared as
- * \`modules: { body: { kind: "compute", contract: "local:code/body.ts#invoiceBody" } }\` and called by step
- * \`invoiceBody\` (\`module: "body"\`) with \`args: { "$expr": "args.invoice" }\`, then
- * \`body: { "$expr": "invoiceBody" }\`. It answers \`{ status, headers, body }\`, body as text. Ask for the
+ * as text: \`body: { "$expr": "JSON.stringify(args.invoice)" }\`). It answers
+ * \`{ status, headers, body }\`, body as text: read a JSON answer as \`JSON.parse(fetched.body)\`. Ask for the
  * connection with \`requestPermission\` (actions \`["get", "send"]\`, or \`["get"]\` for reads alone). Never
  * put a URL, key or token in a definition.
  */
