@@ -175,7 +175,7 @@ const text = (value: unknown): string => {
  * message of the frame's may hold (`request.too_deep`,
  * `request.too_large`), before any of the bridge's code sees them.
  */
-export const FrameRpcTarget = boundedRpcTarget({
+const FrameRpcTarget = boundedRpcTarget({
   depth: rpcArgumentDepth,
   size: pageLimits.rpc.maxMessageSize,
 });
@@ -505,7 +505,7 @@ class Bridge extends FrameRpcTarget implements PageBridge {
  * What a frame reaches through its port: the one object `openBridge`
  * serves, a {@link FrameRpcTarget}.
  */
-export const frameBridge = (
+const frameBridge = (
   target: FrameTarget,
   cleanups: (() => void)[]
 ): PageBridge & InstanceType<typeof FrameRpcTarget> =>

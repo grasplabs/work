@@ -158,21 +158,6 @@ describe(buildBrain, () => {
     expect(brain.notes.every((candidate) => candidate.step <= 2)).toBeTruthy();
   });
 
-  it("never ranks or scores", () => {
-    for (const candidate of brain.notes) {
-      expect(candidate.tags).not.toContain("top-3");
-      const text = [
-        candidate.summary,
-        ...candidate.points.flatMap((point) => [
-          point.label,
-          ...point.refs.map((ref) => ref.label),
-        ]),
-      ].join(" ");
-      expect(text).not.toMatch(/\b(?:rank|score)/iu);
-    }
-    expect(patterns(ws).join(" ")).not.toMatch(/ranks first|hurts most/u);
-  });
-
   it("only links to notes that exist, from links, points, side panel and timeline alike", () => {
     const ids = new Set(brain.notes.map((each) => each.id));
     const dangling = brain.notes.flatMap((each) =>
@@ -553,7 +538,7 @@ describe("a living brain", () => {
     ).toBe("Approvals for supplier invoices are chased by email");
   });
 
-  it("keeps what people say after step 2 in the brain, and leaves exports to the Workflows page", () => {
+  it("keeps what people say after step 2 in the brain", () => {
     const chat = noteIn(ws, "src-agent-finance");
     expect(chat.path).toStrictEqual([
       "Sources",
@@ -561,9 +546,6 @@ describe("a living brain", () => {
       "Chats with Grasp",
     ]);
     expect(chat.step).toBe(2);
-    expect(buildBrain(ws).notes.map((candidate) => candidate.id)).not.toContain(
-      "src-crm"
-    );
     expect(words(noteIn(ws, "cand-invoices"), "What was said")).toContain(
       "4 time wasters"
     );

@@ -403,6 +403,34 @@ const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
   "read-others": "read-others",
 };
 
+/** `toolClass`, as core checks it for the native tool `action` (`checkedClassOf`). */
+const inMailbox = (
+  provider: string,
+  action: string,
+  toolClass: CompanyToolClass
+): CompanyToolClass =>
+  provider === "microsoft" && action.startsWith("mail.")
+    ? inOwnMailbox[toolClass]
+    : toolClass;
+
+/**
+ * The class core checks a call of the chat's agent of the native tool
+ * `action` against: its class, but for a Microsoft 365 mail tool, which
+ * takes any mailbox the account may open. The mailbox it reaches is
+ * checked in connect, which knows it (its own, or one the company pointed
+ * the agent at: shared-mailboxes.ts), so here it has the class it has in
+ * the person's own mailbox. Undefined for a tool the table hasn't got.
+ */
+export const checkedClassOf = (
+  provider: string,
+  action: string
+): ToolClass | undefined => {
+  const toolClass = nativeClasses.get(provider)?.get(action);
+  return toolClass === undefined || toolClass === "never"
+    ? toolClass
+    : inMailbox(provider, action, toolClass);
+};
+
 /**
  * Refuses a call of the chat's agent whose class is off for the person it
  * acts for, before core signs anything for connect: `connect.class_off`.
@@ -434,14 +462,9 @@ export const requireToolClassOn = async (
   if (toolClass === "never") {
     throw connectErrors.create("connect.class_off");
   }
-  // A Microsoft 365 mail tool takes any mailbox the account may open: the
-  // mailbox it reaches is checked in connect, which knows it (its own, or
-  // one the company pointed the agent at: shared-mailboxes.ts), so here
-  // it has the class it has in the person's own mailbox.
-  const mailTool = owner.provider === "microsoft" && action.startsWith("mail.");
   const audience = await audienceNow(
     env,
-    mailTool ? inOwnMailbox[toolClass] : toolClass
+    inMailbox(owner.provider, action, toolClass)
   );
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");

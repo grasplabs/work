@@ -105,8 +105,6 @@ export const useChecks = (): void => {
   void create({ title: 1 });
   // @ts-expect-error -- options are checked strictly
   void create({ title: "x" }, { retries: 3 });
-  // @ts-expect-error -- there are no aliases beside the callable
-  void create.mutate;
 
   const remove = useMutation(api.notes.remove);
   expectTypeOf(remove({ id: noteId })).toEqualTypeOf<Promise<null>>();
@@ -145,8 +143,6 @@ expectTypeOf(
   })
 ).toEqualTypeOf<Promise<Note>>();
 expectTypeOf(client.action(api.notes.tally)).toEqualTypeOf<Promise<number>>();
-// @ts-expect-error -- no `run`, `mutate` or `act` beside query, mutation and action
-void client.mutate;
 // @ts-expect-error -- the client's internals aren't App code's
 void client.entry;
 

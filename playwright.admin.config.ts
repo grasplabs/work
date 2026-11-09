@@ -30,6 +30,10 @@ export default defineConfig({
   // One at a time: a rollout reaches every active client in ring 0, and
   // each journey seeds its own as the only one.
   workers: 1,
+  // Each test on its own, so CI's parts (`--shard`), a stack each, split
+  // the journeys test by test: the organization's sections alone took
+  // half of the 4 minutes they took one after another (November 2026).
+  fullyParallel: true,
   reporter: ci ? "github" : "list",
   use: {
     ...devices["Desktop Chrome"],

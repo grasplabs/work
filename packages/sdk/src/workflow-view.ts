@@ -1,8 +1,11 @@
-import type { WatchState } from "./client-workflow.ts";
-import { hasEnded, invalidSnapshot } from "./run-snapshot.ts";
-import type { RunSnapshot } from "./run-snapshot.ts";
+import { clientError } from "./client-error.ts";
+import type { GraspError } from "./client-error.ts";
+import { deepFreeze } from "./declaration.ts";
+import { isPlainObject } from "./value-descriptor.ts";
 import type { DecisionValueOf } from "./workflow-decisions.ts";
 import type { EventDataOf } from "./workflow-events.ts";
+import type { controlKinds } from "./workflow-functions.ts";
+import type { ReadWorkflow } from "./workflow-reference-read.ts";
 import type {
   AppErrorPayload,
   RunHandle,
@@ -13,11 +16,10 @@ import type {
 export interface PendingControl {
   readonly kind: "pause" | "resume" | "cancel";
   /**
-   * `submitting` until the host admits it, `recovering` while a lost
-   * answer is recovered, `applying` once admitted until a snapshot shows
-   * it settled or superseded.
+   * `submitting` while this hook's request is unanswered, `applying` once
+   * the host admitted it until the run settles it.
    */
-  readonly stage: "submitting" | "applying" | "recovering";
+  readonly stage: "submitting" | "applying";
 }
 
 /** What a hook does, and may do now, whatever its run's status. */
@@ -28,7 +30,7 @@ export interface WorkflowCommands<Input, Wait, Event = never> {
    * structured error otherwise. With no `runId` given to the hook, the
    * hook then shows the run of its latest admitted start.
    */
-  readonly run: (input: Input) => Promise<RunHandle>;
+  readonly start: (input: Input) => Promise<RunHandle>;
   /**
    * Pauses the selected run at its next safe point: resolves once the
    * host admitted it; the run's status says when it is paused.
@@ -71,7 +73,7 @@ export interface WorkflowCommands<Input, Wait, Event = never> {
     }
   ) => Promise<void>;
   /** Whether a new run may be started now (not a promise it will be). */
-  readonly canRun: boolean;
+  readonly canStart: boolean;
   readonly canPause: boolean;
   readonly canResume: boolean;
   readonly canCancel: boolean;
@@ -95,9 +97,9 @@ export type WorkflowRunView<Output> =
   | { readonly status: "idle" }
   | { readonly status: "loading"; readonly runId: string }
   /**
-   * The run was shown, and the person may see it no more (a decision that
-   * asked them was answered, its alias bound elsewhere): nothing of it is
-   * shown, and it is no error. Shown again should access come back.
+   * The person may not see the run (a decision that asked them was
+   * answered, its alias bound elsewhere, or no such run): nothing of it
+   * is shown, and it is no error. Shown again should access come back.
    */
   | { readonly status: "unavailable"; readonly runId: string }
   | (ObservedRun & {
@@ -138,8 +140,68 @@ export type WorkflowView<
   Event = never,
 > = WorkflowCommands<Input, Wait, Event> & WorkflowRunView<Output>;
 
+/** A wait as the `run` query names it: its event by alias. */
+type RunWait =
+  | Exclude<WorkflowWait, { readonly kind: "event" }>
+  | (Omit<Extract<WorkflowWait, { readonly kind: "event" }>, "event"> & {
+      readonly event: {
+        readonly kind: "workflowEvent";
+        readonly alias: string;
+        readonly fingerprint: string;
+      };
+    });
+
+/**
+ * One run as a workflow reference's `run` query answers it (its
+ * descriptor, workflow-functions.ts, says exactly what the host sends).
+ */
+export interface RunSnapshot extends RunHandle {
+  readonly status:
+    | "queued"
+    | "running"
+    | "waiting"
+    | "paused"
+    | "compensating"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  readonly startedAt: number | null;
+  readonly finishedAt: number | null;
+  readonly compensation?:
+    | {
+        readonly cause: "failure";
+        readonly activity: "running" | "waiting" | "paused";
+        readonly originalError: AppErrorPayload;
+      }
+    | {
+        readonly cause: "cancellation";
+        readonly activity: "running" | "waiting" | "paused";
+      };
+  readonly output?: unknown;
+  readonly error?: AppErrorPayload;
+  readonly waits: readonly RunWait[];
+  readonly control: {
+    readonly canPause: boolean;
+    readonly canResume: boolean;
+    readonly canCancel: boolean;
+    readonly pendingControl: {
+      readonly kind: (typeof controlKinds)[number];
+      readonly stage: "applying";
+    } | null;
+  };
+}
+
+const ended: ReadonlySet<string> = new Set<RunSnapshot["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+const invalidSnapshot = (): GraspError =>
+  clientError("contract.invalid_snapshot");
+
 /** A snapshot as its status's variant of the view. */
-export const runView = (snapshot: RunSnapshot): WorkflowRunView<unknown> => {
+const runView = (snapshot: RunSnapshot): WorkflowRunView<unknown> => {
   const observed: ObservedRun = {
     runId: snapshot.runId,
     workflowId: snapshot.workflowId,
@@ -148,7 +210,7 @@ export const runView = (snapshot: RunSnapshot): WorkflowRunView<unknown> => {
     startedAt: snapshot.startedAt,
   };
   const { status, finishedAt, compensation, error } = snapshot;
-  // A snapshot's fields agree with its status (`agrees`, as it was read).
+  // The `run` query's descriptor gives each status its own fields.
   const endedAt = (): number => {
     if (finishedAt === null) {
       throw invalidSnapshot();
@@ -192,59 +254,182 @@ export const runView = (snapshot: RunSnapshot): WorkflowRunView<unknown> => {
 };
 
 /**
- * What may be asked of the run `run` shows, with `pending` unsettled: the
- * host's word, from a snapshot of the subscription in force, of a run that
- * hasn't ended and isn't compensating, narrowed by what is pending; never
- * from status alone.
+ * `waits` with each event wait's event the very reference `read` holds
+ * under its alias: a run listening for an event its reference doesn't
+ * declare, or in a task that doesn't listen for it, is an invalid
+ * snapshot, as is one held for a decision it doesn't declare; never a
+ * wait shown with an event or a response type its key doesn't promise.
  */
-export const controlsOf = (
-  run: WatchState<RunSnapshot> | undefined,
-  pending: PendingControl | null
-): Pick<
-  WorkflowCommands<unknown, unknown>,
-  "canPause" | "canResume" | "canCancel"
-> => {
-  const snapshot = run?.error === undefined ? run?.value : undefined;
-  if (
-    run?.fresh !== true ||
-    snapshot === undefined ||
-    hasEnded(snapshot.status) ||
-    snapshot.status === "compensating"
-  ) {
-    return { canPause: false, canResume: false, canCancel: false };
-  }
-  const { control } = snapshot;
-  return {
-    canPause: control.canPause && pending === null,
-    canResume: control.canResume && pending === null,
-    canCancel: control.canCancel && pending?.kind !== "cancel",
-  };
-};
-
-export const noWaits: readonly never[] = Object.freeze([]);
-
-/**
- * `snapshot`'s waits as shown: whether an event may be sent or a decision
- * answered is the host's word only while the subscription is in force,
- * and off from a lost connection until a fresh push, as the run's own
- * controls are; the waits themselves stay on screen.
- */
-export const waitsOf = (
-  snapshot: RunSnapshot,
-  run: WatchState<RunSnapshot> | undefined
-): readonly WorkflowWait[] => {
-  if (run?.fresh === true) {
-    return snapshot.waits;
-  }
-  return Object.freeze(
-    snapshot.waits.map((wait) => {
-      if (wait.kind === "event") {
-        return Object.freeze({ ...wait, canSend: false });
+const resolvedWaits = (
+  read: ReadWorkflow,
+  waits: readonly RunWait[]
+): readonly WorkflowWait[] =>
+  deepFreeze(
+    waits.map((wait): WorkflowWait => {
+      if (wait.kind === "decision" && !read.decisions.has(wait.key)) {
+        throw invalidSnapshot();
       }
-      if (wait.kind === "decision") {
-        return Object.freeze({ ...wait, canRespond: false });
+      if (wait.kind !== "event") {
+        return wait;
       }
-      return wait;
+      const event = read.events.get(wait.event.alias);
+      if (
+        event === undefined ||
+        event.fingerprint !== wait.event.fingerprint ||
+        read.listens.get(wait.key)?.has(event.alias) !== true
+      ) {
+        throw invalidSnapshot();
+      }
+      return { ...wait, event };
     })
   );
+
+/**
+ * A control of this hook's: `submitting` while its request is unanswered;
+ * once the host admitted it, `applying` while the run's query still shows
+ * `before`, the snapshot it showed when the answer came, within the
+ * bounds workflow-calls.ts sets (`WorkflowCalls`, its header).
+ */
+export type Submitting =
+  | {
+      readonly kind: PendingControl["kind"];
+      readonly runId: string;
+      readonly stage: "submitting";
+    }
+  | {
+      readonly kind: PendingControl["kind"];
+      readonly runId: string;
+      readonly stage: "applying";
+      readonly before: unknown;
+    };
+
+/** Whether `each`, of this hook's, is still unsettled on `snapshot`. */
+const unsettled = (each: Submitting, snapshot: unknown): boolean =>
+  each.stage === "submitting" || each.before === snapshot;
+
+/**
+ * The run's unsettled control: this hook's own, or the host's, applying;
+ * a cancel, either's, outranks a pause or resume. None once the run has
+ * ended: a request still unanswered was overtaken, and its caller alone
+ * hears how it ends.
+ */
+const pendingOf = (
+  runId: string,
+  snapshot: RunSnapshot | null | undefined,
+  submitting: readonly Submitting[]
+): PendingControl | null => {
+  if (
+    snapshot !== null &&
+    snapshot !== undefined &&
+    ended.has(snapshot.status)
+  ) {
+    return null;
+  }
+  const mine = submitting.filter(
+    (each) => each.runId === runId && unsettled(each, snapshot)
+  );
+  const host = snapshot?.control.pendingControl ?? null;
+  const myCancel = mine.findLast(({ kind }) => kind === "cancel");
+  if (myCancel !== undefined) {
+    return { kind: "cancel", stage: myCancel.stage };
+  }
+  if (host?.kind === "cancel") {
+    return host;
+  }
+  const last = mine.at(-1);
+  return last === undefined ? host : { kind: last.kind, stage: last.stage };
+};
+
+/**
+ * Whether `snapshot`, the run's query as a control of `kind` was admitted,
+ * already shows it: applying, or where it leads (a pause paused, a resume
+ * no longer paused, any control once the run has ended), or no run at
+ * all. Such a snapshot may be the last the host pushes, so the control is
+ * left to it; any other is older than the control, which shows applying
+ * until a newer one.
+ */
+export const showsControl = (
+  kind: PendingControl["kind"],
+  snapshot: unknown
+): boolean => {
+  if (!isPlainObject(snapshot) || !isPlainObject(snapshot.control)) {
+    return true;
+  }
+  const { status, control } = snapshot;
+  const pending = isPlainObject(control.pendingControl)
+    ? control.pendingControl.kind
+    : undefined;
+  if (pending === kind || (typeof status === "string" && ended.has(status))) {
+    return true;
+  }
+  if (kind === "pause") {
+    return status === "paused";
+  }
+  return kind === "resume" && status !== "paused";
+};
+
+const noWaits: readonly never[] = Object.freeze([]);
+
+/** What a `useWorkflow` view is built from (react/workflow.ts). */
+export interface ViewParts {
+  readonly read: ReadWorkflow;
+  /** The run selected: the one given, or the latest admitted start's. */
+  readonly runId: string | undefined;
+  /** The `run` query's answer: undefined while it loads, null if not seen. */
+  readonly snapshot: RunSnapshot | null | undefined;
+  /** The `canStart` query's answer, undefined while it loads. */
+  readonly canStart: boolean | undefined;
+  readonly starting: boolean;
+  readonly submitting: readonly Submitting[];
+  readonly commands: Pick<
+    WorkflowCommands<unknown, WorkflowWait, unknown>,
+    "start" | "pause" | "resume" | "cancel" | "send" | "respond"
+  >;
+}
+
+/**
+ * The view of `parts`: capabilities are the host's, from the run's
+ * snapshot, narrowed by this hook's own unanswered controls; nothing turns
+ * them on from status, ownership or role, and none is offered for a run
+ * that ended or rolls back.
+ */
+export const workflowView = ({
+  read,
+  runId,
+  snapshot,
+  canStart,
+  starting,
+  submitting,
+  commands,
+}: ViewParts): WorkflowView<unknown, unknown> => {
+  const pending =
+    runId === undefined ? null : pendingOf(runId, snapshot, submitting);
+  const free =
+    snapshot !== null &&
+    snapshot !== undefined &&
+    !ended.has(snapshot.status) &&
+    snapshot.status !== "compensating";
+  const shared = {
+    ...commands,
+    canStart: canStart === true,
+    canPause: free && snapshot.control.canPause && pending === null,
+    canResume: free && snapshot.control.canResume && pending === null,
+    canCancel: free && snapshot.control.canCancel && pending?.kind !== "cancel",
+    isStarting: starting,
+    pendingControl: pending === null ? null : Object.freeze({ ...pending }),
+    waits:
+      snapshot === null || snapshot === undefined
+        ? noWaits
+        : resolvedWaits(read, snapshot.waits),
+  };
+  if (runId === undefined) {
+    return Object.freeze({ ...shared, status: "idle" });
+  }
+  if (snapshot === undefined) {
+    return Object.freeze({ ...shared, status: "loading", runId });
+  }
+  if (snapshot === null) {
+    return Object.freeze({ ...shared, status: "unavailable", runId });
+  }
+  return Object.freeze({ ...shared, ...runView(snapshot) });
 };

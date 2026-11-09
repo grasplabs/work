@@ -202,15 +202,6 @@ expectTypeOf<FunctionReturn<typeof tallied>>().toEqualTypeOf<number>();
 // and a public function isn't an internal one.
 expectTypeOf(counted).not.toExtend<Callable<"mutation">>();
 expectTypeOf(counted).not.toExtend<Callable<"query", "internal">>();
-// There is no `input`/`output` form.
-// @ts-expect-error -- `input` is superseded by `args`
-query({ input: {}, returns: v.null(), handler: () => null });
-// @ts-expect-error -- `output` is superseded by `returns`
-query({ args: {}, output: v.null(), handler: () => null });
-// @ts-expect-error -- no `reads` list
-query({ args: {}, returns: v.null(), reads: ["notes"], handler: () => null });
-// @ts-expect-error -- no `writes` list
-mutation({ args: {}, returns: v.null(), writes: [], handler: () => null });
 
 // A query reads, and nothing else: no writer and no permissions, whatever
 // the App declares.
@@ -226,17 +217,16 @@ granted.query({
     expectTypeOf(ctx).not.toHaveProperty("runQuery");
     expectTypeOf(ctx).not.toHaveProperty("connections");
     expectTypeOf(ctx).not.toHaveProperty("ai");
-    // No `ctx.data`, and no notifications.
-    expectTypeOf(ctx).not.toHaveProperty("data");
-    expectTypeOf(ctx).not.toHaveProperty("notify");
     return null;
   },
 });
+// A function's permissions are the App's: none lists its own or narrows
+// its tables.
 // @ts-expect-error -- no function lists its own `uses`
 query({ args: {}, returns: v.null(), uses: [get], handler: () => null });
 // @ts-expect-error -- nor narrows its tables
 query({ args: {}, tables: { notes: {} }, handler: () => null });
-// @ts-expect-error -- nor a mutation
+// @ts-expect-error -- a mutation no more than a query
 mutation({ args: {}, uses: [], handler: () => null });
 // @ts-expect-error -- only an action streams
 query({ args: {}, returns: v.null(), stream: v.string(), handler: () => null });
@@ -327,9 +317,8 @@ granted.action({
   returns: v.object({ summary: v.string() }),
   handler: async (ctx, args) => {
     expectTypeOf(ctx).toExtend<ActionCtx>();
-    // No database, and no notifications of runs: it tells people only.
+    // No database: it tells people only.
     expectTypeOf(ctx).not.toHaveProperty("db");
-    expectTypeOf(ctx).not.toHaveProperty("notify");
     expectTypeOf(ctx.notifyPeople).parameter(0).toEqualTypeOf<string>();
     expectTypeOf(
       ctx.notifyPeople

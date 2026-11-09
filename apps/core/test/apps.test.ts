@@ -9,6 +9,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { definitionRefusal } from "../src/app-definition.ts";
 import { draftOverLatest } from "../src/apps.ts";
 import {
   commitApp,
@@ -69,8 +70,7 @@ const commit = async (
 /**
  * Gives an App without versions a first one holding `files` exactly,
  * unchecked: committed before a check existed or a limit was lowered.
- * With `definition` null, one committed before definitions left the
- * tree, which holds none.
+ * With `definition` null, one that holds none.
  */
 const storedUnchecked = async (
   app: string,
@@ -406,45 +406,28 @@ export const Route = createFileRoute("/")({ component: Page });
     });
   });
 
-  it("tells an App made before definitions left the tree to be created again, and nothing else, wherever its definition is needed", async () => {
+  it("refuses to build on or run a version that holds no definition, saying so", async () => {
     const { apps, userId } = await appsApi("builder");
     const app = await newApp(apps);
-    // Its tree holds the definition as a file, as versions did then:
-    // nothing reads it now.
-    await storedUnchecked(
-      app.id,
-      userId,
-      withFiles(first, {
-        "definition.json": "{}",
-      }).files,
-      null
-    );
-    const oldReview = await apps.versions.review(app.id, 1);
+    await storedUnchecked(app.id, userId, first.files, null);
     let refusal: unknown;
     try {
       await commit(apps, app.id, { "AGENTS.md": "# Again\n" });
     } catch (error) {
       refusal = error;
     }
+    const seal = await outcome(apps.versions.setCurrent(app.id, 1));
+    const versions = await apps.versions.list(app.id);
     expect({
       commit: appErrors.codeOf(refusal),
-      message: refusal instanceof Error ? refusal.message : null,
-      seal: await outcome(apps.versions.setCurrent(app.id, 1)),
-      // Its review plans nothing for the records, and refuses nothing.
-      review: oldReview.schema,
-      draft: await outcome(
-        draftOverLatest(env, appIdSchema.parse(app.id), {
-          base: 1,
-          changes: { "AGENTS.md": "# Drafted\n" },
-          definition: null,
-        })
-      ),
+      issues: definitionRefusal(refusal),
+      seal,
+      versions: versions.map(({ version }) => version),
     }).toStrictEqual({
-      commit: "app.definition_missing",
-      message: appErrors.create("app.definition_missing").message,
-      seal: "app.definition_missing",
-      review: null,
-      draft: "app.definition_missing",
+      commit: "app.definition_invalid",
+      issues: "The App's version holds no definition.",
+      seal: "app.definition_invalid",
+      versions: [1],
     });
   });
 
@@ -723,61 +706,6 @@ export const Route = createFileRoute("/archive")({ component: Page });
     await expect(outcome(apps.contents("no-such-app"))).resolves.toBe(
       "app.not_found"
     );
-  });
-
-  it("refuses to commit the v1 server's files under app/, naming them, and keeps nothing of the commit", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    const v1Files: Record<string, string>[] = [
-      { "app/server.ts": "export class App {}\n" },
-      { "app/exports.json": "{}" },
-      { "app/lib/books.ts": "export const books = 1;\n" },
-    ];
-    const refusals = await Promise.all(
-      v1Files.map(
-        async (files) =>
-          await commit(
-            apps,
-            app.id,
-            withFiles(first, {
-              ...files,
-            })
-          ).then(
-            () => ({ code: "committed" }),
-            (error: unknown) => error
-          )
-      )
-    );
-
-    expect(refusals).toMatchObject([
-      { code: "app.v1_server", details: { issues: ["app/server.ts"] } },
-      { code: "app.v1_server", details: { issues: ["app/exports.json"] } },
-      { code: "app.v1_server", details: { issues: ["app/lib/books.ts"] } },
-    ]);
-    await expect(apps.versions.list(app.id)).resolves.toStrictEqual([]);
-    // Without them, the same files commit.
-    await expect(commit(apps, app.id, first)).resolves.toMatchObject({
-      version: 1,
-    });
-  });
-
-  it("never marks a version still holding the v1 server's files as a blueprint", async () => {
-    const { apps, userId } = await appsApi("builder");
-    const app = await newApp(apps);
-    await storedUnchecked(
-      app.id,
-      userId,
-      withFiles(first, {
-        "app/server.ts": "export class App {}\n",
-      }).files
-    );
-
-    await expect(apps.blueprints.mark(app.id, 1)).rejects.toMatchObject({
-      code: "app.v1_server",
-      details: { issues: ["app/server.ts"] },
-    });
-    const marked = await apps.blueprints.list();
-    expect(marked.filter(({ app: of }) => of === app.id)).toStrictEqual([]);
   });
 
   it("audits every commit and version change, by identifiers only", async () => {

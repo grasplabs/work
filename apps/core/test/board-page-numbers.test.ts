@@ -2,7 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   beforeAndAfter,
-  formatHours,
   headlineOf,
   rowsShown,
   signalRows,
@@ -168,14 +167,6 @@ describe("the board page's numbers", () => {
     ).toStrictEqual([
       "Waits up to 5 hours for a person to decide",
       "A question went unanswered 4 times",
-    ]);
-  });
-
-  it("show hours to a tenth", () => {
-    expect([12, 0.333, 1234.56].map(formatHours)).toStrictEqual([
-      "12 h",
-      "0.3 h",
-      "1,234.6 h",
     ]);
   });
 });

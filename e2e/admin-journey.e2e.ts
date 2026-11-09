@@ -6,6 +6,7 @@ import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { queuedMail } from "./onboarding-outbox.ts";
 import { apiOf, signInAs, signInStaff } from "./people.ts";
+import { installReadingClock, readOn } from "./speech.ts";
 import { origin } from "./stack.ts";
 
 // The admin's onboarding, end to end (GRA-339): they sign in, give their
@@ -95,6 +96,9 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
     });
   });
 
+  // The steps' lines are read silently, at the pace of reading on the
+  // page's clock: the test goes on it to read them (`readOn`).
+  await installReadingClock(page);
   // Signed out, the onboarding sends them to sign in, and the company's
   // sign-in (the stack's stand-in for Entra) brings them back to it.
   await page.goto("/setup?step=welcome");
@@ -144,17 +148,24 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   await page.getByRole("button", { name: "Continue" }).click();
 
   // Documents, tools and the HR platform wait for later.
+  await readOn(page, page.getByRole("button", { name: "Skip for now" }));
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", {
       name: "Do you have anything that explains how you work?",
     })
   ).toBeVisible();
+  await readOn(page, page.getByRole("button", { name: "Skip for now" }));
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", { name: "Which tools do people actually use?" })
   ).toBeVisible();
+  await readOn(page, page.getByRole("button", { name: "Skip for now" }));
   await page.getByRole("button", { name: "Skip for now" }).click();
+  await readOn(
+    page,
+    page.getByRole("button", { name: "We don’t use an HR platform" })
+  );
   await page
     .getByRole("button", { name: "We don’t use an HR platform" })
     .click();
@@ -189,6 +200,7 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
       .filter({ hasText: "What happens next" })
       .getByText(/^Leads get their link on \d+ \w+ at 0:00\./u)
   ).toBeVisible();
+  await readOn(page, page.getByRole("button", { name: "I sent it" }));
   await page.getByRole("button", { name: "I sent it" }).click();
   await expect(
     page.getByRole("heading", {

@@ -1,8 +1,4 @@
-import {
-  fileChannel,
-  declaredWorkflows,
-  workflowFingerprint,
-} from "@grasp-os/sdk/host";
+import { fileChannel, declaredWorkflows } from "@grasp-os/sdk/host";
 import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import type { Json } from "@grasp-os/shared/json";
@@ -202,13 +198,7 @@ const reviewsApp = async () => {
     app: fixture.app,
     workflow: workflow.id,
     release,
-    reference: {
-      resourceId: release.manifest.resourceId,
-      resourceVersion: release.manifest.resourceVersion,
-      contractId: "workflows.review",
-      fingerprint: await workflowFingerprint(declared),
-      kind: "workflow",
-    },
+    start: { name: "workflows.review.mutations.start", kind: "mutation" },
   };
 };
 
@@ -273,9 +263,8 @@ const started = async (
       [pageLeaseHeader]: page.lease,
     },
     body: JSON.stringify({
-      workflow: fixture.reference,
-      command: "start",
-      input: { doc: { id: doc } },
+      reference: fixture.start,
+      input: { input: { doc: { id: doc } } },
       idempotencyKey: key,
     }),
   });

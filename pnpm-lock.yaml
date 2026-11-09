@@ -449,6 +449,9 @@ importers:
       lightningcss:
         specifier: 'catalog:'
         version: 1.33.0
+      oxc-parser:
+        specifier: catalog:oxc
+        version: 0.156.0
       oxfmt:
         specifier: 'catalog:'
         version: 0.68.0(vite-plus@0.3.3(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))

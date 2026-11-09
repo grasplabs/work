@@ -1,4 +1,3 @@
-import { readWorkflowReference, workflowChannel } from "@grasp-os/sdk/host";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -7,25 +6,25 @@ import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
 import { WorkflowRuns } from "../src/workflows/run-object.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdpWith } from "./idp.ts";
-import {
-  endLiveResourceRuns,
-  pageClient,
-  pageOf,
-  settles,
-} from "./json-workflow-apps.ts";
+import { endLiveResourceRuns, pageOf, settles } from "./json-workflow-apps.ts";
 import type { Person } from "./json-workflow-apps.ts";
-import { boundApp, idp, refusalOf } from "./page-typed-workflows-harness.ts";
+import {
+  boundApp,
+  idp,
+  pageRuns,
+  refusalOf,
+} from "./page-typed-workflows-harness.ts";
 import { gate, heldEnd, rollingBackRun, withRollbacks } from "./rollbacks.ts";
 import { runInstance, sleeping, woken } from "./runs.ts";
 import { auditedDuring } from "./sign-in.ts";
 
 // A page's typed `useWorkflow` through the real host (spec 10.4,
 // page-workflows.ts; the threat model is on GRA-626): its starts and
-// cancels as the page relays a page's calls, over core's function
-// route, and its run and binding snapshots as the page follows a live
-// query through the frame's own capability (`pages.frame`). The SDK's
-// own channel speaks to both, so each answer and push passes the
-// validators the hook reads them with.
+// controls as calls of the workflow reference's mutations, relayed over
+// core's function route, and its run and whether it may start one as the
+// reference's `run` and `canStart` queries, followed live through the
+// frame's own capability (`pages.frame`), each answer and push checked by
+// the descriptors the SDK generates.
 
 mockIdpWith(idp);
 
@@ -39,8 +38,7 @@ const compensatedRun = async (
   end?: (runId: string) => Promise<void>,
   /** What is asked of it while it compensates: answered as `during`. */
   meanwhile?: (asked: {
-    channel: ReturnType<typeof workflowChannel>;
-    read: ReturnType<typeof readWorkflowReference>;
+    channel: ReturnType<typeof pageRuns>;
     runId: string;
     builder: Person;
     workflow: string;
@@ -50,9 +48,8 @@ const compensatedRun = async (
     hold: "1 hour",
   });
   const lease = await pageOf(builder, app);
-  const channel = workflowChannel(pageClient(builder, app, lease));
-  const read = readWorkflowReference(reference);
-  const handle = await channel.start(read, { who: "Ada" });
+  const channel = pageRuns(builder, app, lease, reference);
+  const handle = await channel.start({ who: "Ada" });
   await sleeping(handle.runId, "hold:task");
   const holds = gate();
   rollingBackRun(handle.runId, {
@@ -61,31 +58,26 @@ const compensatedRun = async (
     // Its `hold` task's hour.
     held: { name: "hold:task", ms: 3_600_000 },
   });
-  const stop = channel.followRun(read, handle.runId, () => {
+  const stop = channel.followRun(handle.runId, () => {
     // Read below.
   });
   await woken(handle.runId, "hold:task");
   await end?.(handle.runId);
   await vi.waitFor(() => {
-    expect(channel.peekRun(read, handle.runId).value?.status).toBe(
-      "compensating"
-    );
+    expect(channel.peekRun(handle.runId).value?.status).toBe("compensating");
   }, settles);
-  const compensating = channel.peekRun(read, handle.runId);
+  const compensating = channel.peekRun(handle.runId);
   const during = await meanwhile?.({
     channel,
-    read,
     runId: handle.runId,
     builder,
     workflow,
   });
   holds.open();
   await vi.waitFor(() => {
-    expect(
-      channel.peekRun(read, handle.runId).value?.finishedAt
-    ).not.toBeNull();
+    expect(channel.peekRun(handle.runId).value?.finishedAt).not.toBeNull();
   }, settles);
-  const ended = channel.peekRun(read, handle.runId);
+  const ended = channel.peekRun(handle.runId);
   stop();
   return {
     during,
@@ -171,9 +163,8 @@ describe(
         hold: "1 hour",
       });
       const lease = await pageOf(builder, app);
-      const channel = workflowChannel(pageClient(builder, app, lease));
-      const read = readWorkflowReference(reference);
-      const { runId } = await channel.start(read, { who: "Ada" });
+      const channel = pageRuns(builder, app, lease, reference);
+      const { runId } = await channel.start({ who: "Ada" });
       await sleeping(runId, "hold:task");
       const holds = gate();
       rollingBackRun(runId, {
@@ -226,7 +217,7 @@ describe(
       const shown = await compensatedRun(
         { ends: { fails: "resource.declined" } },
         undefined,
-        async ({ channel, read, runId }) => {
+        async ({ channel, runId }) => {
           // The engine's word is lost as the cancel is admitted, as when
           // its rollback began right after: the cancel goes ahead, and the
           // engine answers that it rolls back.
@@ -238,7 +229,6 @@ describe(
           let answered: { kind: string; state: string } | undefined;
           const events = await auditedDuring(async () => {
             const { kind, state } = await channel.control(
-              read,
               runId,
               "cancel",
               () => {
@@ -294,12 +284,12 @@ describe(
       const shown = await compensatedRun(
         { ends: { fails: "resource.declined" } },
         undefined,
-        async ({ channel, read, runId, builder, workflow }) => {
+        async ({ channel, runId, builder, workflow }) => {
           let cancel: unknown;
           let stop: unknown;
           const events = await auditedDuring(async () => {
             cancel = await refusalOf(
-              channel.control(read, runId, "cancel", () => {
+              channel.control(runId, "cancel", () => {
                 // Never recovering.
               })
             );

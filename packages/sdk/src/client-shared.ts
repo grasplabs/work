@@ -1,8 +1,7 @@
 // What the page's client modules share: the session client
-// (client-core.ts), the workflow channel (client-workflow.ts) and core's
-// file and link channels (file-channel.ts, link-channel.ts). How a request
-// is keyed and retried, how a followed query or run is followed again, and
-// a refusal as core answers it.
+// (client-core.ts) and core's file and link channels (file-channel.ts,
+// link-channel.ts). How a request is keyed and retried, how a followed
+// query is followed again, and a refusal as core answers it.
 
 /** A fresh idempotency key: 128 random bits, in hex. */
 export const freshKey = (): string =>

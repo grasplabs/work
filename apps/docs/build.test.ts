@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -15,7 +15,7 @@ import { exampleApps } from "./example-apps.ts";
 // The site the docs' build writes (build.ts), as core serves it at /docs
 // (apps/core/src/docs.ts): every inline script, style and `style`
 // attribute among the hashes core's policy allows, every link under
-// /docs, and nothing written for other hosts. TypeDoc's own checks run in
+// /docs, and nothing core doesn't serve. TypeDoc's own checks run in
 // the release build.
 
 const root = import.meta.dirname;
@@ -31,6 +31,9 @@ const pages = (): string[] =>
   files()
     .filter((file) => file.endsWith(".html"))
     .map((file) => readFileSync(path.join(site, file), "utf-8"));
+
+/** What a page loads: its code, styles, fonts and images. */
+const pageAsset = /\.(?:js|css|woff2?|svg|png|jpe?g|webp|avif|gif|ico)$/u;
 
 const hashOf = (text: string): string =>
   `'sha256-${createHash("sha256").update(text).digest("base64")}'`;
@@ -134,14 +137,33 @@ describe("the docs' build", () => {
     ).toStrictEqual([]);
   });
 
-  it("writes nothing for other hosts, and no page's source twice", () => {
-    expect(
-      files().filter(
-        (file) =>
-          file.endsWith(".mdx") ||
-          ["_headers", "vercel.json", "404.json", "404.md"].includes(file)
+  it("writes only what core serves to people and the agent: pages, their assets, each listed page's Markdown and the files core and the agent read", () => {
+    const listed = docsPagesSchema
+      .parse(
+        JSON.parse(readFileSync(path.join(site, docsSearchIndexFile), "utf-8"))
       )
-    ).toStrictEqual([]);
-    expect(existsSync(path.join(site, "llms.txt"))).toBeTruthy();
+      .map(({ route }) => docsMarkdownFile(route));
+    // The agent's index and whole text, its search index and each listed
+    // page's Markdown, and the hashes core reads: by their place in the site.
+    const read = new Set(
+      [
+        "llms.txt",
+        "llms-full.txt",
+        docsSearchIndexFile,
+        "inline-hashes.json",
+        ...listed,
+      ].map((file) => file.replace(/^\//u, ""))
+    );
+    const written = files().filter((file) =>
+      statSync(path.join(site, file)).isFile()
+    );
+
+    expect({
+      read: [...read].filter((file) => !written.includes(file)),
+      unserved: written.filter(
+        (file) =>
+          !(file.endsWith(".html") || pageAsset.test(file) || read.has(file))
+      ),
+    }).toStrictEqual({ read: [], unserved: [] });
   });
 });

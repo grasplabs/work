@@ -400,27 +400,6 @@ export interface Note {
   text: string;
 }
 
-/** Notes as they were kept: one text from before notes were a list becomes the first of the list. */
-export const notesOf = (value?: unknown): Note[] => {
-  if (typeof value === "string") {
-    return value.trim() ? [{ id: "note-0", at: 0, text: value.trim() }] : [];
-  }
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter(
-    (each: unknown): each is Note =>
-      typeof each === "object" &&
-      each !== null &&
-      "id" in each &&
-      typeof each.id === "string" &&
-      "text" in each &&
-      typeof each.text === "string" &&
-      "at" in each &&
-      typeof each.at === "number"
-  );
-};
-
 export const NOTHING_BY_HAND: Omit<
   OrgState,
   "conversation" | "research" | "agreed" | "client" | "day" | "rules"

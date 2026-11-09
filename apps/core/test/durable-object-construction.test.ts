@@ -13,8 +13,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { appHost } from "../src/durable-objects.ts";
 
-/** More objects of one class than the runtime held before the patch. */
-const constructed = 2500;
+/**
+ * More objects of one class than the runtime held before the patch:
+ * without it, the 1,676th to 1,700th App host overflowed the stack
+ * (measured November 2026, in a file of its own). A fifth more leaves room
+ * for a machine with a deeper stack, and stays as few as still fail.
+ */
+const constructed = 2000;
 
 /** How many App hosts are woken at once. */
 const atOnce = 50;

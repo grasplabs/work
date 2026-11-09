@@ -634,10 +634,29 @@ describe(
         decide: await outcome(
           frame.decide("run", "decision", { approved: true })
         ),
+        // A start through a workflow reference's mutation: a side effect
+        // a preview never has.
+        start: z.object({ error: z.object({ code: z.string() }) }).parse(
+          await resultOf(
+            await post(
+              served.app,
+              JSON.stringify({
+                reference: {
+                  name: "workflows.followUp.mutations.start",
+                  kind: "mutation",
+                },
+                input: { input: {} },
+                idempotencyKey: "preview-start",
+              }),
+              { as: served.builder, lease: own.lease }
+            )
+          )
+        ).error.code,
       }).toStrictEqual({
         pushed: { ok: true, value: [] },
         delivery: "open",
         decide: "app.preview_side_effect",
+        start: "app.preview_side_effect",
       });
     });
 

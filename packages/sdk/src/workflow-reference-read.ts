@@ -3,22 +3,73 @@ import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import { clientError } from "./client-error.ts";
 import { namePattern, sha256Pattern } from "./declaration.ts";
+import type { FunctionReference } from "./function-references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import type { WorkflowDecisionReference } from "./workflow-decisions.ts";
 import type { WorkflowEventReference } from "./workflow-events.ts";
 import { workflowReferenceLimits } from "./workflow-references.ts";
+import type { RunHandle } from "./workflow-runs.ts";
+import type { RunSnapshot } from "./workflow-view.ts";
+
+/** A workflow mutation, as the client calls it. */
+type WorkflowMutation<Args, Return> = FunctionReference<
+  "mutation",
+  "public",
+  Args,
+  Return
+>;
+
+/** A control's mutation, as the client calls it: its receipt answered. */
+type ControlMutation = WorkflowMutation<
+  { readonly runId: string },
+  {
+    readonly kind: "pause" | "resume" | "cancel";
+    readonly state: "admitted" | "applied" | "superseded";
+  }
+>;
 
 /** A workflow reference, read as data and checked. */
 export interface ReadWorkflow {
   /** What identifies it: its App, release, contract and fingerprint. */
   readonly key: string;
-  readonly resourceId: string;
+  /** Its registered path, e.g. `workflows.summarizeNote`. */
   readonly contractId: string;
-  readonly fingerprint: string;
-  readonly input: ValueDescriptor;
-  readonly output: ValueDescriptor;
+  /**
+   * The ordinary functions `useWorkflow` is built on, each named under
+   * this very workflow's path: never another function of the App's.
+   * Typed as their descriptors (workflow-functions.ts) declare them.
+   */
+  readonly functions: {
+    readonly run: FunctionReference<
+      "query",
+      "public",
+      { readonly runId: string },
+      RunSnapshot | null
+    >;
+    readonly canStart: FunctionReference<
+      "query",
+      "public",
+      Record<never, never>,
+      boolean
+    >;
+    readonly start: WorkflowMutation<{ readonly input: unknown }, RunHandle>;
+    readonly pause: ControlMutation;
+    readonly resume: ControlMutation;
+    readonly cancel: ControlMutation;
+    /** None for a workflow that declares no events. */
+    readonly send:
+      | WorkflowMutation<
+          {
+            readonly runId: string;
+            readonly event: string;
+            readonly data: unknown;
+          },
+          unknown
+        >
+      | undefined;
+  };
   /**
    * Its event references, by alias: the very objects it was generated
    * with, which a wait's event resolves to.
@@ -28,14 +79,6 @@ export interface ReadWorkflow {
   readonly listens: ReadonlyMap<string, ReadonlySet<string>>;
   /** Its decision references, by key. */
   readonly decisions: ReadonlyMap<string, WorkflowDecisionReference>;
-  /** What a request names of it, exactly as the host reads it. */
-  readonly wire: {
-    readonly resourceId: string;
-    readonly resourceVersion: number;
-    readonly contractId: string;
-    readonly fingerprint: string;
-    readonly kind: "workflow";
-  };
 }
 
 const readWorkflows = new WeakMap<object, ReadWorkflow>();
@@ -206,9 +249,60 @@ const readEvents = (
 };
 
 /**
- * `value` as a public workflow reference, read as data, its descriptors
- * checked; `contract.invalid_request` for anything else (an operation's
- * reference, an internal one, a string, a forged object).
+ * The function `name` of `group` in a workflow reference's functions
+ * (`value`), read: it must be the one under the workflow's own path
+ * (`<contractId>.<group>.<name>`), so a forged reference never sends a
+ * call of the App's own functions in its place; a mutation's arguments a
+ * descriptor that reads.
+ */
+const functionIn = (
+  value: unknown,
+  contractId: string,
+  group: "queries" | "mutations",
+  name: string
+): { readonly name: string; readonly args: ValueDescriptor | undefined } => {
+  const fn =
+    isPlainObject(value) && Object.hasOwn(value, name)
+      ? value[name]
+      : undefined;
+  const path = `${contractId}.${group}.${name}`;
+  if (!isPlainObject(fn) || fn.name !== path) {
+    throw clientError("contract.invalid_request");
+  }
+  if (group === "queries") {
+    return { name: path, args: undefined };
+  }
+  try {
+    return { name: path, args: readDescriptor(fn.args, 1, { nodes: 0 }) };
+  } catch {
+    throw clientError("contract.invalid_request");
+  }
+};
+
+/**
+ * A workflow reference's mutation `name`, as `functionIn` reads it, typed
+ * as its descriptors declare it (workflow-functions.ts).
+ */
+const mutationIn = <Args, Return>(
+  value: unknown,
+  contractId: string,
+  name: string
+): WorkflowMutation<Args, Return> => {
+  const { args } = functionIn(value, contractId, "mutations", name);
+  if (args === undefined) {
+    throw clientError("contract.invalid_request");
+  }
+  return {
+    name: `${contractId}.mutations.${name}`,
+    kind: "mutation",
+    args,
+  };
+};
+
+/**
+ * `value` as a public workflow reference, read as data, its events and
+ * decisions checked; `contract.invalid_request` for anything else (an
+ * operation's reference, an internal one, a string, a forged object).
  */
 export const readWorkflowReference = (value: unknown): ReadWorkflow => {
   const known =
@@ -232,40 +326,43 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
   ) {
     throw clientError("contract.invalid_request");
   }
-  let input: ValueDescriptor;
-  let output: ValueDescriptor;
-  try {
-    input = readDescriptor(value.input, 1, { nodes: 0 });
-    output = readDescriptor(value.output, 1, { nodes: 0 });
-  } catch {
-    throw clientError("contract.invalid_request");
-  }
-  const wire = {
+  const identity: WorkflowIdentity = {
     resourceId: value.resourceId,
     resourceVersion: value.resourceVersion,
     contractId: value.contractId,
     fingerprint: value.fingerprint,
-    kind: "workflow",
-  } as const;
-  const events = readEvents(value.events, wire);
+  };
+  const events = readEvents(value.events, identity);
   const listens = readListens(value.listens, events);
-  const decisions = readDecisions(value.decisions, wire);
+  const decisions = readDecisions(value.decisions, identity);
+  const { contractId } = identity;
+  const query = (name: string) => ({
+    name: functionIn(value.queries, contractId, "queries", name).name,
+  });
+  const { mutations } = value;
   const read: ReadWorkflow = {
     key: canonicalJson([
-      wire.resourceId,
-      wire.resourceVersion,
-      wire.contractId,
-      wire.fingerprint,
+      identity.resourceId,
+      identity.resourceVersion,
+      contractId,
+      identity.fingerprint,
     ]),
-    resourceId: wire.resourceId,
-    contractId: wire.contractId,
-    fingerprint: wire.fingerprint,
-    input,
-    output,
+    contractId,
+    functions: {
+      run: query("run"),
+      canStart: query("canStart"),
+      start: mutationIn(mutations, contractId, "start"),
+      pause: mutationIn(mutations, contractId, "pause"),
+      resume: mutationIn(mutations, contractId, "resume"),
+      cancel: mutationIn(mutations, contractId, "cancel"),
+      send:
+        events.size === 0
+          ? undefined
+          : mutationIn(mutations, contractId, "send"),
+    },
     events,
     listens,
     decisions,
-    wire,
   };
   readWorkflows.set(value, read);
   return read;

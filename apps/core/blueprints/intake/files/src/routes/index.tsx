@@ -308,7 +308,7 @@ const Intake = () => {
       source = { ...input.source, notes: input.notes };
     }
     const started = await settle(
-      async () => await extract.run({ notes: source.notes, lines })
+      async () => await extract.start({ notes: source.notes, lines })
     );
     if ("error" in started) {
       return refusal(started.error);

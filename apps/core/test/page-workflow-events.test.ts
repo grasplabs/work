@@ -1,13 +1,5 @@
 import { v } from "@grasp-os/sdk";
-import {
-  declaredWorkflows,
-  eventFingerprint,
-  GraspClient,
-  readWorkflowReference,
-  workflowChannel,
-  workflowFingerprint,
-} from "@grasp-os/sdk/host";
-import type { ClientTransport } from "@grasp-os/sdk/host";
+import { declaredWorkflows } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -29,7 +21,6 @@ import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { readWorkflowWatch } from "../src/page-workflows.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -46,7 +37,12 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
-import { objectSchema } from "./json-workflow-apps.ts";
+import {
+  mutationCall,
+  objectSchema,
+  queryCall,
+  settles,
+} from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -165,65 +161,22 @@ const rolesOf = (by: Identity) => ({
   },
 });
 
-/** The reference to `alias` as `@server/_generated/api` generates it from `release`. */
-const workflowReference = async (release: Release, alias: string) => {
+/**
+ * The reference to `alias` as `@server/_generated/api` generates it from
+ * `release`, as much of it as a page's calls name: its functions' path,
+ * and that `jobEvents` is an event it declares.
+ */
+const workflowReference = (release: Release, alias: string) => {
   const declared = declaredWorkflows(release.app, release.workflows).find(
     (workflow) => workflow.alias === alias
   );
-  if (declared === undefined) {
-    throw new Error(`No workflow ${alias}`);
+  if (declared?.events.jobEvents === undefined) {
+    throw new Error(`No workflow ${alias} that takes jobEvents`);
   }
-  const identity = {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-  };
-  const contractId = `workflows.${alias}`;
-  const fingerprint = await workflowFingerprint(declared);
-  const events: Record<string, unknown> = {};
-  for (const [name, event] of Object.entries(declared.events)) {
-    events[name] = {
-      kind: "workflowEvent",
-      ...identity,
-      workflow: contractId,
-      workflowFingerprint: fingerprint,
-      alias: name,
-      type: event.type,
-      // oxlint-disable-next-line no-await-in-loop -- one event
-      fingerprint: await eventFingerprint(event),
-      data: event.data,
-    };
-  }
-  return {
-    kind: "workflow",
-    visibility: "public",
-    ...identity,
-    alias,
-    contractId,
-    fingerprint,
-    input: declared.input,
-    output: declared.output,
-    events,
-    listens: declared.listens,
-    decisions: {},
-  };
+  return { contractId: `workflows.${alias}` };
 };
 
-type Reference = Awaited<ReturnType<typeof workflowReference>>;
-
-/** A reference as the SDK sends it. */
-const wireOf = (reference: Reference) => ({
-  resourceId: reference.resourceId,
-  resourceVersion: reference.resourceVersion,
-  contractId: reference.contractId,
-  fingerprint: reference.fingerprint,
-  kind: "workflow",
-});
-
-/** What a send names of `jobEvents`, as the SDK sends it. */
-const eventOf = (reference: Reference) =>
-  z
-    .object({ alias: z.string(), type: z.string(), fingerprint: z.string() })
-    .parse(reference.events.jobEvents);
+type Reference = ReturnType<typeof workflowReference>;
 
 /** The App's grant of `actions` on `workflow`, requested and granted. */
 const granted = async (
@@ -296,7 +249,7 @@ const invoicesApp = async (actions: readonly string[][]) => {
     app: fixture.app,
     workflow: workflow.id,
     grants,
-    reference: await workflowReference(release, "review"),
+    reference: workflowReference(release, "review"),
   };
 };
 
@@ -332,21 +285,6 @@ const called = async (
   throw Object.assign(new Error(payload.message), { code: payload.code });
 };
 
-/** A session client of `person`'s page: its calls over core's route. */
-const pageClient = (
-  person: Person,
-  app: string,
-  lease: string
-): GraspClient => {
-  const transport: ClientTransport = {
-    call: async (request) => await called(person, app, lease, request),
-    watch: () => {
-      throw new Error("A send follows nothing.");
-    },
-  };
-  return new GraspClient(transport);
-};
-
 const resultSchema = z.union([
   z.object({ ok: z.literal(true), value: z.unknown() }),
   z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }),
@@ -364,21 +302,6 @@ const isEvent = (answer: unknown): boolean =>
     .object({ eventId: z.string().regex(/^evt_[0-9a-f]{48}$/u) })
     .safeParse(answer).success;
 
-/** A fresh command key, as the SDK makes one. */
-const keyOf = (): string => crypto.randomUUID().replaceAll("-", "");
-
-/** The code `work` was refused with, or "ok". */
-const refusalOf = async (work: Promise<unknown>): Promise<unknown> => {
-  try {
-    await work;
-    return "ok";
-  } catch (error) {
-    const code: unknown =
-      error instanceof Error ? Reflect.get(error, "code") : error;
-    return code;
-  }
-};
-
 /** Starts a run of `review` on job `jobId` from `person`'s page: its ID. */
 const startedRun = async (
   person: Person,
@@ -387,10 +310,18 @@ const startedRun = async (
   reference: Reference,
   jobId = "job-1"
 ): Promise<string> => {
-  const handle = await workflowChannel(pageClient(person, app, lease)).start(
-    readWorkflowReference(reference),
-    { jobId }
-  );
+  const handle = z
+    .object({ runId: z.string() })
+    .parse(
+      outcomeOf(
+        await called(
+          person,
+          app,
+          lease,
+          mutationCall(reference, "start", { input: { jobId } })
+        )
+      )
+    );
   await vi.waitFor(
     async () => {
       await expect(liveStatus(handle.runId)).resolves.toBe("waiting");
@@ -400,28 +331,52 @@ const startedRun = async (
   return handle.runId;
 };
 
-/** A raw send's text: `fields` over a well-formed one's. */
+/**
+ * A page's call of `send`: `args` over a well-formed one's
+ * (`jobEvents`, job-1), under a fresh key.
+ */
 const sendText = (
   reference: Reference,
   runId: string,
-  fields: Record<string, unknown> = {}
+  args: Record<string, unknown> = {}
 ): string =>
-  JSON.stringify({
-    workflow: wireOf(reference),
-    command: "send",
+  mutationCall(reference, "send", {
     runId,
-    event: eventOf(reference),
+    event: "jobEvents",
     data: { jobId: "job-1" },
-    idempotencyKey: keyOf(),
-    ...fields,
+    ...args,
   });
 
-/** A raw send's text `text`, under its key, with `data` instead. */
-const withData = (text: string, data: unknown): string =>
-  JSON.stringify({
-    ...z.record(z.string(), z.unknown()).parse(JSON.parse(text)),
-    data,
-  });
+/** A send's call `text`, under its key, with `data` instead. */
+const withData = (text: string, data: unknown): string => {
+  const call = z
+    .looseObject({ input: z.record(z.string(), z.unknown()) })
+    .parse(JSON.parse(text));
+  return JSON.stringify({ ...call, input: { ...call.input, data } });
+};
+
+/** The run `runId`'s snapshot, as its page's `run` query reads it. */
+const snapshotOf = async (
+  person: Person,
+  app: string,
+  lease: string,
+  reference: Reference,
+  runId: string
+): Promise<unknown> =>
+  outcomeOf(
+    await called(person, app, lease, queryCall(reference, "run", { runId }))
+  );
+
+/** The refused sends `events` recorded, as the audit names them. */
+const refusals = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
+  events
+    .filter(({ action }) => action === "workflow.event.refused")
+    .map(({ actor, target, detail }) => ({
+      actor,
+      target,
+      code: detail?.code,
+      via: detail?.via,
+    }));
 
 /** The status run `runId` ended with. */
 const runStatus = async (runId: string): Promise<unknown> =>
@@ -484,13 +439,9 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     )
       .bind(workflow)
       .first<{ runs: number }>();
-    const late = await refusalOf(
-      workflowChannel(pageClient(builder, app, lease)).send(
-        readWorkflowReference(reference),
-        runId,
-        reference.events.jobEvents,
-        { jobId: "job-1" }
-      )
+    // A fresh send, under a key of its own.
+    const late = outcomeOf(
+      await called(builder, app, lease, sendText(reference, runId))
     );
     const runs = await env.DB.prepare(
       "SELECT COUNT(*) AS runs FROM workflow_resource_runs WHERE workflow_resource_id = ?"
@@ -531,14 +482,13 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuses a send carrying any envelope field, a made-up or stale event, data its contract refuses, or a run the page doesn't show, and the run takes only the host's envelope", async () => {
+  it("refuses a send carrying any envelope field, an event the workflow doesn't declare, data its contract refuses, or a run the page doesn't show, and the run takes only the host's envelope", async () => {
     const { admin, builder, app, workflow, reference } = await invoicesApp([
       ["start"],
       ["send"],
     ]);
     const lease = await pageOf(builder, app);
     const runId = await startedRun(builder, app, lease, reference);
-    const event = eventOf(reference);
     const send = async (fields: Record<string, unknown>) =>
       outcomeOf(
         await called(builder, app, lease, sendText(reference, runId, fields))
@@ -551,38 +501,19 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
       time: await send({ time: "2020-01-01T00:00:00Z" }),
       subject: await send({ subject: "job-2" }),
       specversion: await send({ specversion: "1.0" }),
+      // The event is named by its alias alone: never a type or a source.
       eventSource: await send({
-        event: { ...event, source: "urn:grasp:app:forged" },
+        event: { alias: "jobEvents", source: "urn:grasp:app:forged" },
       }),
+      eventType: await send({ type: "grasp.job.timeout" }),
       dataSource: await send({
         data: { jobId: "job-1", source: "urn:grasp:app:forged" },
       }),
       malformed: await send({ data: { jobId: 1 } }),
-      fingerprint: await send({
-        event: { ...event, fingerprint: "0".repeat(64) },
-      }),
-      notBrowser: await send({
-        event: { ...event, type: "grasp.job.timeout" },
-      }),
-      unknownAlias: await send({ event: { ...event, alias: "otherEvents" } }),
+      unknownAlias: await send({ event: "otherEvents" }),
       noSuchRun: await send({ runId: crypto.randomUUID() }),
       anotherPerson: outcomeOf(
         await called(admin, app, adminLease, sendText(reference, runId))
-      ),
-      // The SDK refuses a reference that isn't one of the workflow's own
-      // before anything is sent.
-      madeUp: await refusalOf(
-        workflowChannel(pageClient(builder, app, lease)).send(
-          readWorkflowReference(reference),
-          runId,
-          {
-            ...z
-              .record(z.string(), z.unknown())
-              .parse(reference.events.jobEvents),
-            type: "grasp.job.timeout",
-          },
-          { jobId: "job-1" }
-        )
       ),
     };
     const sent = isEvent(await send({}));
@@ -596,20 +527,18 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
 
     expect({ refused, sent, output }).toStrictEqual({
       refused: {
-        source: "contract.invalid_request",
-        id: "contract.invalid_request",
-        time: "contract.invalid_request",
-        subject: "contract.invalid_request",
-        specversion: "contract.invalid_request",
-        eventSource: "contract.invalid_request",
+        source: "contract.invalid_args",
+        id: "contract.invalid_args",
+        time: "contract.invalid_args",
+        subject: "contract.invalid_args",
+        specversion: "contract.invalid_args",
+        eventSource: "contract.invalid_args",
+        eventType: "contract.invalid_args",
         dataSource: "contract.invalid_args",
         malformed: "contract.invalid_args",
-        fingerprint: "version.mismatch",
-        notBrowser: "version.mismatch",
-        unknownAlias: "function.not_found",
+        unknownAlias: "contract.invalid_args",
         noSuchRun: "workflow.run_unavailable",
         anotherPerson: "workflow.run_unavailable",
-        madeUp: "contract.invalid_request",
       },
       sent: true,
       output: {
@@ -627,13 +556,17 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     const send = async (runId: string) =>
       outcomeOf(await called(builder, app, lease, sendText(reference, runId)));
 
-    const withoutSend = await send(first);
+    const refusedWithout = await auditedDuring(async () => {
+      await expect(send(first)).resolves.toBe("workflow.event_denied");
+    });
     const grant = await granted(admin, builder, app, workflow, ["send"]);
     const accepted = sendText(reference, first);
     const withSend = outcomeOf(await called(builder, app, lease, accepted));
     const second = await startedRun(builder, app, lease, reference, "job-2");
     await revokePermission(env, admin.acting, grant);
-    const revoked = await send(second);
+    const refusedRevoked = await auditedDuring(async () => {
+      await expect(send(second)).resolves.toBe("workflow.event_denied");
+    });
     // A send the run took before the revocation, its answer lost: still
     // the event it was.
     const resent = outcomeOf(await called(builder, app, lease, accepted));
@@ -642,59 +575,69 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     );
 
     expect({
-      withoutSend,
       withSend: isEvent(withSend),
-      revoked,
       resent,
       resentOther,
+      // Every refused send is recorded with why, as every taken one is.
+      refused: [refusals(refusedWithout), refusals(refusedRevoked)],
     }).toStrictEqual({
-      withoutSend: "workflow.event_denied",
       withSend: true,
-      revoked: "workflow.event_denied",
       resent: withSend,
       resentOther: "workflow.event_conflict",
+      refused: [first, second].map((runId) => [
+        {
+          actor: { type: "person", userId: builder.userId },
+          target: { type: "workflow_run", id: runId },
+          code: "workflow.event_denied",
+          via: "page",
+        },
+      ]),
     });
   });
 
-  it("shows a page following a run that it may send it nothing once the App is restricted, under a revision of its own", async () => {
+  it("pushes a page following a run that it may send it nothing once the App is restricted", async () => {
     const { builder, app, reference } = await invoicesApp([
       ["start"],
       ["send"],
     ]);
     const lease = await pageOf(builder, app);
     const runId = await startedRun(builder, app, lease, reference);
-    /** The run's snapshot as its page follows it, once it waits. */
-    const followed = async () =>
-      await vi.waitFor(
-        async () => {
-          const { value, revision } = await readWorkflowWatch(
-            env,
-            builder.acting,
-            app,
-            {
-              workflow: { ...wireOf(reference), kind: "workflow" },
-              watch: "run",
-              runId,
-            }
-          );
-          const [wait] = z
-            .object({ waits: z.array(z.object({ canSend: z.boolean() })) })
-            .parse(value).waits;
-          expect(wait).toBeDefined();
-          return { canSend: wait?.canSend, revision };
+    // The run's `run` query, live on the page, as `useWorkflow` follows it:
+    // whether each push says its event may be sent.
+    const pushed: (boolean | undefined)[] = [];
+    const callback = Object.assign(
+      (push: unknown): void => {
+        const { result } = z
+          .object({ result: z.object({ value: z.unknown() }) })
+          .parse(push);
+        const snapshot = z
+          .object({ waits: z.array(z.object({ canSend: z.boolean() })) })
+          .safeParse(result.value);
+        pushed.push(snapshot.data?.waits[0]?.canSend);
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          // Let go of: nothing more arrives.
         },
-        { timeout: 30_000, interval: 100 }
-      );
-    const open = await followed();
+      }
+    );
+    const subscription = await builder.api.pages
+      .frame(app, lease)
+      .watchQuery(queryCall(reference, "run", { runId }), callback);
+    await vi.waitFor(() => {
+      expect(pushed.at(-1)).toBeTruthy();
+    }, settles);
     await appHost(env, appIdSchema.parse(app)).restrict();
-    const restricted = await followed();
+    // Pushed again, never left to the page's next read.
+    await vi.waitFor(() => {
+      expect(pushed.at(-1)).toBeFalsy();
+    }, settles);
+    await subscription.release();
 
-    expect({
-      open: open.canSend,
-      restricted: restricted.canSend,
-      // A revision of its own: pushed to the page, never the same one.
-      movedOn: (restricted.revision ?? 0) > (open.revision ?? 0),
-    }).toStrictEqual({ open: true, restricted: false, movedOn: true });
+    expect({ first: pushed[0], last: pushed.at(-1) }).toStrictEqual({
+      first: true,
+      last: false,
+    });
   });
 
   it("sends nothing from an App in restricted mode to a run that isn't restricted, and sends to one started restricted", async () => {
@@ -714,15 +657,12 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     const canSend = async (runId: string) =>
       await vi.waitFor(
         async () => {
-          const { value: snapshot } = await readWorkflowWatch(
-            env,
-            builder.acting,
+          const snapshot = await snapshotOf(
+            builder,
             app,
-            {
-              workflow: { ...wireOf(reference), kind: "workflow" },
-              watch: "run",
-              runId,
-            }
+            lease,
+            reference,
+            runId
           );
           const [wait] = z
             .object({ waits: z.array(z.object({ canSend: z.boolean() })) })

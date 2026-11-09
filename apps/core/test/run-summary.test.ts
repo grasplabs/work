@@ -16,15 +16,15 @@ import {
   settles,
   startCommand,
   startedOf,
-  wireOf,
+  workflowQuery,
 } from "./json-workflow-apps.ts";
 import type { Person, WorkflowReference } from "./json-workflow-apps.ts";
 
 // A JSON workflow run's snapshot, as the App's page that started it
 // follows it (page-workflows.ts `runSnapshot`): one read of one moment
-// of the run, under a revision every change moves on. What could go wrong,
+// of the run, its `run` query pushed again as it changes. What could go wrong,
 // tried below: what the run waits for lost while it is paused, a change
-// that leaves the revision as it was, an ended run still offering
+// the page is never pushed, an ended run still offering
 // controls, when it started and ended missing or out of order, the
 // snapshot naming another run or version than the one started, and a
 // failed run past its retention saying something else of why than the run
@@ -67,11 +67,12 @@ const followedRun = async (
   reference: WorkflowReference,
   runId: string
 ) => {
-  const followed = await following(person, app, lease, {
-    workflow: wireOf(reference),
-    watch: "run",
-    runId,
-  });
+  const followed = await following(
+    person,
+    app,
+    lease,
+    workflowQuery(reference, "run", { runId })
+  );
   const shown = (): Snapshot[] =>
     followed.received.flatMap(({ revision, outcome }) => {
       const parsed = snapshotSchema.safeParse(outcome);
@@ -109,7 +110,7 @@ const none = {
 };
 
 describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
-  it("says where a run is, what it waits for and when it started and ended, its sleep kept while paused, each change at a newer revision", async () => {
+  it("says where a run is, what it waits for and when it started and ended, its sleep kept while paused, each change pushed anew", async () => {
     const { builder, app, workflow, reference } = await boundApp({
       hold: "1 hour",
     });

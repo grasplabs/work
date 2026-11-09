@@ -483,10 +483,19 @@ export const workflows: {
       readonly confirmArchive: WorkflowDecisionReference<"workflows.archiveNotes", "confirmArchive", null, null, { count: number }>;
     },
     {
+      readonly canStart: FunctionReference<"query", "public", Record<never, never>, boolean>;
       readonly decision: FunctionReference<"query", "public", { decisionId: string; runId: string }, WorkflowDecisionDetail<"confirmArchive", null, { count: number }> | null>;
       readonly decisions: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId?: string }, WorkflowQueryPage<WorkflowDecisionInboxItem<"confirmArchive", null>>>;
       readonly history: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId: string }, ({ hasMore: false; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "confirmed"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "confirmArchive"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "confirmed"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "confirmArchive"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: string; splitCursor?: string })>;
+      readonly run: FunctionReference<"query", "public", { runId: string }, { compensation?: ({ activity: "running" | "waiting" | "paused"; cause: "failure"; originalError: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean } }) | ({ activity: "running" | "waiting" | "paused"; cause: "cancellation" }); control: { canCancel: boolean; canPause: boolean; canResume: boolean; pendingControl: { kind: "pause" | "resume" | "cancel"; stage: "applying" } | null }; error?: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; finishedAt: number | null; manifestHash: string; output?: null; runId: string; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled"; waits: Array<({ deadline: number; id: string; key: string; kind: "timer"; openedAt: number; purpose: "sleep" | "retry"; taskId: string; title: string }) | ({ canSend: boolean; deadline: number | null; event: { alias: string; fingerprint: string; kind: "workflowEvent" }; id: string; key: string; kind: "event"; openedAt: number; taskId: string; title: string }) | ({ canRespond: boolean; deadline: number | null; id: string; key: string; kind: "decision"; openedAt: number; taskId: string; title: string }) | ({ deadline: number | null; id: string; key: string; kind: "blocked"; message: string; openedAt: number; reason: "policy" | "quota" | "uncertain"; taskId: string; title: string })>; workflowId: string; workflowVersion: number } | null>;
       readonly runs: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; status?: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled" }, ({ hasMore: false; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: string; splitCursor?: string })>;
+    },
+    {
+      readonly cancel: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
+      readonly pause: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
+      readonly resume: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
+      readonly send: FunctionReference<"mutation", "public", { data: { confirmed: boolean }; event: "confirmed"; runId: string }, { eventId: string }>;
+      readonly start: FunctionReference<"mutation", "public", { input: Record<never, never> }, { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }>;
     }
   >;
   readonly summarizeNote: WorkflowReference<
@@ -507,10 +516,19 @@ export const workflows: {
       readonly chooseLength: WorkflowDecisionReference<"workflows.summarizeNote", "chooseLength", "short" | "long", "short" | "long", { words: number }>;
     },
     {
+      readonly canStart: FunctionReference<"query", "public", Record<never, never>, boolean>;
       readonly decision: FunctionReference<"query", "public", { decisionId: string; runId: string }, WorkflowDecisionDetail<"approveSummary", { comment: string; rating?: number }, { noteId: Id<"notes">; summary: string }> | WorkflowDecisionDetail<"chooseLength", "short" | "long", { words: number }> | null>;
       readonly decisions: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId?: string }, WorkflowQueryPage<WorkflowDecisionInboxItem<"approveSummary", { comment: string; rating?: number }> | WorkflowDecisionInboxItem<"chooseLength", "short" | "long">>>;
       readonly history: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId: string }, ({ hasMore: false; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "noteEdited" | "styleChosen"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "approveSummary" | "chooseLength"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "noteEdited" | "styleChosen"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "approveSummary" | "chooseLength"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: string; splitCursor?: string })>;
+      readonly run: FunctionReference<"query", "public", { runId: string }, { compensation?: ({ activity: "running" | "waiting" | "paused"; cause: "failure"; originalError: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean } }) | ({ activity: "running" | "waiting" | "paused"; cause: "cancellation" }); control: { canCancel: boolean; canPause: boolean; canResume: boolean; pendingControl: { kind: "pause" | "resume" | "cancel"; stage: "applying" } | null }; error?: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; finishedAt: number | null; manifestHash: string; output?: { summary: string; words: number }; runId: string; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled"; waits: Array<({ deadline: number; id: string; key: string; kind: "timer"; openedAt: number; purpose: "sleep" | "retry"; taskId: string; title: string }) | ({ canSend: boolean; deadline: number | null; event: { alias: string; fingerprint: string; kind: "workflowEvent" }; id: string; key: string; kind: "event"; openedAt: number; taskId: string; title: string }) | ({ canRespond: boolean; deadline: number | null; id: string; key: string; kind: "decision"; openedAt: number; taskId: string; title: string }) | ({ deadline: number | null; id: string; key: string; kind: "blocked"; message: string; openedAt: number; reason: "policy" | "quota" | "uncertain"; taskId: string; title: string })>; workflowId: string; workflowVersion: number } | null>;
       readonly runs: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; status?: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled" }, ({ hasMore: false; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: string; splitCursor?: string })>;
+    },
+    {
+      readonly cancel: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
+      readonly pause: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
+      readonly resume: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
+      readonly send: FunctionReference<"mutation", "public", ({ data: { noteId: Id<"notes">; title?: string }; event: "noteEdited"; runId: string }) | ({ data: { style: "short" | "long" }; event: "styleChosen"; runId: string }), { eventId: string }>;
+      readonly start: FunctionReference<"mutation", "public", { input: { noteId: Id<"notes">; style?: "short" | "long" } }, { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }>;
     }
   >;
 } = frozen({
@@ -592,6 +610,136 @@ export const workflows: {
         "confirmed"
       ]
     },
+    "mutations": {
+      "cancel": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.archiveNotes.mutations.cancel"
+      },
+      "pause": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.archiveNotes.mutations.pause"
+      },
+      "resume": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.archiveNotes.mutations.resume"
+      },
+      "send": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "data": {
+              "descriptorVersion": 1,
+              "fields": {
+                "confirmed": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "required"
+            },
+            "event": {
+              "descriptorVersion": 1,
+              "kind": "literal",
+              "nullable": false,
+              "presence": "required",
+              "value": "confirmed"
+            },
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.archiveNotes.mutations.send"
+      },
+      "start": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "input": {
+              "descriptorVersion": 1,
+              "fields": {},
+              "kind": "object",
+              "nullable": false,
+              "presence": "required"
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.archiveNotes.mutations.start"
+      }
+    },
     "output": {
       "descriptorVersion": 1,
       "kind": "null",
@@ -599,6 +747,15 @@ export const workflows: {
       "presence": "required"
     },
     "queries": {
+      "canStart": {
+        "name": "workflows.archiveNotes.queries.canStart",
+        "returns": {
+          "descriptorVersion": 1,
+          "kind": "boolean",
+          "nullable": false,
+          "presence": "required"
+        }
+      },
       "decision": {
         "name": "workflows.archiveNotes.queries.decision",
         "returns": {
@@ -2688,6 +2845,673 @@ export const workflows: {
           "presence": "required"
         }
       },
+      "run": {
+        "name": "workflows.archiveNotes.queries.run",
+        "returns": {
+          "descriptorVersion": 1,
+          "fields": {
+            "compensation": {
+              "descriptorVersion": 1,
+              "kind": "union",
+              "members": [
+                {
+                  "descriptorVersion": 1,
+                  "fields": {
+                    "activity": {
+                      "descriptorVersion": 1,
+                      "kind": "enum",
+                      "nullable": false,
+                      "presence": "required",
+                      "values": [
+                        "running",
+                        "waiting",
+                        "paused"
+                      ]
+                    },
+                    "cause": {
+                      "descriptorVersion": 1,
+                      "kind": "literal",
+                      "nullable": false,
+                      "presence": "required",
+                      "value": "failure"
+                    },
+                    "originalError": {
+                      "descriptorVersion": 1,
+                      "fields": {
+                        "category": {
+                          "descriptorVersion": 1,
+                          "kind": "enum",
+                          "nullable": false,
+                          "presence": "required",
+                          "values": [
+                            "source",
+                            "contract",
+                            "domain",
+                            "authorization",
+                            "operational",
+                            "uncertain",
+                            "safety"
+                          ]
+                        },
+                        "code": {
+                          "descriptorVersion": 1,
+                          "email": false,
+                          "kind": "string",
+                          "max": 256,
+                          "min": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "trim": false
+                        },
+                        "message": {
+                          "descriptorVersion": 1,
+                          "email": false,
+                          "kind": "string",
+                          "max": 2000,
+                          "nullable": false,
+                          "presence": "required",
+                          "trim": false
+                        },
+                        "requestId": {
+                          "descriptorVersion": 1,
+                          "email": false,
+                          "kind": "string",
+                          "max": 256,
+                          "min": 1,
+                          "nullable": true,
+                          "presence": "required",
+                          "trim": false
+                        },
+                        "retryable": {
+                          "descriptorVersion": 1,
+                          "kind": "boolean",
+                          "nullable": false,
+                          "presence": "required"
+                        }
+                      },
+                      "kind": "object",
+                      "nullable": false,
+                      "presence": "required"
+                    }
+                  },
+                  "kind": "object",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                {
+                  "descriptorVersion": 1,
+                  "fields": {
+                    "activity": {
+                      "descriptorVersion": 1,
+                      "kind": "enum",
+                      "nullable": false,
+                      "presence": "required",
+                      "values": [
+                        "running",
+                        "waiting",
+                        "paused"
+                      ]
+                    },
+                    "cause": {
+                      "descriptorVersion": 1,
+                      "kind": "literal",
+                      "nullable": false,
+                      "presence": "required",
+                      "value": "cancellation"
+                    }
+                  },
+                  "kind": "object",
+                  "nullable": false,
+                  "presence": "required"
+                }
+              ],
+              "nullable": false,
+              "presence": "optional"
+            },
+            "control": {
+              "descriptorVersion": 1,
+              "fields": {
+                "canCancel": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                "canPause": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                "canResume": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                "pendingControl": {
+                  "descriptorVersion": 1,
+                  "fields": {
+                    "kind": {
+                      "descriptorVersion": 1,
+                      "kind": "enum",
+                      "nullable": false,
+                      "presence": "required",
+                      "values": [
+                        "pause",
+                        "resume",
+                        "cancel"
+                      ]
+                    },
+                    "stage": {
+                      "descriptorVersion": 1,
+                      "kind": "literal",
+                      "nullable": false,
+                      "presence": "required",
+                      "value": "applying"
+                    }
+                  },
+                  "kind": "object",
+                  "nullable": true,
+                  "presence": "required"
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "required"
+            },
+            "error": {
+              "descriptorVersion": 1,
+              "fields": {
+                "category": {
+                  "descriptorVersion": 1,
+                  "kind": "enum",
+                  "nullable": false,
+                  "presence": "required",
+                  "values": [
+                    "source",
+                    "contract",
+                    "domain",
+                    "authorization",
+                    "operational",
+                    "uncertain",
+                    "safety"
+                  ]
+                },
+                "code": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 256,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "required",
+                  "trim": false
+                },
+                "message": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 2000,
+                  "nullable": false,
+                  "presence": "required",
+                  "trim": false
+                },
+                "requestId": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 256,
+                  "min": 1,
+                  "nullable": true,
+                  "presence": "required",
+                  "trim": false
+                },
+                "retryable": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "optional"
+            },
+            "finishedAt": {
+              "descriptorVersion": 1,
+              "kind": "timestamp",
+              "nullable": true,
+              "presence": "required"
+            },
+            "manifestHash": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            },
+            "output": {
+              "descriptorVersion": 1,
+              "kind": "null",
+              "nullable": false,
+              "presence": "optional"
+            },
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            },
+            "startedAt": {
+              "descriptorVersion": 1,
+              "kind": "timestamp",
+              "nullable": true,
+              "presence": "required"
+            },
+            "status": {
+              "descriptorVersion": 1,
+              "kind": "enum",
+              "nullable": false,
+              "presence": "required",
+              "values": [
+                "queued",
+                "running",
+                "waiting",
+                "paused",
+                "compensating",
+                "completed",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "waits": {
+              "descriptorVersion": 1,
+              "item": {
+                "descriptorVersion": 1,
+                "kind": "union",
+                "members": [
+                  {
+                    "descriptorVersion": 1,
+                    "fields": {
+                      "deadline": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "id": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 256,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "key": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "kind": {
+                        "descriptorVersion": 1,
+                        "kind": "literal",
+                        "nullable": false,
+                        "presence": "required",
+                        "value": "timer"
+                      },
+                      "openedAt": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "purpose": {
+                        "descriptorVersion": 1,
+                        "kind": "enum",
+                        "nullable": false,
+                        "presence": "required",
+                        "values": [
+                          "sleep",
+                          "retry"
+                        ]
+                      },
+                      "taskId": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "title": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 200,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      }
+                    },
+                    "kind": "object",
+                    "nullable": false,
+                    "presence": "required"
+                  },
+                  {
+                    "descriptorVersion": 1,
+                    "fields": {
+                      "canSend": {
+                        "descriptorVersion": 1,
+                        "kind": "boolean",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "deadline": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": true,
+                        "presence": "required"
+                      },
+                      "event": {
+                        "descriptorVersion": 1,
+                        "fields": {
+                          "alias": {
+                            "descriptorVersion": 1,
+                            "email": false,
+                            "kind": "string",
+                            "max": 64,
+                            "min": 1,
+                            "nullable": false,
+                            "presence": "required",
+                            "trim": false
+                          },
+                          "fingerprint": {
+                            "descriptorVersion": 1,
+                            "email": false,
+                            "kind": "string",
+                            "max": 64,
+                            "min": 64,
+                            "nullable": false,
+                            "presence": "required",
+                            "trim": false
+                          },
+                          "kind": {
+                            "descriptorVersion": 1,
+                            "kind": "literal",
+                            "nullable": false,
+                            "presence": "required",
+                            "value": "workflowEvent"
+                          }
+                        },
+                        "kind": "object",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "id": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 256,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "key": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "kind": {
+                        "descriptorVersion": 1,
+                        "kind": "literal",
+                        "nullable": false,
+                        "presence": "required",
+                        "value": "event"
+                      },
+                      "openedAt": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "taskId": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "title": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 200,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      }
+                    },
+                    "kind": "object",
+                    "nullable": false,
+                    "presence": "required"
+                  },
+                  {
+                    "descriptorVersion": 1,
+                    "fields": {
+                      "canRespond": {
+                        "descriptorVersion": 1,
+                        "kind": "boolean",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "deadline": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": true,
+                        "presence": "required"
+                      },
+                      "id": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 256,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "key": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "kind": {
+                        "descriptorVersion": 1,
+                        "kind": "literal",
+                        "nullable": false,
+                        "presence": "required",
+                        "value": "decision"
+                      },
+                      "openedAt": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "taskId": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "title": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 200,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      }
+                    },
+                    "kind": "object",
+                    "nullable": false,
+                    "presence": "required"
+                  },
+                  {
+                    "descriptorVersion": 1,
+                    "fields": {
+                      "deadline": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": true,
+                        "presence": "required"
+                      },
+                      "id": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 256,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "key": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "kind": {
+                        "descriptorVersion": 1,
+                        "kind": "literal",
+                        "nullable": false,
+                        "presence": "required",
+                        "value": "blocked"
+                      },
+                      "message": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 2000,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "openedAt": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "reason": {
+                        "descriptorVersion": 1,
+                        "kind": "enum",
+                        "nullable": false,
+                        "presence": "required",
+                        "values": [
+                          "policy",
+                          "quota",
+                          "uncertain"
+                        ]
+                      },
+                      "taskId": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "title": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 200,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      }
+                    },
+                    "kind": "object",
+                    "nullable": false,
+                    "presence": "required"
+                  }
+                ],
+                "nullable": false,
+                "presence": "required"
+              },
+              "kind": "array",
+              "max": 256,
+              "nullable": false,
+              "presence": "required"
+            },
+            "workflowId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            },
+            "workflowVersion": {
+              "descriptorVersion": 1,
+              "integer": true,
+              "kind": "number",
+              "min": 1,
+              "nullable": false,
+              "presence": "required"
+            }
+          },
+          "kind": "object",
+          "nullable": true,
+          "presence": "required"
+        }
+      },
       "runs": {
         "name": "workflows.archiveNotes.queries.runs",
         "returns": {
@@ -3375,6 +4199,215 @@ export const workflows: {
         "styleChosen"
       ]
     },
+    "mutations": {
+      "cancel": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.summarizeNote.mutations.cancel"
+      },
+      "pause": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.summarizeNote.mutations.pause"
+      },
+      "resume": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.summarizeNote.mutations.resume"
+      },
+      "send": {
+        "args": {
+          "descriptorVersion": 1,
+          "kind": "union",
+          "members": [
+            {
+              "descriptorVersion": 1,
+              "fields": {
+                "data": {
+                  "descriptorVersion": 1,
+                  "fields": {
+                    "noteId": {
+                      "descriptorVersion": 1,
+                      "kind": "id",
+                      "nullable": false,
+                      "presence": "required",
+                      "tableName": "notes"
+                    },
+                    "title": {
+                      "descriptorVersion": 1,
+                      "email": false,
+                      "kind": "string",
+                      "nullable": false,
+                      "presence": "optional",
+                      "trim": false
+                    }
+                  },
+                  "kind": "object",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                "event": {
+                  "descriptorVersion": 1,
+                  "kind": "literal",
+                  "nullable": false,
+                  "presence": "required",
+                  "value": "noteEdited"
+                },
+                "runId": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 256,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "required",
+                  "trim": false
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "required"
+            },
+            {
+              "descriptorVersion": 1,
+              "fields": {
+                "data": {
+                  "descriptorVersion": 1,
+                  "fields": {
+                    "style": {
+                      "descriptorVersion": 1,
+                      "kind": "enum",
+                      "nullable": false,
+                      "presence": "required",
+                      "values": [
+                        "short",
+                        "long"
+                      ]
+                    }
+                  },
+                  "kind": "object",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                "event": {
+                  "descriptorVersion": 1,
+                  "kind": "literal",
+                  "nullable": false,
+                  "presence": "required",
+                  "value": "styleChosen"
+                },
+                "runId": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 256,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "required",
+                  "trim": false
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "required"
+            }
+          ],
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.summarizeNote.mutations.send"
+      },
+      "start": {
+        "args": {
+          "descriptorVersion": 1,
+          "fields": {
+            "input": {
+              "descriptorVersion": 1,
+              "fields": {
+                "noteId": {
+                  "descriptorVersion": 1,
+                  "kind": "id",
+                  "nullable": false,
+                  "presence": "required",
+                  "tableName": "notes"
+                },
+                "style": {
+                  "defaultValue": "short",
+                  "descriptorVersion": 1,
+                  "kind": "enum",
+                  "nullable": false,
+                  "presence": "default",
+                  "values": [
+                    "short",
+                    "long"
+                  ]
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "required"
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "mutation",
+        "name": "workflows.summarizeNote.mutations.start"
+      }
+    },
     "output": {
       "descriptorVersion": 1,
       "fields": {
@@ -3399,6 +4432,15 @@ export const workflows: {
       "presence": "required"
     },
     "queries": {
+      "canStart": {
+        "name": "workflows.summarizeNote.queries.canStart",
+        "returns": {
+          "descriptorVersion": 1,
+          "kind": "boolean",
+          "nullable": false,
+          "presence": "required"
+        }
+      },
       "decision": {
         "name": "workflows.summarizeNote.queries.decision",
         "returns": {
@@ -5881,6 +6923,690 @@ export const workflows: {
             }
           ],
           "nullable": false,
+          "presence": "required"
+        }
+      },
+      "run": {
+        "name": "workflows.summarizeNote.queries.run",
+        "returns": {
+          "descriptorVersion": 1,
+          "fields": {
+            "compensation": {
+              "descriptorVersion": 1,
+              "kind": "union",
+              "members": [
+                {
+                  "descriptorVersion": 1,
+                  "fields": {
+                    "activity": {
+                      "descriptorVersion": 1,
+                      "kind": "enum",
+                      "nullable": false,
+                      "presence": "required",
+                      "values": [
+                        "running",
+                        "waiting",
+                        "paused"
+                      ]
+                    },
+                    "cause": {
+                      "descriptorVersion": 1,
+                      "kind": "literal",
+                      "nullable": false,
+                      "presence": "required",
+                      "value": "failure"
+                    },
+                    "originalError": {
+                      "descriptorVersion": 1,
+                      "fields": {
+                        "category": {
+                          "descriptorVersion": 1,
+                          "kind": "enum",
+                          "nullable": false,
+                          "presence": "required",
+                          "values": [
+                            "source",
+                            "contract",
+                            "domain",
+                            "authorization",
+                            "operational",
+                            "uncertain",
+                            "safety"
+                          ]
+                        },
+                        "code": {
+                          "descriptorVersion": 1,
+                          "email": false,
+                          "kind": "string",
+                          "max": 256,
+                          "min": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "trim": false
+                        },
+                        "message": {
+                          "descriptorVersion": 1,
+                          "email": false,
+                          "kind": "string",
+                          "max": 2000,
+                          "nullable": false,
+                          "presence": "required",
+                          "trim": false
+                        },
+                        "requestId": {
+                          "descriptorVersion": 1,
+                          "email": false,
+                          "kind": "string",
+                          "max": 256,
+                          "min": 1,
+                          "nullable": true,
+                          "presence": "required",
+                          "trim": false
+                        },
+                        "retryable": {
+                          "descriptorVersion": 1,
+                          "kind": "boolean",
+                          "nullable": false,
+                          "presence": "required"
+                        }
+                      },
+                      "kind": "object",
+                      "nullable": false,
+                      "presence": "required"
+                    }
+                  },
+                  "kind": "object",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                {
+                  "descriptorVersion": 1,
+                  "fields": {
+                    "activity": {
+                      "descriptorVersion": 1,
+                      "kind": "enum",
+                      "nullable": false,
+                      "presence": "required",
+                      "values": [
+                        "running",
+                        "waiting",
+                        "paused"
+                      ]
+                    },
+                    "cause": {
+                      "descriptorVersion": 1,
+                      "kind": "literal",
+                      "nullable": false,
+                      "presence": "required",
+                      "value": "cancellation"
+                    }
+                  },
+                  "kind": "object",
+                  "nullable": false,
+                  "presence": "required"
+                }
+              ],
+              "nullable": false,
+              "presence": "optional"
+            },
+            "control": {
+              "descriptorVersion": 1,
+              "fields": {
+                "canCancel": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                "canPause": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                "canResume": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                },
+                "pendingControl": {
+                  "descriptorVersion": 1,
+                  "fields": {
+                    "kind": {
+                      "descriptorVersion": 1,
+                      "kind": "enum",
+                      "nullable": false,
+                      "presence": "required",
+                      "values": [
+                        "pause",
+                        "resume",
+                        "cancel"
+                      ]
+                    },
+                    "stage": {
+                      "descriptorVersion": 1,
+                      "kind": "literal",
+                      "nullable": false,
+                      "presence": "required",
+                      "value": "applying"
+                    }
+                  },
+                  "kind": "object",
+                  "nullable": true,
+                  "presence": "required"
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "required"
+            },
+            "error": {
+              "descriptorVersion": 1,
+              "fields": {
+                "category": {
+                  "descriptorVersion": 1,
+                  "kind": "enum",
+                  "nullable": false,
+                  "presence": "required",
+                  "values": [
+                    "source",
+                    "contract",
+                    "domain",
+                    "authorization",
+                    "operational",
+                    "uncertain",
+                    "safety"
+                  ]
+                },
+                "code": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 256,
+                  "min": 1,
+                  "nullable": false,
+                  "presence": "required",
+                  "trim": false
+                },
+                "message": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 2000,
+                  "nullable": false,
+                  "presence": "required",
+                  "trim": false
+                },
+                "requestId": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "max": 256,
+                  "min": 1,
+                  "nullable": true,
+                  "presence": "required",
+                  "trim": false
+                },
+                "retryable": {
+                  "descriptorVersion": 1,
+                  "kind": "boolean",
+                  "nullable": false,
+                  "presence": "required"
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "optional"
+            },
+            "finishedAt": {
+              "descriptorVersion": 1,
+              "kind": "timestamp",
+              "nullable": true,
+              "presence": "required"
+            },
+            "manifestHash": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            },
+            "output": {
+              "descriptorVersion": 1,
+              "fields": {
+                "summary": {
+                  "descriptorVersion": 1,
+                  "email": false,
+                  "kind": "string",
+                  "nullable": false,
+                  "presence": "required",
+                  "trim": false
+                },
+                "words": {
+                  "descriptorVersion": 1,
+                  "integer": true,
+                  "kind": "number",
+                  "nullable": false,
+                  "presence": "required"
+                }
+              },
+              "kind": "object",
+              "nullable": false,
+              "presence": "optional"
+            },
+            "runId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            },
+            "startedAt": {
+              "descriptorVersion": 1,
+              "kind": "timestamp",
+              "nullable": true,
+              "presence": "required"
+            },
+            "status": {
+              "descriptorVersion": 1,
+              "kind": "enum",
+              "nullable": false,
+              "presence": "required",
+              "values": [
+                "queued",
+                "running",
+                "waiting",
+                "paused",
+                "compensating",
+                "completed",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "waits": {
+              "descriptorVersion": 1,
+              "item": {
+                "descriptorVersion": 1,
+                "kind": "union",
+                "members": [
+                  {
+                    "descriptorVersion": 1,
+                    "fields": {
+                      "deadline": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "id": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 256,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "key": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "kind": {
+                        "descriptorVersion": 1,
+                        "kind": "literal",
+                        "nullable": false,
+                        "presence": "required",
+                        "value": "timer"
+                      },
+                      "openedAt": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "purpose": {
+                        "descriptorVersion": 1,
+                        "kind": "enum",
+                        "nullable": false,
+                        "presence": "required",
+                        "values": [
+                          "sleep",
+                          "retry"
+                        ]
+                      },
+                      "taskId": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "title": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 200,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      }
+                    },
+                    "kind": "object",
+                    "nullable": false,
+                    "presence": "required"
+                  },
+                  {
+                    "descriptorVersion": 1,
+                    "fields": {
+                      "canSend": {
+                        "descriptorVersion": 1,
+                        "kind": "boolean",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "deadline": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": true,
+                        "presence": "required"
+                      },
+                      "event": {
+                        "descriptorVersion": 1,
+                        "fields": {
+                          "alias": {
+                            "descriptorVersion": 1,
+                            "email": false,
+                            "kind": "string",
+                            "max": 64,
+                            "min": 1,
+                            "nullable": false,
+                            "presence": "required",
+                            "trim": false
+                          },
+                          "fingerprint": {
+                            "descriptorVersion": 1,
+                            "email": false,
+                            "kind": "string",
+                            "max": 64,
+                            "min": 64,
+                            "nullable": false,
+                            "presence": "required",
+                            "trim": false
+                          },
+                          "kind": {
+                            "descriptorVersion": 1,
+                            "kind": "literal",
+                            "nullable": false,
+                            "presence": "required",
+                            "value": "workflowEvent"
+                          }
+                        },
+                        "kind": "object",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "id": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 256,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "key": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "kind": {
+                        "descriptorVersion": 1,
+                        "kind": "literal",
+                        "nullable": false,
+                        "presence": "required",
+                        "value": "event"
+                      },
+                      "openedAt": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "taskId": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "title": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 200,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      }
+                    },
+                    "kind": "object",
+                    "nullable": false,
+                    "presence": "required"
+                  },
+                  {
+                    "descriptorVersion": 1,
+                    "fields": {
+                      "canRespond": {
+                        "descriptorVersion": 1,
+                        "kind": "boolean",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "deadline": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": true,
+                        "presence": "required"
+                      },
+                      "id": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 256,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "key": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "kind": {
+                        "descriptorVersion": 1,
+                        "kind": "literal",
+                        "nullable": false,
+                        "presence": "required",
+                        "value": "decision"
+                      },
+                      "openedAt": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "taskId": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "title": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 200,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      }
+                    },
+                    "kind": "object",
+                    "nullable": false,
+                    "presence": "required"
+                  },
+                  {
+                    "descriptorVersion": 1,
+                    "fields": {
+                      "deadline": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": true,
+                        "presence": "required"
+                      },
+                      "id": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 256,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "key": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "kind": {
+                        "descriptorVersion": 1,
+                        "kind": "literal",
+                        "nullable": false,
+                        "presence": "required",
+                        "value": "blocked"
+                      },
+                      "message": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 2000,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "openedAt": {
+                        "descriptorVersion": 1,
+                        "kind": "timestamp",
+                        "nullable": false,
+                        "presence": "required"
+                      },
+                      "reason": {
+                        "descriptorVersion": 1,
+                        "kind": "enum",
+                        "nullable": false,
+                        "presence": "required",
+                        "values": [
+                          "policy",
+                          "quota",
+                          "uncertain"
+                        ]
+                      },
+                      "taskId": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 1024,
+                        "min": 1,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      },
+                      "title": {
+                        "descriptorVersion": 1,
+                        "email": false,
+                        "kind": "string",
+                        "max": 200,
+                        "nullable": false,
+                        "presence": "required",
+                        "trim": false
+                      }
+                    },
+                    "kind": "object",
+                    "nullable": false,
+                    "presence": "required"
+                  }
+                ],
+                "nullable": false,
+                "presence": "required"
+              },
+              "kind": "array",
+              "max": 256,
+              "nullable": false,
+              "presence": "required"
+            },
+            "workflowId": {
+              "descriptorVersion": 1,
+              "email": false,
+              "kind": "string",
+              "max": 256,
+              "min": 1,
+              "nullable": false,
+              "presence": "required",
+              "trim": false
+            },
+            "workflowVersion": {
+              "descriptorVersion": 1,
+              "integer": true,
+              "kind": "number",
+              "min": 1,
+              "nullable": false,
+              "presence": "required"
+            }
+          },
+          "kind": "object",
+          "nullable": true,
           "presence": "required"
         }
       },

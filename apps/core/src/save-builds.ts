@@ -12,7 +12,6 @@ import type {
   CommittedVersion,
   SavedBuild,
 } from "@grasp-os/shared/apps";
-import { appErrors, appV1ServerFolder } from "@grasp-os/shared/apps";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
@@ -34,12 +33,6 @@ type SavedBuilds = CommittedVersion["builds"];
 /** What a save says of a build that couldn't run; nothing of App code. */
 const couldNotRun =
   "The build couldn't run now. It runs again when this is first used.";
-
-/**
- * Most files under `app/` a draft's server build names: as many as its
- * refusal names when committed (app-v1-server.ts).
- */
-const maxLeftoversNamed = 20;
 
 /**
  * The most characters of a failed build's error message the warning
@@ -195,16 +188,6 @@ export const buildOnSave = async (
   return { pages };
 };
 
-/** A diagnostic of the App's layout (`server`) about `file`, in core's words. */
-const layoutProblem = (file: string, message: string): BuildDiagnostic => ({
-  file,
-  line: null,
-  rule: "server",
-  category: diagnosticCategory("server"),
-  severity: "error",
-  message,
-});
-
 /** Where inspecting server code located what it threw (app-inspection.ts). */
 const inspectionDetailsSchema = z.object({
   message: z.string().optional(),
@@ -297,9 +280,8 @@ const checkedDraftCode = async (
  * errors and every gate a seal holds it to, against the references its
  * seal would generate (`checkedDraftCode`); its registration runs in the
  * sandbox to say what they are, none of its operations (server code with
- * no app.ts and schema.ts fails there, saying so). Failed too when it
- * holds files under `app/`, which no commit takes (`app.v1_server`), each
- * named; `none` when it has no server code. Never throws, as
+ * no app.ts and schema.ts fails there, saying so); `none` when it has
+ * no server code. Never throws, as
  * `buildOnSave`. `inspection` is the one its caller shares with the
  * pages' build (`inspectDraft`), its own otherwise.
  */
@@ -308,28 +290,14 @@ export const draftServerBuild = async (
   source: Pick<SavedSource, "app" | "version" | "files">,
   inspection: () => Promise<DraftInspection> = async () =>
     await inspectDraft(env, source.app, source.files, { profile: "preview" })
-): Promise<SavedBuild> => {
-  const { files } = source;
-  const leftovers = Object.keys(files)
-    .filter((path) => path.startsWith(appV1ServerFolder))
-    .toSorted();
-  if (leftovers.length > 0) {
-    const refused = appErrors.create("app.v1_server").message;
-    return {
-      status: "failed",
-      diagnostics: leftovers
-        .slice(0, maxLeftoversNamed)
-        .map((path) => layoutProblem(path, refused)),
-    };
-  }
-  return await savedBuild(
+): Promise<SavedBuild> =>
+  await savedBuild(
     "server",
     source,
     appCodeFiles,
     async () => await checkedDraftCode(env, source, inspection),
     env
   );
-};
 
 /**
  * The files Ultracite's rules read (`lint`): the App's TypeScript, but its

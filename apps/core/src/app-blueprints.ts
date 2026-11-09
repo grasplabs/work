@@ -4,7 +4,6 @@ import type { AppDefinition } from "@grasp-os/sdk/definition";
 import {
   acceptedUpdateSchema,
   appErrors,
-  appV1ServerFolder,
   fromBlueprintSchema,
 } from "@grasp-os/shared/apps";
 import type {
@@ -37,7 +36,6 @@ import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
 import { generatedPaths, withDefinitionCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
-import { refuseV1Server } from "./app-v1-server.ts";
 import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
 import {
   appFor,
@@ -58,7 +56,6 @@ import {
   hasPages,
   toApp,
   toVersion,
-  versionFiles,
   versionTree,
 } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
@@ -388,11 +385,6 @@ export const markBlueprint = async (
   const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const row = await findVersion(env, found.id, version);
-  // A version holding the v1 server's files is never a blueprint: no App
-  // could be created from it (`createFromBlueprint` refuses them too).
-  refuseV1Server(Object.keys(await versionFiles(env, found.id, row.version)));
-  // Nor one without a definition, committed before definitions left the
-  // tree: its copies would have none.
   const definition = await readStored(row);
   const db = drizzle(env.DB);
   const marked = async () =>
@@ -547,9 +539,6 @@ export const createFromBlueprint = async (
     blueprint.permissions,
     blueprint.id
   );
-  // A blueprint marked from a version holding the v1 server's files: no
-  // App is created from it as none is committed with them.
-  refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
   const tree = await storedVersion(files, definition);
   await storeTree(env, app, tree);
@@ -784,11 +773,6 @@ const threeWay = <Value>(
  * aren't merged: they are generated from the merged definition, as in
  * every version; a definition both changed is a conflict of its own
  * (`definitionConflict`), the code it generates alike or not.
- *
- * The v1 server's files (`app/`) are dropped, from either side: a copy
- * made before the v1 server went may still hold them, and no version is
- * committed with them any more (app-v1-server.ts). The update shows them
- * deleted, and its version is one that commits.
  */
 const mergeOver = (
   base: MergeSide,
@@ -803,7 +787,7 @@ const mergeOver = (
     ...theirs.files.keys(),
   ]);
   for (const path of [...paths].toSorted()) {
-    if (path.startsWith(appV1ServerFolder) || generatedPaths.has(path)) {
+    if (generatedPaths.has(path)) {
       continue;
     }
     const mine = ours.files.get(path);
@@ -878,14 +862,10 @@ const pendingUpdate = async (
       ? undefined
       : await blueprintRow(env, blueprintIdSchema.parse(origin.blueprintId));
   const latest = await latestVersion(env, found.id);
-  // An origin or a built-in from before definitions left the tree has no
-  // definition to merge over or from.
   if (
     origin === undefined ||
     blueprint === undefined ||
     blueprint.appId !== null ||
-    origin.definition === null ||
-    blueprint.definition === null ||
     (blueprint.tree === origin.tree &&
       blueprint.definition === origin.definition) ||
     latest === null

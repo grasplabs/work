@@ -3,7 +3,12 @@ import { expect } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
-import { answerSpeech } from "./speech.ts";
+import {
+  answerSpeech,
+  installReadingClock,
+  readOn,
+  readUntil,
+} from "./speech.ts";
 
 // Stephen says each step of the admin's onboarding (apps/web/src/voice):
 // with the sound on, each step's line is asked of the voice, the next
@@ -138,6 +143,9 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
   try {
     await leaveNothingChosen();
     const page = await pageOf(admin);
+    // The steps' lines are read silently, at the pace of reading on the
+    // page's clock: the test goes on it to read them (`readOn`).
+    await installReadingClock(page);
     await page.goto("/setup?step=sources");
     // What Grasp knows of the organization, said apart from how far the admin is through the steps.
     const bar = page.getByRole("button", {
@@ -153,6 +161,10 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
 
     // SharePoint comes with the company's Microsoft sign-in, and Microsoft
     // 365 is connected for everyone (e2e/connections-seed.ts): connected.
+    await readOn(
+      page,
+      page.getByRole("button", { name: "Connect SharePoint" })
+    );
     await page.getByRole("button", { name: "Connect SharePoint" }).click();
     await expect(
       page.getByText(
@@ -172,18 +184,21 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
     await expect(page.getByText("Noted", { exact: true })).toBeVisible();
     expect(await known()).toBe(before + 5);
     await page.getByRole("button", { name: "Continue" }).click();
+    await readOn(page, page.getByRole("button", { name: "Skip for now" }));
     await page.getByRole("button", { name: "Skip for now" }).click();
 
     // Pulse skipped counts nothing.
     await expect(
       page.getByRole("heading", { name: "Which tools do people actually use?" })
     ).toBeVisible();
+    await readOn(page, page.getByRole("button", { name: "Skip for now" }));
     await page.getByRole("button", { name: "Skip for now" }).click();
 
     // The HR platform comes before the organization: Personio, noted, counts as the leads (10).
     await expect(
       page.getByRole("heading", { name: "Which HR platform do you use?" })
     ).toBeVisible();
+    await readOn(page, page.getByRole("button", { name: "Connect Personio" }));
     await page.getByRole("button", { name: "Connect Personio" }).click();
     await expect(
       page.getByText(
@@ -226,6 +241,10 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   const { admin } = peopleIn("setupStory");
   const page = await pageOf(admin);
   const asked = await answerSpeech(page);
+  // Read silently, the story goes at the pace of reading on the page's
+  // clock: the test goes on it to read it (`readUntil`). Heard, it takes
+  // the time its sound plays.
+  await installReadingClock(page);
 
   // The welcome, in Dutch from the moment it is picked.
   await page.goto("/setup?step=welcome");
@@ -262,14 +281,35 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   });
   await page.reload();
   const second = page.getByText(story.second);
-  await expect(second).toBeVisible();
+  // Within expect's 5 s, as it was waited for in real time.
+  await readUntil(
+    page,
+    async () => {
+      await expect(second).toBeVisible({ timeout: 100 });
+    },
+    5000
+  );
   await page.getByRole("button", { name: "Pauzeren" }).click();
   await page.waitForTimeout(6000);
   await expect(second).toBeVisible();
   await expect(page.getByText(story.third)).toBeHidden();
   await page.getByRole("button", { name: "Afspelen" }).click();
-  await expect(page.getByText(story.third)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(story.summary)).toBeVisible({ timeout: 120_000 });
+  await readUntil(
+    page,
+    async () => {
+      await expect(page.getByText(story.third)).toBeVisible({ timeout: 100 });
+    },
+    20_000
+  );
+  await readUntil(
+    page,
+    async () => {
+      await expect(page.getByText(story.summary)).toBeVisible({
+        timeout: 100,
+      });
+    },
+    120_000
+  );
   await page.getByRole("button", { name: "Doorgaan" }).click();
   await expect(
     page.getByRole("heading", { name: "Wie is wie in je bedrijf?" })

@@ -1,4 +1,4 @@
-import { declaredWorkflows, workflowQueries } from "@grasp-os/sdk/host";
+import { declaredWorkflows, workflowFunctions } from "@grasp-os/sdk/host";
 import type { WorkflowQueryName } from "@grasp-os/sdk/host";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -219,7 +219,7 @@ export const queryReference = (
     (workflow) => workflow.alias === alias
   );
   const operation =
-    bound === undefined ? undefined : workflowQueries(bound)[name];
+    bound === undefined ? undefined : workflowFunctions(bound).queries[name];
   if (operation === undefined) {
     throw new Error(`No query ${name} of ${alias}`);
   }

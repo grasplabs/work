@@ -246,7 +246,3 @@ export const signalRows = (
     text: signalText(signal),
   }));
 };
-
-/** Hours, as the page shows them: `12.5 h`. */
-export const formatHours = (hours: number): string =>
-  `${(Math.round(hours * 10) / 10).toLocaleString("en", { maximumFractionDigits: 1 })} h`;

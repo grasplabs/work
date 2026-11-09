@@ -1,5 +1,3 @@
-import { canonicalJson } from "@grasp-os/shared/json";
-
 import { AccessFence } from "./access-fence.ts";
 import { clientError } from "./client-error.ts";
 import { ClientFiles } from "./client-files.ts";
@@ -282,30 +280,14 @@ export class GraspClient {
       readReference,
       stream: async (reference, args, options, events) =>
         await client.#streams.stream(reference, args, options, events),
-      workflowLink: {
-        watch: client.#transport.watch,
-        decisions: client.#transport.decisions,
-        command: async (target, request, key, events) =>
-          await client.#submissions.send(
-            target,
-            request,
-            key,
-            {
-              scoped: canonicalJson([client.#fence.generation, key]),
-              input: "",
-            },
-            events
-          ),
-        fence: (refusal, startedUnder) => {
-          if (
-            startedUnder === undefined ||
-            startedUnder === client.#fence.generation
-          ) {
-            client.#fence.fence(refusal);
-          }
-        },
-        generation: () => client.#fence.generation,
-        onFence: (listener) => client.#fence.onFence(listener),
+      decisions: client.#transport.decisions,
+      fence: (refusal, startedUnder) => {
+        if (
+          startedUnder === undefined ||
+          startedUnder === client.#fence.generation
+        ) {
+          client.#fence.fence(refusal);
+        }
       },
       fences: () => client.#fence.generation,
       fencedBy: () => client.#fence.fencedBy,

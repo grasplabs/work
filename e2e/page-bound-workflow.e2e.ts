@@ -94,11 +94,11 @@ function Desk() {
     <main>
       <h1>Follow-ups</h1>
       <output aria-label="Status">{followUp.status}</output>
-      <output aria-label="Can run">{yesNo(followUp.canRun)}</output>
+      <output aria-label="Can start">{yesNo(followUp.canStart)}</output>
       <output aria-label="Starting">{yesNo(followUp.isStarting)}</output>
       <output aria-label="Can cancel">{yesNo(followUp.canCancel)}</output>
       <output aria-label="Pending control">{pending}</output>
-      <Button onClick={() => tried(() => followUp.run({ who: "Ada" }))}>
+      <Button onClick={() => tried(() => followUp.start({ who: "Ada" }))}>
         Start follow-up
       </Button>
       <Button onClick={() => tried(followUp.cancel)}>Cancel follow-up</Button>
@@ -190,10 +190,10 @@ const openDesk = async (page: Page, app: string): Promise<FrameLocator> => {
 const field = (appPage: FrameLocator, name: string) =>
   appPage.getByRole("status", { name, exact: true });
 
-/** Whether `route` relays the page's workflow command `command`. */
-const relays = (route: Route, command: "start" | "cancel"): boolean =>
+/** Whether `route` relays the page's call of the workflow's mutation `name`. */
+const relays = (route: Route, name: "start" | "cancel"): boolean =>
   route.request().method() === "POST" &&
-  (route.request().postData() ?? "").includes(`"command":"${command}"`);
+  (route.request().postData() ?? "").includes(`.mutations.${name}"`);
 
 test("a page starts and cancels a bound workflow's run, and a reload during a start doesn't start it twice", async ({
   pageOf,
@@ -205,7 +205,7 @@ test("a page starts and cancels a bound workflow's run, and a reload during a st
 
   // Nothing runs until asked; the binding and the grant let them start one.
   await expect(field(appPage, "Status")).toHaveText("idle");
-  await expect(field(appPage, "Can run")).toHaveText("yes", live);
+  await expect(field(appPage, "Can start")).toHaveText("yes", live);
   await expect(field(appPage, "Can cancel")).toHaveText("no");
 
   // Started, the run shows running, and may be cancelled.
@@ -270,7 +270,7 @@ test("a page starts and cancels a bound workflow's run, and a reload during a st
   ).toBeVisible({ timeout: 20_000 });
   // Following the workflow again, it shows no run and starts none: the
   // cancelled run and the one core admitted are all there is.
-  await expect(field(reloaded, "Can run")).toHaveText("yes", live);
+  await expect(field(reloaded, "Can start")).toHaveText("yes", live);
   await expect(field(reloaded, "Status")).toHaveText("idle");
   await expect(field(reloaded, "Starting")).toHaveText("no");
   expect(await runsOf(builder, workflow)).toBe(2);
