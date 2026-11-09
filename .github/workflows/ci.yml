@@ -177,6 +177,26 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           store: ${{ matrix.shard == 1 }}
+      # Core's global setup's builds (the App compiler, the extractor, the
+      # connect bundle: about 30 s a shard), by the hash of their inputs
+      # (apps/core/test/prebuilt.ts): on a hit, global setup only copies
+      # them, and it checks the key itself, so a wrong restore is rebuilt.
+      # A miss builds them and saves them at the job's end: a few MB, so
+      # shards that race to save lose nothing. Main's come from
+      # test-caches (below).
+      - id: prebuilt
+        run: echo "key=test-prebuilt-$(node apps/core/test/prebuilt-key.ts)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/core/dist/test-prebuilt
+          key: ${{ steps.prebuilt.outputs.key }}
+      # Vitest's pre-bundled dependencies for core's workers, by the
+      # lockfile and the configs that list them: only restored here, saved
+      # by test-caches on main.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.vite/vitest
+          key: vitest-deps-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'vite.config.ts', 'apps/*/vite*.config.ts', 'packages/*/vite*.config.ts') }}
       # Shards split by how long each file takes (scripts/test-sequencer.ts,
       # with the times in scripts/test-durations.json), each shard running
       # one project group only (scripts/test-shards.ts): a shard that ran
@@ -765,6 +785,48 @@ jobs:
           path: release-out/
           if-no-files-found: error
           retention-days: 14
+
+  # The test shards' caches on main, where every pull request can read
+  # them (a pull request's own are its alone): core's global setup's
+  # builds and Vitest's pre-bundled dependencies, by one run of one small
+  # core test file, which builds both. One job saves, so the shards never
+  # race to pack the same files. Nothing waits for it.
+  test-caches:
+    name: test-caches
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          store: false
+      - id: prebuilt
+        run: echo "key=test-prebuilt-$(node apps/core/test/prebuilt-key.ts)" >> "$GITHUB_OUTPUT"
+      - id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/core/dist/test-prebuilt
+          key: ${{ steps.prebuilt.outputs.key }}
+      - id: deps
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.vite/vitest
+          key: vitest-deps-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'vite.config.ts', 'apps/*/vite*.config.ts', 'packages/*/vite*.config.ts') }}
+      - if: steps.restore.outputs.cache-hit != 'true' || steps.deps.outputs.cache-hit != 'true'
+        run: vp test run --project @grasp-os/core apps/core/test/history-spans.test.ts
+      - if: steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/core/dist/test-prebuilt
+          key: ${{ steps.prebuilt.outputs.key }}
+      - if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.vite/vitest
+          key: vitest-deps-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'vite.config.ts', 'apps/*/vite*.config.ts', 'packages/*/vite*.config.ts') }}
 
   # Every push to main deploys staging's platform (the admin, router and
   # connect gateway) with the Deploy platform workflow, the same steps a
