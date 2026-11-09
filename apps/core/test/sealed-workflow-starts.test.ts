@@ -30,6 +30,7 @@ import type { TestApp } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { tiledPage } from "./split-pages.ts";
 
 // Starting workflows from a sealed App's functions, as they run in their
 // sandbox (spec 7.4, 9.5): the action's start and the mutation's staged
@@ -554,24 +555,22 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       items: z.array(z.object({ run: z.object({ runId: z.string() }) })),
       splitCursor: z.string().optional(),
     });
-    // Each page from where the last split it, as a live list splits them.
-    const ids: string[] = [];
-    let splits = 0;
-    let from: string | null = null;
-    do {
-      // oxlint-disable-next-line no-await-in-loop -- each from the split before
-      const answered = await ask({
-        pagination: { pageSize: 100, cursor: from, endCursor: end },
-      });
-      const read = page.parse(answered.ok ? answered.value : answered);
-      ids.push(...read.items.map(({ run }) => run.runId));
-      from = read.splitCursor ?? null;
-      if (from !== null) {
-        splits += 1;
-      }
-    } while (from !== null);
+    // Split as a live list splits it: on a `splitCursor`, its first half
+    // `(from, split)`, then the rest `(split, end)`, each split again
+    // should it say so.
+    const tiled = await tiledPage(
+      async (from, until) => {
+        const answered = await ask({
+          pagination: { pageSize: 100, cursor: from, endCursor: until },
+        });
+        return page.parse(answered.ok ? answered.value : answered);
+      },
+      null,
+      end
+    );
+    const ids = tiled.items.map(({ run }) => run.runId);
     expect({
-      split: splits > 1,
+      split: tiled.reads > 2,
       runs: ids.length,
       unique: new Set(ids).size,
     }).toStrictEqual({

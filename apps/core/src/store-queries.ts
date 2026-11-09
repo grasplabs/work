@@ -587,8 +587,9 @@ export type PageAnswer = (
   | { items: ReadDocument[]; nextCursor: string; hasMore: true }
 ) & {
   /**
-   * Where to split a page given an end that grew past twice its size:
-   * after its first `pageSize` records (`readPage`).
+   * Where to split a page given an end that grew past a bound (`readPage`,
+   * page-splits.ts): the answer holds every record up to that place, and
+   * may hold those after it.
    */
   splitCursor?: string;
 };
@@ -731,6 +732,12 @@ export interface EndBound {
    * `lastRow`: it answers what it read, and says to split there.
    */
   exhausted: boolean;
+  /**
+   * How many shares of the scan bound the read takes: one for its own
+   * records, one more for each relation `with` loads for them, so a
+   * page's related records fit within what is left of the bound.
+   */
+  shares: number;
 }
 
 /** A row a plan matched, with its document when the plan read it. */
@@ -774,8 +781,8 @@ export const matchesOf = (
         // page's records grew past what one read may examine.
         if (
           end?.lastRow !== undefined &&
-          (scan.entries + 1 > queryMaxScannedEntries ||
-            scan.bytes + (row.bytes ?? 0) > queryMaxScannedBytes)
+          (scan.entries + 1 > queryMaxScannedEntries / end.shares ||
+            scan.bytes + (row.bytes ?? 0) > queryMaxScannedBytes / end.shares)
         ) {
           end.exhausted = true;
           return { done: true, value: undefined };
@@ -1533,6 +1540,7 @@ const searchMatches = (
           reached: false,
           lastRow: undefined,
           exhausted: false,
+          shares: 1 + (query.with?.length ?? 0),
         };
   return {
     matches: matchesOf(
@@ -1821,38 +1829,37 @@ const compareAnchorValues = (left: AnchorValue, right: AnchorValue): number => {
   return 0;
 };
 
+/** The bytes of a row's document, as SQLite read them. */
+const bytesOf = (row: ReadRow | undefined): number =>
+  typeof row?.bytes === "number" ? row.bytes : 0;
+
 /**
- * How a page with an end (`bound`) is answered (page-splits.ts): a page
- * grows as records move into it, so past a bound it answers its first
- * records and says where to split it, keeping a live list's pages near
- * their size and within an answer (as Convex's `splitCursor`); and where
- * it stopped, when it reached the scan bound short of its end. Each
- * record's bytes count with those of the related records it carries
- * (`items`' `_with`). None for a page without an end.
+ * How a page with an end is answered (page-splits.ts): a page grows as
+ * records move into it, so past a bound it says where to split it,
+ * keeping a live list's pages near their size and within an answer (as
+ * Convex's `splitCursor`), and answers only its first records once it is
+ * past what one answer may carry or its read stopped short of its end
+ * (`stopped`, after `lastRow`). Each record's bytes count with those of
+ * the related records it carries (`items`' `_with`), once loaded.
  */
 const pageSplit = (
   found: readonly Match[],
   items: readonly ReadDocument[],
-  bound: EndBound | undefined,
+  { stopped, lastRow }: { stopped: boolean; lastRow: ReadRow | undefined },
   pageSize: number
 ): { keep: number; after: ReadRow | undefined } | undefined => {
-  if (bound === undefined) {
-    return undefined;
-  }
-  const sizes = found.map(
-    ({ row }, position) =>
-      (typeof row.bytes === "number" ? row.bytes : 0) +
-      (items[position]?._with === undefined
-        ? 0
-        : answerSize(items[position]?._with))
+  const sizes = items.map(
+    (item, position) =>
+      bytesOf(found[position]?.row) +
+      (item._with === undefined ? 0 : answerSize(item._with))
   );
-  const { keep, split } = pageCut(sizes, pageSize, bound.exhausted);
+  const { keep, split } = pageCut(sizes, pageSize, stopped);
   if (split === undefined) {
-    return undefined;
+    return keep < items.length ? { keep, after: undefined } : undefined;
   }
   return {
     keep,
-    after: split === "stopped" ? bound.lastRow : found[split]?.row,
+    after: split === "stopped" ? lastRow : found[split]?.row,
   };
 };
 
@@ -1917,11 +1924,45 @@ const answeredPage = (
     pageSize,
     more,
     anchorFields,
-  }: { pageSize: number; more: boolean; anchorFields: number | undefined }
+    related,
+  }: {
+    pageSize: number;
+    more: boolean;
+    anchorFields: number | undefined;
+    /** Loads the related records of the documents kept (`with`). */
+    related: (documents: ReadDocument[]) => void;
+  }
 ): PageRead => {
-  const cut = pageSplit(found, read, bound, pageSize);
-  const items = cut === undefined ? read : read.slice(0, cut.keep);
-  const split = anchorOfRow(cut?.after, anchorFields);
+  // Cut on its own records first, so related records load only for the
+  // records it answers; then again with them, should they push it past
+  // an answer.
+  const own =
+    bound === undefined
+      ? undefined
+      : pageSplit(
+          found,
+          read,
+          { stopped: bound.exhausted, lastRow: bound.lastRow },
+          pageSize
+        );
+  const kept = own === undefined ? read : read.slice(0, own.keep);
+  related(kept);
+  const full =
+    bound === undefined || own?.keep === 0
+      ? undefined
+      : pageSplit(
+          found,
+          kept,
+          { stopped: false, lastRow: undefined },
+          pageSize
+        );
+  const recut =
+    full !== undefined && full.keep < kept.length ? full : undefined;
+  const items = recut === undefined ? kept : kept.slice(0, recut.keep);
+  const split = anchorOfRow(
+    recut?.after ?? own?.after ?? full?.after,
+    anchorFields
+  );
   return {
     items,
     hasMore: more || split !== undefined,
@@ -2013,6 +2054,7 @@ export const readPage = (
             reached: false,
             lastRow: undefined,
             exhausted: false,
+            shares: 1 + (query.with?.length ?? 0),
           };
     matches = chainedMatches(sql, plans, scan, bound);
   } else {
@@ -2044,11 +2086,13 @@ export const readPage = (
   const read = found.map(({ row, valueJson }) =>
     documentOf(table, row, valueJson ?? "{}")
   );
-  withRelated(sql, pinned, scope, table, read, query.with ?? [], scan);
   const page = answeredPage(found, read, bound, {
     pageSize: terminal.pageSize,
     more,
     anchorFields,
+    related: (documents) => {
+      withRelated(sql, pinned, scope, table, documents, query.with ?? [], scan);
+    },
   });
   sql.answered(table.name, page.items.length);
   return page;

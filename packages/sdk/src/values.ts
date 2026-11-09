@@ -205,8 +205,9 @@ export const v = Object.freeze({
  * many records that is, and answers `endCursor` as its own next cursor:
  * how a live list (`usePaginatedQuery`) keeps each loaded page's bounds
  * fixed while records move in and out of it, as Convex does. A caller
- * that passes `endCursor` must read the answer's `splitCursor`: a page
- * that grew past a bound answers only its records up to that place.
+ * that passes `endCursor` must read the answer's `splitCursor`, which
+ * means one thing however it was set: split the page there. The answer
+ * holds every record up to that place, and may hold those after it.
  */
 export const paginationOptionsValidator = v.object({
   pageSize: v
@@ -221,8 +222,9 @@ export const paginationOptionsValidator = v.object({
 
 /**
  * One page of `item`s: the last one without a cursor, any other with one.
- * A page given an end that grew past twice its size also says where to
- * split it (`splitCursor`), which a live list does.
+ * A page given an end that grew past a bound also says where to split it
+ * (`splitCursor`), which a live list does: the answer holds every record
+ * up to that place, and may hold those after it.
  */
 export const paginationResultValidator = <Item extends AnySchema>(item: Item) =>
   v.union(

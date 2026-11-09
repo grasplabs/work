@@ -31,8 +31,9 @@ export type PaginationResult<Item> = (
   | { items: Item[]; nextCursor: string; hasMore: true }
 ) & {
   /**
-   * Where to split a page given an end that grew past twice its size,
-   * after its first `pageSize` records: what a live list does with it.
+   * Where to split a page given an end that grew past a bound: what a
+   * live list does with it. The answer holds every record up to that
+   * place, and may hold those after it.
    */
   splitCursor?: string;
 };

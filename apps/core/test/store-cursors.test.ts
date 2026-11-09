@@ -25,6 +25,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { tiledPage } from "./split-pages.ts";
 import { accessedManifest, appliedTables } from "./store-schemas.ts";
 
 // Pages of a business store's records and their cursors (store-cursors.ts,
@@ -808,8 +809,9 @@ describe("pages ended at a cursor", () => {
       grown: grown.items.length,
       // After the records within the first half of their bytes.
       split: grown.splitCursor,
-      // Answered as far as half an answer holds, and split there.
-    }).toStrictEqual({ grown: 2, split: half.nextCursor });
+      // Answered whole while it fits one answer, and split where half of
+      // its bytes end.
+    }).toStrictEqual({ grown: 4, split: half.nextCursor });
   });
 
   it("stop at their end before any filter, never scanning on past it", async () => {
@@ -864,27 +866,21 @@ describe("pages ended at a cursor", () => {
       "ada",
       100
     );
-    // Each page from where the last split it, as a live list splits them.
-    const titles: string[] = [];
-    let splits = 0;
-    let from: string | null = null;
-    do {
-      // Large enough a page that only the scan and answer bounds cut
-      // it: each answer ends where it says to split.
-      // oxlint-disable-next-line no-await-in-loop -- each from the split before
-      const page = await byTitle().paginate({
-        pageSize: 5000,
-        cursor: from,
-        endCursor: end,
-      });
-      titles.push(...page.items.map(({ title }) => title));
-      from = page.splitCursor ?? null;
-      if (from !== null) {
-        splits += 1;
-      }
-    } while (from !== null);
+    // Split as a live list splits it, each half in turn. Large enough a
+    // page that only the scan and answer bounds split it.
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byTitle().paginate({
+          pageSize: 5000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      end
+    );
+    const titles = tiled.items.map(({ title }) => title);
     expect({
-      split: splits > 0,
+      split: tiled.reads > 1,
       count: titles.length,
       first: titles[0],
       last: titles.at(-1),
@@ -895,6 +891,49 @@ describe("pages ended at a cursor", () => {
       first: "a",
       last: "z",
       unique: queryMaxScannedEntries + 3,
+    });
+  });
+
+  it("say where to split them once a filter skips more than one read may examine, after the last record read", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: "a", done: true },
+      { title: "z", done: true },
+      { title: "zz", done: true },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const doneByTitle = () =>
+      db.query("notes").withIndex("by_title").filter({ done: true });
+    const first = await doneByTitle().paginate({ pageSize: 2 });
+    // Inside the page, more records than one read may examine, all but
+    // three of which the filter skips: a read stops at the scan bound
+    // having matched few, if any.
+    const stride = 5000;
+    await insertNotes(
+      fixture,
+      Array.from({ length: queryMaxScannedEntries + 1 }, (_, index) => ({
+        title: `m${String(index).padStart(6, "0")}`,
+        done: index % stride === 0,
+      })),
+      "ada",
+      100
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await doneByTitle().paginate({
+          pageSize: 5000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    expect({
+      split: tiled.reads > 1,
+      titles: tiled.items.map(({ title }) => title),
+    }).toStrictEqual({
+      split: true,
+      titles: ["a", "m000000", "m005000", "m010000", "z"],
     });
   });
 

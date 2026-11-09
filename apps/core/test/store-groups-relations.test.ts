@@ -14,6 +14,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { tiledPage } from "./split-pages.ts";
 import { accessedManifest, appliedTables } from "./store-schemas.ts";
 
 // Grouped aggregates and related records of a business store
@@ -195,6 +196,9 @@ const orders: Row[] = [
   { id: "o6", fields: { region: "US", paid: true, amount: 7 } },
   { id: "o7", fields: { status: "won", region: "US", paid: true, amount: -4 } },
 ];
+
+/** `index` as five digits, so records sort in its order. */
+const numbered = (index: number): string => String(index).padStart(5, "0");
 
 describe("groups", () => {
   it("count and aggregate every record the query reads, null and absence apart, in key order", async () => {
@@ -589,8 +593,75 @@ describe("related records", () => {
     expect({
       grown: grown.items.length,
       split: grown.splitCursor,
-      // Answered as far as half an answer holds, and split there.
-    }).toStrictEqual({ grown: 2, split: half.nextCursor });
+      // Answered whole while it fits one answer, and split where half of
+      // its bytes end.
+    }).toStrictEqual({ grown: 4, split: half.nextCursor });
+  });
+
+  it("count toward what a page with an end may examine, so one loading them past it splits instead of failing", async () => {
+    const fixture = await storeWith();
+    await put(fixture, "orders", [
+      { id: "m", fields: { region: "M", paid: true } },
+      { id: "z", fields: { region: "Z", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRegion = () =>
+      db.query("orders").withIndex("by_region").with("customer");
+    const first = await byRegion().paginate({ pageSize: 1 });
+    // An import lands inside the page: 6,000 orders, each naming its own
+    // customer. Their records and the customers loaded with them are
+    // more than one read may examine.
+    const imported = 6000;
+    await put(
+      fixture,
+      "customers",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `c${numbered(index)}`,
+        fields: { name: `c${numbered(index)}` },
+      }))
+    );
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `i${numbered(index)}`,
+        fields: {
+          region: `A${numbered(index)}`,
+          paid: true,
+          customer: `c${numbered(index)}`,
+        },
+      }))
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byRegion().paginate({
+          pageSize: 10_000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    // Each order with the customer it names.
+    const loaded = tiled.items.filter(
+      ({ customer, _with }) =>
+        _with.customer !== null &&
+        !("_withheld" in _with.customer) &&
+        _with.customer.name === customer
+    );
+    expect({
+      split: tiled.reads > 1,
+      orders: tiled.items.length,
+      unique: new Set(tiled.items.map(({ _id }) => _id)).size,
+      last: tiled.items.at(-1)?._id,
+      loaded: loaded.length,
+    }).toStrictEqual({
+      split: true,
+      orders: imported + 1,
+      unique: imported + 1,
+      last: "m",
+      loaded: imported,
+    });
   });
 
   it("are refused past their bounds, clearly", async () => {
