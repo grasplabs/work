@@ -144,11 +144,11 @@ export const generatedHelpersImport = "@grasp-os/sdk/workflow-generated";
  * code was generated for, which the run host's engine must fit, so a new
  * version here is a new contract between them: core loads only builds of
  * this one, and an older build is refused, to publish again
- * (`workflow.format_unsupported`), never half run. Version 5: no
+ * (`workflow.format_unsupported`), never half run. Version 6: no
  * workflow modules (`ctx.modules`), `JSON.parse` through `$parse`, and
  * `run.startedAt`.
  */
-export const generatorVersion = "grasp-workflow-ts/5";
+export const generatorVersion = "grasp-workflow-ts/6";
 
 /** A task as its generator writes it: the loops around it are added. */
 type Unscoped<Task> = Task extends unknown ? Omit<Task, "scope"> : never;
