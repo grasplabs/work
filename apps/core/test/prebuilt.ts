@@ -1,13 +1,13 @@
-import { execFileSync } from "node:child_process";
 /**
  * What core's global setup builds, kept by a hash of everything it is
  * built from, so a run whose inputs are byte for byte those of an earlier
  * build reuses that build instead of building again: the App compiler,
  * the extractor and connect's bundle took some 30 s of every CI shard's
- * start. CI restores the directory (or a job builds it once and hands it
- * to every shard: test/prebuild.ts); locally the second run reuses the
- * first's.
+ * start. CI restores the directory by the key test/prebuilt-key.ts
+ * prints; locally the second run reuses the first's.
  */
+
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -57,6 +57,26 @@ const git = (args: readonly string[]): Buffer =>
   execFileSync("git", args, { cwd: repo, maxBuffer: 256 * 1024 * 1024 });
 
 /**
+ * The paths `git status --porcelain=v1 -z` names, sorted: each entry is
+ * `XY path`, and a rename's or copy's (`R`, `C`) is followed by the path
+ * it came from as a field of its own, which is skipped.
+ */
+const changedFiles = (status: string): string[] => {
+  const fields = status.split("\0");
+  const files: string[] = [];
+  for (let at = 0; at < fields.length; at += 1) {
+    const entry = fields[at] ?? "";
+    if (entry.length > 3) {
+      files.push(entry.slice(3));
+      if (entry.startsWith("R") || entry.startsWith("C")) {
+        at += 1;
+      }
+    }
+  }
+  return files.toSorted();
+};
+
+/**
  * The hash of the inputs as they are on disk: the index's hash of each
  * tracked file, and the content of each file changed, added or removed
  * since. Null outside a git checkout, where nothing is reused.
@@ -65,19 +85,16 @@ export const prebuiltKey = (): string | null => {
   const hash = createHash("sha256").update(process.version);
   try {
     hash.update(git(["ls-files", "-s", "-z", "--", ...prebuiltInputs]));
-    const changed = git([
-      "status",
-      "--porcelain=v1",
-      "-z",
-      "--untracked-files=all",
-      "--",
-      ...prebuiltInputs,
-    ])
-      .toString()
-      .split("\0")
-      .filter((entry) => entry.length > 3)
-      .map((entry) => entry.slice(3))
-      .toSorted();
+    const changed = changedFiles(
+      git([
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--",
+        ...prebuiltInputs,
+      ]).toString()
+    );
     for (const file of changed) {
       const full = path.join(repo, file);
       hash.update(`\0${file}\0`);
