@@ -6,7 +6,9 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
  * e2e/model-scripts.ts): the run's args name the invoice and who
  * approves it, the approver decides through the release's own approval
  * contract (`grasp/approval`), and the run ends with whether they
- * approved and what they said. A grasp-workflow/2 document.
+ * approved and what they said. A grasp-workflow/2 document: a decision's
+ * result may be a timeout (with no timeout of its own, at the run's
+ * deadline), so its expressions read `timedOut` before the answer.
  */
 
 /** A value's schema: an object of exactly `fields`, each required. */
@@ -30,9 +32,12 @@ export const invoiceApproval = (): string =>
       }),
       result: {
         status: {
-          $expr: 'approve.approved === true ? "approved" : "declined"',
+          $expr:
+            '!approve.timedOut && approve.approved ? "approved" : "declined"',
         },
-        comment: { $expr: 'approve.payload?.comment ?? ""' },
+        comment: {
+          $expr: 'approve.timedOut ? "" : (approve.payload?.comment ?? "")',
+        },
       },
       permissions: {
         decisions: { approval: { contract: "grasp/approval" } },

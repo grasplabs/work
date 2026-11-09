@@ -62,7 +62,7 @@ const intakeFor = async (admin: Person): Promise<string> => {
         reviewed: { version: 1 },
       });
     }
-    // The model its reading goes through: the `extractor` of the `extract`
+    // The model its reading goes through: the `ai` of the `extract`
     // workflow the copy got (the one it asked to start), approved as an admin
     // approves it on the workflow's page, for the stack's first model
     // (e2e/stack.ts). The local stack's provider refuses unscripted requests'
@@ -75,7 +75,7 @@ const intakeFor = async (admin: Person): Promise<string> => {
       throw new Error("Expected the copy to ask to start its workflow");
     }
     await api.workflowResources.approveBinding(extract.object.workflowId, {
-      alias: "extractor",
+      alias: "ai",
       target: { kind: "model", model: e2eModel },
       reviewed: { version: 1 },
     });
