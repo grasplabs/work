@@ -603,7 +603,7 @@ export const resourceRunTrace = async (
     });
   }
   // A raise has no step: the one whose sealed code the run failed with
-  // is what ended it, told only where no other raise names that code.
+  // is what ended it (the check holds each code to one raise).
   const raise =
     run.status === "failed"
       ? await raiseThatEnded(env, run.id, builtOnce)

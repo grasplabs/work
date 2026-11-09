@@ -226,7 +226,7 @@ describe("generating a workflow", () => {
       "thrown",
       "error",
       "output",
-      "$rows",
+      "$$rows",
       "guardedRetries",
     ]);
     for (const name of boundNames(source)) {
@@ -454,8 +454,6 @@ describe("generating a workflow", () => {
     const { source } = generated(everyStep());
     expect(
       [
-        // Its catch's `when` with its retry's: no retry of what the catch throws on.
-        'const guardedRetries = (error: CaughtError) => Boolean((error.message !== "final") && (error.details));',
         '{ step: "fetch", retry: guardedRetries }',
         "const error = caughtError(thrown);",
         'if (!(error.code === "connect.unavailable" && (error.message !== "final"))) throw thrown;',
@@ -502,7 +500,7 @@ describe("generating a workflow", () => {
       )
     );
     const inner = lines.findIndex((line) =>
-      line.includes("for (const item of $rowsLoop)")
+      line.includes("for (const item of $$rowsLoop)")
     );
     expect({
       declaredBeforeInnerLoop: declared !== -1 && declared < inner,
@@ -518,35 +516,6 @@ describe("generating a workflow", () => {
     });
   });
 
-  it("imports `$own` for an expression reading a field named like a built-in's method", () => {
-    const { source } = generated(
-      followedBy({
-        id: "listed",
-        type: "call",
-        connection: "mail",
-        action: "mail.send",
-        args: { to: { $expr: "args.values" }, subject: { $expr: "send?.at" } },
-      })
-    );
-    const owned = nodesOf(source).filter(
-      (node) =>
-        node.type === "CallExpression" &&
-        isNode(node.callee) &&
-        node.callee.type === "Identifier" &&
-        node.callee.name === "$own"
-    );
-    const imported = nodesOf(source).some(
-      (node) =>
-        node.type === "ImportSpecifier" &&
-        isNode(node.local) &&
-        node.local.name === "$own"
-    );
-    expect({ reads: owned.length, imported }).toStrictEqual({
-      reads: 2,
-      imported: true,
-    });
-  });
-
   it("ties each line of a step's code to that step", () => {
     const { source, spans } = generated(withLoops());
     const lines = source.split("\n");
@@ -555,7 +524,7 @@ describe("generating a workflow", () => {
     expect(taskAtLine(spans, lineOf('{ step: "mailed"'))?.taskId).toBe(
       "mailed"
     );
-    expect(taskAtLine(spans, lineOf("const $rows"))?.taskId).toBe("rows");
+    expect(taskAtLine(spans, lineOf("const $$rows"))?.taskId).toBe("rows");
     expect(taskAtLine(spans, lineOf("throw new AppError"))?.taskId).toBe(
       "stop"
     );

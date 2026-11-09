@@ -380,7 +380,13 @@ class Lowering {
               left: applied,
               right: { type: "Null" },
             },
-            consequent: identifier("undefined"),
+            // `void 0`, not `undefined`: a callback's parameter may be
+            // named `undefined`.
+            consequent: {
+              type: "Unary",
+              operator: "void",
+              argument: { type: "Number", value: 0 },
+            },
             alternate: this.links(applied, [
               { ...link, optional: false },
               ...links.slice(index + 1),

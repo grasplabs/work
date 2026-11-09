@@ -79,15 +79,13 @@ const neverCaught: ReadonlySet<string> = new Set([
   "execution.stale_attempt",
   // Its call took effect: a catch would take it as one that didn't.
   "workflow.failed_after_effect",
-  // A test run's limit on its waits (a retry's backoff past it): the
-  // run's own bound, as a sleep's refusal is never a catch's.
-  "workflow.candidate_wait_limit",
   // A branch a race or an `end` settled over (GRA-956): as a cancellation.
   "workflow.branch_cancelled",
   "connect.outcome_unknown",
   "connect.outcome_unknown_unresolved",
-  // A test run's wait past what a test run may wait: production waits on,
-  // so a catch taking it would report a path a run never takes.
+  // A test run's wait past what a test run may wait (a retry's backoff
+  // past it too): production waits on, so a catch taking it would report
+  // a path a run never takes.
   "workflow.candidate_wait_limit",
 ]);
 

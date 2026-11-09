@@ -194,6 +194,8 @@ describe("checking a workflow", () => {
       "output",
       "ctx",
       "thrown",
+      "defineWorkflow",
+      "v",
       "caughtError",
       "itemsOf",
       "sensitiveParam",
@@ -329,6 +331,24 @@ describe("checking a workflow", () => {
     expect(codesAt(followedBy(mailing("guardedRetries", "x")))).toStrictEqual({
       "/steps/5/id": "workflow.duplicate_id",
     });
+    // A retry with no `when` of its own still retries only where its
+    // catch's `when` would take the failure: by `probeRetries`.
+    expect(
+      codesAt(
+        followedBy(
+          {
+            id: "probe",
+            type: "try",
+            try: [mailing("probed", "x")],
+            catch: {
+              when: { $expr: 'error.code !== ""' },
+              retry: { attempts: 2, delay: "1 minute", backoff: "constant" },
+            },
+          },
+          mailing("probeRetries", "x")
+        )
+      )
+    ).toStrictEqual({ "/steps/6/id": "workflow.duplicate_id" });
   });
 
   it("allows one retrying try around a step, never one inside another", () => {
@@ -381,15 +401,15 @@ describe("checking a workflow", () => {
     ).toStrictEqual({ "/steps/5/error/code": "workflow.invalid_name" });
   });
 
-  it("holds one code to one error, so a run that fails with it is that raise", () => {
+  it("holds one code to one raise, so a run that fails with it is that raise", () => {
     expect({
       same: codesAt(followedBy(raise("first", "No."), raise("again", "No."))),
       other: codesAt(
         followedBy(raise("first", "No."), raise("again", "Not now."))
       ),
     }).toStrictEqual({
-      same: "ok",
-      other: { "/steps/6/error": "workflow.duplicate" },
+      same: { "/steps/6/error/code": "workflow.duplicate" },
+      other: { "/steps/6/error/code": "workflow.duplicate" },
     });
   });
 

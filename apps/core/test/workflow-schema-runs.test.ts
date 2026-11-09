@@ -137,6 +137,14 @@ const declared = {
 
 const greeting = { kind: "object", fields: { line: { kind: "string" } } };
 
+/** Step `id` calling `action` of `mail`, in a try that takes any failure. */
+const calling = (id: string, action: string) => ({
+  id: `${id}Tried`,
+  type: "try",
+  try: [{ id, type: "call", connection: "mail", action, args: {} }],
+  catch: {},
+});
+
 /** An object of `fields`, every one required. */
 const objectOf = (fields: Record<string, unknown>) => ({
   kind: "object",
@@ -376,6 +384,86 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
         { to: "b", subject: "row" },
       ],
       checked: ["notify:task", "notify:task@1"],
+    });
+  });
+
+  it("runs a nested loop of any ID, its items reading a field named like a built-in's method", async () => {
+    const { source, sealed: withTable } = await generated(
+      [
+        {
+          id: "pages",
+          type: "forEach",
+          items: { $expr: "args.rows" },
+          do: [
+            {
+              // `own`: the generated code reads such a field by `$own`.
+              id: "own",
+              type: "forEach",
+              items: { $expr: "item.rows" },
+              do: [
+                {
+                  id: "notify",
+                  type: "call",
+                  connection: "mail",
+                  action: "mail.send",
+                  args: { to: { $expr: "item.at" }, subject: "nested" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      undefined,
+      declared.permissions,
+      declared.state,
+      rowsOf(
+        objectOf({
+          rows: { kind: "array", item: objectOf({ at: { kind: "string" } }) },
+        })
+      )
+    );
+    const runId = await waitingRun(sealed);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: (run) =>
+        withTable({
+          ...run,
+          input: { rows: [{ rows: [{ at: "nestedA" }, { at: "nestedB" }] }] },
+        }),
+    });
+    const { sent } = await sealed.mail.did();
+    expect({
+      ran,
+      sent: sent.filter(({ subject }) => subject === "nested"),
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      sent: [
+        { to: "nestedA", subject: "nested" },
+        { to: "nestedB", subject: "nested" },
+      ],
+    });
+  });
+
+  it("calls each action of a connection by its own member, two that read alike without their group each by its whole name", async () => {
+    const { source, sealed: withTable } = await generated([
+      calling("grouped", "mail.readX"),
+      calling("bare", "read-x"),
+    ]);
+    const runId = await waitingRun(sealed);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    const checked = await checkedCalls(runId);
+    expect({
+      ran,
+      checked: checked.map(({ step, operation }) => ({ step, operation })),
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      checked: [
+        { step: "grouped:task", operation: "mail.readX" },
+        { step: "bare:task", operation: "read-x" },
+      ],
     });
   });
 
@@ -1006,10 +1094,17 @@ describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
         inPages({ catch: 'error.code !== ""', retry: "item.again" })
       ),
       catchReadsThePage: await ranWith(inPages({ catch: "item.again" })),
+      // Its retry would hold, but its catch wouldn't take the failure: no
+      // round is tried first, and the run fails with it.
+      catchDeclines: await ranWith(inPages({ catch: "!item.again" })),
     }).toStrictEqual({
       booleans: retriedThenCaught,
       retryReadsThePage: retriedThenCaught,
       catchReadsThePage: retriedThenCaught,
+      catchDeclines: {
+        ran: failedWith("workflow.compute_failed"),
+        guarded: { decided: 1, retried: 0, failed: 1, told: false },
+      },
     });
   });
 

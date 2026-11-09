@@ -10,7 +10,6 @@ import {
   CompactDescriptorError,
   descriptorFromCompact,
   schemaFromDescriptor,
-  memberName,
 } from "@grasp-os/sdk/host";
 import {
   appErrorDetailsMaxBytes,
@@ -30,8 +29,11 @@ import {
   inboxRoot,
   isSensitive,
   isValueList,
+  memberPathsOf,
   pointerJoin,
   resultStepTypes,
+  retriesByGuard,
+  retriesOf,
   stateStepTypes,
 } from "./format.ts";
 import type {
@@ -594,15 +596,17 @@ interface Walk {
   readonly sensitive: ReadonlySet<string>;
   readonly ids: Set<string>;
   /**
-   * Each raise's error by its code, as JSON: a run fails with the raise
-   * its code names, so one code is one error.
+   * Each raise's code: a run fails with the raise its code names, so one
+   * code is one raise (a run's trace marks that raise).
    */
-  readonly raises: Map<string, string>;
+  readonly raises: Set<string>;
   /**
-   * Each connection's actions by the member a call reads them by
-   * (`memberName` of each dotted part), so no two read alike.
+   * Each connection's actions by the member path a call reads them by
+   * (`memberPathsOf`, as the generated code does), so no two read alike.
    */
   readonly members: Map<string, Map<string, string>>;
+  /** `memberPathsOf` the document: each connection's actions' member paths. */
+  readonly memberPaths: ReadonlyMap<string, ReadonlyMap<string, string>>;
   readonly problems: Problem[];
   readonly code: Map<string, string>;
   readonly placeholders: Map<string, string>;
@@ -1057,19 +1061,17 @@ const checkRaise = (
       "Name the workflow's own code, such as `invoice.rejected`."
     );
   }
-  const { code, message, details } = step.error;
-  const error = JSON.stringify({ message, details });
-  const raised = walk.raises.get(code);
-  if (raised !== undefined && raised !== error) {
+  const { code, details } = step.error;
+  if (walk.raises.has(code)) {
     problem(
       walk,
-      join(pointer, "error"),
+      join(pointer, "error", "code"),
       "workflow.duplicate",
-      `Another raise names \`${code}\` with another message or details: a run that fails with \`${code}\` could be either.`,
-      "Give each error its own code, or raise this one with the same message and details."
+      `Another raise names \`${code}\`: a run that fails with \`${code}\` could be either.`,
+      "Give each raise its own code."
     );
   }
-  walk.raises.set(code, error);
+  walk.raises.add(code);
   if (
     details !== undefined &&
     new TextEncoder().encode(JSON.stringify(details)).byteLength >
@@ -1100,10 +1102,8 @@ const checkCall = (
       "connections",
       join(pointer, "connection")
     );
-    const member = step.action
-      .split(".")
-      .map((part) => memberName(part))
-      .join(".");
+    const member =
+      walk.memberPaths.get(step.connection)?.get(step.action) ?? step.action;
     const actions =
       walk.members.get(step.connection) ?? new Map<string, string>();
     const other = actions.get(member);
@@ -1368,16 +1368,14 @@ const checkSteps = (
 };
 
 /**
- * Refuses a step whose ID is the name the generated code gives a retrying
- * try's `when` (`<try>Retries`, generate.ts's `retriesOf`): the two would
- * be one name in one scope.
+ * Refuses a step whose ID is the name the generated code gives a try's
+ * retry guard (`retriesOf`, wherever `retriesByGuard` holds): the two
+ * would be one name in one scope.
  */
 const checkRetryNames = (walk: Walk): void => {
   const taken = new Set(
     eachStep(walk.document.steps).flatMap(({ step }) =>
-      step.type === "try" && step.catch.retry?.when !== undefined
-        ? [`${step.id}Retries`]
-        : []
+      step.type === "try" && retriesByGuard(step) ? [retriesOf(step.id)] : []
     )
   );
   for (const { step, pointer } of eachStep(walk.document.steps)) {
@@ -1386,7 +1384,7 @@ const checkRetryNames = (walk: Walk): void => {
         walk,
         join(pointer, "id"),
         "workflow.duplicate_id",
-        `\`${step.id}\` is the name of a retrying try's \`when\`.`,
+        `\`${step.id}\` is the name of a retrying try's guard.`,
         "Give the step another ID."
       );
     }
@@ -1478,8 +1476,9 @@ export const checkWorkflow = (json: unknown): CheckResult => {
         .map(([name]) => name)
     ),
     ids: new Set(),
-    raises: new Map(),
+    raises: new Set(),
     members: new Map(),
+    memberPaths: memberPathsOf(document),
     problems: [],
     code: new Map(),
     placeholders: new Map(),

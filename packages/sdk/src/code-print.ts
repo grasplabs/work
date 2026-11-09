@@ -282,12 +282,21 @@ interface Context {
 }
 
 /**
+ * A line continuation in a template's raw part: an unescaped `\` and the
+ * line break after it, which stand for nothing.
+ */
+const lineContinuation =
+  /(?<!\\)(?<escaped>(?:\\\\)*)\\(?:\r\n?|[\n\u2028\u2029])/gu;
+
+/**
  * A template's raw part with its line breaks as escapes, which read the
- * same (a raw CR or CRLF reads as LF): code the generator indents line
- * by line must hold no line break inside a template's text.
+ * same (a raw CR or CRLF reads as LF), and its line continuations dropped,
+ * which read as nothing: code the generator indents line by line must
+ * hold no line break inside a template's text.
  */
 const unbroken = (raw: string): string =>
   raw
+    .replaceAll(lineContinuation, "$<escaped>")
     .replaceAll(/\r\n?/gu, "\\n")
     .replaceAll("\n", "\\n")
     .replaceAll("\u2028", "\\u2028")

@@ -1,24 +1,24 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { validatorSource } from "@grasp-os/sdk/definition";
 import { runtimeNames } from "@grasp-os/sdk/expression-check";
-import { memberName } from "@grasp-os/sdk/host";
 import { z } from "zod";
 
 import type { CheckedWorkflow } from "./check.ts";
 import {
   aiAlias,
   durationMs,
-  eachStep,
   inboxRoot,
   isPlain,
   isValueList,
+  memberPathsOf,
   pointerJoin,
   resultStepTypes,
+  retriesByGuard,
+  retriesOf,
 } from "./format.ts";
 import type {
   Json,
   ModulePermission,
-  WorkflowDocument,
   Step,
   TryStep,
   Value,
@@ -250,60 +250,6 @@ const literalsOf = (templates: readonly Template[]): Json[] | undefined => {
   return literals;
 };
 
-/** A connector contract's group: `mail` of `google-workspace.mail@1`. */
-const contractGroup = /\.(?<group>[^.@]+)@[^@]*$/u;
-
-/**
- * Each connection's actions, by alias, each by its member path: the
- * action as its contract names it, without the group every operation of
- * the contract starts with (`mail.send` of `google-workspace.mail@1` is
- * `send`), as an App's connection lists it, so `ctx.connections.mail.send`
- * reads as an App's call does. Where two of a connection's operations
- * would read alike, or one doesn't start with the group, each keeps its
- * whole name, a path of members (`ctx.connections.crm.notes.add`). The
- * host always gets the operation itself.
- */
-const memberPathsOf = (
-  document: WorkflowDocument
-): ReadonlyMap<string, ReadonlyMap<string, string>> => {
-  const operations = new Map<string, Set<string>>();
-  for (const { step } of eachStep(document.steps)) {
-    if (step.type === "call" && "connection" in step) {
-      const held = operations.get(step.connection) ?? new Set<string>();
-      held.add(step.action);
-      operations.set(step.connection, held);
-    }
-  }
-  return new Map(
-    [...operations].map(([alias, held]) => {
-      const contract =
-        document.permissions?.connections?.[alias]?.contract ?? "";
-      const group = contractGroup.exec(contract)?.groups?.group;
-      const prefix = group === undefined ? undefined : `${group}.`;
-      const stripped = [...held].map(
-        (operation) =>
-          [
-            operation,
-            prefix !== undefined && operation.startsWith(prefix)
-              ? operation.slice(prefix.length)
-              : operation,
-          ] as const
-      );
-      const alike =
-        new Set(stripped.map(([, member]) => member)).size !== stripped.length;
-      return [
-        alias,
-        new Map(
-          stripped.map(([operation, member]) => [
-            operation,
-            alike ? operation : member,
-          ])
-        ),
-      ] as const;
-    })
-  );
-};
-
 /** What a loop's items' code reads its item by. */
 const loopItem = "item";
 
@@ -318,13 +264,6 @@ const contextRoots = ["params", "run", "state", inboxRoot] as const;
 interface Retrying {
   readonly retry: string;
 }
-
-/**
- * The name of a retrying try's `when`, as a function of the code: its
- * step's ID and `Retries` (`guardRetries`), which the check keeps from any
- * step's ID (`retryNameOf` in check.ts reads the same).
- */
-export const retriesOf = (id: string): string => `${id}Retries`;
 
 /** A call's options: its step, its retry, and what it keeps. */
 const callOptions = (
@@ -555,14 +494,12 @@ class Generator {
         operation: step.action,
         arguments: args.template,
       };
-      // The member path as an App's member reads (`memberName` per
-      // segment: `read-attachment` is `readAttachment`), mapped in the
-      // declaration to the operation the host gets.
+      // The member path as an App's member reads (`memberPathsOf`:
+      // `read-attachment` is `readAttachment`), mapped in the declaration
+      // to the operation the host gets.
       const path = (
         this.#memberPaths.get(step.connection)?.get(step.action) ?? step.action
-      )
-        .split(".")
-        .map((segment) => memberName(segment));
+      ).split(".");
       const actions =
         this.#connections.get(step.connection) ?? new Map<string, string>();
       actions.set(path.join("."), step.action);
@@ -897,10 +834,11 @@ class Generator {
       } else {
         // Inside another loop, its items read the outer `item`, which the
         // `for` binding would shadow (and hold uninitialized) as they are
-        // evaluated: they are taken first, under a name no step or root
-        // has (`$<id>`).
-        this.#line(inner, `const $${step.id} = ${list};`);
-        this.#line(inner, `for (const ${loopItem} of $${step.id}) {`);
+        // evaluated: they are taken first, under a name no step, root or
+        // import has (`$$<id>`: a step's ID starts with a letter, and an
+        // import such as `$own` has one `$`).
+        this.#line(inner, `const $$${step.id} = ${list};`);
+        this.#line(inner, `for (const ${loopItem} of $$${step.id}) {`);
       }
       if (holds !== undefined) {
         this.#line(inner + 1, `if (!${holds.code}) break;`);
@@ -986,14 +924,13 @@ class Generator {
       ...(when === undefined ? [] : [when]),
       ...(retryWhen === undefined ? [] : [retryWhen]),
     ];
+    const guard = retriesByGuard(step);
     let inner = retrying;
     if (retry !== undefined) {
-      inner = {
-        retry: retryHolds.length === 0 ? "true" : retriesOf(step.id),
-      };
+      inner = { retry: guard ? retriesOf(step.id) : "true" };
     }
     this.#guarded(step, depth, (at) => {
-      if (retry !== undefined && retryHolds.length > 0) {
+      if (guard) {
         this.#imports.add("type CaughtError");
         this.#line(
           at,

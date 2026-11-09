@@ -303,14 +303,14 @@ describe("what a catch never takes", () => {
 
 /**
  * A recovery step `id` that fails the run unless `error` is the conflict
- * caught, as `when` says it isn't: so a replay that didn't bind it again
- * from the journal fails.
+ * caught, as `when` says it isn't, by a code of its own (one code is one
+ * raise): so a replay that didn't bind it again from the journal fails.
  */
 const unlessCaught = (id: string, when: string) => ({
   id,
   type: "raise",
   if: { $expr: when },
-  error: { code: "not.caught", message: "Failed." },
+  error: { code: `not_caught.${id}`, message: "Failed." },
 });
 
 describe("a caught failure's recovery, through a crash", () => {

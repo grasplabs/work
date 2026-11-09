@@ -464,6 +464,15 @@ describe("the code generated from an expression", () => {
     });
   });
 
+  it("short-circuits such a chain to undefined whatever a callback's parameter is named", () => {
+    expect(
+      evaluated("args.list.map((undefined) => args.a?.b.at)", {
+        list: [1],
+        a: null,
+      })
+    ).toStrictEqual([undefined]);
+  });
+
   it("keeps a template's line breaks in its text, whatever indents the code around it", () => {
     // A line break written in the template, which the code must not carry
     // as one: the generator indents every line of the code it writes.
@@ -472,6 +481,14 @@ describe("the code generated from an expression", () => {
       read: evaluated(written, { a: "x", b: "y" }),
       breaks: /[\n\r\u2028\u2029]/u.test(generated(written)),
     }).toStrictEqual({ read: "x\n\u2028y", breaks: false });
+  });
+
+  it("reads a template's line continuation as nothing, as JavaScript does", () => {
+    expect({
+      continued: evaluated("`a\\\nb`", {}),
+      crlf: evaluated("`a\\\r\nb`", {}),
+      escapedSlash: evaluated("`a\\\\\nb`", {}),
+    }).toStrictEqual({ continued: "ab", crlf: "ab", escapedSlash: "a\\\nb" });
   });
 
   it("puts every comparison in parentheses, so TypeScript reads no type arguments", () => {

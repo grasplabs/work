@@ -1,3 +1,4 @@
+import { memberName } from "@grasp-os/sdk/host";
 import type { CompactDescriptor } from "@grasp-os/sdk/host";
 import { decidersPattern } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -605,8 +606,10 @@ export const stepIdPattern = "^[a-z][A-Za-z0-9]{0,63}$";
 /**
  * The names a step can't take: JavaScript's reserved words and the
  * globals an expression may not shadow, the expression roots and the
- * names the generated code binds (`ctx`, `thrown`, its helpers), and the names no
- * expression may read (`constructor`, `prototype`, `__proto__`).
+ * names the generated code binds (`ctx`, `thrown`, its imports and
+ * helpers; a nested loop's list is `$$<id>` and a retry's guard
+ * `<id>Retries`, which no ID can shadow), and the names no expression may
+ * read (`constructor`, `prototype`, `__proto__`).
  */
 export const reservedStepIds: ReadonlySet<string> = new Set([
   // ECMAScript's reserved words, strict mode's and modules' included,
@@ -669,6 +672,8 @@ export const reservedStepIds: ReadonlySet<string> = new Set([
   "result",
   "ctx",
   "thrown",
+  "defineWorkflow",
+  "v",
   "caughtError",
   "itemsOf",
   "sensitiveParam",
@@ -764,6 +769,86 @@ export const eachStep = (
       ),
     ];
   });
+
+/**
+ * The name the generated code gives a retrying try's guard (`<try>Retries`),
+ * which the check keeps from any step's ID: the two would be one name in
+ * one scope.
+ */
+export const retriesOf = (id: string): string => `${id}Retries`;
+
+/**
+ * Whether a try retries through a guard (`retriesOf`): it retries, and its
+ * catch's `when` or its retry's own decides which failures, so a retry
+ * runs only for a failure its catch would take.
+ */
+export const retriesByGuard = (step: TryStep): boolean =>
+  step.catch.retry !== undefined &&
+  (step.catch.when !== undefined || step.catch.retry.when !== undefined);
+
+/** A connector contract's group: `mail` of `google-workspace.mail@1`. */
+const contractGroup = /\.(?<group>[^.@]+)@[^@]*$/u;
+
+/** A dotted action as a path of members (`memberName` of each part). */
+const memberPath = (action: string): string =>
+  action
+    .split(".")
+    .map((part) => memberName(part))
+    .join(".");
+
+/**
+ * Each connection's actions, by alias, each by the member path a call
+ * reads it by (`memberName` of each dotted part): the action as its
+ * contract names it, without the group every operation of the contract
+ * starts with (`mail.send` of `google-workspace.mail@1` is `send`), as an
+ * App's connection lists it, so `ctx.connections.mail.send` reads as an
+ * App's call does. Where two of a connection's actions would read alike
+ * so (`mail.readX` and `read-x`), each keeps its whole name, a path of
+ * members (`ctx.connections.crm.notes.add`); the check refuses two whose
+ * whole names read alike. The host always gets the action itself.
+ */
+export const memberPathsOf = (
+  document: WorkflowDocument
+): ReadonlyMap<string, ReadonlyMap<string, string>> => {
+  const actions = new Map<string, Set<string>>();
+  for (const { step } of eachStep(document.steps)) {
+    if (step.type === "call" && "connection" in step) {
+      const called = actions.get(step.connection) ?? new Set<string>();
+      called.add(step.action);
+      actions.set(step.connection, called);
+    }
+  }
+  return new Map(
+    [...actions].map(([alias, called]) => {
+      const contract =
+        document.permissions?.connections?.[alias]?.contract ?? "";
+      const group = contractGroup.exec(contract)?.groups?.group;
+      const prefix = group === undefined ? undefined : `${group}.`;
+      const stripped = [...called].map(
+        (action) =>
+          [
+            action,
+            memberPath(
+              prefix !== undefined && action.startsWith(prefix)
+                ? action.slice(prefix.length)
+                : action
+            ),
+          ] as const
+      );
+      const alike =
+        new Set(stripped.map(([, member]) => member)).size !== stripped.length;
+      return [
+        alias,
+        new Map(
+          stripped.map(([action, member]) => [
+            action,
+            alike ? memberPath(action) : member,
+          ])
+        ),
+      ] as const;
+    })
+  );
+};
 
 const pointerEscape = /[~/]/gu;
 

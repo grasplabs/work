@@ -15,8 +15,7 @@ import type { CaughtError, Read } from "./workflow-steps.ts";
  * expression reads it (expression-runtime.ts, `own`): the value's own
  * field, never the method. Generated code imports it as `$own`.
  */
-export const own: (value: unknown, name: string, optional?: boolean) => Read =
-  ownField;
+export const own: (value: unknown, name: string) => Read = ownField;
 
 /**
  * What a catch reads as `error`: the failure it took, as frozen data with
