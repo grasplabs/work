@@ -1,22 +1,23 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
+import { validatorSource } from "@grasp-os/sdk/definition";
 import { runtimeNames } from "@grasp-os/sdk/expression-check";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { z } from "zod";
 
 import type { CheckedWorkflow } from "./check.ts";
-import { pointerJoin } from "./data-schema.ts";
 import {
   durationMs,
   inboxRoot,
   isPlain,
   isValueList,
   localContractPattern,
+  pointerJoin,
 } from "./format.ts";
 import type {
   Binding,
   EventWaitStep,
   Json,
-  PlainParam,
+  Param,
   Step,
   TryStep,
   Value,
@@ -99,10 +100,10 @@ export const generatedImport = "@grasp-os/sdk/workflow";
  * code was generated for, which the run host's engine must fit, so a new
  * version here is a new contract between them: core loads only builds of
  * this one, and an older build is refused, to publish again
- * (`workflow.format_unsupported`), never half run. Version 2: a decision
- * takes no `ask`, and the engine tells its people (`askDecision`).
+ * (`workflow.format_unsupported`), never half run. Version 3: values are
+ * declared with `v`, and the module takes no Zod.
  */
-export const generatorVersion = "grasp-workflow-ts/2";
+export const generatorVersion = "grasp-workflow-ts/3";
 
 /** A task as its generator writes it: the loops around it are added. */
 type Unscoped<Task> = Task extends unknown ? Omit<Task, "scope"> : never;
@@ -213,17 +214,9 @@ type ExpressionEntry = Omit<
   "slot" | "pointer" | "source" | "loopVariables"
 >;
 
-/** The SDK's constructor for a parameter of `kind`. */
-const paramCall = (param: PlainParam): string => {
-  const options = [
-    `label: ${literal(param.label)}`,
-    `default: ${literal(param.default)}`,
-    ...(param.currency === undefined
-      ? []
-      : [`currency: ${literal(param.currency)}`]),
-  ];
-  return `${param.kind}({ ${options.join(", ")} })`;
-};
+/** A parameter as the SDK declares it: its label, and its type in `v`. */
+const paramCode = (param: Param, type: ValueDescriptor): string =>
+  `{ label: ${literal(param.label)}, type: ${validatorSource(type)} }`;
 
 /** The engine steps of a task, by the key its step names it with. */
 type StepKey = "task" | "enter" | "item" | "leave" | "catch";
@@ -292,7 +285,7 @@ class Generator {
   // The workflow SDK, and the guards expressions read and call through.
   readonly #imports = new Set([
     "workflow",
-    "z",
+    "v",
     `readMember as ${runtimeNames.read}`,
     `callMethod as ${runtimeNames.call}`,
     `optionalChain as ${runtimeNames.optional}`,
@@ -543,7 +536,7 @@ class Generator {
             ),
           }),
     });
-    const called = `z.json().parse(await env[${literal(step.binding)}].call(${literal(sealed.operation)}, ${sealed.arguments}))`;
+    const called = `${runtimeNames.json}(await env[${literal(step.binding)}].call(${literal(sealed.operation)}, ${sealed.arguments}))`;
     // Its state is evaluated from its result, `output`, in the step that
     // records both, so the host writes exactly what that step recorded.
     // Each value is held first to its key's declared schema, by the SDK's
@@ -683,16 +676,16 @@ class Generator {
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
       },
     });
-    this.#imports.add("paramValueSchemas");
     // The host holds the record to what a decision takes, as it records
-    // it (`#decisionEntered`): how many recipients, the prompt's length,
+    // it (`#decisionEntered`): deciders, how many, the prompt's length,
     // not blank. Each fails this enter step, as the call's own failure.
-    // The recipients are parsed as `person` values here only so `from`
-    // takes the first of them as it is.
+    // The recipients are recorded as a list of text, so `from` takes the
+    // first of them as it was recorded.
+    this.#imports.add("parse");
     const record = [
-      `["recipients"]: z.array(paramValueSchemas.person).parse(${recipients.code})`,
-      `["prompt"]: z.json().parse(${prompt.code})`,
-      `["input"]: z.json().parse(${input.code})`,
+      `["recipients"]: parse(v.array(v.string()), ${recipients.code})`,
+      `["prompt"]: ${prompt.code}`,
+      `["input"]: ${input.code}`,
     ];
     this.#decided(
       step,
@@ -763,13 +756,14 @@ class Generator {
         // Over the recorded items, never a fresh evaluation: the host
         // holds the items to what the enter step recorded, and fails a
         // record that isn't a list of at most 1,000
-        // (`workflow.collection_invalid`), so this parse only types them:
+        // (`workflow.collection_invalid`), so this read only types them:
         // each item as every value an expression reads (the SDK's `Read`),
         // which the typed check types where it is written, so an item read
         // bare (`100 * item`) compiles as it was checked.
+        this.#imports.add("itemsOf");
         this.#line(
           inner,
-          `for (const [${index}, item${number}] of z.array(z.any()).parse(${entered}.items).entries()) {`
+          `for (const [${index}, item${number}] of itemsOf(${entered}.items).entries()) {`
         );
         this.#line(inner + 1, `const ${loopItem} = item${number};`);
         if (holds !== undefined) {
@@ -838,7 +832,7 @@ class Generator {
         step,
         depth,
         "enter",
-        `{ ["key"]: z.json().parse(${equals.code}) }`,
+        `{ ["key"]: ${equals.code} }`,
         listen
       );
       return;
@@ -899,16 +893,17 @@ class Generator {
     });
     // Its deadline may fail to evaluate in its enter step, as a call may
     // fail: a retry around it decides it as any call's.
+    this.#imports.add("parse");
     const retry = retryOf(tries, depth);
     this.#decided(
       step,
       depth,
       "enter",
-      `{ output: null, until: ${code} }`,
+      `{ output: null, until: parse(v.number(), ${code}) }`,
       (inner, entered) => {
         this.#line(
           inner,
-          `await step.sleepUntil(${literal(step.id)}, ${this.#options(step, "task", [`until: z.number().parse(${entered}.until)`])});`
+          `await step.sleepUntil(${literal(step.id)}, ${this.#options(step, "task", [`until: ${entered}.until`])});`
         );
         this.#line(inner, done);
       },
@@ -1147,11 +1142,13 @@ class Generator {
   generate(id: string): Generation {
     const { document } = this.#workflow;
     const params = Object.entries(document.params ?? {}).flatMap(
-      ([name, param]) => (isPlain(param) ? [[name, param] as const] : [])
+      ([name, param]) => {
+        const type = this.#workflow.contract.params.get(name);
+        return isPlain(param) && type !== undefined
+          ? [[name, paramCode(param, type)] as const]
+          : [];
+      }
     );
-    for (const [, param] of params) {
-      this.#imports.add(param.kind);
-    }
     this.#line(1, "const run = { id: runId };");
     this.#line(1, "const steps = Object.create(null);");
     // The snapshot is untrusted input: every version of the workflow
@@ -1180,19 +1177,22 @@ class Generator {
       });
       this.#line(
         1,
-        `const ended = await step.do("workflow", { key: "output", description: "workflow" }, async () => ({ output: z.json().parse(${code}) }));`
+        `const ended = await step.do("workflow", { key: "output", description: "workflow" }, async () => ({ output: ${code} }));`
       );
       this.#line(1, "return ended.output;");
     }
+    // A declaration in `v` may take lines of its own: each counts.
     const prelude = [
       "// Generated from a grasp-workflow/1 document on every save: not edited by hand.",
       `import { ${[...this.#imports].toSorted().join(", ")} } from ${literal(generatedImport)};`,
       "",
       `export default workflow(${literal(id)}, {`,
-      `  params: { ${params.map(([name, param]) => `[${literal(name)}]: ${paramCall(param)}`).join(", ")} },`,
-      "  input: z.json(),",
+      `  params: { ${params.map(([name, code]) => `[${literal(name)}]: ${code}`).join(", ")} },`,
+      `  input: ${validatorSource(this.#workflow.contract.input)},`,
       `}, async (step, { input, params, env, runId, ${inboxRoot}, state: snapshot }) => {`,
-    ];
+    ]
+      .join("\n")
+      .split("\n");
     const offset = prelude.length;
     return {
       source: [...prelude, ...this.#lines, "});", ""].join("\n"),

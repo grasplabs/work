@@ -10,12 +10,7 @@
           "id": "id2",
           "name": "name",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
-            "trim": false,
-            "email": false,
             "min": 1,
             "max": 200
           }

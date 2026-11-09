@@ -57,11 +57,11 @@ const definitionOf = (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     input: objectSchema({
-      invoice: { type: "string" },
-      amount: { type: "integer" },
+      invoice: { kind: "string" },
+      amount: { kind: "number", integer: true },
     }),
     output: {
-      schema: objectSchema({ invoice: { type: "string" } }),
+      schema: objectSchema({ invoice: { kind: "string" } }),
       value: { invoice: { $expr: "input.invoice" } },
     },
     steps: [],

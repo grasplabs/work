@@ -28,11 +28,10 @@ test.use({ trace: "retain-on-failure" });
 /** How long a run's change may take to reach a page. */
 const live = { timeout: 30_000 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A native value descriptor of an object of string fields named `names`. */
@@ -48,11 +47,11 @@ const definitionOf = (contract: string) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     input: objectSchema({
-      who: { type: "string" },
-      reviewer: { type: "string" },
+      who: { kind: "string" },
+      reviewer: { kind: "string" },
     }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: { $expr: '"Hello, " + input.who' } },
     },
     bindings: { approval: { kind: "decision", contract } },

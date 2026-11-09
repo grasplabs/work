@@ -6,34 +6,31 @@ import type {
   ExpressionErrorCode,
   ExpressionRead,
 } from "@grasp-os/sdk/expression-check";
-import { currencySchema, paramValueSchemas } from "@grasp-os/sdk/params";
+import {
+  CompactDescriptorError,
+  descriptorFromCompact,
+  schemaFromDescriptor,
+} from "@grasp-os/sdk/host";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { passedBound, plainDataBounds } from "@grasp-os/shared/value-bounds";
-import { paramDeclarationSchema } from "@grasp-os/shared/workflows";
 
-import {
-  compileDataSchema,
-  pointerJoin,
-  schemaProblemMessages,
-} from "./data-schema.ts";
-import type { JsonValue, SchemaProblem } from "./data-schema.ts";
 import {
   durationMs,
   errorTypeBase,
   expressionRoots,
   formatLimits,
   inboxRoot,
-  isPlain,
   isSensitive,
   isValueList,
+  pointerJoin,
   stateStepTypes,
 } from "./format.ts";
 import type {
   Binding,
+  Descriptor,
   Duration,
   ExpressionRoot,
   Json,
-  Param,
   StateWrites,
   Step,
   Value,
@@ -62,7 +59,9 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 // - a sensitive parameter only as a whole argument of a connector call,
 //   which the host fills in and the run's code never sees;
 // - each step's binding declared, of a kind the step calls;
-// - parameter defaults the SDK takes, and schemas the SDK compiles;
+// - every value's schema (input, output, answers, state, parameters) a
+//   compact descriptor the SDK reads (`descriptorFromCompact`), defaults
+//   included;
 // - lists nested at most `formatLimits.depth` deep, and at most
 //   `formatLimits.steps` steps in all;
 // - what it generates within what a sealed build holds
@@ -73,10 +72,16 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 // each expression's code, each sensitive placeholder and each agent's
 // answer descriptor, by JSON Pointer.
 
+/** Why a value's schema was refused. */
+type SchemaProblemCode =
+  | "schema.invalid"
+  | "schema.invalid_default"
+  | "schema.too_large";
+
 /** Why a workflow was refused, stable for whoever fixes it. */
 export type ProblemCode =
   | ExpressionErrorCode
-  | SchemaProblem["code"]
+  | SchemaProblemCode
   | "workflow.too_deep"
   | "workflow.too_large"
   | "workflow.version"
@@ -93,7 +98,6 @@ export type ProblemCode =
   | "workflow.invalid_event_type"
   | "workflow.invalid_duration"
   | "workflow.invalid_contract"
-  | "workflow.invalid_currency"
   | "workflow.invalid_uri"
   | "workflow.wait_kind"
   | "workflow.state_not_allowed"
@@ -111,7 +115,6 @@ export type ProblemCode =
   | "workflow.operation_not_allowed"
   | "workflow.unreadable"
   | "workflow.sensitive"
-  | "workflow.invalid_default"
   | "workflow.expression_too_long"
   | "workflow.pointer_too_long"
   | "workflow.arguments_too_deep"
@@ -348,13 +351,6 @@ const patternProblem = ({
       message: "Not a duration.",
       remedy:
         "Write a whole count and a unit (second, minute, hour, day or week), e.g. `30 minutes`.",
-    };
-  }
-  if (last === "currency") {
-    return {
-      code: "workflow.invalid_currency",
-      message: "Not a currency code.",
-      remedy: "Write an ISO 4217 code in capitals, e.g. `EUR`.",
     };
   }
   return undefined;
@@ -808,89 +804,64 @@ const bindingFor = (
   return binding;
 };
 
-/** What a workflow that declares no `input` takes: an empty object. */
-const noInput: Json = {
-  type: "object",
-  properties: {},
-  additionalProperties: false,
-};
+/** What a workflow that declares no `input` takes: an object of no fields. */
+const noInput: Descriptor = { kind: "object", fields: {} };
 
 /** What a workflow that declares no `output` ends with: null. */
-const noOutput: Json = { type: "null" };
+const noOutput: Descriptor = { kind: "null" };
 
-/**
- * A parameter's value as a data schema, as the SDK's parameter kinds hold
- * it (`@grasp-os/sdk/params`): an amount of money in whole minor units, a
- * schedule as cron fields, a person and a template by reference.
- */
-const paramSchemaOf = (param: Param): Json => {
-  switch (param.kind) {
-    case "number": {
-      return { type: "number" };
-    }
-    case "money": {
-      return { type: "integer" };
-    }
-    case "person":
-    case "template": {
-      return { type: "string", "x-grasp-value": { kind: param.kind } };
-    }
-    case "text":
-    case "schedule": {
-      return { type: "string" };
-    }
-    default: {
-      return param.kind satisfies never;
-    }
+/** Why a descriptor was refused, as `descriptorFromCompact` said it. */
+const schemaProblemOf = (
+  error: CompactDescriptorError
+): { code: SchemaProblemCode; remedy: string } => {
+  if (
+    error.code === "definition.invalid_default" ||
+    error.code === "definition.default_with_optional"
+  ) {
+    return {
+      code: "schema.invalid_default",
+      remedy: "Give a default the schema itself accepts.",
+    };
   }
+  if (error.code === "definition.too_large") {
+    return {
+      code: "schema.too_large",
+      remedy: "Nest it less deep, or declare less: split it up.",
+    };
+  }
+  return {
+    code: "schema.invalid",
+    remedy:
+      'Write it as `v` declares it, e.g. `{ "kind": "string", "max": 200 }` for `v.string().max(200)`.',
+  };
 };
 
-/** `schema` at `pointer` as the SDK's schema, or its problems reported. */
+/** `descriptor` at `pointer` as the SDK's schema, or its problem reported. */
 const compiledSchema = (
   walk: Walk,
-  schema: Json,
-  pointer: string,
-  /** The value it defaults to, if any: a parameter's `default`. */
-  rootDefault?: Json
+  descriptor: Descriptor,
+  pointer: string
 ): ValueSchema<unknown, unknown> | undefined => {
-  // SAFETY: JSON either way; compileDataSchema's type is only mutable.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const document = schema as Parameters<typeof compileDataSchema>[0];
-  const compiled = compileDataSchema(
-    document,
-    pointer,
-    rootDefault === undefined
-      ? undefined
-      : {
-          // SAFETY: as above.
-          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-          value: rootDefault as JsonValue,
-          pointer: join(pointer, "default"),
-        }
-  );
-  if (!compiled.ok) {
-    for (const each of compiled.problems) {
-      problem(
-        walk,
-        each.pointer,
-        each.code,
-        schemaProblemMessages[each.code],
-        each.remedy
-      );
+  try {
+    return schemaFromDescriptor(
+      JSON.stringify(descriptorFromCompact(descriptor))
+    );
+  } catch (error) {
+    if (!(error instanceof CompactDescriptorError)) {
+      throw error;
     }
+    const { code, remedy } = schemaProblemOf(error);
+    problem(walk, join(pointer, ...error.path), code, error.message, remedy);
     return undefined;
   }
-  return compiled.schema;
 };
 
 const checkSchema = (
   walk: Walk,
-  schema: Json,
-  pointer: string,
-  /** The value it defaults to, if any: a parameter's `default`. */
-  rootDefault?: Json
+  descriptor: Descriptor,
+  pointer: string
 ): ValueDescriptor | undefined =>
-  compiledSchema(walk, schema, pointer, rootDefault)?.descriptor;
+  compiledSchema(walk, descriptor, pointer)?.descriptor;
 
 /** Whether `value` holds no expression anywhere: JSON as written. */
 const isLiteral = (value: Value): value is Json => {
@@ -1243,45 +1214,6 @@ const checkSteps = (
   }
 };
 
-const checkParams = (
-  walk: Walk,
-  params: Readonly<Record<string, Param>>
-): void => {
-  for (const [name, param] of Object.entries(params)) {
-    const at = join("/params", name);
-    // Its kind's value, and within the bounds the SDK holds a declaration
-    // to as the generated module loads: past them, the document would
-    // generate a workflow that can't load.
-    if (
-      !isSensitive(param) &&
-      !(
-        paramValueSchemas[param.kind].safeParse(param.default).success &&
-        paramDeclarationSchema.shape.default.safeParse(param.default).success
-      )
-    ) {
-      problem(
-        walk,
-        join(at, "default"),
-        "workflow.invalid_default",
-        `Not a default a ${param.kind} parameter takes.`,
-        `Give a ${param.kind} value.`
-      );
-    }
-    if (
-      param.currency !== undefined &&
-      !currencySchema.safeParse(param.currency).success
-    ) {
-      problem(
-        walk,
-        join(at, "currency"),
-        "workflow.invalid_currency",
-        "Not an ISO 4217 currency code.",
-        "Write an ISO 4217 code in capitals, e.g. `EUR`."
-      );
-    }
-  }
-};
-
 /** Checks `json`, a workflow's document as parsed JSON. */
 export const checkWorkflow = (json: unknown): CheckResult => {
   const shape = shapeProblems(json);
@@ -1314,14 +1246,12 @@ export const checkWorkflow = (json: unknown): CheckResult => {
     state: new Map(),
     count: 0,
   };
-  checkParams(walk, params);
   const paramDescriptors = new Map<string, ValueDescriptor>();
   for (const [name, param] of Object.entries(params)) {
     const descriptor = checkSchema(
       walk,
-      paramSchemaOf(param),
-      join("/params", name),
-      isPlain(param) ? param.default : undefined
+      param.type,
+      join("/params", name, "type")
     );
     if (descriptor !== undefined) {
       paramDescriptors.set(name, descriptor);

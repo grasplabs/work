@@ -37,9 +37,9 @@ const refusedSchema = z.object({
 
 /** Code that would reach the App's mail binding outside any review. */
 const stealing = {
-  "workflows/steal.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+  "workflows/steal.ts": `import { workflow } from "@grasp-os/sdk/workflow";
 
-export default workflow("steal", { params: {}, input: z.unknown() }, async (step, { env }) =>
+export default workflow("steal", { params: {} }, async (step, { env }) =>
   await step.do("send", { description: "Send" }, async () =>
     await env.MAIL.call("mail.send", { to: "out@example.test", subject: "Data" })
   )

@@ -81,11 +81,11 @@ const builder = async (role: Role = "builder"): Promise<Acting> => {
 };
 
 /** The output most definitions here return: a status. */
-const statusOutput = { status: { type: "string" } };
+const statusOutput = { status: { kind: "string" } };
 
 /**
  * A grasp-workflow/1 definition running `steps` on input `{ who }`, its
- * output `value` of `output`'s properties: `{ status: "done" }` unless said.
+ * output `value` of `output`'s fields: `{ status: "done" }` unless said.
  */
 const definitionOf = (
   steps: unknown[],
@@ -96,13 +96,12 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: { schema: objectSchema(output), value },
     params: {
       greeting: {
-        kind: "text",
         label: "Greeting",
-        default: "Hello",
+        type: { kind: "string", default: "Hello" },
         sensitive: false,
       },
     },
@@ -277,10 +276,10 @@ describe("runs of JSON workflows", () => {
       // `note` is optional, with a default.
       definitionOf([], {
         output: {
-          status: { type: "string" },
-          note: { type: "string", default: "none" },
+          status: { kind: "string" },
+          note: { kind: "string", default: "none" },
         },
-      }).replace('"required":["status","note"]', '"required":["status"]')
+      })
     );
     const { runId } = await start(by, workflow.id);
     const run = await ended(by, workflow.id, runId);
@@ -333,8 +332,8 @@ describe("runs of JSON workflows", () => {
       by,
       definitionOf([], {
         output: {
-          status: { type: "string" },
-          texts: { type: "array", items: { type: "string" } },
+          status: { kind: "string" },
+          texts: { kind: "array", item: { kind: "string" } },
         },
         value: { status: "done", texts },
       })

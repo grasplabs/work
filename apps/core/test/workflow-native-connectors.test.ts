@@ -189,12 +189,12 @@ const definitionOf = (mail: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     input: objectSchema({
-      mailbox: { type: "string" },
-      message: { type: "string" },
-      attachment: { type: "string" },
+      mailbox: { kind: "string" },
+      message: { kind: "string" },
+      attachment: { kind: "string" },
     }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: { $expr: "steps.read.output.content" } },
     },
     bindings: { mail: { kind: "connector", contract: mail } },

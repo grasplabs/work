@@ -188,30 +188,26 @@ export const admin = async (): Promise<Identity> => {
   };
 };
 
-export const stringOrNull = { anyOf: [{ type: "string" }, { type: "null" }] };
+export const stringOrNull = { kind: "string", nullable: true };
 
 /**
  * An attachment, as a message's input lists it: as a file of the run too,
  * when a run file may be it.
  */
 export const attachment = {
-  type: "object",
-  properties: {
+  kind: "object",
+  fields: {
     filename: stringOrNull,
-    mimeType: { type: "string" },
-    size: { type: "integer" },
-    file: { type: "object", "x-grasp-value": { kind: "file" } },
+    mimeType: { kind: "string" },
+    size: { kind: "number", integer: true },
+    file: { kind: "file", optional: true },
   },
-  required: ["filename", "mimeType", "size"],
-  additionalProperties: false,
 };
 
-/** The JSON Schema of an object of `properties`, each required. */
-export const objectOf = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+export const objectOf = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /**
@@ -222,13 +218,13 @@ export const definitionOf = (subject = "input.subject"): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     input: objectOf({
-      subject: { type: "string" },
-      from: { type: "string" },
+      subject: { kind: "string" },
+      from: { kind: "string" },
       stored: stringOrNull,
-      attachments: { type: "array", items: attachment },
+      attachments: { kind: "array", item: attachment },
     }),
     output: {
-      schema: objectOf({ subject: { type: "string" } }),
+      schema: objectOf({ subject: { kind: "string" } }),
       value: { subject: { $expr: subject } },
     },
     steps: [],
@@ -361,22 +357,17 @@ export const inputOf = (input: string | null): unknown =>
 
 /** What a message trigger's run takes of the message (`messageTriggerFor`). */
 const messageFields = {
-  id: { type: "string" },
+  id: { kind: "string" },
   stored: stringOrNull,
-  from: { type: "string" },
+  from: { kind: "string" },
   to: {
-    type: "array",
-    items: {
-      type: "object",
-      properties: { name: { type: "string" }, address: { type: "string" } },
-      required: ["name", "address"],
-      additionalProperties: false,
-    },
+    kind: "array",
+    item: objectOf({ name: { kind: "string" }, address: { kind: "string" } }),
   },
-  subject: { type: "string" },
-  text: { type: "string" },
-  truncated: { type: "boolean" },
-  attachments: { type: "array", items: attachment },
+  subject: { kind: "string" },
+  text: { kind: "string" },
+  truncated: { kind: "boolean" },
+  attachments: { kind: "array", item: attachment },
 };
 
 /** A workflow taking what `messageFields` says of a message. */
@@ -385,7 +376,7 @@ const messageDefinitionOf = (): string =>
     $schema: workflowSchemaUrl,
     input: objectOf(messageFields),
     output: {
-      schema: objectOf({ subject: { type: "string" } }),
+      schema: objectOf({ subject: { kind: "string" } }),
       value: { subject: { $expr: "input.subject" } },
     },
     steps: [],

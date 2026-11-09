@@ -88,7 +88,7 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
             binding: "extractor",
             instructions: "Read the total in cents.",
             input: { text: "Total 12.34 EUR" },
-            output: objectSchema({ total: { type: "integer" } }),
+            output: objectSchema({ total: { kind: "number", integer: true } }),
           },
         ],
         {

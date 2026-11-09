@@ -3,46 +3,39 @@
 /* oxlint-disable require-await -- stand-in callbacks for interfaces that take async functions */
 import type { RunId } from "@grasp-os/shared/ids";
 import { expectTypeOf } from "vite-plus/test";
+import type { z } from "zod";
 
 import type { stepOptionSchemas } from "../src/steps.ts";
-import { money, person, template } from "../src/workflow.ts";
+import { v } from "../src/workflow.ts";
 import type {
   DecisionOptions,
   DoOptions,
-  Person,
   SleepOptions,
   StepRunner,
   WorkflowContext,
-  z,
 } from "../src/workflow.ts";
 import { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 
 const params = {
-  threshold: money({ label: "Above", currency: "EUR", default: 500_000 }),
-  reviewer: person({ label: "Reviewer", default: "team:finance" }),
-  reminder: template({ label: "Reminder", default: "invoice-reminder" }),
+  threshold: {
+    label: "Above",
+    type: v.money().default({ minorUnits: 500_000, currency: "EUR" }),
+  },
+  reviewer: { label: "Reviewer", type: v.person().default("team:finance") },
+  limit: { label: "Limit", type: v.number().integer().default(3) },
 };
 declare const step: StepRunner;
 declare const context: WorkflowContext<typeof params, undefined>;
 const { params: p } = context;
 
-// Parameters are typed by their kind.
-expectTypeOf(p.threshold).toExtend<number>();
-expectTypeOf(p.reviewer).toEqualTypeOf<Person>();
+// Parameters are typed by their `v` type.
+expectTypeOf(p.threshold).toEqualTypeOf<{
+  currency: string;
+  minorUnits: number;
+}>();
+expectTypeOf(p.reviewer).toEqualTypeOf<string>();
+expectTypeOf(p.limit).toEqualTypeOf<number>();
 expectTypeOf(context.runId).toEqualTypeOf<RunId>();
-expectTypeOf<string>().not.toExtend<Person>();
-
-// A parameter of the wrong kind doesn't compile.
-await step.decision("review", {
-  description: "Review",
-  // @ts-expect-error -- a template isn't a person
-  from: p.reminder,
-  timeout: "7 days",
-});
-// @ts-expect-error -- a money parameter holds a number
-money({ label: "Above", currency: "EUR", default: "5000" });
-// @ts-expect-error -- money is in a currency
-money({ label: "Above", default: 500_000 });
 
 // The SDK owns how long a decision waits.
 // @ts-expect-error -- a decision needs a timeout

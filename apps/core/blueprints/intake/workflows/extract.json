@@ -1,56 +1,49 @@
 {
   "$schema": "https://grasp.work/schemas/grasp-workflow/1.json",
   "input": {
-    "type": "object",
-    "properties": {
+    "kind": "object",
+    "fields": {
       "notes": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 30000
+        "kind": "string",
+        "min": 1,
+        "max": 30000
       },
       "lines": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
+        "kind": "array",
+        "item": {
+          "kind": "object",
+          "fields": {
             "role": {
-              "type": "string",
-              "enum": ["guest", "question"]
+              "kind": "enum",
+              "values": ["guest", "question"]
             },
             "text": {
-              "type": "string"
+              "kind": "string"
             }
-          },
-          "required": ["role", "text"],
-          "additionalProperties": false
+          }
         }
       }
-    },
-    "required": ["notes", "lines"],
-    "additionalProperties": false
+    }
   },
   "output": {
     "schema": {
-      "type": "object",
-      "properties": {
+      "kind": "object",
+      "fields": {
         "statements": {
-          "type": "array",
-          "maxItems": 9,
-          "items": {
-            "type": "object",
-            "properties": {
+          "kind": "array",
+          "item": {
+            "kind": "object",
+            "fields": {
               "text": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 200
+                "kind": "string",
+                "min": 1,
+                "max": 200
               },
               "tags": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 6,
-                "items": {
-                  "type": "string",
-                  "enum": [
+                "kind": "array",
+                "item": {
+                  "kind": "enum",
+                  "values": [
                     "goal",
                     "blocker",
                     "time_sink",
@@ -58,20 +51,19 @@
                     "tool",
                     "rule"
                   ]
-                }
+                },
+                "min": 1,
+                "max": 6
               },
               "quote": {
-                "type": "string",
-                "maxLength": 150
+                "kind": "string",
+                "max": 150
               }
-            },
-            "required": ["text", "tags", "quote"],
-            "additionalProperties": false
-          }
+            }
+          },
+          "max": 9
         }
-      },
-      "required": ["statements"],
-      "additionalProperties": false
+      }
     },
     "value": {
       "statements": {
@@ -96,26 +88,23 @@
         "$expr": "input.lines.length !== 0 ? { lines: input.lines } : { notes: input.notes }"
       },
       "output": {
-        "type": "object",
-        "properties": {
+        "kind": "object",
+        "fields": {
           "statements": {
-            "type": "array",
-            "maxItems": 9,
-            "items": {
-              "type": "object",
-              "properties": {
+            "kind": "array",
+            "item": {
+              "kind": "object",
+              "fields": {
                 "text": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
+                  "kind": "string",
+                  "min": 1,
+                  "max": 200
                 },
                 "tags": {
-                  "type": "array",
-                  "minItems": 1,
-                  "maxItems": 6,
-                  "items": {
-                    "type": "string",
-                    "enum": [
+                  "kind": "array",
+                  "item": {
+                    "kind": "enum",
+                    "values": [
                       "goal",
                       "blocker",
                       "time_sink",
@@ -123,20 +112,19 @@
                       "tool",
                       "rule"
                     ]
-                  }
+                  },
+                  "min": 1,
+                  "max": 6
                 },
                 "quote": {
-                  "type": "string",
-                  "maxLength": 150
+                  "kind": "string",
+                  "max": 150
                 }
-              },
-              "required": ["text", "tags", "quote"],
-              "additionalProperties": false
-            }
+              }
+            },
+            "max": 9
           }
-        },
-        "required": ["statements"],
-        "additionalProperties": false
+        }
       }
     }
   ]

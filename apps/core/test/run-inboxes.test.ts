@@ -98,12 +98,10 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-/** A JSON object schema of `properties`, each required, and nothing else. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 const completed = "grasp.job.completed";
@@ -232,8 +230,8 @@ const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
 
 /** A module of the test's own whose run answers the `inbox` it read. */
 const readsInbox = `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({}) }, async (step, { inbox }) => ({ ...inbox }));
+import { workflow, v } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: v.object({}) }, async (step, { inbox }) => ({ ...inbox }));
 `;
 
 /** Run `runId` as the dispatcher loads it, served on the run host. */

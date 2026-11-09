@@ -19,12 +19,10 @@ import { apiOf, peopleIn } from "./people.ts";
 /** How long a read from core may take to show. */
 const pageRead = { timeout: 15_000 };
 
-/** A JSON Schema of an object with exactly `properties`, each required. */
-const objectOf = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+const objectOf = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A definition answering `status`, its one step given `extra` keys. */
@@ -37,7 +35,7 @@ const definition = (
       $schema: workflowSchemaUrl,
       input: objectOf({}),
       output: {
-        schema: objectOf({ status: { type: "string" } }),
+        schema: objectOf({ status: { kind: "string" } }),
         value: { status },
       },
       steps: [{ id: "finish", type: "wait", for: "1 second", ...extra }],
@@ -196,9 +194,9 @@ const routing = (): string =>
   JSON.stringify(
     {
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { type: "string" } }),
+      input: objectOf({ who: { kind: "string" } }),
       output: {
-        schema: objectOf({ status: { type: "string" } }),
+        schema: objectOf({ status: { kind: "string" } }),
         value: {
           status: { $expr: 'input.who === "Ada" ? "ada" : "other"' },
         },
@@ -388,7 +386,7 @@ const totalling = (): string =>
       $schema: workflowSchemaUrl,
       input: objectOf({}),
       output: {
-        schema: objectOf({ sum: { type: "number" } }),
+        schema: objectOf({ sum: { kind: "number" } }),
         value: { sum: { $expr: "steps.add.output" } },
       },
       bindings: {

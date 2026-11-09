@@ -22,21 +22,19 @@ import { apiOf, peopleIn } from "./people.ts";
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
 
-/** A JSON object schema of `properties`, each required, and nothing else. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** An independent workflow that is done at once, its status counted. */
 const countingDefinition = (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: "counted" },
     },
     steps: [],

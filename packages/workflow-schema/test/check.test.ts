@@ -1,3 +1,5 @@
+import { v } from "@grasp-os/sdk";
+import { compactDescriptor } from "@grasp-os/sdk/host";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -74,7 +76,10 @@ const withKey = (steps: unknown[]) => {
   const document = everyStep();
   return {
     ...document,
-    params: { ...document.params, apiKey: { kind: "text", label: "API key" } },
+    params: {
+      ...document.params,
+      apiKey: { label: "API key", type: { kind: "string" } },
+    },
     steps: [...steps, ...document.steps],
   };
 };
@@ -108,6 +113,37 @@ const asking = (replyTo: string) =>
 describe("checking a workflow", () => {
   it("accepts every step kind of the format", () => {
     expect(problemsAt(everyStep())).toBe("ok");
+  });
+
+  it("reads every kind of value `v` declares, in its compact form, as the descriptor it is", () => {
+    const input = v.object({
+      text: v.string().trim().email().min(3).max(200).nullable(),
+      count: v.number().integer().min(0).default(0),
+      flag: v.boolean().optional(),
+      nothing: v.null(),
+      exactly: v.literal(3),
+      choice: v.enum(["low", "high"]),
+      row: v.id("tasks", { onDelete: "cascade" }),
+      list: v.array(v.string()).min(1).max(3),
+      either: v.union(v.object({ a: v.string() }), v.number()),
+      map: v.record(v.boolean()),
+      amount: v.money(),
+      when: v.timestamp(),
+      wait: v.duration(),
+      file: v.file(),
+      who: v.person(),
+      model: v.model(),
+      mail: v.template(),
+      every: v.schedule(),
+    }).descriptor;
+    const result = checkWorkflow({
+      ...everyStep(),
+      input: structuredClone(compactDescriptor(input)),
+    });
+
+    expect(result.ok ? result.workflow.contract.input : result).toStrictEqual(
+      input
+    );
   });
 
   it("refuses what its JSON Schema doesn't allow, where it is", () => {
@@ -144,7 +180,7 @@ describe("checking a workflow", () => {
       money: problemsAt({
         ...everyStep(),
         params: {
-          fee: { kind: "money", label: "Fee", default: 5, sensitive: false },
+          fee: { label: "Fee", type: { kind: "money" }, sensitive: false },
         },
       }),
       local: problemsAt({
@@ -160,7 +196,7 @@ describe("checking a workflow", () => {
       id: ["/steps/5/id"],
       extra: ["/steps/5/jq"],
       expression: ["/steps/5/until/also"],
-      money: ["/params/fee"],
+      money: ["/params/fee/type"],
       local: ["/bindings/own/contract"],
     });
   });
@@ -182,7 +218,7 @@ describe("checking a workflow", () => {
             binding: "mail",
             instructions: "x",
             input: null,
-            output: { type: "string" },
+            output: { kind: "string" },
           },
         ])
       ),
@@ -227,7 +263,7 @@ describe("checking a workflow", () => {
             binding: "docs",
             instructions: "Find leave.",
             input: null,
-            output: { type: "string" },
+            output: { kind: "string" },
           },
         ])
       ),
@@ -307,7 +343,7 @@ describe("checking a workflow", () => {
         binding: "summary",
         instructions: { $expr: "params.token" },
         input: null,
-        output: { type: "string" },
+        output: { kind: "string" },
       },
     ]);
     const inside = withSteps((steps) => [
@@ -361,7 +397,7 @@ describe("checking a workflow", () => {
             binding: "summary",
             instructions: "Go.",
             input: { $expr: "params.apiKey" },
-            output: { type: "string" },
+            output: { kind: "string" },
           },
         ])
       ),
@@ -383,21 +419,27 @@ describe("checking a workflow", () => {
     const withParam = (param: Record<string, unknown>) =>
       problemsAt({ ...everyStep(), params: { token: param } });
     expect({
-      unmarked: withParam({ kind: "text", label: "Key", default: "sk-live" }),
-      marked: withParam({
-        kind: "text",
+      unmarked: withParam({
         label: "Key",
-        default: "sk-live",
+        type: { kind: "string", default: "sk-live" },
+      }),
+      marked: withParam({
+        label: "Key",
+        type: { kind: "string", default: "sk-live" },
         sensitive: true,
       }),
-      empty: withParam({ kind: "text", label: "Key", default: "" }),
-      plainWithout: withParam({ kind: "text", label: "Key", sensitive: false }),
-      sensitiveWithout: withParam({ kind: "text", label: "Key" }),
+      empty: withParam({ label: "Key", type: { kind: "string", default: "" } }),
+      plainWithout: withParam({
+        label: "Key",
+        type: { kind: "string" },
+        sensitive: false,
+      }),
+      sensitiveWithout: withParam({ label: "Key", type: { kind: "string" } }),
     }).toStrictEqual({
-      unmarked: ["/params/token"],
-      marked: ["/params/token"],
-      empty: ["/params/token"],
-      plainWithout: ["/params/token"],
+      unmarked: ["/params/token/type"],
+      marked: ["/params/token/type"],
+      empty: ["/params/token/type"],
+      plainWithout: ["/params/token/type"],
       sensitiveWithout: "ok",
     });
   });
@@ -656,12 +698,7 @@ describe("checking a workflow", () => {
             if: { $expr: "state.previous !== state.last" },
             instructions: { $expr: '"Last: " + state.last' },
             input: { who: { $expr: "input.who" } },
-            output: {
-              type: "object",
-              properties: { line: { type: "string" } },
-              required: ["line"],
-              additionalProperties: false,
-            },
+            output: { kind: "object", fields: { line: { kind: "string" } } },
             state: { summary: { $expr: "output" } },
           },
           {
@@ -685,18 +722,31 @@ describe("checking a workflow", () => {
       wrongItem: at({ state: { kept: ["a", 1] } }),
       badDeclaredKey: codesAt({
         ...followedBy(),
-        state: { "1st": { type: "string" } },
+        state: { "1st": { kind: "string" } },
       }),
-      openDeclared: codesAt({
+      longhandDeclared: codesAt({
+        ...followedBy(),
+        state: { open: { kind: "string", nullable: false } },
+      }),
+      jsonSchemaDeclared: codesAt({
         ...followedBy(),
         state: { open: { type: "object" } },
+      }),
+      badDefaultDeclared: codesAt({
+        ...followedBy(),
+        state: {
+          open: {
+            kind: "object",
+            fields: { n: { kind: "number", max: 3, default: 4 } },
+          },
+        },
       }),
       tooManyDeclared: codesAt({
         ...followedBy(),
         state: Object.fromEntries(
           Array.from({ length: 65 }, (_, index) => [
             `k${index}`,
-            { type: "string" },
+            { kind: "string" },
           ])
         ),
       }),
@@ -741,8 +791,10 @@ describe("checking a workflow", () => {
       belowMinimum: { "/steps/5/state/runs": "workflow.state_type" },
       wrongItem: { "/steps/5/state/kept": "workflow.state_type" },
       badDeclaredKey: { "/state/1st": "workflow.invalid_state_key" },
-      openDeclared: {
-        "/state/open/additionalProperties": "schema.open_object",
+      longhandDeclared: { "/state/open/nullable": "workflow.not_allowed" },
+      jsonSchemaDeclared: { "/state/open": "workflow.missing_property" },
+      badDefaultDeclared: {
+        "/state/open/fields/n": "schema.invalid_default",
       },
       tooManyDeclared: { "/state": "workflow.out_of_bounds" },
       badKey: { "/steps/5/state/1st": "workflow.invalid_state_key" },
@@ -937,7 +989,7 @@ describe("checking a workflow", () => {
             binding: "summary",
             instructions: "Go.",
             input: nestedList(34),
-            output: { type: "string" },
+            output: { kind: "string" },
           },
         ])
       ),
@@ -980,19 +1032,6 @@ describe("checking a workflow", () => {
           }),
         ])
       ),
-      // A text, but longer than a parameter's declaration holds.
-      longDefault: codesAt({
-        ...everyStep(),
-        params: {
-          ...everyStep().params,
-          intro: {
-            kind: "text",
-            label: "Intro",
-            default: "x".repeat(4097),
-            sensitive: false,
-          },
-        },
-      }),
       // Within the source's length, but longer as the code it lowers to.
       lowered: codesAt(
         withSteps((steps) => [
@@ -1008,7 +1047,6 @@ describe("checking a workflow", () => {
         [`/steps/0/arguments/to/${"k".repeat(1024)}/${"k".repeat(1024)}/$expr`]:
           "workflow.pointer_too_long",
       },
-      longDefault: { "/params/intro/default": "workflow.invalid_default" },
       lowered: { "/steps/5/until/$expr": "workflow.expression_too_long" },
     });
   });
@@ -1100,13 +1138,14 @@ describe("checking a workflow", () => {
       $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
       params: {
         limit: {
-          kind: "money",
           label: "Limit",
-          currency: "EUR",
+          type: {
+            kind: "money",
+            default: { minorUnits: 500, currency: "EUR" },
+          },
           sensitive: false,
-          default: 500,
         },
-        token: { kind: "text", label: "Token" },
+        token: { label: "Token", type: { kind: "string" } },
       },
       steps: [{ id: "pause", type: "wait", for: "1 hour" }],
     });
@@ -1123,7 +1162,7 @@ describe("checking a workflow", () => {
     }).toStrictEqual({
       input: "object",
       output: "null",
-      limit: ["default", 500],
+      limit: ["default", { minorUnits: 500, currency: "EUR" }],
       token: "required",
     });
   });

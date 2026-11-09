@@ -41,12 +41,10 @@ import { connectDb } from "./test-env.ts";
 // bind. Then what a test sees: the run's end, and how often each
 // task completed.
 
-/** A JSON object schema of `properties`, each required, and nothing else. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** An object of `fields`, each required. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** What a greeting ends with: `{ status: "Hello, <who>" }`. */
@@ -70,9 +68,9 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     params,
@@ -451,7 +449,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
               binding: "summary",
               instructions: "Greet them.",
               input: { who: { $expr: "input.who" } },
-              output: objectSchema({ line: { type: "string" } }),
+              output: objectSchema({ line: { kind: "string" } }),
             },
           ],
           {
@@ -850,9 +848,8 @@ export default workflowTest({
             bindings: { mail: { kind: "connector", contract: key } },
             params: {
               word: {
-                kind: "text",
                 label: "Word",
-                default: "default-word",
+                type: { kind: "string", default: "default-word" },
                 sensitive: false,
               },
             },
@@ -1010,8 +1007,8 @@ export const notify = action({
           ...JSON.parse(definitionOf([])),
           output: {
             schema: objectSchema({
-              status: { type: "string" },
-              secret: { type: "string" },
+              status: { kind: "string" },
+              secret: { kind: "string" },
             }),
             value: { status: "hello", secret: "ultramarine" },
           },
@@ -1038,9 +1035,8 @@ export const notify = action({
   it("run with the fixture's parameter values or their defaults, never the organization's", async () => {
     const params = {
       greeting: {
-        kind: "text",
         label: "Greeting",
-        default: "Hello",
+        type: { kind: "string", default: "Hello" },
         sensitive: false,
       },
     };

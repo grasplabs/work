@@ -20,12 +20,11 @@ export type EngineDecision =
   | { answered: false };
 
 /**
- * A method of a binding: it takes JSON and answers with it. The answer is
- * typed `unknown`, as a binding's name doesn't say what it is (a
- * connection, an App, a collection): a workflow's code narrows what it
- * reads, to the answer's shape or to `Json` to return it from a step.
+ * A method of a binding: it takes JSON and answers with it, as the run
+ * host settles every answer into plain data. What it holds is the
+ * binding's contract's to say, which the host checks, never its name.
  */
-type BindingMethod = (...args: Json[]) => Promise<unknown>;
+type BindingMethod = (...args: Json[]) => Promise<Json>;
 
 /**
  * What a run reaches outside its own code, by binding name: the

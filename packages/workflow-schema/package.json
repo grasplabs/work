@@ -8,7 +8,6 @@
   "exports": {
     "./catalog": "./src/catalog.ts",
     "./check": "./src/check.ts",
-    "./data-schema": "./src/data-schema.ts",
     "./expression-scope": "./src/expression-scope.ts",
     "./format": "./src/format.ts",
     "./generate": "./src/generate.ts",

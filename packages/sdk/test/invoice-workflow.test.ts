@@ -9,7 +9,6 @@ import {
 } from "vite-plus/test";
 
 import { createTestEngine } from "../src/testing.ts";
-import { z } from "../src/workflow.ts";
 import { invoice } from "./fakes.ts";
 import { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 import type { InvoiceSystems } from "./workflows/invoice-approval.ts";
@@ -42,30 +41,36 @@ describe("the sample invoice workflow", () => {
     vi.useRealTimers();
   });
 
-  it("exposes its parameters as plain JSON", () => {
+  it("exposes its parameters as plain JSON, each type a descriptor", () => {
     const { metadata } = invoiceWorkflow(fakeSystems());
 
-    expect(metadata).toStrictEqual({
+    expect(structuredClone(metadata)).toStrictEqual({
       id: "invoice-approval",
       params: [
         {
           name: "threshold",
-          kind: "money",
           label: "Review invoices above",
-          default: 500_000,
-          sensitive: true,
-          currency: "EUR",
+          type: {
+            descriptorVersion: 1,
+            nullable: false,
+            presence: "default",
+            defaultValue: { minorUnits: 500_000, currency: "EUR" },
+            kind: "money",
+          },
         },
         {
           name: "reviewer",
-          kind: "person",
           label: "Reviewer",
-          default: "team:finance",
-          sensitive: false,
+          type: {
+            descriptorVersion: 1,
+            nullable: false,
+            presence: "default",
+            defaultValue: "team:finance",
+            kind: "person",
+          },
         },
       ],
     });
-    expect(z.json().safeParse(metadata).success).toBeTruthy();
   });
 
   it("books an invoice below the threshold without asking anyone", async () => {
@@ -145,7 +150,7 @@ describe("the sample invoice workflow", () => {
   it("uses the values people set instead of the defaults", async () => {
     const systems = fakeSystems();
     const { engine, decisions } = createTestEngine({
-      params: { threshold: 1_000_000 },
+      params: { threshold: { minorUnits: 1_000_000, currency: "EUR" } },
     });
 
     const result = await invoiceWorkflow(systems).run(engine, invoice);
@@ -176,14 +181,16 @@ describe("the sample invoice workflow", () => {
       }
       return await book(entry);
     };
-    const params: Record<string, unknown> = { threshold: 1_000_000 };
+    const params: Record<string, unknown> = {
+      threshold: { minorUnits: 1_000_000, currency: "EUR" },
+    };
     const { engine, decisions } = createTestEngine({ params });
     const definition = invoiceWorkflow(systems);
 
     await expect(definition.run(engine, invoice)).rejects.toThrow(
       "Ledger went away"
     );
-    params.threshold = 100_000;
+    params.threshold = { minorUnits: 100_000, currency: "EUR" };
     const result = await definition.run(engine, invoice);
 
     expect(result.status).toBe("booked");

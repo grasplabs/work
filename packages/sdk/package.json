@@ -27,7 +27,6 @@
     "./action": "./src/action.ts",
     "./brain": "./src/brain.ts",
     "./compute-runner": "./src/compute-runner.ts",
-    "./params": "./src/params.ts",
     "./testing": "./src/testing.ts",
     "./client": "./src/client.ts",
     "./form-binding": "./src/form-binding.ts",

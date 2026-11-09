@@ -71,11 +71,9 @@ const person = async (role: Role): Promise<Identity> => {
   return identityOf(userId, role);
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** The text of `size` characters the actions write and check. */
@@ -189,12 +187,12 @@ const definitionOf = (
   JSON.stringify({
     $schema: workflowSchemaUrl,
     input: objectSchema({
-      mode: { type: "string" },
-      file: { type: "string" },
-      size: { type: "number" },
+      mode: { kind: "string" },
+      file: { kind: "string" },
+      size: { kind: "number" },
     }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { $expr: `steps[${JSON.stringify(steps.at(-1)?.id)}].output` },
     },
     bindings: {

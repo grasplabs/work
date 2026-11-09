@@ -578,6 +578,23 @@ describe("reading", () => {
     );
   });
 
+  test("holds every type in its compact form, and says which one it can't read", () => {
+    const text = definitionText(tasks());
+
+    expect(text).not.toContain("descriptorVersion");
+    expect(text).toContain(
+      '"type": {\n            "kind": "boolean",\n            "default": false\n          }'
+    );
+    expect(() =>
+      readDefinition(
+        text.replace(
+          '"kind": "boolean"',
+          '"kind": "boolean",\n "nullable": false'
+        )
+      )
+    ).toThrow(/`tasks\.done`/u);
+  });
+
   test("refuses a definition that isn't one", () => {
     const text = definitionText(tasks());
     const refused = [

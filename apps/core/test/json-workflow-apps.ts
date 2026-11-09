@@ -58,12 +58,10 @@ import { routed, signedInApi, unique } from "./sign-in.ts";
 /** How long a push or a run's change may take, and how often to look. */
 export const settles = { timeout: 30_000, interval: 50 };
 
-/** A JSON object schema of `properties`, each required, and nothing else. */
-export const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+export const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** What a greeting ends with: `{ status: "Hello, <who>" }`. */
@@ -104,9 +102,9 @@ export const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     ...(bindings === undefined ? {} : { bindings }),
@@ -667,7 +665,7 @@ export const askTask = {
   binding: "reader",
   instructions: "Greet them.",
   input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { type: "string" } }),
+  output: objectSchema({ line: { kind: "string" } }),
 };
 
 /** What a workflow that asks its model ends with: the line it answered. */

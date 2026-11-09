@@ -102,19 +102,9 @@ const notesFiles = (): Record<string, string> => ({
 const greetingSource = (() => {
   const checked = checkWorkflow({
     $schema: workflowSchemaUrl,
-    input: {
-      type: "object",
-      properties: { who: { type: "string" } },
-      required: ["who"],
-      additionalProperties: false,
-    },
+    input: { kind: "object", fields: { who: { kind: "string" } } },
     output: {
-      schema: {
-        type: "object",
-        properties: { status: { type: "string" } },
-        required: ["status"],
-        additionalProperties: false,
-      },
+      schema: { kind: "object", fields: { status: { kind: "string" } } },
       value: { status: { $expr: '"Hello, " + input.who' } },
     },
     steps: [{ id: "pause", type: "wait", for: "1 minute" }],

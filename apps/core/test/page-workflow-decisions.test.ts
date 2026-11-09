@@ -119,12 +119,10 @@ export const count = query({
   "src/routes/index.tsx": page,
 });
 
-/** The JSON Schema of an object of `properties`, each required. */
-const objectDocument = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+const objectDocument = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /**
@@ -142,9 +140,9 @@ const definitionOf = (contract: string, looped = false): string => {
   };
   return JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectDocument({ amount: { type: "number" } }),
+    input: objectDocument({ amount: { kind: "number" } }),
     output: {
-      schema: objectDocument({ status: { type: "string" } }),
+      schema: objectDocument({ status: { kind: "string" } }),
       value: { status: "done" },
     },
     bindings: { approval: { kind: "decision", contract } },
@@ -230,9 +228,9 @@ const jobEvents = {
 const eventDefinitionOf = (contract: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectDocument({ amount: { type: "number" } }),
+    input: objectDocument({ amount: { kind: "number" } }),
     output: {
-      schema: objectDocument({ status: { type: "string" } }),
+      schema: objectDocument({ status: { kind: "string" } }),
       value: { status: "done" },
     },
     bindings: { jobEvents: { kind: "event", contract } },

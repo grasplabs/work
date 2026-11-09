@@ -92,16 +92,12 @@ export const workflowErrors = defineErrorFamily({
  * A parameter as a workflow's code declares it (the SDK's
  * `ParamMetadata`), within the bounds core keeps and shows: the SDK
  * refuses a definition outside them, so a version whose declarations core
- * would refuse never passes its tests. Kinds, and whether a default fits
- * its kind, are the SDK's to check (`paramValueSchemas`).
+ * would refuse never passes its tests. Its type, and whether its default
+ * fits it, are `v`'s to check.
  */
 export const paramDeclarationSchema = z.object({
   name: z.string().regex(/^[A-Za-z_$][\w$]{0,63}$/u),
-  kind: z.string(),
   label: z.string().max(200),
-  default: z.union([z.string().max(4096), z.number()]),
-  sensitive: z.boolean(),
-  currency: z.string().max(3).optional(),
 });
 
 /** Most parameters one workflow declares. */

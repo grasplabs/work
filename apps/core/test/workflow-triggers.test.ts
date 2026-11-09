@@ -48,9 +48,9 @@ const personApi = async (role: Role): Promise<Person> =>
 const definitionOf = (version: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ report: { type: "string" } }),
+    input: objectSchema({ report: { kind: "string" } }),
     output: {
-      schema: objectSchema({ report: { type: "string" } }),
+      schema: objectSchema({ report: { kind: "string" } }),
       value: { report: { $expr: "input.report" } },
     },
     steps: [

@@ -69,7 +69,7 @@ const connectOwn = async (person: Person): Promise<string> => {
   return connection.id;
 };
 
-const mailFields = { id: { type: "string" }, subject: { type: "string" } };
+const mailFields = { id: { kind: "string" }, subject: { kind: "string" } };
 
 /** The inbox workflow: it hands back the mail's ID and subject it started with. */
 const inbox = JSON.stringify({

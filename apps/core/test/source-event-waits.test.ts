@@ -158,7 +158,7 @@ const paymentWorkflow = async (on?: {
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({ invoice: { type: "string" } }),
+      input: objectSchema({ invoice: { kind: "string" } }),
       bindings: { payments: { kind: "event", contract } },
       steps: [{ id: "linger", type: "wait", for: "1 hour" }, awaitPaid],
     }),
@@ -261,8 +261,8 @@ const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
  * that none came.
  */
 const waiting = (key = "input.invoice"): string => `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ invoice: z.string() }) }, async (step, { input }) => {
+import { workflow, v } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: v.object({ invoice: v.string() }) }, async (step, { input }) => {
   await step.do("await-paid", { key: "enter", description: "Its match" }, async () => ({ key: ${key} }));
   const waited = await step.listen("await-paid", { key: "task", description: "Its payment" });
   return waited.timedOut ? "none" : waited.event.data.invoice;
@@ -1078,7 +1078,7 @@ describe("publishing and approving a wait on a webhook source's events", () => {
         await publishWorkflowVersion(env, admin, workflow.id, {
           definition: JSON.stringify({
             $schema: workflowSchemaUrl,
-            input: objectSchema({ invoice: { type: "string" } }),
+            input: objectSchema({ invoice: { kind: "string" } }),
             bindings: { payments: { kind: "event", contract } },
             steps: [{ ...awaitPaid, event }],
           }),

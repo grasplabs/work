@@ -4,30 +4,19 @@ import type { CheckedWorkflow } from "../src/check.ts";
 /** A workflow with every step kind of the format, as a builder writes it. */
 export const everyStep = () => ({
   $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
-  input: {
-    type: "object",
-    properties: { who: { type: "string" } },
-    required: ["who"],
-    additionalProperties: false,
-  },
+  input: { kind: "object", fields: { who: { kind: "string" } } },
   output: {
-    schema: {
-      type: "object",
-      properties: { line: { type: "string" } },
-      required: ["line"],
-      additionalProperties: false,
-    },
+    schema: { kind: "object", fields: { line: { kind: "string" } } },
     value: { line: { $expr: "steps.greet.output.line" } },
   },
   params: {
     greeting: {
-      kind: "text",
       label: "Greeting",
-      default: "Hello",
+      type: { kind: "string", default: "Hello" },
       sensitive: false,
     },
     // Sensitive, as every parameter not marked otherwise.
-    token: { kind: "text", label: "Token" },
+    token: { label: "Token", type: { kind: "string" } },
   },
   bindings: {
     mail: { kind: "connector", contract: "composio.mail@1" },
@@ -35,18 +24,13 @@ export const everyStep = () => ({
   },
   // What it keeps between runs: what `keeping` and its kin write.
   state: {
-    last: { type: "string" },
-    previous: { type: "string" },
-    runs: { type: "integer", minimum: 0 },
-    kept: { type: "array", items: { type: "string" } },
-    marked: { type: "boolean" },
-    row: { type: "string" },
-    summary: {
-      type: "object",
-      properties: { line: { type: "string" } },
-      required: ["line"],
-      additionalProperties: false,
-    },
+    last: { kind: "string" },
+    previous: { kind: "string" },
+    runs: { kind: "number", integer: true, min: 0 },
+    kept: { kind: "array", item: { kind: "string" } },
+    marked: { kind: "boolean" },
+    row: { kind: "string" },
+    summary: { kind: "object", fields: { line: { kind: "string" } } },
   },
   steps: [
     { id: "linger", type: "wait", for: "1 hour" },
@@ -77,12 +61,7 @@ export const everyStep = () => ({
         who: { $expr: "input.who" },
         tags: ["vip", { $expr: "input.who" }],
       },
-      output: {
-        type: "object",
-        properties: { line: { type: "string" } },
-        required: ["line"],
-        additionalProperties: false,
-      },
+      output: { kind: "object", fields: { line: { kind: "string" } } },
     },
     {
       id: "known",

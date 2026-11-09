@@ -60,20 +60,18 @@ const tryEach = (calls: Record<string, string>, before = ""): string =>
     return results;
   };`;
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A definition that passes and ends with `status`. */
 const definitionOf = (status = "done"): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     steps: [],
@@ -208,9 +206,9 @@ describe("the agent building an independent workflow", () => {
     });
     const definition = JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({ claim: { type: "string" } }),
+      input: objectSchema({ claim: { kind: "string" } }),
       output: {
-        schema: objectSchema({ summary: { type: "string" } }),
+        schema: objectSchema({ summary: { kind: "string" } }),
         value: { summary: { $expr: "steps.assess.output.summary" } },
       },
       bindings: { judge: { kind: "model", contract: judge } },
@@ -221,7 +219,7 @@ describe("the agent building an independent workflow", () => {
           binding: "judge",
           instructions: "Summarise the expense claim.",
           input: { claim: { $expr: "input.claim" } },
-          output: objectSchema({ summary: { type: "string" } }),
+          output: objectSchema({ summary: { kind: "string" } }),
         },
       ],
     });

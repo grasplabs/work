@@ -341,15 +341,14 @@ const definitionOf = (waits: boolean): string =>
     $schema: workflowSchemaUrl,
     params: {
       greeting: {
-        kind: "text",
         label: "Greeting",
-        default: "Hello",
+        type: { kind: "string", default: "Hello" },
         sensitive: false,
       },
     },
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: { $expr: 'params.greeting + ", " + input.who' } },
     },
     steps: waits ? [{ id: "pause", type: "wait", for: "1 hour" }] : [],

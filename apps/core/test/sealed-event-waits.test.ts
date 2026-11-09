@@ -149,7 +149,7 @@ const eventWorkflow = async () => {
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({ jobId: { type: "string" } }),
+      input: objectSchema({ jobId: { kind: "string" } }),
       bindings: {
         jobEvents: { kind: "event", contract },
         otherEvents: { kind: "event", contract },
@@ -227,8 +227,8 @@ const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
 
 /** A module of the test's own whose run on input `{ jobId }` is `body`. */
 const moduleOf = (body: string): string => `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ jobId: z.string() }) }, async (step, { input }) => {
+import { workflow, v } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: v.object({ jobId: v.string() }) }, async (step, { input }) => {
 ${body}
 });
 `;

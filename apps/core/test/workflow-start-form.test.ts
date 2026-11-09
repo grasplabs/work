@@ -40,36 +40,28 @@ const person = async (role: Role): Promise<Acting> => {
 };
 
 /**
- * A grasp-workflow/1 definition whose input is an object with
- * `properties`, its one step titled `version`, so each version's document
- * differs.
+ * A grasp-workflow/1 definition whose input is an object of `fields`, its
+ * one step titled `version`, so each version's document differs.
  */
 const definitionOf = (
   version: string,
-  properties: Record<string, unknown>
+  fields: Record<string, unknown>
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: {
-      type: "object",
-      properties,
-      required: Object.keys(properties),
-      additionalProperties: false,
-    },
+    input: { kind: "object", fields },
     output: {
-      schema: {
-        type: "object",
-        properties: { status: { type: "string" } },
-        required: ["status"],
-        additionalProperties: false,
-      },
+      schema: { kind: "object", fields: { status: { kind: "string" } } },
       value: { status: "done" },
     },
     steps: [{ id: "pause", title: version, type: "wait", for: "1 second" }],
   });
 
 /** The input `version` takes: who to greet, and how many times. */
-const greeting = { who: { type: "string" }, times: { type: "integer" } };
+const greeting = {
+  who: { kind: "string" },
+  times: { kind: "number", integer: true },
+};
 
 /** Ada's workflow, published once, Uma its user; Carl a member with no role in it. */
 const greetingWorkflow = async () => {
@@ -162,8 +154,8 @@ describe("starting an independent workflow by hand", () => {
     const workflow = await createWorkflowResource(env, ada, `ask-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf("1.0.0", {
-        approver: { type: "string", "x-grasp-value": { kind: "person" } },
-        note: { type: "string" },
+        approver: { kind: "person" },
+        note: { kind: "string" },
       }),
       basedOn: null,
     });
@@ -248,7 +240,7 @@ describe("starting an independent workflow by hand", () => {
     // Version 2 takes other input, and isn't live.
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf("1.1.0", {
-        who: { type: "string" },
+        who: { kind: "string" },
       }),
       basedOn: 1,
     });

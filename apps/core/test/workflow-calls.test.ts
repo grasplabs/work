@@ -219,9 +219,9 @@ const definitionOf = ({
 }: Draft): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: status === undefined ? "done" : { $expr: status } },
     },
     params,
@@ -450,7 +450,7 @@ const mailingWorkflow = async (
         ? {}
         : { [sharing]: { kind: "connector", contract: key } }),
     },
-    params: { token: { kind: "text", label: "Token" } },
+    params: { token: { label: "Token", type: { kind: "string" } } },
     steps: [
       ...before,
       // The other alias, called by a step that never runs.
@@ -808,7 +808,7 @@ const greetStep = (id = "greet", timeout?: string) => ({
   binding: "summary",
   instructions: "Greet them.",
   input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { type: "string" } }),
+  output: objectSchema({ line: { kind: "string" } }),
   ...(timeout === undefined ? {} : { timeout }),
 });
 
@@ -2213,7 +2213,7 @@ const writeAgain = {
   binding: "writer",
   instructions: "Greet them again.",
   input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { type: "string" } }),
+  output: objectSchema({ line: { kind: "string" } }),
 };
 
 describe("model resources of a workflow's own actions", () => {

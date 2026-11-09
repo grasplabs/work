@@ -6,30 +6,30 @@
  */
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import type {
-  Json,
+  Descriptor,
   Step,
   WorkflowDocument,
 } from "@grasp-os/workflow-schema/format";
 
-/** A JSON Schema, as a definition's input, output and steps hold one. */
-export type JsonSchema = Readonly<Record<string, Json>>;
-
-/** A schema of exactly `properties`, each required unless named `optional`. */
+/** An object of exactly `fields`, each required unless named `optional`. */
 export const objectOf = (
-  properties: Record<string, JsonSchema>,
+  fields: Record<string, Descriptor>,
   optional: readonly string[] = []
-): JsonSchema => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties).filter((key) => !optional.includes(key)),
-  additionalProperties: false,
+): Descriptor => ({
+  kind: "object",
+  fields: Object.fromEntries(
+    Object.entries(fields).map(([name, field]) => [
+      name,
+      optional.includes(name) ? { ...field, optional: true } : field,
+    ])
+  ),
 });
 
-export const text: JsonSchema = { type: "string" };
-export const boolean: JsonSchema = { type: "boolean" };
-export const listOf = (items: JsonSchema): JsonSchema => ({
-  type: "array",
-  items,
+export const text: Descriptor = { kind: "string" };
+export const boolean: Descriptor = { kind: "boolean" };
+export const listOf = (item: Descriptor): Descriptor => ({
+  kind: "array",
+  item,
 });
 
 /** What a workflow is made of: its document, but for `$schema`. */

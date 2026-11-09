@@ -260,9 +260,9 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ jobId: { type: "string" } }),
+    input: objectSchema({ jobId: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: {
         status: {
           $expr:

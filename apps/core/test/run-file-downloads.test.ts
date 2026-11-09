@@ -67,19 +67,17 @@ export const writeFile = action({
 });
 `;
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 const definitionOf = (key: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ size: { type: "number" } }),
+    input: objectSchema({ size: { kind: "number" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { $expr: "steps.write.output" },
     },
     bindings: {

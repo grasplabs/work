@@ -15,6 +15,8 @@ import type {
   RowRule,
   TableAccess,
 } from "./table-access.ts";
+import { compactDescriptor, descriptorFromCompact } from "./value-compact.ts";
+import { isPlainObject, ValueDefinitionError } from "./value-descriptor.ts";
 import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
@@ -27,6 +29,10 @@ import type { AnySchema } from "./value-schema.ts";
 // and generates the App's config (`grasp.config.ts`) and schema
 // (`server/schema.ts`) from it (definition-source.ts): what it does is
 // code, and only code runs, is sealed and is exported.
+//
+// Every type in it, a field's or a permission's, is a descriptor in its
+// compact form (value-compact.ts) as the text holds it, and the full
+// descriptor once read.
 //
 // Every table and field has an ID that never changes. A rename changes a
 // name only; indexes, row rules and answers name fields by their IDs, so
@@ -235,7 +241,7 @@ export const accessOf = (table: DefinedTable): TableAccess => {
   } as TableAccess;
 };
 
-/** A descriptor's schema, its structure checked as a manifest's is. */
+/** A field's schema, its descriptor sealed again as a manifest's is. */
 const typeOf = (field: DefinedField): AnySchema =>
   schemaOf(readDescriptor(field.type, 1, { nodes: 0 }));
 
@@ -371,6 +377,60 @@ export const definitionManifest = (definition: AppDefinition): AppManifest =>
   ).manifest;
 
 /**
+ * `data`, a permission's, with each descriptor it holds mapped by `map`:
+ * a workflow's `input` and `output`, and the platform's functions' `args`
+ * and `returns`. The only kinds whose data holds descriptors.
+ */
+const permissionTypes = (
+  data: DefinedPermission,
+  map: (descriptor: unknown) => unknown
+): DefinedPermission => {
+  const mapped = (value: FrozenJson | undefined): FrozenJson =>
+    // SAFETY: a descriptor either way, which is JSON.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    map(value) as FrozenJson;
+  const kind = data["~permission"];
+  if (kind === "workflows") {
+    return { ...data, input: mapped(data.input), output: mapped(data.output) };
+  }
+  const { functions } = data;
+  if (kind !== "grasp" || !isPlainObject(functions)) {
+    return data;
+  }
+  return {
+    ...data,
+    functions: Object.fromEntries(
+      Object.entries(functions).map(([name, declared]) => [
+        name,
+        isPlainObject(declared)
+          ? {
+              ...declared,
+              args: mapped(declared.args),
+              returns: mapped(declared.returns),
+            }
+          : declared,
+      ])
+    ),
+  };
+};
+
+/** `read`'s answer, a refusal naming `where` when its descriptor isn't one. */
+const readType = <Read>(where: string, read: () => Read): Read => {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof ValueDefinitionError) {
+      return refuse(`${where}: ${error.message}`);
+    }
+    throw error;
+  }
+};
+
+/** A descriptor read from its compact form; `where` names it in a refusal. */
+const fromCompact = (where: string, compact: unknown): ValueDescriptor =>
+  readType(where, () => descriptorFromCompact(compact));
+
+/**
  * The definition `text` holds, checked whole (`definitionManifest`):
  * throws `AppDefinitionError`, or the builders' own errors, for text that
  * isn't one.
@@ -391,17 +451,53 @@ export const readDefinition = (text: string): AppDefinition => {
       `${definitionPath} isn't a definition: ${z.prettifyError(parsed.error)}`
     );
   }
-  // SAFETY: its structure was just checked, and every type is read and
-  // checked as a descriptor when it is declared, just below.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const definition = parsed.data as AppDefinition;
+  const { tables, permissions, ...rest } = parsed.data;
+  const definition: AppDefinition = {
+    ...rest,
+    permissions: permissions.map((permission) =>
+      permissionTypes(permission, (compact) =>
+        fromCompact(
+          `A \`${JSON.stringify(permission["~permission"])}\` permission`,
+          compact
+        )
+      )
+    ),
+    tables: tables.map((table) => ({
+      ...table,
+      fields: table.fields.map((field) => ({
+        ...field,
+        type: fromCompact(`\`${table.name}.${field.name}\``, field.type),
+      })),
+    })),
+  };
   definitionManifest(definition);
   return definition;
 };
 
-/** A definition's text, as `definition.json` holds it. */
-export const definitionText = (definition: AppDefinition): string =>
-  `${JSON.stringify(definition, null, 2)}\n`;
+/**
+ * A definition's text, as `definition.json` holds it: every descriptor in
+ * its compact form.
+ */
+export const definitionText = (definition: AppDefinition): string => {
+  const text = {
+    ...definition,
+    permissions: definition.permissions.map((data) =>
+      permissionTypes(data, (descriptor) =>
+        // SAFETY: a permission's descriptors, as `permission.*` made them.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        compactDescriptor(descriptor as ValueDescriptor)
+      )
+    ),
+    tables: definition.tables.map((table) => ({
+      ...table,
+      fields: table.fields.map((field) => ({
+        ...field,
+        type: compactDescriptor(field.type),
+      })),
+    })),
+  };
+  return `${JSON.stringify(text, null, 2)}\n`;
+};
 
 /** The definition of a new App named `name`: nothing in it yet. */
 export const emptyDefinition = (name: string): AppDefinition => ({

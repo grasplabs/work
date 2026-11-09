@@ -346,9 +346,9 @@ const definitionOf = ({
 }: DefinitionParts = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: { $expr: "steps.notify.output.status" } },
     },
     bindings: {
@@ -889,7 +889,7 @@ describe("a JSON workflow's own actions", () => {
       binding: "writer",
       instructions: "Write a line.",
       input: { who: { $expr: "input.who" } },
-      output: objectSchema({ line: { type: "string" } }),
+      output: objectSchema({ line: { kind: "string" } }),
     };
     /** Publishes `before` ahead of the action, which uses `operations` of mail. */
     const reviewed = async (
@@ -1016,7 +1016,7 @@ describe("a JSON workflow's own actions", () => {
       binding: "writer",
       instructions: "Write a line.",
       input: { who: { $expr: "input.who" } },
-      output: objectSchema({ line: { type: "string" } }),
+      output: objectSchema({ line: { kind: "string" } }),
     };
     const problems: string[] = [];
     // No `writer` binding at all, then `writer` bound as a connector.

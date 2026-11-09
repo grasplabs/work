@@ -171,12 +171,10 @@ const guests: DeclaredPermission = {
   binding: "GUESTS",
 };
 
-/** A JSON Schema of an object of `properties`, all required. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A workflow value of an object of `fields`, all required. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /**
@@ -186,9 +184,9 @@ const objectSchema = (properties: Record<string, unknown>) => ({
 const greeter = (contract: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ line: { type: "string" } }),
+      schema: objectSchema({ line: { kind: "string" } }),
       value: { line: { $expr: "steps.greet.output.line" } },
     },
     bindings: { model: { kind: "model", contract } },
@@ -199,7 +197,7 @@ const greeter = (contract: string): string =>
         binding: "model",
         instructions: "Greet them.",
         input: { who: { $expr: "input.who" } },
-        output: objectSchema({ line: { type: "string" } }),
+        output: objectSchema({ line: { kind: "string" } }),
       },
     ],
   });

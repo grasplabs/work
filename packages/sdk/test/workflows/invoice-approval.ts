@@ -1,4 +1,4 @@
-import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
+import { v, workflow } from "@grasp-os/sdk/workflow";
 
 /**
  * The outside systems the sample invoice workflow talks to. The sample
@@ -17,21 +17,22 @@ export const invoiceWorkflow = (systems: InvoiceSystems) =>
   workflow(
     "invoice-approval",
     {
-      input: z.object({
-        number: z.string(),
-        purchaseOrder: z.string(),
+      input: v.object({
+        number: v.string(),
+        purchaseOrder: v.string(),
         /** In whole minor units: cents for EUR. */
-        total: z.int(),
+        total: v.number().integer(),
       }),
       params: {
-        threshold: money({
+        threshold: {
           label: "Review invoices above",
-          currency: "EUR",
           // €5,000.00
-          default: 500_000,
-          sensitive: true,
-        }),
-        reviewer: person({ label: "Reviewer", default: "team:finance" }),
+          type: v.money().default({ minorUnits: 500_000, currency: "EUR" }),
+        },
+        reviewer: {
+          label: "Reviewer",
+          type: v.person().default("team:finance"),
+        },
       },
     },
     async (step, { input, params }) => {
@@ -44,7 +45,7 @@ export const invoiceWorkflow = (systems: InvoiceSystems) =>
         return { status: "unmatched" } as const;
       }
 
-      if (input.total > params.threshold) {
+      if (input.total > params.threshold.minorUnits) {
         const decision = await step.decision("review", {
           description: "Ask the reviewer to approve invoices above the limit",
           from: params.reviewer,

@@ -5,46 +5,24 @@
       "~permission": "workflows",
       "alias": "extract",
       "input": {
-        "descriptorVersion": 1,
-        "nullable": false,
-        "presence": "required",
         "kind": "object",
         "fields": {
           "notes": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
-            "trim": false,
-            "email": false,
             "min": 1,
             "max": 30000
           },
           "lines": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "array",
             "item": {
-              "descriptorVersion": 1,
-              "nullable": false,
-              "presence": "required",
               "kind": "object",
               "fields": {
                 "role": {
-                  "descriptorVersion": 1,
-                  "nullable": false,
-                  "presence": "required",
                   "kind": "enum",
                   "values": ["guest", "question"]
                 },
                 "text": {
-                  "descriptorVersion": 1,
-                  "nullable": false,
-                  "presence": "required",
-                  "kind": "string",
-                  "trim": false,
-                  "email": false
+                  "kind": "string"
                 }
               }
             }
@@ -52,39 +30,19 @@
         }
       },
       "output": {
-        "descriptorVersion": 1,
-        "nullable": false,
-        "presence": "required",
         "kind": "object",
         "fields": {
           "statements": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "array",
             "item": {
-              "descriptorVersion": 1,
-              "nullable": false,
-              "presence": "required",
               "kind": "object",
               "fields": {
                 "text": {
-                  "descriptorVersion": 1,
-                  "nullable": false,
-                  "presence": "required",
-                  "kind": "string",
-                  "trim": false,
-                  "email": false
+                  "kind": "string"
                 },
                 "tags": {
-                  "descriptorVersion": 1,
-                  "nullable": false,
-                  "presence": "required",
                   "kind": "array",
                   "item": {
-                    "descriptorVersion": 1,
-                    "nullable": false,
-                    "presence": "required",
                     "kind": "enum",
                     "values": [
                       "goal",
@@ -97,12 +55,7 @@
                   }
                 },
                 "quote": {
-                  "descriptorVersion": 1,
-                  "nullable": false,
-                  "presence": "required",
-                  "kind": "string",
-                  "trim": false,
-                  "email": false
+                  "kind": "string"
                 }
               }
             }
@@ -125,54 +78,31 @@
           "id": "db585dcc-41f1-495a-925e-aeb4e6979f5b",
           "name": "source",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "object",
             "fields": {
               "title": {
-                "descriptorVersion": 1,
-                "nullable": false,
-                "presence": "required",
                 "kind": "string",
                 "trim": true,
-                "email": false,
                 "min": 1,
                 "max": 200
               },
               "medium": {
-                "descriptorVersion": 1,
-                "nullable": false,
-                "presence": "required",
                 "kind": "enum",
                 "values": ["interview", "chat", "document", "other"]
               },
               "date": {
-                "descriptorVersion": 1,
-                "nullable": false,
-                "presence": "required",
                 "kind": "string",
-                "trim": false,
-                "email": false,
                 "min": 10,
                 "max": 10
               },
               "from": {
-                "descriptorVersion": 1,
-                "nullable": false,
-                "presence": "required",
                 "kind": "string",
                 "trim": true,
-                "email": false,
                 "max": 200
               },
               "notes": {
-                "descriptorVersion": 1,
-                "nullable": false,
-                "presence": "required",
                 "kind": "string",
                 "trim": true,
-                "email": false,
                 "max": 30000
               }
             }
@@ -182,35 +112,19 @@
           "id": "92b2b601-e1f3-440a-a50a-8730afce49a2",
           "name": "statements",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "array",
             "item": {
-              "descriptorVersion": 1,
-              "nullable": false,
-              "presence": "required",
               "kind": "object",
               "fields": {
                 "text": {
-                  "descriptorVersion": 1,
-                  "nullable": false,
-                  "presence": "required",
                   "kind": "string",
                   "trim": true,
-                  "email": false,
                   "min": 1,
                   "max": 200
                 },
                 "tags": {
-                  "descriptorVersion": 1,
-                  "nullable": false,
-                  "presence": "required",
                   "kind": "array",
                   "item": {
-                    "descriptorVersion": 1,
-                    "nullable": false,
-                    "presence": "required",
                     "kind": "enum",
                     "values": [
                       "goal",
@@ -225,12 +139,8 @@
                   "max": 6
                 },
                 "quote": {
-                  "descriptorVersion": 1,
-                  "nullable": false,
-                  "presence": "required",
                   "kind": "string",
                   "trim": true,
-                  "email": false,
                   "max": 1000
                 }
               }
@@ -242,9 +152,6 @@
           "id": "72e083a2-c198-43f6-9dc4-27a616e65a35",
           "name": "origin",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "enum",
             "values": ["manual", "notes", "guest"]
           }
@@ -269,12 +176,8 @@
           "id": "6618f848-e346-446c-a399-862956e216d7",
           "name": "title",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
             "trim": true,
-            "email": false,
             "min": 1,
             "max": 200
           }
@@ -283,9 +186,6 @@
           "id": "a805026f-4b9c-4374-af22-474ac390eb44",
           "name": "medium",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "enum",
             "values": ["interview", "chat", "document", "other"]
           }
@@ -294,12 +194,7 @@
           "id": "388d8199-9cd9-4b56-bd6a-fcadf026a226",
           "name": "date",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
-            "trim": false,
-            "email": false,
             "min": 10,
             "max": 10
           }
@@ -308,12 +203,8 @@
           "id": "632761b3-e707-4e8e-90a7-477f0b0f8b5f",
           "name": "from",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
             "trim": true,
-            "email": false,
             "max": 200
           }
         },
@@ -321,12 +212,8 @@
           "id": "43017c51-11f9-414b-a56f-f105e973af39",
           "name": "notes",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
             "trim": true,
-            "email": false,
             "max": 30000
           }
         },
@@ -334,9 +221,6 @@
           "id": "594cf528-4438-41f8-b941-c128aac2fe1b",
           "name": "guest",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "boolean"
           }
         }
@@ -360,12 +244,8 @@
           "id": "89079202-fce2-4062-8e29-b3a404b86df5",
           "name": "text",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
             "trim": true,
-            "email": false,
             "min": 1,
             "max": 200
           }
@@ -374,14 +254,8 @@
           "id": "cb5d02d8-5db9-428f-b839-8995990bfd7f",
           "name": "tags",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "array",
             "item": {
-              "descriptorVersion": 1,
-              "nullable": false,
-              "presence": "required",
               "kind": "enum",
               "values": [
                 "goal",
@@ -400,12 +274,8 @@
           "id": "33402098-5407-4b34-a371-15b5a69f9162",
           "name": "quote",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
             "trim": true,
-            "email": false,
             "max": 1000
           }
         },
@@ -413,9 +283,6 @@
           "id": "4ea8ec16-2cb4-4f9e-9fe5-be2028323235",
           "name": "source",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "id",
             "tableName": "sources"
           }
@@ -424,12 +291,7 @@
           "id": "0e121985-e181-49e4-8152-b10e792b8d98",
           "name": "date",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
-            "trim": false,
-            "email": false,
             "min": 10,
             "max": 10
           }
@@ -438,9 +300,6 @@
           "id": "fb7ea4b2-f50f-4560-9fb8-cca296982812",
           "name": "guest",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "boolean"
           }
         }

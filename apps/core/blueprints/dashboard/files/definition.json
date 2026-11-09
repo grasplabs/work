@@ -10,12 +10,8 @@
           "id": "3a0397e5-939e-4b57-9948-5c36f902c70d",
           "name": "customer",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
             "trim": true,
-            "email": false,
             "min": 1,
             "max": 200
           }
@@ -24,9 +20,6 @@
           "id": "10b1ffaa-d9a2-4220-84b5-dffe558d892f",
           "name": "amount",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "money"
           }
         },
@@ -34,9 +27,6 @@
           "id": "2fcdd6e4-7e1d-4160-82b9-a4449f1d6dc8",
           "name": "closedAt",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "timestamp"
           }
         }
@@ -60,12 +50,7 @@
           "id": "9879c8bc-52b2-4d25-b197-3bc7b7f737a7",
           "name": "month",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
-            "trim": false,
-            "email": false,
             "min": 7,
             "max": 7
           }
@@ -74,9 +59,6 @@
           "id": "7e5e9561-1997-4d97-8231-a9fbd639b8f5",
           "name": "sales",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "number",
             "integer": true,
             "min": 0
@@ -86,9 +68,6 @@
           "id": "8bd36b88-6737-4b15-953c-6d8e27a0a0ae",
           "name": "revenue",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "money"
           }
         }

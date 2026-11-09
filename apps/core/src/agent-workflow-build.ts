@@ -494,10 +494,21 @@ const workflowBuildDeclaration = `/**
  * \`{ type: "workflow", workflowId }\`). Say so.
  *
  * A document is \`{ $schema, input?, output?: { schema, value }, params?, bindings?, state?, steps }\`.
- * \`input\` and \`output.schema\` are JSON Schemas. \`params\` are values people set
- * without editing the workflow: \`{ [name]: { kind: "text" | "number" | "money" | "person"
- * | "schedule" | "template", label, sensitive?: false, default?, currency? } }\`, sensitive
- * (never shown or read by code, no default) unless \`sensitive: false\`. \`bindings\` declare
+ * Every value's schema (\`input\`, \`output.schema\`, an agent's \`output\`, each \`state\` key, each
+ * parameter's \`type\`) is a descriptor: what \`v\` declares, as JSON, in \`v\`'s words, leaving out
+ * whatever is false: \`v.string().max(200)\` is \`{ "kind": "string", "max": 200 }\`,
+ * \`v.object({ total: v.number().integer(), note: v.string().optional() })\` is
+ * \`{ "kind": "object", "fields": { "total": { "kind": "number", "integer": true }, "note": { "kind":
+ * "string", "optional": true } } }\`. Kinds: \`string\` (\`trim\`, \`email\`, \`min\`, \`max\`), \`number\`
+ * (\`integer\`, \`min\`, \`max\`), \`boolean\`, \`null\`, \`literal\` (\`value\`), \`enum\` (\`values\`), \`id\`
+ * (\`tableName\`), \`object\` (\`fields\`), \`array\` (\`item\`, \`min\`, \`max\`), \`union\` (\`members\`),
+ * \`record\` (\`value\`), \`timestamp\`, \`duration\`, \`file\`, \`money\` (\`{ minorUnits, currency }\`),
+ * \`person\`, \`model\`, \`template\` and \`schedule\` (\`{ cron, timeZone }\`); any of them takes
+ * \`"nullable": true\`, and \`"optional": true\` or \`"default": <value>\`. \`params\` are values people set
+ * without editing the workflow: \`{ [name]: { label, type, sensitive?: false } }\`, sensitive (never
+ * shown or read by code, its type without a default) unless \`sensitive: false\`, when its type has a
+ * \`default\`: \`{ "label": "Review above", "type": { "kind": "money", "default": { "minorUnits":
+ * 500000, "currency": "EUR" } }, "sensitive": false }\`. \`bindings\` declare
  * what the workflow calls outside itself: \`{ [alias]: { kind, contract, title? } }\`, kind one
  * of ${bindingKinds.map((kind) => `\`${kind}\``).join(", ")}; a model, connector,
  * decision or event binding names a contract of its kind from \`catalog()\` (an event contract's
@@ -509,7 +520,7 @@ const workflowBuildDeclaration = `/**
  * returns is its step's output, which the run records: return a file's reference
  * \`{ file: <id> }\`, never its content, and hand that reference to the next action, which reads
  * it. Of the Brain, return only what the next step needs.
- * \`state\` declares what the workflow keeps between its runs: \`{ [key]: <JSON Schema> }\`, at
+ * \`state\` declares what the workflow keeps between its runs: \`{ [key]: <descriptor> }\`, at
  * most 64 KB in all.
  *
  * Each step is \`{ id, type, title?, if?, ... }\`: \`id\` is a stable key (lower-case words
@@ -517,7 +528,7 @@ const workflowBuildDeclaration = `/**
  * - \`do\`: \`{ binding, operation?, arguments?, timeout? }\` calls a binding (a connector's
  *   operation, the workflow's own compute or action);
  * - \`agent\`: \`{ binding, instructions, input, output, timeout? }\` asks a model binding for an
- *   answer matching the JSON Schema \`output\`;
+ *   answer of the descriptor \`output\`;
  * - a \`do\` or \`agent\` step may also take \`state: { [key]: value }\`: declared keys it writes once it
  *   succeeds, \`output\` being its result there. A restricted or test run reads the state but
  *   doesn't change it;

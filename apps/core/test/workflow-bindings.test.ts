@@ -153,9 +153,9 @@ const documentOf = ({
 }): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     params,
@@ -201,17 +201,20 @@ const definitionOf = ({
   documentOf({
     ...(status === undefined ? {} : { status }),
     params: {
-      limit: { kind: "number", label: "Limit", default: 3, sensitive: false },
+      limit: {
+        label: "Limit",
+        type: { kind: "number", default: 3 },
+        sensitive: false,
+      },
       ...(token === undefined
         ? {}
         : {
             token:
               token === "sensitive"
-                ? { kind: "text", label: "Token" }
+                ? { label: "Token", type: { kind: "string" } }
                 : {
-                    kind: "text",
                     label: "Token",
-                    default: "none",
+                    type: { kind: "string", default: "none" },
                     sensitive: false,
                   },
           }),
@@ -234,7 +237,7 @@ const definitionOf = ({
               binding: "summary",
               instructions: "Greet them.",
               input: { who: { $expr: "input.who" } },
-              output: objectSchema({ line: { type: "string" } }),
+              output: objectSchema({ line: { kind: "string" } }),
             },
           ]),
       ...(waits ? [{ id: "pause", type: "wait", for: "1 hour" }] : []),
@@ -1410,7 +1413,7 @@ describe("what a start freezes", () => {
           binding: alias,
           instructions: "Greet them.",
           input: { who: { $expr: "input.who" } },
-          output: objectSchema({ line: { type: "string" } }),
+          output: objectSchema({ line: { kind: "string" } }),
         })),
       }),
       basedOn: null,
@@ -1580,11 +1583,10 @@ describe("parameter configuration", () => {
       definition: documentOf({
         params: {
           // Sensitive, with no default: required.
-          token: { kind: "text", label: "Token" },
+          token: { label: "Token", type: { kind: "string" } },
           limit: {
-            kind: "number",
             label: "Limit",
-            default: 3,
+            type: { kind: "number", default: 3 },
             sensitive: false,
           },
         },
@@ -1634,7 +1636,11 @@ describe("parameter configuration", () => {
         params: Object.fromEntries(
           ["first", "second"].map((name) => [
             name,
-            { kind: "text", label: name, default: "", sensitive: false },
+            {
+              label: name,
+              type: { kind: "string", default: "" },
+              sensitive: false,
+            },
           ])
         ),
       }),

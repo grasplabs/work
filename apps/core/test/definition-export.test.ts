@@ -79,20 +79,18 @@ export const kickOff = action({
 `,
 });
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A greeting workflow's definition, with `params` as its parameters. */
 const definitionOf = (params: Record<string, unknown>): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: "done" },
     },
     params,
@@ -112,9 +110,9 @@ const published = async (by: Acting, params: Record<string, unknown>) => {
 /** A definition that totals [1, 2, 3] with its own module. */
 const computingDefinition = JSON.stringify({
   $schema: workflowSchemaUrl,
-  input: objectSchema({ who: { type: "string" } }),
+  input: objectSchema({ who: { kind: "string" } }),
   output: {
-    schema: objectSchema({ status: { type: "string" } }),
+    schema: objectSchema({ status: { kind: "string" } }),
     value: { status: "counted" },
   },
   bindings: {
@@ -210,11 +208,10 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app, store } = fixture;
     const workflow = await published(owner, {
-      apiKey: { kind: "text", label: "API key" },
+      apiKey: { label: "API key", type: { kind: "string" } },
       pageSize: {
-        kind: "number",
         label: "Page size",
-        default: 25,
+        type: { kind: "number", default: 25 },
         sensitive: false,
       },
     });

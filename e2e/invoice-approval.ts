@@ -9,12 +9,10 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
  * approved and what they said. A grasp-workflow/1 document.
  */
 
-/** A JSON Schema of an object with exactly `properties`, each required. */
-const objectOf = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+const objectOf = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** The workflow.json of the approval. */
@@ -23,13 +21,13 @@ export const invoiceApproval = (): string =>
     {
       $schema: workflowSchemaUrl,
       input: objectOf({
-        invoice: { type: "string" },
-        approver: { type: "string", "x-grasp-value": { kind: "person" } },
+        invoice: { kind: "string" },
+        approver: { kind: "person" },
       }),
       output: {
         schema: objectOf({
-          status: { type: "string" },
-          comment: { type: "string" },
+          status: { kind: "string" },
+          comment: { kind: "string" },
         }),
         value: {
           status: {

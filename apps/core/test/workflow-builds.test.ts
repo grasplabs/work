@@ -43,11 +43,9 @@ const builder = async (role: Role = "builder"): Promise<Acting> => {
   return { userId, role, teams: [], staff: false };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /**
@@ -57,19 +55,18 @@ const objectSchema = (properties: Record<string, unknown>) => ({
 const definitionOf = (status: unknown, steps: unknown[] = []): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     params: {
       greeting: {
-        kind: "text",
         label: "Greeting",
-        default: "Hello",
+        type: { kind: "string", default: "Hello" },
         sensitive: false,
       },
-      token: { kind: "text", label: "Token" },
+      token: { label: "Token", type: { kind: "string" } },
     },
     steps,
   });
@@ -255,8 +252,8 @@ describe("JSON workflow builds", () => {
         $schema: workflowSchemaUrl,
         output: {
           schema: objectSchema({
-            status: { type: "string" },
-            [hostile[0] ?? ""]: { type: "array", items: { type: "string" } },
+            status: { kind: "string" },
+            [hostile[0] ?? ""]: { kind: "array", item: { kind: "string" } },
           }),
           value: { status: "done", [hostile[0] ?? ""]: hostile },
         },

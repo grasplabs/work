@@ -2,7 +2,6 @@ import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 
 import type { Backoff } from "./engine.ts";
-import type { Person } from "./workflow-params.ts";
 
 // Steps
 
@@ -88,7 +87,7 @@ export interface DecisionOptions extends StepOptions {
    * isn't asked, unless `from` names exactly them; a triggered run has no
    * starter. Every answer is audited under who gave it.
    */
-  from: Person;
+  from: string;
   /** Stop waiting this long after the decision opened, however long asking took. */
   timeout: Duration;
 }

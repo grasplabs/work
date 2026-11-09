@@ -1,13 +1,13 @@
 // What the runner checks a step's options by. Internal to the SDK: neither
 // workflow code nor the runtime imports this module.
 
+import { decidersSchema } from "@grasp-os/shared/decisions";
 import {
   maxAttemptTimeoutMs,
   maxStepRetries,
 } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
-import { paramValueSchemas } from "./params.ts";
 import type { CaughtError, RetryChoice } from "./workflow-steps.ts";
 
 // Step names become part of engine step names and idempotency keys
@@ -137,7 +137,7 @@ export const stepOptionSchemas = {
   }),
   decision: z.strictObject({
     ...common,
-    from: paramValueSchemas.person,
+    from: decidersSchema,
     timeout: durationSchema,
   }),
   sleep: z.strictObject({

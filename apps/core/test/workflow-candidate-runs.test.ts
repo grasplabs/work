@@ -91,9 +91,9 @@ const definitionOf = ({
 }: Definition): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: { $expr: status } },
     },
     params,
@@ -283,7 +283,7 @@ const greet = {
   binding: "summary",
   instructions: "Greet them.",
   input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { type: "string" } }),
+  output: objectSchema({ line: { kind: "string" } }),
 };
 
 /** A step waiting `span`. */
@@ -511,13 +511,12 @@ describe("test runs of a workflow's draft", () => {
         bindings: { mail: { kind: "connector", contract: key } },
         params: {
           greeting: {
-            kind: "text",
             label: "Greeting",
-            default: "Hello",
+            type: { kind: "string", default: "Hello" },
             sensitive: false,
           },
           // Sensitive, so it has no default: each start gives it.
-          token: { kind: "text", label: "Token" },
+          token: { label: "Token", type: { kind: "string" } },
         },
         // The token reaches the call as a connector argument, the only place
         // a sensitive parameter may go; the greeting comes back as output.

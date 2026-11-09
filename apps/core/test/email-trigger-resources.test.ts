@@ -940,9 +940,9 @@ export const read = action({
 const readerOf = (key: string) => (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectOf({ attachments: { type: "array", items: attachment } }),
+    input: objectOf({ attachments: { kind: "array", item: attachment } }),
     output: {
-      schema: objectOf({ content: { type: "string" } }),
+      schema: objectOf({ content: { kind: "string" } }),
       value: { content: { $expr: "steps.read.output.content" } },
     },
     bindings: {
@@ -965,11 +965,11 @@ const takingAttachments = (fields: readonly string[]) => (): string =>
     $schema: workflowSchemaUrl,
     input: objectOf(
       Object.fromEntries(
-        fields.map((field) => [field, { type: "array", items: attachment }])
+        fields.map((field) => [field, { kind: "array", item: attachment }])
       )
     ),
     output: {
-      schema: objectOf({ subject: { type: "string" } }),
+      schema: objectOf({ subject: { kind: "string" } }),
       value: { subject: "Read" },
     },
     steps: [],

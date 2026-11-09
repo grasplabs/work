@@ -92,12 +92,10 @@ export const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-/** A JSON Schema of an object of `properties`, every one required. */
-export const objectOf = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+export const objectOf = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** Where the standard error types are, as a catch's filter names them. */
@@ -184,12 +182,12 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { type: "string" } }),
+      input: objectOf({ who: { kind: "string" } }),
       output: {
-        schema: objectOf({ status: { type: "string" } }),
+        schema: objectOf({ status: { kind: "string" } }),
         value: { status: "done" },
       },
-      params: { token: { kind: "text", label: "Token" } },
+      params: { token: { label: "Token", type: { kind: "string" } } },
       bindings: {
         mail: { kind: "connector", contract: mailKey },
         summary: { kind: "model", contract: modelKey },
@@ -215,7 +213,7 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
             who: { $expr: "input.who" },
             tags: ["vip", { $expr: "input.who" }],
           },
-          output: objectOf({ line: { type: "string" } }),
+          output: objectOf({ line: { kind: "string" } }),
         })),
         { id: "pause", type: "wait", until: { $expr: "0" } },
         {
@@ -431,8 +429,8 @@ export const sdkWorkflow = JSON.stringify(
  * `input` and `sensitiveParam` in scope.
  */
 export const moduleOf = (body: string): string => `
-import { sensitiveParam, workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { env, input }) => {
+import { sensitiveParam, v, workflow } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: v.object({ who: v.string() }) }, async (step, { env, input }) => {
 ${body}
 });
 `;
@@ -859,13 +857,13 @@ export const decisionWorkflow = async () => {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
       input: objectOf({
-        reviewer: { type: "string" },
-        invoice: { type: "string" },
+        reviewer: { kind: "string" },
+        invoice: { kind: "string" },
       }),
       output: {
         schema: objectOf({
-          approved: { type: "boolean" },
-          by: { type: "string" },
+          approved: { kind: "boolean" },
+          by: { kind: "string" },
         }),
         value: {
           approved: { $expr: "steps.review.output.approved" },
