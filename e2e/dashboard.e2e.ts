@@ -122,16 +122,30 @@ test("a builder sees their workflows on the board, and opens them in full", asyn
   await expect(page).toHaveURL(new RegExp(`/workflows/${tally.id}$`, "u"));
 });
 
-test("someone with nothing waiting sees no pile or activity, and a board with nothing on it yet", async ({
+/** The board's widgets, by their titles, in the order they stand. */
+const boardTitles = (page: Page) =>
+  page.getByRole("heading", {
+    level: 2,
+    name: /^(?:Return a month|Board goals|Workflows|Apps|Runs this week|Could be better)$/u,
+  });
+
+test("a person with nothing waiting finds an empty board, takes a widget off, adds it back and moves it, kept over a reload, puts the board back as it began, and finds nothing in their inbox", async ({
   pageOf,
 }) => {
-  const { user } = peopleIn("dashboard");
+  const { user } = peopleIn("dashboardLayout");
+  const { core, api } = apiOf(user);
+  const saved = async () => {
+    const layout = await api.dashboard.layout();
+    return layout?.widgets;
+  };
   const page = await pageOf(user);
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Main" })
     .getByRole("link", { name: "Dashboard", exact: true })
     .click();
+  const titles = boardTitles(page);
+  const reset = page.getByRole("button", { name: "Back to how it began" });
 
   await expect(
     page.getByRole("heading", { level: 1, name: "Dashboard" })
@@ -152,13 +166,12 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
     page.getByRole("region", { name: "Waiting elsewhere" })
   ).toHaveCount(0);
   // The board is there, with nothing of theirs on it yet: core counts no
-  // hours, and there are no workflows in their columns. The
-  // board's goals are the company's: another journey's may be on it
+  // hours, and there are no workflows in their columns. The board's goals
+  // are the company's: another journey's may be on it
   // (e2e/board-goals.e2e.ts).
   await expect(
     page.getByRole("region", { name: "Return a month" })
   ).toContainText("No workflow with counted hours here yet.");
-  await expect(page.getByRole("region", { name: "Board goals" })).toBeVisible();
   const workflows = page.getByRole("region", { name: "Workflows" });
   await expect(workflows.getByRole("list", { name: "Ran" })).toBeAttached(
     pageRead
@@ -179,29 +192,6 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(
     page.getByRole("region", { name: "AI spend this month" })
   ).toHaveCount(0);
-  await expect(page.getByRole("alert")).toHaveCount(0);
-});
-
-/** The board's widgets, by their titles, in the order they stand. */
-const boardTitles = (page: Page) =>
-  page.getByRole("heading", {
-    level: 2,
-    name: /^(?:Return a month|Board goals|Workflows|Apps|Runs this week|Could be better)$/u,
-  });
-
-test("a person takes a widget off, adds it back and moves it, kept over a reload, and puts the board back as it began", async ({
-  pageOf,
-}) => {
-  const { user } = peopleIn("dashboardLayout");
-  const { core, api } = apiOf(user);
-  const saved = async () => {
-    const layout = await api.dashboard.layout();
-    return layout?.widgets;
-  };
-  const page = await pageOf(user);
-  await page.goto("/dashboard");
-  const titles = boardTitles(page);
-  const reset = page.getByRole("button", { name: "Back to how it began" });
 
   // As it begins: every widget, and nothing to put back.
   const begun = [
@@ -287,6 +277,25 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .toStrictEqual(["return", "goals", "workflows", "apps", "runs", "signals"]);
   await page.reload();
   await expect(titles).toHaveText(begun);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  // Their inbox: nothing waits, nothing was dealt with, and the audit
+  // trail is for admins.
+  await page.goto("/inbox");
+  await expect(
+    page.getByRole("navigation", { name: "Breadcrumb" }).getByText("Inbox")
+  ).toBeVisible(pageRead);
+  await expect(page.getByRole("tab", { name: /^To do/u })).toHaveText(
+    /^To do\s*0$/u
+  );
+  await expect(
+    page
+      .getByRole("region", { name: "What waits on you" })
+      .getByText("Nothing waits on you.")
+  ).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Activity" })).toHaveCount(0);
+  await page.getByRole("tab", { name: /^Done/u }).click();
+  await expect(page.getByText(/^Nothing dealt with yet\./u)).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
   core[Symbol.dispose]();
 });

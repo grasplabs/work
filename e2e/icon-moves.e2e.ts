@@ -7,7 +7,8 @@ import { peopleIn } from "./people.ts";
 // The icon of a control moves in its own parts when the control is pointed
 // at (apps/web/src/icon-moves.css): the sidebar trigger's panel slides
 // over and back. At rest, and for whoever asked for less motion, nothing
-// moves. That every icon has a move is a unit test (icon-moves.test.ts).
+// moves. That every icon has a move is the lint's (grasp/icon-has-move,
+// scripts/lint/icon-has-move.test.ts).
 
 /** The animation the sidebar trigger's moving part runs now. */
 const movePart = async (page: Page): Promise<string> =>
