@@ -8,15 +8,15 @@
  *
  *   vp run e2e:build
  *
- * What doesn't depend on another runs at once: the frontend's build, the
- * steps of core's `build` that don't write into it, connect's build and
- * the migrations; then the steps that write into the built frontend
- * (`../web/dist`, which its build empties first). One after another they
- * took 94 s of e2e-build on a CI runner, the parts' start (November 2026).
+ * Every build runs at once, each into its own folder: the frontend's,
+ * core's (what it writes into the built frontend goes beside it, copied
+ * in after, as the frontend's build empties its folder first), connect's
+ * and the migrations. One after another they took 94 s of e2e-build on a
+ * CI runner, the parts' start (November 2026). The SDK docs aren't built.
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { readFileSync, rmSync } from "node:fs";
+import { cpSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { z } from "zod";
@@ -42,7 +42,16 @@ const run = async (
     cwd: coreDir,
     shell: true,
     stdio: "inherit",
-    env: { ...process.env, ...env },
+    env: {
+      ...process.env,
+      // The workspace's binaries, core's first, as its scripts find them.
+      PATH: [
+        path.join(coreDir, "node_modules/.bin"),
+        path.join(root, "node_modules/.bin"),
+        process.env.PATH ?? "",
+      ].join(path.delimiter),
+      ...env,
+    },
   });
   const [code] = z
     .tuple([z.number().nullable()])
@@ -66,8 +75,21 @@ const stepsOf = (script: string): string[] => {
   return command.split("&&").map((step) => step.trim());
 };
 
-/** What writes into the built frontend, which its build empties first. */
-const intoFrontend = (step: string): boolean => step.includes("../web/dist");
+/** The built frontend, which core serves, and which its build empties first. */
+const frontendDist = "../web/dist";
+
+/**
+ * Where what core's build writes into the built frontend (the App
+ * compiler, the extractor) is built meanwhile, to be copied in once the
+ * frontend is built.
+ */
+const besideFrontend = path.join(import.meta.dirname, "dist/frontend");
+
+/**
+ * The SDK docs' build, which writes the docs core serves at /docs: no
+ * journey opens them, and it took 17 s of e2e-build (November 2026).
+ */
+const docsBuild = "../docs/build.ts";
 
 if (import.meta.main) {
   // dev:build is the frontend's build, core's `build`, connect's build.
@@ -76,19 +98,22 @@ if (import.meta.main) {
   if (devBuild.length === afterFrontend.length) {
     throw new Error("core's dev:build no longer runs `vp run build`");
   }
-  const coreBuild = stepsOf("build");
+  const coreBuild = stepsOf("build").filter(
+    (step) => !step.includes(docsBuild)
+  );
   rmSync(migratedStateDir, { recursive: true, force: true });
+  rmSync(besideFrontend, { recursive: true, force: true });
   await run(`node ${path.join(import.meta.dirname, "connect-config.ts")}`);
   await Promise.all([
-    (async () => {
-      await run(frontend);
-      await Promise.all(coreBuild.filter(intoFrontend).map(runStep));
-    })(),
-    ...coreBuild.filter((step) => !intoFrontend(step)).map(runStep),
+    run(frontend),
+    ...coreBuild.map(async (step) => {
+      await run(step.replaceAll(frontendDist, besideFrontend));
+    }),
     ...devBuild.map(runStep),
     run(stepsOf("dev:migrate").join(" && "), {
       DEV_PERSIST_TO: migratedStateDir,
       CONNECT_WRANGLER_CONFIG: connectConfig,
     }),
   ]);
+  cpSync(besideFrontend, path.join(coreDir, frontendDist), { recursive: true });
 }
