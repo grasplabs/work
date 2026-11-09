@@ -91,14 +91,14 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 });
 
 /**
- * A step `id` that runs and ends at once: a raise its `if` skips for
- * anyone with a name, so the run's history has a step of it.
+ * A step `id` that runs and ends at once: a wait until a deadline long
+ * past, whose enter step records it, so the run's history has a step of
+ * it.
  */
 const passing = (id: string) => ({
   id,
-  type: "raise",
-  if: { $expr: 'args.who === ""' },
-  error: { code: "test.nameless", message: "Failed." },
+  type: "wait",
+  until: { $expr: "0" },
 });
 
 /**
@@ -794,9 +794,7 @@ const longDefinitionOf = (tasks: number): string =>
     args: objectSchema({ who: { kind: "string" } }),
     returns: objectSchema({ status: { kind: "string" } }),
     result: { status: "done" },
-    steps: Array.from({ length: tasks }, (_, index) =>
-      passing(`step-${index}`)
-    ),
+    steps: Array.from({ length: tasks }, (_, index) => passing(`step${index}`)),
   });
 
 /**
@@ -815,6 +813,9 @@ const failingDefinition = JSON.stringify({
     },
   ],
 });
+
+/** Any value of a history entry the engine sets, as a matcher. */
+const anyValue: unknown = expect.anything();
 
 const historySchema = z.object({
   items: z.array(z.looseObject({ sequence: z.number(), kind: z.string() })),
@@ -1097,8 +1098,25 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       told: [
         { taskId: null, kind: "lifecycle", status: "queued" },
         { taskId: null, kind: "lifecycle", status: "running" },
+        // Its enter step, recording its deadline, then its timer.
         { taskId: "greet", kind: "step", state: "started", attempt: 1 },
         { taskId: "greet", kind: "step", state: "completed", attempt: 1 },
+        {
+          taskId: "greet",
+          kind: "wait",
+          waitId: anyValue,
+          waitKind: "timer",
+          state: "opened",
+          deadline: anyValue,
+        },
+        {
+          taskId: "greet",
+          kind: "wait",
+          waitId: anyValue,
+          waitKind: "timer",
+          state: "closed",
+          deadline: null,
+        },
         // The output's own step, of no task.
         { taskId: null, kind: "step", state: "started", attempt: 1 },
         { taskId: null, kind: "step", state: "completed", attempt: 1 },
@@ -1161,7 +1179,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ownBadCursor: "data.invalid_cursor",
       lastCursor: 0,
       pastCursor: "data.invalid_cursor",
-      carolOwn: 7,
+      carolOwn: 9,
       unknownCode: "workflow.run_unavailable",
     });
 
@@ -1277,14 +1295,9 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     }).toStrictEqual({
       throughOld: unknown,
       oldRunThroughNext: unknown,
-      // The engine's code and words, never what the expression read.
-      failedStep: {
-        code: "expression.failed",
-        message: "A step of the workflow failed.",
-        category: "operational",
-        retryable: false,
-        requestId: null,
-      },
+      // Its expression failed in its code, before any step: no step of
+      // it failed, and nothing of what it read is told.
+      failedStep: undefined,
       leaks: false,
       removed: { items: [], nextCursor: null, hasMore: false },
     });

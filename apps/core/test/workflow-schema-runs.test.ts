@@ -44,7 +44,6 @@ import {
   decisionWorkflow,
   descriptorOf,
   echoingMail,
-  engineStep,
   failedWith,
   hello,
   journalingEngine,
@@ -55,7 +54,6 @@ import {
   reviewRun,
   sealedRunOf,
   sealedWorkflow,
-  standardErrors,
   waitingRun,
 } from "./sealed-run-harness.ts";
 import type {
@@ -90,14 +88,14 @@ const evictedBefore = (engine: Engine, name: string): Engine => ({
  */
 const guardedRan = (tries: ReadonlyMap<string, number>) => {
   const keys = [...tries.keys()];
-  // In a loop's item, a step's key goes on with the item's indexes.
+  // In a loop's items, a task's later runs go on with their count.
   const of = (step: string): string | undefined =>
-    keys.find((key) => key === step || key.startsWith(`${step}%40`));
+    keys.find((key) => key === step || key.startsWith(`${step}@`));
   return {
     decided: keys.filter((key) => key.endsWith(":decide")).length,
     retried: keys.filter((key) => key.endsWith(":run")).length,
     failed: tries.get(of("key:fail:task") ?? ""),
-    caught: of("key:guarded:catch") !== undefined,
+    // Its catch ran its `do`: it took the failure.
     told: of("key:tell:task") !== undefined,
   };
 };
@@ -109,7 +107,7 @@ const guardedRan = (tries: ReadonlyMap<string, number>) => {
 // every step kind of the format runs as the host holds a sealed build to
 // it, refused nothing as tampering: the calls go out as sealed, the
 // sensitive value put in by the host, the model asked, the waits slept,
-// the `if` taken, the raise failing its step and the catch taking it.
+// the `if` taken, the raise failing the run and the catch taking it.
 
 /** The permissions and the sensitive token of `sealedWorkflow`'s workflow. */
 const declared = {
@@ -272,7 +270,6 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
             },
           ],
           catch: {
-            errors: { status: 500 },
             retry: { attempts: 3, delay: "1 second", backoff: "constant" },
           },
         },
@@ -347,7 +344,7 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
                   error: { code: "test.bad", message: "Failed." },
                 },
               ],
-              catch: { code: "test.unrelated" },
+              catch: { code: "test.bad" },
             },
           ],
         },
@@ -372,16 +369,13 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
       checked: checked.map(({ step }) => step),
     }).toStrictEqual({
       ran: { ended: null, tampered: [] },
-      // Item 2 is "stop": its item step records `while: false`, and no
-      // step of it, nor of item 3, runs.
+      // Item 2 is "stop": its `while` doesn't hold, and no step of it, nor
+      // of item 3, runs. Item 1's raise its catch takes in the code.
       sent: [
         { to: "a", subject: "row" },
         { to: "b", subject: "row" },
       ],
-      checked: [
-        `notify:${encodeURIComponent("task@0")}`,
-        `notify:${encodeURIComponent("task@1")}`,
-      ],
+      checked: ["notify:task", "notify:task@1"],
     });
   });
 
@@ -415,7 +409,7 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
     const rows = (run: HostedSealedRun) =>
       withTable({ ...run, input: { rows: ["a", "b"] } });
     const journal = new Map<string, Journaled>();
-    const second = engineStep("notify", "task@1");
+    const second = "notify:task@1";
     const first = await ranAs(runId, source, {
       engine: evictedBefore(journalingEngine(journal, []), second),
       sealed: rows,
@@ -435,7 +429,7 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
       first: [],
       replayed: { ended: ["a", "b"], tampered: [] },
       // Its items and its first item's call are the journal's.
-      ranAgain: [second, engineStep("workflow", "output")],
+      ranAgain: [second, "workflow:output"],
       sent: [
         { to: "a", subject: "replayed row" },
         { to: "b", subject: "replayed row" },
@@ -488,11 +482,12 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
       // Item 0 ran no step; item 1 starts past it, nothing refused.
       ran: { ended: null, tampered: [] },
       sent: [{ to: "a", subject: "passed over" }],
-      checked: [`notify:${encodeURIComponent("task@1")}`],
+      // The first run of `notify`, in item 1.
+      checked: ["notify:task"],
     });
   });
 
-  it("fails the step of an `if` that throws as an item's first, which a catch in the item takes, refusing nothing", async () => {
+  it("takes an `if` that throws in an item in the item's own catch, as its code's failure, refusing nothing", async () => {
     const { source, sealed: withTable } = await generated(
       [
         {
@@ -523,7 +518,9 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
                     action: "mail.send",
                     args: {
                       to: "ops",
-                      subject: { $expr: 'error.type + " | " + error.title' },
+                      subject: {
+                        $expr: 'error.code + " | " + error.message',
+                      },
                     },
                   },
                 ],
@@ -557,20 +554,14 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
       checked: checked.map(({ step }) => step),
     }).toStrictEqual({
       ran: { ended: null, tampered: [] },
-      // The failure the host recorded of item 0's step: an expression's
-      // (`expression.failed`), its type and the code's words; then item 1
-      // runs. (Its guard's own message once the host keeps it.)
+      // Item 0's `if` threw in its code, before any step: its catch takes
+      // it as an expression's failure, in the platform's words; then item
+      // 1's `notify` runs, its first.
       sent: [
-        {
-          to: "ops",
-          subject: `${standardErrors}expression | The expression failed.`,
-        },
+        { to: "ops", subject: "expression.failed | The expression failed." },
         { to: "a", subject: "throwing" },
       ],
-      checked: [
-        `report:${encodeURIComponent("task@0")}`,
-        `notify:${encodeURIComponent("task@1")}`,
-      ],
+      checked: ["report:task", "notify:task"],
     });
   });
 
@@ -646,8 +637,8 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
     );
     const engine = retryingEngine();
     const ran = await ranAs(await waitingRun(sealed), source, {
-      // A ceiling of 3 steps in place of the platform's: the loop's
-      // enter step and two items' mail fit, the third item's doesn't.
+      // A ceiling of 3 steps in place of the platform's: three items'
+      // mail fit, the fourth item's doesn't.
       engine: { ...engine, step: countedStep(engine.step, 3) },
       sealed: (run) =>
         withTable({ ...run, input: { rows: ["a", "b", "c", "d"] } }),
@@ -664,11 +655,11 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
         why: workflowErrors.create("workflow.too_many_steps").message,
         tampered: [],
       },
-      sent: ["a", "b"],
+      sent: ["a", "b", "c"],
     });
   });
 
-  it("fails a raise with its sealed error, which its catch takes, and skips a step whose `if` doesn't hold", async () => {
+  it("raises its sealed error, which its catch takes, and skips a step whose `if` doesn't hold", async () => {
     const { source, sealed: withTable } = await generated(
       [
         {
@@ -705,7 +696,7 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
                 action: "mail.send",
                 args: {
                   to: { $expr: "args.who" },
-                  subject: { $expr: "error.type" },
+                  subject: { $expr: "error.code" },
                 },
               },
             ],
@@ -724,7 +715,7 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
     const { sent } = await sealed.mail.did();
     expect({ ran, notice: sent.at(-1) }).toStrictEqual({
       ran: { ended: { skipped: true }, tampered: [] },
-      notice: { to: "Ada", subject: "urn:grasp:error:stop" },
+      notice: { to: "Ada", subject: "test.stop" },
     });
   });
 
@@ -740,8 +731,9 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
       engine: retryingEngine(),
       sealed: withTable,
     });
-    expect({ ended: ran.ended, tampered: ran.tampered }).toStrictEqual({
-      ended: "workflow.raised",
+    expect(ran).toStrictEqual({
+      ended: "test.stop",
+      why: "Failed.",
       tampered: [],
     });
   });
@@ -753,8 +745,8 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
         id: "guarded",
         type: "try",
         try: [
-          // Reads past a field that isn't there: it throws.
-          { id: "pause", type: "wait", until: { $expr: "args.missing.at" } },
+          // Reads past a key no run kept: it throws, in the code.
+          { id: "pause", type: "wait", until: { $expr: "state.never.at" } },
         ],
         catch: {
           retry: {
@@ -775,14 +767,14 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
       ran,
       decided: keys.filter((key) => key.endsWith(":decide")).length,
       retried: keys.filter((key) => key.endsWith(":run")).length,
-      caught: tries.has("key:guarded:catch"),
+      paused: keys.some((key) => key.startsWith("key:pause:")),
     }).toStrictEqual({
-      // An expression's failure (`expression.failed`) isn't one trying
-      // again may fix: no round is offered, and the catch takes it.
+      // Its deadline threw in its code, before its step: no step failed,
+      // nothing is retried, and its catch takes it in the code.
       ran: { ended: null, tampered: [] },
       decided: 0,
       retried: 0,
-      caught: true,
+      paused: false,
     });
   });
 });
@@ -882,7 +874,7 @@ const guarded = (
         id: "tell",
         type: "call",
         module: "note",
-        args: { to: { $expr: "error.type" } },
+        args: { to: { $expr: "error.code" } },
       },
     ],
   },
@@ -999,7 +991,6 @@ describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
         decided: 2,
         retried: 2,
         failed: 1,
-        caught: true,
         told: true,
       },
     };
@@ -1007,12 +998,12 @@ describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
       // A number: the choice the host reads takes a boolean.
       booleans: await ranWith([
         guarded([fail], {
-          catch: "error.status >= 400",
-          retry: "error.status",
+          catch: 'error.code !== ""',
+          retry: "error.code.length",
         }),
       ]),
       retryReadsThePage: await ranWith(
-        inPages({ catch: "error.status >= 400", retry: "item.again" })
+        inPages({ catch: 'error.code !== ""', retry: "item.again" })
       ),
       catchReadsThePage: await ranWith(inPages({ catch: "item.again" })),
     }).toStrictEqual({
@@ -1035,15 +1026,15 @@ describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
               attempts: 3,
               delay: "1 second",
               backoff: "constant",
-              // Reads past a field that isn't there: it throws.
-              when: { $expr: "error.missing.deeper === 1" },
+              // Reads past details the host never gives: it throws.
+              when: { $expr: "error.details.deeper === 1" },
             },
             do: [
               {
                 id: "tell",
                 type: "call",
                 module: "note",
-                args: { to: { $expr: "error.type" } },
+                args: { to: { $expr: "error.code" } },
               },
             ],
           },
@@ -1064,7 +1055,6 @@ describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
         decided: 1,
         retried: 0,
         failed: 1,
-        caught: true,
         told: true,
       },
     });
@@ -1102,9 +1092,9 @@ const decided = {
   }),
   value: {
     timedOut: { $expr: "review.timedOut" },
-    approved: { $expr: "review.approved === true" },
-    by: { $expr: 'review.by ?? ""' },
-    comment: { $expr: 'review.payload?.comment ?? ""' },
+    approved: { $expr: "!review.timedOut && review.approved" },
+    by: { $expr: 'review.timedOut ? "" : review.by' },
+    comment: { $expr: 'review.timedOut ? "" : review.payload?.comment ?? ""' },
   },
 };
 
@@ -1357,12 +1347,12 @@ describe("a grasp-workflow/2 decision's generated code on the run host", () => {
       ran: { ended: null, tampered: [] },
       decisions: [
         {
-          step: `sign:${encodeURIComponent("task@0")}`,
+          step: "sign:task",
           input: JSON.stringify({ invoice: "INV-1" }),
           status: "approved",
         },
         {
-          step: `sign:${encodeURIComponent("task@1")}`,
+          step: "sign:task@1",
           input: JSON.stringify({ invoice: "INV-2" }),
           status: "approved",
         },
@@ -1448,9 +1438,9 @@ const replied = {
   }),
   value: {
     timedOut: { $expr: "reply.timedOut" },
-    type: { $expr: 'reply.event?.type ?? ""' },
-    from: { $expr: 'reply.event?.data.from ?? ""' },
-    source: { $expr: 'reply.event?.source ?? ""' },
+    type: { $expr: 'reply.timedOut ? "" : reply.event.type' },
+    from: { $expr: 'reply.timedOut ? "" : reply.event.data.from ?? ""' },
+    source: { $expr: 'reply.timedOut ? "" : reply.event.source' },
   },
 };
 
@@ -1665,7 +1655,7 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
       },
       asked: [
         {
-          step: engineStep("reply", "task"),
+          step: "reply:task",
           types: await keysOf(received, bounced),
         },
       ],
@@ -1756,8 +1746,8 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
     }).toStrictEqual({
       ran: { ended: null, tampered: [] },
       asked: [
-        { step: engineStep("each", "task@0"), types: await keysOf(received) },
-        { step: engineStep("each", "task@1"), types: await keysOf(received) },
+        { step: "each:task", types: await keysOf(received) },
+        { step: "each:task@1", types: await keysOf(received) },
       ],
       sent: 2,
     });
@@ -1825,8 +1815,10 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
     }).toStrictEqual({
       top: { ended: { skipped: true }, tampered: [] },
       items: { ended: null, tampered: [] },
-      steps: { reply: ["enter", "task"], each: ["enter", "task"] },
-      asked: [engineStep("each", "task@1")],
+      // An `if` is the code's: no step records it.
+      steps: { reply: ["task"], each: ["task"] },
+      // The first run of `each`, in item 1.
+      asked: ["each:task"],
       sent: 1,
     });
   });
@@ -1860,8 +1852,12 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
       // Refused before it waits: the engine is asked for nothing.
       asked,
     }).toStrictEqual({
-      // No catch takes it: the host checks the binding again on replay.
-      caught: failedWith("workflow.event_denied"),
+      // No catch takes it, whatever its code does: the run ends with it.
+      caught: {
+        ended: null,
+        tampered: [],
+        untaken: "workflow.event_denied",
+      },
       bare: failedWith("workflow.event_denied"),
       asked: [],
     });
@@ -1923,11 +1919,15 @@ describe("a grasp-workflow/2 event wait's generated code on the run host", () =>
       first: { ended: null, tampered: [] },
       replayed: { ended: null, tampered: [] },
       ranAgain: [],
-      // The path the run took is gone: its catch is asked, and takes
-      // nothing, so it never takes a path the run never took.
-      afterRevoking: failedWith("workflow.event_denied"),
-      ranRevoked: [engineStep("guarded", "catch")],
-      asked: [engineStep("reply", "task")],
+      // The path the run took is gone: its code's catch can't take the
+      // failure, so the run ends with it, never on a path it never took.
+      afterRevoking: {
+        ended: null,
+        tampered: [],
+        untaken: "workflow.event_denied",
+      },
+      ranRevoked: [],
+      asked: ["reply:task"],
     });
   });
 });
@@ -2071,9 +2071,12 @@ describe("a grasp-workflow/2 run's inbox on the run host", () => {
         value: {
           mailed: { $expr: 'ask?.replyTo ?? ""' },
           replyTo: { $expr: 'inbox.replies ?? ""' },
-          from: { $expr: 'reply.event?.data.from.address ?? ""' },
+          from: {
+            $expr: 'reply.timedOut ? "" : reply.event.data.from.address ?? ""',
+          },
           dmarc: {
-            $expr: 'reply.event?.data.authentication.dmarc?.result ?? ""',
+            $expr:
+              'reply.timedOut ? "" : reply.event.data.authentication.dmarc?.result ?? ""',
           },
         },
       },
@@ -2123,7 +2126,7 @@ describe("a grasp-workflow/2 run's inbox on the run host", () => {
       },
       asked: [
         {
-          step: engineStep("reply", "task"),
+          step: "reply:task",
           types: [await eventTypeKey("replies", replying.replyType)],
         },
       ],
@@ -2421,7 +2424,7 @@ describe("a grasp-workflow/2 workflow's state on the run host", () => {
           do: [
             {
               ...remember,
-              arguments: { to: { $expr: "item" }, subject: "row" },
+              args: { to: { $expr: "item" }, subject: "row" },
               state: { last: { $expr: "item" } },
             },
           ],

@@ -80,7 +80,7 @@ const definitionOf = (
 /** A wait long enough that the run's own engine leaves it waiting. */
 const linger = { id: "linger", type: "wait", for: "10 minutes" };
 
-/** Asks the `summary` model binding to greet the input's `who`. */
+/** Asks the model, `ai`, to greet the input's `who`. */
 const summarize = {
   id: "summarize",
   type: "generate",
@@ -119,7 +119,8 @@ const reviewWho = reviewOf([{ $expr: "args.who" }]);
 
 /** How `review` was answered, and by whom, as a run's status. */
 const reviewed = {
-  $expr: '(review.approved ? "approved" : "rejected") + " by " + review.by',
+  $expr:
+    'review.timedOut ? "timed out" : (review.approved ? "approved" : "rejected") + " by " + review.by',
 };
 
 /** Asks the fixture's `approver` about each of two items, in turn. */
@@ -407,7 +408,7 @@ export const list = query({
 
 /**
  * The Requests App binding a workflow of `steps` ending in `status` as
- * `followUp` (model binding `summary`, connector binding `mail`),
+ * `followUp` (the model `ai`, connector binding `mail`),
  * `fixture` its test's.
  */
 const requestsApp = async (
@@ -501,7 +502,7 @@ describe(
       const { runId } = await startCandidateRun(env, ada, workflow.id, {
         revision,
         input: { who: "Ada" },
-        fixtures: { summary: { output: { line: "Hello Ada" } } },
+        fixtures: { ai: { output: { line: "Hello Ada" } } },
       });
       // Its own engine leaves it waiting out its linger.
       await candidateOnce(
@@ -523,7 +524,7 @@ describe(
 
     it("counts each step an App test's run completed on the run host once, by the step's ID", async () => {
       const app = await requestsApp([summarize], greeting, {
-        models: { summary: { line: "Hello from the fixture" } },
+        models: { ai: { line: "Hello from the fixture" } },
       });
       const host = fixtureHostFor(
         env,
@@ -557,7 +558,7 @@ describe(
         outputTokens: 1,
       });
       const app = await requestsApp([linger, summarize], greeting, {
-        models: { summary: { line: "Hello from the fixture" } },
+        models: { ai: { line: "Hello from the fixture" } },
       });
       const host = fixtureHostFor(
         env,
@@ -580,7 +581,7 @@ describe(
 
     it("answers an App test's model call once on the run host, whatever its step's attempts: an evicted activation's successor fails as tried", async () => {
       const app = await requestsApp([linger, summarize], greeting, {
-        models: { summary: { line: "Hello" } },
+        models: { ai: { line: "Hello" } },
       });
       const host = fixtureHostFor(
         env,

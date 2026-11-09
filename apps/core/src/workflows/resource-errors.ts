@@ -230,6 +230,9 @@ const permanentCodes: ReadonlySet<string> = new Set([
   "workflow.action_call_limit",
   "workflow.too_many_steps",
   "workflow.too_many_attempts",
+  // A step's state past what a workflow keeps: the same values, the
+  // same size, every time.
+  "workflow.state_too_large",
   "workflow.lineage_limit",
   "workflow.between_steps_limit",
   "workflow.queue_timeout",

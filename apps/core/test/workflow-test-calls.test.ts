@@ -308,7 +308,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
     const provider = await watchedProvider();
     const app = await requestsApp(
       { steps: [summarize], status: line },
-      { models: { summary: { line: "Hello from the fixture" } } },
+      { models: { ai: { line: "Hello from the fixture" } } },
       {
         "tests/greet.test.ts": suiteOf(`
       const run = await owner.start(workflows.followUp, { who: "Ada" });
@@ -350,7 +350,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
         await requestsApp(tasks, { models: { elsewhere: { line: "Hi" } } })
       ),
       wrongShape: await endedIn(
-        await requestsApp(tasks, { models: { summary: { words: 3 } } })
+        await requestsApp(tasks, { models: { ai: { words: 3 } } })
       ),
       asked: provider.requests.length,
     }).toMatchObject({
@@ -408,7 +408,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
     const provider = await watchedProvider();
     const app = await requestsApp(
       { steps: [summarize, hold("2 seconds")], status: line },
-      { models: { summary: { line: "Hello" } } }
+      { models: { ai: { line: "Hello" } } }
     );
     const { session, run, runId } = await runningIn(app);
     await sleeping(runId, "hold:task");

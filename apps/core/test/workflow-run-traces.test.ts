@@ -70,19 +70,27 @@ const definitionOf = (
     steps,
   });
 
+/** A step `id` that runs and ends at once: a wait of a second. */
+const passing = (id: string) => ({ id, type: "wait", for: "1 second" });
+
 /**
- * A step `id` that runs and ends at once: a raise its `if` skips for
- * anyone with a name.
+ * A step `id` that runs and ends at once without sleeping: a wait until a
+ * deadline long past, its enter step and its own.
  */
-const passing = (id: string) => ({
+const quick = (id: string) => ({ id, type: "wait", until: { $expr: "0" } });
+
+/**
+ * A step `id` that always fails: a wait until a deadline further ahead
+ * than a year, which its enter step refuses (`workflow.call_invalid`).
+ */
+const failing = (id: string) => ({
   id,
-  type: "raise",
-  if: { $expr: 'args.who === ""' },
-  error: { code: "test.nameless", message: "Failed." },
+  type: "wait",
+  until: { $expr: "8640000000000000" },
 });
 
-/** A step `id` that always fails: a raise. */
-const failing = (id: string) => ({
+/** A raise `id`, which has no step: its code throws it. */
+const raising = (id: string) => ({
   id,
   type: "raise",
   error: { code: "test.refused", message: "Refused." },
@@ -94,8 +102,8 @@ const routing = [
     id: "route",
     type: "if",
     condition: { $expr: 'args.who === "Ada"' },
-    then: [passing("greet-ada")],
-    else: [passing("greet-other")],
+    then: [passing("greetAda")],
+    else: [passing("greetOther")],
   },
   passing("finished"),
 ];
@@ -158,7 +166,7 @@ describe("a run's trace", () => {
     });
     const ada = await ranFor(by, workflow.id, 1, "Ada");
     const grace = await ranFor(by, workflow.id, 1, "Grace");
-    const declared = ["route", "greet-ada", "greet-other", "finished"];
+    const declared = ["route", "greetAda", "greetOther", "finished"];
     expect({
       ada: pathOf(await resourceRunTrace(env, by, workflow.id, ada)),
       grace: pathOf(await resourceRunTrace(env, by, workflow.id, grace)),
@@ -166,12 +174,12 @@ describe("a run's trace", () => {
       ada: {
         status: "completed",
         declared,
-        reached: ["finished reached", "greet-ada reached", "route reached"],
+        reached: ["finished reached", "greetAda reached", "route reached"],
       },
       grace: {
         status: "completed",
         declared,
-        reached: ["finished reached", "greet-other reached", "route reached"],
+        reached: ["finished reached", "greetOther reached", "route reached"],
       },
     });
   });
@@ -240,9 +248,8 @@ describe("a run's trace", () => {
     }).toStrictEqual({
       steps: [
         "init reached -",
-        "each-name reached -",
-        "note@each-name.0 reached -",
-        "note@each-name.1 reached -",
+        "note@0 reached -",
+        "note@1 reached -",
         "finished reached -",
       ],
       ordered: true,
@@ -258,36 +265,26 @@ describe("a run's trace", () => {
       `traced-${unique()}`
     );
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf([
-        {
-          ...passing("mark"),
-          // Fails as it runs: the input has no ten-thousandth letter.
-          if: { $expr: 'args.who.split("")[9999].toUpperCase() === ""' },
-        },
-      ]),
+      definition: definitionOf([failing("mark")]),
       basedOn: null,
     });
-    const raising = await createWorkflowResource(env, by, `traced-${unique()}`);
-    await publishWorkflowVersion(env, by, raising.id, {
-      definition: definitionOf([failing("refuse")]),
+    const raiser = await createWorkflowResource(env, by, `traced-${unique()}`);
+    await publishWorkflowVersion(env, by, raiser.id, {
+      definition: definitionOf([raising("refuse")]),
       basedOn: null,
     });
     const failed = await ranFor(by, workflow.id, 1, "Ada");
-    const raised = await ranFor(by, raising.id, 1, "Ada");
+    const raised = await ranFor(by, raiser.id, 1, "Ada");
     expect({
       failed: shown(await resourceRunTrace(env, by, workflow.id, failed)),
-      raised: shown(await resourceRunTrace(env, by, raising.id, raised)),
+      raised: shown(await resourceRunTrace(env, by, raiser.id, raised)),
     }).toStrictEqual({
       failed: [
-        {
-          task: "mark",
-          state: "failed",
-          errorCode: "expression.failed",
-        },
+        { task: "mark", state: "failed", errorCode: "workflow.call_invalid" },
       ],
-      raised: [
-        { task: "refuse", state: "failed", errorCode: "workflow.raised" },
-      ],
+      // A raise has no step: its code throws it, and the run fails with
+      // it, no step of it to show.
+      raised: [],
     });
   });
 
@@ -415,7 +412,7 @@ describe("a run's trace, read over the session API", () => {
             ],
             catch: {
               retry: { attempts: 3, delay: "1 second", backoff: "constant" },
-              do: [passing("fell-back")],
+              do: [passing("fellBack")],
             },
           },
         ],
@@ -442,11 +439,10 @@ describe("a run's trace, read over the session API", () => {
     }).toStrictEqual({
       status: "completed",
       // One step of three attempts in all, failed at the last, which the
-      // catch took: the try's catch step after it.
+      // catch took, then the step its catch runs.
       steps: [
-        "fetch-rates failed 3 workflow.compute_failed",
-        "guard reached 1 -",
-        "fell-back reached 1 -",
+        "fetchRates failed 3 workflow.compute_failed",
+        "fellBack reached 0 -",
       ],
       task: { task: "fetchRates", state: "failed", attempts: 3 },
     });
@@ -481,7 +477,7 @@ describe("a run's trace, read over the session API", () => {
           },
           passing("finish"),
         ],
-        { approval: { kind: "decision", contract } }
+        { decisions: { approval: { contract } } }
       ),
       basedOn: null,
     });
@@ -567,7 +563,7 @@ describe("a run's trace, read over the session API", () => {
       waiting: ["ask reached 1 -", "ask waiting 1 -"],
       waitingTask: "waiting",
       waitingEnd: null,
-      answered: ["ask reached 1 -", "ask reached 1 -", "finish reached 1 -"],
+      answered: ["ask reached 1 -", "ask reached 1 -", "finish reached 0 -"],
       ended: true,
     });
   });
@@ -590,7 +586,7 @@ describe("a run's trace, read over the session API", () => {
             id: "eachName",
             type: "forEach",
             items: { $expr: `${JSON.stringify("x".repeat(items))}.split("")` },
-            do: [passing("note")],
+            do: [quick("note")],
           },
           passing("finished"),
         ]),
@@ -646,10 +642,11 @@ describe("a run's trace, read over the session API", () => {
           truncated: longTrace.truncated,
           // Its first items, in order, short of all of them and of the
           // task after the loop.
+          // Two steps an item's run: its enter step and its own.
           firstItems: notes.every(
-            ({ item }, index) => item === `each-name.${index}`
+            ({ item }, index) => item === String(Math.floor(index / 2))
           ),
-          some: notes.length > 0 && notes.length < items,
+          some: notes.length > 0 && notes.length < 2 * items,
           finished: longTrace.steps.some(({ task }) => task === "finished"),
         },
         short: {
@@ -663,7 +660,8 @@ describe("a run's trace, read over the session API", () => {
           some: true,
           finished: false,
         },
-        short: { truncated: false, steps: 3 },
+        // `greetAda` and `finished`: an `if` has no step.
+        short: { truncated: false, steps: 2 },
       });
     }
   );

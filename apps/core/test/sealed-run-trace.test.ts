@@ -9,19 +9,22 @@ import { traceReading } from "../src/workflows/resource-run-trace.ts";
 import type { SealedSteps } from "../src/workflows/sealed-steps.ts";
 
 // How a run's trace reads the steps a run of a build generated for the run
-// host runs (sealed-steps.ts): `<task>:<kind>` with each loop's index
-// after `@`, as the SDK encodes a key, placed by its build's table of
+// host runs (sealed-steps.ts): `<task>:<kind>`, from a task's second run
+// in a loop's items on with its count after `@`, placed by its build's table of
 // tasks; a decision's own steps past its task step and core's steps of
 // its wait by that wait's key. A parser of the engine's own records, so
 // the records are the engine's shape.
 
-/** A fixed wait, a deadline, a decision, a try and a wait in loop `rows`. */
+/**
+ * A fixed wait, a deadline, a decision, a try and a wait in loop `rows`:
+ * a try and a loop have no steps, their flow the code's.
+ */
 const sealed: SealedSteps = new Map([
   ["linger", { steps: ["task"], scope: [] }],
   ["pause", { steps: ["enter", "task"], scope: [] }],
-  ["approve", { steps: ["enter", "task", "leave"], scope: [] }],
-  ["guarded", { steps: ["catch"], scope: [] }],
-  ["rows", { steps: ["enter", "item"], scope: [] }],
+  ["approve", { steps: ["enter", "task"], scope: [] }],
+  ["guarded", { steps: [], scope: [] }],
+  ["rows", { steps: [], scope: [] }],
   ["nap", { steps: ["task"], scope: ["rows"] }],
 ]);
 
@@ -163,7 +166,6 @@ describe("a run on the run host's trace", () => {
         ...waited(`${core}:again:1`, "waitForEvent", true),
         ...done(`${core}:woken:1`),
         ...done(`${core}:outcome`),
-        ...done("approve:leave"),
       ],
       sealed
     );
@@ -180,7 +182,6 @@ describe("a run on the run host's trace", () => {
       decided: [
         { task: "approve", item: null, state: "reached", attempts: 1 },
         { task: "approve", item: null, state: "reached", attempts: 1 },
-        { task: "approve", item: null, state: "reached", attempts: 1 },
       ],
       early: [
         { task: "approve", item: null, state: "reached", attempts: 1 },
@@ -189,26 +190,21 @@ describe("a run on the run host's trace", () => {
     });
   });
 
-  it("shows each loop item's wait as its own step, placed in its item, and a try's catch", async () => {
+  it("shows each run of a loop's task as its own step, placed by its run", async () => {
     await expect(
       traced(
         [
+          ...waited("nap:task", "sleep", true),
+          ...waited("nap:task@1", "sleep", false),
+          // A loop and a try have no steps of their own.
           ...done("rows:enter"),
-          ...done("rows:item%400"),
-          ...waited("nap:task%400", "sleep", true),
-          ...done("rows:item%401"),
-          ...waited("nap:task%401", "sleep", false),
           ...done("guarded:catch"),
         ],
         sealed
       )
     ).resolves.toStrictEqual([
-      { task: "rows", item: null, state: "reached", attempts: 1 },
-      { task: "rows", item: "rows.0", state: "reached", attempts: 1 },
-      { task: "nap", item: "rows.0", state: "reached", attempts: 0 },
-      { task: "rows", item: "rows.1", state: "reached", attempts: 1 },
-      { task: "nap", item: "rows.1", state: "waiting", attempts: 0 },
-      { task: "guarded", item: null, state: "reached", attempts: 1 },
+      { task: "nap", item: "0", state: "reached", attempts: 0 },
+      { task: "nap", item: "1", state: "waiting", attempts: 0 },
     ]);
   });
 

@@ -1,6 +1,7 @@
 import { isExpectedCode } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
+  DiagramTask,
   TraceState,
   TraceStep,
   WorkflowRunTrace,
@@ -492,6 +493,30 @@ export const tracedSteps = async (
 };
 
 /**
+ * Marks reached, in `tasks`, each of `diagram`'s tasks that hold a list of
+ * steps (an `if`, a `try`, a loop) one of whose tasks the run reached:
+ * such a task has no steps of its own, its flow the run's code, so the
+ * tasks inside it are what tell that the run reached it. Answers whether
+ * any of `diagram`'s tasks, or a task inside one, was reached.
+ */
+const reachedAround = (
+  diagram: readonly DiagramTask[],
+  tasks: Map<string, WorkflowRunTrace["tasks"][number]>
+): boolean => {
+  let any = false;
+  for (const task of diagram) {
+    const inside = task.scopes
+      .map((scope) => reachedAround(scope.tasks, tasks))
+      .some(Boolean);
+    if (inside && !tasks.has(task.id)) {
+      tasks.set(task.id, { task: task.id, state: "reached", attempts: 0 });
+    }
+    any ||= inside || tasks.has(task.id);
+  }
+  return any;
+};
+
+/**
  * The trace of run `runId` of workflow `id`, for `by`, who must build it:
  * its version's diagram and the tasks its journal reached.
  */
@@ -553,6 +578,7 @@ export const resourceRunTrace = async (
       attempts: Math.max(step.attempts, known?.attempts ?? 0),
     });
   }
+  reachedAround(diagram.tasks, tasks);
   return {
     runId: run.id,
     version: run.version,
