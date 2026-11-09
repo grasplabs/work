@@ -8,6 +8,7 @@ import type { CheckedWorkflow } from "./check.ts";
 import {
   aiAlias,
   durationMs,
+  eachStep,
   inboxRoot,
   isPlain,
   isValueList,
@@ -17,6 +18,7 @@ import {
 import type {
   Json,
   ModulePermission,
+  WorkflowDocument,
   Step,
   TryStep,
   Value,
@@ -49,6 +51,26 @@ import type {
 // the code as written, again on replay, which reads the same journaled
 // values (workflow.ts's threat model). The line map (`spans`,
 // `taskAtLine`) ties each line back to its step on the canvas.
+//
+// Why each call names its step (`{ step: "invoice" }`) rather than the
+// line map tying a call to its step as it runs. The step is the call's
+// journal key and what the host holds it to (its sealed task: its
+// template, its timeout, its state, the `try` around it), so it must be
+// a fact of the sealed build, the same on every replay, and something the
+// host can check. A line is none of that at run time: the only way to
+// learn it is a stack trace, which is V8's text, read in the isolate the
+// host distrusts, over the compiled module, whose lines the compiler and
+// the runtime may move; two calls can share a line; and a key derived
+// from it would change the journal of every run in flight whenever a
+// change upstream shifted the lines. Sequence alone (the n-th call, as a
+// durable SDK without names journals) doesn't name a task either: an
+// `if` and a loop decide in the isolate which call comes next, so the
+// host can't tell which of two calls of one action a call is, nor which
+// sealed template, timeout and catch hold it. So the step's ID, a literal
+// of the sealed document, names the call, as Convex's workflow names a
+// step and Temporal an activity; the line map stays what it is: the
+// generated code's lines, mapped back to the canvas for diagnostics and
+// the run view.
 //
 // Threat model, and how each is closed:
 //
@@ -225,6 +247,60 @@ const literalsOf = (templates: readonly Template[]): Json[] | undefined => {
   return literals;
 };
 
+/** A connector contract's group: `mail` of `google-workspace.mail@1`. */
+const contractGroup = /\.(?<group>[^.@]+)@[^@]*$/u;
+
+/**
+ * Each connection's actions, by alias, each by its member path: the
+ * action as its contract names it, without the group every operation of
+ * the contract starts with (`mail.send` of `google-workspace.mail@1` is
+ * `send`), as an App's connection lists it, so `ctx.connections.mail.send`
+ * reads as an App's call does. Where two of a connection's operations
+ * would read alike, or one doesn't start with the group, each keeps its
+ * whole name, a path of members (`ctx.connections.crm.notes.add`). The
+ * host always gets the operation itself.
+ */
+const memberPathsOf = (
+  document: WorkflowDocument
+): ReadonlyMap<string, ReadonlyMap<string, string>> => {
+  const operations = new Map<string, Set<string>>();
+  for (const { step } of eachStep(document.steps)) {
+    if (step.type === "call" && "connection" in step) {
+      const held = operations.get(step.connection) ?? new Set<string>();
+      held.add(step.action);
+      operations.set(step.connection, held);
+    }
+  }
+  return new Map(
+    [...operations].map(([alias, held]) => {
+      const contract =
+        document.permissions?.connections?.[alias]?.contract ?? "";
+      const group = contractGroup.exec(contract)?.groups?.group;
+      const prefix = group === undefined ? undefined : `${group}.`;
+      const stripped = [...held].map(
+        (operation) =>
+          [
+            operation,
+            prefix !== undefined && operation.startsWith(prefix)
+              ? operation.slice(prefix.length)
+              : operation,
+          ] as const
+      );
+      const alike =
+        new Set(stripped.map(([, member]) => member)).size !== stripped.length;
+      return [
+        alias,
+        new Map(
+          stripped.map(([operation, member]) => [
+            operation,
+            alike ? operation : member,
+          ])
+        ),
+      ] as const;
+    })
+  );
+};
+
 /** What a loop's items' code reads its item by. */
 const loopItem = "item";
 
@@ -248,7 +324,9 @@ class Generator {
   /** The `forEach` loops around the code being generated, outermost first. */
   #loops: readonly string[] = [];
   /** What the module's permissions declare, as its steps use them. */
-  readonly #connections = new Map<string, Set<string>>();
+  readonly #connections = new Map<string, Map<string, string>>();
+  /** Each connection's operations' member paths (`memberPathsOf`). */
+  readonly #memberPaths: ReadonlyMap<string, ReadonlyMap<string, string>>;
   readonly #decisions = new Set<string>();
   readonly #events = new Map<string, Set<string>>();
   readonly #modules = new Map<string, ModulePermission["kind"]>();
@@ -256,6 +334,7 @@ class Generator {
 
   constructor(workflow: CheckedWorkflow) {
     this.#workflow = workflow;
+    this.#memberPaths = memberPathsOf(workflow.document);
   }
 
   #line(depth: number, text: string): void {
@@ -476,10 +555,13 @@ class Generator {
         operation: step.action,
         arguments: args.template,
       };
-      const actions = this.#connections.get(step.connection) ?? new Set();
-      actions.add(step.action);
+      const path =
+        this.#memberPaths.get(step.connection)?.get(step.action) ?? step.action;
+      const actions =
+        this.#connections.get(step.connection) ?? new Map<string, string>();
+      actions.set(path, step.action);
       this.#connections.set(step.connection, actions);
-      member = `ctx.connections${memberOf(step.connection)}${step.action
+      member = `ctx.connections${memberOf(step.connection)}${path
         .split(".")
         .map((segment) => memberOf(memberName(segment)))
         .join("")}`;
@@ -1014,7 +1096,12 @@ class Generator {
         objectCode(
           [...this.#connections].map(([alias, actions]) => [
             alias,
-            listed(actions),
+            objectCode(
+              [...actions].map(([path, operation]) => [
+                path,
+                literal(operation),
+              ])
+            ),
           ])
         ),
       ]);

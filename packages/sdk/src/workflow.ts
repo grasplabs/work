@@ -38,7 +38,7 @@ import type {
  * export default defineWorkflow({
  *   args: v.object({ customer: v.string() }),
  *   returns: v.object({ id: v.string() }),
- *   permissions: { connections: { stripe: ["invoices.create"] } },
+ *   permissions: { connections: { stripe: { "invoices.create": "invoices.create" } } },
  *   handler: async (ctx, args) => {
  *     const invoice = await ctx.connections.stripe.invoices.create(
  *       { customer: args.customer },
@@ -109,10 +109,18 @@ export type {
  * (`ai: true`), each connection's actions by alias, its decisions' and
  * event permissions' aliases (an event permission with the types it
  * waits for), and its own modules, each a compute or an action.
+ *
+ * A connection's actions are each its member path (`send`, or a dotted
+ * one, `invoices.create`) and the operation its call names, as the host's
+ * catalog has it (`mail.send`): an App's connection lists the action as
+ * its contract names it (`send`), so a workflow's member reads the same,
+ * and the host still gets the operation its build seals.
  */
 export interface WorkflowPermissions {
   readonly ai?: true;
-  readonly connections?: Readonly<Record<string, readonly string[]>>;
+  readonly connections?: Readonly<
+    Record<string, Readonly<Record<string, string>>>
+  >;
   readonly decisions?: readonly string[];
   readonly events?: Readonly<Record<string, readonly string[]>>;
   readonly modules?: Readonly<Record<string, "compute" | "action">>;
@@ -191,7 +199,7 @@ export interface WorkflowCtx<
     readonly [
       Alias in keyof NonNullable<Permissions["connections"]>
     ]: ConnectionMembers<
-      ListedOf<NonNullable<Permissions["connections"]>[Alias]>
+      Extract<keyof NonNullable<Permissions["connections"]>[Alias], string>
     >;
   };
   readonly decisions: Readonly<

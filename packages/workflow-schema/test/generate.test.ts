@@ -222,9 +222,7 @@ describe("generating a workflow", () => {
     for (const name of boundNames(source)) {
       expect(resulting.has(name) || own.has(name)).toBeTruthy();
     }
-    expect(source).toContain(
-      "const send = await ctx.connections.mail.mail.send({"
-    );
+    expect(source).toContain("const send = await ctx.connections.mail.send({");
     expect(source).toContain("return { line: greet.line };");
   });
 
@@ -286,10 +284,30 @@ describe("generating a workflow", () => {
 
   it("declares exactly the permissions its steps use, by alias, with their actions and types", () => {
     expect(generated(withDecisions(decision())).source).toContain(
-      'permissions: { ai: true, connections: { mail: ["mail.send"] }, decisions: ["approvers"] },'
+      'permissions: { ai: true, connections: { mail: { send: "mail.send" } }, decisions: ["approvers"] },'
     );
     expect(generated(withEventWaits(eventWait())).source).toContain(
       'events: { replies: ["grasp.reply.received"] }'
+    );
+    // An action not of its contract's group keeps its whole name, a path.
+    expect(
+      generated({
+        ...followedBy({
+          id: "noted",
+          type: "call",
+          connection: "crm",
+          action: "notes.add",
+        }),
+        permissions: {
+          ...everyStep().permissions,
+          connections: {
+            ...everyStep().permissions.connections,
+            crm: { contract: "acme.crm@1" },
+          },
+        },
+      }).source
+    ).toContain(
+      'const noted = await ctx.connections.crm.notes.add({}, { step: "noted" });'
     );
     expect(generated(everyCall()).source).toContain(
       'modules: { total: "compute", note: "action" }'

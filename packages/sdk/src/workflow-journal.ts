@@ -488,7 +488,9 @@ export const journaledCtx = (
   const connections = membersOf(
     Object.entries(permissions.connections ?? {}).map(([alias, actions]) => [
       alias,
-      pathMembers(actions, (action) => call(alias, action)),
+      pathMembers(Object.keys(actions), (path) =>
+        call(alias, actions[path] ?? path)
+      ),
     ])
   );
 

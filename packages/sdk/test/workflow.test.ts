@@ -166,7 +166,9 @@ const engineOf = ({
 
 const permissions = {
   ai: true,
-  connections: { mail: ["mail.send", "mail.read-attachment"] },
+  connections: {
+    mail: { send: "mail.send", "read-attachment": "mail.read-attachment" },
+  },
   decisions: ["finance"],
   events: { replies: ["grasp.reply.received"] },
 } as const;
@@ -179,7 +181,7 @@ describe("a workflow's data", () => {
       args: v.object({ who: v.string() }),
       permissions,
       handler: async (ctx, args) => {
-        const sent: unknown = await ctx.connections.mail.mail.send(
+        const sent: unknown = await ctx.connections.mail.send(
           { to: args.who },
           { step: "send" }
         );
@@ -246,7 +248,7 @@ describe("a workflow's data", () => {
       permissions,
       handler: async (ctx) => {
         try {
-          await ctx.connections.mail.mail.send({}, { step: "send" });
+          await ctx.connections.mail.send({}, { step: "send" });
         } catch (error) {
           caught = caughtError(error);
         }
@@ -314,7 +316,7 @@ const probes: readonly (readonly string[])[] = [
 const declaredCtx = async (): Promise<unknown> => {
   let held: unknown;
   const workflow = defineWorkflow({
-    permissions: { connections: { mail: ["mail.send"] } },
+    permissions: { connections: { mail: { send: "mail.send" } } },
     handler: async (ctx) => {
       held = ctx;
       return null;
@@ -338,17 +340,16 @@ describe("a workflow's ctx", () => {
       ctx,
       read(ctx, "connections"),
       read(ctx, "connections", "mail"),
-      read(ctx, "connections", "mail", "mail"),
     ];
     expect({
       data: objects.map((object) => isFrozenData(object)),
       // A Proxy would answer a name nobody declared; these answer none.
       anything: objects.map((object) => read(object, "anything")),
       aliases: keysOf(read(ctx, "connections")),
-      actions: keysOf(read(ctx, "connections", "mail", "mail")),
+      actions: keysOf(read(ctx, "connections", "mail")),
     }).toStrictEqual({
-      data: [true, true, true, true],
-      anything: [undefined, undefined, undefined, undefined],
+      data: [true, true, true],
+      anything: [undefined, undefined, undefined],
       aliases: ["mail"],
       actions: ["send"],
     });
@@ -358,10 +359,7 @@ describe("a workflow's ctx", () => {
     const workflow = defineWorkflow({
       permissions,
       handler: async (ctx) => {
-        await ctx.connections.mail.mail.readAttachment(
-          { id: 1 },
-          { step: "read" }
-        );
+        await ctx.connections.mail.readAttachment({ id: 1 }, { step: "read" });
         await ctx.ai.generate(
           { instructions: "Sum up.", input: { id: 1 } },
           { step: "summary" }
@@ -395,7 +393,7 @@ describe("a workflow's ctx", () => {
       const workflow = defineWorkflow({
         permissions,
         handler: async (ctx): Promise<unknown> =>
-          await Reflect.apply(ctx.connections.mail.mail.send, undefined, [
+          await Reflect.apply(ctx.connections.mail.send, undefined, [
             {},
             options,
           ]),
@@ -413,8 +411,8 @@ describe("a workflow's ctx", () => {
       permissions,
       handler: async (ctx) =>
         await Promise.all([
-          ctx.connections.mail.mail.send({}, { step: "one" }),
-          ctx.connections.mail.mail.send({}, { step: "two" }),
+          ctx.connections.mail.send({}, { step: "one" }),
+          ctx.connections.mail.send({}, { step: "two" }),
         ]),
     });
     await expect(workflow.run(engineOf().engine, {})).rejects.toMatchObject({
@@ -435,7 +433,7 @@ const generatedLike = defineWorkflow({
       for (const row of page.rows) {
         if (row !== "") {
           // oxlint-disable-next-line no-await-in-loop -- a run's steps run one after another
-          await ctx.connections.mail.mail.send(
+          await ctx.connections.mail.send(
             { to: row },
             {
               step: "mailed",

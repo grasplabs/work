@@ -13,8 +13,8 @@ import type {
 const permissions = {
   ai: true,
   connections: {
-    mail: ["mail.send", "send-invite"],
-    github: ["issues.create"],
+    mail: { send: "mail.send", "send-invite": "mail.send-invite" },
+    github: { "issues.create": "issues.create" },
   },
   decisions: ["finance"],
   events: { stripe: ["invoice.paid", "invoice.failed"] },
@@ -27,7 +27,7 @@ const params = {
 declare const ctx: WorkflowCtx<typeof permissions, typeof params>;
 
 // Every declared action is a member, by its dotted path, `-` in camel case.
-expectTypeOf(ctx.connections.mail.mail.send).toBeFunction();
+expectTypeOf(ctx.connections.mail.send).toBeFunction();
 expectTypeOf(ctx.connections.mail.sendInvite).toBeFunction();
 expectTypeOf(ctx.connections.github.issues.create).toBeFunction();
 expectTypeOf(ctx.decisions.finance.ask).toBeFunction();
@@ -55,11 +55,11 @@ void ctx.events.stripe.waitFor(
 
 // Every call names its step.
 // @ts-expect-error -- no step
-void ctx.connections.mail.mail.send({ to: "ada" });
+void ctx.connections.mail.send({ to: "ada" });
 
 // A workflow with no model has no `ai`.
 declare const noModel: WorkflowCtx<
-  { connections: { mail: ["mail.send"] } },
+  { connections: { mail: { send: "mail.send" } } },
   Record<never, never>
 >;
 expectTypeOf(noModel.ai).toEqualTypeOf<undefined>();
