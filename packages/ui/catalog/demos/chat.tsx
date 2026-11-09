@@ -1,5 +1,5 @@
 // Demos of the kit's chat components. One per component, for the dev-only
-// gallery and its accessibility checks (e2e/catalog.e2e.ts).
+// gallery and its accessibility checks (test/kit.browser.test.tsx).
 import {
   Attachment,
   AttachmentContent,

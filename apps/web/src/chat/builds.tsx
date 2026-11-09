@@ -7,6 +7,7 @@ import type {
 import { appErrors } from "@grasp-os/shared/apps";
 import type { ChatDraft } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
+import type { Permission } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -246,6 +247,31 @@ const RowRuleWords = ({ rules }: { rules: ReviewedRowRule[] }) => {
   return <>{formatList(words)}</>;
 };
 
+/**
+ * A workflow's grant to call one of the App's functions, by the
+ * workflow's name and the function's path where core gives them.
+ */
+const CallerLine = ({
+  permission,
+  askedAgain,
+}: {
+  permission: Permission;
+  askedAgain: boolean;
+}) => {
+  const { t } = useLingui();
+  const { subject, object, workflowNames, functionName } = permission;
+  const workflow =
+    subject.type === "workflow"
+      ? (workflowNames?.[subject.workflowId] ?? subject.workflowId)
+      : "";
+  const path =
+    functionName ??
+    (object.type === "app" ? (object.function ?? object.appId) : "");
+  return askedAgain
+    ? t`${workflow} calls ${path}, asked for again of an admin if you make this current`
+    : t`${workflow} calls ${path}`;
+};
+
 /** Each table's row rules, as a version's reviewer reads them. */
 const RowRules = ({ tables }: { tables: TableRowRules[] }) => (
   <ul className="flex flex-col gap-2">
@@ -456,6 +482,23 @@ const ReviewDetails = ({
           </ul>
         )}
       </section>
+      {review.callers.length > 0 && (
+        <section
+          aria-label={t`Workflows that call it`}
+          className="flex flex-col gap-1"
+        >
+          <h4 className="font-medium">
+            <Trans>Workflows that call it</Trans>
+          </h4>
+          <ul className="flex flex-col gap-1">
+            {review.callers.map(({ permission, askedAgain }) => (
+              <li key={permission.id}>
+                <CallerLine permission={permission} askedAgain={askedAgain} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section
         aria-label={t`Permissions asked for`}
         className="flex flex-col gap-1"

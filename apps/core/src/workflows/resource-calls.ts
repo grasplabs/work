@@ -142,6 +142,19 @@ export interface Effect {
   readonly sending?: () => void;
 }
 
+/**
+ * A run's call of one of an App's functions (app-calls.ts, GRA-1663),
+ * as its host builds it: the App by its ID, the function by the stable
+ * ID the App's definition gives it, and its arguments, which the
+ * function's own validator checks.
+ */
+export interface AppCall {
+  readonly name: "grasp.app";
+  readonly app: string;
+  readonly function: string;
+  readonly arguments: Json;
+}
+
 /** A task's call, its arguments built by the host (sealed-run.ts, `#sent`). */
 export type BuiltCall =
   | {
@@ -189,7 +202,16 @@ export type BuiltCall =
       readonly binding: string;
       readonly operation: FilesCallOperation;
       readonly arguments: Json;
-    };
+    }
+  /**
+   * One of an App's functions, by its App's ID and the stable ID the
+   * App's definition gives it, through the workflow's own grant on it,
+   * never a catalog binding (app-calls.ts, GRA-1663).
+   */
+  | AppCall;
+
+/** A call made through a catalog binding its start froze. */
+type BoundBuiltCall = Exclude<BuiltCall, AppCall>;
 
 /** The binding kind each call goes through. */
 const kindOf = {
@@ -218,7 +240,7 @@ const callInvalid = (issue: string) =>
  * is refused before anything walks it.
  */
 /** `value` as JSON, as much as a step records, or `workflow.call_invalid`. */
-const boundedAnswer = (value: unknown, what: string): Json => {
+export const boundedAnswer = (value: unknown, what: string): Json => {
   const written = writeJson(value, {
     maxBytes: platformLimits.stepPayloadBytes,
     maxDepth: valueDepth,
@@ -825,6 +847,8 @@ const filesWrites: ReadonlySet<string> = new Set(["open", "append", "finish"]);
  */
 const handsOut = (call: BuiltCall): boolean =>
   call.name === "grasp.connector" ||
+  // Its arguments are the App's to keep.
+  call.name === "grasp.app" ||
   call.name === "grasp.model" ||
   (call.name === "grasp.files" && filesWrites.has(call.operation));
 
@@ -850,9 +874,22 @@ const filesCallDetail = (
  */
 const candidateAnswer = async (
   env: Env,
+  run: CallingRun,
   bindings: ReadonlyMap<string, CandidateBinding>,
   call: BuiltCall
 ): Promise<Json> => {
+  // An App call goes through no binding: its answer is the start's under
+  // the call's own key (app-calls.ts, `appCallKey`), checked against what
+  // the function answers.
+  if (call.name === "grasp.app") {
+    const { appCallKey, candidateAppAnswer } = await import("./app-calls.ts");
+    return await candidateAppAnswer(
+      env,
+      run,
+      bindings.get(appCallKey(call)),
+      call
+    );
+  }
   const binding = bindings.get(call.binding);
   if (binding?.kind !== kindOf[call.name]) {
     throw workflowResourceErrors.create("workflow.call_denied");
@@ -909,7 +946,7 @@ const requireCallAllowed = async (
   env: Env,
   run: CallingRun,
   binding: FrozenCatalogBinding,
-  call: BuiltCall,
+  call: BoundBuiltCall,
   effect: Effect
 ): Promise<void> => {
   if (
@@ -939,6 +976,115 @@ const requireCallAllowed = async (
 };
 
 /**
+ * A receipt of call `call` of task `task` of `run`, under key `key`
+ * (`workflow.run.called`): what it went through (`through`: its binding
+ * and approval, or the App and function it called, by ID) and `outcome`,
+ * never an argument or answer.
+ */
+const callReceipt = (
+  run: CallingRun,
+  { task, call, key }: { task: string; call: string; key: string },
+  through: Readonly<Record<string, string | number>>,
+  outcome: string
+): AuditEntry => ({
+  actor: { type: "system" },
+  action: "workflow.run.called",
+  target: { type: "workflow_run", id: run.runId },
+  detail: {
+    workflow: run.workflowId,
+    version: run.version,
+    task,
+    call,
+    ...through,
+    key,
+    person: run.principal,
+    outcome,
+  },
+});
+
+/**
+ * Keeps a call's outcome receipt, which follows its started one, kept
+ * before anything was sent: a failure to keep it is logged, never put in
+ * place of what the call came to.
+ */
+const receiptKept = async (
+  env: Env,
+  run: CallingRun,
+  task: string,
+  entry: AuditEntry
+): Promise<void> => {
+  try {
+    await audited(env, entry);
+  } catch (error) {
+    log.error("workflow.run_receipt_unkept", {
+      runId: run.runId,
+      task,
+      outcome: String(entry.detail?.outcome),
+      ...errorFields(error),
+    });
+  }
+};
+
+/** `value`, a call's ID, as a receipt names it: none for one that isn't text. */
+const receiptId = (value: unknown): string =>
+  typeof value === "string" ? value.slice(0, 64) : "";
+
+/**
+ * Makes `call` of one of an App's functions (app-calls.ts), as task
+ * `task` of `run`, for `effect`, with its receipts in the audit log as
+ * every call of a run leaves them: started, kept before anything is
+ * sent, then its outcome by code. They name the App and the function by
+ * their IDs, never an argument or answer.
+ */
+const madeAppCall = async (
+  env: Env,
+  run: CallingRun,
+  task: string,
+  call: AppCall,
+  effect: Effect
+): Promise<Json> => {
+  // The App's request ID, once it is known: what the App's own evidence
+  // of the call names too.
+  let request: Readonly<Record<string, string>> = {};
+  // Read as the host sent them, whatever they are: `callApp` refuses
+  // what isn't an App's ID and a function's.
+  const receipt = (outcome: string): AuditEntry =>
+    callReceipt(
+      run,
+      { task, call: "grasp.app", key: effect.key },
+      {
+        app: receiptId(call.app),
+        function: receiptId(call.function),
+        ...request,
+      },
+      outcome
+    );
+  try {
+    // What the run recalled leaves with the arguments, as with any call
+    // that hands out.
+    await requireResourceRunEvidenceReadable(env, run);
+    await audited(env, receipt("started"));
+    // Imported here, not at the top: an App's functions start workflows,
+    // whose runs reach back into this module.
+    const { callApp } = await import("./app-calls.ts");
+    const value = await callApp(env, run, call, effect, (requestId) => {
+      request = { request: requestId };
+    });
+    const output = boundedAnswer(value, "output");
+    await receiptKept(env, run, task, receipt("done"));
+    return output;
+  } catch (error) {
+    await receiptKept(
+      env,
+      run,
+      task,
+      receipt(isExpectedError(error) ? error.code : "internal.unexpected")
+    );
+    throw error;
+  }
+};
+
+/**
  * Makes `call`, a task's named call with its arguments built, as task
  * `task` of `run`, for `effect`: through the binding its start froze for
  * the call's alias, once the authority behind it was decided again
@@ -958,7 +1104,7 @@ export const makeCall = async (
   // binding, authority or receipt is looked at, so nothing of it can
   // reach connect, a model, an App, a store or Knowledge.
   if (run.candidate !== undefined) {
-    return await candidateAnswer(env, run.candidate, call);
+    return await candidateAnswer(env, run, run.candidate, call);
   }
   // A run an App's test started never comes here: its host answers its
   // model calls from its test (fixture-calls.ts) and refuses the rest.
@@ -967,43 +1113,24 @@ export const makeCall = async (
   if (run.fixture === true) {
     throw operationErrors.create("resource.unavailable");
   }
+  if (call.name === "grasp.app") {
+    return await madeAppCall(env, run, task, call, effect);
+  }
   const binding = run.bindings.get(call.binding);
   if (binding?.kind !== kindOf[call.name]) {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   // What a files call's receipts say of its file (GRA-724): never its name.
   let fileDetail: Readonly<Record<string, string | number>> = {};
-  const receipt = (outcome: string): AuditEntry => ({
-    actor: { type: "system" },
-    action: "workflow.run.called",
-    target: { type: "workflow_run", id: run.runId },
-    detail: {
-      workflow: run.workflowId,
-      version: run.version,
-      task,
-      call: call.name,
-      binding: binding.alias,
-      approval: binding.approval,
-      key: effect.key,
-      person: run.principal,
-      outcome,
-      ...fileDetail,
-    },
-  });
-  // The outcome's receipt follows the started one, which is kept before
-  // anything is sent: a failure to keep it is logged, never put in place
-  // of what the call came to.
+  const receipt = (outcome: string): AuditEntry =>
+    callReceipt(
+      run,
+      { task, call: call.name, key: effect.key },
+      { binding: binding.alias, approval: binding.approval, ...fileDetail },
+      outcome
+    );
   const outcomeKept = async (outcome: string): Promise<void> => {
-    try {
-      await audited(env, receipt(outcome));
-    } catch (error) {
-      log.error("workflow.run_receipt_unkept", {
-        runId: run.runId,
-        task,
-        outcome,
-        ...errorFields(error),
-      });
-    }
+    await receiptKept(env, run, task, receipt(outcome));
   };
   let output: Json;
   try {

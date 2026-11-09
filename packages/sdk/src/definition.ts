@@ -1,3 +1,8 @@
+import {
+  operationPathMaxLength,
+  operationPathMaxSegments,
+  operationSegmentPattern,
+} from "@grasp-os/shared/function-limits";
 import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import { z } from "zod";
 
@@ -39,6 +44,15 @@ import type { AnySchema } from "./value-schema.ts";
 // Every table and field has an ID that never changes. A rename changes a
 // name only; indexes, row rules and answers name fields by their IDs, so
 // a rename never leaves one pointing at nothing.
+//
+// So does each server function a workflow may call (`functions`): its ID
+// is what a workflow's grant and its calls name it by, and a rename
+// (`renameFunction`) changes its name, the code's path to it, only. Its
+// code stays found by that path. Each query and mutation the code exports
+// gets an ID as a commit brings it, and loses it once the code no longer
+// exports it (`withExportedFunctions`), so a version's definition names
+// exactly its code's; a seal reads only those (core's app-definition.ts,
+// `functionIdsOf`).
 //
 // A definition is checked whole, by declaring it as code would
 // (`definitionApp`): the builders check every name, type, index, rule and
@@ -99,12 +113,24 @@ export interface DefinedAnswer {
  */
 export type DefinedPermission = Readonly<Record<string, FrozenJson>>;
 
+/**
+ * A server function the App gives a stable ID: its ID, and its name, the
+ * path its code exports it at (`server/tasks.ts`'s `create` is
+ * `tasks.create`).
+ */
+export interface DefinedFunction {
+  readonly id: string;
+  readonly name: string;
+}
+
 /** An App's definition (see the header). */
 export interface AppDefinition {
   readonly name: string;
   readonly permissions: readonly DefinedPermission[];
   readonly tables: readonly DefinedTable[];
   readonly answers: readonly DefinedAnswer[];
+  /** The server functions it gives stable IDs; absent while it gives none. */
+  readonly functions?: readonly DefinedFunction[];
 }
 
 /** The files generated from an App's definition, which only Grasp writes. */
@@ -121,6 +147,24 @@ export const peoplePermission = "people";
 
 /** An ID: what a definition names a table or field by, forever. */
 const idSchema = z.string().regex(stableIdPattern);
+
+/**
+ * Whether `name` is a server function's path as the SDK makes one
+ * (app-functions.ts, `checkPath`): its module's path under `server/` and
+ * its export's name, each an identifier of letters, digits and `_` not
+ * starting with either of the last two, so `__proto__` is never a
+ * segment of one, joined by dots, at most as many and as long as a path
+ * may be. A seal checks the rest: that the code exports it.
+ */
+export const isFunctionPath = (name: string): boolean => {
+  const segments = name.split(".");
+  return (
+    segments.length >= 2 &&
+    segments.length <= operationPathMaxSegments &&
+    name.length <= operationPathMaxLength &&
+    segments.every((segment) => operationSegmentPattern.test(segment))
+  );
+};
 
 const ruleSchema = z.union([
   z.strictObject({ kind: z.literal("owner") }),
@@ -172,6 +216,17 @@ const definitionSchema = z.strictObject({
   answers: z.array(
     z.strictObject({ table: idSchema, field: idSchema, value: json })
   ),
+  functions: z
+    .array(
+      z.strictObject({
+        id: idSchema,
+        name: z.string().refine(isFunctionPath, {
+          message:
+            "A function's path: its module's path and its export's name, joined by dots",
+        }),
+      })
+    )
+    .optional(),
 });
 
 const refuse: (message: string) => never = refuser(AppDefinitionError);
@@ -414,9 +469,14 @@ const ordered = (value: unknown, declared = false): unknown => {
   );
 };
 
-/** `definition` as its text holds it: every descriptor in its compact form. */
-const compactForm = (definition: AppDefinition): unknown => ({
+/**
+ * `definition` as its text holds it: every descriptor in its compact
+ * form, and no `functions` while it gives none, so a definition from
+ * before functions had IDs keeps its text, and its hash.
+ */
+const compactForm = ({ functions, ...definition }: AppDefinition): unknown => ({
   ...definition,
+  ...(functions === undefined || functions.length === 0 ? {} : { functions }),
   permissions: definition.permissions.map((data) =>
     permissionTypes(data, (descriptor) =>
       // SAFETY: a permission's descriptors, as `permission.*` made them.
@@ -438,9 +498,10 @@ const compactForm = (definition: AppDefinition): unknown => ({
  * read from its compact form, a refusal naming the one that isn't one.
  */
 const fullForm = (data: z.output<typeof definitionSchema>): AppDefinition => {
-  const { tables, permissions, ...rest } = data;
+  const { tables, permissions, functions, ...rest } = data;
   return {
     ...rest,
+    ...(functions === undefined || functions.length === 0 ? {} : { functions }),
     permissions: permissions.map((permission) =>
       permissionTypes(permission, (compact) =>
         fromCompact(
@@ -487,6 +548,15 @@ export const definitionApp = (
   requireUniqueIds(definition.tables, "tables");
   for (const table of definition.tables) {
     requireUniqueIds(table.fields, `fields of \`${table.name}\``);
+  }
+  const functions = definition.functions ?? [];
+  requireUniqueIds(functions, "functions");
+  const named = new Set<string>();
+  for (const { name } of functions) {
+    if (named.has(name)) {
+      refuse(`Two functions are named \`${name}\`.`);
+    }
+    named.add(name);
   }
   const tables: Record<string, AnyTable> = {};
   for (const table of definition.tables) {

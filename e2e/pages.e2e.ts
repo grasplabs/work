@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { retryCast } from "./contexts.ts";
+import { fileCast } from "./contexts.ts";
 import { test } from "./csp.ts";
 import { pageAppFiles, serveAttacker } from "./page-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
@@ -82,7 +82,7 @@ let app: string;
 
 test.beforeAll(async () => {
   attacker = await serveAttacker();
-  await retryCast();
+  await fileCast();
   ({ one, two } = peopleIn("pages"));
   app = await releaseApp(one, attacker.url, "Notes", two);
 });

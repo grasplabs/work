@@ -391,6 +391,7 @@ export const definitionToolNames = [
   "removeIndex",
   "removePermission",
   "moveField",
+  "renameFunction",
 ] as const;
 
 /**

@@ -77,6 +77,7 @@ const reviewOf = (version: number): VersionReview => ({
   schema: null,
   permissions: [],
   grants: [],
+  callers: [],
   handsFilesToWorkflows: false,
   readsPeople: false,
   rowRules: [],

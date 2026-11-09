@@ -404,6 +404,12 @@ export interface VersionReview {
    * again, as this reviewer can't grant it (`AppVersionsApi.setCurrent`).
    */
   grants: { permission: Permission; askedAgain: boolean }[];
+  /**
+   * The workflows' grants to call the App's functions, which trust its
+   * code as its own grants do; `askedAgain` likewise. Only those this
+   * reviewer may see.
+   */
+  callers: { permission: Permission; askedAgain: boolean }[];
 }
 
 /**
@@ -1020,7 +1026,7 @@ export const appErrors = defineErrorFamily({
   "app.no_workflows":
     "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
   "app.generated_file":
-    "grasp.config.ts and server/schema.ts are the code Grasp generates from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts), never by writing them.",
+    "grasp.config.ts and server/schema.ts are the code Grasp generates from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission, renameFunction and their remove counterparts), never by writing them.",
   "app.definition_invalid":
     "The App's definition, from which its grasp.config.ts and server/schema.ts are generated, isn't valid.",
   "app.chat_has_app":

@@ -1,7 +1,7 @@
 /**
  * One small demo per component in the kit, for the dev-only gallery
  * (apps/web, `/kit/components/<name>`) and the accessibility checks that
- * run over it (e2e/catalog.e2e.ts). test/catalog.test.ts holds it to the
+ * run over it (test/kit.browser.test.tsx). test/catalog.test.ts holds it to the
  * components directory: a component added to the kit without a demo fails.
  */
 import type { ComponentType } from "react";

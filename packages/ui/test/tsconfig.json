@@ -1,8 +1,9 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    // The tests read the components directory from disk.
-    "types": ["node"]
+    // The tests read the components directory from disk; the browser's
+    // import the kit's stylesheet (kit.browser.test.tsx).
+    "types": ["node", "vite-plus/client"]
   },
   "include": [".", "../src", "../catalog"]
 }

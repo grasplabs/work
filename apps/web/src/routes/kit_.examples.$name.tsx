@@ -5,9 +5,10 @@ import { createFileRoute, notFound, useParams } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
 // Local gallery of the UI kit's examples, one per page, each loaded by
-// name only when its page renders it; the accessibility
-// checks in e2e/catalog.e2e.ts go through them. Not product UI: like /kit,
-// builds in production mode answer not found.
+// name only when its page renders it: the same examples the kit's
+// component tests check (packages/ui/test/kit.browser.test.tsx);
+// e2e/catalog.e2e.ts loads each page under core's Content Security Policy.
+// Not product UI: like /kit, builds in production mode answer not found.
 
 const isExample = (name: string): name is ExampleName =>
   Object.hasOwn(loadExample, name);

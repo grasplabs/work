@@ -1,4 +1,5 @@
 import { isExpectedError } from "@grasp-os/shared/errors";
+import type { AppId } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { drizzle } from "drizzle-orm/d1";
@@ -130,14 +131,17 @@ export const permissionsOpenTo = async (
   env: Env,
   by: Member,
   subject?: unknown,
-  status?: unknown
+  status?: unknown,
+  /** Only the workflows' grants to call App `calling`'s functions. */
+  calling?: AppId
 ): Promise<Permission[]> => {
   const listed = await listPermissions(
     env,
     by,
     subject,
     appsFoundBy(env, by),
-    status
+    status,
+    calling
   );
   const named = listed.flatMap(({ subject: of, object }) => [
     ...(of.type === "app" ? [of.appId] : []),
@@ -171,8 +175,31 @@ export const permissionsOpenTo = async (
       open.flatMap((permission) => workflowsOf(permission))
     ),
   ]);
+  // Imported here, not at the top: the App registry reaches back into
+  // this module.
+  const { currentFunctionNames } = await import("./app-function-bindings.ts");
+  const functionApps = [
+    ...new Set(
+      open.flatMap(({ object }) =>
+        object.type === "app" && object.function !== undefined
+          ? [object.appId]
+          : []
+      )
+    ),
+  ];
+  const functionNames = new Map(
+    await Promise.all(
+      functionApps.map(
+        async (app) => [app, await currentFunctionNames(env, app)] as const
+      )
+    )
+  );
   return open.map((permission) => {
-    const { subject: of } = permission;
+    const { subject: of, object } = permission;
+    const functionName =
+      object.type === "app" && object.function !== undefined
+        ? functionNames.get(object.appId)?.get(object.function)
+        : undefined;
     const trigger =
       of.type === "trigger" ? triggers.get(of.triggerId) : undefined;
     const ofWorkflows = workflowsOf(permission).flatMap((id) => {
@@ -185,6 +212,7 @@ export const permissionsOpenTo = async (
       ...(ofWorkflows.length === 0
         ? {}
         : { workflowNames: Object.fromEntries(ofWorkflows) }),
+      ...(functionName === undefined ? {} : { functionName }),
     };
   });
 };

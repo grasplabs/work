@@ -2,7 +2,10 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { AppDefinitionError } from "../src/app-definition-error.ts";
 import { evaluateExpression } from "../src/definition-expression.ts";
-import { applyOperation } from "../src/definition-operations.ts";
+import {
+  applyOperation,
+  withExportedFunctions,
+} from "../src/definition-operations.ts";
 import type { DefinitionOperation } from "../src/definition-operations.ts";
 import {
   definitionSources,
@@ -689,5 +692,139 @@ describe("reading", () => {
     expect(twice).not.toBe(text);
     expect(() => readDefinition(JSON.parse(twice))).toThrow(AppDefinitionError);
     expect(() => readDefinition(JSON.parse(twice))).toThrow(/named `title`/u);
+  });
+});
+
+describe("functions", () => {
+  /** IDs counted up across one test's commits. */
+  let newId = counter();
+
+  /** The definition `exported` gives IDs, over `previous`. */
+  const exporting = (
+    exported: string[],
+    {
+      definition = emptyDefinition("Tasks"),
+      previous = [],
+    }: { definition?: AppDefinition; previous?: AppDefinition[] } = {}
+  ) => withExportedFunctions(definition, previous, exported, newId);
+
+  test("give each exported function an ID, which the next commit keeps and a function gone loses", () => {
+    newId = counter();
+    const first = exporting(["tasks.create", "tasks.list"]);
+    const next = exporting(["tasks.create", "tasks.done"], {
+      previous: [first],
+    });
+
+    expect({ first: first.functions, next: next.functions }).toStrictEqual({
+      first: [
+        { id: "id1", name: "tasks.create" },
+        { id: "id2", name: "tasks.list" },
+      ],
+      next: [
+        { id: "id1", name: "tasks.create" },
+        { id: "id3", name: "tasks.done" },
+      ],
+    });
+    // No code is generated from them: the IDs stay in the definition.
+    expect(definitionSources(next)).toStrictEqual(
+      definitionSources(emptyDefinition("Tasks"))
+    );
+  });
+
+  test("keep a function's ID through a rename it says, and give the function at its old path a new one", () => {
+    newId = counter();
+    const first = exporting(["tasks.create"]);
+    const renamed = applyOperation(first, {
+      op: "renameFunction",
+      function: "tasks.create",
+      name: "tasks.add",
+    });
+
+    const next = exporting(["tasks.add", "tasks.create"], {
+      definition: renamed,
+      previous: [first],
+    });
+
+    expect(next.functions?.find(({ name }) => name === "tasks.add")?.id).toBe(
+      "id1"
+    );
+    expect(
+      next.functions?.find(({ name }) => name === "tasks.create")?.id
+    ).not.toBe("id1");
+  });
+
+  test("give a function back the ID an older version gave it, past a commit that left it out", () => {
+    newId = counter();
+    const live = exporting(["tasks.create"]);
+    const dropped = exporting([], { previous: [live] });
+
+    const back = exporting(["tasks.create"], { previous: [dropped, live] });
+
+    expect(back.functions).toStrictEqual([{ id: "id1", name: "tasks.create" }]);
+  });
+
+  test("keep the text of a definition that gives no function an ID", () => {
+    newId = counter();
+    const none = exporting([]);
+    const one = exporting(["a.b"]);
+
+    expect(definitionText(none)).toBe(definitionText(emptyDefinition("Tasks")));
+    expect(stored(none)).not.toHaveProperty("functions");
+    expect(readDefinition(stored(one))).toStrictEqual(one);
+  });
+
+  test("refuse a rename to a path that isn't one, one held already, or of a function with no ID", () => {
+    newId = counter();
+    const before = exporting(["tasks.create", "tasks.list"]);
+    const refusals: [DefinitionOperation, RegExp][] = [
+      [
+        { op: "renameFunction", function: "tasks.create", name: "tasks.list" },
+        /already/u,
+      ],
+      [
+        { op: "renameFunction", function: "tasks.create", name: "create" },
+        /path/u,
+      ],
+      [
+        {
+          op: "renameFunction",
+          function: "tasks.create",
+          name: "__proto__.create",
+        },
+        /path/u,
+      ],
+      [
+        {
+          op: "renameFunction",
+          function: "tasks.create",
+          name: "tasks.__proto__",
+        },
+        /path/u,
+      ],
+      [
+        { op: "renameFunction", function: "tasks.gone", name: "tasks.all" },
+        /no function `tasks\.gone`/u,
+      ],
+    ];
+    for (const [operation, problem] of refusals) {
+      expect(() => applyOperation(before, operation)).toThrow(problem);
+    }
+  });
+
+  test("refuse a definition giving two functions one ID or one path, or a path that isn't one", () => {
+    newId = counter();
+    const text = definitionText(exporting(["tasks.create", "tasks.list"]));
+    const sameId = text.replace('"id":"id2"', '"id":"id1"');
+    const samePath = text.replace('"tasks.list"', '"tasks.create"');
+    const protoPath = text.replace('"tasks.list"', '"__proto__.list"');
+
+    expect(sameId).not.toBe(text);
+    expect(() => readDefinition(JSON.parse(sameId))).toThrow(/ID `id1`/u);
+    expect(() => readDefinition(JSON.parse(samePath))).toThrow(
+      /named `tasks\.create`/u
+    );
+    expect(() => readDefinition(JSON.parse(protoPath))).toThrow(
+      AppDefinitionError
+    );
   });
 });

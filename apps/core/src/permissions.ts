@@ -51,6 +51,7 @@ import {
   eq,
   inArray,
   getTableColumns,
+  isNotNull,
   isNull,
   ne,
   or,
@@ -163,10 +164,11 @@ const objectColumns = (object: PermissionObject) => {
       };
     }
     case "app": {
+      // One of its functions, for a workflow's grant: by its stable ID.
       return {
         objectType: object.type,
         objectId: object.appId,
-        resource: null,
+        resource: object.function ?? null,
       };
     }
     case "platform": {
@@ -210,6 +212,7 @@ const objectOf = (row: Row): PermissionObject => {
       return permissionObjectSchema.parse({
         type: row.objectType,
         appId: row.objectId,
+        ...(resource === undefined ? {} : { function: resource }),
       });
     }
     case "platform": {
@@ -633,17 +636,32 @@ const requireSenderFits = (
 };
 
 /**
- * Refuses an `app` permission for anyone but an agent: Apps don't call
- * each other, and a workflow calls no App's functions through a
- * permission.
+ * Refuses an `app` permission but an agent's on a whole App and an
+ * independent workflow's on one of its functions (by its stable ID):
+ * Apps don't call each other, an agent acts for its person in every App
+ * they use, and a workflow reaches only the functions it was granted,
+ * each on its own.
  */
 const requireAppCallerFits = (
   subject: PermissionSubject,
   object: PermissionObject
 ): void => {
-  if (object.type === "app" && subject.type !== "agent") {
+  if (object.type !== "app") {
+    return;
+  }
+  if (subject.type === "agent" && object.function !== undefined) {
     refuseRequest(
-      "subject: Only an agent calls an App's functions through a permission."
+      "object.function: An agent calls an App's public functions, not one of them."
+    );
+  }
+  if (subject.type === "workflow" && object.function === undefined) {
+    refuseRequest(
+      "object.function: A workflow calls one of an App's functions, by the ID the App's definition gives it."
+    );
+  }
+  if (subject.type !== "agent" && subject.type !== "workflow") {
+    refuseRequest(
+      "subject: Only an agent or a workflow calls an App's functions through a permission."
     );
   }
 };
@@ -841,7 +859,10 @@ const auditDetailSql = sql`json_patch(
       CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('resource', ${permissions.resource}) END
     )
     WHEN 'collection' THEN json_object('collectionId', ${permissions.objectId})
-    WHEN 'app' THEN json_object('appId', ${permissions.objectId})
+    WHEN 'app' THEN json_patch(
+      json_object('appId', ${permissions.objectId}),
+      CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('function', ${permissions.resource}) END
+    )
     WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
     ELSE '{}'
   END
@@ -971,6 +992,12 @@ export const requestPermission = async (
     await roles.app(object.appId, "user");
   }
   await requireApps(env, subject, object);
+  if (object.type === "app" && object.function !== undefined) {
+    // Imported here, not at the top: the App registry reaches back into
+    // this module.
+    const { requireAppFunction } = await import("./app-function-bindings.ts");
+    await requireAppFunction(env, object.appId, object.function);
+  }
   await requireCollection(env, subject, object, actions);
   const row: Row = {
     id: crypto.randomUUID(),
@@ -1231,6 +1258,28 @@ export const tellChat = async (
   }
 };
 
+/** The App a workflow's request on one of its functions (`row`) names, if it is one. */
+const functionAppOf = (row: Row): string | undefined =>
+  row.objectType === "app" && row.resource !== null ? row.objectId : undefined;
+
+/**
+ * For a workflow's request on one of an App's functions (`row`), refuses
+ * it unless the App's current version gives a query or mutation its ID
+ * (app-function-bindings.ts): one removed since it was asked for is
+ * granted to nobody. The grant then holds to that version as it lands
+ * (`reviewedApp` in `grantPermission`).
+ */
+const requireServedFunction = async (env: Env, row: Row): Promise<void> => {
+  const object = objectOf(row);
+  if (object.type !== "app" || object.function === undefined) {
+    return;
+  }
+  // Imported here, not at the top: the App registry reaches back into
+  // this module.
+  const { requireAppFunction } = await import("./app-function-bindings.ts");
+  await requireAppFunction(env, object.appId, object.function);
+};
+
 /**
  * Grants a requested permission, the admin's own request included. Only
  * from requested: an active or revoked one is refused, so a revoke is for
@@ -1281,6 +1330,7 @@ export const grantPermission = async (
     );
   }
   await requireNoBindingClash(env, found);
+  await requireServedFunction(env, found);
   const db = drizzle(env.DB);
   const event = createAuditEvent(
     changeEntry(by, "permission.granted", toPermission(found), {
@@ -1289,17 +1339,24 @@ export const grantPermission = async (
     "core"
   );
   const isApp = found.subjectType === "app";
-  if (!isApp && version !== null) {
+  // The App whose version the admin reviews: the App asking, or the App
+  // whose function a workflow asks to call, whose current definition
+  // named the function as they saw it (`Permission.functionName`).
+  const reviewedApp = isApp ? found.subjectId : functionAppOf(found);
+  if (reviewedApp === undefined && version !== null) {
     // An agent has no versions; an independent resource's versions are
     // immutable and pinned, so none is reviewed here.
     throw permissionErrors.create("permission.invalid", {
-      issues: ["version: only an App's version is reviewed"],
+      issues: [
+        "version: only an App's version is reviewed, or the version of the App whose function is called",
+      ],
     });
   }
   // The version reviewed is still the one current (an agent has none).
-  const stillReviewed = isApp
-    ? sql`(SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${found.subjectId}) IS ${version}`
-    : undefined;
+  const stillReviewed =
+    reviewedApp === undefined
+      ? undefined
+      : sql`(SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${reviewedApp}) IS ${version}`;
   let widened: Grantee | undefined;
   if (isApp) {
     widened = { type: "app", appId: appIdSchema.parse(found.subjectId) };
@@ -1370,7 +1427,9 @@ export const grantPermission = async (
   if (!granted) {
     await requireStillAdmin(env, by);
     await requireNoBindingClash(env, found);
-    // Still requested: then the version reviewed is no longer current.
+    // Still requested: then the version reviewed is no longer current,
+    // or no longer gives the function its ID.
+    await requireServedFunction(env, found);
     const now = await findRow(env, found.id);
     if (now?.status === "requested") {
       throw appErrors.create("app.conflict");
@@ -1576,13 +1635,16 @@ export interface MadeCurrent {
  * reads) if `by` could grant the permissions themselves (`canGrantSql`),
  * and unapproved otherwise. And unless `by` could, or the permissions are
  * kept (`keep`), each of the App's permissions active when the batch runs
- * that lets it change things for the person using it (`changesThingsSql`)
- * is asked for again: first an audit event for each
+ * that lets it change things for the person using it (`changesThingsSql`),
+ * and each workflow's grant to call one of its functions (whose code the
+ * version holds, run as the person each run acts for), is asked for
+ * again: first an audit event for each
  * (`permission.requested`, by `by`, with the version, the one it replaced
  * and who had granted it), then the update, back to requested, asked for
  * by `by`, keeping who granted it and when. Both select their rows with the same condition when the batch
  * runs, nothing read before it, so a grant made just before is asked for
- * again too. Reading only is kept: the code reads what the person may.
+ * again too. The App's own grants that only read are kept: the code
+ * reads what the person may.
  * Core's database has no full-text index, so nothing in the batch moves
  * `changes()` under them.
  */
@@ -1603,10 +1665,22 @@ export const madeCurrent = (
   if (keep) {
     return [approval];
   }
+  // The App's own grants that change things, and the workflows' grants
+  // to call its functions: both trust the code of the version made
+  // current, so both are asked for again alike.
   const requestedAgain = and(
-    ofSubject({ type: "app", appId: app }),
+    or(
+      and(ofSubject({ type: "app", appId: app }), changesThingsSql),
+      and(
+        eq(permissions.subjectType, "workflow"),
+        eq(permissions.objectType, "app"),
+        eq(permissions.objectId, app),
+        isNotNull(permissions.resource),
+        sql`EXISTS (SELECT 1 FROM workflow_resources AS live
+          WHERE live.id = ${permissions.subjectId} AND live.deleted_at IS NULL)`
+      )
+    ),
     eq(permissions.status, "active"),
-    changesThingsSql,
     changed,
     sql`NOT ${canGrantSql(by)}`
   );
@@ -1724,7 +1798,9 @@ export const listPermissions = async (
   by: Pick<Identity, "role">,
   subject?: unknown,
   openApps?: SQL,
-  status?: unknown
+  status?: unknown,
+  /** Only the workflows' grants to call App `calling`'s functions. */
+  calling?: AppId
 ): Promise<Permission[]> => {
   requireBuilder(by);
   const inStatus =
@@ -1777,6 +1853,14 @@ export const listPermissions = async (
         ofOne,
         ofOpenApp,
         inStatus,
+        calling === undefined
+          ? undefined
+          : and(
+              eq(permissions.subjectType, "workflow"),
+              eq(permissions.objectType, "app"),
+              eq(permissions.objectId, calling),
+              isNotNull(permissions.resource)
+            ),
         eq(permissions.personal, false),
         servedSql
       )

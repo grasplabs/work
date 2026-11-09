@@ -1279,6 +1279,14 @@ msgstr "{word}. Ändern, ob {name} läuft"
 msgid "{work, plural, one {# piece of work} other {# pieces of work}}"
 msgstr "{work, plural, one {# Arbeit} other {# Arbeiten}}"
 
+#: src/chat/builds.tsx
+msgid "{workflow} calls {path}"
+msgstr "{workflow} ruft {path} auf"
+
+#: src/chat/builds.tsx
+msgid "{workflow} calls {path}, asked for again of an admin if you make this current"
+msgstr "{workflow} ruft {path} auf, wird erneut bei einem Admin angefragt, wenn Sie diese Version aktuell machen"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "{workflow} in {app}"
 msgstr "{workflow} in {app}"
@@ -3141,6 +3149,10 @@ msgstr "Ein Modell aufgerufen"
 #: src/activity/audit-words.ts
 msgid "Called another App"
 msgstr "Eine andere App aufgerufen"
+
+#: src/activity/pending.tsx
+msgid "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
+msgstr "Ruft {path} von {app} auf. Jeder Lauf kann lesen oder ändern, was diese Funktion in der App liest oder ändert, als die Person, für die er läuft"
 
 #: src/brain/brain.ts
 msgid "Came in"
@@ -15501,6 +15513,10 @@ msgstr "Workflows entstehen im Chat: Beschreiben Sie, was von selbst laufen soll
 #: src/brain/goals-editor.tsx
 msgid "Workflows of {title}"
 msgstr "Workflows von {title}"
+
+#: src/chat/builds.tsx
+msgid "Workflows that call it"
+msgstr "Workflows, die sie aufrufen"
 
 #: src/brain/goals-editor.tsx
 msgid "Workflows that serve {title}"

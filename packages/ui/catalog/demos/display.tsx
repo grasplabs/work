@@ -1,6 +1,6 @@
 // Demos of the kit's components that show content: status, media, data and
 // structure. One per component, for the dev-only gallery and its
-// accessibility checks (e2e/catalog.e2e.ts).
+// accessibility checks (test/kit.browser.test.tsx).
 import {
   Accordion,
   AccordionContent,

@@ -694,6 +694,7 @@
   "@grasp-os/ui test/rich-text-marks.test.ts": 0,
   "@grasp-os/ui test/rich-text.test.tsx": 0.1,
   "@grasp-os/ui test/row-ends.test.ts": 0,
+  "@grasp-os/ui:browser (chromium) test/kit.browser.test.tsx": 31,
   "@grasp-os/web locale-preload.test.ts": 0,
   "@grasp-os/web src/activity/audit-words.test.ts": 0,
   "@grasp-os/web src/activity/pending.test.ts": 0,

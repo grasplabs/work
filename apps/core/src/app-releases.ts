@@ -5,6 +5,7 @@ import {
   kitModules,
   serverSdkModules,
 } from "@grasp-os/compiler";
+import { isFunctionPath } from "@grasp-os/sdk/definition";
 import type { AppDefinition } from "@grasp-os/sdk/definition";
 import {
   contractFingerprints,
@@ -29,6 +30,7 @@ import type {
   ReleaseArtifact,
   ReleaseManifest,
 } from "@grasp-os/shared/app-releases";
+import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
@@ -79,7 +81,7 @@ import {
   requireMigrationsTarget,
 } from "./migration-run.ts";
 import { graphApproved } from "./packages/approvals.ts";
-import { pageArtifact, versionPages } from "./pages.ts";
+import { buildAppCode, pageArtifact, versionPages } from "./pages.ts";
 import type { BuildProfile, BuiltPage, PageBuildResult } from "./pages.ts";
 import {
   artifactKey,
@@ -1269,6 +1271,43 @@ export const sealDraftRelease = async (
 };
 
 /**
+ * Refuses sealing a version whose definition gives no ID to a query or
+ * mutation its code exports, as the commit's build finds them
+ * (`buildAppCode`, the same build, cached): one committed while its build
+ * didn't finish in time gave none (apps.ts, `storedVersion`), and the
+ * next commit does. So every query and mutation the compiler finds in a
+ * sealed version (`export const name = query(…)` or `mutation(…)`) has
+ * one; one exported another way gets none, and can't be granted.
+ */
+const requireFunctionIds = async (
+  env: Env,
+  app: AppId,
+  files: Readonly<Record<string, string>>,
+  definition: AppDefinition
+): Promise<void> => {
+  const build = await buildAppCode(env, { ...files }, app);
+  if (!build.ok) {
+    return;
+  }
+  const given = new Set((definition.functions ?? []).map(({ name }) => name));
+  const missing = (build.functions ?? []).filter(
+    (path) => isFunctionPath(path) && !given.has(path)
+  );
+  if (missing.length > 0) {
+    throw appErrors.create("app.definition_invalid", {
+      issues: [
+        `${missing
+          .slice(0, 10)
+          .map((path) => `\`${path}\``)
+          .join(
+            ", "
+          )} has no ID yet: the version was committed before its build finished. Commit again to give it one.`,
+      ],
+    });
+  }
+};
+
+/**
  * Seals the release of `request.app`'s `request.version` (see the header)
  * and answers it. A version sealed
  * already answers its release as sealed; a seal racing another with a different manifest is refused
@@ -1287,7 +1326,7 @@ export const sealRelease = async (
   const row = await findVersion(env, app, version);
   // Checked against its hash, and refused for a version with none: its
   // release names the definition its schema is applied by (app-schema.ts).
-  const { hash: definition } = await readStored(row);
+  const { hash: definition, definition: defined } = await readStored(row);
   const files = await versionFiles(env, app, version);
   const built = await inspectForSeal(
     env,
@@ -1295,6 +1334,7 @@ export const sealRelease = async (
     files,
     "production"
   );
+  await requireFunctionIds(env, app, files, defined);
   const store = await boundStore(env, request, built.manifest, built.schema);
   // Every page built and sealed with the release, so none is compiled
   // when it opens.

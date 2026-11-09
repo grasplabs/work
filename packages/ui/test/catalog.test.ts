@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { demos } from "../catalog/demos.ts";
 import { loadExample } from "../catalog/examples.ts";
+import { overlayNames } from "../catalog/overlays.ts";
 
 // The dev-only gallery (apps/web, `/kit`) against what the kit really
 // ships: pages import `@grasp-os/ui/components/<name>`, one module per
@@ -31,6 +32,19 @@ describe("the kit's demos", () => {
         rendered: renderToStaticMarkup(createElement(Demo)).length > 0,
       }).toStrictEqual({ name, rendered: true });
     }
+  });
+});
+
+describe("the kit's overlays", () => {
+  it("names only components and examples there are, so none goes unopened", () => {
+    expect({
+      components: overlayNames.components.filter(
+        (name) => !Object.hasOwn(demos, name)
+      ),
+      examples: overlayNames.examples.filter(
+        (name) => !Object.hasOwn(loadExample, name)
+      ),
+    }).toStrictEqual({ components: [], examples: [] });
   });
 });
 

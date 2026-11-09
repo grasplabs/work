@@ -267,6 +267,41 @@ export const requireCallAuthority = async (
   }
 };
 
+/**
+ * Refuses a call of `run` of function `fn` of App `app` (by the stable
+ * ID the App's definition gives it), `workflow.call_denied`, unless the
+ * authority behind it holds now, in one statement read as the call is
+ * made: the person's role in the workflow, the workflow live, the start
+ * by code still standing (as `requireCallAuthority` decides them), and
+ * the workflow's own active grant to `call` exactly that function of
+ * exactly that App (workflows/app-calls.ts). No approval of a version,
+ * the workflow's or the App's: the grant is the approval (see that
+ * module's header).
+ */
+export const requireAppCallAuthority = async (
+  env: Env,
+  run: CallingRun,
+  app: string,
+  fn: string
+): Promise<void> => {
+  const { workflowId: id } = run;
+  const { holds } = await drizzle(env.DB).get<{ holds: number }>(
+    sql`SELECT (${workflowRoleSql(run.principal, id)}
+      AND EXISTS (SELECT 1 FROM workflow_resources AS live
+        WHERE live.id = ${id} AND live.deleted_at IS NULL)
+      AND EXISTS (SELECT 1 FROM permissions AS held
+        WHERE held.subject_type = 'workflow' AND held.subject_id = ${id}
+          AND held.object_type = 'app' AND held.object_id = ${app}
+          AND held.resource = ${fn} AND held.status = 'active'
+          AND held.chat_id IS NULL
+          AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'call'))
+      AND ${invokerSql(run)}) AS holds`
+  );
+  if (holds === 0) {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+};
+
 /** Run `runId`'s row and its start's receipt, as a run's calls read them. */
 const runRowOf = async (env: Env, runId: string) =>
   await drizzle(env.DB)

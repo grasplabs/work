@@ -322,6 +322,7 @@ export default defineConfig({
       "apps/core/vite.brain.config.ts",
       "apps/core/vite.stephen.config.ts",
       "packages/*",
+      "packages/ui/vite.browser.config.ts",
       "packages/workerflow/vite.process.config.ts",
       "packages/workerflow/vite.conformance.config.ts",
       "packages/connectors/*",

@@ -14,7 +14,7 @@ import type {
   DefinitionOperation,
   ValueDescriptor,
 } from "@grasp-os/sdk/definition";
-import type { SchemaManifest } from "@grasp-os/sdk/host";
+import type { AppManifest, SchemaManifest } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type {
   DataModel,
@@ -141,6 +141,40 @@ export const schemaIdsOf = (
     });
   }
   return ids;
+};
+
+/**
+ * The paths of the queries and mutations `app` exports publicly: the
+ * functions a version gives stable IDs, which a workflow may call. An
+ * action reaches outside systems, and is never one.
+ */
+const exportedFunctionPaths = (
+  app: Pick<AppManifest, "operations">
+): string[] =>
+  Object.values(app.operations).flatMap(({ path, kind, visibility }) =>
+    visibility === "public" && kind !== "action" ? [path] : []
+  );
+
+/**
+ * The paths of the functions `definition` gives stable IDs, by ID, of
+ * those `app` exports as public queries and mutations: what a workflow's
+ * call of the App (workflows/app-calls.ts) and a publish's check of the
+ * workflows bound to it (app-function-bindings.ts) resolve an ID through,
+ * in the release sealed with that definition. A version's definition
+ * names its code's (apps.ts, `storedVersion`); one committed while its
+ * build was late, or a draft's, may still name one it no longer exports,
+ * which serves nothing.
+ */
+export const functionIdsOf = (
+  definition: AppDefinition,
+  app: Pick<AppManifest, "operations">
+): ReadonlyMap<string, string> => {
+  const exported = new Set(exportedFunctionPaths(app));
+  return new Map(
+    (definition.functions ?? []).flatMap(({ id, name }) =>
+      exported.has(name) ? [[id, name] as const] : []
+    )
+  );
 };
 
 /**
@@ -503,6 +537,11 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
       table: text,
       field: text,
       to: z.int().min(0),
+    }),
+    z.strictObject({
+      op: z.literal("renameFunction"),
+      function: text,
+      name: text,
     }),
   ]);
 

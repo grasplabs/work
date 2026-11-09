@@ -563,8 +563,10 @@ export const auditOutboxRejected = sqliteTable(
  * The object is stored by type: a connection is `object_id`, with
  * `resource` naming one resource in it or null for all of it; a collection
  * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
- * an App (an agent's, to call its functions) is its ID in `object_id`.
- * `actions` is a JSON array of action names.
+ * an App is its ID in `object_id`: an agent's, to call its functions,
+ * with `resource` null; a workflow's, to call one of them, with that
+ * function's stable ID in `resource`. `actions` is a JSON array of action
+ * names.
  */
 export const permissions = sqliteTable(
   "permissions",
