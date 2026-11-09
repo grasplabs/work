@@ -5,6 +5,7 @@ import {
   attachmentsProperty,
 } from "@grasp-os/shared/connector-attachments";
 import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
+import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -398,6 +399,76 @@ const asFileRead = (operation: { answersFile?: true }, input: Json): Json => {
 const unnamedFile = "attachment";
 
 /**
+ * Refuses a read kept as a file (`into`) that passes a sensitive
+ * parameter: the file could hold the value, and the run reads a kept
+ * file whole, where no check of the answer's echo (`echoes`) reaches.
+ */
+const requireNoSensitiveKept = (
+  call: Extract<BuiltCall, { name: "grasp.connector" }>
+): void => {
+  if (call.into !== undefined && call.sensitive.length > 0) {
+    throw callInvalid(
+      "into: A call passing a sensitive parameter keeps no file, which could hold it."
+    );
+  }
+};
+
+/**
+ * Refuses run files attached (`from`) to an operation whose contract
+ * doesn't record that it takes them (`takesFiles`).
+ */
+const requireTakesFiles = (
+  operation: { takesFiles?: true },
+  call: Extract<BuiltCall, { name: "grasp.connector" }>
+): void => {
+  if (call.from !== undefined && operation.takesFiles !== true) {
+    throw callInvalid("from: This operation attaches no files.");
+  }
+};
+
+/** The ID a test run's stand-in for a kept file has: no file's. */
+const candidateFileId = "candidate";
+
+/**
+ * What a test run's read kept as a file answers: its fixture, checked
+ * against the contract's shape as a real read is (its content apart),
+ * with a stand-in reference to the file in place of its content and
+ * encoding, as no test run keeps a file. The stand-in's size and digest
+ * are of the fixture's bytes; its ID finds no file anywhere.
+ */
+const candidateKept = async (
+  operation: { output: string },
+  answer: Json
+): Promise<Json> => {
+  const read = fileAnswerSchema.safeParse(answer);
+  if (!read.success) {
+    throw callInvalid("output: It isn't a file's content as base64.");
+  }
+  const { content, encoding: _encoding, ...rest } = read.data;
+  requireShape(
+    operation.output,
+    { ...rest, encoding: "base64", content: "" },
+    "output"
+  );
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(content), (char) => char.codePointAt(0) ?? 0);
+  } catch {
+    throw callInvalid("output: Its content isn't base64.");
+  }
+  return {
+    ...rest,
+    file: {
+      file: candidateFileId,
+      name: rest.name ?? unnamedFile,
+      type: rest.contentType ?? "application/octet-stream",
+      size: bytes.length,
+      sha256: await sha256HexOfBytes(bytes),
+    },
+  };
+};
+
+/**
  * `answer`, a read that answers a file, with its bytes kept as a file of
  * the calling run (`keepFile`) and named in place of its content: its
  * type shown by its bytes (`runFileTypeShown`), never the label it came
@@ -475,9 +546,7 @@ const attachedTo = async (
   input: Json
 ): Promise<Attached> => {
   const takes = operation.takesFiles === true;
-  if (call.from !== undefined && !takes) {
-    throw callInvalid("from: This operation attaches no files.");
-  }
+  requireTakesFiles(operation, call);
   const fields = z.record(z.string(), z.json()).safeParse(input);
   // Never passed on to an operation that takes no files, whatever its own
   // schema allows: run files leave only where the contract says they may.
@@ -913,7 +982,14 @@ const candidateAnswer = async (
         throw callInvalid("operation: The contract has no such operation.");
       }
       requireShape(shape.input, call.arguments, "arguments");
-      return requireShape(shape.output, answer, "output");
+      // As a real call: a file kept only from a read that answers one,
+      // files attached only to a write that takes them.
+      requireTakesFiles(shape, call);
+      if (call.into === undefined) {
+        return requireShape(shape.output, answer, "output");
+      }
+      asFileRead(shape, call.arguments);
+      return await candidateKept(shape, answer);
     }
     case "grasp.model": {
       requireModelRequest(call);
@@ -1104,6 +1180,11 @@ export const makeCall = async (
   call: BuiltCall,
   effect: Effect
 ): Promise<Json> => {
+  // Never a file kept by a read that passes a sensitive value, before
+  // anything else is looked at, a test run's included.
+  if (call.name === "grasp.connector") {
+    requireNoSensitiveKept(call);
+  }
   // A test run of a draft's checkpoint calls nothing: whatever the call,
   // its answer is the one the run's start gave its binding, before any
   // binding, authority or receipt is looked at, so nothing of it can

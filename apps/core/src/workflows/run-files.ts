@@ -7,6 +7,7 @@ import type {
 } from "@grasp-os/shared/connector-attachments";
 import { sha256HexOfBytes, toBase64, toHex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   runFileErrors,
   runFileIdSchema,
@@ -94,10 +95,14 @@ import { inList } from "../db/d1.ts";
 //   `ctx.files.<alias>`): its reads and writes are this module's, by the
 //   same lookups (a file's ID *and* the run's), under the same limits. A
 //   step reads a file whole only when it is text of `runFileTextTypes` of
-//   at most `callBytes` (`readText`), and writes one whole, of text of
-//   those types (`write`, as `keepFile` keeps a connector's read: opened,
-//   written and finished under the step's own key, so the same call again
-//   answers the same file).
+//   at most `callBytes`, as its step records it within a step's payload
+//   (`readText`), writes one whole, of text of those types (`write`, as
+//   `keepFile` keeps a connector's read: opened, written and finished
+//   under the step's own key, so the same call again answers the same
+//   file), and deletes only a finished one (`deleteFinished`), never one a
+//   task is still writing. A run's files permissions all reach all of its
+//   files: the permission says that the workflow works on its runs' files,
+//   and the run, never the alias, is what scopes them.
 // - Typing by signature only: a binary type's bytes are checked by their
 //   first bytes alone. Nothing serves a run file yet; before downloads
 //   (phase 2) serve one, check this again (a polyglot file passes).
@@ -112,6 +117,7 @@ export const filesCallOperations = {
   delete: "delete",
   readText: "read",
   write: "write",
+  deleteFinished: "delete",
 } as const;
 export type FilesCallOperation = keyof typeof filesCallOperations;
 
@@ -124,7 +130,7 @@ export const stepFilesOperations = {
   read: "readText",
   write: "write",
   list: "list",
-  delete: "delete",
+  delete: "deleteFinished",
 } as const satisfies Readonly<Record<string, FilesCallOperation>>;
 
 const utf8 = new TextEncoder();
@@ -150,6 +156,7 @@ const argumentSchemas = {
   list: z.strictObject({}),
   delete: z.strictObject({ file: runFileIdSchema }),
   readText: z.strictObject({ file: runFileIdSchema }),
+  deleteFinished: z.strictObject({ file: runFileIdSchema }),
   // Text of a text type, named as that type's file is.
   write: z
     .strictObject({
@@ -724,7 +731,15 @@ const readText = async (
     fatal: true,
     ignoreBOM: false,
   }).decode(bytesOfBase64(content));
-  return { output: { file: refJson(row), text }, detail: whole.detail };
+  const output = { file: refJson(row), text };
+  // As the step records it: JSON, its text escaped, within a step's
+  // payload, which escaping can take a text of `callBytes` past.
+  if (
+    utf8.encode(JSON.stringify(output)).length > platformLimits.stepPayloadBytes
+  ) {
+    throw runFileErrors.create("file.not_readable");
+  }
+  return { output, detail: whole.detail };
 };
 
 /** The run's finished files, oldest first. */
@@ -742,11 +757,16 @@ const list = async (env: Env, caller: FilesCaller): Promise<FilesAnswer> => {
   return { output: rows.map((row) => refJson(row)), detail: {} };
 };
 
-/** Deletes a file of the run: its chunks go with the next sweep. */
+/**
+ * Deletes a file of the run: its chunks go with the next sweep. A step's
+ * delete (`finishedOnly`) takes only a finished file, never one a task is
+ * still writing (`file.not_finished`).
+ */
 const remove = async (
   env: Env,
   caller: FilesCaller,
-  args: z.infer<typeof argumentSchemas.delete>
+  args: z.infer<typeof argumentSchemas.delete>,
+  finishedOnly = false
 ): Promise<FilesAnswer> => {
   const row = await fileOf(env, caller, args.file, true);
   if (row === undefined) {
@@ -755,6 +775,9 @@ const remove = async (
   // Deleted already, by this call's first attempt or another: done.
   if (row.state === "deleted") {
     return { output: null, detail: detailOf(row) };
+  }
+  if (finishedOnly && row.state !== "done") {
+    throw runFileErrors.create("file.not_finished");
   }
   caller.requireHolds();
   await drizzle(env.DB)
@@ -836,6 +859,14 @@ const callFile = async (
         env,
         caller,
         parsed(argumentSchemas.readText, args)
+      );
+    }
+    case "deleteFinished": {
+      return await remove(
+        env,
+        caller,
+        parsed(argumentSchemas.deleteFinished, args),
+        true
       );
     }
     default: {

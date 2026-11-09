@@ -258,8 +258,12 @@ export const expressionTypeRequest = (
         step.into !== undefined
       ) {
         // A read kept as a file answers its contract's shape with the file
-        // in place of its content: no descriptor of its own.
-        type = untyped;
+        // in place of its content and encoding.
+        const answer = output(step);
+        type =
+          answer === undefined
+            ? untyped
+            : `Omit<${typeOf(answer)}, "content" | "encoding"> & { readonly file: ${runFileType} }`;
       } else {
         const answer =
           step.type === "generate"

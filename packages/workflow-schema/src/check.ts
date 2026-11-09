@@ -1173,6 +1173,24 @@ const checkCall = (
   }
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
   checkValue(walk, step.args, join(pointer, "args"), place, connection);
+  // A file a read keeps could hold a sensitive parameter it passed, and the
+  // run reads a kept file whole: no read that passes one keeps a file.
+  const args = join(pointer, "args");
+  if (
+    connection &&
+    step.into !== undefined &&
+    [...walk.placeholders.keys()].some(
+      (at) => at === args || at.startsWith(`${args}/`)
+    )
+  ) {
+    problem(
+      walk,
+      join(pointer, "into"),
+      "workflow.sensitive",
+      "A call that passes a sensitive parameter keeps no file: the file could hold it.",
+      "Leave `into` out, or pass the call no sensitive parameter."
+    );
+  }
   checkCallDepth(walk, step.args, join(pointer, "args"), 0);
   checkState(walk, step.state, pointer, place);
 };

@@ -1,3 +1,4 @@
+import { parseProgram } from "@grasp-os/sdk/oxc-parse";
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkWorkflow } from "../src/check.ts";
@@ -11,6 +12,137 @@ import { checked, fileSteps, withFiles } from "./fixtures.ts";
 // only thing an expression gives, and the host looks it up by the run's
 // own; `into` and `from` name files permissions alone, sealed, and the
 // code names the same.
+
+/** A node of a parsed module, as this file reads it. */
+interface Node {
+  readonly type: string;
+  readonly [key: string]: unknown;
+}
+
+const isNode = (value: unknown): value is Node =>
+  typeof value === "object" &&
+  value !== null &&
+  "type" in value &&
+  typeof value.type === "string";
+
+/** Every node of `source`, a module, in order. */
+const nodesOf = (source: string): Node[] => {
+  const nodes: Node[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item);
+      }
+      return;
+    }
+    if (typeof value !== "object" || value === null) {
+      return;
+    }
+    if (isNode(value)) {
+      nodes.push(value);
+    }
+    for (const [key, item] of Object.entries(value)) {
+      if (key !== "loc" && key !== "start" && key !== "end") {
+        visit(item);
+      }
+    }
+  };
+  visit(parseProgram(source, "ts").program);
+  return nodes;
+};
+
+/** The dotted path of member expression `node` from its root name, if plain. */
+const pathOf = (node: unknown): string | undefined => {
+  if (!isNode(node)) {
+    return undefined;
+  }
+  if (node.type === "Identifier") {
+    return typeof node.name === "string" ? node.name : undefined;
+  }
+  if (node.type !== "MemberExpression" || node.computed === true) {
+    return undefined;
+  }
+  const object = pathOf(node.object);
+  const property = isNode(node.property) ? node.property.name : undefined;
+  return object === undefined || typeof property !== "string"
+    ? undefined
+    : `${object}.${property}`;
+};
+
+/** The JSON literal `node` is, if it is one: what a declaration holds. */
+const literalOf = (node: unknown): unknown => {
+  if (!isNode(node)) {
+    return undefined;
+  }
+  if (node.type === "Literal") {
+    return node.value;
+  }
+  if (node.type === "ArrayExpression" && Array.isArray(node.elements)) {
+    return node.elements.map((element: unknown) => literalOf(element));
+  }
+  if (node.type === "ObjectExpression" && Array.isArray(node.properties)) {
+    return Object.fromEntries(
+      node.properties.flatMap((property: unknown) => {
+        if (!isNode(property) || !isNode(property.key)) {
+          return [];
+        }
+        const { key } = property;
+        const name = key.type === "Identifier" ? key.name : key.value;
+        return typeof name === "string"
+          ? [[name, literalOf(property.value)]]
+          : [];
+      })
+    );
+  }
+  return undefined;
+};
+
+/**
+ * Each `ctx` member call of `source`, by the step its options name: the
+ * member it calls, and the files permissions it names (`into`, `from`).
+ */
+const callsOf = (source: string): Record<string, Record<string, unknown>> =>
+  Object.fromEntries(
+    nodesOf(source).flatMap((node) => {
+      const member = pathOf(node.callee);
+      const options = Array.isArray(node.arguments)
+        ? literalOf(node.arguments[1])
+        : undefined;
+      if (
+        node.type !== "CallExpression" ||
+        member?.startsWith("ctx.") !== true ||
+        typeof options !== "object" ||
+        options === null ||
+        !("step" in options)
+      ) {
+        return [];
+      }
+      const step: unknown = Reflect.get(options, "step");
+      const into: unknown = Reflect.get(options, "into");
+      const from: unknown = Reflect.get(options, "from");
+      return [
+        [
+          String(step),
+          {
+            member,
+            ...(into === undefined ? {} : { into }),
+            ...(from === undefined ? {} : { from }),
+          },
+        ],
+      ];
+    })
+  );
+
+/** What `source`'s `defineWorkflow` declares as its permissions. */
+const permissionsOf = (source: string): unknown =>
+  literalOf(
+    nodesOf(source).find(
+      (node) =>
+        node.type === "Property" &&
+        isNode(node.key) &&
+        node.key.name === "permissions"
+    )?.value
+  );
 
 /** The codes of `document`'s problems by their pointers, or "ok". */
 const codesAt = (document: unknown): unknown => {
@@ -137,45 +269,71 @@ describe("calls on the run's files and the Brain", () => {
       write: { "/steps/5/args/text/$expr": "workflow.sensitive" },
     });
   });
+
+  it("refuses a read that passes a sensitive parameter keeping a file, which could hold it", () => {
+    const passing = {
+      ...attachment,
+      args: { message: { $expr: "params.token" }, attachment: "a1" },
+    };
+    const { into: _into, ...notKept } = passing;
+    expect(
+      codesOf({ kept: withFiles(passing), notKept: withFiles(notKept) })
+    ).toStrictEqual({
+      kept: { "/steps/5/into": "workflow.sensitive" },
+      notKept: "ok",
+    });
+  });
 });
 
 describe("generating calls on the run's files and the Brain", () => {
-  it("calls typed members, and names a connection call's files permissions as sealed", () => {
-    const { source } = generated();
-    expect(
-      [
-        'const listed = await ctx.files.runFiles.list({}, { step: "listed" });',
-        'const notes = await ctx.files.runFiles.read({ file: listed[0].file }, { step: "notes" });',
-        'const searched = await ctx.brain.handbook.search({ text: notes.text }, { step: "searched" });',
-        'files: { runFiles: ["list", "read", "write", "delete"] }',
-        'brain: { handbook: ["search", "read", "recall"] }',
-        '{ step: "attachment", into: "runFiles" }',
-        '{ step: "forwarded", from: "runFiles" }',
-      ].filter((line) => !source.includes(line))
-    ).toStrictEqual([]);
+  it("calls each step's member with its step, and a connection's files permissions as sealed", () => {
+    expect(callsOf(generated().source)).toMatchObject({
+      listed: { member: "ctx.files.runFiles.list" },
+      notes: { member: "ctx.files.runFiles.read" },
+      searched: { member: "ctx.brain.handbook.search" },
+      doc: { member: "ctx.brain.handbook.read" },
+      recalled: { member: "ctx.brain.handbook.recall" },
+      summary: { member: "ctx.files.runFiles.write" },
+      attachment: {
+        member: "ctx.connections.mail.readAttachment",
+        into: "runFiles",
+      },
+      forwarded: { member: "ctx.connections.mail.send", from: "runFiles" },
+      removed: { member: "ctx.files.runFiles.delete" },
+    });
   });
 
   it("declares only the actions its steps take, so no other is a member", () => {
-    const { source } = generateWorkflow(
-      checked(withFiles({ ...listed }, { ...searched }))
-    );
+    const declared = (...steps: unknown[]) =>
+      permissionsOf(generateWorkflow(checked(withFiles(...steps))).source);
     expect({
-      files: source.includes('files: { runFiles: ["list"] }'),
-      brain: source.includes('brain: { handbook: ["search"] }'),
-      others: ['"write"', '"delete"', '"recall"'].filter((name) =>
-        source.includes(name)
-      ),
-    }).toStrictEqual({ files: true, brain: true, others: [] });
+      some: declared({ ...listed }, { ...searched }),
+      every: declared(...fileSteps()),
+    }).toMatchObject({
+      some: { files: { runFiles: ["list"] }, brain: { handbook: ["search"] } },
+      every: {
+        files: { runFiles: ["list", "read", "write", "delete"] },
+        brain: { handbook: ["search", "read", "recall"] },
+      },
+    });
   });
 
-  it("seals each files and Brain call's permission and action, its arguments a template, and a connection's files permissions", () => {
+  it("seals each files and Brain call's permission and action, its arguments a template, and a connection's files permissions only where the step names them", () => {
     const { task } = generated();
+    const filesOf = (id: string) => {
+      const sealed = task(id);
+      return sealed?.kind === "call" && sealed.call.name === "grasp.connector"
+        ? { into: sealed.call.into ?? null, from: sealed.call.from ?? null }
+        : null;
+    };
     expect({
       listed: task("listed"),
       notes: task("notes"),
       searched: task("searched"),
-      attachment: task("attachment"),
-      forwarded: task("forwarded"),
+      files: {
+        attachment: filesOf("attachment"),
+        forwarded: filesOf("forwarded"),
+      },
     }).toMatchObject({
       listed: {
         kind: "call",
@@ -197,23 +355,10 @@ describe("generating calls on the run's files and the Brain", () => {
       searched: {
         call: { name: "grasp.brain", binding: "handbook", operation: "search" },
       },
-      attachment: { call: { name: "grasp.connector", into: "runFiles" } },
-      forwarded: { call: { name: "grasp.connector", from: "runFiles" } },
-    });
-  });
-
-  it("seals a connection call's files permissions only where the step names them", () => {
-    const { task } = generated();
-    const keysOf = (id: string): string[] => {
-      const sealed = task(id);
-      return sealed?.kind === "call" ? Object.keys(sealed.call) : [];
-    };
-    expect({
-      attachment: keysOf("attachment"),
-      forwarded: keysOf("forwarded"),
-    }).toStrictEqual({
-      attachment: ["name", "binding", "operation", "arguments", "into"],
-      forwarded: ["name", "binding", "operation", "arguments", "from"],
+      files: {
+        attachment: { into: "runFiles", from: null },
+        forwarded: { into: null, from: "runFiles" },
+      },
     });
   });
 });

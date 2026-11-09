@@ -10,7 +10,11 @@ import { appFor } from "../src/apps.ts";
 import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { saveDocument } from "../src/knowledge/person-writes.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
-import { grantPermission, requestPermission } from "../src/permissions.ts";
+import {
+  grantPermission,
+  requestPermission,
+  revokePermission,
+} from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -135,6 +139,30 @@ const recalls = {
 };
 
 /**
+ * Recalls the run's query, then, after a pause, writes what it recalled
+ * to a file of the run: what the run read leaving it.
+ */
+const recallsThenWrites = {
+  steps: [
+    ...recalls.steps,
+    { id: "hold", type: "wait", for: "1 second" },
+    {
+      id: "written",
+      type: "call",
+      files: "runFiles",
+      action: "write",
+      args: {
+        name: "recalled.txt",
+        type: "text/plain",
+        text: { $expr: '"Recalled " + recalled.items.length' },
+      },
+    },
+  ],
+  returns: recalls.returns,
+  result: recalls.result,
+};
+
+/**
  * A workflow of `by`'s running `shape` on `docs`, its one collection: the
  * handbook everyone reads, the payroll team's own (`team`), or its
  * sensitive salaries collection (`sensitive`), granted to the workflow
@@ -144,11 +172,17 @@ const recalls = {
 const readingWorkflow = async (
   by: Identity,
   admin: Identity,
-  shape: typeof searchesAndReads | typeof recalls,
-  { sensitive = false, team: teamOnly = false } = {}
+  shape: {
+    readonly steps: readonly unknown[];
+    readonly returns: unknown;
+    readonly result: unknown;
+  },
+  { sensitive = false, team: teamOnly = false, files = false } = {}
 ) => {
   const key = `docs-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "knowledge" });
+  const filesKey = `files-${unique()}`;
+  await publishCatalogContract(env, admin, { key: filesKey, kind: "files" });
   const team = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare(
@@ -200,7 +234,10 @@ const readingWorkflow = async (
       },
       returns: shape.returns,
       result: shape.result,
-      permissions: { brain: { docs: { contract: key } } },
+      permissions: {
+        brain: { docs: { contract: key } },
+        ...(files ? { files: { runFiles: { contract: filesKey } } } : {}),
+      },
       steps: shape.steps,
     }),
     basedOn: null,
@@ -216,6 +253,13 @@ const readingWorkflow = async (
     target: { kind: "knowledge", permissionId },
     reviewed: { version: 1 },
   });
+  if (files) {
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "runFiles",
+      target: { kind: "files" },
+      reviewed: { version: 1 },
+    });
+  }
   return { workflow, documents: { leave: leave.id, elsewhere: elsewhere.id } };
 };
 
@@ -382,6 +426,62 @@ describe("a workflow's steps on a Brain collection", () => {
       // The bound collection's evidence alone.
       allowed: { status: "completed", output: { cited: ["Leave"] } },
       withoutBrain: { status: "failed", code: "brain.denied" },
+    });
+  });
+
+  it("write nothing of what the run recalled once it may no longer read it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await readingWorkflow(ada, admin, recallsThenWrites, {
+      files: true,
+    });
+    const brain = await granted(ada, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    const { runId } = await startWorkflow(
+      env,
+      { type: "person", person: ada },
+      workflow.id,
+      { version: 1, input: { doc: "", query: "leave" }, key: unique() }
+    );
+    if (runId === null) {
+      throw new Error("The start admitted no run");
+    }
+    // Revoked while the run pauses between its recall and its write.
+    await vi.waitFor(
+      async () => {
+        const row = await env.DB.prepare(
+          "SELECT count(*) AS n FROM run_brain_evidence WHERE run_id = ?"
+        )
+          .bind(runId)
+          .first<{ n: number }>();
+        expect(row?.n ?? 0).toBeGreaterThan(0);
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    await revokePermission(env, admin, brain);
+    const run: WorkflowResourceRun = await vi.waitFor(
+      async () => {
+        const read = await resourceRunFor(env, ada, workflow.id, runId);
+        expect(read.endedAt).not.toBeNull();
+        return read;
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const kept = await env.DB.prepare(
+      "SELECT count(*) AS n FROM workflow_run_files WHERE run_id = ?"
+    )
+      .bind(runId)
+      .first<{ n: number }>();
+    expect({
+      end: { status: run.status, code: run.error?.code },
+      files: kept?.n,
+    }).toStrictEqual({
+      end: { status: "failed", code: "brain.revoked" },
+      files: 0,
     });
   });
 });

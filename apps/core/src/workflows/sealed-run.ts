@@ -396,7 +396,9 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   refused; a file is read whole only when it is text of a run file's
 //   text types, at most one call's bytes; a write is text of those types
 //   only, checked against its type as an action's writes are, under the
-//   run's and the workflow's limits. Each call is one of the run's named
+//   run's and the workflow's limits; a delete takes only a finished file.
+//   Every files permission of a run reaches all of the run's files, never
+//   another run's: the run scopes them, not the alias. Each call is one of the run's named
 //   calls (`makeCall`): its authority decided again, a write gated by
 //   what the run may still read (`handsOut`: a file's name and bytes are
 //   shown outside the run once it's finished), its receipts kept with the

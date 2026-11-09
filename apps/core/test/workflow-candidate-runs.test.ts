@@ -1,4 +1,6 @@
 import { v } from "@grasp-os/sdk";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -12,6 +14,7 @@ import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { sweepReleases } from "../src/release-retention.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
@@ -1387,6 +1390,131 @@ describe("a draft's test run and what its workflow keeps between runs", () => {
       end: { status: "completed", output: { status: "done" } },
       frozen: '{"count":1}',
       now: { count: 2 },
+    });
+  });
+});
+
+/**
+ * A connector contract reading attachments as files and sending with run
+ * files, as a native connector's confirmed operations record it
+ * (`answersFile`, `takesFiles`): stored as such under a key of its own,
+ * as only a contract compared with what a connection serves is.
+ */
+const filingContract = async (admin: Identity): Promise<string> => {
+  const key = `filing-${unique()}`;
+  const contractOf = {
+    kind: "connector",
+    operations: {
+      "mail.readAttachment": {
+        input: descriptor({ message: "string" }),
+        output: descriptor({
+          name: "string",
+          contentType: "string",
+          encoding: "string",
+          content: "string",
+        }),
+        readOnly: true,
+        answersFile: true,
+      },
+      "mail.send": {
+        input: JSON.stringify(
+          v.object({
+            to: v.string(),
+            attachments: v.array(v.object({ file: v.string() })),
+          }).descriptor
+        ),
+        output: descriptor({ messageId: "string" }),
+        takesFiles: true,
+      },
+    },
+  };
+  const text = canonicalJson(z.json().parse(contractOf));
+  await env.DB.prepare(
+    "INSERT INTO workflow_catalog_contracts (key, kind, contract, fingerprint, published_by, published_at) VALUES (?, 'connector', ?, ?, ?, ?)"
+  )
+    .bind(key, text, await sha256Hex(text), admin.userId, Date.now())
+    .run();
+  return key;
+};
+
+describe("a draft's test run keeping and attaching run files", () => {
+  it("answers a read kept as a file with a stand-in reference, checked as a real read is, attaches it, and keeps nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const filing = await filingContract(admin);
+    const files = await contract(admin, "files");
+    const { workflow, revision } = await drafted(ada, {
+      permissions: {
+        connections: {
+          reader: { contract: filing },
+          mailer: { contract: filing },
+        },
+        files: { runFiles: { contract: files } },
+      },
+      steps: [
+        {
+          id: "kept",
+          type: "call",
+          connection: "reader",
+          action: "mail.readAttachment",
+          args: { message: "m1" },
+          into: "runFiles",
+        },
+        {
+          id: "sent",
+          type: "call",
+          connection: "mailer",
+          action: "mail.send",
+          args: {
+            to: { $expr: "args.who" },
+            attachments: [{ file: { $expr: "kept.file.file" } }],
+          },
+          from: "runFiles",
+        },
+      ],
+      status:
+        'kept.file.file + " " + kept.file.name + " " + kept.file.size + " " + sent.messageId',
+    });
+    const csv = "a,b\n1,2\n";
+    const run = async (content: string) => {
+      const { runId } = await startCandidateRun(env, ada, workflow.id, {
+        revision,
+        input: { who: "Ada" },
+        fixtures: {
+          reader: {
+            output: {
+              name: "invoice.csv",
+              contentType: "text/csv",
+              encoding: "base64",
+              content,
+            },
+          },
+          mailer: { output: { messageId: "m-1" } },
+        },
+      });
+      const calls = await callsOf(runId);
+      return {
+        end: endOf(await ended(ada, workflow.id, runId)),
+        calls: calls.length,
+        files: await countOf(
+          "SELECT count(*) AS n FROM workflow_run_files WHERE run_id = ?",
+          runId
+        ),
+      };
+    };
+    const kept = await run(btoa(csv));
+    // A fixture that isn't a file's content fails as a real read would.
+    const { end: notBase64 } = await run("not base64!");
+    expect({ kept, notBase64 }).toStrictEqual({
+      kept: {
+        end: {
+          status: "completed",
+          output: { status: `candidate invoice.csv ${csv.length} m-1` },
+        },
+        calls: 0,
+        files: 0,
+      },
+      notBase64: { status: "failed", code: "workflow.call_invalid" },
     });
   });
 });

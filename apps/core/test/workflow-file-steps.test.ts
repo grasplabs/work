@@ -17,6 +17,8 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { callFiles } from "../src/workflows/run-files.ts";
+import type { FilesCaller } from "../src/workflows/run-files.ts";
 import { allEvents } from "./audit-events.ts";
 import { unique } from "./sign-in.ts";
 
@@ -227,7 +229,7 @@ describe("a workflow's steps on its run's files", () => {
           after: 0,
         },
       },
-      done: ["write", "list", "readText", "delete", "list"],
+      done: ["write", "list", "readText", "deleteFinished", "list"],
       leaks: [],
       digests: [true],
     });
@@ -331,6 +333,99 @@ describe("a workflow's steps on its run's files", () => {
     expect({ end, files: kept?.count }).toStrictEqual({
       end: { status: "failed", code: "workflow.call_denied" },
       files: 0,
+    });
+  });
+});
+
+/** A caller of a step's files calls for a run of its own: its step's key. */
+const stepCaller = (requireHolds: () => void): FilesCaller => {
+  const runId = crypto.randomUUID();
+  return {
+    runId,
+    workflowId: crypto.randomUUID(),
+    effectKey: `${runId}:written:task`,
+    requireHolds,
+  };
+};
+
+/** The state of each of run `runId`'s files, as its rows keep them. */
+const statesOf = async (runId: string): Promise<string[]> => {
+  const rows = await env.DB.prepare(
+    "SELECT state FROM workflow_run_files WHERE run_id = ? ORDER BY created_at"
+  )
+    .bind(runId)
+    .all<{ state: string }>();
+  return rows.results.map(({ state }) => state);
+};
+
+/** The ID of the file a files call answered. */
+const fileOf = (output: unknown): string =>
+  z.object({ file: z.string() }).parse(output).file;
+
+/** How `pending` ended: "done", its error's code, or "failed". */
+const outcomeOf = async (pending: Promise<unknown>): Promise<string> => {
+  try {
+    await pending;
+    return "done";
+  } catch (error) {
+    const code: unknown =
+      typeof error === "object" && error !== null
+        ? Reflect.get(error, "code")
+        : undefined;
+    return typeof code === "string" ? code : "failed";
+  }
+};
+
+const note = { name: "notes.md", type: "text/markdown", text: "# Notes" };
+
+describe("a step's calls on its run's files, again", () => {
+  it("write one file however often an attempt dies after opening it: the next answers the file the first opened", async () => {
+    let held = 0;
+    // The lease lost once the file is open, before its text is added.
+    const stale = stepCaller(() => {
+      held += 1;
+      if (held > 2) {
+        throw new Error("The attempt no longer holds its lease.");
+      }
+    });
+    const died = await outcomeOf(callFiles(env, stale, "write", note));
+    const holding = { ...stale, requireHolds: () => {} };
+    const again = await callFiles(env, holding, "write", note);
+    const replayed = await callFiles(env, holding, "write", note);
+    expect({
+      died,
+      same: fileOf(again.output) === fileOf(replayed.output),
+      states: await statesOf(stale.runId),
+    }).toStrictEqual({ died: "failed", same: true, states: ["done"] });
+  });
+
+  it("delete a finished file once, answering a second delete as done, and never one still being written", async () => {
+    const caller = stepCaller(() => {});
+    const written = await callFiles(env, caller, "write", note);
+    const file = fileOf(written.output);
+    const first = await callFiles(env, caller, "deleteFinished", { file });
+    const second = await callFiles(env, caller, "deleteFinished", { file });
+    // A file another task opened and is still writing.
+    const open = await callFiles(
+      env,
+      { ...caller, effectKey: `${caller.runId}:other:task:1` },
+      "open",
+      { name: "draft.txt", type: "text/plain" }
+    );
+    const unfinished = await outcomeOf(
+      callFiles(env, caller, "deleteFinished", { file: fileOf(open.output) })
+    );
+    const states = await statesOf(caller.runId);
+    expect({
+      first: first.output,
+      second: second.output,
+      unfinished,
+      states,
+    }).toStrictEqual({
+      first: null,
+      second: null,
+      unfinished: "file.not_finished",
+      states: ["deleted", "writing"],
     });
   });
 });
