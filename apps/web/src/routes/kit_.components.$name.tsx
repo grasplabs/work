@@ -3,7 +3,7 @@ import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { createFileRoute, notFound, useParams } from "@tanstack/react-router";
 
 // Local gallery of the UI kit: one component's demo per page, which the
-// accessibility checks in e2e/catalog.e2e.ts go through. Not product UI:
+// accessibility checks in packages/ui/test/kit.browser.test.tsx go through. Not product UI:
 // like /kit, builds in production mode answer not found.
 //
 // Only the component reads `demos` statically, so the code splitter keeps

@@ -1,7 +1,7 @@
 import { BrandHeader } from "@grasp-os/ui/components/brand-header";
 // Demos of the kit's navigation components and the command palette. One
 // per component, for the dev-only gallery and its accessibility checks
-// (e2e/catalog.e2e.ts).
+// (test/kit.browser.test.tsx).
 import {
   Breadcrumb,
   BreadcrumbItem,

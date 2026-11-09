@@ -6,7 +6,7 @@ import { lazy, Suspense } from "react";
 
 // Local gallery of the UI kit's examples, one per page, each loaded by
 // name only when its page renders it; the accessibility
-// checks in e2e/catalog.e2e.ts go through them. Not product UI: like /kit,
+// checks in packages/ui/test/kit.browser.test.tsx go through them. Not product UI: like /kit,
 // builds in production mode answer not found.
 
 const isExample = (name: string): name is ExampleName =>

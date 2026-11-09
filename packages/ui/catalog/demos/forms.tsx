@@ -1,5 +1,5 @@
 // Demos of the kit's buttons and form controls, one per component, for the
-// dev-only gallery and its accessibility checks (e2e/catalog.e2e.ts). Every
+// dev-only gallery and its accessibility checks (test/kit.browser.test.tsx). Every
 // control has a name.
 import { Button } from "@grasp-os/ui/components/button";
 import {

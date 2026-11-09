@@ -1,5 +1,5 @@
 // Demos of the kit's overlays: dialogs, sheets, menus and popups. Each opens
-// from a trigger named "Open <component>", which e2e/catalog.e2e.ts opens
+// from a trigger named "Open <component>", which test/kit.browser.test.tsx opens
 // from the keyboard and closes with Escape.
 import {
   AlertDialog,
