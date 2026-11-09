@@ -440,7 +440,9 @@ jobs:
         with:
           save: true
       # About 70 s, the most of this job's 2 minutes: the parts wait for it.
-      - run: vp run e2e:build
+      # Then the parallel parts' tests, listed once for all fourteen
+      # (scripts/e2e-parts.ts): the count is e2e's matrix's, below.
+      - run: vp run e2e:build && node scripts/e2e-parts.ts --all 14
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-stack
@@ -450,6 +452,7 @@ jobs:
             apps/connect/dist
             packages/compiler/dist
             apps/core/.wrangler/e2e-state-migrated
+            e2e/dist/parts
           if-no-files-found: error
           # The state sits under .wrangler.
           include-hidden-files: true
@@ -551,13 +554,7 @@ jobs:
           sampler=$!
           trap 'kill "$sampler"' EXIT
           if [ "$GRASP_E2E_PART" = parallel ]; then
-            # As many lists as parts: e2e-build's `--all` and this matrix agree.
-            lists=$(find e2e/dist/parts -name '*.txt' | wc -l)
-            if [ "$lists" -ne "${PART##*-of-}" ]; then
-              echo "::error title=e2e parts::e2e-build listed $lists parts, the matrix has ${PART##*-of-}: change both together."
-              exit 1
-            fi
-            node_modules/.bin/playwright test --project chromium --test-list "e2e/dist/parts/$PART.txt" --reporter=github,json
+            vp run e2e --project chromium --test-list "e2e/dist/parts/$PART.txt" --reporter=github,json
           elif [ -n "$SHARD" ]; then
             node_modules/.bin/playwright test --shard "$SHARD" --reporter=github,json
           else
