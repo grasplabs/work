@@ -22,8 +22,9 @@ import type { SealedSteps } from "./sealed-steps.ts";
 // What an independent run waits on now, as its pages are shown it (spec
 // 10.7.2), read from the engine's journal (workerflow's `pendingWaits`),
 // never guessed from its definition or status. The run host (sealed-run.ts)
-// names its steps `<task>:<kind>` with each loop's index after `@`
-// (sealed-steps.ts), each placed by its build's table of tasks:
+// names its steps `<task>:<part>`, from a task's second run in a loop's
+// items on with its count of earlier runs after `@` (sealed-steps.ts),
+// each placed by its build's table of tasks:
 //
 // - a timer: a wait task's sleep (`<task>:task`, a deadline's too), a
 //   retry of any of a task's steps, or a catch's retry's backoff and its
