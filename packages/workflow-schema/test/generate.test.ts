@@ -258,7 +258,7 @@ describe("generating a workflow", () => {
     });
   });
 
-  it("makes no name of an ID, imports only the workflow SDK, and loops only as a forEach", () => {
+  it("makes no name of an ID, imports only the workflow SDK and its generated helpers, and loops only as a forEach", () => {
     const generated = generateWorkflow(checked(withLoops()), "workflow");
     const { body } = parse(generated.source).program;
     const imports = body.flatMap((statement) =>
@@ -291,7 +291,7 @@ describe("generating a workflow", () => {
         "ForInStatement",
       ].filter((type) => types.has(type)),
     }).toStrictEqual({
-      imports: ["@grasp-os/sdk/workflow"],
+      imports: ["@grasp-os/sdk/workflow", "@grasp-os/sdk/workflow-generated"],
       ids: [],
       loops: [],
     });
@@ -817,10 +817,14 @@ describe("generating a workflow", () => {
     const unimported = [everyStep(), withDecisions(decision()), withLoops()]
       .map((document) => generateWorkflow(checked(document), "workflow"))
       .flatMap(({ source }) => {
-        const imported = source.split("\n")[1] ?? "";
+        const imported = source
+          .split("\n")
+          .filter((line) => line.startsWith("import "))
+          .join("\n");
         return helpers.filter(
           (name) =>
-            source.includes(`${name}(`) && !imported.includes(` ${name},`)
+            source.includes(`${name}(`) &&
+            !new RegExp(`[{ ,]${name}[ ,}]`, "u").test(imported)
         );
       });
 

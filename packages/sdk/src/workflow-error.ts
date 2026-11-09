@@ -73,6 +73,21 @@ export const parseOrThrow = <Schema extends z.ZodType>(
   return result.data;
 };
 
+/**
+ * What a value's check found wrong, as one line: the first issue, where
+ * in the value it is (`at lines.0.total: …`).
+ */
+export const issueText = (
+  issues: readonly {
+    readonly message: string;
+    readonly path?: readonly PropertyKey[];
+  }[]
+): string => {
+  const [issue] = issues;
+  const at = issue?.path?.map(String).join(".") ?? "";
+  return `${at === "" ? "" : `at ${at}: `}${issue?.message ?? "not of its schema"}`;
+};
+
 /** `value` checked by `schema`, a `v` schema, or `code` thrown naming `what`. */
 export const checkOrThrow = <Input, Output>(
   schema: ValueSchema<Input, Output>,
@@ -84,10 +99,5 @@ export const checkOrThrow = <Input, Output>(
   if (result.issues === undefined) {
     return result.value;
   }
-  const [issue] = result.issues;
-  const at = issue?.path.join(".") ?? "";
-  throw new WorkflowError(
-    code,
-    `${what}${at === "" ? "" : ` at ${at}`}: ${issue?.message ?? "not of its schema"}`
-  );
+  throw new WorkflowError(code, `${what}: ${issueText(result.issues)}`);
 };

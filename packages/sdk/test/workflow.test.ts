@@ -40,6 +40,15 @@ const labelled = (label: string) =>
     async () => null
   );
 
+/** A workflow declaring one parameter of `type`, as a thunk. */
+const declared = (type: unknown) => () =>
+  workflow(
+    "typed",
+    // @ts-expect-error -- a type is a `v` schema
+    { params: { limit: { label: "Limit", type } } },
+    async () => null
+  );
+
 /** What `work` came to: its answer, or its error's message. */
 const settledOutcome = async (
   work: () => Promise<unknown>
@@ -56,6 +65,21 @@ describe("workflow definitions", () => {
     expect(() => workflow("", { params: noParams }, async () => null)).toThrow(
       expect.objectContaining({ code: "workflow.invalid_definition" })
     );
+  });
+
+  it("rejects a parameter whose type isn't a `v` schema with a default", () => {
+    for (const type of [
+      v.number(),
+      v.number().optional(),
+      { descriptor: { kind: "number" } },
+      "number",
+      undefined,
+    ]) {
+      expect(declared(type)).toThrow(
+        expect.objectContaining({ code: "workflow.invalid_definition" })
+      );
+    }
+    expect(declared(v.number().default(3))).not.toThrow();
   });
 
   it("rejects parameters past the bounds the platform keeps, such as a label over 200 characters", () => {
@@ -98,7 +122,7 @@ describe("workflow definitions", () => {
 
     expect({
       fits: await run({ who: "Ada" }),
-      unfit: String(await run({ who: 7 })).startsWith("Input at who"),
+      unfit: String(await run({ who: 7 })).startsWith("Input: at who"),
     }).toStrictEqual({ fits: "Hello, Ada", unfit: true });
   });
 });

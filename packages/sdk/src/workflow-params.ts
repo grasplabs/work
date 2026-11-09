@@ -1,13 +1,11 @@
-import {
-  paramDeclarationSchema,
-  paramDeclarationsSchema,
-  sensitiveParamKey,
-} from "@grasp-os/shared/workflows";
+import { sensitiveParamKey } from "@grasp-os/shared/workflows";
 
+import { descriptorOf } from "./sealed-descriptors.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
+import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer } from "./value-types.ts";
-import { checkOrThrow, invalidCall, parseOrThrow } from "./workflow-error.ts";
+import { checkOrThrow, invalidCall, WorkflowError } from "./workflow-error.ts";
 
 /**
  * The runtime's `Object.freeze`, kept as this module loads: a run's main
@@ -73,16 +71,43 @@ export const describeParams = (params: Params): ParamMetadata[] =>
     type: definition.type.descriptor,
   }));
 
+/** The longest label a parameter has, as the format holds it. */
+const maxLabelLength = 200;
+
+/**
+ * Refuses (`workflow.invalid_definition`) a parameter whose label isn't 1
+ * to 200 characters, or whose type isn't a `v` schema with a default: the
+ * code declares only the parameters it reads, never a sensitive one, so
+ * each has a value to start with. A definition outside them fails as it
+ * loads, so its tests fail and the version is never made current.
+ */
 export const validateParams = (params: Params): void => {
-  // Within the bounds core keeps (`paramDeclarationsSchema`): a definition
-  // outside them fails here, so its tests fail and the version is never
-  // made current, rather than every run of it failing to load.
-  parseOrThrow(
-    paramDeclarationsSchema(paramDeclarationSchema),
-    describeParams(params),
-    "workflow.invalid_definition",
-    "Parameters"
-  );
+  for (const [name, { label, type }] of Object.entries(params)) {
+    const invalid = (reason: string): never => {
+      throw new WorkflowError(
+        "workflow.invalid_definition",
+        `Parameter "${name}": ${reason}`
+      );
+    };
+    if (
+      typeof label !== "string" ||
+      label === "" ||
+      label.length > maxLabelLength
+    ) {
+      invalid(`its label is 1 to ${maxLabelLength} characters`);
+    }
+    let presence: string | undefined;
+    try {
+      ({ presence } = descriptorOf(type));
+    } catch (error) {
+      if (!(error instanceof ValueDefinitionError)) {
+        throw error;
+      }
+    }
+    if (presence !== "default") {
+      invalid("its type is a `v` schema with a `.default()`");
+    }
+  }
 };
 
 export const resolveParams = (

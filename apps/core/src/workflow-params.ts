@@ -250,11 +250,16 @@ const currentContract = async (
  */
 const schemaOfParam = (descriptor: Json): Json => {
   try {
-    const schema: unknown = jsonSchemaOf(
-      schemaFromDescriptor(JSON.stringify(descriptor)).descriptor,
-      { exact: true }
-    );
-    return z.json().parse(schema);
+    const read = schemaFromDescriptor(JSON.stringify(descriptor)).descriptor;
+    const schema = jsonSchemaOf(read, { exact: true });
+    // Money and a schedule are marked, as the start form marks a person,
+    // so the page takes each in fields of its own: an amount and a
+    // currency, cron fields and a time zone.
+    const marked =
+      (read.kind === "money" || read.kind === "schedule") && !read.nullable
+        ? { ...schema, "x-grasp-value": { kind: read.kind } }
+        : schema;
+    return z.json().parse(marked);
   } catch {
     return null;
   }

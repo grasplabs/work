@@ -2,14 +2,86 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   fieldValueOf,
+  isBlank,
   nextFieldBase,
   paramKindOf,
   paramText,
   paramValueOf,
+  withPart,
 } from "./param-values.ts";
 import type { ParamKind } from "./param-values.ts";
 
+/** A field's text once each of `parts` is typed in it, in order. */
+const typed = (parts: Record<string, string>): string => {
+  let text = "";
+  for (const [name, value] of Object.entries(parts)) {
+    text = withPart(text, name, value);
+  }
+  return text;
+};
+
 describe("a workflow parameter's field", () => {
+  it("takes money as an amount and a currency, and a schedule as cron fields and a time zone", () => {
+    const money = { type: "object", "x-grasp-value": { kind: "money" } };
+    const schedule = { type: "object", "x-grasp-value": { kind: "schedule" } };
+    expect({
+      kinds: [
+        paramKindOf(money),
+        paramKindOf(schedule),
+        // A sensitive value is replaced as JSON, never shown in parts.
+        paramKindOf(money, true),
+      ],
+      money: [
+        paramValueOf("money", typed({ amount: "5000.5", currency: "eur" })),
+        paramValueOf("money", typed({ amount: "12", currency: "JPY" })),
+        paramValueOf("money", typed({ amount: "-0.07", currency: "EUR" })),
+        // More decimals than the currency has, no currency, not a number.
+        paramValueOf("money", typed({ amount: "1.234", currency: "EUR" })),
+        paramValueOf("money", typed({ amount: "12" })),
+        paramValueOf("money", typed({ amount: "1e3", currency: "EUR" })),
+      ],
+      schedule: [
+        paramValueOf(
+          "schedule",
+          typed({ cron: " 0 8 * * 1 ", timeZone: "Europe/Amsterdam" })
+        ),
+        paramValueOf("schedule", typed({ cron: "0 8 * * 1" })),
+      ],
+      shown: [
+        paramText("money", { minorUnits: 500_050, currency: "EUR" }),
+        paramText("money", { minorUnits: 7, currency: "EUR" }),
+        paramText("money", { minorUnits: 1200, currency: "JPY" }),
+        paramText("schedule", { cron: "0 8 * * 1", timeZone: "UTC" }),
+      ],
+      blank: [
+        isBlank("money", ""),
+        isBlank("money", typed({ amount: " ", currency: "" })),
+        isBlank("money", typed({ amount: "1" })),
+      ],
+    }).toStrictEqual({
+      kinds: ["money", "schedule", "json"],
+      money: [
+        { value: { minorUnits: 500_050, currency: "EUR" } },
+        { value: { minorUnits: 12, currency: "JPY" } },
+        { value: { minorUnits: -7, currency: "EUR" } },
+        undefined,
+        undefined,
+        undefined,
+      ],
+      schedule: [
+        { value: { cron: "0 8 * * 1", timeZone: "Europe/Amsterdam" } },
+        undefined,
+      ],
+      shown: [
+        '{"amount":"5000.50","currency":"EUR"}',
+        '{"amount":"0.07","currency":"EUR"}',
+        '{"amount":"1200","currency":"JPY"}',
+        '{"cron":"0 8 * * 1","timeZone":"UTC"}',
+      ],
+      blank: [true, true, false],
+    });
+  });
+
   it("takes a value by the kind its schema says", () => {
     expect({
       kinds: [
@@ -20,7 +92,7 @@ describe("a workflow parameter's field", () => {
         { type: "object" },
         { type: ["string", "null"] },
         null,
-      ].map(paramKindOf),
+      ].map((schema) => paramKindOf(schema)),
       values: [
         paramValueOf("string", "  spaced  "),
         paramValueOf("string", ""),

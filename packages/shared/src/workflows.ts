@@ -88,40 +88,6 @@ export const workflowErrors = defineErrorFamily({
     "The workflow run failed, and undoing what it had done failed too.",
 });
 
-/**
- * A parameter as a workflow's code declares it (the SDK's
- * `ParamMetadata`), within the bounds core keeps and shows: the SDK
- * refuses a definition outside them, so a version whose declarations core
- * would refuse never passes its tests. Its type, and whether its default
- * fits it, are `v`'s to check.
- */
-export const paramDeclarationSchema = z.object({
-  name: z.string().regex(/^[A-Za-z_$][\w$]{0,63}$/u),
-  label: z.string().max(200),
-});
-
-/** Most parameters one workflow declares. */
-const maxParamDeclarations = 100;
-
-/**
- * A workflow's parameter declarations, each as `item` has it: at most
- * {@link maxParamDeclarations}, and each name once: with two declarations
- * of one name, which one a read goes by would be anyone's guess.
- */
-export const paramDeclarationsSchema = <
-  Item extends z.ZodType<{ name: string }>,
->(
-  item: Item
-) =>
-  z
-    .array(item)
-    .max(maxParamDeclarations)
-    .refine(
-      (params) =>
-        new Set(params.map(({ name }) => name)).size === params.length,
-      { message: "Each name once" }
-    );
-
 /** Whether the runtime knows `timeZone`, an IANA name like `Europe/Amsterdam`. */
 export const isTimeZone = (timeZone: string): boolean => {
   try {

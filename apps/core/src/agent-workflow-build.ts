@@ -506,7 +506,7 @@ const workflowBuildDeclaration = `/**
  * \`person\`, \`model\`, \`template\` and \`schedule\` (\`{ cron, timeZone }\`); any of them takes
  * \`"nullable": true\`, and \`"optional": true\` or \`"default": <value>\`. \`params\` are values people set
  * without editing the workflow: \`{ [name]: { label, type, sensitive?: false } }\`, sensitive (never
- * shown or read by code, its type without a default) unless \`sensitive: false\`, when its type has a
+ * shown or read by code, its type without a default, literal or enum anywhere) unless \`sensitive: false\`, when its type has a
  * \`default\`: \`{ "label": "Review above", "type": { "kind": "money", "default": { "minorUnits":
  * 500000, "currency": "EUR" } }, "sensitive": false }\`. \`bindings\` declare
  * what the workflow calls outside itself: \`{ [alias]: { kind, contract, title? } }\`, kind one

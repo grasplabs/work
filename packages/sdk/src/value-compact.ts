@@ -1,7 +1,10 @@
+import { canonicalText } from "@grasp-os/shared/json";
+
 import { seal } from "./descriptor-seal.ts";
 import {
   descriptorVersion,
   isPlainObject,
+  unsafeKeys,
   ValueDefinitionError,
   valueLimits,
 } from "./value-descriptor.ts";
@@ -130,149 +133,6 @@ export class CompactDescriptorError extends ValueDefinitionError {
   }
 }
 
-/** What reading one compact descriptor has spent of its limits so far. */
-interface Budget {
-  nodes: number;
-}
-
-const refuse = (message: string): never => {
-  throw new ValueDefinitionError("definition.invalid_descriptor", message);
-};
-
-/** Refuses a key `input`'s kind doesn't have, and a flag that isn't `true`. */
-const checkKeys = (input: Record<string, unknown>, kind: string): void => {
-  const own = kindKeys[kind] ?? [];
-  for (const key of Object.keys(input)) {
-    if (key !== "kind" && !own.includes(key) && !modifierKeys.has(key)) {
-      refuse(`\`${key.slice(0, 64)}\` isn't a key of a \`${kind}\`.`);
-    }
-    if (flagKeys.has(key) && input[key] !== true) {
-      refuse(`\`${key}\` is \`true\`, or left out.`);
-    }
-  }
-  if (Object.hasOwn(input, "optional") && Object.hasOwn(input, "default")) {
-    refuse("A value is `optional` or has a `default`, never both.");
-  }
-};
-
-/** The kind `input` names, once it is one of the kinds `v` has. */
-const kindOf = (input: Record<string, unknown>): string => {
-  const { kind } = input;
-  if (typeof kind !== "string" || !Object.hasOwn(kindKeys, kind)) {
-    return refuse(
-      `\`kind\` is one of ${Object.keys(kindKeys).join(", ")}, as \`v\` names them.`
-    );
-  }
-  return kind;
-};
-
-/** Reads `input` at `path`, its nested descriptors first (see the header). */
-const expand = (
-  input: unknown,
-  path: readonly (string | number)[],
-  budget: Budget
-): ValueDescriptor => {
-  const nested = (value: unknown, ...at: (string | number)[]) =>
-    expand(value, [...path, ...at], budget);
-  try {
-    budget.nodes += 1;
-    if (
-      path.length >= valueLimits.depth * 2 ||
-      budget.nodes > valueLimits.descriptorNodes
-    ) {
-      throw new ValueDefinitionError(
-        "definition.too_large",
-        "The descriptor nests too deep or declares too much."
-      );
-    }
-    if (!isPlainObject(input)) {
-      return refuse("A descriptor is a JSON object with a `kind`.");
-    }
-    const kind = kindOf(input);
-    checkKeys(input, kind);
-    const {
-      nullable,
-      optional,
-      default: defaultValue,
-      trim,
-      email,
-      integer,
-      ...rest
-    } = input;
-    const draft: Record<string, unknown> = {
-      descriptorVersion,
-      nullable: nullable === true,
-      ...rest,
-    };
-    if (Object.hasOwn(input, "default")) {
-      draft.presence = "default";
-      draft.defaultValue = defaultValue;
-    } else {
-      draft.presence = optional === true ? "optional" : "required";
-    }
-    if (kind === "string") {
-      draft.trim = trim === true;
-      draft.email = email === true;
-    } else if (kind === "number") {
-      draft.integer = integer === true;
-    } else if (kind === "array") {
-      draft.item = nested(input.item, "item");
-    } else if (kind === "record") {
-      draft.value = nested(input.value, "value");
-    } else if (kind === "union") {
-      const { members } = input;
-      // The length is checked before a member is read.
-      if (
-        !Array.isArray(members) ||
-        members.length > valueLimits.unionMembers
-      ) {
-        return refuse(
-          `A union's \`members\` are a list of at most ${valueLimits.unionMembers} descriptors.`
-        );
-      }
-      draft.members = members.map((member: unknown, index) =>
-        nested(member, "members", index)
-      );
-    } else if (kind === "object") {
-      const { fields } = input;
-      if (!isPlainObject(fields)) {
-        return refuse(
-          "An object's `fields` are a map of names to descriptors."
-        );
-      }
-      const descriptors: Record<string, unknown> = {};
-      for (const [name, field] of Object.entries(fields)) {
-        // Defined, not assigned: `seal` refuses a prototype key by name.
-        Object.defineProperty(descriptors, name, {
-          enumerable: true,
-          value: nested(field, "fields", name),
-        });
-      }
-      draft.fields = descriptors;
-    }
-    return seal(draft);
-  } catch (error) {
-    if (
-      error instanceof ValueDefinitionError &&
-      !(error instanceof CompactDescriptorError)
-    ) {
-      throw new CompactDescriptorError(error, path);
-    }
-    throw error;
-  }
-};
-
-/**
- * The full descriptor `input`, a compact one, stands for, sealed as `v`
- * seals one: checked as strictly as a declaration in code. Throws
- * `CompactDescriptorError`, whose `path` leads to the descriptor at fault,
- * for anything that isn't a compact descriptor: an unknown kind or key, a
- * flag that isn't `true`, invalid bounds or defaults, prototype keys, and
- * descriptors past the limits.
- */
-export const descriptorFromCompact = (input: unknown): ValueDescriptor =>
-  expand(input, [], { nodes: 0 });
-
 /** A descriptor's `min` and `max`, those it sets. */
 const boundsOf = (descriptor: {
   readonly min?: number;
@@ -371,6 +231,208 @@ export const compactDescriptor = (
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return out as CompactDescriptor;
 };
+
+/** The longest compact form a refusal spells out for its writer. */
+const canonicalHintLength = 300;
+
+/** What reading one compact descriptor has spent of its limits so far. */
+interface Budget {
+  nodes: number;
+}
+
+const refuse = (message: string): never => {
+  throw new ValueDefinitionError("definition.invalid_descriptor", message);
+};
+
+/** Refuses a key `input`'s kind doesn't have, and a flag that isn't `true`. */
+const checkKeys = (input: Record<string, unknown>, kind: string): void => {
+  const own = kindKeys[kind] ?? [];
+  for (const key of Object.keys(input)) {
+    if (key !== "kind" && !own.includes(key) && !modifierKeys.has(key)) {
+      refuse(`\`${key.slice(0, 64)}\` isn't a key of a \`${kind}\`.`);
+    }
+    if (flagKeys.has(key) && input[key] !== true) {
+      refuse(`\`${key}\` is \`true\`, or left out.`);
+    }
+  }
+  if (Object.hasOwn(input, "optional") && Object.hasOwn(input, "default")) {
+    refuse("A value is `optional` or has a `default`, never both.");
+  }
+};
+
+/** The kind `input` names, once it is one of the kinds `v` has. */
+const kindOf = (input: Record<string, unknown>): string => {
+  const { kind } = input;
+  if (typeof kind !== "string" || !Object.hasOwn(kindKeys, kind)) {
+    return refuse(
+      `\`kind\` is one of ${Object.keys(kindKeys).join(", ")}, as \`v\` names them.`
+    );
+  }
+  return kind;
+};
+
+/** A path's next step, read as a nested descriptor of its own. */
+type Nested = (value: unknown, ...at: (string | number)[]) => ValueDescriptor;
+
+/** An object's fields, each read where it is; a prototype key refused there. */
+const fieldsOf = (
+  fields: unknown,
+  path: readonly (string | number)[],
+  nested: Nested
+): Record<string, unknown> => {
+  if (!isPlainObject(fields)) {
+    return refuse("An object's `fields` are a map of names to descriptors.");
+  }
+  const descriptors: Record<string, unknown> = {};
+  for (const [name, field] of Object.entries(fields)) {
+    if (unsafeKeys.has(name)) {
+      throw new CompactDescriptorError(
+        new ValueDefinitionError(
+          "definition.invalid_key",
+          "A field is never named `__proto__`, `constructor` or `prototype`."
+        ),
+        [...path, "fields", name]
+      );
+    }
+    Object.defineProperty(descriptors, name, {
+      enumerable: true,
+      value: nested(field, "fields", name),
+    });
+  }
+  return descriptors;
+};
+
+/** What a kind that nests holds, its parts read first; `{}` for any other. */
+const nestedDraft = (
+  kind: string,
+  input: Record<string, unknown>,
+  path: readonly (string | number)[],
+  nested: Nested
+): Record<string, unknown> => {
+  if (kind === "array") {
+    return { item: nested(input.item, "item") };
+  }
+  if (kind === "record") {
+    return { value: nested(input.value, "value") };
+  }
+  if (kind === "object") {
+    return { fields: fieldsOf(input.fields, path, nested) };
+  }
+  if (kind !== "union") {
+    return {};
+  }
+  const { members } = input;
+  // The length is checked before a member is read.
+  if (!Array.isArray(members) || members.length > valueLimits.unionMembers) {
+    return refuse(
+      `A union's \`members\` are a list of at most ${valueLimits.unionMembers} descriptors.`
+    );
+  }
+  return {
+    members: members.map((member: unknown, index) =>
+      nested(member, "members", index)
+    ),
+  };
+};
+
+/**
+ * `sealed`, once `input` is its one spelling: what `v` seals it to,
+ * written back, is what was read, or the reader refuses it (a union with
+ * a null member, a default its own `.trim()` changes, a lone member).
+ */
+const canonicalOnly = (
+  input: Record<string, unknown>,
+  sealed: ValueDescriptor
+): ValueDescriptor => {
+  const canonical = compactDescriptor(sealed);
+  if (canonicalText(input) === canonicalText(canonical)) {
+    return sealed;
+  }
+  const written = JSON.stringify(canonical);
+  return refuse(
+    written.length <= canonicalHintLength
+      ? `Write it in its one compact form: ${written}`
+      : "Write it in its one compact form, as `v` would declare it."
+  );
+};
+
+/** The flags a kind has, each false where the compact form leaves it out. */
+const flagsOf = (
+  kind: string,
+  { trim, email, integer }: Record<string, unknown>
+): Record<string, boolean> => {
+  if (kind === "string") {
+    return { trim: trim === true, email: email === true };
+  }
+  return kind === "number" ? { integer: integer === true } : {};
+};
+
+/** Reads `input` at `path`, its nested descriptors first (see the header). */
+const expand = (
+  input: unknown,
+  path: readonly (string | number)[],
+  budget: Budget
+): ValueDescriptor => {
+  const nested: Nested = (value, ...at) =>
+    expand(value, [...path, ...at], budget);
+  try {
+    budget.nodes += 1;
+    if (
+      path.length >= valueLimits.depth * 2 ||
+      budget.nodes > valueLimits.descriptorNodes
+    ) {
+      throw new ValueDefinitionError(
+        "definition.too_large",
+        "The descriptor nests too deep or declares too much."
+      );
+    }
+    if (!isPlainObject(input)) {
+      return refuse("A descriptor is a JSON object with a `kind`.");
+    }
+    const kind = kindOf(input);
+    checkKeys(input, kind);
+    const {
+      nullable,
+      optional,
+      default: defaultValue,
+      trim,
+      email,
+      integer,
+      ...rest
+    } = input;
+    const presence = Object.hasOwn(input, "default")
+      ? { presence: "default", defaultValue }
+      : { presence: optional === true ? "optional" : "required" };
+    const sealed = seal({
+      descriptorVersion,
+      nullable: nullable === true,
+      ...presence,
+      ...rest,
+      ...flagsOf(kind, { trim, email, integer }),
+      ...nestedDraft(kind, input, path, nested),
+    });
+    return canonicalOnly(input, sealed);
+  } catch (error) {
+    if (
+      error instanceof ValueDefinitionError &&
+      !(error instanceof CompactDescriptorError)
+    ) {
+      throw new CompactDescriptorError(error, path);
+    }
+    throw error;
+  }
+};
+
+/**
+ * The full descriptor `input`, a compact one, stands for, sealed as `v`
+ * seals one: checked as strictly as a declaration in code. Throws
+ * `CompactDescriptorError`, whose `path` leads to the descriptor at fault,
+ * for anything that isn't a compact descriptor: an unknown kind or key, a
+ * flag that isn't `true`, invalid bounds or defaults, prototype keys, and
+ * descriptors past the limits.
+ */
+export const descriptorFromCompact = (input: unknown): ValueDescriptor =>
+  expand(input, [], { nodes: 0 });
 
 // The JSON Schema (draft 2020-12) of the compact form, as `$defs` a schema
 // that holds descriptors takes in: `descriptor` refers to itself as

@@ -2,6 +2,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 
 import { schemaFromDescriptor } from "./descriptor-text.ts";
+import { issueText } from "./workflow-error.ts";
 
 /**
  * `value` held to the value descriptor `descriptor` holds as JSON text,
@@ -19,11 +20,7 @@ const fitOf = (
   if (result.issues === undefined) {
     return { value: z.json().parse(result.value) };
   }
-  const [issue] = result.issues;
-  const at = issue?.path?.join(".") ?? "";
-  return {
-    unfit: `${at === "" ? "" : `at ${at}: `}${issue?.message ?? "not of its schema"}`,
-  };
+  return { unfit: issueText(result.issues) };
 };
 
 /**

@@ -435,12 +435,33 @@ describe("checking a workflow", () => {
         sensitive: false,
       }),
       sensitiveWithout: withParam({ label: "Key", type: { kind: "string" } }),
+      nestedDefault: withParam({
+        label: "Key",
+        type: {
+          kind: "object",
+          fields: { secret: { kind: "string", default: "sk-live" } },
+        },
+      }),
+      literal: withParam({
+        label: "Key",
+        type: { kind: "literal", value: "sk-live" },
+      }),
+      enumValues: withParam({
+        label: "Key",
+        type: {
+          kind: "array",
+          item: { kind: "enum", values: ["sk-live", "sk-test"] },
+        },
+      }),
     }).toStrictEqual({
       unmarked: ["/params/token/type"],
       marked: ["/params/token/type"],
       empty: ["/params/token/type"],
       plainWithout: ["/params/token/type"],
       sensitiveWithout: "ok",
+      nestedDefault: ["/params/token/type"],
+      literal: ["/params/token/type"],
+      enumValues: ["/params/token/type"],
     });
   });
 

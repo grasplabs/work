@@ -3,7 +3,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type {
   Authority,
   PermissionRequest,
@@ -1626,6 +1626,48 @@ describe("parameter configuration", () => {
         { name: "token", set: true, value: null },
       ],
     });
+  });
+
+  it("marks money and a schedule for the page, which takes each in parts", async () => {
+    const ada = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `kinds-${unique()}`
+    );
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: documentOf({
+        params: {
+          fee: {
+            label: "Fee",
+            type: {
+              kind: "money",
+              default: { minorUnits: 500, currency: "EUR" },
+            },
+            sensitive: false,
+          },
+          when: {
+            label: "When",
+            type: {
+              kind: "schedule",
+              default: { cron: "0 8 * * 1", timeZone: "Europe/Amsterdam" },
+            },
+            sensitive: false,
+          },
+        },
+      }),
+      basedOn: null,
+    });
+    const { params } = await workflowParams(env, ada, workflow.id);
+    expect(
+      params.map(({ name, schema }) => [
+        name,
+        isRecord(schema) ? schema["x-grasp-value"] : undefined,
+      ])
+    ).toStrictEqual([
+      ["fee", { kind: "money" }],
+      ["when", { kind: "schedule" }],
+    ]);
   });
 
   it("refuses values too large together to fit a start's receipt, before saving anything", async () => {

@@ -85,6 +85,62 @@ describe("a descriptor's compact form", () => {
     ).toStrictEqual(whole);
   });
 
+  it("reads back null, unions as `v` collapses them, and defaults at any depth", () => {
+    const cases = [
+      v.null(),
+      v.string().nullable(),
+      v.union(v.string(), v.null()),
+      v.union(v.null(), v.null()).optional(),
+      v.union(v.string(), v.number()).nullable(),
+      v.object({
+        inner: v
+          .object({
+            n: v.number().default(3),
+            tags: v.array(v.enum(["a", "b"])).default(["a"]),
+          })
+          .default({ n: 1, tags: [] }),
+      }),
+      v.array(v.object({ note: v.string().trim().default("") })),
+    ].map(({ descriptor }) => descriptor);
+
+    expect(
+      cases.map((descriptor) =>
+        descriptorFromCompact(structuredClone(compactDescriptor(descriptor)))
+      )
+    ).toStrictEqual(cases);
+    expect(
+      compactDescriptor(v.union(v.string(), v.null()).descriptor)
+    ).toStrictEqual({ kind: "string", nullable: true });
+  });
+
+  it("reads each descriptor in one spelling only", () => {
+    expect({
+      nullMember: refusal({
+        kind: "union",
+        members: [{ kind: "string" }, { kind: "null" }],
+      }),
+      loneMember: refusal({ kind: "union", members: [{ kind: "number" }] }),
+      nullableNull: refusal({ kind: "null", nullable: true }),
+      untrimmedDefault: refusal({
+        kind: "object",
+        fields: { note: { kind: "string", trim: true, default: " x " } },
+      }),
+      nestedNullMember: refusal({
+        kind: "array",
+        item: {
+          kind: "union",
+          members: [{ kind: "null" }, { kind: "boolean" }],
+        },
+      }),
+    }).toStrictEqual({
+      nullMember: at([]),
+      loneMember: at([]),
+      nullableNull: at([]),
+      untrimmedDefault: at(["fields", "note"]),
+      nestedNullMember: at(["item"]),
+    });
+  });
+
   it("refuses what no `v` declaration makes, saying where", () => {
     expect({
       notAnObject: refusal("string"),
@@ -119,7 +175,7 @@ describe("a descriptor's compact form", () => {
       both: at([]),
       badDefault: at(["fields", "n"], "definition.invalid_default"),
       badBound: at(["item"], "definition.contradictory_bounds"),
-      prototypeKey: at([], "definition.invalid_key"),
+      prototypeKey: at(["fields", "__proto__"], "definition.invalid_key"),
       tooDeep: at(
         Array.from({ length: 64 }, () => "item"),
         "definition.too_large"

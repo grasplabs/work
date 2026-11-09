@@ -84,40 +84,6 @@ export const callMethod: (
 export const optionalChain: (value: Read, rest: (value: Read) => Read) => Read =
   optionalGuard;
 
-/**
- * `value`, checked by `schema` as `v` checks a value: what it answers,
- * typed so, or a `TypeError` naming the first thing that doesn't fit,
- * which fails the step it runs in. What generated code holds what a step
- * records to (a decision's recipients, a deadline).
- */
-export const parse = <Input, Output>(
-  schema: ValueSchema<Input, Output>,
-  value: unknown
-): Output => {
-  const result = schema["~standard"].validate(value);
-  if (result.issues === undefined) {
-    return result.value;
-  }
-  const [issue] = result.issues;
-  const at = issue?.path.join(".") ?? "";
-  throw new TypeError(
-    `Not of its schema: ${at === "" ? "" : `at ${at}: `}${issue?.message ?? "not of its schema"}`
-  );
-};
-
-/**
- * The items a loop's enter step recorded, each as every value an
- * expression reads (`Read`), so an item read bare (`100 * item`) compiles
- * as its expression was checked. The host holds the record to a list
- * (`workflow.collection_invalid`); anything else is a `TypeError` here.
- */
-export const itemsOf: (items: Json) => readonly Read[] = (items) => {
-  if (!Array.isArray(items)) {
-    throw new TypeError("A loop's items are a list.");
-  }
-  const list: readonly Json[] = items;
-  return list;
-};
 // What generated code holds the state it keeps and reads to.
 export { fittedState, fittedValue } from "./fitted-value.ts";
 // What a step records and a binding is handed: a workflow's code names it

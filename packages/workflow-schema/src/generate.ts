@@ -77,8 +77,9 @@ import type {
 //   the host bounds: at most 1,000 an enter, each item's steps one at a
 //   time, and every one counted against the run's step ceiling, which is
 //   what ends a long loop (`workflow.too_many_steps`). The module imports
-//   `@grasp-os/sdk/workflow` and nothing else (the compiler refuses any
-//   other import of generated code all the same).
+//   `@grasp-os/sdk/workflow` and its helpers for generated code
+//   (`@grasp-os/sdk/workflow-generated`) and nothing else (the compiler
+//   refuses any other import of generated code all the same).
 // - A sensitive value reaching the run's code. A sensitive parameter is
 //   only ever `sensitiveParam(<name>)` in a connector call's arguments,
 //   sealed there as a `param` the host fills in; the code declares only
@@ -92,8 +93,14 @@ import type {
 //   of each value: a record keeping any other key, or another value, is
 //   the host's to refuse.
 
-/** The SDK the generated module imports, and nothing else. */
+/** The SDK the generated module imports. */
 export const generatedImport = "@grasp-os/sdk/workflow";
+
+/**
+ * The helpers only generated code calls (`parse`, `itemsOf`), which the
+ * module imports besides, and nothing else: not the SDK's API.
+ */
+export const generatedHelpersImport = "@grasp-os/sdk/workflow-generated";
 
 /**
  * The generator, as a build names what made it. A build seals the SDK its
@@ -283,6 +290,8 @@ class Generator {
   readonly #expressions: SealedExpression[] = [];
   readonly #spans: TaskSpan[] = [];
   // The workflow SDK, and the guards expressions read and call through.
+  // The helpers only generated code calls (`generatedHelpersImport`).
+  readonly #generatedImports = new Set<string>();
   readonly #imports = new Set([
     "workflow",
     "v",
@@ -681,7 +690,7 @@ class Generator {
     // not blank. Each fails this enter step, as the call's own failure.
     // The recipients are recorded as a list of text, so `from` takes the
     // first of them as it was recorded.
-    this.#imports.add("parse");
+    this.#generatedImports.add("parse");
     const record = [
       `["recipients"]: parse(v.array(v.string()), ${recipients.code})`,
       `["prompt"]: ${prompt.code}`,
@@ -760,7 +769,7 @@ class Generator {
         // each item as every value an expression reads (the SDK's `Read`),
         // which the typed check types where it is written, so an item read
         // bare (`100 * item`) compiles as it was checked.
-        this.#imports.add("itemsOf");
+        this.#generatedImports.add("itemsOf");
         this.#line(
           inner,
           `for (const [${index}, item${number}] of itemsOf(${entered}.items).entries()) {`
@@ -893,7 +902,7 @@ class Generator {
     });
     // Its deadline may fail to evaluate in its enter step, as a call may
     // fail: a retry around it decides it as any call's.
-    this.#imports.add("parse");
+    this.#generatedImports.add("parse");
     const retry = retryOf(tries, depth);
     this.#decided(
       step,
@@ -1185,6 +1194,11 @@ class Generator {
     const prelude = [
       "// Generated from a grasp-workflow/1 document on every save: not edited by hand.",
       `import { ${[...this.#imports].toSorted().join(", ")} } from ${literal(generatedImport)};`,
+      ...(this.#generatedImports.size === 0
+        ? []
+        : [
+            `import { ${[...this.#generatedImports].toSorted().join(", ")} } from ${literal(generatedHelpersImport)};`,
+          ]),
       "",
       `export default workflow(${literal(id)}, {`,
       `  params: { ${params.map(([name, code]) => `[${literal(name)}]: ${code}`).join(", ")} },`,

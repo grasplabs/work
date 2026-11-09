@@ -1214,6 +1214,33 @@ const checkSteps = (
   }
 };
 
+/**
+ * Whether `descriptor` holds a value anywhere in it: a default, a literal
+ * or an enum's values, any of which would put a value in the document.
+ */
+const holdsValue = (descriptor: ValueDescriptor): boolean => {
+  const pending = [descriptor];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (
+      next.presence === "default" ||
+      next.kind === "literal" ||
+      next.kind === "enum"
+    ) {
+      return true;
+    }
+    if (next.kind === "object") {
+      pending.push(...Object.values(next.fields));
+    } else if (next.kind === "array") {
+      pending.push(next.item);
+    } else if (next.kind === "record") {
+      pending.push(next.value);
+    } else if (next.kind === "union") {
+      pending.push(...next.members);
+    }
+  }
+  return false;
+};
+
 /** Checks `json`, a workflow's document as parsed JSON. */
 export const checkWorkflow = (json: unknown): CheckResult => {
   const shape = shapeProblems(json);
@@ -1253,7 +1280,19 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       param.type,
       join("/params", name, "type")
     );
-    if (descriptor !== undefined) {
+    if (
+      descriptor !== undefined &&
+      isSensitive(param) &&
+      holdsValue(descriptor)
+    ) {
+      problem(
+        walk,
+        join("/params", name, "type"),
+        "workflow.sensitive",
+        "A sensitive parameter's type holds a value: a default, a literal or an enum's values.",
+        "Leave its type without a default, a literal or an enum, so its value is set only where parameter values are kept; or declare it with `sensitive: false`."
+      );
+    } else if (descriptor !== undefined) {
       paramDescriptors.set(name, descriptor);
     }
   }
