@@ -46,7 +46,7 @@ const guards: readonly Guard[] = [
 const unresolved = "an import it can't resolve";
 
 /** The sources core is built from, by their extension. */
-const sourceFile = /\.(?:ts|tsx|mts|js|mjs)$/u;
+const sourceFile = /\.[cm]?[jt]sx?$/u;
 
 /** A JavaScript extension a TypeScript import is written with, for the `.ts` it resolves to. */
 const javaScriptExtension = /\.m?js$/u;
@@ -148,10 +148,12 @@ const reachesOf = (file: string, source: string): Reach[] => {
         : [[guard.module, statementAt(source, start, end)]];
     }
   );
+  // Any part of `import.meta` but its address and environment may load
+  // modules: `glob` and its kin, however written.
   const globs = module.importMetas.flatMap(({ start, end }): Reach[] =>
-    /^\s*\.\s*glob\b/u.test(source.slice(end))
-      ? [[unresolved, statementAt(source, start, end + 5)]]
-      : []
+    /^\s*\.\s*(?:url|env)\b/u.test(source.slice(end))
+      ? []
+      : [[unresolved, statementAt(source, start, end + 5)]]
   );
   // CommonJS: a `require` a bundler would follow, which oxc lists among no
   // imports.

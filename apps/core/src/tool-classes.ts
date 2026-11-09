@@ -403,6 +403,16 @@ const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
   "read-others": "read-others",
 };
 
+/** `toolClass`, as core checks it for the native tool `action` (`checkedClassOf`). */
+const inMailbox = (
+  provider: string,
+  action: string,
+  toolClass: CompanyToolClass
+): CompanyToolClass =>
+  provider === "microsoft" && action.startsWith("mail.")
+    ? inOwnMailbox[toolClass]
+    : toolClass;
+
 /**
  * The class core checks a call of the chat's agent of the native tool
  * `action` against: its class, but for a Microsoft 365 mail tool, which
@@ -416,12 +426,9 @@ export const checkedClassOf = (
   action: string
 ): ToolClass | undefined => {
   const toolClass = nativeClasses.get(provider)?.get(action);
-  if (toolClass === undefined || toolClass === "never") {
-    return toolClass;
-  }
-  return provider === "microsoft" && action.startsWith("mail.")
-    ? inOwnMailbox[toolClass]
-    : toolClass;
+  return toolClass === undefined || toolClass === "never"
+    ? toolClass
+    : inMailbox(provider, action, toolClass);
 };
 
 /**
@@ -449,14 +456,16 @@ export const requireToolClassOn = async (
     return await requireAppClassOn(env, authority, owner, action);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);
-  const checked = checkedClassOf(owner.provider, action);
-  if (toolClass === undefined || checked === undefined) {
+  if (toolClass === undefined) {
     throw connectErrors.create("connect.class_unknown");
   }
-  if (toolClass === "never" || checked === "never") {
+  if (toolClass === "never") {
     throw connectErrors.create("connect.class_off");
   }
-  const audience = await audienceNow(env, checked);
+  const audience = await audienceNow(
+    env,
+    inMailbox(owner.provider, action, toolClass)
+  );
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
