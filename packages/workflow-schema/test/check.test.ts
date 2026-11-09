@@ -309,6 +309,13 @@ describe("checking a workflow", () => {
     ).toStrictEqual({ "/steps/5/state": "workflow.state_not_allowed" });
   });
 
+  it("keeps a step's ID from the name of a retrying try's `when`", () => {
+    // `everyStep`'s try `guarded` retries by a `when`: `guardedRetries`.
+    expect(codesAt(followedBy(mailing("guardedRetries", "x")))).toStrictEqual({
+      "/steps/5/id": "workflow.duplicate_id",
+    });
+  });
+
   it("allows one retrying try around a step, never one inside another", () => {
     const retry = { attempts: 2, delay: "1 minute", backoff: "constant" };
     expect(

@@ -124,6 +124,15 @@ const ctxCallSteps = (source: string): string[] =>
     return isNode(step?.value) ? [String(step.value.value)] : ["(none)"];
   });
 
+/** A mail to a loop's row. */
+const mailingRow = {
+  id: "mailedRow",
+  type: "call",
+  connection: "mail",
+  action: "mail.send",
+  args: { to: { $expr: "item.name" }, subject: "Due" },
+};
+
 const lineSeparator = String.fromCodePoint(0x20_28);
 const paragraphSeparator = String.fromCodePoint(0x20_29);
 
@@ -218,6 +227,7 @@ describe("generating a workflow", () => {
       "error",
       "output",
       "$rows",
+      "guardedRetries",
     ]);
     for (const name of boundNames(source)) {
       expect(resulting.has(name) || own.has(name)).toBeTruthy();
@@ -450,15 +460,67 @@ describe("generating a workflow", () => {
 
   it("passes a retrying try's policy to each call it covers, and reads a catch's failure as data", () => {
     const { source } = generated(everyStep());
-    expect(source).toContain(
-      '{ step: "fetch", retry: (error) => Boolean(error.details) }'
+    expect(
+      [
+        "const guardedRetries = (error) => Boolean(error.details);",
+        '{ step: "fetch", retry: guardedRetries }',
+        "const error = caughtError(thrown);",
+        'if (!(error.code === "connect.unavailable" && (error.message !== "final"))) throw thrown;',
+        // A call in the catch's own list isn't retried by it.
+        '{ step: "notice" }',
+      ].filter((line) => !source.includes(line))
+    ).toStrictEqual([]);
+  });
+
+  it("decides a retry's `when` where its try is written, so it reads that loop's `item`", () => {
+    const { source, expressions } = generated(
+      followedBy({
+        id: "pagesLoop",
+        type: "forEach",
+        items: { $expr: "args.pages" },
+        do: [
+          {
+            id: "page",
+            type: "try",
+            try: [
+              {
+                id: "rowsLoop",
+                type: "forEach",
+                items: { $expr: "item.rows" },
+                do: [mailingRow],
+              },
+            ],
+            catch: {
+              retry: {
+                attempts: 2,
+                delay: "1 minute",
+                backoff: "constant",
+                when: { $expr: "item.open" },
+              },
+            },
+          },
+        ],
+      })
     );
-    expect(source).toContain("const error = caughtError(thrown);");
-    expect(source).toContain(
-      'if (!(error.code === "connect.unavailable" && (error.message !== "final"))) throw thrown;'
+    const lines = source.split("\n");
+    const declared = lines.findIndex((line) =>
+      line.includes("const pageRetries = (error) => Boolean(item.open);")
     );
-    // A call in the catch's own list isn't retried by it.
-    expect(source).toContain('{ step: "notice" }');
+    const inner = lines.findIndex((line) =>
+      line.includes("for (const item of $rowsLoop)")
+    );
+    expect({
+      declaredBeforeInnerLoop: declared !== -1 && declared < inner,
+      passed: source.includes('{ step: "mailedRow", retry: pageRetries }'),
+      // One `when` a retrying try, sealed once: this one and `everyStep`'s.
+      whens: expressions.filter(({ pointer }) =>
+        pointer.endsWith("/catch/retry/when")
+      ).length,
+    }).toStrictEqual({
+      declaredBeforeInnerLoop: true,
+      passed: true,
+      whens: 2,
+    });
   });
 
   it("reads a field named like a built-in's method through `$own`, never the method", () => {

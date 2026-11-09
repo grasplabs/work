@@ -1327,6 +1327,32 @@ const checkSteps = (
 };
 
 /**
+ * Refuses a step whose ID is the name the generated code gives a retrying
+ * try's `when` (`<try>Retries`, generate.ts's `retriesOf`): the two would
+ * be one name in one scope.
+ */
+const checkRetryNames = (walk: Walk): void => {
+  const taken = new Set(
+    eachStep(walk.document.steps).flatMap(({ step }) =>
+      step.type === "try" && step.catch.retry?.when !== undefined
+        ? [`${step.id}Retries`]
+        : []
+    )
+  );
+  for (const { step, pointer } of eachStep(walk.document.steps)) {
+    if (taken.has(step.id)) {
+      problem(
+        walk,
+        join(pointer, "id"),
+        "workflow.duplicate_id",
+        `\`${step.id}\` is the name of a retrying try's \`when\`.`,
+        "Give the step another ID."
+      );
+    }
+  }
+};
+
+/**
  * Refuses an alias declared under two kinds, and `ai` under any kind but
  * the workflow's one model: each alias is one member of `ctx` and one
  * binding of the run.
@@ -1444,6 +1470,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
     }
   }
   checkAliases(walk);
+  checkRetryNames(walk);
   const args = checkSchema(walk, document.args ?? noArgs, "/args");
   for (const [key, schema] of Object.entries(document.state ?? {})) {
     const compiled = compiledSchema(walk, schema, join("/state", key));

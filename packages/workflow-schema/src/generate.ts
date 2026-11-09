@@ -307,11 +307,37 @@ const loopItem = "item";
 /** The roots of `ctx` the handler binds, as its expressions read them. */
 const contextRoots = ["params", "run", "state", inboxRoot] as const;
 
-/** The `try` around the code being generated that retries, if any. */
+/**
+ * The `try` around the code being generated that retries, if any: what a
+ * call in its list passes as `retry`, `true` or the name of its `when`'s
+ * function, which the try declares where it is written (`retriesOf`).
+ */
 interface Retrying {
-  readonly step: TryStep;
-  readonly pointer: string;
+  readonly retry: string;
 }
+
+/**
+ * The name of a retrying try's `when`, as a function of the code: its
+ * step's ID and `Retries` (`guardRetries`), which the check keeps from any
+ * step's ID (`retryNameOf` in check.ts reads the same).
+ */
+export const retriesOf = (id: string): string => `${id}Retries`;
+
+/** A call's options: its step, its retry, and what it keeps. */
+const callOptions = (
+  step: Step,
+  retrying: Retrying | undefined,
+  state: readonly (readonly [string, string])[]
+): string => {
+  const options: (readonly [string, string])[] = [["step", literal(step.id)]];
+  if (retrying !== undefined) {
+    options.push(["retry", retrying.retry]);
+  }
+  if (state.length > 0) {
+    options.push(["state", `(output) => (${objectCode(state)})`]);
+  }
+  return objectCode(options);
+};
 
 class Generator {
   readonly #workflow: CheckedWorkflow;
@@ -474,35 +500,6 @@ class Generator {
     this.#line(depth, "}");
   }
 
-  /** A call's options: its step, its retry, and what it keeps. */
-  #callOptions(
-    step: Placed<Extract<Step, { type: "call" | "generate" }>>,
-    retrying: Retrying | undefined,
-    state: readonly (readonly [string, string])[]
-  ): string {
-    const options: (readonly [string, string])[] = [["step", literal(step.id)]];
-    const retry = retrying?.step.catch.retry;
-    if (retrying !== undefined && retry !== undefined) {
-      const when =
-        retry.when === undefined
-          ? undefined
-          : this.#expression(`${retrying.pointer}/catch/retry/when`, {
-              taskId: retrying.step.id,
-              stage: "taskDefinition",
-              result: "boolean",
-              caught: [{ variable: "error", taskId: retrying.step.id }],
-            }).code;
-      options.push([
-        "retry",
-        when === undefined ? "true" : `(error) => Boolean(${bare(when)})`,
-      ]);
-    }
-    if (state.length > 0) {
-      options.push(["state", `(output) => (${objectCode(state)})`]);
-    }
-    return objectCode(options);
-  }
-
   /** A call step's state: its sealed entries, and each value's code. */
   #state(step: Placed<Extract<Step, { type: "call" | "generate" }>>): {
     sealed: SealedTask["state"];
@@ -602,7 +599,7 @@ class Generator {
     this.#emitCall(
       step,
       depth,
-      `${member}(${args.code}, ${this.#callOptions(step, retrying, state.code)})`
+      `${member}(${args.code}, ${callOptions(step, retrying, state.code)})`
     );
   }
 
@@ -653,7 +650,7 @@ class Generator {
     this.#emitCall(
       step,
       depth,
-      `ctx.ai.generate(${request}, ${this.#callOptions(step, retrying, state.code)})`
+      `ctx.ai.generate(${request}, ${callOptions(step, retrying, state.code)})`
     );
   }
 
@@ -966,12 +963,30 @@ class Generator {
       catch: sealed,
     });
     // The check allows one retrying try around a step: this one, if it
-    // retries, or the one around it.
-    const inner: Retrying | undefined =
-      step.catch.retry === undefined
-        ? retrying
-        : { step, pointer: step.pointer };
+    // retries, or the one around it. Its `when` is a function written where
+    // the try is, so it reads that place's `item`, whatever loop a call in
+    // its list stands in.
+    const { retry } = step.catch;
+    const retryWhen =
+      retry?.when === undefined
+        ? undefined
+        : this.#expression(`${step.pointer}/catch/retry/when`, {
+            taskId: step.id,
+            stage: "taskDefinition",
+            result: "boolean",
+            caught: [{ variable: "error", taskId: step.id }],
+          }).code;
+    let inner = retrying;
+    if (retry !== undefined) {
+      inner = { retry: retryWhen === undefined ? "true" : retriesOf(step.id) };
+    }
     this.#guarded(step, depth, (at) => {
+      if (retryWhen !== undefined) {
+        this.#line(
+          at,
+          `const ${retriesOf(step.id)} = (error) => Boolean(${bare(retryWhen)});`
+        );
+      }
       this.#line(at, "try {");
       this.#list(step.try, `${step.pointer}/try`, inner, at + 1);
       const conditions = [
