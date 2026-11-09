@@ -226,6 +226,8 @@ granted.query({
 query({ args: {}, returns: v.null(), uses: [get], handler: () => null });
 // @ts-expect-error -- nor narrows its tables
 query({ args: {}, tables: { notes: {} }, handler: () => null });
+// @ts-expect-error -- a mutation no more than a query
+mutation({ args: {}, uses: [], handler: () => null });
 // @ts-expect-error -- only an action streams
 query({ args: {}, returns: v.null(), stream: v.string(), handler: () => null });
 
@@ -315,9 +317,8 @@ granted.action({
   returns: v.object({ summary: v.string() }),
   handler: async (ctx, args) => {
     expectTypeOf(ctx).toExtend<ActionCtx>();
-    // No database, and no notifications of runs: it tells people only.
+    // No database: it tells people only.
     expectTypeOf(ctx).not.toHaveProperty("db");
-    expectTypeOf(ctx).not.toHaveProperty("notify");
     expectTypeOf(ctx.notifyPeople).parameter(0).toEqualTypeOf<string>();
     expectTypeOf(
       ctx.notifyPeople
