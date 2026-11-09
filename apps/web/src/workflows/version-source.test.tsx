@@ -40,7 +40,7 @@ const published = (version: number): WorkflowResourceVersion => ({
   resourceId: "workflow-1",
   version,
   definitionVersion: `1.${version}.0`,
-  profile: "grasp-workflow/1",
+  profile: "grasp-workflow/2",
   definitionHash: "definition",
   contractHash: "contract",
   manifestHash: "manifest",

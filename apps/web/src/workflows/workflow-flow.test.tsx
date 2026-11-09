@@ -58,7 +58,7 @@ const draftOf = (
   passes = true
 ): WorkflowDraft => {
   const source = JSON.stringify({
-    $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+    $schema: "https://grasp.work/schemas/grasp-workflow/2.json",
     steps: ids.map((id) => ({ id, type: "wait", for: "1 minute" })),
   });
   const diagram: WorkflowDiagram = { tasks: ids.map(task) };

@@ -64,7 +64,7 @@ const versionTwo: WorkflowResourceVersion = {
   resourceId: workflow,
   version: 2,
   definitionVersion: "1.0.0",
-  profile: "grasp-workflow/1",
+  profile: "grasp-workflow/2",
   definitionHash: "definition",
   contractHash: "contract",
   manifestHash: "manifest",

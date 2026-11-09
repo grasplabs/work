@@ -19,7 +19,7 @@ const childOf = (value: unknown, token: string): unknown => {
 
 /**
  * The fields of the step at JSON Pointer `pointer` (RFC 6901) in
- * grasp-workflow/1 text `source`, its `id` aside: what a change of it
+ * grasp-workflow/2 text `source`, its `id` aside: what a change of it
  * sends. Undefined when the text isn't JSON or names no step there.
  */
 export const stepFieldsAt = (
