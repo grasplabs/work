@@ -1,4 +1,4 @@
-import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineProject } from "vite-plus";
 
 // The state objects are Durable Objects, so their tests run in workerd,
