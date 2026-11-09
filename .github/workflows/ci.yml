@@ -170,7 +170,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # pnpm's store only where a test installs offline from it: the first
+      # shard holds every such file (scripts/test-shards.ts,
+      # `firstShardFiles`). The rest restore node_modules alone, 9 s sooner.
       - uses: ./.github/actions/setup
+        with:
+          store: ${{ matrix.shard == 1 }}
       # Shards split by how long each file takes (scripts/test-sequencer.ts,
       # with the times in scripts/test-durations.json), each shard running
       # one project group only (scripts/test-shards.ts): a shard that ran

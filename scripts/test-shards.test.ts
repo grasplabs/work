@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   concurrentFiles,
+  firstShardFiles,
   projectStartSeconds,
   shardSeconds,
   splitIntoShards,
@@ -112,6 +113,31 @@ describe("splitting the test files between shards", () => {
     const shards = splitIntoShards(files, 5);
 
     expect(shards.map((shard) => shard.length)).toStrictEqual([2, 2, 2, 0, 0]);
+  });
+
+  it("runs the files that install offline from pnpm's store in the first shard, whatever their time", () => {
+    const [offline = ""] = firstShardFiles;
+    const files = [
+      ...suite,
+      file(offline, 1),
+      ...Array.from({ length: 300 }, (_, index) =>
+        file(`scripts ${index}`, 30)
+      ),
+    ];
+
+    for (const count of [3, 6, 12]) {
+      expect(splitIntoShards(files, count)[0]?.map(({ key }) => key)).toContain(
+        offline
+      );
+    }
+  });
+
+  it("refuses a file that installs offline outside the first group", () => {
+    const [offline = ""] = firstShardFiles;
+
+    expect(() =>
+      splitIntoShards([...suite, file(offline, 1, { group: 1 })], 4)
+    ).toThrow("must be in the tests' first group");
   });
 
   it("refuses fewer shards than groups, which would have to run two together", () => {

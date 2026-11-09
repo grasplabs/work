@@ -105,6 +105,17 @@ const unitsOf = (files: readonly ShardFile[]): ShardFile[][] => {
   );
 };
 
+/**
+ * Files that run in the first shard, whatever the split: those that
+ * install offline from pnpm's store. CI restores the store, about 9 s of
+ * a shard's setup, only in the first shard (.github/workflows/ci.yml,
+ * `test`). Each must be in the tests' first group, whose first shard is
+ * the run's first.
+ */
+export const firstShardFiles: ReadonlySet<string> = new Set([
+  "scripts scripts/package-definition.test.ts",
+]);
+
 /** A unit by its first file's key, for an order that is the same on every runner. */
 const keyOfUnit = (unit: readonly ShardFile[]): string => unit[0]?.key ?? "";
 
@@ -118,9 +129,17 @@ export const spreadOver = (
   count: number
 ): ShardFile[][] => {
   const shards: ShardFile[][] = Array.from({ length: count }, () => []);
-  const longestFirst = unitsOf(files).toSorted(
-    (a, b) => workOf(b) - workOf(a) || byKey(keyOfUnit(a), keyOfUnit(b))
-  );
+  const units = unitsOf(files);
+  const pinned = (unit: readonly ShardFile[]): boolean =>
+    unit.some(({ key }) => firstShardFiles.has(key));
+  for (const unit of units.filter(pinned)) {
+    shards[0]?.push(...unit);
+  }
+  const longestFirst = units
+    .filter((unit) => !pinned(unit))
+    .toSorted(
+      (a, b) => workOf(b) - workOf(a) || byKey(keyOfUnit(a), keyOfUnit(b))
+    );
   for (const unit of longestFirst) {
     let best = 0;
     let bestSeconds = Number.POSITIVE_INFINITY;
@@ -165,6 +184,14 @@ export const splitIntoShards = (
   if (count < order.length) {
     throw new Error(
       `${count} shards can't hold the tests' ${order.length} groups apart: run at least ${order.length}.`
+    );
+  }
+  const misplaced = files.filter(
+    ({ key, group }) => firstShardFiles.has(key) && group !== order[0]
+  );
+  if (misplaced.length > 0) {
+    throw new Error(
+      `${misplaced.map(({ key }) => key).join(", ")} must be in the tests' first group to run in the first shard.`
     );
   }
   const shardsOf = new Map(
