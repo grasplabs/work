@@ -295,6 +295,10 @@ const fieldParameter = Type.String({
   description: "The field, by its name.",
 });
 
+/** A server function's path, as the definition tools take it. */
+const functionParameter = (description: string) =>
+  Type.String({ minLength: 1, maxLength: 512, description });
+
 /** The definition change `operation` of `app`, as `env.build.define` makes it. */
 const define = async (
   scope: AgentScope,
@@ -787,6 +791,22 @@ const definitions = (known: Set<string>) => [
     ),
     run: async (scope, { app, ...input }) =>
       await define(scope, app, { op: "moveField", ...input }),
+  }),
+  tool({
+    name: "renameFunction",
+    label: "Rename a function",
+    api: "build",
+    description: `Renames a query or mutation, keeping its stable ID, so the workflows calling it keep calling it under its new name. Each one the code exports gets an ID as it is committed, and one gone loses it: code alone can't tell a rename from a function removed and another added, so say a rename with this, and move or rename the export in the code to the new path in the same turn. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        function: functionParameter("Its path now."),
+        name: functionParameter("Its new path."),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "renameFunction", ...input }),
   }),
   tool({
     name: "removeTable",

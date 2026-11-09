@@ -42,10 +42,15 @@ export type Grantee =
  *
  * - an App or a workflow holding an active `start` grant on a workflow
  *   reaches that workflow, and so does a live workflow any of whose
- *   versions binds it: what it reads comes back to what started it.
+ *   versions binds it: what it reads comes back to what started it;
+ * - a workflow holding an active grant to `call` one of an App's
+ *   functions (workflows/app-calls.ts) and that App reach each other:
+ *   what the App reads comes back to the workflow, and on to what starts
+ *   it, and what the workflow sends it the App keeps.
  *
  * So more for a workflow reaches the Apps starting it, or starting one
- * that runs it.
+ * that runs it, and the Apps it calls; more for an App, the workflows
+ * calling it too.
  */
 const reachingSql = (grantee: Grantee): SQL => {
   const seed =
@@ -60,6 +65,20 @@ const reachingSql = (grantee: Grantee): SQL => {
       AND held.object_id = reached.id
   WHERE held.status = 'active' AND held.subject_type IN ('app', 'workflow')
     AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'start')
+  UNION
+  SELECT 'workflow', held.subject_id FROM permissions AS held
+    JOIN reached ON reached.kind = 'app' AND held.object_type = 'app'
+      AND held.object_id = reached.id
+  WHERE held.status = 'active' AND held.subject_type = 'workflow'
+    AND held.resource IS NOT NULL
+    AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'call')
+  UNION
+  SELECT 'app', held.object_id FROM permissions AS held
+    JOIN reached ON reached.kind = 'workflow' AND held.subject_type = 'workflow'
+      AND held.subject_id = reached.id
+  WHERE held.status = 'active' AND held.object_type = 'app'
+    AND held.resource IS NOT NULL
+    AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'call')
   UNION
   SELECT 'workflow', bound.resource_id FROM sdk_resource_bindings AS bound
     JOIN reached ON reached.kind = 'workflow' AND bound.kind = 'workflow'

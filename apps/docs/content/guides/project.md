@@ -27,6 +27,8 @@ Each type in it says what `v` says, as JSON, in the same words, and leaves out w
 
 You don't write it by hand. Grasp changes it with its definition tools, in a chat or on the App's page: `addTable`, `addField`, `changeField`, `renameField`, `renameTable`, `setAccess`, `addIndex` and `addPermission`. Each change is checked whole, and Grasp tells you what it does to the records the App already holds.
 
+Each query and mutation the App's code exports has an ID in the definition too, given as a commit brings it and kept from version to version by its path (`server/tasks.ts`'s `create` is `tasks.create`): what a workflow calls it by. Renaming one in code reads as one removed and another added, so `renameFunction` says the rename, keeping its ID, and the workflows calling it keep calling it under the new name. Publishing a version that removes a function a workflow calls, or changes what it takes or answers so the workflow's calls no longer fit, is refused, naming the workflow.
+
 From the definition, Grasp generates two files you read but never edit: `grasp.config.ts` and `server/schema.ts`. Every version of the App holds them exactly as its definition generates them. Generation goes one way, and the IDs stay in the definition: the code names tables and fields by their names alone, so an exported App is a plain code project.
 
 ## The schema

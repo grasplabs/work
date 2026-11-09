@@ -4,6 +4,8 @@ import {
   emptyDefinition,
   readDefinition,
   tryReadDefinition,
+  isFunctionPath,
+  withExportedFunctions,
 } from "@grasp-os/sdk/definition";
 import type { AppDefinition } from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
@@ -33,6 +35,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, BlueprintId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { dataErrors } from "@grasp-os/shared/stores";
@@ -52,6 +55,7 @@ import {
 import type { Person } from "./app-access.ts";
 import {
   generatedPaths,
+  functionIdsOf,
   schemaIdsOf,
   withDefinitionCode,
 } from "./app-definition.ts";
@@ -590,11 +594,151 @@ export const releaseIdsOf = async (
   return schemaIdsOf(definition, release.app.schema);
 };
 
+/**
+ * The paths of the functions `release` serves by stable ID
+ * (app-definition.ts, `functionIdsOf`): its version's definition's, only
+ * while that is the definition the release was sealed with, as
+ * `releaseIdsOf` reads it.
+ */
+export const releaseFunctionsOf = async (
+  env: Env,
+  release: Pick<Release, "manifest" | "app">
+): Promise<ReadonlyMap<string, string>> => {
+  const app = appIdSchema.parse(release.manifest.resourceId);
+  const row = await findVersion(env, app, release.manifest.resourceVersion);
+  const { definition, hash } = await readStored(row);
+  if (hash !== release.manifest.definitionHash) {
+    throw new Error("A release names another definition than its version's");
+  }
+  return functionIdsOf(definition, release.app);
+};
+
 /** A version as it is stored: its tree, the hash of its code, its definition. */
 export interface StoredVersion extends Tree {
   code: string;
   definition: StoredDefinition;
 }
+
+/**
+ * The definitions a commit over `latest` carries function IDs from,
+ * nearest first: `latest`'s, then that of App `app`'s current version,
+ * whose IDs workflows are bound by, so a function a commit in between
+ * left out comes back with its ID.
+ */
+export const carriedDefinitions = async (
+  env: Env,
+  app: AppId,
+  latest: VersionRow | undefined
+): Promise<AppDefinition[]> => {
+  if (latest === undefined) {
+    return [];
+  }
+  const { currentVersion } = await findApp(env, app);
+  const rows = [latest];
+  if (currentVersion !== null && currentVersion !== latest.version) {
+    rows.push(await findVersion(env, app, currentVersion));
+  }
+  const read = await Promise.all(
+    rows.map(async (row) => await readStored(row))
+  );
+  return read.map(({ definition }) => definition);
+};
+
+/**
+ * The paths of the queries and mutations `files`' server code exports,
+ * as the App compiler finds them building it; undefined for code that
+ * doesn't build, a build refused (a bound passed, the builders busy) or
+ * one that doesn't answer within the build wait: a commit never waits
+ * longer on whether its code compiles, nor fails on it. A seal refuses a
+ * version whose code exports one it gave no ID (app-releases.ts), so
+ * the next commit gives it.
+ */
+const exportedPaths = async (
+  env: Env,
+  app: AppId,
+  files: ReadonlyMap<string, string>
+): Promise<string[] | undefined> => {
+  // Imported here, not at the top: builds reach back into this module.
+  const { buildAppCode, withinBuildWait } = await import("./pages.ts");
+  try {
+    // Within the build wait, as a save waits on its builds: a later
+    // commit gives what this one couldn't.
+    const build = await withinBuildWait(
+      env,
+      async () => await buildAppCode(env, Object.fromEntries(files), app)
+    );
+    if (build === "late" || !build.ok) {
+      return undefined;
+    }
+    // Only paths a function may have: what a definition takes.
+    return (build.functions ?? []).filter((path) => isFunctionPath(path));
+  } catch (error) {
+    // Whatever stopped the build: the commit stands, and the next one
+    // gives what this one couldn't (a seal refuses a version short of
+    // one, app-releases.ts).
+    log.warn("app.function_ids_unbuilt", { app, ...errorFields(error) });
+    return undefined;
+  }
+};
+
+/**
+ * Refuses a definition that gives a path another function's ID: one the
+ * version it is committed over (`previous`) gives another ID, whose
+ * function the code still exports there. A rename moves a function to a
+ * new path; an ID moved onto a function the App has is that function
+ * (`app.definition_invalid`).
+ */
+const requireNoFunctionTaken = (
+  definition: AppDefinition,
+  previous: AppDefinition | undefined,
+  exported: readonly string[]
+): void => {
+  const held = new Map(
+    (previous?.functions ?? []).map(({ id, name }) => [name, id])
+  );
+  const taken = (definition.functions ?? []).filter(
+    ({ id, name }) =>
+      exported.includes(name) &&
+      held.get(name) !== undefined &&
+      held.get(name) !== id
+  );
+  if (taken.length > 0) {
+    throw appErrors.create("app.definition_invalid", {
+      issues: taken.map(
+        ({ name }) =>
+          `\`${name}\` is another function's, with an ID of its own: rename a function to a new path, and that one away first in a version of its own.`
+      ),
+    });
+  }
+};
+
+/**
+ * `definition` giving stable IDs to exactly the queries and mutations
+ * `files`' server code exports (sdk's `withExportedFunctions`): each keeps
+ * the ID `definition` or `previous` gives its path, a new one gets one,
+ * and one gone loses its. Found as the App compiler builds the code, from
+ * its syntax (the compiler's `exportedFunctionsOf`), the build cached as
+ * every build is. Code that doesn't build seals nothing, so its version
+ * keeps the IDs it was given, or `previous`'s, for the next commit to
+ * carry on.
+ */
+const exportedFunctionsOf = async (
+  env: Env,
+  app: AppId,
+  files: ReadonlyMap<string, string>,
+  definition: AppDefinition,
+  previous: readonly AppDefinition[]
+): Promise<AppDefinition> => {
+  const exported = await exportedPaths(env, app, files);
+  if (exported === undefined) {
+    const { functions = previous[0]?.functions ?? [] } = definition;
+    const named = functions.map(({ name }) => name);
+    requireNoFunctionTaken(definition, previous[0], named);
+    return withExportedFunctions(definition, previous, named);
+  }
+  requireNoFunctionTaken(definition, previous[0], exported);
+  return withExportedFunctions(definition, previous, exported);
+};
 
 /**
  * `files` and `definition` as a version stores them, `files` changed in
@@ -604,14 +748,25 @@ export interface StoredVersion extends Tree {
  * over an App's limits.
  */
 export const storedVersion = async (
+  env: Env,
+  app: AppId,
   files: Map<string, string>,
-  definition: AppDefinition
+  definition: AppDefinition,
+  /** The definitions it carries function IDs from (`carriedDefinitions`). */
+  previous: readonly AppDefinition[] = []
 ): Promise<StoredVersion> => {
   withDefinitionCode(files, definition);
+  const defined = await exportedFunctionsOf(
+    env,
+    app,
+    files,
+    definition,
+    previous
+  );
   return {
     ...(await versionTree(files)),
     code: await codeIdentity(files),
-    definition: await storedDefinition(definition),
+    definition: await storedDefinition(defined),
   };
 };
 
@@ -915,16 +1070,13 @@ export const commitFiles = async (
   const { id: appId, name } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const { latest, files } = await latestFiles(env, appId);
-  let definition: AppDefinition;
-  if (definitionInput !== undefined) {
-    definition = givenDefinition(definitionInput);
-  } else if (latest === undefined) {
-    definition = emptyDefinition(name);
-  } else {
-    ({ definition } = await readStored(latest));
-  }
+  const previous = await carriedDefinitions(env, appId, latest);
+  const definition =
+    definitionInput === undefined
+      ? (previous[0] ?? emptyDefinition(name))
+      : givenDefinition(definitionInput);
   applyChanges(files, input, definition);
-  const stored = await storedVersion(files, definition);
+  const stored = await storedVersion(env, appId, files, definition, previous);
   if (sameVersion(stored, latest)) {
     throw appErrors.create("app.nothing_to_commit");
   }
@@ -1077,6 +1229,21 @@ const changedSince = (what: string): string =>
   `${what}: Changed in a version committed since this draft began`;
 
 /**
+ * A stored definition's text without the IDs of its functions, which a
+ * commit gives as its code exports them: what a draft compares with the
+ * versions committed since it began. Null for none.
+ */
+const definitionShape = (text: string | null): string | null => {
+  if (text === null) {
+    return null;
+  }
+  const { functions: _ids, ...rest } = z
+    .record(z.string(), z.unknown())
+    .parse(JSON.parse(text));
+  return JSON.stringify(rest);
+};
+
+/**
  * A chat's draft over the App's latest version: its changes over its base
  * while that is still the latest; otherwise over the latest, only if no
  * version since changed a path the draft changes (to other content), nor
@@ -1104,11 +1271,13 @@ export const draftOverLatest = async (
         ? [changedSince(path)]
         : []
     );
-    const latestDefinition = latest?.definition ?? null;
+    // Without the IDs of the functions each exports: a commit gives those
+    // as its code has them, never a change of the definition itself.
+    const latestDefinition = definitionShape(latest?.definition ?? null);
     if (
       definition !== null &&
-      (baseRow?.definition ?? null) !== latestDefinition &&
-      definition !== latestDefinition
+      definitionShape(baseRow?.definition ?? null) !== latestDefinition &&
+      definitionShape(definition) !== latestDefinition
     ) {
       clashes.push(changedSince("The App's definition"));
     }
@@ -1160,12 +1329,15 @@ export const proposeDraft = async (
 ): Promise<AppVersion> => {
   const { id: appId, name } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
-  const stored = await storedVersion(
-    files,
-    definition ?? emptyDefinition(name)
-  );
   const latest =
     parent === null ? undefined : await findVersion(env, appId, parent);
+  const stored = await storedVersion(
+    env,
+    appId,
+    files,
+    definition ?? emptyDefinition(name),
+    await carriedDefinitions(env, appId, latest)
+  );
   if (sameVersion(stored, latest)) {
     throw appErrors.create("app.nothing_to_commit");
   }
@@ -1499,8 +1671,19 @@ export const makeCurrent = async (
   const { readBackRelease } = await import("./app-releases.ts");
   const { applyVersionSchema, unfinishedPublish } =
     await import("./app-schema.ts");
+  const { boundFunctionsServedSql, requireBoundFunctionsServed } =
+    await import("./app-function-bindings.ts");
   const release = await readBackRelease(env, appId, number);
   const previous = found.currentVersion;
+  // No workflow bound to one of the App's functions loses it, or finds it
+  // changed so its calls no longer fit (app-function-bindings.ts): a
+  // publish, a rollback and any older version made current alike.
+  const served = await requireBoundFunctionsServed(
+    env,
+    appId,
+    previous,
+    release
+  );
   // Last before the batch, after every gate above, so no refused gate
   // leaves the store changed: the version's schema applied to its store,
   // its migrations with it, all or nothing (app-schema.ts). The store and
@@ -1554,7 +1737,9 @@ export const makeCurrent = async (
                 // Archived since `editableApp` let it in: read-only now.
                 ne(apps.status, "archived"),
                 runnableReleaseSql(appId, number),
-                publishedSql(appId, number)
+                publishedSql(appId, number),
+                // A workflow granted a function since it was checked.
+                boundFunctionsServedSql(appId, served)
               )
             )
             .returning(),
@@ -1614,6 +1799,8 @@ export const makeCurrent = async (
     if (!(await isPublished(env, appId, number))) {
       throw versionErrors.create("version.unpublished");
     }
+    // A workflow bound since to a function it doesn't serve: named.
+    await requireBoundFunctionsServed(env, appId, previous, release);
     // What is left is a conflict: the base moved.
     throw appErrors.create("app.conflict");
   }

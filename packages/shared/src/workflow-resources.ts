@@ -215,6 +215,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "This run may no longer make that call: the person it acts for, the approval or permission behind the binding, or the trigger, App or agent that started it lost what it needed since the run started.",
   "workflow.call_invalid":
     "A task's call, or what it answered, doesn't match the binding's contract, so the run failed.",
+  "workflow.app_function_unavailable":
+    "The App function this run calls can't be reached: the App has no current version, that version gives no function this ID, or the person the run acts for has no role in the App.",
+  "workflow.app_call_failed":
+    "The App function this run called failed, so the run failed. These details name the App's error code.",
   "workflow.call_release_not_current":
     "The App release this call's approval pins is no longer the App's current version, so the call can't run. Approve the binding for the App's current release, then start the workflow again.",
   "workflow.decision_timed_out":

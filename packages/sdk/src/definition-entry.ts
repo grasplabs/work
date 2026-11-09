@@ -9,11 +9,13 @@ export {
   definitionText,
   emptyDefinition,
   generatedFiles,
+  isFunctionPath,
   readDefinition,
 } from "./definition.ts";
 export type {
   AppDefinition,
   DefinedField,
+  DefinedFunction,
   DefinedRule,
   DefinedTable,
 } from "./definition.ts";
@@ -23,6 +25,7 @@ export {
   tryOperation,
   tryReadDefinition,
   typeFrom,
+  withExportedFunctions,
 } from "./definition-operations.ts";
 export type { DefinitionOperation } from "./definition-operations.ts";
 export { definitionSources, validatorSource } from "./definition-source.ts";

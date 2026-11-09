@@ -1,5 +1,5 @@
 import { declaredPermission } from "@grasp-os/sdk/host";
-import type { WorkflowQueryName } from "@grasp-os/sdk/host";
+import type { FunctionManifest, WorkflowQueryName } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
@@ -46,7 +46,7 @@ import {
   formIntents,
   formSubmissionOf,
 } from "./app-webhook-queue.ts";
-import { usableApp } from "./apps.ts";
+import { releaseFunctionsOf, usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { openStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
@@ -422,6 +422,8 @@ interface FunctionCallOptions {
   ) => void;
   /** The agent whose call this is (`FunctionCaller.agent`). */
   readonly agent?: CallingAgent;
+  /** What a mutation's receipt is scoped by (`CallOptions.receiptScope`). */
+  readonly receiptScope?: string;
 }
 
 /**
@@ -663,6 +665,105 @@ const currentResolution = async (
   return { release, appId: found.id, ...resolved };
 };
 
+/**
+ * `call` of the public function at `path` of `release` (App `appId`'s),
+ * as `callFunction` resolved it, run through the operation host for `by`:
+ * the tail every call of a function shares, by name or by ID.
+ */
+const invokedCall = async (
+  env: Env,
+  {
+    by,
+    release,
+    appId,
+    path,
+    call,
+    options,
+    requestId,
+    sources,
+    refused,
+  }: {
+    by: Pick<Identity, "userId" | "role" | "teams">;
+    release: Release;
+    appId: AppId;
+    path: string;
+    call: FunctionRequest;
+    options: FunctionCallOptions;
+    requestId: string;
+    sources: InvocationSources;
+    refused: (error: unknown) => FunctionAnswer;
+  }
+): Promise<FunctionAnswer> => {
+  const {
+    deadline,
+    stillAllowed,
+    parentSession,
+    observeReads,
+    agent,
+    tellsForm,
+    receiptScope,
+  } = options;
+  try {
+    const invocation = await invocationFor(env, release, {
+      by,
+      requestId,
+      deadline,
+      ...(stillAllowed === undefined ? {} : { stillAllowed }),
+      ...(agent === undefined ? {} : { agent }),
+      sources,
+    });
+    const observed = observedInvocation(invocation, release, observeReads);
+    const hosted = hostedRelease(env, release);
+    const reference = { path, kind: call.reference.kind };
+    // A page's keyed mutation: its form, committed with its writes.
+    const submittedCall = call;
+    const submittedKey = call.idempotencyKey;
+    const submittedApp = appId;
+    const result = await callOperation(
+      hosted,
+      observed,
+      reference,
+      call.input,
+      {
+        ...(call.idempotencyKey === undefined
+          ? {}
+          : { idempotencyKey: call.idempotencyKey }),
+        ...(parentSession === undefined ? {} : { parentSession }),
+        ...(receiptScope === undefined ? {} : { receiptScope }),
+        ...(tellsForm !== true ||
+        submittedCall.reference.kind !== "mutation" ||
+        submittedKey === undefined
+          ? {}
+          : {
+              // Only for a form some webhook would hear: a receipt
+              // whose outbox owes nothing keeps to its own time.
+              // Its values left out when the commit wouldn't hold them.
+              commitIntent: async (startedAt: number) =>
+                (await formHeardBy(env, submittedApp, startedAt))
+                  ? formIntents(
+                      formSubmissionOf({
+                        app: submittedApp,
+                        userId: by.userId,
+                        call: submittedCall,
+                        key: submittedKey,
+                        operation: path,
+                        startedAt,
+                      })
+                    )
+                  : undefined,
+            }),
+      }
+    );
+    return {
+      result,
+      provenance: sources.snapshot(),
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
+
 /** A workflow reference's queries only a page reads (`FunctionCallOptions.page`). */
 const isPageOnlyQuery = (name: WorkflowQueryName): boolean =>
   name === "run" || name === "canStart";
@@ -675,15 +776,7 @@ const callFunction = async (
   request: unknown,
   options: FunctionCallOptions
 ): Promise<FunctionAnswer> => {
-  const {
-    deadline,
-    stillAllowed,
-    parentSession,
-    kind,
-    observeReads,
-    agent,
-    tellsForm,
-  } = options;
+  const { deadline, stillAllowed, kind, agent } = options;
   const sources = invocationSources();
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
@@ -734,64 +827,131 @@ const callFunction = async (
       deadline,
     });
   }
+  return await invokedCall(env, {
+    by,
+    release,
+    appId,
+    path,
+    call,
+    options,
+    requestId,
+    sources,
+    refused,
+  });
+};
+
+/**
+ * The public function App `app`'s definition gives stable ID `id`, in
+ * the release of the App's current version, for `by`: resolved through
+ * the definition that release was sealed with (apps.ts,
+ * `releaseFunctionsOf`), never by a name a caller holds. `app.not_found`
+ * for anyone without a role in the App, `version.not_sealed` while none
+ * is current, and `function.not_found` when no public function has the
+ * ID.
+ */
+export const functionById = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: AppId,
+  id: string
+): Promise<{ release: Release; operation: FunctionManifest }> => {
+  const found = await usableApp(env, by, app);
+  if (found.currentVersion === null) {
+    throw versionErrors.create("version.not_sealed");
+  }
+  const release = await loadRelease(env, found.id, found.currentVersion);
+  const functions = await releaseFunctionsOf(env, release);
+  const path = functions.get(id);
+  const operation =
+    path !== undefined && Object.hasOwn(release.app.operations, path)
+      ? release.app.operations[path]
+      : undefined;
+  if (operation?.visibility !== "public") {
+    throw operationErrors.create("function.not_found");
+  }
+  return { release, operation };
+};
+
+/**
+ * Calls the public function App `app`'s definition gives stable ID
+ * `id`, for `by` (a workflow's run, workflows/app-calls.ts): resolved in
+ * the release of the App's current version, through the definition that
+ * release was sealed with (apps.ts, `releaseFunctionsOf`), never by a
+ * name the caller holds, so a rename since the caller was bound reaches
+ * the same function, and a function removed reaches nothing
+ * (`function.not_found`). Then as any call: `by` needs a role in the App,
+ * the function's own validator checks `input`, and a mutation is keyed by
+ * `idempotencyKey`, so a retry or replay answers its stored receipt.
+ * Answers the call's request ID too, which the App's own evidence of it
+ * names (its sensitive reads, a use it refused). Never throws.
+ */
+export const callAppFunctionById = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: AppId,
+  {
+    id,
+    input,
+    idempotencyKey,
+  }: { id: string; input: unknown; idempotencyKey: string },
+  options: Pick<FunctionCallOptions, "deadline" | "stillAllowed"> & {
+    /**
+     * Told the function's kind once it is resolved, right before it
+     * runs: throws to run nothing (an action that can't be tried once).
+     */
+    readonly running: (
+      kind: FunctionRequest["reference"]["kind"]
+    ) => Promise<void>;
+  }
+): Promise<
+  FunctionAnswer & { readonly path: string | null; readonly requestId: string }
+> => {
+  const sources = invocationSources();
+  const requestId = crypto.randomUUID();
+  const refused = (error: unknown) => ({
+    requestId,
+    result: { ok: false as const, error: refusalOf(error, requestId) },
+    provenance: null,
+    manifestHash: null,
+    path: null,
+  });
+  let resolved: { release: Release; path: string; call: FunctionRequest };
   try {
-    const invocation = await invocationFor(env, release, {
-      by,
-      requestId,
-      deadline,
-      ...(stillAllowed === undefined ? {} : { stillAllowed }),
-      ...(agent === undefined ? {} : { agent }),
-      sources,
-    });
-    const observed = observedInvocation(invocation, release, observeReads);
-    const hosted = hostedRelease(env, release);
-    const reference = { path, kind: call.reference.kind };
-    // A page's keyed mutation: its form, committed with its writes.
-    const submittedCall = call;
-    const submittedKey = call.idempotencyKey;
-    const submittedApp = appId;
-    const result = await callOperation(
-      hosted,
-      observed,
-      reference,
-      call.input,
-      {
-        ...(call.idempotencyKey === undefined
-          ? {}
-          : { idempotencyKey: call.idempotencyKey }),
-        ...(parentSession === undefined ? {} : { parentSession }),
-        ...(tellsForm !== true ||
-        submittedCall.reference.kind !== "mutation" ||
-        submittedKey === undefined
-          ? {}
-          : {
-              // Only for a form some webhook would hear: a receipt
-              // whose outbox owes nothing keeps to its own time.
-              // Its values left out when the commit wouldn't hold them.
-              commitIntent: async (startedAt: number) =>
-                (await formHeardBy(env, submittedApp, startedAt))
-                  ? formIntents(
-                      formSubmissionOf({
-                        app: submittedApp,
-                        userId: by.userId,
-                        call: submittedCall,
-                        key: submittedKey,
-                        operation: path,
-                        startedAt,
-                      })
-                    )
-                  : undefined,
-            }),
-      }
-    );
-    return {
-      result,
-      provenance: sources.snapshot(),
-      manifestHash: release.manifestHash,
+    const { release, operation } = await functionById(env, by, app, id);
+    const { path } = operation;
+    resolved = {
+      release,
+      path,
+      call: {
+        reference: { name: path, kind: operation.kind },
+        input,
+        // Only a mutation keeps a receipt to answer a retry from.
+        ...(operation.kind === "mutation" ? { idempotencyKey } : {}),
+      },
     };
+    await options.running(operation.kind);
   } catch (error) {
     return refused(error);
   }
+  const answer = await invokedCall(env, {
+    by,
+    release: resolved.release,
+    appId: app,
+    path: resolved.path,
+    call: resolved.call,
+    options: {
+      deadline: options.deadline,
+      ...(options.stillAllowed === undefined
+        ? {}
+        : { stillAllowed: options.stillAllowed }),
+      // By the ID, never the path a rename changes.
+      receiptScope: `function:${id}`,
+    },
+    requestId,
+    sources,
+    refused,
+  });
+  return { ...answer, path: resolved.path, requestId };
 };
 
 /**

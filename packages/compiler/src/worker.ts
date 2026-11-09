@@ -28,6 +28,7 @@ import {
   appTestFiles,
   isAppLayout,
   isAppTestSuite,
+  isServerModule,
   maxAppTestSuites,
   serverCodeFolders,
   serverEntryPath,
@@ -71,7 +72,7 @@ import type {
   IncrementalBuild,
   ModuleRecord,
 } from "./increments.ts";
-import { apiCallsOf, indexReadsOf } from "./index-uses.ts";
+import { apiCallsOf, exportedFunctionsOf, indexReadsOf } from "./index-uses.ts";
 import type { IndexRead } from "./index-uses.ts";
 import {
   appCodeLimitErrors,
@@ -1001,6 +1002,11 @@ export type AppCodeBuild =
       modules: Record<string, string>;
       /** The indexes its functions read (index-uses.ts). */
       indexReads?: IndexRead[];
+      /**
+       * The public queries and mutations its server files export, by
+       * path, sorted (index-uses.ts, `exportedFunctionsOf`).
+       */
+      functions?: string[];
     }
   | { ok: false; diagnostics: Diagnostic[] };
 
@@ -1028,7 +1034,9 @@ const compileAppCodeFile = (
   /** What its types may name by path: every file the build was given. */
   typeFiles: ReadonlySet<string> = files,
   /** Where the indexes its functions read are listed. */
-  reads: IndexRead[] = []
+  reads: IndexRead[] = [],
+  /** Where the queries and mutations it exports are listed. */
+  functions: string[] = []
 ): { code: string } | { errors: Diagnostic[] } => {
   // With its source map, so a stack trace of the module is read back to
   // the line of the file to fix (core's app-inspection.ts).
@@ -1036,7 +1044,11 @@ const compileAppCodeFile = (
   if (transformed.code === null) {
     return { errors: transformErrors(path, transformed, unparsed) };
   }
-  reads.push(...indexReadsOf(path, parsed(path, source)));
+  const tree = parsed(path, source);
+  reads.push(...indexReadsOf(path, tree));
+  if (isServerModule(path)) {
+    functions.push(...exportedFunctionsOf(path, tree));
+  }
   const { code: compiled, map } = transformed;
   const { imports, directives } = sitesOf(transformed);
   // What would steer the type check (`checkAppCode`) rather than be
@@ -1142,6 +1154,7 @@ const buildAppCodeNoting = (
   );
   const named = new Map<string, string>();
   const indexReads: IndexRead[] = [];
+  const functions: string[] = [];
   for (const [path, source] of compiled) {
     const name = appModuleName(path);
     const taken = named.get(name);
@@ -1162,7 +1175,8 @@ const buildAppCodeNoting = (
       known,
       unparsed,
       known,
-      indexReads
+      indexReads,
+      functions
     );
     if ("code" in result) {
       modules[name] = result.code;
@@ -1172,7 +1186,7 @@ const buildAppCodeNoting = (
   }
   return errors.length > 0
     ? { ok: false, diagnostics: errors }
-    : { ok: true, modules, indexReads };
+    : { ok: true, modules, indexReads, functions: functions.toSorted() };
 };
 
 /**

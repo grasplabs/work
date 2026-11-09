@@ -82,8 +82,9 @@ export interface PermissionRequestItem extends ItemBase {
   request: Permission;
   /**
    * The version of the asking App current as it was read, which a grant
-   * approves (`GrantReview`); null for an agent's or independent
-   * resource's request, or an App with none current.
+   * approves (`GrantReview`); for a workflow's request on one of an App's
+   * functions, that App's; null for any other request, or an App with
+   * none current.
    */
   reviewedVersion: number | null;
 }

@@ -8,6 +8,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { Permission } from "@grasp-os/shared/permissions";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -112,6 +113,23 @@ const everyOutcome = async (
 };
 
 /**
+ * The version of the App a grant of `request` approves, as it is current
+ * now (`current`): the asking App's, or, for a workflow's request on one
+ * of an App's functions, that App's. Null for any other request.
+ */
+const reviewedVersionOf = (
+  { subject, object }: Permission,
+  current: ReadonlyMap<string, number | null>
+): number | null => {
+  if (subject.type === "app") {
+    return current.get(subject.appId) ?? null;
+  }
+  return object.type === "app" && object.function !== undefined
+    ? (current.get(object.appId) ?? null)
+    : null;
+};
+
+/**
  * The permission requests waiting for an admin, each with the version of
  * its App current now: what a grant approves.
  */
@@ -136,10 +154,7 @@ const requestItems = async (
       waitsOn: { type: "admin" },
       verdicts: ["grant", "reject"],
       request,
-      reviewedVersion:
-        request.subject.type === "app"
-          ? (current.get(request.subject.appId) ?? null)
-          : null,
+      reviewedVersion: reviewedVersionOf(request, current),
     })),
   };
 };

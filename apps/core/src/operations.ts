@@ -572,6 +572,13 @@ export interface CallOptions {
     | { readonly full: SubmissionIntent; readonly lean: SubmissionIntent }
     | undefined
   >;
+  /**
+   * What the named mutation's receipt is scoped by in place of its path,
+   * for a caller that names the function by the stable ID its App's
+   * definition gives it (a workflow's run, workflows/app-calls.ts): a
+   * retry after a rename then finds the receipt the first try made.
+   */
+  readonly receiptScope?: string;
 }
 
 /** A table of the App's schema, as staged writes are checked against it. */
@@ -2465,6 +2472,8 @@ interface Run {
   readonly onEffect?: () => void;
   /** What the named mutation's commit carries (`CallOptions.commitIntent`). */
   readonly commitIntent?: CallOptions["commitIntent"];
+  /** What the named mutation's receipt is scoped by (`CallOptions.receiptScope`). */
+  readonly receiptScope?: string;
   /** Where its progress goes: only for the streaming action the caller named. */
   readonly progress?: ProgressSink;
   /**
@@ -3270,8 +3279,13 @@ const runMutation = async (
           // version: a page's call runs in whatever release is current,
           // so a retry after a publish, even one that changed the
           // function's arguments, finds the receipt and runs nothing
-          // again. Other input under the key is refused by its hash.
-          contractId: fn.path,
+          // again. Other input under the key is refused by its hash. A
+          // caller naming the function by its stable ID scopes it by
+          // that, so a retry after a rename finds it too.
+          contractId:
+            run.depth === 0 && run.receiptScope !== undefined
+              ? run.receiptScope
+              : fn.path,
           contractVersion: 1,
           operationKind: "mutation",
         },
@@ -3882,6 +3896,9 @@ const answer = async (
         ...(options.commitIntent === undefined
           ? {}
           : { commitIntent: options.commitIntent }),
+        ...(options.receiptScope === undefined
+          ? {}
+          : { receiptScope: options.receiptScope }),
         filesAdmitted,
       },
       fn,

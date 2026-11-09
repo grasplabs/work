@@ -7,6 +7,7 @@ import {
 } from "./definition-expression.ts";
 import {
   definitionManifest,
+  isFunctionPath,
   peoplePermission,
   permissionDataSchema,
   readDefinition,
@@ -15,6 +16,7 @@ import type {
   AppDefinition,
   DefinedAnswer,
   DefinedField,
+  DefinedFunction,
   DefinedPermission,
   DefinedRule,
   DefinedTable,
@@ -43,7 +45,17 @@ import { v } from "./values.ts";
 // `evaluateExpression` over the SDK's own builders.
 //
 // Tables and fields get IDs as they are added, and keep them: renaming
-// changes a name only.
+// changes a name only. So do server functions, whose ID is what a
+// workflow calls one by: each query and mutation the code exports gets
+// one as a commit brings it (`withExportedFunctions`), and renaming one
+// (`renameFunction`) keeps it, so a workflow bound to it calls it under
+// its new name. One left out by a commit and brought back at its path
+// takes back the ID an earlier version gave it there, if nothing else
+// holds it; a publish still compares it with its callers.
+// An ID stands for whatever function the definition names it with, as
+// the App's builders say: a rename to another export's path moves it
+// there, as rewriting the function's code would change what it does, and
+// a publish still refuses a function that no longer fits its callers.
 
 /** A row rule as an operation takes it: its field by name. */
 type RuleInput =
@@ -132,6 +144,12 @@ export type DefinitionOperation =
     }
   | { readonly op: "removePermission"; readonly alias: string }
   | {
+      /** Renames function `function` (by its path now), keeping its ID. */
+      readonly op: "renameFunction";
+      readonly function: string;
+      readonly name: string;
+    }
+  | {
       readonly op: "moveField";
       readonly table: string;
       readonly field: string;
@@ -160,6 +178,103 @@ const fieldId = (table: DefinedTable, name: string): string =>
   name === "_createdAt" || name === "_updatedAt"
     ? name
     : fieldNamed(table, name).id;
+
+/** The functions `definition` gives IDs. */
+const functionsOf = (definition: AppDefinition): readonly DefinedFunction[] =>
+  definition.functions ?? [];
+
+/** The function `definition` gives an ID at path `name`. */
+const functionNamed = (
+  definition: AppDefinition,
+  name: string
+): DefinedFunction =>
+  functionsOf(definition).find((held) => held.name === name) ??
+  refuse(
+    `The App gives no function \`${name}\` an ID. Those it gives one: ${
+      functionsOf(definition)
+        .map((held) => `\`${held.name}\``)
+        .join(", ") || "none yet"
+    }.`
+  );
+
+/** Refuses `name` unless it is a function's path that `definition` doesn't hold yet. */
+const requireFreeFunctionName = (
+  definition: AppDefinition,
+  name: string
+): void => {
+  if (!isFunctionPath(name)) {
+    refuse(
+      `\`${name}\` isn't a function's path: its module's path under server/ and its export's name, joined by dots (\`server/tasks.ts\`'s \`create\` is \`tasks.create\`).`
+    );
+  }
+  if (functionsOf(definition).some((held) => held.name === name)) {
+    refuse(`The App gives a function \`${name}\` an ID already.`);
+  }
+};
+
+/** `definition` with `functions` in place of its functions. */
+const withFunctions = (
+  definition: AppDefinition,
+  functions: readonly DefinedFunction[]
+): AppDefinition => {
+  const { functions: _held, ...rest } = definition;
+  return functions.length === 0 ? rest : { ...rest, functions };
+};
+
+/**
+ * `definition` with function `operation.function` (by its path now)
+ * renamed `operation.name`, keeping its ID: code alone can't tell a
+ * rename from a function removed and another added, so a rename is said.
+ */
+const withFunctionRenamed = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "renameFunction" }>
+): AppDefinition => {
+  const named = functionNamed(definition, operation.function);
+  requireFreeFunctionName(definition, operation.name);
+  return withFunctions(
+    definition,
+    functionsOf(definition).map((fn) =>
+      fn.id === named.id ? { ...fn, name: operation.name } : fn
+    )
+  );
+};
+
+/**
+ * `definition` giving stable IDs to exactly the functions at `exported`,
+ * the paths of the queries and mutations a version's code exports (what
+ * inspecting it found), as a commit holds it: each keeps the ID
+ * `definition` gives its path (a rename it said moved it there), else the
+ * first ID `previous` (the versions it is committed over, nearest first)
+ * gave that path that no function of it holds already, else a new one
+ * from `newId`. A function the code no longer exports has none: it is
+ * gone.
+ */
+export const withExportedFunctions = (
+  definition: AppDefinition,
+  previous: readonly AppDefinition[],
+  exported: readonly string[],
+  newId: () => string = () => crypto.randomUUID()
+): AppDefinition => {
+  // Only what the code exports: an ID the definition gives a path it
+  // doesn't stands for nothing, and is free to come back where it was.
+  const given = new Map(
+    functionsOf(definition)
+      .filter(({ name }) => exported.includes(name))
+      .map(({ id, name }) => [name, id])
+  );
+  const held = new Set(given.values());
+  const carriedFor = (name: string): string | undefined =>
+    previous
+      .map((before) => functionsOf(before).find((fn) => fn.name === name)?.id)
+      .find((id) => id !== undefined && !held.has(id));
+  const functions = [...exported].toSorted().map((name) => {
+    const id = given.get(name) ?? carriedFor(name) ?? newId();
+    held.add(id);
+    return { id, name };
+  });
+  return withFunctions(definition, functions);
+};
 
 /** The descriptor a `v` expression declares. */
 export const typeFrom = (source: string): ValueDescriptor =>
@@ -622,6 +737,9 @@ const applied = (
     case "removeIndex":
     case "removePermission": {
       return removed(definition, operation);
+    }
+    case "renameFunction": {
+      return withFunctionRenamed(definition, operation);
     }
     default: {
       return refuse("That isn't an operation on a definition.");

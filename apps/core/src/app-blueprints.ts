@@ -1,5 +1,6 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import { compilerVersion } from "@grasp-os/compiler";
+import { definitionText } from "@grasp-os/sdk/definition";
 import type { AppDefinition } from "@grasp-os/sdk/definition";
 import {
   acceptedUpdateSchema,
@@ -42,6 +43,7 @@ import {
   blueprintFiles,
   changeEntry,
   checkPaths,
+  carriedDefinitions,
   deleteOtherBlueprintTrees,
   diffFiles,
   editableApp,
@@ -510,7 +512,7 @@ export const createFromBlueprint = async (
     fromBlueprintSchema,
     input
   );
-  const { definition } = await readStored(blueprint);
+  const { definition, text: takenDefinition } = await readStored(blueprint);
   const files = await blueprintFiles(env, {
     id: blueprintIdSchema.parse(blueprint.id),
     appId: source?.id ?? null,
@@ -540,7 +542,7 @@ export const createFromBlueprint = async (
     blueprint.id
   );
   refuseAppWorkflows(files.keys());
-  const tree = await storedVersion(files, definition);
+  const tree = await storedVersion(env, app, files, definition);
   await storeTree(env, app, tree);
   await storeTree(env, app, takenCode);
   // What the blueprint ships, as the release stored it: refused whole if
@@ -652,7 +654,8 @@ export const createFromBlueprint = async (
       blueprintVersion: blueprint.version,
       tree: blueprint.tree,
       code: takenCode.tree,
-      definition: tree.definition.text,
+      // The blueprint's own, as taken: what an update merges over.
+      definition: takenDefinition,
       createdAt: now,
     }),
     outboxed(
@@ -764,6 +767,35 @@ const threeWay = <Value>(
     : { kept: mine, conflict: now !== was };
 
 /**
+ * `ours`' function IDs, each at a path `theirs` renamed from `base` (the
+ * ID `base` gives that path, at another path in `theirs`) renamed so in
+ * `ours` too, whatever ID `ours` gives it, where `ours` still has the
+ * path: a blueprint's rename reaches the copy as a rename. A built-in's
+ * hand-written definition gives no IDs, so its renames reach a copy as a
+ * function removed and another added, which a bound workflow's publish
+ * check refuses.
+ */
+const renamedAsTheirs = (
+  base: AppDefinition,
+  ours: AppDefinition,
+  theirs: AppDefinition
+): NonNullable<AppDefinition["functions"]> => {
+  const now = new Map(
+    (theirs.functions ?? []).map(({ id, name }) => [id, name])
+  );
+  const renamed = new Map(
+    (base.functions ?? []).flatMap(({ id, name }) => {
+      const to = now.get(id);
+      return to === undefined || to === name ? [] : [[name, to] as const];
+    })
+  );
+  return (ours.functions ?? []).map((fn) => {
+    const to = renamed.get(fn.name);
+    return to === undefined ? fn : { ...fn, name: to };
+  });
+};
+
+/**
  * `theirs` (the blueprint's code and definition now) merged over `ours`
  * (the App's latest version's) from `base` (what the App last took of the
  * blueprint), file by file and the definition as a whole: what only one
@@ -802,16 +834,28 @@ const mergeOver = (
       files.set(path, kept);
     }
   }
-  // Compared by their text, one for equal definitions.
-  const { kept: keptText, conflict } = threeWay(
-    base.definition.text,
-    ours.definition.text,
-    theirs.definition.text
+  // Compared by their text, one for equal definitions, without the IDs
+  // of the functions each side's code exports: a copy's own, given as it
+  // is committed, never a change of the definition. The version the
+  // update commits gives them again, carried from the copy's
+  // (apps.ts, `storedVersion`).
+  const texts = [base, ours, theirs].map(({ definition }) =>
+    definitionText({ ...definition.definition, functions: [] })
   );
-  const kept =
-    keptText === theirs.definition.text
+  const { kept: keptText, conflict } = threeWay(texts[0], texts[1], texts[2]);
+  // The copy's function IDs, each renamed as the blueprint renamed it
+  // (the same ID under a new name) where the copy kept the name it took:
+  // the version the update commits gives them as its code exports them.
+  const { functions: _ids, ...chosen } =
+    keptText === texts[2]
       ? theirs.definition.definition
       : ours.definition.definition;
+  const functions = renamedAsTheirs(
+    base.definition.definition,
+    ours.definition.definition,
+    theirs.definition.definition
+  );
+  const kept = functions.length === 0 ? chosen : { ...chosen, functions };
   // Its config and schema follow it: no file conflict of their own, a
   // definition conflict being said as such, whether or not the code the
   // two generate differs (stable IDs alone change none).
@@ -977,7 +1021,13 @@ export const acceptBlueprintUpdate = async (
     new Set([...files.keys()].filter((path) => !ours.has(path)))
   );
   refuseAppWorkflows(files.keys());
-  const tree = await storedVersion(files, definition);
+  const tree = await storedVersion(
+    env,
+    appId,
+    files,
+    definition,
+    await carriedDefinitions(env, appId, latest)
+  );
   const base = await versionTree(theirs.files);
   await storeTree(env, appId, base);
   const changed = !sameVersion(tree, latest);

@@ -1924,7 +1924,8 @@ build: {
    * tools do (\`addTable\`, \`addField\`, \`changeField\`,
    * \`renameField\`, \`renameTable\`, \`setAccess\`, \`addIndex\`, \`addPermission\`,
    * \`removeTable\`, \`removeField\`, \`removeIndex\`,
-   * \`removePermission\`, \`moveField\`: \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
+   * \`removePermission\`, \`moveField\`, \`renameFunction\`:
+   * \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
    * grasp.config.ts and server/schema.ts from it. \`ok: false\` with the
    * problem saves nothing; otherwise the \`plan\` of what it does to the
    * App's records, and what its pages compile to now, as \`write\`.

@@ -4,7 +4,8 @@
 // and searches one with `ctx.db.search(table, text)`, and a page calls a
 // function as `api.<file>.<name>`. Only what the code spells out (string
 // literals) is found. The Data view says from it what uses each index
-// (core's app-definition.ts).
+// (core's app-definition.ts). The queries and mutations a server file
+// exports are found the same way (`exportedFunctionsOf`).
 
 import { child, children, walk } from "./syntax.ts";
 import type { Node, Parsed } from "./syntax.ts";
@@ -108,6 +109,44 @@ export const indexReadsOf = (
         }
       });
       return reads;
+    });
+  });
+
+/** The builders of a public query or mutation, as server code calls them. */
+const callableBuilders: ReadonlySet<string> = new Set(["query", "mutation"]);
+
+/**
+ * The public queries and mutations the server file `path` exports, as
+ * pages call them (`deals.list` for `server/deals.ts`'s `list`): each
+ * `export const name = query(…)` or `mutation(…)`, as the code spells it
+ * out; none of a file that doesn't parse. What a commit gives a stable ID
+ * a workflow calls it by (core's apps.ts); a seal keeps only those the
+ * code registers.
+ */
+export const exportedFunctionsOf = (
+  path: string,
+  tree: Parsed | undefined
+): string[] =>
+  children(tree?.program, "body").flatMap((statement) => {
+    const declaration = child(statement, "declaration");
+    if (
+      statement.type !== "ExportNamedDeclaration" ||
+      declaration?.type !== "VariableDeclaration"
+    ) {
+      return [];
+    }
+    return children(declaration, "declarations").flatMap((declarator) => {
+      const name = nameOf(child(declarator, "id"));
+      const init = child(declarator, "init");
+      const builder =
+        init?.type === "CallExpression"
+          ? nameOf(child(init, "callee"))
+          : undefined;
+      return name !== undefined &&
+        builder !== undefined &&
+        callableBuilders.has(builder)
+        ? [`${moduleOf(path)}.${name}`]
+        : [];
     });
   });
 

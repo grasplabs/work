@@ -103,7 +103,7 @@ export const subjectOf = (
  * by ID, as they have no names here.
  */
 export const objectOf = (
-  { object, actions, workflowNames }: Permission,
+  { object, actions, workflowNames, functionName }: Permission,
   directory: Directory
 ): string => {
   if (object.type === "connection") {
@@ -115,6 +115,16 @@ export const objectOf = (
   if (object.type === "collection") {
     const { collectionId } = object;
     return i18n._(msg`Collection ${collectionId}`);
+  }
+  if (object.type === "app" && object.function !== undefined) {
+    // A workflow's permission on one function, by its ID, named by its
+    // path now. Consent in plain words: it reads or changes what that
+    // function does, as the person each run acts for.
+    const app = appName(directory, object.appId);
+    const path = functionName ?? object.function;
+    return i18n._(
+      msg`Calls ${ph({ path })} of ${ph({ app })}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for`
+    );
   }
   if (object.type === "app") {
     // An agent's permission on an App's functions, by action as core
@@ -153,29 +163,45 @@ export const objectOf = (
 };
 
 /**
- * The version of the App an admin reviews as they decide: the one current
- * as the list was read, whose code the grant trusts. Null for an agent's
- * permission, an App with none current, or one the list doesn't have:
- * core then grants only if the App still has none current.
+ * The App whose version an admin reviews as they decide: the App asking,
+ * or the App whose one function a workflow asks to call, as its current
+ * version names it. None for any other request.
+ */
+const reviewedApp = ({ subject, object }: Permission): string | undefined => {
+  if (subject.type === "app") {
+    return subject.appId;
+  }
+  return object.type === "app" && object.function !== undefined
+    ? object.appId
+    : undefined;
+};
+
+/**
+ * The version of the App an admin reviews as they decide (`reviewedApp`):
+ * the one current as the list was read, whose code the grant trusts. Null
+ * for an agent's permission, an App with none current, or one the list
+ * doesn't have: core then grants only if the App still has none current.
  */
 export const reviewedVersion = (
-  { subject }: Permission,
+  request: Permission,
   directory: Directory
-): number | null =>
-  subject.type === "app"
-    ? (directory.apps.get(subject.appId)?.currentVersion ?? null)
-    : null;
+): number | null => {
+  const app = reviewedApp(request);
+  return app === undefined
+    ? null
+    : (directory.apps.get(app)?.currentVersion ?? null);
+};
 
 /** The version to review, as the row shows it. */
 export const reviewedVersionText = (
   request: Permission,
   directory: Directory
 ): string => {
-  const { subject } = request;
-  if (subject.type !== "app") {
+  const app = reviewedApp(request);
+  if (app === undefined) {
     return "–";
   }
-  if (!directory.apps.has(subject.appId)) {
+  if (!directory.apps.has(app)) {
     return i18n._(msg`Unknown`);
   }
   const version = reviewedVersion(request, directory);

@@ -436,13 +436,13 @@ export const reviewVersion = async (
   // Asked for again only if not kept, as `madeCurrent` says: an App's
   // first version copied from a blueprint, made current for the first time.
   const keep = current === null && row.approved === 1;
-  // What the App holds, as the permissions API shows it to this reviewer.
-  const held = await permissionsOpenTo(
-    env,
-    by,
-    { type: "app", appId: found.id },
-    "active"
-  );
+  // What the App holds, and the workflows' grants to call its functions,
+  // which trust its code alike (`madeCurrent`), as the permissions API
+  // shows them to this reviewer.
+  const [held, callers] = await Promise.all([
+    permissionsOpenTo(env, by, { type: "app", appId: found.id }, "active"),
+    permissionsOpenTo(env, by, undefined, "active", found.id),
+  ]);
   return {
     version: toVersion(row),
     proposedBy: await proposerOf(env, by, row),
@@ -475,6 +475,10 @@ export const reviewVersion = async (
       "requested"
     ),
     grants: held.map((permission) => ({
+      permission,
+      askedAgain: askedAgainBy(by, permission, keep),
+    })),
+    callers: callers.map((permission) => ({
       permission,
       askedAgain: askedAgainBy(by, permission, keep),
     })),
