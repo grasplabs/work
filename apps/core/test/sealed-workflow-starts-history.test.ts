@@ -1,0 +1,682 @@
+import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
+import type { OperationResult } from "@grasp-os/shared/operations";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
+
+import { callAppFunction } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
+import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { readWorkflowWatch } from "../src/page-workflows.ts";
+import {
+  createWorkflowResource,
+  publishWorkflowVersion,
+} from "../src/workflow-resources.ts";
+import { startWorkflow } from "../src/workflow-starts.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { withFiles } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
+import { person, queryReference, seal } from "./sealed-apps.ts";
+import {
+  codeOf,
+  definitionOf,
+  failingDefinition,
+  files,
+  greetingOf,
+  historySchema,
+  longDefinitionOf,
+  objectSchema,
+  passing,
+  pinnedApp,
+  refusalOf,
+  startedRuns,
+} from "./sealed-workflow-starts-harness.ts";
+import { unique } from "./sign-in.ts";
+
+// Starting workflows from a sealed App's functions, as they run in their
+// sandbox (spec 7.4, 9.5): the action's start and the mutation's staged
+// start cross the isolate as every capability does, and land as runs of
+// the workflow version the App binds. The threat model is tested
+// against the operation host directly (workflow-app-starts.test.ts);
+// this is the same path from the release's own code.
+
+describe("a workflow reference's run list", { timeout: 120_000 }, () => {
+  it("offer a run as watchable exactly when the reference's useWorkflow shows it", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await greetingOf(owner);
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob],
+      workflow.id,
+      owner
+    );
+    const { app } = fixture;
+    const { result: kicked } = await callAppFunction(
+      env,
+      bob,
+      app,
+      JSON.stringify({
+        reference: { name: "requests.kickOff", kind: "action" },
+        input: { who: "Ada" },
+      })
+    );
+    if (!kicked.ok) {
+      throw new Error(kicked.error.code);
+    }
+    const started = z.object({ runId: z.string() }).parse(kicked.value).runId;
+    // A run of the App's that no App version's contract accounts for: its
+    // receipt names no version that started it.
+    await startedRuns(app, workflow.id, bob.userId, 1);
+    const runs = queryReference(release, "followUp", "runs");
+    const declared = declaredWorkflows(release.app, release.workflows).find(
+      (bound) => bound.alias === "followUp"
+    );
+    if (declared === undefined) {
+      throw new Error("No followUp");
+    }
+    const workflowRef = {
+      resourceId: release.manifest.resourceId,
+      resourceVersion: release.manifest.resourceVersion,
+      contractId: "workflows.followUp",
+      fingerprint: await workflowFingerprint(declared),
+      kind: "workflow" as const,
+    };
+    // Each listed run: what its row offers, and whether a watch shows it.
+    const offered = async () => {
+      const { result } = await callAppFunction(
+        env,
+        bob,
+        app,
+        JSON.stringify({ reference: runs, input: { pagination: {} } })
+      );
+      const items = result.ok
+        ? z
+            .object({
+              items: z.array(
+                z.object({
+                  run: z.object({ runId: z.string() }),
+                  canWatch: z.boolean(),
+                })
+              ),
+            })
+            .parse(result.value).items
+        : [];
+      const rows = await Promise.all(
+        items.map(async ({ run, canWatch }) => {
+          let watched: string;
+          try {
+            await readWorkflowWatch(env, bob, app, {
+              workflow: workflowRef,
+              watch: "run",
+              runId: run.runId,
+            });
+            watched = "shown";
+          } catch (error) {
+            watched =
+              error instanceof Error
+                ? String(Reflect.get(error, "code"))
+                : String(error);
+          }
+          return { started: run.runId === started, canWatch, watched };
+        })
+      );
+      // The run Bob started first, then the one no version accounts for.
+      return rows.toSorted((a, b) => Number(b.started) - Number(a.started));
+    };
+    const pinned = await offered();
+    // The alias bound to another version of the same workflow: its runs
+    // still listed, none of them watchable through this release.
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: definitionOf("1 second"),
+      basedOn: 1,
+    });
+    await bindWorkflowToApp(env, owner, workflow.id, {
+      app,
+      alias: "followUp",
+      version: 2,
+    });
+    const rebound = await offered();
+    await bindWorkflowToApp(env, owner, workflow.id, {
+      app,
+      alias: "followUp",
+      version: 1,
+    });
+    const back = await offered();
+    // Completed, then its details removed, as the retention sweep removes
+    // them: its watch has no output to show.
+    await vi.waitFor(
+      async () => {
+        const { value } = await readWorkflowWatch(env, bob, app, {
+          workflow: workflowRef,
+          watch: "run",
+          runId: started,
+        });
+        expect(value).toMatchObject({ status: "completed" });
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    await env.DB.prepare(
+      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
+    )
+      .bind(Date.now(), started)
+      .run();
+    const [removed] = await offered();
+    expect({
+      pinned,
+      rebound,
+      back,
+      removed,
+    }).toStrictEqual({
+      pinned: [
+        { started: true, canWatch: true, watched: "shown" },
+        {
+          started: false,
+          canWatch: false,
+          watched: "workflow.run_unavailable",
+        },
+      ],
+      rebound: [
+        {
+          started: true,
+          canWatch: false,
+          watched: "workflow.run_unavailable",
+        },
+        {
+          started: false,
+          canWatch: false,
+          watched: "workflow.run_unavailable",
+        },
+      ],
+      back: [
+        { started: true, canWatch: true, watched: "shown" },
+        {
+          started: false,
+          canWatch: false,
+          watched: "workflow.run_unavailable",
+        },
+      ],
+      removed: {
+        started: true,
+        canWatch: false,
+        watched: "workflow.run_details_removed",
+      },
+    });
+  });
+});
+
+const pageOf = (result: OperationResult) =>
+  historySchema.parse(result.ok ? result.value : result);
+
+describe("a workflow reference's run history", { timeout: 180_000 }, () => {
+  it("tells the person's own runs of the version the release pins, metadata only, and refuses every other run alike", async () => {
+    const admin = await person("admin");
+    const [bob, carol] = await Promise.all([person("user"), person("user")]);
+    const owner = await person("builder");
+    const workflow = await greetingOf(owner);
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob, carol],
+      workflow.id,
+      owner
+    );
+    const { app } = fixture;
+    const kickOff = async (
+      who: Identity,
+      name: string,
+      other?: { app: string; release: typeof release }
+    ): Promise<string> => {
+      const through = other ?? { app, release };
+      const { result } = await callAppFunction(
+        env,
+        who,
+        through.app,
+        JSON.stringify({
+          reference: { name: "requests.kickOff", kind: "action" },
+          input: { who: name },
+        })
+      );
+      if (!result.ok) {
+        throw new Error(result.error.code);
+      }
+      return z.object({ runId: z.string() }).parse(result.value).runId;
+    };
+    const settled = async (runId: string) =>
+      await vi.waitFor(
+        async () => {
+          const run = await resourceRunFor(env, admin, workflow.id, runId);
+          expect(run.endedAt).not.toBeNull();
+          return run;
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+    const bobs = await kickOff(bob, "Bob");
+    const carols = await kickOff(carol, "Carol");
+    // Bob's run of the same version, through another App pinning it too.
+    const otherApp = await pinnedApp(admin, [bob], workflow.id, owner);
+    const throughOther = await kickOff(bob, "Bob", {
+      app: otherApp.fixture.app,
+      release: otherApp.release,
+    });
+    await Promise.all([settled(bobs), settled(carols), settled(throughOther)]);
+    // The owner's own start, not through the App: never the App's to tell.
+    const direct = await startWorkflow(
+      env,
+      { type: "person", person: owner },
+      workflow.id,
+      { version: 1, input: { who: "Owner" }, key: `key-${unique()}` }
+    );
+
+    const history = queryReference(release, "followUp", "history");
+    const ask = async (
+      who: Identity,
+      input: unknown
+    ): Promise<OperationResult> => {
+      const { result } = await callAppFunction(
+        env,
+        who,
+        app,
+        JSON.stringify({ reference: history, input })
+      );
+      return result;
+    };
+    const whole = pageOf(await ask(bob, { runId: bobs, pagination: {} }));
+    // Page by page, one entry each, from each page's cursor.
+    const paged: unknown[] = [];
+    const cursors: string[] = [];
+    let cursor: string | null = null;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
+      const answer = await ask(bob, {
+        runId: bobs,
+        pagination: { pageSize: 1, cursor },
+      });
+      const page = pageOf(answer);
+      paged.push(...page.items);
+      ({ nextCursor: cursor } = page);
+      if (cursor !== null) {
+        cursors.push(cursor);
+      }
+    } while (cursor !== null);
+    // A live list's loaded page, ended where its fourth entry's page
+    // starts: its first three entries, whatever its size.
+    const ended = await ask(bob, {
+      runId: bobs,
+      pagination: { pageSize: 1, endCursor: cursors[2] },
+    });
+    expect({
+      told: whole.items.map((item) =>
+        Object.fromEntries(
+          Object.entries(item).filter(
+            ([key]) => key !== "id" && key !== "sequence" && key !== "at"
+          )
+        )
+      ),
+      ascending: whole.items.every(
+        (item, index) =>
+          index === 0 || item.sequence > (whole.items[index - 1]?.sequence ?? 0)
+      ),
+      paged,
+      ended: ended.ok ? ended.value : ended.error.code,
+    }).toStrictEqual({
+      // Metadata only: no input, output or engine step ID; the task named
+      // by the ID its sealed build declares.
+      told: [
+        { taskId: null, kind: "lifecycle", status: "queued" },
+        { taskId: null, kind: "lifecycle", status: "running" },
+        { taskId: "greet", kind: "step", state: "started", attempt: 1 },
+        { taskId: "greet", kind: "step", state: "completed", attempt: 1 },
+        // The output's own step, of no task.
+        { taskId: null, kind: "step", state: "started", attempt: 1 },
+        { taskId: null, kind: "step", state: "completed", attempt: 1 },
+        { taskId: null, kind: "lifecycle", status: "completed" },
+      ],
+      ascending: true,
+      paged: whole.items,
+      // Three entries past twice its size of one: it says to split after
+      // its first, as any page with an end does.
+      ended: {
+        items: whole.items.slice(0, 3),
+        nextCursor: cursors[2],
+        hasMore: true,
+        splitCursor: String(whole.items[0]?.sequence),
+      },
+    });
+
+    // Anyone else's run, a run started outside the App, and an ID no run
+    // has are one refusal, word for word; a cursor tells nothing of them.
+    const unknown = refusalOf(
+      await ask(bob, { runId: crypto.randomUUID(), pagination: {} })
+    );
+    expect({
+      carols: refusalOf(await ask(bob, { runId: carols, pagination: {} })),
+      direct: refusalOf(await ask(owner, { runId: direct.id, pagination: {} })),
+      otherApps: refusalOf(
+        await ask(bob, { runId: throughOther, pagination: {} })
+      ),
+      carolsWithBadCursor: refusalOf(
+        await ask(bob, { runId: carols, pagination: { cursor: "x" } })
+      ),
+      carolsEnded: refusalOf(
+        await ask(bob, { runId: carols, pagination: { endCursor: "1" } })
+      ),
+      ownBadCursor: codeOf(
+        await ask(bob, { runId: bobs, pagination: { cursor: "x" } })
+      ),
+      // Any event ID the engine can write, and none past it.
+      lastCursor: pageOf(
+        await ask(bob, {
+          runId: bobs,
+          pagination: { cursor: String(Number.MAX_SAFE_INTEGER) },
+        })
+      ).items.length,
+      pastCursor: codeOf(
+        await ask(bob, {
+          runId: bobs,
+          pagination: { cursor: "9007199254740992" },
+        })
+      ),
+      carolOwn: pageOf(await ask(carol, { runId: carols, pagination: {} }))
+        .items.length,
+      unknownCode: unknown === "ok" ? "ok" : unknown.code,
+    }).toStrictEqual({
+      carols: unknown,
+      direct: unknown,
+      otherApps: unknown,
+      carolsWithBadCursor: unknown,
+      carolsEnded: unknown,
+      ownBadCursor: "data.invalid_cursor",
+      lastCursor: 0,
+      pastCursor: "data.invalid_cursor",
+      carolOwn: 7,
+      unknownCode: "workflow.run_unavailable",
+    });
+
+    // Version 1's sealed build no longer verifying is the platform's
+    // fault: the run's history tells nothing rather than failing the page.
+    const versionRow = (text: string) =>
+      env.DB.prepare(
+        "UPDATE workflow_resource_versions SET manifest = ? WHERE workflow_resource_id = ? AND version = 1"
+      ).bind(text, workflow.id);
+    const manifest = await env.DB.prepare(
+      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ manifest: string }>();
+    const immutable =
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END";
+    await env.DB.batch([
+      env.DB.prepare(
+        "DROP TRIGGER workflow_resource_versions_immutable_update"
+      ),
+      versionRow(`${manifest?.manifest ?? ""} `),
+      env.DB.prepare(immutable),
+    ]);
+    const unverified = await ask(bob, { runId: bobs, pagination: {} });
+    await env.DB.batch([
+      env.DB.prepare(
+        "DROP TRIGGER workflow_resource_versions_immutable_update"
+      ),
+      versionRow(manifest?.manifest ?? ""),
+      env.DB.prepare(immutable),
+    ]);
+
+    // Bound to another workflow without a new seal: the binding's runs are
+    // what `runs` lists, so the pinned workflow's history is read no more.
+    const other = await greetingOf(owner);
+    await bindWorkflowToApp(env, owner, other.id, {
+      app,
+      alias: "followUp",
+      version: 1,
+    });
+    expect({
+      unverified: pageOf(unverified),
+      reboundPage: refusalOf(await ask(bob, { runId: bobs, pagination: {} })),
+      reboundEnded: refusalOf(
+        await ask(bob, { runId: bobs, pagination: { endCursor: "1" } })
+      ),
+    }).toStrictEqual({
+      unverified: { items: [], nextCursor: null, hasMore: false },
+      reboundPage: unknown,
+      reboundEnded: unknown,
+    });
+
+    // Rebound to version 2, which fails on what it reads: version 1's
+    // release tells none of version 2's runs, and a release sealed after
+    // the rebind, none of version 1's. A failure's own words never leave.
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: failingDefinition,
+      basedOn: 1,
+    });
+    await bindWorkflowToApp(env, owner, workflow.id, {
+      app,
+      alias: "followUp",
+      version: 2,
+    });
+    const secret = `Secret-${unique()}`;
+    const failed = await kickOff(bob, secret);
+    await settled(failed);
+    const throughOld = refusalOf(
+      await ask(bob, { runId: failed, pagination: {} })
+    );
+    await commitDefined(
+      env,
+      owner,
+      app,
+      withFiles(files(), {
+        "server/requests.ts": `${files().files["server/requests.ts"] ?? ""}// Sealed again.\n`,
+      }),
+      "Seal again"
+    );
+    const next = await seal(fixture, 2);
+    await publishVersion(env, owner, app, 2);
+    const nextHistory = queryReference(next, "followUp", "history");
+    const askNext = async (input: unknown) => {
+      const answer = await callAppFunction(
+        env,
+        bob,
+        app,
+        JSON.stringify({ reference: nextHistory, input })
+      );
+      return answer.result;
+    };
+    const failedPage = await askNext({ runId: failed, pagination: {} });
+    const failedItems = pageOf(failedPage).items;
+    const oldRunThroughNext = refusalOf(
+      await askNext({ runId: bobs, pagination: {} })
+    );
+    // Once the retention sweep removed the run's details (as it marks
+    // its receipt), its history tells nothing.
+    await env.DB.prepare(
+      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
+    )
+      .bind(Date.now(), failed)
+      .run();
+    const removed = pageOf(await askNext({ runId: failed, pagination: {} }));
+    expect({
+      throughOld,
+      oldRunThroughNext,
+      failedStep: failedItems.find(
+        (item) => item.kind === "step" && item.state === "failed"
+      )?.error,
+      leaks: JSON.stringify(failedPage).includes(secret),
+      removed,
+    }).toStrictEqual({
+      throughOld: unknown,
+      oldRunThroughNext: unknown,
+      // The engine's code and words, never what the expression read.
+      failedStep: {
+        code: "expression.failed",
+        message: "A step of the workflow failed.",
+        category: "operational",
+        retryable: false,
+        requestId: null,
+      },
+      leaks: false,
+      removed: { items: [], nextCursor: null, hasMore: false },
+    });
+  });
+
+  it("names each step of a loop's items by its task, as the run host names it", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `loop-${unique()}`
+    );
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: JSON.stringify({
+        $schema: workflowSchemaUrl,
+        input: objectSchema({ who: { kind: "string" } }),
+        output: {
+          schema: objectSchema({ status: { kind: "string" } }),
+          value: { status: "done" },
+        },
+        steps: [
+          {
+            id: "each",
+            type: "forEach",
+            items: { $expr: "[1, 2]" },
+            do: [passing("greet")],
+          },
+        ],
+      }),
+      basedOn: null,
+    });
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob],
+      workflow.id,
+      owner
+    );
+    const { result } = await callAppFunction(
+      env,
+      bob,
+      fixture.app,
+      JSON.stringify({
+        reference: { name: "requests.kickOff", kind: "action" },
+        input: { who: "Bob" },
+      })
+    );
+    if (!result.ok) {
+      throw new Error(result.error.code);
+    }
+    const { runId } = z.object({ runId: z.string() }).parse(result.value);
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, admin, workflow.id, runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const { result: read } = await callAppFunction(
+      env,
+      bob,
+      fixture.app,
+      JSON.stringify({
+        reference: queryReference(release, "followUp", "history"),
+        input: { runId, pagination: {} },
+      })
+    );
+    const { items } = historySchema.parse(read.ok ? read.value : read);
+    const greetSteps = items.filter(
+      (item) => item.kind === "step" && item.taskId === "greet"
+    );
+    // Each item's step of `greet` (`greet:task%40<i>`), started and
+    // completed: none of them left without its task.
+    expect(greetSteps).toHaveLength(4);
+  });
+
+  it("ends a page of the history where the next starts, however many entries it holds", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `long-${unique()}`
+    );
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: longDefinitionOf(60),
+      basedOn: null,
+    });
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob],
+      workflow.id,
+      owner
+    );
+    const started = await callAppFunction(
+      env,
+      bob,
+      fixture.app,
+      JSON.stringify({
+        reference: { name: "requests.kickOff", kind: "action" },
+        input: { who: "Bob" },
+      })
+    );
+    const runId = started.result.ok
+      ? z.object({ runId: z.string() }).parse(started.result.value).runId
+      : "";
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, admin, workflow.id, runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 60_000, interval: 200 }
+    );
+    const history = queryReference(release, "followUp", "history");
+    const read = async (input: unknown) => {
+      const { result } = await callAppFunction(
+        env,
+        bob,
+        fixture.app,
+        JSON.stringify({ reference: history, input })
+      );
+      if (!result.ok) {
+        throw new Error(`${result.error.code}: ${result.error.message}`);
+      }
+      return historySchema.parse(result.value);
+    };
+    // Every row, page by page as a caller pages it.
+    const rows: unknown[] = [];
+    const cursors: string[] = [];
+    let cursor: string | null = null;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
+      const page = await read({ runId, pagination: { pageSize: 100, cursor } });
+      rows.push(...page.items);
+      ({ nextCursor: cursor } = page);
+      if (cursor !== null) {
+        cursors.push(cursor);
+      }
+    } while (cursor !== null);
+    // A live list's loaded page: from the start to the first page's end,
+    // however small its size, then the page after it from there.
+    const [end = ""] = cursors;
+    const ended = await read({
+      runId,
+      pagination: { pageSize: 1, endCursor: end },
+    });
+    const after = await read({
+      runId,
+      pagination: { pageSize: 100, cursor: end },
+    });
+    expect({
+      morethanAPage: rows.length > 100,
+      ended: ended.items,
+      endedAt: ended.nextCursor,
+      after: after.items,
+    }).toStrictEqual({
+      morethanAPage: true,
+      ended: rows.slice(0, 100),
+      endedAt: end,
+      after: rows.slice(100, 200),
+    });
+  });
+});
