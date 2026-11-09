@@ -1,16 +1,15 @@
 import type { Acting } from "../../src/auth/identity.ts";
 import { buildPackages } from "../../src/packages/build.ts";
 import { buildPages } from "../../src/pages.ts";
-import { runCompute } from "../../src/workflow-modules.ts";
 import { loadSealedIsolate } from "../../src/workflows/sealed-isolate.ts";
 
-// An independent JSON workflow's run and its calculations, the App
-// compiler and the package builder on plain workerd with no sandbox and no
+// An independent JSON workflow's run, the App compiler and the package
+// builder on plain workerd with no sandbox and no
 // `SANDBOX_IN_PROCESS=unbounded` (scripts/workerd-unbounded-loaders.test.ts):
 // core loads none of them, as no sandbox bounds them here. Each is asked
 // for with `SANDBOX_HOST` unbound, as by a deployment that forgot it.
 
-/** A workflow's builder, as far as a package build reads one first. */
+/** An App's builder, as far as a package build reads one first. */
 const builder: Acting = {
   userId: "builder",
   role: "builder",
@@ -48,27 +47,6 @@ export default {
         )
       );
     }
-    if (pathname === "/compute") {
-      return new Response(
-        await refusal(
-          async () =>
-            // A JSON workflow's calculation, on the sandbox host where one
-            // is bound: here, none is.
-            await runCompute(
-              { ...env, SANDBOX_HOST: undefined },
-              {
-                modules: {},
-                sdk: {},
-                paths: ["code/count.ts"],
-                module: "code/count.ts",
-                export: "count",
-                input: [1],
-              },
-              1024
-            )
-        )
-      );
-    }
     if (pathname === "/pages") {
       return new Response(
         await refusal(
@@ -91,7 +69,7 @@ export default {
             await buildPackages(
               { ...env, SANDBOX_HOST: undefined },
               { type: "person", userId: builder.userId },
-              { type: "workflow", id: "workflow-test" },
+              { type: "app", id: "app-test" },
               "0".repeat(64),
               "worker"
             )

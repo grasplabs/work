@@ -19,37 +19,20 @@ const task: SealedTask = {
 const retries = (error: { name: string; code?: string }, of: SealedTask) =>
   retryable(failureOf({ ...error, message: "" }, of, false), of);
 
-/** A call task of `name`, a call whose effect runs once. */
-const onceTask = (name: "grasp.action" | "grasp.model"): SealedTask => {
-  const base = {
-    id: "charge",
-    pointer: "/steps/0/try/0",
-    kind: "call" as const,
-    steps: ["task" as const],
-    scope: [],
-  };
-  if (name === "grasp.model") {
-    return {
-      ...base,
-      call: {
-        name,
-        binding: "m",
-        instructions: { literal: "" },
-        input: { literal: "" },
-        outputSchema: {},
-      },
-    };
-  }
-  return {
-    ...base,
-    call: {
-      name,
-      binding: "a",
-      module: "code/a.ts",
-      export: "a",
-      arguments: { literal: null },
-    },
-  };
+/** A model call's task, a call whose effect runs once. */
+const modelTask: SealedTask = {
+  id: "charge",
+  pointer: "/steps/0/try/0",
+  kind: "call",
+  steps: ["task"],
+  scope: [],
+  call: {
+    name: "grasp.model",
+    binding: "m",
+    instructions: { literal: "" },
+    input: { literal: "" },
+    outputSchema: {},
+  },
 };
 
 describe("a step's failure, as a catch sees it", () => {
@@ -91,12 +74,8 @@ describe("a step's failure, as a catch sees it", () => {
       { name: "Error", message: "", code: "function.deadline_exceeded" },
     ];
     expect(
-      (["grasp.action", "grasp.model"] as const).flatMap((name) =>
-        timeouts.map(
-          (error) => failureOf(error, onceTask(name), false).catchable
-        )
-      )
-    ).toStrictEqual([false, false, false, false]);
+      timeouts.map((error) => failureOf(error, modelTask, false).catchable)
+    ).toStrictEqual([false, false]);
     // A connector call that ran out of time on every attempt: its send may
     // have gone out, and no attempt had connect's definite answer.
     const connector: SealedTask = {
@@ -168,7 +147,7 @@ describe("a step's failure, as a catch sees it", () => {
         { name: "Error", code: "workflow.task_data_invalid" },
         task
       ),
-      modelTimedOut: retries({ name: "TimeoutError" }, onceTask("grasp.model")),
+      modelTimedOut: retries({ name: "TimeoutError" }, modelTask),
     }).toStrictEqual({
       timeout: true,
       connector: true,

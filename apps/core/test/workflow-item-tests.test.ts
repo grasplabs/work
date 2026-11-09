@@ -145,7 +145,6 @@ const workflowOf = async (
   const saved = await editWorkflowDraft(env, by, workflow.id, {
     expectedRevision: base,
     source: definitionOf("Version 2", draft),
-    modules: {},
   });
   expect(saved.problems).toStrictEqual([]);
   return { workflow, revision: saved.revision };

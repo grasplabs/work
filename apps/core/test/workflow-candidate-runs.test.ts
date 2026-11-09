@@ -104,16 +104,13 @@ const definitionOf = ({
 
 /**
  * A workflow of `by`'s whose draft holds the source `sourceOf` writes for
- * its name (and `modules`), checked: its revision. With `publish`, version
+ * its name, checked: its revision. With `publish`, version
  * 1 is published from it first, so its parameters can be set.
  */
 const draftedSource = async (
   by: Identity,
   sourceOf: (name: string) => string,
-  {
-    modules = {},
-    publish = false,
-  }: { modules?: Record<string, string>; publish?: boolean } = {}
+  { publish = false }: { publish?: boolean } = {}
 ) => {
   const workflow = await createWorkflowResource(env, by, `test-${unique()}`);
   const source = sourceOf(workflow.name);
@@ -121,14 +118,12 @@ const draftedSource = async (
     await publishWorkflowVersion(env, by, workflow.id, {
       definition: source,
       basedOn: null,
-      modules,
     });
   }
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
     expectedRevision: base,
     source,
-    modules,
   });
   expect(saved.problems).toStrictEqual([]);
   return { workflow, revision: saved.revision };
@@ -138,7 +133,7 @@ const draftedSource = async (
 const drafted = async (
   by: Identity,
   definition: Definition,
-  options: { modules?: Record<string, string>; publish?: boolean } = {}
+  options: { publish?: boolean } = {}
 ) => await draftedSource(by, () => definitionOf(definition), options);
 
 /** Test run `runId` of workflow `id` once it ended, as `by` reads it. */
@@ -246,7 +241,7 @@ const aroundTrigger = async (
 /** A catalog contract of `kind` published by `admin`: its key. */
 const contract = async (
   admin: Identity,
-  kind: "connector" | "model" | "knowledge" | "files"
+  kind: "connector" | "model"
 ): Promise<string> => {
   const key = `${kind}-${unique()}`;
   await publishCatalogContract(
@@ -289,119 +284,6 @@ const greet = {
 /** A step waiting `span`. */
 const hold = (span: string, id = "hold") => ({ id, type: "wait", for: span });
 
-/** The module of action `notify`, sending mail through `mail`. */
-const notifyModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-export const notify = action({
-  args: { to: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [resource.connector("mail", { operations: ["mail.send"] })],
-  handler: async (ctx, args) => {
-    const sent = await ctx.resources.mail.call("mail.send", { to: args.to, subject: "Hello" });
-    return { status: JSON.stringify(sent) };
-  },
-});
-`;
-
-/** A definition calling action `notify`, which sends through `mail`. */
-const notifying = (key: string): Definition => ({
-  permissions: {
-    modules: {
-      notify: { kind: "action", contract: "local:code/notify.ts#notify" },
-    },
-    connections: { mail: { contract: key } },
-  },
-  steps: [
-    {
-      id: "notify",
-      type: "call",
-      module: "notify",
-      args: { to: { $expr: "args.who" } },
-    },
-  ],
-  status: "notify.status",
-});
-
-/** The module of action `listFiles`, listing the run's own files. */
-const listFilesModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-export const listFiles = action({
-  args: { who: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [resource.files("files", { operations: ["list"] })],
-  handler: async (ctx) => {
-    const listed = await ctx.resources.files.list();
-    return { status: JSON.stringify(listed) };
-  },
-});
-`;
-
-/** The module of action `deleteFile`, deleting the file its input names. */
-const deleteFileModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-export const deleteFile = action({
-  args: { who: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [resource.files("files", { operations: ["delete"] })],
-  handler: async (ctx, args) => {
-    await ctx.resources.files.delete({ file: args.who });
-    return { status: "deleted" };
-  },
-});
-`;
-
-/** The module of action `look`, reading the document its input names from `docs`. */
-const lookModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-export const look = action({
-  args: { who: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [resource.knowledge("docs", { operations: ["read"] })],
-  handler: async (ctx, args) => {
-    const found = await ctx.resources.docs.read({ id: args.who });
-    return { status: found.title };
-  },
-});
-`;
-
-/**
- * A definition calling action `action` through module `act`, with the
- * run's args, beside `permissions`: its status the action's.
- */
-const acting = (
-  action: string,
-  permissions: Record<string, unknown>
-): Definition => ({
-  permissions: {
-    modules: { act: { kind: "action", contract: action } },
-    ...permissions,
-  },
-  steps: [
-    {
-      id: "act",
-      type: "call",
-      module: "act",
-      args: { who: { $expr: "args.who" } },
-    },
-  ],
-  status: "act.status",
-});
-
-/** A definition calling action `look`, which reads the Brain binding `docs`. */
-const reading = (knowledge: string): Definition =>
-  acting("local:code/look.ts#look", {
-    brain: { docs: { contract: knowledge } },
-  });
-
-/**
- * A definition calling action `action` (by default `listFiles`, which
- * lists through `files`) with the run's input.
- */
-const listing = (
-  key: string,
-  action = "local:code/list-files.ts#listFiles"
-): Definition => acting(action, { files: { files: { contract: key } } });
-
 describe("test runs of a workflow's draft", () => {
   it("answers each kind of call from its fixture, checked as a real answer is, and fails at a call it has no answer for, calling nothing", async () => {
     const admin = await person("admin");
@@ -413,12 +295,9 @@ describe("test runs of a workflow's draft", () => {
     const cases: {
       kind: string;
       definition: Definition;
-      modules: Record<string, string>;
       alias: string;
       answer: Record<string, string>;
       status: string;
-      /** Whether its fixture is checked against the contract's output. */
-      shaped: boolean;
     }[] = [
       {
         kind: "connector",
@@ -427,11 +306,9 @@ describe("test runs of a workflow's draft", () => {
           steps: [send()],
           status: "send.messageId",
         },
-        modules: {},
         alias: "mail",
         answer: { messageId: "m-1" },
         status: "m-1",
-        shaped: true,
       },
       {
         kind: "model",
@@ -440,67 +317,45 @@ describe("test runs of a workflow's draft", () => {
           steps: [greet],
           status: "greet.line",
         },
-        modules: {},
         alias: "ai",
         answer: { line: "Hello, Ada" },
         status: "Hello, Ada",
-        shaped: true,
-      },
-      // A connector call an action makes, answered as a step's is. The
-      // action itself is the workflow's own code: only its calls are.
-      {
-        kind: "connector (an action's)",
-        definition: notifying(keys.connector),
-        modules: { "code/notify.ts": notifyModule },
-        alias: "mail",
-        answer: { messageId: "m-2" },
-        status: JSON.stringify({ messageId: "m-2" }),
-        shaped: false,
       },
     ];
     const results = await Promise.all(
-      cases.map(
-        async ({ kind, definition, modules, alias, answer, shaped }) => {
-          const { workflow, revision } = await drafted(ada, definition, {
-            modules,
+      cases.map(async ({ kind, definition, alias, answer }) => {
+        const { workflow, revision } = await drafted(ada, definition);
+        const run = async (fixtures: Record<string, unknown>) => {
+          const { runId } = await startCandidateRun(env, ada, workflow.id, {
+            revision,
+            input: { who: "Ada" },
+            fixtures,
           });
-          const run = async (fixtures: Record<string, unknown>) => {
-            const { runId } = await startCandidateRun(env, ada, workflow.id, {
-              revision,
-              input: { who: "Ada" },
-              fixtures,
-            });
-            return { runId, run: await ended(ada, workflow.id, runId) };
-          };
-          const answered = await run({ [alias]: { output: answer } });
-          const unanswered = await run({});
-          // An answer a real call of it would refuse, refused the same way.
-          const misshapen = shaped
-            ? await run({ [alias]: { output: { wrong: 1 } } })
-            : undefined;
-          return {
-            kind,
-            answered: endOf(answered.run),
-            unanswered: endOf(unanswered.run),
-            misshapen:
-              misshapen === undefined ? undefined : endOf(misshapen.run),
-            // Neither went out, nor was refused on its way: no call was made.
-            calls: [
-              ...(await callsOf(answered.runId)),
-              ...(await callsOf(unanswered.runId)),
-            ],
-          };
-        }
-      )
+          return { runId, run: await ended(ada, workflow.id, runId) };
+        };
+        const answered = await run({ [alias]: { output: answer } });
+        const unanswered = await run({});
+        // An answer a real call of it would refuse, refused the same way.
+        const misshapen = await run({ [alias]: { output: { wrong: 1 } } });
+        return {
+          kind,
+          answered: endOf(answered.run),
+          unanswered: endOf(unanswered.run),
+          misshapen: endOf(misshapen.run),
+          // Neither went out, nor was refused on its way: no call was made.
+          calls: [
+            ...(await callsOf(answered.runId)),
+            ...(await callsOf(unanswered.runId)),
+          ],
+        };
+      })
     );
     expect(results).toStrictEqual(
-      cases.map(({ kind, status, shaped }) => ({
+      cases.map(({ kind, status }) => ({
         kind,
         answered: { status: "completed", output: { status } },
         unanswered: { status: "failed", code: "workflow.candidate_unfixtured" },
-        misshapen: shaped
-          ? { status: "failed", code: "workflow.call_invalid" }
-          : undefined,
+        misshapen: { status: "failed", code: "workflow.call_invalid" },
         calls: [],
       }))
     );
@@ -639,7 +494,6 @@ describe("test runs of a workflow's draft", () => {
           },
         ],
       }),
-      modules: {},
     });
     expect({
       end: endOf(run),
@@ -676,7 +530,6 @@ describe("test runs of a workflow's draft", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: draft.revision,
       source: "{",
-      modules: {},
     });
     const stale = await outcome(
       startCandidateRun(env, ada, workflow.id, {
@@ -698,7 +551,6 @@ describe("test runs of a workflow's draft", () => {
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: passing.revision,
       source: draft.source,
-      modules: {},
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision: saved.revision,
@@ -1243,110 +1095,6 @@ describe("test runs of a workflow's draft", () => {
       afterWeek: "workflow.candidate_unavailable",
       engine: undefined,
       reservedAfter: 0,
-    });
-  });
-});
-
-describe("test runs of a draft whose actions read files and the Brain", () => {
-  it("answer an action's Brain and files calls from their fixtures alone, and fail one with no answer, calling nothing", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const cases: {
-      kind: string;
-      who: string;
-      alias: string;
-      answer: Record<string, unknown>;
-      status: string;
-      definition: Definition;
-      modules: Record<string, string>;
-    }[] = [
-      {
-        kind: "brain",
-        who: "doc-1",
-        alias: "docs",
-        answer: { id: "doc-1", title: "Leave policy", text: "…" },
-        status: "Leave policy",
-        definition: reading(await contract(admin, "knowledge")),
-        modules: { "code/look.ts": lookModule },
-      },
-      // Its answer is the fixture, and the run keeps no file.
-      {
-        kind: "files",
-        who: "Ada",
-        alias: "files",
-        answer: { files: [] },
-        status: JSON.stringify({ files: [] }),
-        definition: listing(await contract(admin, "files")),
-        modules: { "code/list-files.ts": listFilesModule },
-      },
-    ];
-    const results = await Promise.all(
-      cases.map(async ({ kind, definition, modules, alias, answer, who }) => {
-        const { workflow, revision } = await drafted(ada, definition, {
-          modules,
-        });
-        const run = async (fixtures: Record<string, unknown>) => {
-          const { runId } = await startCandidateRun(env, ada, workflow.id, {
-            revision,
-            input: { who },
-            fixtures,
-          });
-          return { runId, run: await ended(ada, workflow.id, runId) };
-        };
-        const answered = await run({ [alias]: { output: answer } });
-        const unanswered = await run({});
-        const answeredCalls = await callsOf(answered.runId);
-        const unansweredCalls = await callsOf(unanswered.runId);
-        return {
-          kind,
-          answered: endOf(answered.run),
-          unanswered: endOf(unanswered.run),
-          // Neither reached the Brain or R2, nor was refused on its way.
-          calls: [...answeredCalls, ...unansweredCalls],
-          files: await countOf(
-            "SELECT count(*) AS n FROM workflow_run_files WHERE run_id IN (?, ?)",
-            answered.runId,
-            unanswered.runId
-          ),
-        };
-      })
-    );
-    expect(results).toStrictEqual(
-      cases.map(({ kind, status }) => ({
-        kind,
-        answered: { status: "completed", output: { status } },
-        unanswered: { status: "failed", code: "workflow.candidate_unfixtured" },
-        calls: [],
-        files: 0,
-      }))
-    );
-  });
-
-  it("refuse a files call a real call would refuse, its fixture notwithstanding, and keep no file", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const key = await contract(admin, "files");
-    const { workflow, revision } = await drafted(
-      ada,
-      listing(key, "local:code/delete-file.ts#deleteFile"),
-      { modules: { "code/delete-file.ts": deleteFileModule } }
-    );
-    const run = async (who: string) => {
-      const { runId } = await startCandidateRun(env, ada, workflow.id, {
-        revision,
-        input: { who },
-        fixtures: { files: { output: null } },
-      });
-      return endOf(await ended(ada, workflow.id, runId));
-    };
-    expect({
-      // No file's ID: refused as a real call is.
-      invalid: await run("not-a-file"),
-      // A file's ID: answered from the fixture, though no such file is.
-      valid: await run(crypto.randomUUID()),
-    }).toStrictEqual({
-      invalid: { status: "failed", code: "workflow.call_invalid" },
-      valid: { status: "completed", output: { status: "deleted" } },
     });
   });
 });

@@ -195,8 +195,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "Nobody answered the run's decision before its deadline, so the run failed.",
   "workflow.model_call_limit":
     "The run made as many model calls as its workflow allows, so it failed.",
-  "workflow.compute_failed":
-    "A task's calculation threw, or the sandbox stopped it, so the run failed.",
   "workflow.draft_conflict":
     "Someone changed this draft since you read it. Read it again, then make your change.",
   "workflow.draft_unchecked":

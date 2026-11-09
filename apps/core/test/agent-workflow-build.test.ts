@@ -114,7 +114,6 @@ describe("the agent building an independent workflow", () => {
       const saved = await env.workflowBuild.edit(created.id, {
         expectedRevision: started.revision,
         source: ${JSON.stringify(definitionOf())},
-        modules: {},
       });
       const { runId } = await env.workflowBuild.startTest(created.id, {
         revision: saved.checkpoint.revision,
@@ -225,7 +224,6 @@ describe("the agent building an independent workflow", () => {
       const saved = await env.workflowBuild.edit(created.id, {
         expectedRevision: started.revision,
         source: ${JSON.stringify(definition)},
-        modules: {},
       });
       const renamed = await env.workflowBuild.editStep(created.id, {
         expectedRevision: saved.revision,
@@ -303,7 +301,6 @@ describe("the agent building an independent workflow", () => {
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: started.revision,
       source: definitionOf(),
-      modules: {},
     });
     const calls = tryEach({
       publish: `await env.workflowBuild.publish(${JSON.stringify(flow.id)}, { revision: 1, basedOn: null })`,
@@ -371,7 +368,6 @@ describe("the agent building an independent workflow", () => {
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: started.revision,
       source: definitionOf(),
-      modules: {},
     });
     await builder.api.workflowResources.publishDraft(flow.id, {
       revision: 1,
@@ -476,7 +472,6 @@ describe("the agent building an independent workflow", () => {
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: started.revision,
       source: definitionOf(),
-      modules: {},
     });
     await builder.api.workflowResources.publishDraft(flow.id, {
       revision: 1,
@@ -485,7 +480,6 @@ describe("the agent building an independent workflow", () => {
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: 1,
       source: definitionOf("later"),
-      modules: {},
     });
     await builder.api.workflowResources.publishDraft(flow.id, {
       revision: 2,
@@ -572,7 +566,6 @@ describe("the agent building an independent workflow", () => {
     await builder.api.workflowResources.editDraft(mine.id, {
       expectedRevision: started.revision,
       source: definitionOf(),
-      modules: {},
     });
     await builder.api.workflowResources.publishDraft(mine.id, {
       revision: 1,
@@ -581,7 +574,7 @@ describe("the agent building an independent workflow", () => {
     const id = JSON.stringify(theirs.id);
     const calls = tryEach({
       draft: `await env.workflowBuild.draft(${id})`,
-      edit: `await env.workflowBuild.edit(${id}, { expectedRevision: 0, source: "{}", modules: {} })`,
+      edit: `await env.workflowBuild.edit(${id}, { expectedRevision: 0, source: "{}" })`,
       startTest: `await env.workflowBuild.startTest(${id}, { revision: 1, input: {}, fixtures: {} })`,
       testRun: `await env.workflowBuild.testRun(${id}, "run-1")`,
       publish: `await env.workflowBuild.publish(${id}, { revision: 1, basedOn: null })`,
@@ -704,7 +697,6 @@ describe("the agent following independent workflows", () => {
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: started.revision,
       source: definitionOf(),
-      modules: {},
     });
     await builder.api.workflowResources.publishDraft(flow.id, {
       revision: 1,

@@ -387,7 +387,8 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
                 {
                   id: "save",
                   type: "call",
-                  module: "save",
+                  connection: "save",
+                  action: "add",
                   args: { who: { $expr: "args.who" } },
                 },
               ],

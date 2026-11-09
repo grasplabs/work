@@ -4,10 +4,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 // what they are given: refusing it with their own error, reading it,
 // bounding it and freezing what they keep.
 
-/**
- * The intrinsic `dataReader` calls, taken as this module loads, before any of
- * a workflow's modules (the action and compute modules import it).
- */
+/** The intrinsic `dataReader` calls, taken as this module loads. */
 const { getOwnPropertyDescriptor } = Object;
 
 /**

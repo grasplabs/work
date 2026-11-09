@@ -25,7 +25,6 @@ import { z } from "zod";
 import worker from "../src/index.ts";
 import { revokePermission } from "../src/permissions.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
-import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { stampedMail } from "../src/workflows/mail-stamps.ts";
 import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
@@ -33,7 +32,6 @@ import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   addedSince,
-  admin,
   attachment,
   deliver,
   definitionOf,
@@ -913,52 +911,6 @@ const mailWith = (to: string, parts: readonly Part[]): string =>
     "",
   ].join("\r\n");
 
-/**
- * The module of a workflow reading the files its run was handed: `read`
- * answers a file's content as text, through the workflow's files binding.
- */
-const readerModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-const files = resource.files("files", { operations: ["read"] });
-
-export const read = action({
-  args: { file: v.string() },
-  returns: v.object({ content: v.string() }),
-  uses: [files],
-  handler: async (ctx, args) => {
-    const reader = ctx.resources.files as unknown as { read: (request: object) => Promise<unknown> };
-    return { content: String(await reader.read({ file: args.file })) };
-  },
-});
-`;
-
-/**
- * A workflow taking a message's attachments, whose run reads the first as
- * a file of its own, through its files binding of catalog key `key`, and
- * returns its content.
- */
-const readerOf = (key: string) => (): string =>
-  JSON.stringify({
-    $schema: workflowSchemaUrl,
-    args: objectOf({ attachments: { kind: "array", item: attachment } }),
-    returns: objectOf({ content: { kind: "string" } }),
-    result: { content: { $expr: "read.content" } },
-    permissions: {
-      modules: {
-        read: { kind: "action", contract: "local:code/reader.ts#read" },
-      },
-      files: { files: { contract: key } },
-    },
-    steps: [
-      {
-        id: "read",
-        type: "call",
-        module: "read",
-        args: { file: { $expr: "args.attachments[0].file?.id" } },
-      },
-    ],
-  });
-
 /** A workflow taking a message's attachments as each of `fields`. */
 const takingAttachments = (fields: readonly string[]) => (): string =>
   JSON.stringify({
@@ -1161,13 +1113,9 @@ describe(
   "attachments of mail to independent workflows' email triggers",
   { timeout: 120_000 },
   () => {
-    it("are files of the run they start, which reads them through its files binding, each copied and audited once however often the message comes", async () => {
-      const key = `files-${unique()}`;
-      await publishCatalogContract(env, await admin(), { key, kind: "files" });
+    it("are files of the run they start, named in its input by reference, each copied and audited once however often the message comes", async () => {
       const { trigger, workflow, address } = await emailTrigger({
-        definition: readerOf(key),
-        modules: { "code/reader.ts": readerModule },
-        files: true,
+        definition: takingAttachments(["attachments"]),
         input: attachmentsAs("attachments"),
       });
       const before = await storedObjects();
@@ -1180,14 +1128,13 @@ describe(
       const again = await deliver(address, message);
       const runs = await runsOf(trigger.id);
       const run = runs[0]?.id ?? "";
-      const output = await outputOf(run);
+      await outputOf(run);
       const files = await runFilesOf(run);
 
       expect({
         delivered: [first.rejected, again.rejected],
         runs: runs.length,
         input: inputOf(runs[0]?.input ?? null),
-        output,
         files: files.map(({ name, type, size, state }) => ({
           name,
           type,
@@ -1211,8 +1158,6 @@ describe(
             },
           ],
         },
-        // The PDF as it was sent: its bytes, read by reference.
-        output: { content: "%PDF-" },
         files: [
           {
             name: "inv-7.pdf",

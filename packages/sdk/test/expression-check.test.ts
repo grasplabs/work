@@ -24,7 +24,7 @@
  * 6. It runs without end: nested `map` over large arrays. JavaScript has
  *    no loops here and no recursion (no function can name itself), so
  *    the work is at most polynomial in the data's size; what bounds it is
- *    the isolate's CPU and memory limits, as for compute modules, not the
+ *    the isolate's CPU and memory limits, not the
  *    check.
  */
 import { describe, expect, it } from "vite-plus/test";

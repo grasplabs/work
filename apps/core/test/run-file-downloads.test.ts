@@ -11,8 +11,6 @@ import { z } from "zod";
 import { appFor } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
-import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -25,6 +23,7 @@ import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { sweepGraceMs } from "../src/workflows/run-files.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { startFilesOf } from "./run-file-starts.ts";
 import {
   openRpc,
   outcome,
@@ -45,57 +44,20 @@ import {
 
 const idp = mockIdp();
 
-/** The file the run writes: Markdown holding HTML, under a name claiming HTML. */
+/** The file a run is handed: Markdown holding HTML, under a name claiming HTML. */
 const written = '# Notes\n\n<script>alert("x")</script>\n';
 
-const filesModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+/** The most bytes one chunk of a file holds. */
+const chunkBytes = 512 * 1024;
 
-const files = resource.files("files", { operations: ["write"] });
-
-export const writeFile = action({
-  args: { size: v.number() },
-  returns: v.object({ status: v.string() }),
-  uses: [files],
-  handler: async (ctx, args) => {
-    const done = await ctx.resources.files.write({
-      name: "notes.html",
-      type: "text/markdown",
-      content: args.size === 0 ? ${JSON.stringify(written)} : "a".repeat(args.size),
-    });
-    return { status: done.file };
-  },
+/** A workflow taking a file, whose run says which file it was handed. */
+const definition = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  args: { kind: "object", fields: { doc: { kind: "file" } } },
+  returns: { kind: "object", fields: { status: { kind: "string" } } },
+  result: { status: { $expr: "args.doc.id" } },
+  steps: [],
 });
-`;
-
-const objectSchema = (fields: Record<string, unknown>) => ({
-  kind: "object",
-  fields,
-});
-
-const definitionOf = (key: string): string =>
-  JSON.stringify({
-    $schema: workflowSchemaUrl,
-    args: objectSchema({ size: { kind: "number" } }),
-    returns: objectSchema({ status: { kind: "string" } }),
-    result: { $expr: "write" },
-    permissions: {
-      modules: {
-        writeFile: {
-          kind: "action",
-          contract: "local:code/files.ts#writeFile",
-        },
-      },
-      files: { files: { contract: key } },
-    },
-    steps: [
-      {
-        id: "write",
-        type: "call",
-        module: "writeFile",
-        args: { size: { $expr: "args.size" } },
-      },
-    ],
-  });
 
 /** Someone signed in with `role`: their session, and as core takes them. */
 const member = async (role: Role) => {
@@ -114,26 +76,26 @@ const member = async (role: Role) => {
 
 type Member = Awaited<ReturnType<typeof member>>;
 
-/** A workflow of `builder`'s that writes one file, its files binding approved. */
-const filesWorkflow = async (builder: Member, admin: Member) => {
-  const key = `files-${unique()}`;
-  await publishCatalogContract(env, admin.identity, { key, kind: "files" });
+/** A workflow of `builder`'s whose runs are each handed one file. */
+const filesWorkflow = async (builder: Member) => {
   const workflow = await createWorkflowResource(
     env,
     builder.identity,
     `files-${unique()}`
   );
   await publishWorkflowVersion(env, builder.identity, workflow.id, {
-    definition: definitionOf(key),
+    definition,
     basedOn: null,
-    modules: { "code/files.ts": filesModule },
-  });
-  await approveWorkflowBinding(env, admin.identity, workflow.id, {
-    alias: "files",
-    target: { kind: "files" },
-    reviewed: { version: 1 },
   });
   return workflow.id;
+};
+
+/** The bytes of `size`, in chunks of at most 512 KiB, as a file's are stored. */
+const chunksOf = (size: number): Uint8Array[] => {
+  const bytes = new TextEncoder().encode("a".repeat(size));
+  return Array.from({ length: Math.ceil(size / chunkBytes) }, (_, at) =>
+    bytes.subarray(at * chunkBytes, (at + 1) * chunkBytes)
+  );
 };
 
 /** Runs workflow `id` once for `by` (or as `invoker`), to its end: the run and its file. */
@@ -144,11 +106,20 @@ const ranOnce = async (
   /** How many bytes the file holds, or none for `written`. */
   size = 0
 ): Promise<{ run: string; file: string }> => {
+  const handed = await startFilesOf({
+    name: "notes.html",
+    type: "text/markdown",
+    chunks: size === 0 ? [new TextEncoder().encode(written)] : chunksOf(size),
+  });
   const { runId } = await startWorkflow(
     env,
     invoker ?? { type: "person", person: by.identity },
     id,
-    { version: 1, input: { size }, key: unique() }
+    { version: 1, input: { doc: { id: handed.id } }, key: unique() },
+    undefined,
+    undefined,
+    undefined,
+    handed.files
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -248,7 +219,7 @@ describe(
         member("admin"),
         member("builder"),
       ]);
-      const id = await filesWorkflow(ada, admin);
+      const id = await filesWorkflow(ada);
       const { run, file } = await ranOnce(ada, id);
       const path = runFileContentPath(id, run, file);
 
@@ -331,7 +302,7 @@ describe(
         member("user"),
         member("builder"),
       ]);
-      const id = await filesWorkflow(ada, admin);
+      const id = await filesWorkflow(ada);
       await shareWorkflowResource(env, ada.identity, id, {
         type: "person",
         id: bob.userId,
@@ -410,11 +381,8 @@ describe(
     });
 
     it("serve only a finished file of that run while its details last, and end a download whose stored bytes changed", async () => {
-      const [admin, ada] = await Promise.all([
-        member("admin"),
-        member("builder"),
-      ]);
-      const id = await filesWorkflow(ada, admin);
+      const ada = await member("builder");
+      const id = await filesWorkflow(ada);
       const first = await ranOnce(ada, id);
       const second = await ranOnce(ada, id);
       const adaGets = async (path: string) => await statusOf(ada.session, path);
@@ -498,9 +466,9 @@ describe(
         member("admin"),
         member("builder"),
       ]);
-      const id = await filesWorkflow(ada, admin);
-      // Three chunks: a call writes at most 512 KiB.
-      const size = 1024 * 1024 + 7;
+      const id = await filesWorkflow(ada);
+      // Three chunks.
+      const size = 2 * chunkBytes + 7;
       /** A download by `reader` of a new run's file, `meanwhile` done after its first chunk. */
       const partway = async (
         reader: Member,
@@ -543,7 +511,7 @@ describe(
       const stopped = {
         chunks: 3,
         status: 200,
-        first: 512 * 1024,
+        first: chunkBytes,
         rest: "file.not_found",
       };
 
@@ -582,7 +550,7 @@ describe(
         member("admin"),
         member("builder"),
       ]);
-      const id = await filesWorkflow(ada, admin);
+      const id = await filesWorkflow(ada);
       /** A download by `reader` of a new run's one-chunk file, `meanwhile` done as storage reads it. */
       const whileRead = async (
         reader: Member,

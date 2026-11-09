@@ -1,28 +1,16 @@
 import { sha256HexOfBytes, toBase64 } from "@grasp-os/shared/encoding";
-import { agentIdSchema } from "@grasp-os/shared/ids";
-import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runFileLimits } from "@grasp-os/shared/run-files";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { appFor } from "../src/apps.ts";
-import { requireResourceRole } from "../src/permission-resources.ts";
-import { grantPermission, requestPermission } from "../src/permissions.ts";
-import {
-  approveWorkflowBinding,
-  revokeWorkflowBinding,
-} from "../src/workflow-bindings.ts";
-import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import type { StartInvoker } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import {
@@ -32,17 +20,14 @@ import {
   sweepRunFiles,
 } from "../src/workflows/run-files.ts";
 import type { FilesCaller } from "../src/workflows/run-files.ts";
-import { allEvents } from "./audit-events.ts";
+import { startFilesOf } from "./run-file-starts.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // A workflow run's own files (GRA-724, workflows/run-files.ts), from its
-// threat model: a file is its run's alone, found by nothing else, a
-// restricted run's included; only the operations a use declares, each
-// decided again; only the task that opened a file writes it, and a
-// replay writes nothing twice; its bytes are what its type says; every
-// limit holds before bytes are stored; it goes with its run's details,
-// and what R2 refuses is deleted on the next sweep; its receipts carry
-// its digest, never its name.
+// threat model, through the files host itself: only the task that opened
+// a file writes it, and a replay writes nothing twice; its bytes are what
+// its type says; every limit holds before bytes are stored; it goes with
+// its run's details, and what R2 refuses is deleted on the next sweep.
 
 const identityOf = (userId: string, role: Role): Identity => ({
   userId,
@@ -71,215 +56,52 @@ const person = async (role: Role): Promise<Identity> => {
   return identityOf(userId, role);
 };
 
-const objectSchema = (fields: Record<string, unknown>) => ({
-  kind: "object",
-  fields,
-});
-
-/** The text of `size` characters the actions write and check. */
+/** A text of `size` characters. */
 const bodyOf = (size: number): string =>
   "abcdefghij".repeat(Math.ceil(size / 10)).slice(0, size);
 
-/**
- * The module of the workflow's actions, its files use declaring
- * `operations`: `writeFile` writes a CSV of `size` characters and answers
- * its reference; `readFile` reads the file a reference names; `go` does
- * what its `mode` says, with the file its input names.
- */
-const filesModule = (
-  operations = '["write", "read", "list", "delete"]'
-): string => `import { action, resource, v } from "@grasp-os/sdk/action";
-
-const files = resource.files("files", { operations: ${operations} });
-const ref = v.object({
-  file: v.string(),
-  name: v.string(),
-  type: v.string(),
-  size: v.number(),
-  sha256: v.string(),
-});
-const bodyOf = (size: number) => "abcdefghij".repeat(Math.ceil(size / 10)).slice(0, size);
-// Untyped, so a use declaring fewer operations still builds: the host is
-// what refuses an undeclared one.
-const loose = (files: unknown) =>
-  files as {
-    write: (request: object) => Promise<{ file: string; name: string; type: string; size: number; sha256: string }>;
-    read: (request: object) => Promise<string>;
-    list: () => Promise<{ file: string }[]>;
-  };
-
-export const writeFile = action({
-  args: { size: v.number() },
-  returns: ref,
-  uses: [files],
-  handler: async (ctx, args) =>
-    await loose(ctx.resources.files).write({
-      name: "report.csv",
-      type: "text/csv",
-      content: bodyOf(args.size),
-    }),
+/** A workflow taking a file, whose run says which file it was handed. */
+const definition = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  args: { kind: "object", fields: { doc: { kind: "file" } } },
+  returns: { kind: "object", fields: { status: { kind: "string" } } },
+  result: { status: { $expr: "args.doc.id" } },
+  steps: [],
 });
 
-export const readFile = action({
-  args: { file: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [files],
-  handler: async (ctx, args) => {
-    const text = await loose(ctx.resources.files).read({ file: args.file });
-    return { status: JSON.stringify({ length: text.length, same: text === bodyOf(text.length) }) };
-  },
-});
-
-export const go = action({
-  args: { mode: v.string(), file: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [files],
-  handler: async (ctx, args) => {
-    if (args.mode === "write") {
-      const written = await loose(ctx.resources.files).write({ name: "notes.md", type: "text/markdown", content: "# Notes" });
-      return { status: JSON.stringify(written) };
-    }
-    if (args.mode === "both") {
-      const written = await loose(ctx.resources.files).write({ name: "notes.md", type: "text/markdown", content: "# Notes" });
-      const text = await loose(ctx.resources.files).read({ file: written.file });
-      const listed = await loose(ctx.resources.files).list();
-      return { status: JSON.stringify({ text, listed: listed.map(({ file }) => file === written.file) }) };
-    }
-    if (args.mode === "lie") {
-      await loose(ctx.resources.files).write({ name: "report.pdf", type: "application/pdf", content: "not a pdf" });
-      return { status: "kept" };
-    }
-    if (args.mode === "list") {
-      const listed = await loose(ctx.resources.files).list();
-      return { status: String(listed.length) };
-    }
-    const text = await loose(ctx.resources.files).read({ file: args.file });
-    return { status: text };
-  },
-});
-`;
-
-/** A step `id` calling action `binding` with `args`. */
-const call = (id: string, module: string, args: Record<string, unknown>) => ({
-  id,
-  type: "call",
-  module,
-  args,
-});
-
-/** Suspends a run before its action: time to change what it relies on. */
-const hold = { id: "hold", type: "wait", for: "1 second" };
-
-/** What `go` does: its mode and file, as the run's input. */
-const goTask = call("go", "go", {
-  mode: { $expr: "args.mode" },
-  file: { $expr: "args.file" },
-});
-
-/**
- * A definition running `steps`, its files binding `key`, ending with what
- * its last step answered.
- */
-const definitionOf = (
-  key: string,
-  steps: readonly { readonly id: string }[]
-): string =>
-  JSON.stringify({
-    $schema: workflowSchemaUrl,
-    args: objectSchema({
-      mode: { kind: "string" },
-      file: { kind: "string" },
-      size: { kind: "number" },
-    }),
-    returns: objectSchema({ status: { kind: "string" } }),
-    result: { $expr: steps.at(-1)?.id ?? "null" },
-    permissions: {
-      modules: {
-        writeFile: {
-          kind: "action",
-          contract: "local:code/files.ts#writeFile",
-        },
-        readFile: { kind: "action", contract: "local:code/files.ts#readFile" },
-        go: { kind: "action", contract: "local:code/files.ts#go" },
-      },
-      files: { files: { contract: key } },
-    },
-    steps,
-  });
-
-/**
- * A workflow of `by`'s running `tasks`, its files binding approved by
- * `admin` for version 1: its ID and the approval's.
- */
-const filesWorkflow = async (
-  by: Identity,
-  admin: Identity,
-  steps: readonly { readonly id: string }[],
-  module = filesModule()
-) => {
-  const key = `files-${unique()}`;
-  await publishCatalogContract(env, admin, { key, kind: "files" });
+/** A run of a workflow of `by`'s, handed one file by its start, once it ended. */
+const handedRun = async (by: Identity): Promise<string> => {
   const workflow = await createWorkflowResource(env, by, `files-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(key, steps),
+    definition,
     basedOn: null,
-    modules: { "code/files.ts": module },
   });
-  const approval = await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "files",
-    target: { kind: "files" },
-    reviewed: { version: 1 },
+  const handed = await startFilesOf({
+    name: "a.csv",
+    type: "text/csv",
+    chunks: [new TextEncoder().encode(bodyOf(10))],
   });
-  return { workflow, approval: approval.id };
-};
-
-/** Starts version 1 of workflow `id` for `by` on `input`, as `invoker`. */
-const started = async (
-  by: Identity,
-  id: string,
-  input: { mode?: string; file?: string; size?: number },
-  invoker?: StartInvoker
-): Promise<string> => {
   const { runId } = await startWorkflow(
     env,
-    invoker ?? { type: "person", person: by },
-    id,
-    {
-      version: 1,
-      input: { mode: "", file: "", size: 0, ...input },
-      key: unique(),
-    }
+    { type: "person", person: by },
+    workflow.id,
+    { version: 1, input: { doc: { id: handed.id } }, key: unique() },
+    undefined,
+    undefined,
+    undefined,
+    handed.files
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
   }
-  return runId;
-};
-
-/** How run `runId` of workflow `id` ended. */
-const ended = async (by: Identity, id: string, runId: string) => {
-  const run: WorkflowResourceRun = await vi.waitFor(
+  await vi.waitFor(
     async () => {
-      const read = await resourceRunFor(env, by, id, runId);
-      expect(read.endedAt).not.toBeNull();
-      return read;
+      const read = await resourceRunFor(env, by, workflow.id, runId);
+      expect(read.status).toBe("completed");
     },
     { timeout: 60_000, interval: 100 }
   );
-  return run.status === "completed"
-    ? { status: run.status, output: run.output }
-    : { status: run.status, code: run.error?.code };
-};
-
-/** The receipts of run `runId`'s file calls, as the audit log keeps them. */
-const fileReceiptsOf = async (runId: string) => {
-  const events = await allEvents();
-  return events.filter(
-    (event) =>
-      event.action === "workflow.run.called" &&
-      event.target?.id === runId &&
-      event.detail?.call === "grasp.files"
-  );
+  return runId;
 };
 
 /** An attempt that still holds its lease. */
@@ -295,7 +117,7 @@ const callerOf = (
   return {
     run,
     workflowId,
-    /** The next call's caller, as the action host numbers its calls. */
+    /** The next call's caller, numbered as a task numbers its calls. */
     next: (requireHolds: () => void = holds): FilesCaller => {
       ordinal += 1;
       return {
@@ -417,247 +239,6 @@ const written = async (
 };
 
 describe("a workflow run's own files", () => {
-  it("are written in pieces by one task and read back by reference in the next, their receipts carrying the digest and never the name", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const size = 3 * 1024 * 1024 + 7;
-    const { workflow } = await filesWorkflow(ada, admin, [
-      call("written", "writeFile", { size: { $expr: "args.size" } }),
-      call("read", "readFile", {
-        file: { $expr: "written.file" },
-      }),
-    ]);
-    const runId = await started(ada, workflow.id, { size });
-    const end = await ended(ada, workflow.id, runId);
-    const receipts = await fileReceiptsOf(runId);
-    const sha256 = await sha256HexOfBytes(
-      new TextEncoder().encode(bodyOf(size))
-    );
-    const finished = receipts.filter(
-      ({ detail }) => detail?.outcome === "done" && detail.sha256 === sha256
-    );
-    const operations: Record<string, number> = {};
-    for (const { detail } of receipts) {
-      if (detail?.outcome === "done") {
-        const operation = String(detail.operation);
-        operations[operation] = (operations[operation] ?? 0) + 1;
-      }
-    }
-    expect({
-      end,
-      // Open, seven pieces and finish; then seven reads.
-      calls: receipts.filter(({ detail }) => detail?.outcome === "done").length,
-      operations,
-      // The finish and every read name the file by its digest.
-      digested: finished.length,
-      named: JSON.stringify(receipts).includes("report.csv"),
-    }).toStrictEqual({
-      end: {
-        status: "completed",
-        output: { status: JSON.stringify({ length: size, same: true }) },
-      },
-      calls: 16,
-      operations: { open: 1, append: 7, finish: 1, read: 7 },
-      digested: 8,
-      named: false,
-    });
-  });
-
-  it("are another run's nothing: one handed another run's file, a restricted run's too, finds none", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow } = await filesWorkflow(ada, admin, [goTask]);
-    const first = await ended(
-      ada,
-      workflow.id,
-      await started(ada, workflow.id, { mode: "write" })
-    );
-    const status = fieldOf(first.output, "status");
-    const ref: unknown = JSON.parse(typeof status === "string" ? status : "{}");
-    const file = String(fieldOf(ref, "file"));
-    // An agent's start that names no chat starts restricted
-    // (workflow-starts.ts, `restrictedStart`).
-    const agentId = agentIdSchema.parse(`agent-${unique()}`);
-    const asked = await requestPermission(
-      env,
-      ada,
-      {
-        subject: { type: "agent", agentId },
-        object: { type: "workflow", workflowId: workflow.id },
-        actions: ["start"],
-        binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
-      } satisfies PermissionRequest,
-      {
-        app: async (named: string, role: "user" | "builder") =>
-          await appFor(env, ada, named, role),
-        resource: async (
-          refOf: Parameters<typeof requireResourceRole>[2],
-          needed: Parameters<typeof requireResourceRole>[3]
-        ) => {
-          await requireResourceRole(env, ada, refOf, needed);
-        },
-      }
-    );
-    await grantPermission(env, admin, asked.id, { version: null });
-    const agent: StartInvoker = {
-      type: "agent",
-      authority: {
-        subject: { type: "agent", agentId },
-        onBehalfOf: ada.userId,
-        mode: "interactive",
-      },
-    };
-    const restricted = await ended(
-      ada,
-      workflow.id,
-      await started(ada, workflow.id, { mode: "both" }, agent)
-    );
-    const restrictedFile = await env.DB.prepare(
-      "SELECT id FROM workflow_run_files WHERE workflow_resource_id = ? AND name = 'notes.md' ORDER BY created_at DESC LIMIT 1"
-    )
-      .bind(workflow.id)
-      .first<{ id: string }>();
-    const otherRunId = await started(ada, workflow.id, {
-      mode: "read",
-      file,
-    });
-    const otherRun = await ended(ada, workflow.id, otherRunId);
-    const otherReceipts = await fileReceiptsOf(otherRunId);
-    const refusedReceipt = otherReceipts.find(
-      ({ detail }) => detail?.outcome === "file.not_found"
-    )?.detail;
-    const fromRestricted = await ended(
-      ada,
-      workflow.id,
-      await started(ada, workflow.id, {
-        mode: "read",
-        file: restrictedFile?.id ?? "",
-      })
-    );
-    expect({
-      first: first.status,
-      restricted,
-      otherRun,
-      // Its receipt says what was asked for: the operation and the file.
-      refused: {
-        operation: refusedReceipt?.operation,
-        file: refusedReceipt?.file,
-      },
-      fromRestricted,
-    }).toStrictEqual({
-      first: "completed",
-      refused: { operation: "read", file },
-      // Its own file, within the run.
-      restricted: {
-        status: "completed",
-        output: {
-          status: JSON.stringify({ text: "# Notes", listed: [true] }),
-        },
-      },
-      otherRun: { status: "failed", code: "file.not_found" },
-      fromRestricted: { status: "failed", code: "file.not_found" },
-    });
-  });
-
-  it("are nothing to a reference an expression writes: another workflow's file, named in the definition itself, finds none, audited", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const writer = await filesWorkflow(ada, admin, [goTask]);
-    const writtenRun = await started(ada, writer.workflow.id, {
-      mode: "write",
-    });
-    const writes = await ended(ada, writer.workflow.id, writtenRun);
-    const status = fieldOf(writes.output, "status");
-    const file = String(
-      fieldOf(JSON.parse(typeof status === "string" ? status : "{}"), "file")
-    );
-    // The same builder's other workflow, its files binding approved too,
-    // whose step forges the reference: the file's ID as a literal.
-    const forger = await filesWorkflow(ada, admin, [
-      call("go", "go", { mode: "read", file: { $expr: JSON.stringify(file) } }),
-    ]);
-    const forgedRun = await started(ada, forger.workflow.id, {});
-    const forged = await ended(ada, forger.workflow.id, forgedRun);
-    const receipts = await fileReceiptsOf(forgedRun);
-    expect({
-      written: writes.status,
-      forged,
-      receipts: receipts.map(({ detail }) => ({
-        operation: detail?.operation,
-        file: detail?.file,
-        outcome: detail?.outcome,
-      })),
-      // The file is still its own run's, as it was.
-      kept: await rowsOf(writtenRun),
-    }).toStrictEqual({
-      written: "completed",
-      forged: { status: "failed", code: "file.not_found" },
-      receipts: [
-        { operation: "read", file, outcome: "started" },
-        { operation: "read", file, outcome: "file.not_found" },
-      ],
-      kept: ["done"],
-    });
-  });
-
-  it("refuse an operation the use doesn't declare, and the next call once the files approval is revoked", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const writeOnly = await filesWorkflow(
-      ada,
-      admin,
-      [goTask],
-      filesModule('["write"]')
-    );
-    const undeclaredRun = await started(ada, writeOnly.workflow.id, {
-      mode: "list",
-    });
-    const undeclared = await ended(ada, writeOnly.workflow.id, undeclaredRun);
-    const revoked = await filesWorkflow(ada, admin, [hold, goTask]);
-    const revokedRun = await started(ada, revoked.workflow.id, {
-      mode: "write",
-    });
-    await revokeWorkflowBinding(
-      env,
-      admin,
-      revoked.workflow.id,
-      revoked.approval
-    );
-    const revokedEnd = await ended(ada, revoked.workflow.id, revokedRun);
-    const events = await allEvents();
-    expect({
-      undeclared,
-      refused: events
-        .filter(
-          (event) =>
-            event.action === "workflow.call.refused" &&
-            event.target?.id === undeclaredRun
-        )
-        .map(({ detail }) => ({ call: detail?.call, reason: detail?.reason })),
-      revoked: revokedEnd,
-      revokedFiles: await rowsOf(revokedRun),
-    }).toStrictEqual({
-      undeclared: { status: "failed", code: "workflow.call_denied" },
-      refused: [{ call: "files", reason: "operation_undeclared" }],
-      revoked: { status: "failed", code: "workflow.call_denied" },
-      revokedFiles: [],
-    });
-  });
-
-  it("refuse a file whose bytes aren't its type, which then holds no place in the run", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow } = await filesWorkflow(ada, admin, [goTask]);
-    const runId = await started(ada, workflow.id, { mode: "lie" });
-    expect({
-      end: await ended(ada, workflow.id, runId),
-      files: await rowsOf(runId),
-    }).toStrictEqual({
-      end: { status: "failed", code: "file.content_mismatch" },
-      files: ["deleted"],
-    });
-  });
-
   it("take only the task that opened a file as its writer, and a replay writes nothing twice", async () => {
     const caller = callerOf();
     const opened = await callFiles(env, caller.next(), "open", {
@@ -1145,7 +726,7 @@ describe("a workflow run's own files", () => {
 
   it("keep a connector's answer as one finished file of the run, whatever its size, and the same call again as the same file, only of the same bytes", async () => {
     const caller = callerOf();
-    // Past one call's bytes: written in pieces, as an action's own writes are.
+    // Past one call's bytes: written in pieces.
     const text = bodyOf(runFileLimits.callBytes * 2 + 10);
     const bytes = new TextEncoder().encode(text);
     const keeping = caller.next();
@@ -1433,12 +1014,7 @@ describe("a workflow run's own files", () => {
   }, 120_000);
 
   it("go with their run's details, the sweep deleting their chunks and trying again what R2 refused, and a file never finished a day after it opened", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow } = await filesWorkflow(ada, admin, [goTask]);
-    const runId = await started(ada, workflow.id, { mode: "write" });
-    const end = await ended(ada, workflow.id, runId);
-    expect(end.status).toBe("completed");
+    const runId = await handedRun(await person("builder"));
     const before = {
       objects: await objectsOf(runId),
       rows: await rowsOf(runId),
