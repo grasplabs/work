@@ -28,7 +28,7 @@ import type {
 // seals one, and `compactDescriptor` writes a full descriptor back. Where
 // the text is kept (a file, a database row) is its holder's business.
 // `compactDescriptorSchema` is its JSON Schema, for editors and for the
-// JSON Schema of a format that holds it (grasp-workflow/1's `$schema`).
+// JSON Schema of a format that holds it (grasp-workflow/2's `$schema`).
 
 /** A descriptor's compact form (see the header). */
 export type CompactDescriptor = CompactModifiers & CompactKind;

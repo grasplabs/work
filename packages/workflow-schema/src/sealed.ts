@@ -1,3 +1,8 @@
+import {
+  appErrorCodeMaxLength,
+  appErrorCodePattern,
+  appErrorMessageMaxLength,
+} from "@grasp-os/shared/function-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 import {
@@ -164,25 +169,28 @@ const sealedListenSchema = z.strictObject({
     .optional(),
 });
 
-/** A try task's catch, as the host decides it. */
+/** An `AppError` code, as a catch takes one and a raise fails with one. */
+const errorCodeSchema = z
+  .string()
+  .max(appErrorCodeMaxLength)
+  .regex(appErrorCodePattern);
+
+/**
+ * A try task's catch, as the host decides it: the code a failure must
+ * have for it to take it (any, without one), the slot of its `when`,
+ * which its code decides, and its retry policy, in milliseconds, which
+ * the host runs for a failure of a call in its list (a call's `retry`
+ * says whether its `when` holds).
+ */
 const sealedCatchSchema = z.strictObject({
   variable: z.string().min(1).max(64),
-  /** The properties a failure must have for it to take it. */
-  errors: z
-    .strictObject({
-      type: z.string().max(2048).optional(),
-      status: z.int().optional(),
-    })
-    .optional(),
-  /** The slot of its `when`, which its code decides. */
+  code: errorCodeSchema.optional(),
   when: z.int().min(0).optional(),
-  /** Its retry policy, in milliseconds. */
   retry: z
     .strictObject({
       attempts: z.int().min(1).max(5),
       delayMs: z.int().min(0),
       backoff: z.enum(["constant", "linear", "exponential"]),
-      when: z.int().min(0).optional(),
     })
     .optional(),
 });
@@ -192,11 +200,15 @@ export type SealedCatch = z.infer<typeof sealedCatchSchema>;
 const taskBase = {
   id: taskIdSchema,
   pointer: z.string().max(sealedBuildLimits.pointerLength),
-  /** Its engine steps, `<id>:<step>`, besides a decision's parts. */
-  steps: z.array(z.enum(["task", "enter", "leave", "item", "catch"])).max(4),
   /**
-   * The `for` tasks around it, outermost first: each of its steps runs in
-   * an item of each.
+   * Its engine steps, `<id>:<step>` (from its second run in a loop's
+   * items on, `<id>:<step>@<count>`), besides a decision's parts: none
+   * for an `if`, a loop, a `try` or a raise, whose flow is the code's.
+   */
+  steps: z.array(z.enum(["enter", "task"])).max(2),
+  /**
+   * The `for` tasks around it, outermost first: a task in none runs at
+   * most once.
    */
   scope: z.array(taskIdSchema).max(maxTaskScopes),
   /** The most an attempt of its steps may take, from its `timeout`. */
@@ -227,12 +239,15 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     ...taskBase,
     kind: z.literal("raise"),
-    /** The workflow's own error its step fails with, literal. */
+    /**
+     * The workflow's own `AppError` its code throws, literal: a run that
+     * fails with an `AppError` of a code no raise seals fails as the
+     * platform's, never with that code.
+     */
     error: z.strictObject({
-      type: z.string().min(1).max(2048),
-      status: z.int().min(400).max(599),
-      title: z.string().max(2000).optional(),
-      detail: z.string().max(2000).optional(),
+      code: errorCodeSchema,
+      message: z.string().min(1).max(appErrorMessageMaxLength),
+      details: z.json().optional(),
     }),
   }),
   z.strictObject({
@@ -245,15 +260,12 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
     ...taskBase,
     kind: z.literal("for"),
     /**
-     * Its items, one at a time, in order: the collection its enter step
-     * records (`in`, which the host reads from that record, not from
-     * here), the names its items' code reads them by, and the slot of its
-     * `while`, which each item's `item` step records.
+     * Its items, for review: the slot of the list its code goes over, the
+     * name its items' code reads each by, and the slot of its `while`.
      */
     loop: z.strictObject({
       in: templateSchema,
       each: z.string().min(1).max(64),
-      at: z.string().min(1).max(64),
       while: z.int().min(0).optional(),
     }),
   }),
@@ -332,7 +344,7 @@ export const sealedTableSchema = z.strictObject({
   expressions: z
     .array(sealedExpressionSchema)
     .max(sealedBuildLimits.expressions),
-  /** Whether the workflow has an output, evaluated in `workflow:output`. */
+  /** Whether the workflow returns a result, recorded in `workflow:output`. */
   workflow: z.strictObject({ output: z.boolean() }),
   /** The parameters its code reads: those that aren't sensitive. */
   params: z.array(z.string().min(1).max(64)).max(64),

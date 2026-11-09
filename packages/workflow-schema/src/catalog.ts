@@ -10,7 +10,7 @@ import type { BindingKind } from "./format.ts";
 // code) says what each one is. A binding is a requirement, never a grant:
 // this reads what the host has, within its limits, so a check can hold a
 // definition to it. The catalog holds contracts of more kinds than a
-// grasp-workflow/1 step binds (`bindingKinds`, format.ts): Apps and their
+// grasp-workflow/2 step binds (`bindingKinds`, format.ts): Apps and their
 // pages bind the rest.
 
 /** Every kind of contract the host catalog holds. */

@@ -1,280 +1,345 @@
-import { workflowIdSchema } from "@grasp-os/shared/ids";
-import type { RunId, WorkflowId } from "@grasp-os/shared/ids";
-import type { Json } from "@grasp-os/shared/json";
+import type { RunId } from "@grasp-os/shared/ids";
 
-import type { WorkflowEngine, WorkflowEnv } from "./engine.ts";
-import {
-  callMethod as callGuard,
-  optionalChain as optionalGuard,
-  readMember as readGuard,
-} from "./expression-runtime.ts";
+import type { WorkflowEngine } from "./engine.ts";
+import type { MemberName } from "./member-names.ts";
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer } from "./value-types.ts";
 import { v } from "./values.ts";
-import { checkOrThrow, parseOrThrow, WorkflowError } from "./workflow-error.ts";
+import { checkOrThrow, WorkflowError } from "./workflow-error.ts";
+import { frozenCopy, journaledCtx } from "./workflow-journal.ts";
 import {
   describeParams,
   resolveParams,
   validateParams,
 } from "./workflow-params.ts";
 import type { ParamMetadata, ParamValues, Params } from "./workflow-params.ts";
-import { createRunner } from "./workflow-runner.ts";
-import type { StepRunner } from "./workflow-steps.ts";
-
-/**
- * Workflow SDK: what the code core generates from a grasp-workflow/1
- * document (@grasp-os/workflow-schema's generate.ts) runs on, and the only
- * API that code sees. A workflow declares its parameters, then runs its
- * steps in code, each with its options inline:
- *
- * ```ts
- * export default workflow("invoice-approval", {
- *   params: {
- *     threshold: {
- *       label: "Review invoices above",
- *       type: v.money().default({ minorUnits: 500_000, currency: "EUR" }),
- *     },
- *   },
- *   input: v.object({ invoice: v.number() }),
- * }, async (step, { params, env }) => {
- *   await step.do("book", { key: "task", description: "book" },
- *     async () => ({ output: await env.ledger.call("entries.create", { invoice: 7 }) }));
- * });
- * ```
- */
-
-// Workflow code imports only this module, so it gets `v` from here too:
-// a workflow declares its values as an App does.
-export { v } from "./values.ts";
-export { brain } from "./brain.ts";
-// The guards a workflow's JavaScript expressions run through, as the
-// code generated from them imports them (expression-check.ts,
-// `runtimeNames`).
-export { jsonValue } from "./expression-runtime.ts";
-
-/**
- * A value an expression reads, as generated code holds it: any. Code
- * generated from an expression must type-check whatever its data
- * (`input.count + 1`, `(line) => line.length > 3`), and on the guards'
- * JSON every operator but `===` is a type error TypeScript makes of
- * JavaScript that runs well. What an expression reads is type-checked
- * against the workflow's schemas where it is written, never in the
- * generated code, where its data is only JSON. The guards still decide
- * everything at run time.
- */
-// oxlint-disable-next-line typescript/no-explicit-any -- see above
-type Read = any;
-
-/** `readMember`, for generated code: what it reads is `Read`. */
-export const readMember: (object: unknown, key: string | number) => Read =
-  readGuard;
-
-/**
- * `callMethod`, for generated code: what it answers is `Read`, and a
- * callback's parameters are, as the arrow written in its place takes them.
- */
-export const callMethod: (
-  receiver: unknown,
-  name: string,
-  args: readonly (Json | ((...values: Read[]) => unknown))[]
-) => Read = callGuard;
-
-/** `optionalChain`, for generated code: on `Read` values. */
-export const optionalChain: (value: Read, rest: (value: Read) => Read) => Read =
-  optionalGuard;
-
-// What generated code holds the state it keeps and reads to.
-export { fittedState, fittedValue } from "./fitted-value.ts";
-// What a step records and a binding is handed: a workflow's code names it
-// to narrow what a binding answers (`unknown`) into a step's result.
-export type { Json } from "@grasp-os/shared/json";
-export { WorkflowError } from "./workflow-error.ts";
-export { sensitiveParam } from "./workflow-params.ts";
-export type { Param, ParamMetadata } from "./workflow-params.ts";
-export type {
-  CaughtError,
+import type {
+  CallOptions,
   Decision,
-  DecisionOptions,
-  DoOptions,
+  DecisionRequest,
   Duration,
   EventWait,
-  Retries,
-  RetryChoice,
-  SleepOptions,
-  StepRunner,
+  EventWaitRequest,
+  GenerateRequest,
+  Read,
+  StepOptions,
+} from "./workflow-steps.ts";
+
+/**
+ * Workflow SDK: what the code core generates from a grasp-workflow/2
+ * document (@grasp-os/workflow-schema's generate.ts) runs on, and the only
+ * API that code sees. It reads as an App's code does: a workflow declares
+ * its args, what it returns, its parameters and its permissions, and its
+ * handler calls what it may reach through `ctx`, each call journaling
+ * itself under its step:
+ *
+ * ```ts
+ * export default defineWorkflow({
+ *   args: v.object({ customer: v.string() }),
+ *   returns: v.object({ id: v.string() }),
+ *   permissions: { connections: { stripe: ["invoices.create"] } },
+ *   handler: async (ctx, args) => {
+ *     const invoice = await ctx.connections.stripe.invoices.create(
+ *       { customer: args.customer },
+ *       { step: "invoice" }
+ *     );
+ *     return { id: invoice.id };
+ *   },
+ * });
+ * ```
+ *
+ * Threat model, and how each is closed (the host's half is core's
+ * workflows/sealed-run.ts):
+ *
+ * - Prototype access through data. Every value the handler reads (its
+ *   args, parameters, state, inbox, each call's result, each event, each
+ *   decision, each caught error) is JSON copied into objects with no
+ *   prototype, frozen all the way down (`frozenData`, workflow-journal.ts),
+ *   on a first run and on a replay alike: a field nobody wrote, `__proto__`
+ *   and `constructor` included, is `undefined` or an own field holding
+ *   data, never something inherited, and nothing changes it. The check of
+ *   expressions (`@grasp-os/sdk/expression-check`) is the first layer, the
+ *   isolate's frozen intrinsics the third.
+ * - Members exposing undeclared names. `ctx.connections`, `ctx.decisions`,
+ *   `ctx.events`, `ctx.modules` and `ctx.ai` are built only from
+ *   `permissions`, as frozen objects with no prototype (`membersOf`),
+ *   never a `Proxy`: an alias or action nobody declared, `constructor`
+ *   and `__proto__` included, is `undefined`, and calling it is a
+ *   `TypeError` before anything is journaled.
+ * - Replay determinism without enter steps. A call's journal name is its
+ *   step's ID and part, and from its second run in a loop on, the count
+ *   of its earlier runs (`<step>:task@2`): deterministic as long as the
+ *   code is, which it is, as its expressions read only journaled values
+ *   and frozen inputs. Flow (an `if`, a loop's items) is evaluated again
+ *   on replay from the same values, so it takes the same path; a call's
+ *   arguments are evaluated again too, and the host holds every call to
+ *   its sealed template, so a replay that diverged is refused where it
+ *   differs, never acted on.
+ * - A call the build didn't seal. The members are the code's convenience:
+ *   the host decides every call by the build's sealed table (the step a
+ *   call names, its permission, its action, every literal of its
+ *   arguments), whatever member made it, and refuses anything else.
+ */
+
+// Workflow code imports only this module (and its generated helpers), so
+// it gets `v` and `AppError` from here: a workflow declares its values and
+// raises its errors as an App does.
+export { v } from "./values.ts";
+export { AppError } from "./app-error.ts";
+export { WorkflowError } from "./workflow-error.ts";
+export { sensitiveParam } from "./workflow-params.ts";
+export type { Json } from "@grasp-os/shared/json";
+export type { Param, ParamMetadata } from "./workflow-params.ts";
+export type {
+  CallOptions,
+  CaughtError,
+  Decision,
+  DecisionRequest,
+  Duration,
+  EventWait,
+  EventWaitRequest,
+  GenerateRequest,
+  StepOptions,
   WorkflowEvent,
 } from "./workflow-steps.ts";
 
 /**
- * The runtime's `Object.freeze`, kept as this module loads: a run's main
- * module (core's workflows/sealed-isolate.ts) loads it before any of the App's code,
- * which could otherwise put its own in its place.
+ * What a workflow may reach, as its handler calls it: its model
+ * (`ai: true`), each connection's actions by alias, its decisions' and
+ * event permissions' aliases (an event permission with the types it
+ * waits for), and its own modules, each a compute or an action.
  */
-const { freeze } = Object;
-
-/** `value` frozen all the way down: JSON a run reads and never changes. */
-const frozenJson = <Value extends Json | undefined>(value: Value): Value => {
-  if (typeof value === "object" && value !== null) {
-    for (const item of Object.values(value)) {
-      frozenJson(item);
-    }
-    freeze(value);
-  }
-  return value;
-};
-
-/** Everything a workflow reads besides its steps. */
-export interface WorkflowContext<P extends Params, Input> {
-  runId: RunId;
-  input: Input;
-  params: ParamValues<P>;
-  /**
-   * What the workflow kept between its runs, by key, as this run's start
-   * found it: the same in every execution of the run, whatever later runs
-   * write meanwhile, and frozen. A step sets it only as its definition
-   * seals, once it succeeded.
-   */
-  state: Readonly<Record<string, Json>>;
-  /**
-   * Where outsiders send this run's events, by the alias of an event
-   * binding whose contract takes them from outside: for replies to the
-   * run's mail, its reply address (`reply-<token>@<host>`), to give that
-   * mail as its Reply-To. Each is the run's own, the same for its whole
-   * life, and takes nothing once it ended. Anyone the mail reaches can
-   * reply through it: a reply is checked against the contract, but who
-   * sent it isn't vouched for. Its `authentication` says what SPF, DKIM
-   * and DMARC found as the deployment's mail service received it, each of
-   * which domain (`null` where it recorded nothing, and `dmarc` also where
-   * its verdict isn't of `from`: several From headers or mailboxes, none
-   * readable, another domain, or an address with several `@` or cut to
-   * fit). A `dmarc` pass means
-   * `from`'s domain is verified; which address at that domain may send
-   * stays the domain's own policy. A reply
-   * delivered again is the same event; a reply after the run ended, or
-   * one sent automatically (an out-of-office), is dropped and audited. A test run gets placeholders that
-   * reach nobody; any run not on a sealed build's run host, none.
-   */
-  inbox: Readonly<Record<string, string>>;
-  /**
-   * The run's bindings, by name; call them in a step's own function, each
-   * written out as `env.NAME.method(…)` (see `WorkflowEnv`). A binding the
-   * run has no permission for is refused when it is called
-   * (`permission.denied`).
-   */
-  env: WorkflowEnv;
+export interface WorkflowPermissions {
+  readonly ai?: true;
+  readonly connections?: Readonly<Record<string, readonly string[]>>;
+  readonly decisions?: readonly string[];
+  readonly events?: Readonly<Record<string, readonly string[]>>;
+  readonly modules?: Readonly<Record<string, "compute" | "action">>;
 }
 
-// Definition
+/** A call of a connection's action, or of one of the workflow's modules. */
+export type CallMember = (args: unknown, options: CallOptions) => Promise<Read>;
+
+type UnionToIntersection<Union> = (
+  Union extends unknown ? (value: Union) => void : never
+) extends (value: infer Intersection) => void
+  ? Intersection
+  : never;
+
+/** The member path of action `Name`: `mail.send` is `.mail.send`. */
+type PathMembers<
+  Name extends string,
+  Leaf,
+> = Name extends `${infer Head}.${infer Tail}`
+  ? Readonly<Record<MemberName<Head>, PathMembers<Tail, Leaf>>>
+  : Readonly<Record<MemberName<Name>, Leaf>>;
+
+/** A connection's members: each of its actions, by its member path. */
+export type ConnectionMembers<Actions extends string> = UnionToIntersection<
+  Actions extends unknown ? PathMembers<Actions, CallMember> : never
+>;
+
+/** What a decision permission's member does. */
+export interface DecisionMembers {
+  readonly ask: (
+    request: DecisionRequest,
+    options: StepOptions
+  ) => Promise<Decision>;
+}
+
+/** What an event permission's member does, for its types. */
+export interface EventMembers<Type extends string> {
+  readonly waitFor: (
+    request: EventWaitRequest<Type>,
+    options: StepOptions
+  ) => Promise<EventWait<Type>>;
+}
+
+/** What the workflow's model does. */
+export interface AiMembers {
+  readonly generate: (
+    request: GenerateRequest,
+    options: CallOptions
+  ) => Promise<Read>;
+}
+
+type ListedOf<List> = List extends readonly (infer Item extends string)[]
+  ? Item
+  : never;
+
+/** What a workflow's handler reaches, as its permissions declare it. */
+export interface WorkflowCtx<
+  Permissions extends WorkflowPermissions,
+  P extends Params,
+> {
+  readonly run: { readonly id: RunId };
+  readonly params: ParamValues<P>;
+  /**
+   * What the workflow kept between its runs, by key, as this run's start
+   * found it: only the keys it declares whose values fit their schemas,
+   * the same in every execution of the run, and frozen.
+   */
+  readonly state: Readonly<Record<string, Read>>;
+  /**
+   * Where outsiders send this run's events, by the alias of an event
+   * permission whose contract takes them from outside: for replies to the
+   * run's mail, its reply address (`reply-<token>@<host>`).
+   */
+  readonly inbox: Readonly<Record<string, string>>;
+  readonly connections: {
+    readonly [
+      Alias in keyof NonNullable<Permissions["connections"]>
+    ]: ConnectionMembers<
+      ListedOf<NonNullable<Permissions["connections"]>[Alias]>
+    >;
+  };
+  readonly decisions: Readonly<
+    Record<ListedOf<Permissions["decisions"]>, DecisionMembers>
+  >;
+  readonly events: {
+    readonly [Alias in keyof NonNullable<Permissions["events"]>]: EventMembers<
+      ListedOf<NonNullable<Permissions["events"]>[Alias]>
+    >;
+  };
+  readonly modules: {
+    readonly [Alias in keyof NonNullable<Permissions["modules"]>]: CallMember;
+  };
+  readonly ai: Permissions["ai"] extends true ? AiMembers : undefined;
+  /** Durably pauses the run for `duration`. */
+  readonly sleep: (duration: Duration, options: StepOptions) => Promise<void>;
+  /** Durably pauses the run until `until`, in ms since the epoch. */
+  readonly sleepUntil: (until: number, options: StepOptions) => Promise<void>;
+}
+
+/** What `defineWorkflow` takes. */
+export interface WorkflowConfig<
+  Args extends AnySchema,
+  Returns extends AnySchema,
+  P extends Params,
+  Permissions extends WorkflowPermissions,
+> {
+  /** What starts a run, as `v` declares it. */
+  readonly args?: Args;
+  /** What a run ends with, recorded as its last step. */
+  readonly returns?: Returns;
+  /** The tunable values people set without touching the workflow. */
+  readonly params?: P;
+  /** The keys the workflow keeps between its runs, each its schema. */
+  readonly state?: Readonly<Record<string, AnySchema>>;
+  readonly permissions?: Permissions;
+  readonly handler: (
+    ctx: WorkflowCtx<Permissions, P>,
+    args: Infer<Args>
+  ) => Promise<unknown>;
+}
 
 /** What the UI shows about a workflow besides its steps, as plain JSON. */
 interface WorkflowMetadata {
-  id: WorkflowId;
   params: ParamMetadata[];
 }
 
 /** A workflow, ready for the runtime to run. */
-export interface WorkflowDefinition<Output> {
-  metadata: WorkflowMetadata;
+export interface WorkflowDefinition {
+  readonly metadata: WorkflowMetadata;
   /**
-   * Runs (or replays) one run on `engine`; `input` is checked first. A
-   * `WorkflowError` keeps its code even through an engine that keeps only a
-   * failed step's error name and message.
+   * Runs (or replays) one run on `engine`; its args are checked first. A
+   * `WorkflowError` keeps its code even through an engine that keeps only
+   * a failed step's error name and message.
    */
-  run: (engine: WorkflowEngine, input?: unknown) => Promise<Output>;
+  readonly run: (engine: WorkflowEngine, args?: unknown) => Promise<unknown>;
 }
 
 /**
- * Defines a workflow. `params` are the tunable values; `run` is the workflow
- * itself, with every step and its options written inline. Checks the
- * definition right away, so a bad one fails when it loads.
+ * The runtime's `Object.freeze`, kept as this module loads: a run's main
+ * module (core's workflows/sealed-isolate.ts) loads it before any of the
+ * workflow's code, which could otherwise put its own in its place.
  */
-export const workflow = <
-  const P extends Params,
-  Output,
-  InputSchema extends AnySchema = ValueSchema<undefined, undefined>,
+const { freeze } = Object;
+
+/** The engine step the run's parameters are recorded in. */
+const paramsStep = "$params";
+
+/** The engine step the run's result is recorded in. */
+const resultStep = "workflow:output";
+
+/**
+ * Defines a workflow (see the header). Checks the definition right away,
+ * so a bad one fails when it loads.
+ */
+export const defineWorkflow = <
+  const Permissions extends WorkflowPermissions = Record<never, never>,
+  const P extends Params = Record<never, never>,
+  Args extends AnySchema = ValueSchema<
+    Record<never, never>,
+    Record<never, never>
+  >,
+  Returns extends AnySchema = AnySchema,
 >(
-  id: string,
-  config: {
-    params: P;
-    /** The run's input, as `v` declares it, e.g. the invoice that started it. */
-    input?: InputSchema;
-  },
-  run: (
-    step: StepRunner,
-    context: WorkflowContext<P, Infer<InputSchema>>
-  ) => Promise<Output>
-): WorkflowDefinition<Output> => {
-  const workflowId = parseOrThrow(
-    workflowIdSchema,
-    id,
-    "workflow.invalid_definition",
-    "Workflow ID"
-  );
-  validateParams(config.params);
-  // With no input declared, a run takes none.
-  const inputSchema: AnySchema = config.input ?? v.null().optional();
+  config: WorkflowConfig<Args, Returns, P, Permissions>
+): WorkflowDefinition => {
+  const params: Params = config.params ?? {};
+  validateParams(params);
+  if (typeof config.handler !== "function") {
+    throw new WorkflowError(
+      "workflow.invalid_definition",
+      "A workflow's handler is a function."
+    );
+  }
+  // With no args declared, a run takes an object of none.
+  const argsSchema: AnySchema = config.args ?? v.object({});
 
   const runOnce = async (
     engine: WorkflowEngine,
-    rawInput: unknown
-  ): Promise<Output> => {
-    // SAFETY: checked by `config.input`, or to be null or left out when
-    // there is none, as the default of `InputSchema` says.
-    const input = checkOrThrow(
-      inputSchema,
-      rawInput,
+    rawArgs: unknown
+  ): Promise<unknown> => {
+    // SAFETY: checked by `config.args`, or to be an empty object when there
+    // is none, as the default of `Args` says.
+    const args = checkOrThrow(
+      argsSchema,
+      rawArgs,
       "workflow.invalid_input",
-      "Input"
-    ) as Infer<InputSchema>;
+      "Args"
+    ) as Infer<Args>;
     // Recorded, so a replay runs with the values the run started with. A
     // value that doesn't fit fails for good: the error is non-retryable.
-    const params = await engine.do(
-      "$params",
+    const values = await engine.do(
+      paramsStep,
       {},
-      async () =>
-        await Promise.resolve(resolveParams(config.params, engine.params))
+      async () => await Promise.resolve(resolveParams(params, engine.params))
     );
-    const runner = createRunner(engine);
-    return await run(
-      // SAFETY: the untyped runner takes every call the typed one allows
-      // and checks each option at run time.
+    const { ctx, recordResult } = journaledCtx(engine, {
+      permissions: config.permissions ?? {},
+      state: config.state ?? {},
+      params: values,
+    });
+    const result = await config.handler(
+      // SAFETY: the journal builds exactly the members `permissions`
+      // declares, as `WorkflowCtx` types them, and the parameters as
+      // `resolveParams` checked them.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      runner.steps as StepRunner,
-      {
-        runId: engine.runId,
-        inbox: Object.freeze({ ...engine.inbox }),
-        input,
-        // SAFETY: resolveParams checks every declared parameter with its
-        // type, which is what ParamValues<P> describes.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        params: Object.freeze(params) as ParamValues<P>,
-        state: frozenJson(engine.state),
-        // The host builds the run's bindings from its permissions; a
-        // binding the run doesn't have when it calls fails then
-        // (`permission.denied`).
-        env: engine.env,
-      }
+      ctx as WorkflowCtx<Permissions, P>,
+      frozenCopy(args)
     );
+    if (config.returns === undefined) {
+      return null;
+    }
+    return await recordResult(resultStep, result);
   };
 
   // Frozen, so no code can put another `run` in its place once it is
   // made (a module that imports the workflow's own file, say): the run
   // is held to the steps its review shows this one running.
-  const definition: WorkflowDefinition<Output> = {
-    metadata: {
-      id: workflowId,
-      params: describeParams(config.params),
-    },
-    run: async (engine, rawInput) => {
+  return freeze({
+    metadata: freeze({ params: describeParams(params) }),
+    run: async (engine: WorkflowEngine, rawArgs?: unknown) => {
       try {
-        return await runOnce(engine, rawInput);
+        return await runOnce(engine, rawArgs);
       } catch (error) {
         // Engines may keep only a failed step's error name and message;
         // the code is in the name, so the error comes back whole.
         throw WorkflowError.from(error) ?? error;
       }
     },
-  };
-  return freeze(definition);
+  });
 };

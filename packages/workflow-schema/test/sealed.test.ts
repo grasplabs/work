@@ -15,9 +15,8 @@ const genuine = (): SealedTable => {
   const generation = generateWorkflow(
     checked({
       ...withLoops(decision()),
-      bindings: withDecisions().bindings,
-    }),
-    "workflow"
+      permissions: withDecisions().permissions,
+    })
   );
   return sealedTableSchema.parse(
     structuredClone({
@@ -101,7 +100,7 @@ describe("a sealed table", () => {
       loopKeys: withTask("pages", (pages) =>
         changed(pages, "loop", { keys: 0 })
       ),
-      forkBranch: withTask("mail", (mail) => ({ ...mail, branches: [0, 1] })),
+      forkBranch: withTask("mailed", (mail) => ({ ...mail, branches: [0, 1] })),
       taskSchemas: withTask("send", (send) => ({ ...send, schemas: {} })),
       inputFrom: withTask("send", (send) => ({
         ...send,
@@ -151,6 +150,25 @@ describe("a sealed table", () => {
         ...without(linger, "milliseconds"),
         duration: { slot: 0 },
       })),
+      // grasp-workflow/1's step kinds, gone with its enter and catch steps.
+      catchStep: withTask("guarded", (guarded) => ({
+        ...guarded,
+        steps: ["catch"],
+      })),
+      itemStep: withTask("rows", (rows) => ({ ...rows, steps: ["item"] })),
+      loopIndex: withTask("pages", (pages) =>
+        changed(pages, "loop", { at: "index" })
+      ),
+      catchByStatus: withTask("guarded", (guarded) =>
+        changed(guarded, "catch", { errors: { status: 500 } })
+      ),
+      raiseByType: withTask("stop", (stop) => ({
+        ...stop,
+        error: { type: "urn:acme:error:stop", status: 422 },
+      })),
+      raisePlatformCode: withTask("stop", (stop) =>
+        changed(stop, "error", { code: "Not a code" })
+      ),
       workflowInput: { ...genuine(), workflow: { input: true, output: true } },
       ownLimits: { ...genuine(), limits: { maxSteps: 1 } },
       inputExpression: {

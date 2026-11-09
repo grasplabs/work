@@ -185,7 +185,7 @@ export const generatedWorkflowEntry = ".grasp/workflow.ts";
 
 /**
  * The most characters the generated module may have: four times the
- * largest definition grasp-workflow/1 takes (1 MiB, `formatLimits`), as it restates each
+ * largest definition grasp-workflow/2 takes (1 MiB, `formatLimits`), as it restates each
  * literal once, with a few characters of code around it.
  */
 const generatedWorkflowMaxLength = 4 * 1024 * 1024;

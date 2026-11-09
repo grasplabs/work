@@ -90,7 +90,7 @@ export const workflowErrors = defineErrorFamily({
 
 /**
  * A workflow parameter's name: an identifier, so code reads it as
- * `params.<name>`. The format's check (grasp-workflow/1) and the SDK's
+ * `params.<name>`. The format's check (grasp-workflow/2) and the SDK's
  * (`validateParams`) both hold a name to it.
  */
 export const workflowParamNamePattern = /^[a-z][A-Za-z0-9]{0,63}$/u;

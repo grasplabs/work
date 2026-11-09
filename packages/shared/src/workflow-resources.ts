@@ -24,7 +24,7 @@ import type { RunAiProviderWait } from "./workflows.ts";
 // versions, never part of an App. An App, an agent, a trigger or the
 // system may later start one; none of them owns it, and grouping it with
 // an App in the product gives nothing. Each version is one validated
-// workflow.json (grasp-workflow/1), published once and never
+// workflow.json (grasp-workflow/2), published once and never
 // changed.
 
 /**
@@ -117,7 +117,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.name_busy":
     "What names the deleted workflow kept changing while its name was released. Try again in a moment.",
   "workflow.definition_invalid":
-    "The workflow definition isn't a valid grasp-workflow/1 document.",
+    "The workflow definition isn't a valid grasp-workflow/2 document.",
   "workflow.version_conflict":
     "Someone published another version since you started from this one. Start again from the current version.",
   "workflow.version_not_found": "This workflow has no such version.",
@@ -991,7 +991,7 @@ export interface WorkflowMember {
 const stepPointerSchema = z.string().startsWith("/").max(4096);
 
 /**
- * A step's fields besides its `id`, as grasp-workflow/1 has them: `type`,
+ * A step's fields besides its `id`, as grasp-workflow/2 has them: `type`,
  * `title` and the rest. Checked with the draft, as any edit.
  */
 const stepFieldsSchema = z.record(z.string(), z.json());

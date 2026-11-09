@@ -49,29 +49,29 @@ const verdict = (source: string): string => {
 describe("what a workflow expression may be", () => {
   it("reads the workflow's data and works on it with the allowed methods", () => {
     const allowed = [
-      "steps.extract.output.statements",
-      "input.lines?.[0]?.amount ?? 0",
-      'input["first name"]',
-      "input.lines.length > 0 && params.limit >= 3",
-      "input.total * 1.21 - params.discount / 2 + 3 ** 2 % 5",
-      "!input.done || -input.offset === +params.offset",
-      "typeof input.note === 'string' ? input.note.trim() : ''",
-      "`${input.name} (${run.id})`",
-      "{ id: input.id, 'due date': input.due, total: input.lines.length, }",
-      "[input.a, input.b, null, true, 1e3]",
-      "input.lines.map((line) => line.amount * 2)",
-      "input.lines.filter((line, index) => index < params.limit && line.ok)",
-      "input.lines.some((line) => line.tags.includes('urgent'))",
-      "input.lines.every((l) => l.total.toFixed(2) !== '0.00')",
-      "input.people.find((p) => p.email.toLowerCase().endsWith('@acme.test'))?.name",
-      "input.people.findIndex((p) => p.id === params.id)",
-      "input.rows.map((row) => row.cells.map((cell) => cell.value).join(', '))",
-      "input.name.split(' ').at(-1).toUpperCase().startsWith('A')",
-      "input.items.slice(0, 3).concat(input.more).indexOf(input.pick)",
-      "input.title.trimStart().trimEnd()",
-      "{ ...input.record, status: 'done' }",
-      "[...input.a, ...input.b]",
-      "input.a == null ? params.fallback : input.a",
+      "args.extract.statements",
+      "args.lines?.[0]?.amount ?? 0",
+      'args["first name"]',
+      "args.lines.length > 0 && params.limit >= 3",
+      "args.total * 1.21 - params.discount / 2 + 3 ** 2 % 5",
+      "!args.done || -args.offset === +params.offset",
+      "typeof args.note === 'string' ? args.note.trim() : ''",
+      "`${args.name} (${run.id})`",
+      "{ id: args.id, 'due date': args.due, total: args.lines.length, }",
+      "[args.a, args.b, null, true, 1e3]",
+      "args.lines.map((line) => line.amount * 2)",
+      "args.lines.filter((line, index) => index < params.limit && line.ok)",
+      "args.lines.some((line) => line.tags.includes('urgent'))",
+      "args.lines.every((l) => l.total.toFixed(2) !== '0.00')",
+      "args.people.find((p) => p.email.toLowerCase().endsWith('@acme.test'))?.name",
+      "args.people.findIndex((p) => p.id === params.id)",
+      "args.rows.map((row) => row.cells.map((cell) => cell.value).join(', '))",
+      "args.name.split(' ').at(-1).toUpperCase().startsWith('A')",
+      "args.items.slice(0, 3).concat(args.more).indexOf(args.pick)",
+      "args.title.trimStart().trimEnd()",
+      "{ ...args.record, status: 'done' }",
+      "[...args.a, ...args.b]",
+      "args.a == null ? params.fallback : args.a",
     ];
     expect(
       allowed.filter((source) => verdict(source) !== "ok"),
@@ -80,11 +80,11 @@ describe("what a workflow expression may be", () => {
   });
 
   it("gives the source back as it was written, and the code to run", () => {
-    expect(checkExpression(" input.a ")).toStrictEqual({
+    expect(checkExpression(" args.a ")).toStrictEqual({
       ok: true,
-      source: " input.a ",
-      code: '($read(input, "a"))',
-      reads: [{ root: "input", path: ["a"] }],
+      source: " args.a ",
+      code: "(args.a)",
+      reads: [{ root: "args", path: ["a"] }],
       literalDepth: 0,
     });
   });
@@ -92,10 +92,10 @@ describe("what a workflow expression may be", () => {
   it("says how deep its literals nest, one in another", () => {
     expect(
       [
-        "input.a",
-        "[input]",
+        "args.a",
+        "[args]",
         "[{ a: [1] }, []]",
-        "input.lines.map((line) => ({ at: [line] }))",
+        "args.lines.map((line) => ({ at: [line] }))",
       ].map((source) => {
         const checked = checkExpression(source);
         return checked.ok ? checked.literalDepth : checked.errors;
@@ -116,18 +116,18 @@ describe("reaching a global", () => {
         "self",
         "window",
         "process.env",
-        "Object.keys(input)",
-        "JSON.stringify(input)",
-        "Math.max(input.a, 1)",
+        "Object.keys(args)",
+        "JSON.stringify(args)",
+        "Math.max(args.a, 1)",
         "Date.now()",
-        "String(input.a)",
+        "String(args.a)",
         "NaN",
         "arguments",
         "require('fs')",
         "env",
         "ctx",
         // A callback's parameter is in scope inside it, not after.
-        "input.lines.map((line) => line) && line",
+        "args.lines.map((line) => line) && line",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 19 }, () => "expression.global"));
   });
@@ -136,8 +136,8 @@ describe("reaching a global", () => {
     expect(
       [
         "undefined",
-        "input.note !== undefined ? input.note : ''",
-        "input.lines.filter((line) => line.note === undefined)",
+        "args.note !== undefined ? args.note : ''",
+        "args.lines.filter((line) => line.note === undefined)",
       ].map(verdict)
     ).toStrictEqual(["ok", "ok", "ok"]);
   });
@@ -151,7 +151,7 @@ describe("reaching a global", () => {
 
   it("is refused through `this`, `import`, `new.target` and `import.meta`", () => {
     expect(
-      ["this", "import('x')", "import.meta.url", "input.lines.map((l) => this)"]
+      ["this", "import('x')", "import.meta.url", "args.lines.map((l) => this)"]
         .map(verdict)
         .every((code) => code === "expression.syntax")
     ).toBeTruthy();
@@ -162,19 +162,19 @@ describe("the prototype chain of the data", () => {
   it("is out of reach by every way of writing a property's name", () => {
     expect(
       [
-        "input.constructor",
-        "input.a.constructor.constructor('return globalThis')()",
-        "input.__proto__",
-        "input.lines.prototype",
-        "input?.constructor",
-        "input['constructor']",
-        "input?.['__proto__']",
-        String.raw`input.\u0063onstructor`,
-        String.raw`input['\u0063onstructor']`,
-        String.raw`input['\x5f_proto__']`,
-        "input.__defineGetter__",
-        "input.__lookupSetter__",
-        "input.lines.map((l) => l.constructor)",
+        "args.constructor",
+        "args.a.constructor.constructor('return globalThis')()",
+        "args.__proto__",
+        "args.lines.prototype",
+        "args?.constructor",
+        "args['constructor']",
+        "args?.['__proto__']",
+        String.raw`args.\u0063onstructor`,
+        String.raw`args['\u0063onstructor']`,
+        String.raw`args['\x5f_proto__']`,
+        "args.__defineGetter__",
+        "args.__lookupSetter__",
+        "args.lines.map((l) => l.constructor)",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 13 }, () => "expression.property"));
   });
@@ -182,11 +182,11 @@ describe("the prototype chain of the data", () => {
   it("is out of reach by a computed name", () => {
     expect(
       [
-        "input[params.key]",
-        "input['con' + 'structor']",
-        "input[`constructor`]",
-        "input[`${params.key}`]",
-        "input[input.a ? 'a' : 'b']",
+        "args[params.key]",
+        "args['con' + 'structor']",
+        "args[`constructor`]",
+        "args[`${params.key}`]",
+        "args[args.a ? 'a' : 'b']",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 5 }, () => "expression.computed-key"));
   });
@@ -194,10 +194,10 @@ describe("the prototype chain of the data", () => {
   it("is out of reach by an object literal's `__proto__`", () => {
     expect(
       [
-        "{ __proto__: input }",
-        "{ '__proto__': input }",
-        String.raw`{ \u005f_proto__: input }`,
-        "{ constructor: input }",
+        "{ __proto__: args }",
+        "{ '__proto__': args }",
+        String.raw`{ \u005f_proto__: args }`,
+        "{ constructor: args }",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 4 }, () => "expression.property"));
   });
@@ -207,25 +207,25 @@ describe("calling code", () => {
   it("is only the allowed methods, by name", () => {
     expect(
       [
-        "input.lines.push(1)",
-        "input.lines.sort()",
-        "input.lines.reverse()",
-        "input.lines.splice(0)",
-        "input.lines.fill(0)",
-        "input.lines.reduce((a, b) => a + b)",
-        "input.name.replace('a', 'b')",
-        "input.name.repeat(1e9)",
-        "input.name.padStart(1e9)",
-        "input.toString()",
-        "input.valueOf()",
-        "input.hasOwnProperty('a')",
-        "input.lines['map']((l) => l)",
-        "input.lines[`map`]((l) => l)",
-        "input.lines.map.call(input, (l) => l)",
-        "input.lines.map.apply(input, [])",
-        "input.lines.map.bind(input)",
-        "input.f()",
-        "(0, input.lines.map)((l) => l)",
+        "args.lines.push(1)",
+        "args.lines.sort()",
+        "args.lines.reverse()",
+        "args.lines.splice(0)",
+        "args.lines.fill(0)",
+        "args.lines.reduce((a, b) => a + b)",
+        "args.name.replace('a', 'b')",
+        "args.name.repeat(1e9)",
+        "args.name.padStart(1e9)",
+        "args.toString()",
+        "args.valueOf()",
+        "args.hasOwnProperty('a')",
+        "args.lines['map']((l) => l)",
+        "args.lines[`map`]((l) => l)",
+        "args.lines.map.call(args, (l) => l)",
+        "args.lines.map.apply(args, [])",
+        "args.lines.map.bind(args)",
+        "args.f()",
+        "(0, args.lines.map)((l) => l)",
         "params.run()",
       ]
         .map(verdict)
@@ -241,13 +241,13 @@ describe("calling code", () => {
       [
         // A method read as a value, called by `map` with `this` set to
         // what `thisArg` names: `push` would write into the data.
-        "input.lines.map(input.other.push, input.target)",
-        "input.lines.map((l) => l, input.target)",
-        "input.lines.filter(input.check)",
-        "input.lines.map()",
-        "input.lines.join((l) => l)",
-        "input.name.includes((l) => l)",
-        "input.lines.map(...input.fns)",
+        "args.lines.map(args.other.push, args.target)",
+        "args.lines.map((l) => l, args.target)",
+        "args.lines.filter(args.check)",
+        "args.lines.map()",
+        "args.lines.join((l) => l)",
+        "args.name.includes((l) => l)",
+        "args.lines.map(...args.fns)",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 7 }, () => "expression.callback"));
   });
@@ -258,14 +258,14 @@ describe("calling code", () => {
         "(l) => l",
         "{ f: (l) => l }",
         "[(l) => l]",
-        "input.lines.map((l) => { return l; })",
-        "input.lines.map(async (l) => l)",
-        "input.lines.map(({ a }) => a)",
-        "input.lines.map(([a]) => a)",
-        "input.lines.map((a = globalThis) => a)",
-        "input.lines.map((...rest) => rest)",
-        "input.lines.map(function (l) { return l; })",
-        "input.lines.map((l) => (m) => m)",
+        "args.lines.map((l) => { return l; })",
+        "args.lines.map(async (l) => l)",
+        "args.lines.map(({ a }) => a)",
+        "args.lines.map(([a]) => a)",
+        "args.lines.map((a = globalThis) => a)",
+        "args.lines.map((...rest) => rest)",
+        "args.lines.map(function (l) { return l; })",
+        "args.lines.map((l) => (m) => m)",
       ].map(verdict)
     ).toStrictEqual([
       "expression.callback",
@@ -285,9 +285,9 @@ describe("calling code", () => {
   it("is never a tagged template, `new`, a getter or a method", () => {
     expect(
       [
-        "input.lines.join`,`",
+        "args.lines.join`,`",
         "String.raw`a`",
-        "new input.Thing()",
+        "new args.Thing()",
         "{ get total() { return 1; } }",
         "{ set total(v) {} }",
         "{ total() { return 1; } }",
@@ -310,14 +310,12 @@ describe("calling code", () => {
 
   it("reads a data field named like a method, as `$read` reads own data", () => {
     expect(
-      ["input.at", "input.list.map", "input?.join", "{ at: input.at }"].map(
-        verdict
-      )
+      ["args.at", "args.list.map", "args?.join", "{ at: args.at }"].map(verdict)
     ).toStrictEqual(["ok", "ok", "ok", "ok"]);
   });
 
   it("spreads nothing into a call", () => {
-    expect(verdict("input.lines.concat(...input.more)")).toBe(
+    expect(verdict("args.lines.concat(...args.more)")).toBe(
       "expression.syntax"
     );
   });
@@ -327,16 +325,16 @@ describe("changing state", () => {
   it("is refused", () => {
     expect(
       [
-        "input.a = 1",
-        "input.a += 1",
-        "input.a ??= 1",
-        "input.a++",
-        "--input.a",
-        "delete input.a",
-        "void input.a",
-        "input.a, input.b",
-        "await input.a",
-        "yield input.a",
+        "args.a = 1",
+        "args.a += 1",
+        "args.a ??= 1",
+        "args.a++",
+        "--args.a",
+        "delete args.a",
+        "void args.a",
+        "args.a, args.b",
+        "await args.a",
+        "yield args.a",
       ]
         .map(verdict)
         .every((code) => code === "expression.syntax")
@@ -348,15 +346,15 @@ describe("operators", () => {
   it("are those that work on values: no bitwise ones, no `in` or `instanceof`", () => {
     expect(
       [
-        "input.a | input.b",
-        "input.a & input.b",
-        "input.a ^ input.b",
-        "~input.a",
-        "input.a >> 1",
-        "input.a << 2",
-        "input.a >>> 0",
-        "'a' in input",
-        "input instanceof input.b",
+        "args.a | args.b",
+        "args.a & args.b",
+        "args.a ^ args.b",
+        "~args.a",
+        "args.a >> 1",
+        "args.a << 2",
+        "args.a >>> 0",
+        "'a' in args",
+        "args instanceof args.b",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 9 }, () => "expression.operator"));
   });
@@ -364,10 +362,10 @@ describe("operators", () => {
   it("are JavaScript's: TypeScript's own syntax doesn't parse", () => {
     expect(
       [
-        "input.a as string",
-        "input.a!",
-        "input.a satisfies string",
-        "<string>input.a",
+        "args.a as string",
+        "args.a!",
+        "args.a satisfies string",
+        "<string>args.a",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 4 }, () => "expression.syntax"));
   });
@@ -377,21 +375,21 @@ describe("splicing into the generated code", () => {
   it("is one expression, whole, or nothing", () => {
     expect(
       [
-        "input.a; globalThis.x",
-        "input.a)\n;globalThis.fetch('x')\n;(",
-        "input.a /*",
-        "input.a } ; globalThis.x ; {",
+        "args.a; globalThis.x",
+        "args.a)\n;globalThis.fetch('x')\n;(",
+        "args.a /*",
+        "args.a } ; globalThis.x ; {",
         "",
         "   ",
         // Code in an HTML comment of a script, which a module doesn't have.
-        "input.a <!-- globalThis",
+        "args.a <!-- globalThis",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 7 }, () => "expression.syntax"));
   });
 
   it("generates code with no comment to swallow the code after it", () => {
-    const checked = checkExpression("input.a // the amount\n");
-    expect(checked.ok && checked.code).toBe('($read(input, "a"))');
+    const checked = checkExpression("args.a // the amount\n");
+    expect(checked.ok && checked.code).toBe("(args.a)");
   });
 
   it("refuses one nested too deep to read, rather than throwing", () => {
@@ -401,54 +399,65 @@ describe("splicing into the generated code", () => {
   });
 
   it("refuses a regular expression, whose work no limit of ours bounds", () => {
-    expect(verdict("/(a+)+$/.test(input.name)")).toBe("expression.syntax");
+    expect(verdict("/(a+)+$/.test(args.name)")).toBe("expression.syntax");
   });
 });
 
 describe("the code generated from an expression", () => {
-  it("reads and calls only through the guards", () => {
-    expect(generated("input.lines.map((line) => line.amount).at(-1)")).toBe(
-      '($call($call($read(input, "lines"), "map", [line => $read(line, "amount")]), "at", [-1]))'
+  it("reads and calls as plain JavaScript, printed from its tree", () => {
+    expect(generated("args.lines.map((line) => line.amount).at(-1)")).toBe(
+      "(args.lines.map(line => line.amount).at(-1))"
+    );
+    expect(generated("args.lines[0].total")).toBe("(args.lines[0].total)");
+  });
+
+  it("reads a field named like a built-in's method only through `$own`, never the method", () => {
+    expect(generated("args.values.length + args.lines.at(0)")).toBe(
+      '($own(args, "values").length + args.lines.at(0))'
+    );
+    expect(generated("args.a?.toString")).toBe(
+      '($own(args.a, "toString", true))'
+    );
+    expect(generated("({ at: args.lines.at, map: args.lines.forEach })")).toBe(
+      '({\n  at: $own(args.lines, "at"),\n  map: $own(args.lines, "forEach")\n})'
     );
   });
 
   it("puts every comparison in parentheses, so TypeScript reads no type arguments", () => {
-    // `input.a<input.b, input.c>(input.d)`, a generic call, in TypeScript.
-    expect(generated("[input.a < input.b, input.c > (input.d)]")).toBe(
-      '([($read(input, "a") < $read(input, "b")), ($read(input, "c") > $read(input, "d"))])'
+    // `args.a<args.b, args.c>(args.d)`, a generic call, in TypeScript.
+    expect(generated("[args.a < args.b, args.c > (args.d)]")).toBe(
+      "([(args.a < args.b), (args.c > args.d)])"
     );
   });
 
-  it("writes every object key as a computed string: `__proto__` stays a field", () => {
-    expect(generated("{ a: input.a, 'b c': 1, 2: null, ...input.d }")).toBe(
-      '({\n  ["a"]: $read(input, "a"),\n  ["b c"]: 1,\n  ["2"]: null,\n  ...$read(input, "d")\n})'
+  it("writes an object's keys plainly where they are names, quoted otherwise", () => {
+    expect(generated("{ a: args.a, 'b c': 1, 2: null, ...args.d }")).toBe(
+      '({\n  a: args.a,\n  "b c": 1,\n  "2": null,\n  ...args.d\n})'
     );
   });
 
   it("short-circuits a `?.` chain as JavaScript does", () => {
-    expect(generated("input.a?.b.c")).toBe(
-      '($opt($read(input, "a"), $0 => $read($read($0, "b"), "c")))'
-    );
+    expect(generated("args.a?.b.c")).toBe("(args.a?.b.c)");
   });
 
   it("can't be shadowed: no root or parameter starts with `$`", () => {
-    expect(verdict("input.lines.map(($read) => $read)")).toBe(
+    expect(verdict("args.lines.map(($own) => $own)")).toBe(
       "expression.callback"
     );
-    expect(() => checkExpression("1", { roots: ["$read"] })).toThrow(
+    expect(() => checkExpression("1", { roots: ["$own"] })).toThrow(
       "plain identifier"
     );
   });
 
   it("writes a number too large for a double as a number, which no parameter can shadow", () => {
     // `Infinity` as a name would read the callback's parameter.
-    expect(generated("input.items.map((Infinity) => 1e400 > Infinity)")).toBe(
-      '($call($read(input, "items"), "map", [Infinity => (1e999 > Infinity)]))'
+    expect(generated("args.items.map((Infinity) => 1e400 > Infinity)")).toBe(
+      "(args.items.map(Infinity => (1e999 > Infinity)))"
     );
   });
 
   it("calls no method optionally: `?.()` is refused", () => {
-    expect(verdict("input.lines.map?.((line) => line)")).toBe(
+    expect(verdict("args.lines.map?.((line) => line)")).toBe(
       "expression.syntax"
     );
   });
@@ -462,27 +471,25 @@ const readsOf = (source: string) => {
 
 describe("a chain in parentheses", () => {
   it("is a chain of its own: `(a?.b).c` reads `.c` of whatever `a?.b` gives", () => {
-    expect(generated("(input.a?.b).c")).toBe(
-      '($read($opt($read(input, "a"), $0 => $read($0, "b")), "c"))'
-    );
+    expect(generated("(args.a?.b).c")).toBe("((args.a?.b).c)");
   });
 
   it("reads the whole chain through its parentheses, once", () => {
     expect({
-      member: readsOf("(steps.fetch).output"),
-      nested: readsOf("((input.a).b).c"),
-      called: readsOf("(input.lines.map((line) => line.total)).length"),
+      member: readsOf("(args.fetch).output"),
+      nested: readsOf("((args.a).b).c"),
+      called: readsOf("(args.lines.map((line) => line.total)).length"),
     }).toStrictEqual({
-      member: [{ root: "steps", path: ["fetch", "output"] }],
-      nested: [{ root: "input", path: ["a", "b", "c"] }],
-      called: [{ root: "input", path: ["lines"] }],
+      member: [{ root: "args", path: ["fetch", "output"] }],
+      nested: [{ root: "args", path: ["a", "b", "c"] }],
+      called: [{ root: "args", path: ["lines"] }],
     });
   });
 
   it("is never a method's callee: `(a?.map)(f)` would call `undefined`", () => {
     expect([
-      verdict("(input.list?.map)((x) => x)"),
-      verdict("(input.list.join)(', ')"),
+      verdict("(args.list?.map)((x) => x)"),
+      verdict("(args.list.join)(', ')"),
     ]).toStrictEqual(["expression.syntax", "expression.syntax"]);
   });
 });
@@ -490,19 +497,19 @@ describe("a chain in parentheses", () => {
 describe("what an expression reads", () => {
   it("is each read of a root, by its path up to a call or computed step", () => {
     const checked = checkExpression(
-      "steps.extract.output.lines.map((line) => line.total)[0] + params.limit + input"
+      "args.extract.lines.map((line) => line.total)[0] + params.limit + args"
     );
     expect(checked.ok ? checked.reads : []).toStrictEqual([
-      { root: "steps", path: ["extract", "output", "lines"] },
+      { root: "args", path: ["extract", "lines"] },
       { root: "params", path: ["limit"] },
-      { root: "input", path: [] },
+      { root: "args", path: [] },
     ]);
   });
 
   it("isn't a callback parameter that shadows a root", () => {
-    const checked = checkExpression("input.items.map((steps) => steps.total)");
+    const checked = checkExpression("args.items.map((steps) => steps.total)");
     expect(checked.ok ? checked.reads : []).toStrictEqual([
-      { root: "input", path: ["items"] },
+      { root: "args", path: ["items"] },
     ]);
   });
 });
@@ -527,7 +534,7 @@ describe("the roots an expression reads", () => {
   it("are plain identifiers, bound as parameters, and not a default one again", () => {
     const refused = [
       // The default ones again.
-      "input",
+      "args",
       "run",
       // Not bindable as a parameter in a module.
       "eval",
@@ -559,23 +566,23 @@ describe("the roots an expression reads", () => {
     // Bound as a parameter, a root named like a global reads the root.
     expect(checkExpression("fetch.url", { roots: ["fetch"] })).toMatchObject({
       ok: true,
-      code: '($read(fetch, "url"))',
+      code: "(fetch.url)",
     });
   });
 });
 
 describe("an error", () => {
   it("says where it is and how to fix it", () => {
-    const checked = checkExpression("input.lines.map((l) =>\n  globalThis)");
+    const checked = checkExpression("args.lines.map((l) =>\n  globalThis)");
     expect(checked).toStrictEqual({
       ok: false,
       errors: [
         {
           code: "expression.global",
           message:
-            "`globalThis` is not one of the workflow's values: input, steps, params, run.",
+            "`globalThis` is not one of the workflow's values: args, params, run.",
           fix: "Start from one of the values the message names, or a callback's own parameter.",
-          offset: 25,
+          offset: 24,
           line: 2,
           column: 3,
         },
@@ -584,14 +591,14 @@ describe("an error", () => {
   });
 
   it("names every problem, not only the first", () => {
-    const checked = checkExpression("eval(input.constructor)");
+    const checked = checkExpression("eval(args.constructor)");
     expect(
       checked.ok ? [] : checked.errors.map(({ code }) => code)
     ).toStrictEqual(["expression.global", "expression.property"]);
   });
 
   it("of syntax has its position too", () => {
-    const checked = checkExpression("input.a +");
+    const checked = checkExpression("args.a +");
     expect(checked.ok ? undefined : checked.errors[0]).toMatchObject({
       code: "expression.syntax",
       line: 1,

@@ -542,7 +542,7 @@ export const sdkImports = [
 
 /**
  * The SDK modules the code the host generates from a JSON workflow
- * (grasp-workflow/1, @grasp-os/workflow-schema) imports: the workflow SDK,
+ * (grasp-workflow/2, @grasp-os/workflow-schema) imports: the workflow SDK,
  * and the helpers only generated code calls, and nothing else, not even
  * the testing module beside them.
  */

@@ -25,29 +25,46 @@ export { allowedMethods } from "./expression-runtime.ts";
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
  * a value is computed from the run's data, such as
- * `steps.extract.output.lines.filter((line) => line.total > params.limit)`.
- * The generator writes each checked expression's code (`code`) into the
- * workflow's generated TypeScript, so it runs in the workflow's isolate
- * with no interpreter, under the isolate's CPU and memory limits, as
- * compute modules do.
+ * `extract.lines.filter((line) => line.total > params.limit)`. The
+ * generator writes each checked expression's code (`code`) into the
+ * workflow's generated TypeScript as plain JavaScript (`invoice.id`), so
+ * it runs in the workflow's isolate with no interpreter, under the
+ * isolate's CPU and memory limits.
  *
- * Two lines of defence:
+ * Threat model, and how each is closed:
  *
- * 1. The check. An expression is parsed by oxc (oxc-parse.ts), as
- *    JavaScript in a module, and its syntax tree held to an allowlist:
- *    reads of the workflow's own values (`roots`) and of callback
- *    parameters, literals, operators, and calls of the allowed methods by
- *    name. Everything else is refused, with a position and a fix, and a
- *    syntax added to JavaScript later is refused until it is allowed here.
- * 2. The code. What runs is printed from the checked tree (`Lowering`),
- *    with every member read and method call through the guards of
- *    expression-runtime.ts, which give only own data and call only the
- *    allowed built-ins on real arrays, strings and numbers. So no
- *    expression holds a function value, whatever names its data's fields
- *    have: none can file a built-in method under an allowed name
- *    (`{ at: [].forEach }.at(…)`) or hand one to an implicit conversion
- *    (`${{ toString: list.reverse }}`), which a check of names alone
- *    can't refuse.
+ * - Reaching a prototype, and from there `Function`. The check refuses
+ *   every name of `blockedProperties` (`__proto__`, `constructor`,
+ *   `prototype`, the accessor helpers) wherever a name stands: a member
+ *   read, a literal key in brackets (`a["__proto__"]`), an object
+ *   literal's key or shorthand (`{ __proto__: a }`, `{ constructor }`).
+ *   `in` and `instanceof`, which ask about prototypes, are refused. Every
+ *   value an expression starts from is JSON copied into frozen objects
+ *   with no prototype (the runtime's second layer, `frozenData` in
+ *   workflow.ts), so a name the check missed finds nothing inherited, and
+ *   the isolate's frozen intrinsics are a third.
+ * - Computed names. A key in brackets is a string or number literal, held
+ *   to the same names; `a[b]`, `a[1 + 1]` and template keys are refused,
+ *   so every name an expression reads is in its source, for review.
+ * - Holding a function value: filing a built-in method under an allowed
+ *   name (`{ at: [].forEach }.at(…)`) or handing one to an implicit
+ *   conversion (`${{ toString: list.reverse }}`). The only functions an
+ *   expression writes are the arrows it passes to a callback method; it
+ *   calls only `allowedMethods`, by name, in call position; and a field
+ *   whose name a built-in prototype has as a function is read through
+ *   `own` (expression-runtime.ts), which gives only an own field. JSON
+ *   holds no function, so no read gives one.
+ * - Replay giving another value. An expression reads only its roots
+ *   (journaled values and the run's frozen args, parameters and state)
+ *   and callback parameters: no global, so no clock, randomness or
+ *   environment. Evaluated again on replay, it gives the same value.
+ *
+ * Two lines of defence, then: the check, which parses an expression by
+ * oxc (oxc-parse.ts), as JavaScript in a module, and holds its syntax
+ * tree to an allowlist (anything else is refused, with a position and a
+ * fix, and a syntax added to JavaScript later is refused until it is
+ * allowed here); and the code, printed from the checked tree
+ * (`Lowering`), never from its source, over data with no prototype.
  *
  * Work is bounded by the isolate, not here: with no loops and no
  * function that can call itself, an expression's work is at most
@@ -56,7 +73,7 @@ export { allowedMethods } from "./expression-runtime.ts";
  */
 
 /** The workflow's values an expression may start from, by default. */
-export const expressionRoots = ["input", "steps", "params", "run"] as const;
+export const expressionRoots = ["args", "params", "run"] as const;
 
 /**
  * Property names never read or written, however they're spelled: the way
@@ -126,7 +143,7 @@ export interface ExpressionError {
  * A checked expression: its source, as written, and the code generated
  * from its syntax tree (`Lowering`), one parenthesized expression the
  * generator writes where the value is computed, in a module that
- * imports the guards under `runtimeNames`. Never write it right after an identifier on
+ * imports `own` under `runtimeNames.own`. Never write it right after an identifier on
  * the line before: `name\n(…)` is a call.
  */
 type CheckedExpression =
@@ -412,9 +429,9 @@ class Checker {
       }
       case "MemberExpression": {
         this.visit(node.object, scope);
-        // A field named like a method (`at`, `map`) is data, and `$read`
-        // reads it. A method read without a call is no own data field,
-        // so `$read` never gives the function.
+        // A field named like a method (`at`, `map`) is data, and `own`
+        // reads it (`inheritedNames`): a method read without a call is no
+        // own field, so it never gives the function.
         if (node.property.type === "PrivateIdentifier") {
           this.refuse(node.property);
         } else {

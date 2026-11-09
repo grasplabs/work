@@ -8,6 +8,7 @@ import type {
 
 import { print } from "./code-print.ts";
 import type { Code, Property, Spread } from "./code-print.ts";
+import { inheritedNames } from "./expression-runtime.ts";
 
 /** A node of a parsed expression, or of what its nodes hold. */
 export type ExpressionNode =
@@ -56,17 +57,11 @@ const isComparison = (node: Expression): boolean =>
     node.operator === ">=");
 
 /**
- * The names the generated code calls its guards by: a generated module
- * imports `readMember`, `callMethod`, `optionalChain` and `jsonValue`
- * from `@grasp-os/sdk/workflow` under them. No root or callback parameter
- * can take them, as neither starts with `$`.
+ * The name the generated code calls its one guard by: a generated module
+ * imports `own` from `@grasp-os/sdk/workflow-generated` under it. No root,
+ * step or callback parameter can take it, as none starts with `$`.
  */
-export const runtimeNames = {
-  read: "$read",
-  call: "$call",
-  optional: "$opt",
-  json: "$json",
-} as const;
+export const runtimeNames = { own: "$own" } as const;
 
 /** A link of a member chain: `.key`, `[0]` or `.method(…)`, after `?.` or not. */
 type Link =
@@ -103,12 +98,6 @@ const keyOf = (node: ExpressionNode): string | number => {
 
 const identifier = (name: string): Code => ({ type: "Identifier", name });
 
-const call = (callee: string, args: Code[]): Code => ({
-  type: "Call",
-  callee: identifier(callee),
-  arguments: args,
-});
-
 /**
  * A read of one of the roots: `steps.extract.output.total` is root
  * `steps` and path `["extract", "output", "total"]`, up to its first
@@ -123,15 +112,16 @@ export interface ExpressionRead {
 /**
  * A checked syntax tree as the code that runs, printed from the tree
  * itself (code-print.ts), never from the source: what runs is what was
- * checked. Every member read goes through `$read` and every call through
- * `$call` (expression-runtime.ts), a `?.` through `$opt`; every
- * comparison is in parentheses (`isComparison`); and every object key is
- * a computed string, so `__proto__` is an own field, never the prototype.
+ * checked, as plain JavaScript (`invoice.lines[0].total`, `a?.b`,
+ * `lines.map((line) => line.total)`). A field whose name a built-in
+ * prototype has as a function is read through `$own`
+ * (expression-runtime.ts, `own`), so no expression holds a built-in
+ * method; every comparison is in parentheses (`isComparison`); and an
+ * object key is written plain, `__proto__` (which the check refuses)
+ * only ever as a computed string, so it is an own field, never the
+ * prototype.
  */
 class Lowering {
-  /** The parameters `$opt`'s callbacks take: `$0`, `$1`, … */
-  private next = 0;
-
   readonly reads: ExpressionRead[] = [];
 
   /** The array and object literals around what is lowered now. */
@@ -175,10 +165,11 @@ class Lowering {
     if (property.type === "SpreadElement") {
       return { type: "Spread", argument: this.expression(property.argument) };
     }
+    const key = String(keyOf(property.key));
     return {
       type: "Property",
-      key: String(keyOf(property.key)),
-      computed: true,
+      key,
+      computed: key === "__proto__",
       value: this.expression(property.value),
     };
   }
@@ -339,59 +330,66 @@ class Lowering {
     }
     const { base, links } = this.linksOf(node, true);
     if (base.type === "Identifier") {
-      return this.links(identifier(base.name), links, 0);
+      return this.links(identifier(base.name), links);
     }
     // Its reads are the outer chain's, recorded above.
-    const inner = isChain(base)
-      ? this.chain(base, false)
+    // A chain in parentheses stays in them: `(a?.b).c` throws where
+    // `a?.b.c` short-circuits.
+    const inner: Code = isChain(base)
+      ? { type: "Parenthesized", expression: this.chain(base, false) }
       : this.expression(base);
-    return this.links(inner, links, 0);
+    return this.links(inner, links);
   }
 
   /**
-   * `links[from…]` applied to `value`. At a `?.` link, the rest of the
-   * chain runs only for a value that isn't nullish, as JavaScript's
-   * short-circuit does: `$opt(value, ($0) => rest)`.
+   * `links` applied to `value`, in order, as JavaScript reads them: a `?.`
+   * short-circuits the rest natively. A field of an inherited function's
+   * name is `$own(value, "name")`, optional (giving `undefined` for a
+   * nullish value) where a `?.` came before it in the chain.
    */
-  private links(
-    value: Code,
-    links: readonly Link[],
-    from: number,
-    entered = false
-  ): Code {
-    const link = links[from];
-    if (link === undefined) {
-      return value;
+  private links(value: Code, links: readonly Link[]): Code {
+    let applied = value;
+    let optional = false;
+    for (const link of links) {
+      optional ||= link.optional;
+      if (link.kind === "call") {
+        applied = {
+          type: "Call",
+          callee: {
+            type: "Member",
+            object: applied,
+            property: link.method,
+            optional: link.optional,
+          },
+          arguments: link.args.map((arg) => this.argument(arg)),
+        };
+      } else if (Number.isSafeInteger(link.key) && Number(link.key) >= 0) {
+        applied = {
+          type: "Index",
+          object: applied,
+          index: Number(link.key),
+          optional: link.optional,
+        };
+      } else if (inheritedNames.has(String(link.key))) {
+        applied = {
+          type: "Call",
+          callee: identifier(runtimeNames.own),
+          arguments: [
+            applied,
+            { type: "String", value: String(link.key) },
+            ...(optional ? [{ type: "Boolean", value: true } as const] : []),
+          ],
+        };
+      } else {
+        applied = {
+          type: "Member",
+          object: applied,
+          property: String(link.key),
+          optional: link.optional,
+        };
+      }
     }
-    if (link.optional && !entered) {
-      const parameter = `$${this.next}`;
-      this.next += 1;
-      return call(runtimeNames.optional, [
-        value,
-        {
-          type: "Arrow",
-          params: [parameter],
-          body: this.links(identifier(parameter), links, from, true),
-        },
-      ]);
-    }
-    const applied =
-      link.kind === "member"
-        ? call(runtimeNames.read, [
-            value,
-            typeof link.key === "number"
-              ? { type: "Number", value: link.key }
-              : { type: "String", value: link.key },
-          ])
-        : call(runtimeNames.call, [
-            value,
-            { type: "String", value: link.method },
-            {
-              type: "Array",
-              elements: link.args.map((arg) => this.argument(arg)),
-            },
-          ]);
-    return this.links(applied, links, from + 1);
+    return applied;
   }
 
   /** A call's argument: a value, or the callback arrow written there. */

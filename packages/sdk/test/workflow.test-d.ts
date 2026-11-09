@@ -1,119 +1,77 @@
 // Compile-time guarantees of the workflow SDK. This file is type-checked by
 // `vp check` and never run: every `@ts-expect-error` below must stay an error.
-/* oxlint-disable require-await -- stand-in callbacks for interfaces that take async functions */
-import type { RunId } from "@grasp-os/shared/ids";
+/* oxlint-disable require-await -- stand-in handlers for an interface that takes async functions */
 import { expectTypeOf } from "vite-plus/test";
-import type { z } from "zod";
 
-import type { stepOptionSchemas } from "../src/steps.ts";
-import { v } from "../src/workflow.ts";
+import { defineWorkflow, v } from "../src/workflow.ts";
 import type {
-  DecisionOptions,
-  DoOptions,
-  SleepOptions,
-  StepRunner,
-  WorkflowContext,
+  ConnectionMembers,
+  WorkflowCtx,
+  WorkflowPermissions,
 } from "../src/workflow.ts";
-import { invoiceWorkflow } from "./workflows/invoice-approval.ts";
+
+const permissions = {
+  ai: true,
+  connections: {
+    mail: ["mail.send", "send-invite"],
+    github: ["issues.create"],
+  },
+  decisions: ["finance"],
+  events: { stripe: ["invoice.paid", "invoice.failed"] },
+} as const satisfies WorkflowPermissions;
 
 const params = {
-  threshold: {
-    label: "Above",
-    type: v.money().default({ minorUnits: 500_000, currency: "EUR" }),
-  },
-  reviewer: { label: "Reviewer", type: v.person().default("team:finance") },
-  limit: { label: "Limit", type: v.number().integer().default(3) },
+  threshold: { label: "Above", type: v.number().default(100) },
 };
-declare const step: StepRunner;
-declare const context: WorkflowContext<typeof params, undefined>;
-const { params: p } = context;
 
-// Parameters are typed by their `v` type.
-expectTypeOf(p.threshold).toEqualTypeOf<{
-  currency: string;
-  minorUnits: number;
-}>();
-expectTypeOf(p.reviewer).toEqualTypeOf<string>();
-expectTypeOf(p.limit).toEqualTypeOf<number>();
-expectTypeOf(context.runId).toEqualTypeOf<RunId>();
+declare const ctx: WorkflowCtx<typeof permissions, typeof params>;
 
-// The SDK owns how long a decision waits.
-// @ts-expect-error -- a decision needs a timeout
-await step.decision("review", {
-  description: "Review",
-  from: p.reviewer,
-});
+// Every declared action is a member, by its dotted path, `-` in camel case.
+expectTypeOf(ctx.connections.mail.mail.send).toBeFunction();
+expectTypeOf(ctx.connections.mail.sendInvite).toBeFunction();
+expectTypeOf(ctx.connections.github.issues.create).toBeFunction();
+expectTypeOf(ctx.decisions.finance.ask).toBeFunction();
+expectTypeOf(ctx.ai.generate).toBeFunction();
+expectTypeOf(ctx.params.threshold).toEqualTypeOf<number>();
 
-// Retries say how many, and how far apart.
-await step.do(
-  "match",
-  // @ts-expect-error -- retries are an object
-  { description: "Match", retries: 2 },
-  async () => 1
+// A name nobody declared is no member.
+// @ts-expect-error -- no such connection
+expectTypeOf(ctx.connections.slack).toBeObject();
+// @ts-expect-error -- no such action
+expectTypeOf(ctx.connections.github.repos).toBeObject();
+// @ts-expect-error -- no such decision
+expectTypeOf(ctx.decisions.legal).toBeObject();
+
+// An event wait takes only the types its permission declares.
+void ctx.events.stripe.waitFor(
+  { type: "invoice.paid", timeout: "3 days" },
+  { step: "paid" }
 );
-await step.do(
-  "match",
-  {
-    description: "Match",
-    retries: { limit: 2, delay: "30 seconds", backoff: "exponential" },
-    timeout: "30 seconds",
+void ctx.events.stripe.waitFor(
+  // @ts-expect-error -- not one of the declared types
+  { type: "invoice.created", timeout: "3 days" },
+  { step: "created" }
+);
+
+// Every call names its step.
+// @ts-expect-error -- no step
+void ctx.connections.mail.mail.send({ to: "ada" });
+
+// A workflow with no model has no `ai`.
+declare const noModel: WorkflowCtx<
+  { connections: { mail: ["mail.send"] } },
+  Record<never, never>
+>;
+expectTypeOf(noModel.ai).toEqualTypeOf<undefined>();
+
+// Members are typed from the declaration, path by path.
+expectTypeOf<ConnectionMembers<"a.b" | "a.c">>().toHaveProperty("a");
+
+// The handler's args are what `args` declares.
+defineWorkflow({
+  args: v.object({ who: v.string() }),
+  handler: async (_ctx, args) => {
+    expectTypeOf(args.who).toEqualTypeOf<string>();
+    return null;
   },
-  async () => 1
-);
-
-// A step's result is JSON, which the engine records.
-await step.do(
-  "when",
-  { description: "When" },
-  // @ts-expect-error -- a Date isn't JSON
-  async () => new Date(0)
-);
-
-// The typed options and the schemas that check them at run time take the
-// same options.
-// But for `retry`, generated code's alone, checked apart.
-expectTypeOf<Exclude<keyof DoOptions, "retry">>().toEqualTypeOf<
-  keyof z.input<typeof stepOptionSchemas.do>
->();
-expectTypeOf<keyof DecisionOptions>().toEqualTypeOf<
-  keyof z.input<typeof stepOptionSchemas.decision>
->();
-expectTypeOf<keyof SleepOptions>().toEqualTypeOf<
-  keyof z.input<typeof stepOptionSchemas.sleep>
->();
-
-// Every step needs a description.
-// @ts-expect-error -- the description is required
-await step.do("match", {}, async () => 1);
-// @ts-expect-error -- the description is required
-await step.sleep("pause", { duration: "1 day" });
-// @ts-expect-error -- durations need a unit
-await step.sleep("pause", { description: "Pause", duration: "1 fortnight" });
-
-// A step gets back the input it's given, as typed, and input is JSON.
-await step.do(
-  "notify",
-  { description: "Notify", input: { to: "anna", count: 2 } },
-  async ({ input }) => {
-    expectTypeOf(input).toEqualTypeOf<{ to: string; count: number }>();
-  }
-);
-await step.do("match", { description: "Match" }, async ({ input }) => {
-  expectTypeOf(input).toBeUndefined();
 });
-await step.do(
-  "match",
-  // @ts-expect-error -- input is JSON
-  { description: "Match", input: { at: new Date(0) } },
-  async () => 1
-);
-
-// A run resolves to what the workflow returns.
-expectTypeOf(
-  invoiceWorkflow({
-    findPurchaseOrder: async () => null,
-    book: async () => "",
-  }).run
-).returns.resolves.toExtend<{
-  status: "unmatched" | "rejected" | "timedOut" | "booked";
-}>();

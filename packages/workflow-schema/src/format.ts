@@ -7,13 +7,15 @@ import {
   workflowParamNamePattern,
 } from "@grasp-os/shared/workflows";
 
-// grasp-workflow/1: a workflow as JSON, the stored form of a workflow on
-// `@grasp-os/sdk/workflow`. One step is one SDK call; steps name each
-// other's results explicitly (`steps.extract.output`), and everything a
-// run reads besides (its input, its parameters, its bindings) is declared
-// at the top. The canvas draws it and the agent edits it step by step;
-// what runs, is sealed and is exported is the TypeScript it generates
-// (generate.ts). schema.ts defines it; check.ts checks it.
+// grasp-workflow/2: a workflow as JSON, the stored form of a workflow on
+// `@grasp-os/sdk/workflow`, in the App SDK's words: what starts a run is
+// its `args`, what it ends with its `returns` (and its `result`), what it
+// may reach its `permissions`, each kind by alias as an App's are. One
+// step is one `ctx` call; a step's ID is an identifier, and an expression
+// reads its result by it (`invoice.id`). The canvas draws it and the agent
+// edits it step by step; what runs, is sealed and is exported is the
+// TypeScript it generates (generate.ts). schema.ts defines it; check.ts
+// checks it.
 //
 // A step kind joins the format as its SDK call joins the run host: a new
 // `type` in the union, nothing else changing.
@@ -24,18 +26,10 @@ import {
  * package.json does), so an editor checks it as it is written.
  */
 export const workflowSchemaUrl =
-  "https://grasp.work/schemas/grasp-workflow/1.json";
+  "https://grasp.work/schemas/grasp-workflow/2.json";
 
 /** The format's name and version, as a published version records it. */
-export const definitionFormat = "grasp-workflow/1";
-
-/**
- * Where the host's own error kinds are (`<errorTypeBase>timeout`, say), as
- * a catch's `errors.type` names them. A raise never names one: an error of
- * these kinds is always the host's.
- */
-export const errorTypeBase =
-  "https://grasp.work/schemas/grasp-workflow/1/errors/";
+export const definitionFormat = "grasp-workflow/2";
 
 /** JSON, as the format's values hold it. */
 export type Json =
@@ -52,31 +46,32 @@ export interface ValueRecord {
 }
 
 /**
- * An expression (expressions.ts): JavaScript a run evaluates where it
- * stands, reading `input`, `params`, `steps`, `inbox`, `state` and, in a
- * catch, `error`; in a step's `state`, `output` too. As JSON, it is an
- * object of one value, so it is a `ValueRecord` too.
+ * An expression (`@grasp-os/sdk/expression-check`): JavaScript a run
+ * evaluates where it stands, reading `args`, `params`, `run`, `inbox`,
+ * `state`, the results of the steps that ran before it by their IDs and,
+ * in a catch, `error`; in a step's `state`, `output` too. As JSON, it is
+ * an object of one value, so it is a `ValueRecord` too.
  */
 export type Expression = ValueRecord & { readonly $expr: string };
 
 /**
  * The root an expression reads a run's reply addresses by:
- * `inbox.<alias>`, the address (`reply-<token>@<host>`) of event binding
- * `<alias>`, whose contract takes email replies, as the run's
- * `WorkflowContext.inbox` has it. Typically a mail call's `replyTo`, and a
- * later `wait` on the same binding takes the reply. A string, or
+ * `inbox.<alias>`, the address (`reply-<token>@<host>`) of event
+ * permission `<alias>`, whose contract takes email replies, as the run's
+ * `ctx.inbox` has it. Typically a mail call's `replyTo`, and a later
+ * `waitForEvent` on the same permission takes the reply. A string, or
  * `undefined` where the run has none: a deployment with no sign-in
  * origin, or one whose auth secret rotated since the run started.
  */
 export const inboxRoot = "inbox";
 
 /**
- * The roots an expression reads besides `input`, `steps`, `params` and
- * `run`: the one list both the format's check (check.ts, which says where
- * each is in scope) and the compiler's typed check (expression-scope.ts,
- * which types each) read, so neither knows a root the other doesn't.
- * `inbox` and `state` are in scope everywhere, `error` in a catch, `item`
- * in a loop's items, and `output` in a step's `state`.
+ * The roots an expression reads besides `args`, `params`, `run` and the
+ * steps' results: the one list both the format's check (check.ts, which
+ * says where each is in scope) and the compiler's typed check
+ * (expression-scope.ts, which types each) read, so neither knows a root
+ * the other doesn't. `inbox` and `state` are in scope everywhere, `error`
+ * in a catch, `item` in a loop's items, and `output` in a step's `state`.
  */
 export const expressionRoots = [
   inboxRoot,
@@ -114,7 +109,7 @@ export type DurationUnit = "second" | "minute" | "hour" | "day" | "week";
  * A value's schema, as `v` declares it, in the compact form an SDK value
  * descriptor is written by hand in (`@grasp-os/sdk/host`'s
  * `descriptorFromCompact`): `{ "kind": "string", "max": 200 }` is
- * `v.string().max(200)`. A run's input, its output, an agent's answer, a
+ * `v.string().max(200)`. A run's args, its returns, a model's answer, a
  * key of the state and a parameter are each declared so.
  */
 export type Descriptor = CompactDescriptor;
@@ -143,14 +138,29 @@ export const isPlain = (param: Param): boolean => param.sensitive === false;
 export const isSensitive = (param: Param): boolean => !isPlain(param);
 
 /**
- * What a binding reaches, as the host's catalog has its contracts. A step
- * calls the first six; `files` (the run's own files) and `brain` (one
- * Brain collection) only the workflow's own actions reach, as uses they
- * declare: no step calls them itself. What an action returns is its
- * step's output, recorded as any other, so the action chooses what that
- * holds: a file's reference, `{ file: <id> }`, which only its own run's
- * files resolve, rather than its content; and of the Brain, only what the
- * run's person may read, as its audience and the run's restriction allow.
+ * The kinds of permission a workflow declares, each by alias under its
+ * key, as an App's `permissions` are: `ai` is the workflow's one model,
+ * whose alias is `ai`; `connections`, `decisions` and `events` are the
+ * catalog's connectors, decision contracts and event contracts; `files`
+ * (the run's own files) and `brain` (one Brain collection) only the
+ * workflow's own actions reach; `modules` are its own compute and action
+ * modules (`local:code/<file>.ts#<export>`).
+ */
+export const permissionKinds = [
+  "ai",
+  "connections",
+  "decisions",
+  "events",
+  "files",
+  "brain",
+  "modules",
+] as const;
+export type PermissionKind = (typeof permissionKinds)[number];
+
+/**
+ * What a permission reaches, as the host's catalog, the sealed table and
+ * the run's bindings name it: the kind each permission is, by alias
+ * (`bindingsOf`).
  */
 export const bindingKinds = [
   "connector",
@@ -164,25 +174,109 @@ export const bindingKinds = [
 ] as const;
 export type BindingKind = (typeof bindingKinds)[number];
 
-/**
- * A binding: what a step calls, by the contract an admin approves. A
- * `compute` or `action` binding names one of the workflow's own modules
- * (`local:code/<file>.ts#<export>`); every other a contract of the
- * host's catalog.
- */
-export interface Binding {
-  readonly kind: BindingKind;
+/** The alias of the workflow's one `ai` permission. */
+export const aiAlias = "ai";
+
+/** A permission: the contract an admin approves, and its label. */
+export interface Permission {
   readonly contract: string;
   /** What it is called where people see it: a label, renamed freely. */
   readonly title?: string;
 }
 
+/** One of the workflow's own modules: a compute or an action. */
+export interface ModulePermission extends Permission {
+  readonly kind: "compute" | "action";
+}
+
+/** What a workflow may reach, each kind by alias (`permissionKinds`). */
+export interface Permissions {
+  readonly ai?: Permission;
+  readonly connections?: Readonly<Record<string, Permission>>;
+  readonly decisions?: Readonly<Record<string, Permission>>;
+  readonly events?: Readonly<Record<string, Permission>>;
+  readonly files?: Readonly<Record<string, Permission>>;
+  readonly brain?: Readonly<Record<string, Permission>>;
+  readonly modules?: Readonly<Record<string, ModulePermission>>;
+}
+
+/** A permission held by alias: its kind, its alias, and what it binds. */
+export interface AliasedPermission {
+  readonly kind: Exclude<PermissionKind, "ai">;
+  readonly alias: string;
+  readonly binding: Binding;
+}
+
+/** The permissions of one kind held by alias, each binding as `bound`. */
+const held = (
+  kind: Exclude<PermissionKind, "ai" | "modules">,
+  entries: Readonly<Record<string, Permission>> | undefined,
+  bound: BindingKind
+): AliasedPermission[] =>
+  Object.entries(entries ?? {}).map(([alias, permission]) => ({
+    kind,
+    alias,
+    binding: { kind: bound, ...permission },
+  }));
+
+/**
+ * Every permission `permissions` holds by alias, in the order of their
+ * kinds: all but `ai`, whose alias is fixed (`aiAlias`).
+ */
+export const aliasedPermissions = (
+  permissions: Permissions
+): AliasedPermission[] => [
+  ...held("connections", permissions.connections, "connector"),
+  ...held("decisions", permissions.decisions, "decision"),
+  ...held("events", permissions.events, "event"),
+  ...held("files", permissions.files, "files"),
+  ...held("brain", permissions.brain, "brain"),
+  ...Object.entries(permissions.modules ?? {}).map(
+    ([alias, permission]): AliasedPermission => ({
+      kind: "modules",
+      alias,
+      binding: { ...permission },
+    })
+  ),
+];
+
+/**
+ * A permission as the host binds it: its kind, its contract and its
+ * label. Every permission of every kind is one, by its alias
+ * (`bindingsOf`).
+ */
+export interface Binding {
+  readonly kind: BindingKind;
+  readonly contract: string;
+  readonly title?: string;
+}
+
+/**
+ * Every permission of `document`, by alias, as the host binds it: the
+ * `ai` permission as `ai`, a model. The check refuses one alias under two
+ * kinds, so each alias is one binding.
+ */
+export const bindingsOf = (
+  document: Pick<WorkflowDocument, "permissions">
+): Readonly<Record<string, Binding>> => {
+  const permissions = document.permissions ?? {};
+  const bindings = new Map<string, Binding>();
+  if (permissions.ai !== undefined) {
+    bindings.set(aiAlias, { kind: "model", ...permissions.ai });
+  }
+  for (const { alias, binding } of aliasedPermissions(permissions)) {
+    bindings.set(alias, binding);
+  }
+  return Object.fromEntries(bindings);
+};
+
 interface StepBase {
   /**
    * Its stable key, unique in the workflow, never changed once it is made:
-   * `steps.<id>` reads its result, and lists, retries and the sealed table
-   * name it by it. A step is renamed by its `title`, never its ID, so a
-   * rename breaks nothing.
+   * an identifier (`stepIdPattern`), so its result is a `const` of that
+   * name and an expression reads it as `<id>.<field>`; lists, retries and
+   * the sealed table name it by it. A step is renamed by its `title`,
+   * never its ID, so a rename breaks nothing.
    */
   readonly id: string;
   /**
@@ -190,7 +284,7 @@ interface StepBase {
    * label, renamed freely, which no code is generated from.
    */
   readonly title?: string;
-  /** Runs only when this holds; skipped, its output is `null`. */
+  /** Runs only when this holds; skipped, its result is `null`. */
   readonly if?: Expression;
 }
 
@@ -204,49 +298,54 @@ interface StepBase {
  */
 export type StateWrites = Readonly<Record<string, Value>>;
 
-/** Calls a binding: a connector's operation, a store operation, code. */
-export interface DoStep extends StepBase {
-  readonly type: "do";
-  readonly binding: string;
-  /** A connector's operation; no other binding takes one. */
-  readonly operation?: string;
-  readonly arguments?: Value;
+interface CallBase extends StepBase {
+  readonly type: "call";
+  readonly args?: Value;
   /** The most one attempt may take. */
   readonly timeout?: Duration;
   readonly state?: StateWrites;
 }
 
-/** Asks a model, through a model binding, for an answer of `output`'s shape. */
-export interface AgentStep extends StepBase {
-  readonly type: "agent";
-  readonly binding: string;
+/**
+ * Calls an action of a connection, `ctx.connections.<connection>.<action>`,
+ * or one of the workflow's own modules, `ctx.modules.<module>`.
+ */
+export type CallStep =
+  | (CallBase & { readonly connection: string; readonly action: string })
+  | (CallBase & { readonly module: string });
+
+/**
+ * Asks the workflow's model (`permissions.ai`) for an answer of
+ * `returns`' shape: `ctx.ai.generate`.
+ */
+export interface GenerateStep extends StepBase {
+  readonly type: "generate";
   readonly instructions: Value;
   readonly input: Value;
   /** What the answer must be. */
-  readonly output: Descriptor;
+  readonly returns: Descriptor;
   readonly timeout?: Duration;
   readonly state?: StateWrites;
 }
 
 /**
- * Asks people to decide, through a decision binding, and waits for the
- * answer: its output is `{ timedOut: false, approved, by, payload }`, or
- * `{ timedOut: true }` when nobody answered within `timeout`. A timeout
- * never means approval.
+ * Asks people to decide, through decision permission `decision`, and
+ * waits for the answer: `ctx.decisions.<decision>.ask`. Its result is
+ * `{ timedOut: false, approved, by, payload }`, or `{ timedOut: true }`
+ * when nobody answered within `timeout`. A timeout never means approval.
  */
-export interface DecisionStep extends StepBase {
-  readonly type: "decision";
-  readonly binding: string;
+export interface DecideStep extends StepBase {
+  readonly type: "decide";
+  readonly decision: string;
   /**
    * Who is asked, 1 to 16 of `person:<user ID>`, `team:<team ID>` and
    * `role:<role>`: a list, any item of which may be an expression, or an
-   * expression for the whole list. The first is the SDK's `from`; any of
-   * them may answer.
+   * expression for the whole list. Any of them may answer.
    */
   readonly recipients: Value;
   /** What they are asked, at most 500 characters. */
   readonly prompt: Value;
-  /** What they decide on, as the binding's contract takes it. */
+  /** What they decide on, as the permission's contract takes it. */
   readonly input: Value;
   /** How long it waits for an answer: until the run's own deadline if not given. */
   readonly timeout?: Duration;
@@ -254,8 +353,8 @@ export interface DecisionStep extends StepBase {
 
 /**
  * Runs `do` for each of `items`, one item at a time, in order: `item` is
- * in scope in its steps and in `while`. Its own output is `null`; a step
- * inside it is read only by the steps after it in the same item.
+ * in scope in its steps and in `while`. A step inside it is read only by
+ * the steps after it in the same item.
  *
  * What bounds a loop is the run's step ceiling (`forEachDescription`): every step
  * of every item counts toward it, so a loop of many items, or of items
@@ -265,24 +364,11 @@ export interface DecisionStep extends StepBase {
  */
 export interface ForEachStep extends StepBase {
   readonly type: "forEach";
-  /** A list of items, as its run records them first. */
+  /** A list of items. */
   readonly items: Expression;
   /** Goes on to each next item only while this holds. */
   readonly while?: Expression;
   readonly do: readonly Step[];
-}
-
-/**
- * The events an event wait takes: those sent to the run through event
- * binding `from`, of `type` or any of a list of types, each one the
- * binding's contract admits; with `match`, only one of the events an
- * event source sends (a webhook) whose data has, at `match.field`, the
- * value `match.equals` gives.
- */
-export interface EventFilter {
-  readonly from: string;
-  readonly type: string | readonly string[];
-  readonly match?: EventFieldMatch;
 }
 
 /**
@@ -299,34 +385,34 @@ export interface EventFieldMatch {
   readonly equals: Value;
 }
 
-/**
- * Waits: for a time span, until a deadline (ms since the epoch), or for an
- * event (`EventWaitStep`), at most `timeout`, which an event wait always
- * names: a run never waits for an event with no end.
- */
+/** Waits for a time span, or until a deadline (ms since the epoch). */
 export type WaitStep =
   | (StepBase & { readonly type: "wait"; readonly for: Duration })
-  | (StepBase & { readonly type: "wait"; readonly until: Expression })
-  | EventWaitStep;
+  | (StepBase & { readonly type: "wait"; readonly until: Expression });
 
 /**
- * A wait for an event. Its output is the SDK's `step.listen`'s
- * (`EventWait`): the first event of its filter sent to the run (once the
+ * Waits for an event sent to the run through event permission `events`,
+ * of `eventType` or any of a list of types, each one its contract admits:
+ * `ctx.events.<events>.waitFor`. With `match`, only one of the events an
+ * event source sends (a webhook) whose data has, at `match.field`, the
+ * value `match.equals` gives. Its result is the first such event (once the
  * run started, or while it waited), as the host minted it, or
  * `{ timedOut: true }` when none came within its timeout. A timeout is an
- * outcome a later step reads (`steps.<id>.output.timedOut`), never a
- * failure; the event's data is `steps.<id>.output.event.data`.
+ * outcome a later step reads (`<id>.timedOut`), never a failure; the
+ * event's data is `<id>.event.data`.
  *
  * Any failure of an event wait fails the run, and no `try` catches it:
- * its binding revoked (`workflow.event_denied`), the run's person no
+ * its permission revoked (`workflow.event_denied`), the run's person no
  * longer active (`permission.person_inactive`), or a test run's wait
- * limit (`workflow.candidate_wait_limit`). The host checks the binding
+ * limit (`workflow.candidate_wait_limit`). The host checks the permission
  * again on every replay, so a catch would let a replay after a revocation
  * take a path the run never took.
  */
-export interface EventWaitStep extends StepBase {
-  readonly type: "wait";
-  readonly event: EventFilter;
+export interface WaitForEventStep extends StepBase {
+  readonly type: "waitForEvent";
+  readonly events: string;
+  readonly eventType: string | readonly string[];
+  readonly match?: EventFieldMatch;
   readonly timeout: Duration;
 }
 
@@ -338,13 +424,7 @@ export interface IfStep extends StepBase {
   readonly else?: readonly Step[];
 }
 
-/** Which failures a catch takes, as the run host maps them. */
-export interface ErrorFilter {
-  readonly type?: string;
-  readonly status?: number;
-}
-
-/** Tries a failing step of the `try` list again, after a backoff. */
+/** Tries a failing call of the `try` list again, after a backoff. */
 export interface Retry {
   /** Attempts in all, the first included: 1 to 5. */
   readonly attempts: number;
@@ -354,12 +434,17 @@ export interface Retry {
   readonly when?: Expression;
 }
 
-/** Runs `try`; a failure there its catch takes runs `catch.do` instead. */
+/**
+ * Runs `try`; a failure there its catch takes runs `catch.do` instead. A
+ * catch takes a failure of its `code` (an `AppError` code: the platform's,
+ * such as `connect.rate_limited`, or one the workflow raises), any when it
+ * names none, and only while its `when` holds.
+ */
 export interface TryStep extends StepBase {
   readonly type: "try";
   readonly try: readonly Step[];
   readonly catch: {
-    readonly errors?: ErrorFilter;
+    readonly code?: string;
     /** Takes only while this holds, `error` in scope. */
     readonly when?: Expression;
     readonly retry?: Retry;
@@ -367,42 +452,55 @@ export interface TryStep extends StepBase {
   };
 }
 
-/** Fails the run with the workflow's own error, which a catch may take. */
+/**
+ * Fails the run with the workflow's own `AppError`, which a catch may
+ * take: its `code` in a namespace of the workflow's own
+ * (`invoice.rejected`), never one of the platform's.
+ */
 export interface RaiseStep extends StepBase {
   readonly type: "raise";
   readonly error: {
-    /** A URI naming the kind of error, e.g. `urn:acme:error:rejected`. */
-    readonly type: string;
-    readonly status: number;
-    readonly title?: string;
-    readonly detail?: string;
+    readonly code: string;
+    readonly message: string;
+    readonly details?: Json;
   };
 }
 
 export type Step =
-  | DoStep
-  | AgentStep
-  | DecisionStep
+  | CallStep
+  | GenerateStep
+  | DecideStep
   | ForEachStep
   | WaitStep
+  | WaitForEventStep
   | IfStep
   | TryStep
   | RaiseStep;
 
 export type StepType = Step["type"];
 
-/** A workflow in grasp-workflow/1. */
+/** The steps that have a result, which a later expression reads by the step's ID. */
+export const resultStepTypes: ReadonlySet<StepType> = new Set([
+  "call",
+  "generate",
+  "decide",
+  "waitForEvent",
+]);
+
+/** A workflow in grasp-workflow/2. */
 export interface WorkflowDocument {
   /** What the document is: the format's schema, `workflowSchemaUrl`. */
   readonly $schema: typeof workflowSchemaUrl;
   /** What starts a run: an object of no fields when not given. */
-  readonly input?: Descriptor;
-  /** What a run ends with: its schema, and its value. */
-  readonly output?: { readonly schema: Descriptor; readonly value: Value };
+  readonly args?: Descriptor;
+  /** What a run ends with: null when not given. */
+  readonly returns?: Descriptor;
+  /** What it ends with, of `returns`' shape: only with `returns`. */
+  readonly result?: Value;
   readonly params?: Readonly<Record<string, Param>>;
-  readonly bindings?: Readonly<Record<string, Binding>>;
+  readonly permissions?: Permissions;
   /**
-   * What it keeps between its runs: each key's schema, as `input`'s. A
+   * What it keeps between its runs: each key's schema, as `args`'. A
    * step writes only these keys, each value of its key's schema.
    */
   readonly state?: Readonly<Record<string, Descriptor>>;
@@ -432,6 +530,7 @@ export const formatLimits = {
   idLength: 64,
   titleLength: 200,
   params: maxWorkflowParams,
+  /** Permissions in all, every kind's. */
   bindings: 64,
   /** The keys one step keeps in its workflow's state, as the host seals them. */
   stateKeys: 64,
@@ -472,7 +571,7 @@ export const forEachDescription = `Runs \`do\` for each of \`items\`, one item a
  * call's, which the host writes the state with. A decision, a wait, a
  * loop, an `if`, a `try` and a raise record no result of their own there.
  */
-export const stateStepTypes = ["do", "agent"] as const;
+export const stateStepTypes = ["call", "generate"] as const;
 
 /**
  * What a step's `state` is, to whoever writes one: the schema's
@@ -480,14 +579,14 @@ export const stateStepTypes = ["do", "agent"] as const;
  * all (core's `workflowStateMaxBytes`), which only a run can reach: no
  * check of the document can.
  */
-export const stateDescription = `What the step keeps in its workflow's state once it succeeded: \`{ "<key>": <value> }\`, each key one the workflow declares under its top-level \`state\`, and each value of that key's schema. A value is JSON, any part of which may be an expression; there \`output\` is this step's result. A literal value is checked against its key's schema as the workflow is; every value is checked again as the step records it, and one of another shape fails the step, keeping nothing. Every expression of the workflow reads the state as it was when the run started, as \`state.<key>\`, which is undefined until a run kept it: write \`state.<key> ?? <default>\`. Every version of the workflow keeps the same state, so a value kept under an older schema that doesn't fit this version's reads as undefined too, as a key never written. A step its \`if\` skips keeps nothing, and a replay never writes twice. A restricted run reads the workflow's state but doesn't change it, and nor does a test run. A workflow's state holds at most 64 KB in all, which only a run can reach: a step that would pass it fails with workflow.state_too_large, and since its call already answered, the run ends with workflow.failed_after_effect, as it does when a value isn't of its key's schema. Only a \`do\` or an \`agent\` step keeps state.`;
+export const stateDescription = `What the step keeps in its workflow's state once it succeeded: \`{ "<key>": <value> }\`, each key one the workflow declares under its top-level \`state\`, and each value of that key's schema. A value is JSON, any part of which may be an expression; there \`output\` is this step's result. A literal value is checked against its key's schema as the workflow is; every value is checked again as the step records it, and one of another shape fails the step, keeping nothing. Every expression of the workflow reads the state as it was when the run started, as \`state.<key>\`, which is undefined until a run kept it: write \`state.<key> ?? <default>\`. Every version of the workflow keeps the same state, so a value kept under an older schema that doesn't fit this version's reads as undefined too, as a key never written. A step its \`if\` skips keeps nothing, and a replay never writes twice. A restricted run reads the workflow's state but doesn't change it, and nor does a test run. A workflow's state holds at most 64 KB in all, which only a run can reach: a step that would pass it fails with workflow.state_too_large, and since its call already answered, the run ends with workflow.failed_after_effect, as it does when a value isn't of its key's schema. Only a \`call\` or a \`generate\` step keeps state.`;
 
 /** What a workflow's `state` declares, to whoever writes one. */
-export const stateDeclarationDescription = `What the workflow keeps between its runs: \`{ "<key>": <descriptor> }\`, at most ${formatLimits.stateKeys} keys, each a letter then letters, digits and \`_\`, each with a value's schema as \`input\` has one, such as \`{ "kind": "number", "integer": true }\`. A \`do\` or \`agent\` step's \`state\` writes these keys alone, and every expression reads them as \`state.<key>\`.`;
+export const stateDeclarationDescription = `What the workflow keeps between its runs: \`{ "<key>": <descriptor> }\`, at most ${formatLimits.stateKeys} keys, each a letter then letters, digits and \`_\`, each with a value's schema as \`args\` has one, such as \`{ "kind": "number", "integer": true }\`. A \`call\` or \`generate\` step's \`state\` writes these keys alone, and every expression reads them as \`state.<key>\`.`;
 
-/** What a wait is, to whoever writes one: the schema's description. */
-export const waitDescription =
-  "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). To wait for a webhook event about this run's own thing (a payment for the invoice it sent, say), give `event.match: { field, equals }`: `field` a JSON Pointer into the event's data (`/invoice`), `equals` the text, number or boolean it must be, usually an expression (`{ $expr: \"steps.send.output.invoice\" }`); Grasp matches it, and an event that came up to a day before the wait is taken first. An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. To wait for a reply to the run's mail, give the mail `inbox.<from>` (the run's reply address for that binding, or `undefined` when it has none) as its reply-to address, then wait on the same binding. Any failure of an event wait fails the run; no `try` catches it: its binding revoked, the run's person no longer active, or a test run's wait limit. The run checks its binding again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
+/** What an event wait is, to whoever writes one: the schema's description. */
+export const waitForEventDescription =
+  "Waits for an event sent to the run: `events` names an event permission and `eventType` one or a list of the types its contract admits. To wait for a webhook event about this run's own thing (a payment for the invoice it sent, say), give `match: { field, equals }`: `field` a JSON Pointer into the event's data (`/invoice`), `equals` the text, number or boolean it must be, usually an expression (`{ $expr: \"send.invoice\" }`); Grasp matches it, and an event that came up to a day before the wait is taken first. An event wait names its `timeout`, at most a year, and its result is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `<id>.timedOut` before `<id>.event.data`. To wait for a reply to the run's mail, give the mail `inbox.<events>` (the run's reply address for that permission, or `undefined` when it has none) as its reply-to address, then wait on the same permission. Any failure of an event wait fails the run; no `try` catches it: its permission revoked, the run's person no longer active, or a test run's wait limit. The run checks its permission again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
 
 /**
  * Who a decision asks: a person or a team by ID, or everyone with a role,
@@ -496,16 +595,93 @@ export const waitDescription =
 export const recipientPattern = decidersPattern.source;
 
 /**
- * What a step ID may be: lower-case words joined by dashes, and none of
- * the names an expression may never read (`constructor`, `prototype`), so
- * `steps.<id>.output` reads every step.
+ * What a step ID may be: an identifier of ASCII letters and digits,
+ * starting with a lower-case letter, so its result is a `const` of that
+ * name in the generated code (`reservedStepIds` says which names it may
+ * not take).
  */
-export const stepIdPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$";
+export const stepIdPattern = "^[a-z][A-Za-z0-9]{0,63}$";
+
+/**
+ * The names a step can't take: JavaScript's reserved words and the
+ * globals an expression may not shadow, the expression roots and the
+ * names the generated code binds (`ctx`, `thrown`, its helpers), and the names no
+ * expression may read (`constructor`, `prototype`, `__proto__`).
+ */
+export const reservedStepIds: ReadonlySet<string> = new Set([
+  // ECMAScript's reserved words, strict mode's and modules' included,
+  // lower-case and so able to match the pattern.
+  "await",
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "implements",
+  "import",
+  "in",
+  "instanceof",
+  "interface",
+  "let",
+  "new",
+  "null",
+  "package",
+  "private",
+  "protected",
+  "public",
+  "return",
+  "static",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "yield",
+  "arguments",
+  "eval",
+  "undefined",
+  "async",
+  "of",
+  // What the generated code and its expressions bind.
+  "args",
+  "params",
+  "run",
+  "result",
+  "ctx",
+  "thrown",
+  "caughtError",
+  "itemsOf",
+  "sensitiveParam",
+  ...expressionRoots,
+  // What no expression reads.
+  "constructor",
+  "prototype",
+]);
 
 /**
  * A parameter's name: an identifier, so code reads it as `params.<name>`.
- * Like a step's ID and a binding's alias, a stable key, never changed once
- * made: a parameter is renamed by its `label`.
+ * Like a step's ID and a permission's alias, a stable key, never changed
+ * once made: a parameter is renamed by its `label`.
  */
 export const paramNamePattern = workflowParamNamePattern.source;
 
@@ -515,8 +691,16 @@ export const paramNamePattern = workflowParamNamePattern.source;
  */
 export const stateKeyPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
 
-/** A binding's alias, as the host's bindings take it. */
+/** A permission's alias, as the host's bindings take it and `ctx.<kind>.<alias>` reads it. */
 export const aliasPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
+
+/**
+ * A connection's action, as `ctx.connections.<alias>.<action>` calls it:
+ * dotted segments (`mail.send`), each a member of the one before, each a
+ * letter, then letters, digits, `_` or `-` (`send-mail` is `sendMail`).
+ */
+export const actionPattern =
+  "^[A-Za-z][A-Za-z0-9_-]{0,63}(?:\\.[A-Za-z][A-Za-z0-9_-]{0,63}){0,3}$";
 
 /**
  * A workflow's own module and export, `local:code/<path>.ts#<export>`: its
@@ -532,13 +716,14 @@ export const localContractPattern = `^local:(${workflowModulePattern.source.slic
  * that walks or edits a document's steps.
  */
 export const stepListPaths: Readonly<Record<StepType, readonly string[]>> = {
-  do: [],
-  agent: [],
+  call: [],
+  generate: [],
+  decide: [],
   wait: [],
+  waitForEvent: [],
   if: ["then", "else"],
   try: ["try", "catch/do"],
   raise: [],
-  decision: [],
   forEach: ["do"],
 };
 

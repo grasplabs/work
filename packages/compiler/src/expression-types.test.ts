@@ -23,10 +23,10 @@ if (!(tsrs instanceof WebAssembly.Module)) {
 }
 
 const scope: ExpressionScopeTypes = {
-  input: "{ lines: { amount: number; tags: string[] }[]; customer: string }",
+  args: "{ lines: { amount: number; tags: string[] }[]; customer: string }",
   steps: {
     extract: "{ statements: { id: string; total: number }[] }",
-    "send-mail": "{ sent: boolean }",
+    sendMail: "{ sent: boolean }",
   },
   params: "{ limit: number }",
   run: "{ id: string }",
@@ -67,14 +67,13 @@ describe("type-checking a workflow's expressions", () => {
       check({
         total: {
           source:
-            "input.lines.map((line) => line.amount).filter((amount) => amount > params.limit)",
+            "args.lines.map((line) => line.amount).filter((amount) => amount > params.limit)",
         },
         statement: {
-          source:
-            "steps.extract.output.statements.find((s) => s.total > 0)?.id ?? run.id",
+          source: "extract.statements.find((s) => s.total > 0)?.id ?? run.id",
         },
-        sent: { source: "steps['send-mail'].output.sent" },
-        label: { source: "`${input.customer.trim()} (${input.lines.length})`" },
+        sent: { source: "sendMail.sent" },
+        label: { source: "`${args.customer.trim()} (${args.lines.length})`" },
       })
     ).toStrictEqual({
       expressions: { total: [], statement: [], sent: [], label: [] },
@@ -84,16 +83,16 @@ describe("type-checking a workflow's expressions", () => {
 
   it("finds a wrong reference, at its line and column in the expression", () => {
     const { expressions } = check({
-      field: { source: "steps.extract.output.statments" },
-      step: { source: "input.customer +\n  steps.extrct.output" },
+      field: { source: "extract.statments" },
+      step: { source: "args.customer +\n  args.lins" },
       // A line separator ends a line, as TypeScript counts them.
       separated: {
-        source: `input.customer +${String.fromCodePoint(0x20_28)}  steps.extrct.output`,
+        source: `args.customer +${String.fromCodePoint(0x20_28)}  args.lins`,
       },
       callback: {
-        source: "input.lines.some((line) => line.tag.includes('x'))",
+        source: "args.lines.some((line) => line.tag.includes('x'))",
       },
-      method: { source: "input.customer.toFixed(2)" },
+      method: { source: "args.customer.toFixed(2)" },
     });
     expect(
       Object.fromEntries(
@@ -103,26 +102,26 @@ describe("type-checking a workflow's expressions", () => {
         ])
       )
     ).toStrictEqual({
-      field: [{ code: "TS2551", line: 1, column: 22 }],
-      step: [{ code: "TS2551", line: 2, column: 9 }],
-      separated: [{ code: "TS2551", line: 2, column: 9 }],
-      callback: [{ code: "TS2551", line: 1, column: 33 }],
-      method: [{ code: "TS2551", line: 1, column: 16 }],
+      field: [{ code: "TS2551", line: 1, column: 9 }],
+      step: [{ code: "TS2551", line: 2, column: 8 }],
+      separated: [{ code: "TS2551", line: 2, column: 8 }],
+      callback: [{ code: "TS2551", line: 1, column: 32 }],
+      method: [{ code: "TS2551", line: 1, column: 15 }],
     });
   });
 
   it("reads what JavaScript reads: comparisons, never a generic call", () => {
     const { expressions } = typed(
-      { ...scope, input: "{ a: number; b: number; c: number; d: number }" },
-      { pair: { source: "[input.a < input.b, input.c > (input.d)]" } }
+      { ...scope, args: "{ a: number; b: number; c: number; d: number }" },
+      { pair: { source: "[args.a < args.b, args.c > (args.d)]" } }
     );
     expect(expressions.pair).toStrictEqual([]);
   });
 
   it("maps an error back past the parentheses it adds, to the source", () => {
     const { expressions } = check({
-      sum: { source: "1 + -input.lines.length * input.custmer" },
-      lines: { source: "input.customer\n  // a note\n  + !input.lnes" },
+      sum: { source: "1 + -args.lines.length * args.custmer" },
+      lines: { source: "args.customer\n  // a note\n  + !args.lnes" },
     });
     expect(
       Object.fromEntries(
@@ -132,16 +131,16 @@ describe("type-checking a workflow's expressions", () => {
         ])
       )
     ).toStrictEqual({
-      sum: [{ code: "TS2551", line: 1, column: 33 }],
-      lines: [{ code: "TS2551", line: 3, column: 12 }],
+      sum: [{ code: "TS2551", line: 1, column: 31 }],
+      lines: [{ code: "TS2551", line: 3, column: 11 }],
     });
   });
 
   it("can't be silenced from inside an expression", () => {
     const { expressions } = check({
-      ignored: { source: "// @ts-ignore\ninput.custmer" },
+      ignored: { source: "// @ts-ignore\nargs.custmer" },
       // An emoji is two UTF-16 units: the error stays at its column after it.
-      emoji: { source: "/*\u{1F600}*/ input.custmer < 1" },
+      emoji: { source: "/*\u{1F600}*/ args.custmer < 1" },
     });
     expect(
       Object.fromEntries(
@@ -151,8 +150,8 @@ describe("type-checking a workflow's expressions", () => {
         ])
       )
     ).toStrictEqual({
-      ignored: [{ code: "TS2551", line: 2, column: 7 }],
-      emoji: [{ code: "TS2551", line: 1, column: 14 }],
+      ignored: [{ code: "TS2551", line: 2, column: 6 }],
+      emoji: [{ code: "TS2551", line: 1, column: 13 }],
     });
   });
 
@@ -160,14 +159,14 @@ describe("type-checking a workflow's expressions", () => {
     const { expressions } = typed(
       {
         ...scope,
-        input: "{ at: string; map: { join: number }; list: string[] }",
+        args: "{ at: string; map: { join: number }; list: string[] }",
       },
       {
-        field: { source: "input.at.trim() + input.map.join" },
-        called: { source: "input.list.map((item) => item.at(0)).join(', ')" },
-        method: { source: "input.list.map" },
-        optional: { source: "[input.list?.join, input.at['trim']]" },
-        inCallback: { source: "input.list.map((item) => item.trim)" },
+        field: { source: "args.at.trim() + args.map.join" },
+        called: { source: "args.list.map((item) => item.at(0)).join(', ')" },
+        method: { source: "args.list.map" },
+        optional: { source: "[args.list?.join, args.at['trim']]" },
+        inCallback: { source: "args.list.map((item) => item.trim)" },
       }
     );
     expect(
@@ -180,12 +179,12 @@ describe("type-checking a workflow's expressions", () => {
     ).toStrictEqual({
       field: [],
       called: [],
-      method: [{ code: "expression.method", line: 1, column: 12 }],
+      method: [{ code: "expression.method", line: 1, column: 11 }],
       optional: [
-        { code: "expression.method", line: 1, column: 14 },
-        { code: "expression.method", line: 1, column: 29 },
+        { code: "expression.method", line: 1, column: 13 },
+        { code: "expression.method", line: 1, column: 27 },
       ],
-      inCallback: [{ code: "expression.method", line: 1, column: 31 }],
+      inCallback: [{ code: "expression.method", line: 1, column: 30 }],
     });
   });
 
@@ -193,11 +192,11 @@ describe("type-checking a workflow's expressions", () => {
     const { expressions } = typed(
       {
         ...scope,
-        input: "{ un: string[] | { map: number }; list: string[] }",
+        args: "{ un: string[] | { map: number }; list: string[] }",
       },
       {
-        union: { source: "input.un.map" },
-        notAllowed: { source: "input.list.push" },
+        union: { source: "args.un.map" },
+        notAllowed: { source: "args.list.push" },
       }
     );
     expect(
@@ -215,14 +214,14 @@ describe("type-checking a workflow's expressions", () => {
       union: [
         {
           code: "expression.method",
-          column: 10,
+          column: 9,
           message: "`map` is a method, read without a call: it has no value.",
         },
       ],
       notAllowed: [
         {
           code: "expression.method",
-          column: 12,
+          column: 11,
           message: "`push` is not one of the methods an expression can call.",
         },
       ],
@@ -239,8 +238,8 @@ describe("type-checking a workflow's expressions", () => {
       {
         at: { source: "item.at" },
         computed: { source: "item['map']" },
-        output: { source: "steps.loose.output.slice" },
-        field: { source: "steps.loose.output.total" },
+        output: { source: "loose.slice" },
+        field: { source: "loose.total" },
       }
     );
     expect(placesOf(expressions)).toStrictEqual({
@@ -253,15 +252,15 @@ describe("type-checking a workflow's expressions", () => {
 
   it("refuses a method read once, not again at the reads of what holds it", () => {
     const { expressions } = typed(
-      { ...scope, input: "{ s: string }" },
+      { ...scope, args: "{ s: string }" },
       {
-        inArray: { source: "[input.s.trim][0]" },
-        inObject: { source: "({ f: input.s.trim }).f" },
+        inArray: { source: "[args.s.trim][0]" },
+        inObject: { source: "({ f: args.s.trim }).f" },
       }
     );
     expect(placesOf(expressions)).toStrictEqual({
-      inArray: [{ code: "expression.method", line: 1, column: 10 }],
-      inObject: [{ code: "expression.method", line: 1, column: 15 }],
+      inArray: [{ code: "expression.method", line: 1, column: 9 }],
+      inObject: [{ code: "expression.method", line: 1, column: 14 }],
     });
   });
 
@@ -269,22 +268,21 @@ describe("type-checking a workflow's expressions", () => {
     const { expressions } = typed(
       {
         ...scope,
-        input:
-          '{ note?: string; v: string | number; shape: { kind: "circle"; radius: number } | { kind: "square"; side: number }; maybe: { a: number } | null; s: string }',
+        args: '{ note?: string; v: string | number; shape: { kind: "circle"; radius: number } | { kind: "square"; side: number }; maybe: { a: number } | null; s: string }',
       },
       {
-        and: { source: "input.note && input.note.trim()" },
+        and: { source: "args.note && args.note.trim()" },
         typeofCheck: {
-          source: "typeof input.v === 'string' ? input.v.trim() : ''",
+          source: "typeof args.v === 'string' ? args.v.trim() : ''",
         },
         discriminant: {
-          source: "input.shape.kind === 'circle' ? input.shape.radius : 0",
+          source: "args.shape.kind === 'circle' ? args.shape.radius : 0",
         },
-        nullCheck: { source: "input.maybe === null ? 0 : input.maybe.a" },
+        nullCheck: { source: "args.maybe === null ? 0 : args.maybe.a" },
         undefinedCheck: {
-          source: "input.note !== undefined ? input.note.trim() : ''",
+          source: "args.note !== undefined ? args.note.trim() : ''",
         },
-        notNarrowed: { source: "input.maybe.a" },
+        notNarrowed: { source: "args.maybe.a" },
       }
     );
     expect(placesOf(expressions)).toStrictEqual({
@@ -301,28 +299,28 @@ describe("type-checking a workflow's expressions", () => {
     const { expressions } = typed(
       {
         ...scope,
-        input: "{ s?: string; maybe: { a: number } | null; list?: string[] }",
+        args: "{ s?: string; maybe: { a: number } | null; list?: string[] }",
       },
       {
-        chain: { source: "input.s?.trim.length" },
-        deeper: { source: "input.maybe?.a.toFixed.length" },
-        last: { source: "input.list?.join" },
-        called: { source: "input.s?.trim().length ?? 0" },
+        chain: { source: "args.s?.trim.length" },
+        deeper: { source: "args.maybe?.a.toFixed.length" },
+        last: { source: "args.list?.join" },
+        called: { source: "args.s?.trim().length ?? 0" },
       }
     );
     expect(placesOf(expressions)).toStrictEqual({
-      chain: [{ code: "expression.method", line: 1, column: 10 }],
-      deeper: [{ code: "expression.method", line: 1, column: 16 }],
-      last: [{ code: "expression.method", line: 1, column: 13 }],
+      chain: [{ code: "expression.method", line: 1, column: 9 }],
+      deeper: [{ code: "expression.method", line: 1, column: 15 }],
+      last: [{ code: "expression.method", line: 1, column: 12 }],
       called: [],
     });
   });
 
   it("checks the subset before the types, and splices nothing it refuses", () => {
     const { expressions, scope: scopeErrors } = check({
-      global: { source: "globalThis.fetch(input.customer)" },
-      escape: { source: "input.customer)\n;globalThis.x\n;(" },
-      fine: { source: "input.customer" },
+      global: { source: "globalThis.fetch(args.customer)" },
+      escape: { source: "args.customer)\n;globalThis.x\n;(" },
+      fine: { source: "args.customer" },
     });
     expect({
       global: expressions.global?.map(({ code }) => code),
@@ -355,15 +353,14 @@ describe("type-checking a workflow's expressions", () => {
     const { expressions, scope: problems } = typed(
       {
         ...scope,
-        input:
-          '{ doc: FileValue; price: MoneyValue; when: ScheduleValue; row: Id<"rows"> }',
+        args: '{ doc: FileValue; price: MoneyValue; when: ScheduleValue; row: Id<"rows"> }',
       },
       {
         fine: {
           source:
-            "input.doc.id + input.price.currency + input.when.cron + input.row + input.price.minorUnits",
+            "args.doc.id + args.price.currency + args.when.cron + args.row + args.price.minorUnits",
         },
-        wrong: { source: "input.doc.name" },
+        wrong: { source: "args.doc.name" },
       }
     );
     expect({
@@ -376,7 +373,7 @@ describe("type-checking a workflow's expressions", () => {
   it("takes no root that is a default one again, or no plain identifier", () => {
     const refused = [
       "eval",
-      "input",
+      "args",
       "item: unknown) => globalThis; ((x",
     ].filter((name) => {
       try {

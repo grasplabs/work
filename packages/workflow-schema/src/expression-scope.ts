@@ -2,13 +2,13 @@ import type { ValueDescriptor } from "@grasp-os/sdk";
 import { valueTypeOf } from "@grasp-os/sdk/host";
 
 import type { CheckedWorkflow } from "./check.ts";
-import { eachStep } from "./format.ts";
+import { eachStep, resultStepTypes } from "./format.ts";
 import type { ExpressionRoot, Step } from "./format.ts";
 
 // What a checked document's expressions read, as TypeScript types, for
 // the compiler's typed check (@grasp-os/compiler's `expressionTypeCheck`):
-// the run's input and parameters from the document's own schemas, each
-// step's output from what it declares or calls, and each expression's
+// the run's args and parameters from the document's own schemas, each
+// step's result from what it declares or calls, and each expression's
 // source by the pointer of its `{ $expr }`. The checks of check.ts come
 // first: what this reads is a document that passed them, so every read of
 // a step that may not have run, or of a root out of its place (`error`
@@ -16,13 +16,13 @@ import type { ExpressionRoot, Step } from "./format.ts";
 // `state`), is already refused there. Its roots are the format's
 // (`expressionRoots`), each typed here.
 //
-// A step whose output the document doesn't type (a decision's, a wait's, a
-// call of the workflow's own modules) is `any`: the check passes what
+// A step whose result the document doesn't type (a decision's, an event
+// wait's, a call of the workflow's own modules) is `any`: the check passes what
 // reads it rather than refuse what it can't know.
 
 /** The types an expression reads, as the compiler's check takes them. */
 export interface ExpressionScope {
-  readonly input: string;
+  readonly args: string;
   readonly steps: Readonly<Record<string, string>>;
   readonly params: string;
   readonly run: string;
@@ -38,7 +38,7 @@ export interface ExpressionTypeRequest {
 
 /** A failure a catch reads as `error` (the SDK's `CaughtError`). */
 const caughtErrorType =
-  "{ readonly type: string; readonly status: number; readonly instance: string; readonly title?: string; readonly detail?: string }";
+  "{ readonly code: string; readonly message: string; readonly details?: any; readonly step?: string }";
 
 /** What a run's code knows of its run. */
 const runType = "{ readonly id: string }";
@@ -91,20 +91,28 @@ const rootTypes = (
 });
 
 /**
- * What `checked`'s expressions read, typed, and their sources. A `do`
- * step's output is `output(step)`'s, its call's contract's (a connector
- * operation's, an action's or a calculation's), when it has one; an `agent` step's
- * is the answer its `output` schema declares.
+ * What `checked`'s expressions read, typed, and their sources: each step
+ * with a result by its ID. A `call` step's result is `output(step)`'s, its
+ * call's contract's (a connection action's, an action's or a
+ * calculation's), when it has one; a `generate` step's is the answer its
+ * `returns` declares.
  */
 export const expressionTypeRequest = (
   checked: CheckedWorkflow,
   output: (step: Step) => ValueDescriptor | undefined
 ): ExpressionTypeRequest => {
-  const steps = eachStep(checked.document.steps).map(({ step, pointer }) => {
-    const answer =
-      step.type === "agent" ? checked.answers.get(pointer) : output(step);
-    return [step.id, answer === undefined ? untyped : typeOf(answer)] as const;
-  });
+  const steps = eachStep(checked.document.steps).flatMap(
+    ({ step, pointer }) => {
+      if (!resultStepTypes.has(step.type)) {
+        return [];
+      }
+      const answer =
+        step.type === "generate" ? checked.answers.get(pointer) : output(step);
+      return [
+        [step.id, answer === undefined ? untyped : typeOf(answer)] as const,
+      ];
+    }
+  );
   const expressions: Record<string, { source: string }> = {};
   for (const pointer of checked.code.keys()) {
     const node = at(checked.document, pointer);
@@ -118,7 +126,7 @@ export const expressionTypeRequest = (
   }
   return {
     scope: {
-      input: typeOf(checked.contract.input),
+      args: typeOf(checked.contract.args),
       steps: Object.fromEntries(steps),
       params: objectType(
         [...checked.contract.params].map(([name, descriptor]) => [

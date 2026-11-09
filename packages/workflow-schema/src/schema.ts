@@ -1,32 +1,38 @@
 import type { Schema } from "@cfworker/json-schema";
-import { blockedProperties } from "@grasp-os/sdk/expression-check";
 import { compactDescriptorSchema } from "@grasp-os/sdk/host";
 import { decisionLimits } from "@grasp-os/shared/decisions";
+import {
+  appErrorCodeMaxLength,
+  appErrorCodePattern,
+  appErrorMessageMaxLength,
+} from "@grasp-os/shared/function-limits";
 import {
   eventTypePattern,
   sealedBuildLimits,
 } from "@grasp-os/shared/sealed-builds";
 
 import {
+  actionPattern,
   aliasPattern,
-  bindingKinds,
   forEachDescription,
   formatLimits,
   localContractPattern,
   paramNamePattern,
   recipientPattern,
+  reservedStepIds,
   stateDeclarationDescription,
   stateDescription,
   stateKeyPattern,
   stepIdPattern,
-  waitDescription,
+  waitForEventDescription,
   workflowSchemaUrl,
 } from "./format.ts";
 
-// grasp-workflow/1's JSON Schema (draft 2020-12): the format's definition,
+// grasp-workflow/2's JSON Schema (draft 2020-12): the format's definition,
 // published as is and checked with a standard validator (check.ts), never
 // with checks of our own. What a schema can't say (IDs unique, references
-// to steps that ran, a binding of the step's kind) check.ts adds after it.
+// to steps that ran, a permission of the step's kind) check.ts adds after
+// it.
 //
 // Steps are told apart by `type` (`if`/`then` on its constant), so a
 // problem names the step's own properties rather than every kind's, and a
@@ -54,34 +60,53 @@ const stepOf = (
   additionalProperties: false,
 });
 
+/** An `AppError` code, as `AppError` takes one. */
+const errorCode = {
+  type: "string",
+  maxLength: appErrorCodeMaxLength,
+  pattern: appErrorCodePattern.source,
+};
+
 const stepKinds = {
-  do: stepOf(
-    "do",
+  call: {
+    ...stepOf(
+      "call",
+      {
+        connection: ref("alias"),
+        action: { type: "string", pattern: actionPattern, maxLength: 256 },
+        module: ref("alias"),
+        args: ref("value"),
+        timeout: ref("duration"),
+        state: ref("state"),
+      },
+      []
+    ),
+    // A connection's action, or one of the workflow's own modules.
+    oneOf: [
+      { required: ["connection", "action"], not: { required: ["module"] } },
+      {
+        required: ["module"],
+        not: {
+          anyOf: [{ required: ["connection"] }, { required: ["action"] }],
+        },
+      },
+    ],
+  },
+  generate: stepOf(
+    "generate",
     {
-      binding: ref("alias"),
-      operation: { type: "string", minLength: 1, maxLength: 256 },
-      arguments: ref("value"),
-      timeout: ref("duration"),
-      state: ref("state"),
-    },
-    ["binding"]
-  ),
-  agent: stepOf(
-    "agent",
-    {
-      binding: ref("alias"),
       instructions: ref("value"),
       input: ref("value"),
-      output: ref("descriptor"),
+      returns: ref("descriptor"),
       timeout: ref("duration"),
       state: ref("state"),
     },
-    ["binding", "instructions", "input", "output"]
+    ["instructions", "input", "returns"]
   ),
-  decision: stepOf(
-    "decision",
+  decide: stepOf(
+    "decide",
     {
-      binding: ref("alias"),
+      decision: ref("alias"),
       recipients: {
         anyOf: [
           ref("expression"),
@@ -113,7 +138,7 @@ const stepKinds = {
       input: ref("value"),
       timeout: ref("duration"),
     },
-    ["binding", "recipients", "prompt", "input"]
+    ["decision", "recipients", "prompt", "input"]
   ),
   forEach: {
     description: forEachDescription,
@@ -128,62 +153,54 @@ const stepKinds = {
     ),
   },
   wait: {
-    description: waitDescription,
     ...stepOf(
       "wait",
       {
         for: ref("duration"),
         until: ref("expression"),
-        event: {
-          type: "object",
-          required: ["from", "type"],
-          properties: {
-            match: {
-              type: "object",
-              required: ["field", "equals"],
-              properties: {
-                // A JSON Pointer into the event's data, never its root.
-                field: {
-                  type: "string",
-                  minLength: 2,
-                  maxLength: formatLimits.matchFieldLength,
-                  pattern: "^(?:/(?:[^~/]|~[01])*)+$",
-                },
-                equals: ref("value"),
-              },
-              additionalProperties: false,
-            },
-            from: ref("alias"),
-            type: {
-              anyOf: [
-                ref("eventType"),
-                {
-                  type: "array",
-                  minItems: 1,
-                  maxItems: sealedBuildLimits.eventTypes,
-                  uniqueItems: true,
-                  items: ref("eventType"),
-                },
-              ],
-            },
-          },
-          additionalProperties: false,
-        },
-        timeout: ref("duration"),
       },
       []
     ),
-    oneOf: [
-      { required: ["for"] },
-      { required: ["until"] },
-      { required: ["event"] },
-    ],
-    // An event wait always ends: its timeout is required, and only it
-    // takes one.
-    if: { required: ["event"] },
-    // oxlint-disable-next-line unicorn/no-thenable -- JSON Schema's if/then
-    then: { required: ["timeout"] },
-    else: { properties: { timeout: false } },
+    oneOf: [{ required: ["for"] }, { required: ["until"] }],
+  },
+  waitForEvent: {
+    description: waitForEventDescription,
+    ...stepOf(
+      "waitForEvent",
+      {
+        events: ref("alias"),
+        eventType: {
+          anyOf: [
+            ref("eventType"),
+            {
+              type: "array",
+              minItems: 1,
+              maxItems: sealedBuildLimits.eventTypes,
+              uniqueItems: true,
+              items: ref("eventType"),
+            },
+          ],
+        },
+        match: {
+          type: "object",
+          required: ["field", "equals"],
+          properties: {
+            // A JSON Pointer into the event's data, never its root.
+            field: {
+              type: "string",
+              minLength: 2,
+              maxLength: formatLimits.matchFieldLength,
+              pattern: "^(?:/(?:[^~/]|~[01])*)+$",
+            },
+            equals: ref("value"),
+          },
+          additionalProperties: false,
+        },
+        // An event wait always ends.
+        timeout: ref("duration"),
+      },
+      ["events", "eventType", "timeout"]
+    ),
   },
   if: stepOf(
     "if",
@@ -202,14 +219,7 @@ const stepKinds = {
       catch: {
         type: "object",
         properties: {
-          errors: {
-            type: "object",
-            properties: {
-              type: { type: "string", minLength: 1, maxLength: 2048 },
-              status: { type: "integer", minimum: 400, maximum: 599 },
-            },
-            additionalProperties: false,
-          },
+          code: errorCode,
           when: ref("expression"),
           retry: {
             type: "object",
@@ -234,12 +244,15 @@ const stepKinds = {
     {
       error: {
         type: "object",
-        required: ["type", "status"],
+        required: ["code", "message"],
         properties: {
-          type: { type: "string", format: "uri", maxLength: 2048 },
-          status: { type: "integer", minimum: 400, maximum: 599 },
-          title: { type: "string", maxLength: 2000 },
-          detail: { type: "string", maxLength: 2000 },
+          code: errorCode,
+          message: {
+            type: "string",
+            minLength: 1,
+            maxLength: appErrorMessageMaxLength,
+          },
+          details: true,
         },
         additionalProperties: false,
       },
@@ -248,36 +261,47 @@ const stepKinds = {
   ),
 };
 
-/** The step kinds of grasp-workflow/1. */
+/** The step kinds of grasp-workflow/2. */
 export const stepTypes = Object.keys(stepKinds);
+
+/** Permissions of one kind, by alias. */
+const byAlias = (permission: Schema): Schema => ({
+  type: "object",
+  maxProperties: formatLimits.bindings,
+  propertyNames: { pattern: aliasPattern },
+  additionalProperties: permission,
+});
 
 export const workflowSchema: Schema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: workflowSchemaUrl,
-  title: "grasp-workflow/1",
+  title: "grasp-workflow/2",
   type: "object",
   required: ["$schema", "steps"],
   properties: {
     // Exactly this format's URL: a document of another is never read as one.
     $schema: { const: workflowSchemaUrl },
-    input: ref("descriptor"),
-    output: {
-      type: "object",
-      required: ["schema", "value"],
-      properties: { schema: ref("descriptor"), value: ref("value") },
-      additionalProperties: false,
-    },
+    args: ref("descriptor"),
+    returns: ref("descriptor"),
+    result: ref("value"),
     params: {
       type: "object",
       maxProperties: formatLimits.params,
       propertyNames: { pattern: paramNamePattern },
       additionalProperties: ref("param"),
     },
-    bindings: {
+    permissions: {
       type: "object",
-      maxProperties: formatLimits.bindings,
-      propertyNames: { pattern: aliasPattern },
-      additionalProperties: ref("binding"),
+      properties: {
+        ai: ref("permission"),
+        connections: byAlias(ref("permission")),
+        decisions: byAlias(ref("permission")),
+        events: byAlias(ref("permission")),
+        files: byAlias(ref("permission")),
+        brain: byAlias(ref("permission")),
+        modules: byAlias(ref("module")),
+      },
+      additionalProperties: false,
     },
     state: {
       description: stateDeclarationDescription,
@@ -288,6 +312,8 @@ export const workflowSchema: Schema = {
     },
     steps: ref("steps"),
   },
+  // What it returns, and its value: both, or neither.
+  dependentRequired: { result: ["returns"], returns: ["result"] },
   additionalProperties: false,
   $defs: {
     steps: { type: "array", maxItems: formatLimits.steps, items: ref("step") },
@@ -299,7 +325,7 @@ export const workflowSchema: Schema = {
           type: "string",
           maxLength: formatLimits.idLength,
           pattern: stepIdPattern,
-          not: { enum: [...blockedProperties] },
+          not: { enum: [...reservedStepIds] },
         },
         type: { enum: stepTypes },
         title: {
@@ -319,7 +345,7 @@ export const workflowSchema: Schema = {
       Object.entries(stepKinds).map(([type, schema]) => [`${type}Step`, schema])
     ),
     alias: { type: "string", pattern: aliasPattern },
-    // A type a run's inbox takes; whether the binding's contract admits
+    // A type a run's inbox takes; whether the permission's contract admits
     // it is publication's to check.
     eventType: {
       type: "string",
@@ -327,7 +353,7 @@ export const workflowSchema: Schema = {
       maxLength: sealedBuildLimits.eventTypeLength,
     },
     duration: { type: "string", pattern: durationPattern },
-    // Only a `do` or an `agent` step has one (`stateStepTypes`): any
+    // Only a `call` or a `generate` step has one (`stateStepTypes`): any
     // other's refuses it as a property it doesn't have, which check.ts
     // names for what it is.
     state: {
@@ -337,12 +363,11 @@ export const workflowSchema: Schema = {
       propertyNames: ref("stateKey"),
       additionalProperties: ref("value"),
     },
-    // As a step's ID, never a name an expression can't read: `state.<key>`
-    // reads every key.
+    // Never a name an expression can't read: `state.<key>` reads every key.
     stateKey: {
       type: "string",
       pattern: stateKeyPattern,
-      not: { enum: [...blockedProperties] },
+      not: { enum: ["constructor", "prototype", "__proto__"] },
     },
     expression: {
       type: "object",
@@ -400,12 +425,17 @@ export const workflowSchema: Schema = {
       then: { properties: { type: { required: ["default"] } } },
       else: { properties: { type: { not: { required: ["default"] } } } },
     },
-    binding: {
+    // A contract of the host's catalog, never one of the workflow's own.
+    permission: {
       type: "object",
-      required: ["kind", "contract"],
+      required: ["contract"],
       properties: {
-        kind: { enum: [...bindingKinds] },
-        contract: { type: "string", minLength: 1, maxLength: 256 },
+        contract: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          not: { pattern: "^local:" },
+        },
         title: {
           type: "string",
           minLength: 1,
@@ -413,10 +443,25 @@ export const workflowSchema: Schema = {
         },
       },
       additionalProperties: false,
-      if: { properties: { kind: { enum: ["compute", "action"] } } },
-      // oxlint-disable-next-line unicorn/no-thenable -- JSON Schema's if/then
-      then: { properties: { contract: { pattern: localContractPattern } } },
-      else: { properties: { contract: { not: { pattern: "^local:" } } } },
+    },
+    // One of the workflow's own modules.
+    module: {
+      type: "object",
+      required: ["kind", "contract"],
+      properties: {
+        kind: { enum: ["compute", "action"] },
+        contract: {
+          type: "string",
+          maxLength: 256,
+          pattern: localContractPattern,
+        },
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: formatLimits.titleLength,
+        },
+      },
+      additionalProperties: false,
     },
   },
 };

@@ -28,9 +28,9 @@ import {
   paginationResultValidator,
   v,
 } from "../src/values.ts";
+import type { WorkflowDefinition } from "../src/workflow.ts";
 import { summarizeNote } from "./notes/grasp.config.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
-import type { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 
 const noteFields = {
   title: v.string().trim().min(1).max(200),
@@ -385,7 +385,7 @@ expectTypeOf(tallied).toExtend<AnyFunction>();
 // mutation stages a start of one for after it commits, each by its alias.
 // Neither reaches the engine, and neither starts what the App doesn't
 // declare.
-declare const engineWorkflow: ReturnType<typeof invoiceWorkflow>;
+declare const engineWorkflow: WorkflowDefinition;
 
 granted.action({
   args: { noteId: v.id("notes") },

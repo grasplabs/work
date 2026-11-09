@@ -10,18 +10,18 @@
  * - `e<i>`, its source as JavaScript reads it (comparisons in
  *   parentheses, comments blanked), whose diagnostics are the author's
  *   type errors. A read stays a reference, so TypeScript narrows it as it
- *   would anywhere (`input.note && input.note.trim()`).
+ *   would anywhere (`args.note && args.note.trim()`).
  * - `m<i>`, the same with every member read that isn't a call's callee
  *   wrapped in `$value(…)`, optional chains' links included, whose only
  *   use is the method-read refusal: `$value` refuses a value that is, or
  *   may be, a function (`$NoMethod`), so a method read without a call
- *   (`input.s.trim`, `input.s?.trim.length`), which `$read` gives no value,
+ *   (`input.s.trim`, `input.s?.trim.length`), which `own` gives no value,
  *   is a TypeScript error at the read. Every other diagnostic of `m<i>` is
  *   dropped: its reads are calls' results, which nothing narrows.
  *
- * The check is the author's help, not a guard: at run time `$read` gives
- * only a value's own data, never a function, so a method read it misses
- * reads `undefined`.
+ * The check is the author's help, not a guard: at run time a read of a
+ * method's name gives only a value's own data (`own`), never a function,
+ * so a method read it misses reads `undefined`.
  */
 import {
   allowedMethods,
@@ -41,10 +41,11 @@ const modulePath = "expressions.ts";
 /**
  * The types of an expression's values, as TypeScript type text the
  * generator writes from the workflow's schemas, never an author's text:
- * the run's input, each step's output by its ID, params and the run.
+ * the run's args, each step's result by its ID, params and the run.
  */
 export interface ExpressionScopeTypes {
-  readonly input: string;
+  readonly args: string;
+  /** Each step with a result, by its ID: a root of its own. */
   readonly steps: Readonly<Record<string, string>>;
   readonly params: string;
   readonly run: string;
@@ -87,7 +88,7 @@ export interface ExpressionTypeCheck {
  * function. A value typed `any` passes, as nothing is known of it: the
  * field may be data named like a method (`item.at`). What it gives is
  * what's left of the value without its functions, so a read of a refused
- * read (`[input.s.trim][0]`) isn't refused again.
+ * read (`[args.s.trim][0]`) isn't refused again.
  */
 const readHelpers = `type $Function = (...args: never[]) => unknown;
 type $NoMethod<T> = [Extract<T, $Function>] extends [never] ? unknown : { readonly "expression.method": never };
@@ -322,10 +323,10 @@ interface Placed {
  * The check of `expressions` against `scope`'s types: each against the
  * subset first (`checkExpression`), then, in one tsrs run of `request`
  * (none when no expression passed), the ones that did, each as the body
- * of a function of `input`, `steps`, `params`, `run` and `scope.roots`, as
- * the generated code runs it. `checked` reads the run's diagnostics back.
- * Throws when a root of `scope.roots` repeats one of the four or isn't
- * one `checkExpression` takes.
+ * of a function of `args`, `params`, `run`, each step by its ID and
+ * `scope.roots`, as the generated code runs it. `checked` reads the run's
+ * diagnostics back. Throws when a root of `scope.roots` or a step's ID
+ * repeats a default root or isn't one `checkExpression` takes.
  */
 export const expressionTypeCheck = (
   scope: ExpressionScopeTypes,
@@ -334,27 +335,21 @@ export const expressionTypeCheck = (
   request?: TypeCheckRequest;
   checked: (diagnostics: readonly Diagnostic[]) => ExpressionTypeCheck;
 } => {
-  const extra = Object.entries(scope.roots ?? {});
+  const extra = [
+    ...Object.entries(scope.steps),
+    ...Object.entries(scope.roots ?? {}),
+  ];
   const roots = extra.map(([name]) => name);
   // Before any name reaches the code: plain identifiers, no global's, no
   // default root again.
   checkRoots(roots);
   // Typed once, in `$Scope`: each function only names them, so the
   // module grows by its expressions alone.
-  const parameters = ["input", "steps", "params", "run", ...roots].join(", ");
-  const scopeParameters = `input: Input, steps: Steps, params: Params, run: Run${extra
+  const parameters = ["args", "params", "run", ...roots].join(", ");
+  const scopeParameters = `args: Args, params: Params, run: Run${extra
     .map(([name, type]) => `, ${name}: ${typeCode(type)}`)
     .join("")}`;
-  const steps = Object.entries(scope.steps)
-    .map(
-      ([id, output]) =>
-        `readonly ${JSON.stringify(id)}: { readonly output: ${typeCode(output)} };`
-    )
-    .join("\n");
-  let code = `${readHelpers}${sdkValueTypes}type Input = ${typeCode(scope.input)};
-type Steps = {
-${steps}
-};
+  let code = `${readHelpers}${sdkValueTypes}type Args = ${typeCode(scope.args)};
 type Params = ${typeCode(scope.params)};
 type Run = ${typeCode(scope.run)};
 type $Scope = (${scopeParameters}) => unknown;

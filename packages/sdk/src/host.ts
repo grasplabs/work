@@ -140,3 +140,6 @@ export { fileChannel } from "./file-channel.ts";
 export { linkChannel } from "./link-channel.ts";
 export type { LinkChannel, LinkDecision } from "./link-channel.ts";
 export type { FileChannel } from "./file-channel.ts";
+
+// How a declared name becomes a member of a client (`ctx.connections.<alias>.<action>`).
+export { memberName } from "./member-names.ts";
