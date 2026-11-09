@@ -46,34 +46,11 @@ inputs:
 runs:
   using: composite
   steps:
-    # Vite+'s own installation (vp, its shims and Node.js), cached by the
-    # versions of all three: setup-vp reuses an installed exact version
-    # instead of running its installer, which fetched vp from npm in every
-    # job, about 4 s of its 6.5 s (November 2026; pingdotgg/t3code caches it
-    # the same way). An entry never changes, hence every version in its key.
-    - id: vp-versions
-      shell: bash
-      run: |
-        echo "key=vite-plus-home-$RUNNER_OS-$RUNNER_ARCH-$(sed -nE 's/^  vite-plus: ([0-9][^ ]*)$/\1/p' pnpm-workspace.yaml)-node$(cat .node-version)-$(jq -r .packageManager package.json | cut -d + -f 1)" >> "$GITHUB_OUTPUT"
-    - id: vp-home
-      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: |
-          ~/.local/share/vite-plus
-          ~/.config/vite-plus
-        key: ${{ steps.vp-versions.outputs.key }}
     - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
       with:
         node-version-file: .node-version
         cache: false
         run-install: false
-    - if: steps.vp-home.outputs.cache-hit != 'true' && inputs.save == 'true'
-      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: |
-          ~/.local/share/vite-plus
-          ~/.config/vite-plus
-        key: ${{ steps.vp-versions.outputs.key }}
     - id: keys
       shell: bash
       run: |
