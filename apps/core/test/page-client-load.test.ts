@@ -1,8 +1,5 @@
 import { storeIdSchema } from "@grasp-os/shared/ids";
-import {
-  liveReadLimitsOf,
-  querySubscriptionLimits,
-} from "@grasp-os/shared/pages";
+import { querySubscriptionLimits } from "@grasp-os/shared/pages";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -36,9 +33,14 @@ describe("live queries under load", { timeout: 180_000 }, () => {
   it("charges the reads a burst of commits causes to the person's budget, however many queries they follow", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
-    // The budget the tests set (`LIVE_READ_LIMITS`), lower than a
-    // client's: spent in dozens of sandboxed reads rather than hundreds.
-    const liveReads = liveReadLimitsOf(env.LIVE_READ_LIMITS);
+    // The budget the tests set (`LIVE_READ_LIMITS` in vite.config.ts),
+    // lower than a client's: spent in dozens of sandboxed reads rather
+    // than hundreds. Stated here, not read through the product's parser,
+    // so the bound below doesn't follow a parser that got it wrong.
+    const liveReads = { burst: 50, perMinute: 300 };
+    expect(env.LIVE_READ_LIMITS).toBe(
+      `${liveReads.burst}/${liveReads.perMinute}`
+    );
     // Two tabs of the owner's, thirty queries each: every commit wakes
     // more of them than the budget's burst, and the budget is the
     // person's, across tabs.
