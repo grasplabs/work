@@ -314,6 +314,25 @@ describe("generating a workflow", () => {
     );
   });
 
+  it("names a hyphenated action's member as an App does, and sends the action's own name", () => {
+    const { source, tasks } = generated({
+      ...followedBy({
+        id: "attachment",
+        type: "call",
+        connection: "mail",
+        action: "mail.read-attachment",
+      }),
+    });
+    expect(source).toContain(
+      'const attachment = await ctx.connections.mail.readAttachment({}, { step: "attachment" });'
+    );
+    expect(source).toContain('readAttachment: "mail.read-attachment"');
+    expect(source).not.toContain('"read-attachment":');
+    expect(tasks.find(({ id }) => id === "attachment")).toMatchObject({
+      call: { operation: "mail.read-attachment" },
+    });
+  });
+
   it("seals each step's task as the run host checks it", () => {
     const { tasks, workflow } = generated(
       withDecisions(decision({ timeout: "2 days" }))

@@ -555,15 +555,20 @@ class Generator {
         operation: step.action,
         arguments: args.template,
       };
-      const path =
-        this.#memberPaths.get(step.connection)?.get(step.action) ?? step.action;
+      // The member path as an App's member reads (`memberName` per
+      // segment: `read-attachment` is `readAttachment`), mapped in the
+      // declaration to the operation the host gets.
+      const path = (
+        this.#memberPaths.get(step.connection)?.get(step.action) ?? step.action
+      )
+        .split(".")
+        .map((segment) => memberName(segment));
       const actions =
         this.#connections.get(step.connection) ?? new Map<string, string>();
-      actions.set(path, step.action);
+      actions.set(path.join("."), step.action);
       this.#connections.set(step.connection, actions);
       member = `ctx.connections${memberOf(step.connection)}${path
-        .split(".")
-        .map((segment) => memberOf(memberName(segment)))
+        .map((segment) => memberOf(segment))
         .join("")}`;
     } else {
       const permission =

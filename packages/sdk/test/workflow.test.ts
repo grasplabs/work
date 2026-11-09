@@ -167,7 +167,7 @@ const engineOf = ({
 const permissions = {
   ai: true,
   connections: {
-    mail: { send: "mail.send", "read-attachment": "mail.read-attachment" },
+    mail: { send: "mail.send", readAttachment: "mail.read-attachment" },
   },
   decisions: ["finance"],
   events: { replies: ["grasp.reply.received"] },
