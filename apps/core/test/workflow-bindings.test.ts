@@ -282,7 +282,7 @@ const modelContract = async (admin: Person): Promise<string> => {
 const start = async (who: Person, id: string, version = 1) =>
   await startWorkflow(env, { type: "person", person: who }, id, {
     version,
-    input: { who: "Ada" },
+    args: { who: "Ada" },
     key: `key-${unique()}`,
   });
 
@@ -349,7 +349,7 @@ const decide = async (
 ): Promise<StartAuthorization> => {
   const decision = await decideWorkflowStart(env, invoker, id, {
     version,
-    input: { who: "Ada" },
+    args: { who: "Ada" },
     key: `key-${unique()}`,
   });
   if ("start" in decision) {
@@ -837,7 +837,7 @@ describe("approving a workflow's binding", () => {
     const startsNow = await outcome(
       startWorkflow(connecting, { type: "person", person: ada }, workflow.id, {
         version: 1,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         key: `key-${unique()}`,
       })
     );
@@ -849,7 +849,7 @@ describe("approving a workflow's binding", () => {
     const afterDrift = await outcome(
       startWorkflow(connecting, { type: "person", person: ada }, workflow.id, {
         version: 1,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         key: `key-${unique()}`,
       })
     );
@@ -1028,7 +1028,7 @@ describe("bindings waiting on an admin", () => {
           connecting,
           { type: "person", person: ada },
           workflow.id,
-          { version: 1, input: { who: "Ada" }, key: `key-${unique()}` }
+          { version: 1, args: { who: "Ada" }, key: `key-${unique()}` }
         )
       );
 
@@ -1331,7 +1331,7 @@ describe("what a start freezes", () => {
     });
     const request = {
       version: 1,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       key: `key-${unique()}`,
     };
     const asAda = { type: "person", person: ada } as const;
@@ -1847,7 +1847,7 @@ describe("an App binding a workflow", () => {
     const binding = await bind(ada, 1);
     const ungranted = await outcome(
       startAppBinding(env, authority, "greet", {
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         key: "k1",
       })
     );
@@ -1858,7 +1858,7 @@ describe("an App binding a workflow", () => {
       binding: "GREET",
     });
     const started = await startAppBinding(env, authority, "greet", {
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       key: "k2",
     });
     const bound = await refusal(deleteWorkflowResource(env, ada, workflow.id));
@@ -2019,7 +2019,7 @@ describe("retention", () => {
       values: { limit: 4 },
     });
     const key = `key-${unique()}`;
-    const request = { version: 1, input: { who: "Ada" }, key };
+    const request = { version: 1, args: { who: "Ada" }, key };
     const first = await startWorkflow(
       env,
       { type: "person", person: ada },

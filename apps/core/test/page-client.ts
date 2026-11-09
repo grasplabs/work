@@ -263,7 +263,7 @@ export const requestOf = (
 ): string =>
   JSON.stringify({
     reference: { name: reference.name, kind },
-    input,
+    args: input,
   });
 
 /**

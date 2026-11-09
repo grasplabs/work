@@ -280,7 +280,7 @@ describe("the session client", { timeout: 120_000 }, () => {
     // The builder's invocation itself, reached in the admin's name.
     const request = JSON.stringify({
       reference: { name: api.stamp.name, kind: "action" },
-      input: { title: "Mine", pauseMs: 0 },
+      args: { title: "Mine", pauseMs: 0 },
       idempotencyKey: keyed.idempotencyKey,
     });
     const app = appIdSchema.parse(opened.app);
@@ -394,7 +394,7 @@ describe("the session client", { timeout: 120_000 }, () => {
     await client.action(api.stamp, input, keyed);
     const request = JSON.stringify({
       reference: { name: api.stamp.name, kind: "action" },
-      input: { ...input, pauseMs: 0 },
+      args: { ...input, pauseMs: 0 },
       idempotencyKey: keyed.idempotencyKey,
     });
     const name = await invocationName(

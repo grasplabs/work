@@ -203,7 +203,7 @@ export const sampleCall = async (
     appId,
     JSON.stringify({
       reference: { name: path, kind },
-      input,
+      args: input,
     })
   );
   return answered.result.ok

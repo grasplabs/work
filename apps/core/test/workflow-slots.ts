@@ -75,7 +75,7 @@ export const idleRun = async (
     env,
     { type: "person", person: actingAs(builder) },
     workflow,
-    { version: 1, input: { who: "Ada" }, key: unique() }
+    { version: 1, args: { who: "Ada" }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

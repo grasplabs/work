@@ -141,7 +141,7 @@ const startOfFirst = async (old: Sealed): Promise<unknown> =>
         serving,
         { type: "person", person: old.by },
         old.workflow.id,
-        { version: 1, input: { who: "Ada" }, key: unique() }
+        { version: 1, args: { who: "Ada" }, key: unique() }
       )
   );
 
@@ -819,7 +819,7 @@ return { before, after: await late };
       serving,
       { type: "person", person: tampered.by },
       tampered.workflow.id,
-      { version: 1, input: { who: "Ada" }, key: unique() }
+      { version: 1, args: { who: "Ada" }, key: unique() }
     );
     await expect(sealedRunOf(runId ?? "")).rejects.toMatchObject({
       code: "workflow.version_corrupt",

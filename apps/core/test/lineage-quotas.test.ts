@@ -349,7 +349,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     });
     await other.end();
 
-    expect({ status: result.status, output: result.output }).toStrictEqual({
+    expect({ status: result.status, output: result.result }).toStrictEqual({
       status: "completed",
       output: { status: "Hello, Ada" },
     });
@@ -422,7 +422,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       await outcome(
         builder.api.workflowResources.start(id, {
           version: 1,
-          input: { who },
+          args: { who },
           key: crypto.randomUUID(),
         })
       );

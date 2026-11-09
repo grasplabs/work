@@ -230,7 +230,7 @@ const followingRuns = async (
     .watchQuery(
       JSON.stringify({
         reference: queryReference(release, "followUp", "runs"),
-        input: { pagination: {} },
+        args: { pagination: {} },
       }),
       follower.callback
     );
@@ -258,7 +258,7 @@ const kickOff = async (by: Acting & Identity, app: string): Promise<string> => {
     app,
     JSON.stringify({
       reference: { name: "requests.kickOff", kind: "action" },
-      input: { who: "Ada" },
+      args: { who: "Ada" },
     })
   );
   return started.result.ok
@@ -451,7 +451,7 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       .watchQuery(
         JSON.stringify({
           reference: queryReference(release, "followUp", "decisions"),
-          input: { pagination: {} },
+          args: { pagination: {} },
         }),
         follower.callback
       );
@@ -568,7 +568,7 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       .watchQuery(
         JSON.stringify({
           reference: queryReference(release, "followUp", "decisions"),
-          input: { pagination: {} },
+          args: { pagination: {} },
         }),
         follower.callback
       );

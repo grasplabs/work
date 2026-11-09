@@ -1654,7 +1654,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           run,
           JSON.stringify({
             reference: { name: method, kind },
-            input: args ?? {},
+            args: args ?? {},
           }),
           {
             deadline: Date.now() + platformLimits.serverInvocationWallMs,

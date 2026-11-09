@@ -91,7 +91,7 @@ const started = async (
   await outcome(
     startWorkflow(env, { type: "person", person: by }, id, {
       version,
-      input,
+      args: input,
       key: `key-${unique()}`,
     })
   );
@@ -170,7 +170,7 @@ describe("starting an independent workflow by hand", () => {
       await started(uma, workflow.id, form.version, { approver, note: "" });
 
     expect({
-      properties: form.input?.properties,
+      properties: form.args?.properties,
       // Uma, a user, picks from everyone, by name and ID alone.
       offersAda: form.people?.people.find(({ id }) => id === ada.userId),
       // Each read on the record: how many, never whom. Only this
@@ -246,7 +246,7 @@ describe("starting an independent workflow by hand", () => {
     const live = await workflowStartForm(env, uma, workflow.id);
 
     expect({
-      live: { version: live.version, fields: live.input?.required },
+      live: { version: live.version, fields: live.args?.required },
       starts: await started(uma, workflow.id, live.version, {
         who: "Ada",
         times: 1,

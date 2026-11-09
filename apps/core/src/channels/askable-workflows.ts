@@ -21,8 +21,8 @@ export interface AskableWorkflow {
   name: string;
   /** The version a start of it would run now. */
   version: number;
-  /** The JSON Schema its input must match, as published. */
-  input: Json | null;
+  /** The JSON Schema its args must match, as published. */
+  args: Json | null;
 }
 
 const contractSchema = z.looseObject({ input: z.json().optional() });
@@ -78,6 +78,6 @@ export const askableFor = async (
     const row = found.get(id);
     return row?.version === null || row === undefined
       ? []
-      : [{ id, name, version: row.version, input: inputOf(row.contract) }];
+      : [{ id, name, version: row.version, args: inputOf(row.contract) }];
   });
 };

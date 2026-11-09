@@ -221,7 +221,7 @@ const startOf = async (release: Release, amount: number): Promise<string> => {
         name: "workflows.approval.mutations.start",
         kind: "mutation",
       },
-      input: { args: { amount } },
+      args: { args: { amount } },
     })
   );
 };

@@ -133,7 +133,7 @@ const ranFor = async (
     startEnv,
     { type: "person", person: by },
     id,
-    { version, input: { who }, key: unique() }
+    { version, args: { who }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start made a run");
@@ -546,7 +546,7 @@ describe("a run's trace, read over the session API", () => {
       env,
       { type: "person", person: builder.acting },
       workflow.id,
-      { version: 1, input: { who: "Ada" }, key: unique() }
+      { version: 1, args: { who: "Ada" }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start made a run");
@@ -670,7 +670,7 @@ describe("a run's trace, read over the session API", () => {
           env,
           { type: "person", person: builder.acting },
           long.id,
-          { version: 1, input: { who: "Ada" }, key: unique() }
+          { version: 1, args: { who: "Ada" }, key: unique() }
         );
         if (longRun === null) {
           throw new Error("The start made a run");

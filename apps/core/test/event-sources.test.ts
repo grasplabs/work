@@ -172,7 +172,10 @@ describe("connector events", () => {
     const events = await allEvents();
 
     expect({
-      runs: runs.map(({ status, output }) => ({ status, output })),
+      runs: runs.map(({ status, result: output }) => ({
+        status,
+        result: output,
+      })),
       reads: events
         .filter(
           ({ action, target }) =>
@@ -207,7 +210,7 @@ describe("connector events", () => {
 
     expect({
       first: first.length,
-      second: second.map(({ output }) => output).toSorted(byId),
+      second: second.map(({ result: output }) => output).toSorted(byId),
     }).toStrictEqual({
       first: 1,
       second: [1, 2]

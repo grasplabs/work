@@ -145,13 +145,16 @@ export interface AgentWorkflowVersion {
   bindings: { alias: string; kind: string; contractId: string | null }[];
 }
 
-/**
- * A test run, as the agent reads it: what it returned as `result`, the
- * word a workflow uses for a run's value.
- */
-export type AgentTestRun = { note: string; result?: unknown } & Pick<
+/** A test run, as the agent reads it. */
+export type AgentTestRun = { note: string } & Pick<
   WorkflowCandidateRun,
-  "id" | "draftRevision" | "status" | "createdAt" | "endedAt" | "error"
+  | "id"
+  | "draftRevision"
+  | "status"
+  | "createdAt"
+  | "endedAt"
+  | "result"
+  | "error"
 >;
 
 /** The ID a call named, for the audit log. */
@@ -328,7 +331,7 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
           status: found.status,
           createdAt: found.createdAt,
           endedAt: found.endedAt,
-          ...(found.output === undefined ? {} : { result: found.output }),
+          ...(found.result === undefined ? {} : { result: found.result }),
           ...(found.error === undefined ? {} : { error: found.error }),
         };
       },

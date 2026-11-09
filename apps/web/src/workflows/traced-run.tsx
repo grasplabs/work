@@ -117,7 +117,7 @@ export const TracedRun = ({
         async (session) =>
           await session.workflowResources.start(workflow, {
             version,
-            input: parsed,
+            args: parsed,
             key: crypto.randomUUID(),
           })
       );

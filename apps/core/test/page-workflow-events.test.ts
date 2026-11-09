@@ -349,9 +349,9 @@ const sendText = (
 /** A send's call `text`, under its key, with `data` instead. */
 const withData = (text: string, data: unknown): string => {
   const call = z
-    .looseObject({ input: z.record(z.string(), z.unknown()) })
+    .looseObject({ args: z.record(z.string(), z.unknown()) })
     .parse(JSON.parse(text));
-  return JSON.stringify({ ...call, input: { ...call.input, data } });
+  return JSON.stringify({ ...call, args: { ...call.args, data } });
 };
 
 /** The run `runId`'s snapshot, as its page's `run` query reads it. */
@@ -427,7 +427,7 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
         minted: true,
       });
     });
-    const { output } = await resourceRunFor(
+    const { result: output } = await resourceRunFor(
       env,
       builder.acting,
       workflow,
@@ -517,7 +517,7 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     };
     const sent = isEvent(await send({}));
     await runStatus(runId);
-    const { output } = await resourceRunFor(
+    const { result: output } = await resourceRunFor(
       env,
       builder.acting,
       workflow,

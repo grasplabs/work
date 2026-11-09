@@ -398,7 +398,7 @@ const startScheduled = async (
       schedule.workflowId,
       {
         version: schedule.workflowVersion,
-        input: z.json().parse(JSON.parse(schedule.input)),
+        args: z.json().parse(JSON.parse(schedule.input)),
         key: startKeyOf(schedule),
       },
       // Admitted only while this occurrence is still the schedule's next:

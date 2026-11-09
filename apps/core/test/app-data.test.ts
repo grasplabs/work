@@ -196,7 +196,7 @@ const call = async (
     app,
     JSON.stringify({
       reference: { name: path, kind: "mutation" },
-      input,
+      args: input,
     }),
     Date.now() + 30_000,
     undefined,

@@ -593,7 +593,7 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
       committed: committed.ok,
       staged,
       settled: await outboxOf(fx.store),
-      run: { status: run.status, output: run.output },
+      run: { status: run.status, output: run.result },
       sent: sent.map(({ actor, detail }) => ({
         actor,
         via: detail?.via,
@@ -633,7 +633,7 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
       env,
       { type: "person", person: fx.ada },
       fx.workflowId,
-      { version: 1, input: { jobId: "job-9" }, key: unique() }
+      { version: 1, args: { jobId: "job-9" }, key: unique() }
     );
     const raw = async (
       path: "jobs.rawNotify" | "jobs.undeclared",

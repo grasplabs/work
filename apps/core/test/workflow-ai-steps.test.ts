@@ -84,7 +84,7 @@ describe("a JSON workflow's model task", { timeout: 60_000 }, () => {
       const run = await endedRun(builder, id, await startedBy(builder, id));
       return {
         status: run.status,
-        output: run.output,
+        output: run.result,
         asked: provider.requests.length,
       };
     };
@@ -198,7 +198,7 @@ describe("the release's general contracts", { timeout: 60_000 }, () => {
         modelCalls: provider.requests.length,
         endedAt: waitingRun.endedAt,
       },
-      ended: { status: run.status, output: run.output },
+      ended: { status: run.status, output: run.result },
       modelCalls: provider.requests.length,
     }).toStrictEqual({
       catalog: [

@@ -997,7 +997,7 @@ class FixtureSession extends TestTarget {
           hostedRelease(this.#env, this.#release),
           invocation,
           { path, kind: call.reference.kind },
-          call.input,
+          call.args,
           {
             ...(call.idempotencyKey === undefined
               ? {}

@@ -1223,7 +1223,7 @@ export const Route = createFileRoute("/")({ component: Requests });
         appId,
         JSON.stringify({
           reference: { name: path, kind: "mutation" },
-          input,
+          args: input,
         })
       );
       if (!answer.result.ok) {

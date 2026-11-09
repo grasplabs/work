@@ -262,7 +262,7 @@ const started = async (
     },
     body: JSON.stringify({
       reference: fixture.start,
-      input: { args: { doc: { id: doc } } },
+      args: { args: { doc: { id: doc } } },
       idempotencyKey: key,
     }),
   });
@@ -335,7 +335,7 @@ const endOf = async (runId: string) =>
       )
         .bind(runId)
         .first<{ input: string }>();
-      const { output } = await resultOf(env, row);
+      const { result: output } = await resultOf(env, row);
       return {
         input: z.json().parse(JSON.parse(receipt?.input ?? "null")),
         output,
@@ -358,7 +358,7 @@ const calledAs = async (
     release.manifest.resourceId,
     JSON.stringify({
       reference: { name: path, kind: release.app.operations[path]?.kind },
-      input,
+      args: input,
     })
   );
   return result.ok ? result.value : { refused: result.error.code };

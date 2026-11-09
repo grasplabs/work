@@ -69,7 +69,7 @@ export class Submissions {
     const key = idempotencyKey ?? freshKey();
     const request = JSON.stringify({
       reference,
-      input,
+      args: input,
       idempotencyKey: key,
     });
     if (

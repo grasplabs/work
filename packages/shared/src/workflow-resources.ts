@@ -622,12 +622,12 @@ export interface AppWorkflowBinding {
 
 /**
  * A start of an independent workflow: the exact version (a publication
- * number, never an alias such as "latest"), its input, and a key of the
+ * number, never an alias such as "latest"), its args, and a key of the
  * invoker's own, so the same start sent again is the same start.
  */
 export const workflowStartSchema = z.strictObject({
   version: z.number().int().positive(),
-  input: z.json(),
+  args: z.json(),
   key: identifierSchema,
 });
 
@@ -734,7 +734,7 @@ export interface WorkflowResourceRun {
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed, for those who see its details. */
-  output?: unknown;
+  result?: unknown;
   /** Why it failed, for those who see its details. */
   error?: { code: string | null; message: string };
 }
@@ -742,8 +742,8 @@ export interface WorkflowResourceRun {
 /**
  * How a workflow is started by hand: the version a start runs, the one
  * approved to go live or else the one published last (null before any is
- * published), and the JSON Schema its input must match exactly (null when
- * it can't be read). A field of the input that takes a person, team or
+ * published), and the JSON Schema its args must match exactly (null when
+ * it can't be read). A field of the args that takes a person, team or
  * role (`person:<id>`, `team:<id>` or `role:<role>`) carries
  * `"x-grasp-value": { "kind": "person" }`, as a workflow's JSON writes it,
  * and `people` then says whom it may name: the organization's people,
@@ -751,7 +751,7 @@ export interface WorkflowResourceRun {
  */
 export interface WorkflowStartForm {
   version: number | null;
-  input: Record<string, unknown> | null;
+  args: Record<string, unknown> | null;
   people: {
     people: { id: string; name: string }[];
     teams: { id: string; name: string }[];
@@ -1053,7 +1053,7 @@ export interface WorkflowCandidateRun {
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed. */
-  output?: unknown;
+  result?: unknown;
   /** Why it failed. */
   error?: { code: string | null; message: string };
 }

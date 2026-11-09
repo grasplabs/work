@@ -118,7 +118,7 @@ const inputOf = async (id: string): Promise<string | null> => {
 /** What run `runId` of workflow `workflow` returned, as `by` reads it. */
 const outputOf = async (by: Person, workflow: string, runId: string) => {
   const run = await runFor(by, workflow, runId);
-  return run.output;
+  return run.result;
 };
 
 /**
@@ -347,7 +347,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
       asleep,
       paused: paused.status,
       whilePaused,
-      ended: { status: ended.status, output: ended.output },
+      ended: { status: ended.status, output: ended.result },
       kept: await receiptOf(runId),
     }).toStrictEqual({
       asleep: started,
@@ -436,7 +436,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
     expect({
       waiting,
       open: { description: open.description, status: open.status },
-      ended: ended.output,
+      ended: ended.result,
       answered: answered.payload,
       after: {
         description: after.description,

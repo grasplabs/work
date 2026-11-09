@@ -215,7 +215,7 @@ const ask = async (
     app,
     JSON.stringify({
       reference: { name: "brain.ask", kind: operation.kind },
-      input,
+      args: input,
     })
   );
 };

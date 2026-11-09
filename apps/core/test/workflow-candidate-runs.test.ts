@@ -156,7 +156,7 @@ const ended = async (
 /** How run `run` ended: its status, and its output or error code. */
 const endOf = (run: WorkflowCandidateRun) =>
   run.status === "completed"
-    ? { status: run.status, output: run.output }
+    ? { status: run.status, output: run.result }
     : { status: run.status, code: run.error?.code };
 
 /** What the audit log says any call of run `runId` reached. */

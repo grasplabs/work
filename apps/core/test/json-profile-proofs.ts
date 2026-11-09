@@ -101,7 +101,7 @@ const started = async (
     id,
     {
       version: 1,
-      input: input ?? { who: "Ada" },
+      args: input ?? { who: "Ada" },
       key: unique(),
     }
   );
@@ -130,7 +130,7 @@ const ended = async (
 const endOf = (run: WorkflowResourceRun) => ({
   status: run.status,
   ...(run.status === "completed"
-    ? { output: run.output }
+    ? { output: run.result }
     : { code: run.error?.code }),
 });
 

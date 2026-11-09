@@ -280,7 +280,7 @@ export const pressOffer = async (
       offer.workflowId,
       {
         version: offer.version,
-        input: z.json().parse(JSON.parse(offer.input)),
+        args: z.json().parse(JSON.parse(offer.input)),
         key: `chat-offer-${offer.id}`,
       },
       stillAskable(offer.workflowId)

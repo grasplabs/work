@@ -71,7 +71,7 @@ export const createAndCount = action({
 const callOf = (release: Release, path: string, input: unknown): string =>
   JSON.stringify({
     reference: { name: path, kind: release.app.operations[path]?.kind },
-    input,
+    args: input,
   });
 
 /** A builder's Notes App, current, and the release that runs. */

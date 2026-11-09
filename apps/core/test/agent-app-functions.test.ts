@@ -90,7 +90,7 @@ export const holdThenCreate = action({
 const callOf = (release: Release, path: string, input: unknown): string =>
   JSON.stringify({
     reference: { name: path, kind: release.app.operations[path]?.kind },
-    input,
+    args: input,
   });
 
 /** Code that makes each call in turn: its result, or the error's code. */
@@ -297,7 +297,7 @@ describe(
       const disguised = JSON.stringify(
         JSON.stringify({
           reference: { name: "notes.create", kind: "query" },
-          input: { title: "Disguised" },
+          args: { title: "Disguised" },
         })
       );
       const calls = {

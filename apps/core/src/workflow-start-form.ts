@@ -80,16 +80,16 @@ export const workflowStartForm = async (
     .get();
   const version = lifecycle?.live ?? workflow.currentVersion;
   if (version === null) {
-    return { version: null, input: null, people: null };
+    return { version: null, args: null, people: null };
   }
   const contract = await versionContract(env, workflow.id, version);
   if (contract === undefined) {
-    return { version, input: null, people: null };
+    return { version, args: null, people: null };
   }
   const descriptor = descriptorFromText(JSON.stringify(contract.input));
   const input = startSchemaOf(descriptor);
   if (!takesPerson(descriptor)) {
-    return { version, input, people: null };
+    return { version, args: input, people: null };
   }
   const people = await organizationPeopleAndTeams(env);
   await keepAuditEvent(env, drizzle(env.DB), {
@@ -98,5 +98,5 @@ export const workflowStartForm = async (
     target: { type: "workflow_resource", id: workflow.id },
     detail: { people: people.people.length, teams: people.teams.length },
   });
-  return { version, input, people };
+  return { version, args: input, people };
 };

@@ -916,7 +916,7 @@ const runSnapshot = async (
   const result = returned ? await resultOf(env, row) : {};
   const completed =
     row.status === "completed"
-      ? resultAsDeclared(resolved.declared.returns, result.output)
+      ? resultAsDeclared(resolved.declared.returns, result.result)
       : undefined;
   return {
     runId: row.id,
@@ -953,7 +953,7 @@ const started = async (
     env,
     authorityOf(asking),
     resolved.alias,
-    { input: args, key: coreStartKey("page", key) },
+    { args, key: coreStartKey("page", key) },
     undefined,
     // The binding still names the version the release's seal pinned.
     bindingPinnedSql(asking.app, resolved.alias, pin),
@@ -1572,7 +1572,7 @@ const sent = async (
 /** A call of a workflow mutation, as `readFunctionRequest` reads one. */
 interface MutationCall {
   readonly reference: { readonly name: string; readonly kind: string };
-  readonly input: unknown;
+  readonly args: unknown;
   readonly idempotencyKey?: string | undefined;
 }
 
@@ -1637,7 +1637,7 @@ export const answerWorkflowMutation = async (
   if (call.reference.kind !== fn.kind) {
     throw operationErrors.create("function.kind_mismatch");
   }
-  const args = checkedValue(fn.args, call.input, "contract.invalid_args");
+  const args = checkedValue(fn.args, call.args, "contract.invalid_args");
   // Keyed as the App's own mutations are (operations.ts): the client
   // sends each under one, the caller's or its own.
   const key =
@@ -1679,7 +1679,7 @@ export const answerWorkflowMutation = async (
 
 const startCallSchema = z.strictObject({
   reference: z.strictObject({ name: z.string(), kind: z.literal("mutation") }),
-  input: z.unknown(),
+  args: z.unknown(),
 });
 
 /**
@@ -1712,7 +1712,7 @@ export const startCallIn = async (
   }
   const args = checkedValue(
     start.args,
-    call.data.input,
+    call.data.args,
     "contract.invalid_args"
   );
   return { resolved, args: argsOf(startArgs, args).args };

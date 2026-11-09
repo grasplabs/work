@@ -160,7 +160,7 @@ const ranFor = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, input: { who }, key: unique() }
+    { version: 1, args: { who }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start made a run");
@@ -198,7 +198,7 @@ const settled = async (
 /** How an item's test run ended: its output, or its failure's code. */
 const endOf = (run: WorkflowCandidateRun) =>
   run.status === "completed"
-    ? { status: run.status, output: run.output }
+    ? { status: run.status, output: run.result }
     : { status: run.status, code: run.error?.code };
 
 /** Each item of `test`: the run it took, and how the draft did on it. */

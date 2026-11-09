@@ -194,7 +194,7 @@ const startOf = async (
     kind: "mutation",
   };
   change(reference);
-  return await Promise.resolve(JSON.stringify({ reference, input: { args } }));
+  return await Promise.resolve(JSON.stringify({ reference, args: { args } }));
 };
 
 const resultSchema = z.union([
@@ -409,7 +409,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       notAStart: startedAs(
         await session.start(
           "desk-user",
-          JSON.stringify({ reference: {}, input: {} })
+          JSON.stringify({ reference: {}, args: {} })
         )
       ),
     };

@@ -1016,7 +1016,7 @@ describe("the built-in blueprints", () => {
     const start = async (app: string, by: string, key: string) =>
       await outcome(
         startAppBinding(env, authorityOf(app, by), "greet", {
-          input: { who: "Ada" },
+          args: { who: "Ada" },
           key,
         })
       );
@@ -1045,7 +1045,7 @@ describe("the built-in blueprints", () => {
       env,
       authorityOf(created.app.id, builder.userId),
       "greet",
-      { input: { who: "Ada" }, key: "k4" }
+      { args: { who: "Ada" }, key: "k4" }
     );
     const { runId } = started;
     if (runId === null) {

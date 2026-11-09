@@ -265,7 +265,7 @@ const sentOnly = async (
     },
     body: JSON.stringify({
       reference: { name: path, kind: release.app.operations[path]?.kind },
-      input,
+      args: input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     }),
   });
@@ -318,7 +318,7 @@ const streamed = async (
     },
     body: JSON.stringify({
       reference: { name: path, kind: release.app.operations[path]?.kind },
-      input,
+      args: input,
       idempotencyKey: key,
     }),
   });
@@ -1307,7 +1307,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       },
       body: JSON.stringify({
         reference: referenceOf(open, "notes.write"),
-        input,
+        args: input,
         idempotencyKey: "gone-s",
       }),
     });
@@ -1352,7 +1352,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       events: ["form_sent"],
     });
     const input = { title: "Unheard", pauseMs: 300 };
-    const call = { reference: referenceOf(open, "notes.add"), input };
+    const call = { reference: referenceOf(open, "notes.add"), args: input };
     const name = await invocationName(
       open.builder.userId,
       open.app,
@@ -1434,7 +1434,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     });
     const call = {
       reference: referenceOf(open, "notes.add"),
-      input: { title: "Held" },
+      args: { title: "Held" },
     };
     const name = await invocationName(
       open.builder.userId,
@@ -1459,7 +1459,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     let answered: unknown;
     let heldBack: boolean;
     try {
-      answered = await sent(open, "notes.add", call.input, "held-a");
+      answered = await sent(open, "notes.add", call.args, "held-a");
       await drainWebhookDeliveries(env);
       heldBack = await untold();
     } finally {
@@ -1470,7 +1470,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     await drainWebhookDeliveries(env);
     const after = { untold: await untold(), reached: await countAt(url) };
     // Sent again under its key: its receipt answers, told already.
-    await sent(open, "notes.add", call.input, "held-a");
+    await sent(open, "notes.add", call.args, "held-a");
     await drainWebhookDeliveries(env);
 
     expect({
@@ -1577,7 +1577,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       userId: open.builder.userId,
       call: {
         reference: referenceOf(open, "notes.add"),
-        input: { title: "Twice" },
+        args: { title: "Twice" },
       },
       key: "twice",
       operation: "notes.add",
@@ -1607,7 +1607,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       events: ["form_sent"],
     });
     const input = { title: "Late" };
-    const call = { reference: referenceOf(open, "notes.add"), input };
+    const call = { reference: referenceOf(open, "notes.add"), args: input };
     const name = await invocationName(
       open.builder.userId,
       open.app,
@@ -1698,7 +1698,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       userId: open.builder.userId,
       call: {
         reference: referenceOf(open, "notes.add"),
-        input: { title: "Gone" },
+        args: { title: "Gone" },
       },
       key: "gone-app",
       operation: "notes.add",
@@ -1782,7 +1782,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     const started = async (named: string, key: string) => {
       const call = {
         reference: { ...referenceOf(open, "notes.add"), name: named },
-        input,
+        args: input,
         idempotencyKey: key,
       };
       const name = await invocationName(

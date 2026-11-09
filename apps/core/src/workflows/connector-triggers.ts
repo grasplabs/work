@@ -595,7 +595,7 @@ export const startOnce = async (
         ...(cause === undefined ? {} : { cause }),
       },
       taker.workflowId,
-      { version: taker.workflowVersion, input: arrival.input, key },
+      { version: taker.workflowVersion, args: arrival.input, key },
       // Read again as it is admitted: what else it needs.
       arrival.also,
       {

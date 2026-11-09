@@ -939,7 +939,7 @@ const outputOf = async (runId: string): Promise<unknown> =>
       if (row?.status !== "completed") {
         throw new Error(`Run ${runId} is ${row?.status ?? "missing"}`);
       }
-      const { output } = await resultOf(env, row);
+      const { result: output } = await resultOf(env, row);
       return output;
     },
     { timeout: 30_000, interval: 100 }
@@ -1308,7 +1308,7 @@ describe(
       const refused = await outcome(
         builder.api.workflowResources.start(workflow, {
           version: 1,
-          input: {
+          args: {
             subject: "Invoice",
             from: "ben@acme.test",
             stored: null,

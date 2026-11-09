@@ -242,7 +242,7 @@ const called = async (
     app,
     JSON.stringify({
       reference: { name: contractId, kind: operation.kind },
-      input,
+      args: input,
     })
   );
 };

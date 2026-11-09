@@ -158,7 +158,7 @@ const startAsApp = async (
   env: Env,
   authority: Authority,
   alias: string,
-  request: { input: Json; key: string },
+  request: { args: Json; key: string },
   agent: CallingAgent | null,
   requireGoing?: () => void
 ): Promise<WorkflowStart> => {
@@ -247,7 +247,7 @@ export const appWorkflowStarts = (
         env,
         authority,
         alias,
-        { input, key: coreStartKey("action", key) },
+        { args: input, key: coreStartKey("action", key) },
         agent,
         requireGoing
       )
@@ -385,9 +385,16 @@ export const dispatchStartIntent = async (
       // Its hand-over may have run out as that was read.
       requireLive(entry.signal);
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await startAsApp(env, authority, alias, { input, key }, agent, () => {
-        requireLive(entry.signal);
-      });
+      await startAsApp(
+        env,
+        authority,
+        alias,
+        { args: input, key },
+        agent,
+        () => {
+          requireLive(entry.signal);
+        }
+      );
       return "delivered";
     } catch (error) {
       refusal = error;

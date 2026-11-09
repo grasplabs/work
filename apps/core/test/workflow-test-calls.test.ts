@@ -188,7 +188,7 @@ const startOf = async (release: Release, args: unknown): Promise<string> => {
         name: "workflows.followUp.mutations.start",
         kind: "mutation",
       },
-      input: { args },
+      args: { args },
     })
   );
 };

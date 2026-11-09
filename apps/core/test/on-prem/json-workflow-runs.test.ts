@@ -51,7 +51,7 @@ describe("a JSON workflow's run on-prem", () => {
       env,
       { type: "person", person: by },
       workflow.id,
-      { version: 1, input: { who: "Ada" }, key: unique() }
+      { version: 1, args: { who: "Ada" }, key: unique() }
     );
     const run = await vi.waitFor(
       async () => {
@@ -61,7 +61,7 @@ describe("a JSON workflow's run on-prem", () => {
       },
       { timeout: 90_000, interval: 500 }
     );
-    expect({ status: run.status, output: run.output }).toStrictEqual({
+    expect({ status: run.status, output: run.result }).toStrictEqual({
       status: "completed",
       output: { status: "Hello, Ada" },
     });
@@ -128,7 +128,7 @@ describe("a JSON workflow's run on-prem", () => {
       env,
       { type: "person", person: by },
       workflow.id,
-      { version: 1, input: { who: "Ada" }, key: unique() }
+      { version: 1, args: { who: "Ada" }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start admitted no run");
@@ -157,7 +157,7 @@ describe("a JSON workflow's run on-prem", () => {
       },
       { timeout: 90_000, interval: 500 }
     );
-    expect({ status: run.status, output: run.output }).toStrictEqual({
+    expect({ status: run.status, output: run.result }).toStrictEqual({
       status: "completed",
       output: { status: "done" },
     });

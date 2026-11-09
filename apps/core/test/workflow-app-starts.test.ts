@@ -1016,7 +1016,7 @@ describe("a mutation starting a workflow after it commits", () => {
           afterCommit: idempotency_key.startsWith("grasp:after-commit:"),
         })
       ),
-      run: { status: run.status, output: run.output },
+      run: { status: run.status, output: run.result },
     }).toStrictEqual({
       sameOutcome: true,
       staged: 1,
@@ -1555,7 +1555,7 @@ describe("what a start rechecks, and records", () => {
     expect({
       status: run.status,
       code: run.status === "failed" ? (run.error?.code ?? null) : null,
-      output: run.output ?? null,
+      output: run.result ?? null,
     }).toStrictEqual({
       // Revoked mid-run: what its input may carry never leaves it.
       status: "failed",
@@ -2192,7 +2192,7 @@ describe("what a start rechecks, and records", () => {
     const taken = await outcome(
       startWorkflow(env, { type: "person", person: fx.ada }, fx.workflowId, {
         version: 1,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         key: `grasp:after-commit:${unique()}`,
       })
     );

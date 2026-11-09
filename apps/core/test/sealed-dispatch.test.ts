@@ -454,7 +454,7 @@ const startOf = (args: unknown): string =>
       name: "workflows.followUp.mutations.start",
       kind: "mutation",
     },
-    input: { args },
+    args: { args },
   });
 
 /** The test's run of an App, and the pin the engine runs it by. */

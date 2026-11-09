@@ -63,7 +63,7 @@ const requestOf = (text: string) => {
   if (!isPlainObject(parsed) || !isPlainObject(parsed.reference)) {
     throw new Error("Not a call");
   }
-  const { reference, input, idempotencyKey } = parsed;
+  const { reference, args: input, idempotencyKey } = parsed;
   return {
     name: String(reference.name),
     kind: String(reference.kind),

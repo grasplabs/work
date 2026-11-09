@@ -319,7 +319,7 @@ const requestFor = async (
   const kind = released.app.operations[contractId]?.kind ?? "query";
   return JSON.stringify({
     reference: { name: contractId, kind },
-    input,
+    args: input,
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
   });
 };

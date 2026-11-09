@@ -52,7 +52,7 @@ const statusText = (shown: WorkflowResourceRun): string =>
 
 describe("an opened run's result", () => {
   it("shows what it returned, as JSON", () => {
-    expect(textOf(run({ output: { status: "sent", count: 2 } }))).toBe(
+    expect(textOf(run({ result: { status: "sent", count: 2 } }))).toBe(
       'What it returned { "status": "sent", "count": 2 }'
     );
   });

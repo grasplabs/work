@@ -432,7 +432,7 @@ export const confirmHeldStart = async (
       row.workflowResourceId,
       {
         version: row.workflowResourceVersion,
-        input: inputOf(row),
+        args: inputOf(row),
         key: startKeyOf(row.chatId, row.key),
       },
       stillConfirmed,

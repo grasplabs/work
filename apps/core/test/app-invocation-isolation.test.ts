@@ -67,7 +67,7 @@ const call = async (
     app,
     JSON.stringify({
       reference: { name: path, kind: operation?.kind },
-      input,
+      args: input,
     })
   );
   return result;

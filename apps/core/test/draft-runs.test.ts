@@ -163,7 +163,7 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
         app,
         JSON.stringify({
           reference: { name: "notes.titles", kind: "query" },
-          input: {},
+          args: {},
         })
       )
     );

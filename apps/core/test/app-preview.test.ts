@@ -108,7 +108,7 @@ const writeDraft = async (
  */
 const titlesRequest = JSON.stringify({
   reference: { name: "notes.titles", kind: "query" },
-  input: {},
+  args: {},
 });
 
 /**

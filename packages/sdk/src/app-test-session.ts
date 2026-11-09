@@ -17,7 +17,7 @@ export interface AppTestSession {
   principal: (name: string) => Promise<string | undefined>;
   /**
    * Calls a function as principal `name`: `request` is the call's JSON
-   * text (`{ reference, input }`), as a page sends it, and the answer
+   * text (`{ reference, args }`), as a page sends it, and the answer
    * the JSON text of what the call answered (an `OperationResult`).
    */
   call: (name: string, request: string) => Promise<string>;
@@ -141,7 +141,7 @@ export const requestFor = (
   }
   return JSON.stringify({
     reference: { name: reference.name, kind },
-    input: args,
+    args,
   });
 };
 

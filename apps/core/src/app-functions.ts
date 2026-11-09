@@ -298,7 +298,7 @@ const functionRequestSchema = z.strictObject({
     name: z.string().min(1).max(256),
     kind: z.enum(["query", "mutation", "action"]),
   }),
-  input: z.unknown(),
+  args: z.unknown(),
   idempotencyKey: z.string().optional(),
 });
 
@@ -535,7 +535,7 @@ const answeredWorkflowQuery = async (
       stillAllowed,
       deadline,
     })();
-    const result = await callWorkflowQuery(env, caller, query, call.input);
+    const result = await callWorkflowQuery(env, caller, query, call.args);
     return {
       result,
       provenance: null,
@@ -609,7 +609,7 @@ const answeredPeople = async (
         requestId,
       }),
       read,
-      call.input
+      call.args
     );
     return {
       result: { ok: true, value },
@@ -723,7 +723,7 @@ const invokedCall = async (
       hosted,
       observed,
       reference,
-      call.input,
+      call.args,
       {
         ...(call.idempotencyKey === undefined
           ? {}
@@ -1077,7 +1077,7 @@ export const callVisitorFunction = async (
       return {
         result: {
           ok: true,
-          value: await answerPeople(visitorPeopleOf(caller), read, call.input),
+          value: await answerPeople(visitorPeopleOf(caller), read, call.args),
         },
         provenance: null,
         manifestHash: null,
@@ -1108,7 +1108,7 @@ export const callVisitorFunction = async (
       hostedRelease(env, release),
       invocation,
       { path, kind: call.reference.kind },
-      call.input,
+      call.args,
       call.idempotencyKey === undefined
         ? {}
         : { idempotencyKey: call.idempotencyKey }
@@ -1358,7 +1358,7 @@ export const invokeAppAction = async (
       hostedRelease(env, release),
       invocation,
       { path, kind: call.reference.kind },
-      call.input,
+      call.args,
       {
         ...(call.idempotencyKey === undefined
           ? {}

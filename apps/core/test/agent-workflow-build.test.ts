@@ -704,7 +704,7 @@ describe("the agent following independent workflows", () => {
     });
     const { id: run } = await builder.api.workflowResources.start(flow.id, {
       version: 1,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       key: `key-${unique()}`,
     });
     const id = JSON.stringify(flow.id);

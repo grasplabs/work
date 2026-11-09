@@ -306,7 +306,7 @@ apps: {
   /**
    * Calls a public function (query, mutation or action) of an App's current
    * version for the person, by its reference, its name and kind: \`request\` is the
-   * call as JSON text, \`{ reference, input, idempotencyKey? }\`, sent as a
+   * call as JSON text, \`{ reference, args, idempotencyKey? }\`, sent as a
    * stream: \`env.apps.call(app, new Blob([JSON.stringify(call)]).stream())\`.
    * At most 132 KiB, sent in full within 5 seconds. Calls made at once may run one at a time, in
    * the order made, each within its own 30 seconds, and at most 8 at once (more answer \`function.sandbox_busy\`). Needs a permission on the App (\`read\` for a query,

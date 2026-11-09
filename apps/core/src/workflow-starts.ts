@@ -764,7 +764,7 @@ export const acceptedInput = (descriptor: string, input: unknown): string => {
     platformLimits.operationInputBytes
   ) {
     throw workflowResourceErrors.create("workflow.start_invalid", {
-      issues: ["input: Too large for a start."],
+      issues: ["args: Too large for a start."],
     });
   }
   return text;
@@ -1088,7 +1088,7 @@ const lineageOf = (
 
 /**
  * Decides on `request` (`workflowStartSchema`: the exact version, the
- * input and the invoker's idempotency key) to start workflow `id` for
+ * args and the invoker's idempotency key) to start workflow `id` for
  * `invoker` (see the rules above). The invoker's own access is checked
  * first, every time; then the version and the input; then a start already
  * admitted under the key is answered as it was (`workflow.start_conflict`
@@ -1113,7 +1113,11 @@ export const decideWorkflowStart = async (
    */
   files?: StartFiles
 ): Promise<StartDecision> => {
-  const { version, input, key } = workflowResourceErrors.parse(
+  const {
+    version,
+    args: input,
+    key,
+  } = workflowResourceErrors.parse(
     "workflow.start_invalid",
     workflowStartSchema,
     request

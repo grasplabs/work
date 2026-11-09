@@ -146,7 +146,7 @@ export const startedBy = async (
 ): Promise<string> => {
   const { runId } = await by.api.workflowResources.start(id, {
     version: 1,
-    input: input ?? { who: "Ada" },
+    args: input ?? { who: "Ada" },
     key: unique(),
   });
   return z.string().parse(runId);
@@ -393,7 +393,7 @@ export const mutationCall = (
       name: `${reference.contractId}.mutations.${name}`,
       kind: "mutation",
     },
-    input: args,
+    args,
     idempotencyKey: key,
   });
 
@@ -411,7 +411,7 @@ export const workflowQuery = (
     name: `${reference.contractId}.queries.${name}`,
     kind: "query",
   },
-  input: args,
+  args,
 });
 
 /** `workflowQuery` as a call's text. */

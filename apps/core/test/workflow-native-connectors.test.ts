@@ -282,7 +282,7 @@ const ran = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, input, key: unique() }
+    { version: 1, args: input, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -296,7 +296,7 @@ const ran = async (
     { timeout: 60_000, interval: 100 }
   );
   return run.status === "completed"
-    ? { status: run.status, output: run.output }
+    ? { status: run.status, output: run.result }
     : { status: run.status, code: run.error?.code };
 };
 
@@ -507,7 +507,7 @@ describe("a workflow binding a native connector's operation", () => {
         { timeout: 20_000, interval: 100 }
       );
       return run.status === "completed"
-        ? { status: run.status, output: run.output }
+        ? { status: run.status, output: run.result }
         : { status: run.status, code: run.error?.code };
     };
     expect(JSON.stringify(read.input)).toContain('"pattern"');

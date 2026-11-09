@@ -146,7 +146,7 @@ export const requestFor = async (
   );
   return JSON.stringify({
     reference: { name: path, kind: read.manifest.operations[path]?.kind },
-    input,
+    args: input,
   });
 };
 
