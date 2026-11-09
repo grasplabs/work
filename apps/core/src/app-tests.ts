@@ -27,6 +27,7 @@ import {
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { loweredLimit } from "@grasp-os/shared/lowered-limit";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
@@ -267,12 +268,6 @@ const fixtureLeftAfterMs = 60 * 60_000;
 /** The most workflow runs one test may start (`FixtureSession.start`). */
 const maxRunsPerTest = 10;
 
-/** `set` where it is a whole number of milliseconds below `most`, else `most`. */
-const lower = (set: number | undefined, most: number): number =>
-  set !== undefined && Number.isInteger(set) && set > 0 && set < most
-    ? set
-    : most;
-
 /** The limits in force: the defaults, or lower ones where tests set them. */
 const limitsOf = (env: Pick<Env, "APP_TEST_LIMITS_MS">): TestLimits => {
   const [testMs, suiteMs, runMs, cleanupMs, cpuMs] = (
@@ -281,11 +276,11 @@ const limitsOf = (env: Pick<Env, "APP_TEST_LIMITS_MS">): TestLimits => {
     .split("/")
     .map(Number);
   return {
-    testMs: lower(testMs, defaultLimits.testMs),
-    suiteMs: lower(suiteMs, defaultLimits.suiteMs),
-    runMs: lower(runMs, defaultLimits.runMs),
-    cleanupMs: lower(cleanupMs, defaultLimits.cleanupMs),
-    cpuMs: lower(cpuMs, defaultLimits.cpuMs),
+    testMs: loweredLimit(testMs, defaultLimits.testMs),
+    suiteMs: loweredLimit(suiteMs, defaultLimits.suiteMs),
+    runMs: loweredLimit(runMs, defaultLimits.runMs),
+    cleanupMs: loweredLimit(cleanupMs, defaultLimits.cleanupMs),
+    cpuMs: loweredLimit(cpuMs, defaultLimits.cpuMs),
   };
 };
 
