@@ -2,6 +2,10 @@ import type { CompactDescriptor } from "@grasp-os/sdk/host";
 import { decidersPattern } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
+import {
+  maxWorkflowParams,
+  workflowParamNamePattern,
+} from "@grasp-os/shared/workflows";
 
 // grasp-workflow/1: a workflow as JSON, the stored form of a workflow on
 // `@grasp-os/sdk/workflow`. One step is one SDK call; steps name each
@@ -427,7 +431,7 @@ export const formatLimits = {
   expressionLength: 2048,
   idLength: 64,
   titleLength: 200,
-  params: 64,
+  params: maxWorkflowParams,
   bindings: 64,
   /** The keys one step keeps in its workflow's state, as the host seals them. */
   stateKeys: 64,
@@ -503,7 +507,7 @@ export const stepIdPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$";
  * Like a step's ID and a binding's alias, a stable key, never changed once
  * made: a parameter is renamed by its `label`.
  */
-export const paramNamePattern = "^[a-z][A-Za-z0-9]{0,63}$";
+export const paramNamePattern = workflowParamNamePattern.source;
 
 /**
  * A key of a workflow's state, as the host keeps it and an expression

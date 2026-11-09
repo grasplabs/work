@@ -1215,16 +1215,20 @@ const checkSteps = (
 };
 
 /**
- * Whether `descriptor` holds a value anywhere in it: a default, a literal
- * or an enum's values, any of which would put a value in the document.
+ * Whether `descriptor` holds a value anywhere in it: a default, a literal,
+ * an enum's values or a number its bounds pin (`min` equal to `max`), any
+ * of which would put a value in the document.
  */
 const holdsValue = (descriptor: ValueDescriptor): boolean => {
   const pending = [descriptor];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const pinned =
+      next.kind === "number" && next.min !== undefined && next.min === next.max;
     if (
       next.presence === "default" ||
       next.kind === "literal" ||
-      next.kind === "enum"
+      next.kind === "enum" ||
+      pinned
     ) {
       return true;
     }

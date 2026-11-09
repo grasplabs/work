@@ -40,6 +40,15 @@ const labelled = (label: string) =>
     async () => null
   );
 
+/** A workflow declaring `params`, as a thunk. */
+const named = (params: Record<string, unknown>) => () =>
+  workflow(
+    "named",
+    // @ts-expect-error -- each parameter is a label and a `v` type
+    { params },
+    async () => null
+  );
+
 /** A workflow declaring one parameter of `type`, as a thunk. */
 const declared = (type: unknown) => () =>
   workflow(
@@ -65,6 +74,25 @@ describe("workflow definitions", () => {
     expect(() => workflow("", { params: noParams }, async () => null)).toThrow(
       expect.objectContaining({ code: "workflow.invalid_definition" })
     );
+  });
+
+  it("rejects parameters by a name code can't read, or too many", () => {
+    const param = { label: "Limit", type: v.number().default(1) };
+    const many = Object.fromEntries(
+      Array.from({ length: 65 }, (_, index) => [`p${index}`, param])
+    );
+
+    for (const params of [
+      { Limit: param },
+      { "max-items": param },
+      { [`l${"x".repeat(64)}`]: param },
+      many,
+    ]) {
+      expect(named(params)).toThrow(
+        expect.objectContaining({ code: "workflow.invalid_definition" })
+      );
+    }
+    expect(named({ maxItems: param })).not.toThrow();
   });
 
   it("rejects a parameter whose type isn't a `v` schema with a default", () => {

@@ -453,6 +453,10 @@ describe("checking a workflow", () => {
           item: { kind: "enum", values: ["sk-live", "sk-test"] },
         },
       }),
+      pinned: withParam({
+        label: "Key",
+        type: { kind: "number", integer: true, min: 4242, max: 4242 },
+      }),
     }).toStrictEqual({
       unmarked: ["/params/token/type"],
       marked: ["/params/token/type"],
@@ -462,6 +466,7 @@ describe("checking a workflow", () => {
       nestedDefault: ["/params/token/type"],
       literal: ["/params/token/type"],
       enumValues: ["/params/token/type"],
+      pinned: ["/params/token/type"],
     });
   });
 

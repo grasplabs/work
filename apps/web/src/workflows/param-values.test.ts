@@ -35,6 +35,14 @@ describe("a workflow parameter's field", () => {
         paramValueOf("money", typed({ amount: "5000.5", currency: "eur" })),
         paramValueOf("money", typed({ amount: "12", currency: "JPY" })),
         paramValueOf("money", typed({ amount: "-0.07", currency: "EUR" })),
+        // By ISO 4217's decimals, which `Intl` disagrees with in some
+        // engines: two for the forint, three for the Iraqi dinar.
+        paramValueOf("money", typed({ amount: "12.34", currency: "HUF" })),
+        paramValueOf("money", typed({ amount: "1.5", currency: "IQD" })),
+        paramValueOf("money", typed({ amount: "12.5", currency: "JPY" })),
+        // A currency the catalog doesn't have, or with no minor unit.
+        paramValueOf("money", typed({ amount: "1", currency: "ZZZ" })),
+        paramValueOf("money", typed({ amount: "1", currency: "XDR" })),
         // More decimals than the currency has, no currency, not a number.
         paramValueOf("money", typed({ amount: "1.234", currency: "EUR" })),
         paramValueOf("money", typed({ amount: "12" })),
@@ -64,6 +72,11 @@ describe("a workflow parameter's field", () => {
         { value: { minorUnits: 500_050, currency: "EUR" } },
         { value: { minorUnits: 12, currency: "JPY" } },
         { value: { minorUnits: -7, currency: "EUR" } },
+        { value: { minorUnits: 1234, currency: "HUF" } },
+        { value: { minorUnits: 1500, currency: "IQD" } },
+        undefined,
+        undefined,
+        undefined,
         undefined,
         undefined,
         undefined,

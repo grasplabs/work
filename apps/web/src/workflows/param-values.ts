@@ -1,3 +1,5 @@
+import { currencyDecimals } from "@grasp-os/sdk";
+
 // How an independent workflow's parameter is taken from a field, by the
 // JSON Schema its current version seals for it (`WorkflowParamSetting`):
 // a switch for a boolean, a number for a number, plain text for a string,
@@ -91,20 +93,7 @@ export const isBlank = (kind: ParamKind, text: string): boolean =>
     ? Object.values(partsOf(text)).every((part) => part.trim() === "")
     : text.trim() === "";
 
-/** How many minor units a major unit of `currency` has, as digits. */
-const fractionDigits = (currency: string): number | undefined => {
-  try {
-    return new Intl.NumberFormat("en", {
-      style: "currency",
-      currency,
-    }).resolvedOptions().maximumFractionDigits;
-  } catch {
-    return undefined;
-  }
-};
-
 const amountPattern = /^(?<sign>-?)(?<whole>\d+)(?:\.(?<fraction>\d+))?$/u;
-const currencyPattern = /^[A-Z]{3}$/u;
 
 /** `amount`, a decimal of major units, in whole minor units. */
 const minorUnitsOf = (amount: string, digits: number): number | undefined => {
@@ -145,7 +134,7 @@ const partsText = (kind: PartsKind, value: unknown): string => {
   const minorUnits = read("minorUnits");
   const currency = read("currency");
   const digits =
-    typeof currency === "string" ? fractionDigits(currency) : undefined;
+    typeof currency === "string" ? currencyDecimals(currency) : undefined;
   return typeof minorUnits === "number" &&
     typeof currency === "string" &&
     digits !== undefined
@@ -167,9 +156,7 @@ const partsValue = (
       : { value: { cron, timeZone } };
   }
   const currency = parts.currency?.trim().toUpperCase() ?? "";
-  const digits = currencyPattern.test(currency)
-    ? fractionDigits(currency)
-    : undefined;
+  const digits = currencyDecimals(currency);
   const minorUnits =
     digits === undefined ? undefined : minorUnitsOf(parts.amount ?? "", digits);
   return minorUnits === undefined

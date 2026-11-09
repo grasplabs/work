@@ -88,6 +88,16 @@ export const workflowErrors = defineErrorFamily({
     "The workflow run failed, and undoing what it had done failed too.",
 });
 
+/**
+ * A workflow parameter's name: an identifier, so code reads it as
+ * `params.<name>`. The format's check (grasp-workflow/1) and the SDK's
+ * (`validateParams`) both hold a name to it.
+ */
+export const workflowParamNamePattern = /^[a-z][A-Za-z0-9]{0,63}$/u;
+
+/** Most parameters one workflow declares. */
+export const maxWorkflowParams = 64;
+
 /** Whether the runtime knows `timeZone`, an IANA name like `Europe/Amsterdam`. */
 export const isTimeZone = (timeZone: string): boolean => {
   try {

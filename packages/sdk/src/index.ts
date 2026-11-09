@@ -10,6 +10,7 @@ export { defineApp } from "./app.ts";
 export type { App, AppConfig, AppPermissions } from "./app-types.ts";
 
 export { AppError } from "./app-error.ts";
+export { currencyDecimals } from "./value-catalog.ts";
 export { defineMigration } from "./migration.ts";
 export type {
   Migration,

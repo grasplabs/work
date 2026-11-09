@@ -1,4 +1,8 @@
-import { sensitiveParamKey } from "@grasp-os/shared/workflows";
+import {
+  maxWorkflowParams,
+  sensitiveParamKey,
+  workflowParamNamePattern,
+} from "@grasp-os/shared/workflows";
 
 import { descriptorOf } from "./sealed-descriptors.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
@@ -75,20 +79,32 @@ export const describeParams = (params: Params): ParamMetadata[] =>
 const maxLabelLength = 200;
 
 /**
- * Refuses (`workflow.invalid_definition`) a parameter whose label isn't 1
+ * Refuses (`workflow.invalid_definition`) more than 64 parameters, or one
+ * whose name isn't an identifier (`params.<name>`), whose label isn't 1
  * to 200 characters, or whose type isn't a `v` schema with a default: the
  * code declares only the parameters it reads, never a sensitive one, so
  * each has a value to start with. A definition outside them fails as it
  * loads, so its tests fail and the version is never made current.
  */
 export const validateParams = (params: Params): void => {
-  for (const [name, { label, type }] of Object.entries(params)) {
+  // An object's keys are each one name, so none is declared twice.
+  const declared = Object.entries(params);
+  if (declared.length > maxWorkflowParams) {
+    throw new WorkflowError(
+      "workflow.invalid_definition",
+      `A workflow declares at most ${maxWorkflowParams} parameters`
+    );
+  }
+  for (const [name, { label, type }] of declared) {
     const invalid = (reason: string): never => {
       throw new WorkflowError(
         "workflow.invalid_definition",
-        `Parameter "${name}": ${reason}`
+        `Parameter "${name.slice(0, 64)}": ${reason}`
       );
     };
+    if (!workflowParamNamePattern.test(name)) {
+      invalid("its name is a lower-case letter, then letters and digits");
+    }
     if (
       typeof label !== "string" ||
       label === "" ||
