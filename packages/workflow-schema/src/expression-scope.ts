@@ -33,12 +33,117 @@ export interface ExpressionScope {
 export interface ExpressionTypeRequest {
   readonly scope: ExpressionScope;
   /** Each expression's source, by the pointer of its `{ $expr }`. */
-  readonly expressions: Readonly<Record<string, { readonly source: string }>>;
+  readonly expressions: Readonly<
+    Record<
+      string,
+      { readonly source: string; readonly guards?: readonly string[] }
+    >
+  >;
 }
 
 /** A failure a catch reads as `error` (the SDK's `CaughtError`). */
 const caughtErrorType =
   "{ readonly code: string; readonly message: string; readonly details?: any; readonly step?: string }";
+
+/**
+ * A decision's result, as the SDK's `Decision` types it in the generated
+ * module: what an expression reads of it is typed as the build types it.
+ */
+const decisionType =
+  "{ readonly timedOut: false; readonly approved: boolean; readonly by: string; readonly payload: any } | { readonly timedOut: true }";
+
+/** An event wait's result for `types`, as the SDK's `EventWait` types it. */
+const eventWaitType = (types: readonly string[]): string =>
+  `{ readonly timedOut: false; readonly event: { readonly id: string; readonly type: ${types.map((type) => JSON.stringify(type)).join(" | ")}; readonly source: string; readonly subject?: string; readonly time: string; readonly data: any } } | { readonly timedOut: true }`;
+
+/** The source of `expression`, if it is one. */
+const sourceOf = (expression: unknown): string | undefined =>
+  typeof expression === "object" &&
+  expression !== null &&
+  "$expr" in expression &&
+  typeof expression.$expr === "string"
+    ? expression.$expr
+    : undefined;
+
+/**
+ * The conditions that hold where the generated code evaluates each of
+ * `steps`' expressions, by pointer prefix (generate.ts): a step's own `if`
+ * around its call (`<if> ? await … : null`), an `if` step's condition
+ * around its `then` and its negation around its `else`, a loop's `while`
+ * around its steps (`if (!<while>) break;`), a catch's code and `when`
+ * around its `do`. A callback the code passes (a retry's `when`, a step's
+ * `state`) is checked under none: narrowing may not reach a closure, and
+ * a condition left out only makes the check stricter than the build.
+ */
+const guardsOf = (
+  steps: readonly Step[],
+  pointer: string,
+  around: readonly string[],
+  guards: Map<string, readonly string[]>
+): void => {
+  for (const [index, step] of steps.entries()) {
+    const at = `${pointer}/${index}`;
+    guards.set(`${at}/if`, around);
+    const own = sourceOf(step.if);
+    const inside = own === undefined ? around : [...around, own];
+    // Every expression of the step's own, but what the cases below set.
+    guards.set(at, inside);
+    guards.set(`${at}/state`, []);
+    if (step.type === "if") {
+      const condition = sourceOf(step.condition) ?? "true";
+      guardsOf(step.then, `${at}/then`, [...inside, condition], guards);
+      guardsOf(
+        step.else ?? [],
+        `${at}/else`,
+        [...inside, `!(${condition})`],
+        guards
+      );
+    } else if (step.type === "forEach") {
+      const holds = sourceOf(step.while);
+      guardsOf(
+        step.do,
+        `${at}/do`,
+        holds === undefined ? inside : [...inside, holds],
+        guards
+      );
+    } else if (step.type === "try") {
+      guardsOf(step.try, `${at}/try`, inside, guards);
+      guards.set(`${at}/catch/retry`, []);
+      const caught = [
+        ...inside,
+        ...(step.catch.code === undefined
+          ? []
+          : [`error.code === ${JSON.stringify(step.catch.code)}`]),
+      ];
+      guards.set(`${at}/catch/when`, caught);
+      const when = sourceOf(step.catch.when);
+      guardsOf(
+        step.catch.do ?? [],
+        `${at}/catch/do`,
+        when === undefined ? caught : [...caught, when],
+        guards
+      );
+    }
+  }
+};
+
+/** The guards of the expression at `pointer`: those of its longest prefix. */
+const guardsAt = (
+  guards: ReadonlyMap<string, readonly string[]>,
+  pointer: string
+): readonly string[] => {
+  for (
+    let prefix = pointer;
+    prefix !== "";
+    prefix = prefix.slice(0, prefix.lastIndexOf("/"))
+  ) {
+    const held = guards.get(prefix);
+    if (held !== undefined) {
+      return held;
+    }
+  }
+  return [];
+};
 
 /** What a run's code knows of its run. */
 const runType = "{ readonly id: string }";
@@ -106,22 +211,38 @@ export const expressionTypeRequest = (
       if (!resultStepTypes.has(step.type)) {
         return [];
       }
-      const answer =
-        step.type === "generate" ? checked.answers.get(pointer) : output(step);
+      let type: string;
+      if (step.type === "decide") {
+        type = decisionType;
+      } else if (step.type === "waitForEvent") {
+        type = eventWaitType(
+          typeof step.eventType === "string" ? [step.eventType] : step.eventType
+        );
+      } else {
+        const answer =
+          step.type === "generate"
+            ? checked.answers.get(pointer)
+            : output(step);
+        type = answer === undefined ? untyped : typeOf(answer);
+      }
+      // A step its `if` skips is `null`, as the generated `const` is.
       return [
-        [step.id, answer === undefined ? untyped : typeOf(answer)] as const,
+        [step.id, step.if === undefined ? type : `(${type}) | null`] as const,
       ];
     }
   );
-  const expressions: Record<string, { source: string }> = {};
+  const guards = new Map<string, readonly string[]>();
+  guardsOf(checked.document.steps, "/steps", [], guards);
+  const expressions: Record<
+    string,
+    { source: string; guards?: readonly string[] }
+  > = {};
   for (const pointer of checked.code.keys()) {
-    const node = at(checked.document, pointer);
-    const source: unknown =
-      typeof node === "object" && node !== null && "$expr" in node
-        ? node.$expr
-        : undefined;
-    if (typeof source === "string") {
-      expressions[pointer] = { source };
+    const source = sourceOf(at(checked.document, pointer));
+    if (source !== undefined) {
+      const held = guardsAt(guards, pointer);
+      expressions[pointer] =
+        held.length === 0 ? { source } : { source, guards: held };
     }
   }
   return {

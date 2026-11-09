@@ -1,6 +1,7 @@
 import { generatedWorkflowEntry } from "@grasp-os/compiler";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
+import { expressionTypeRequest } from "@grasp-os/workflow-schema/expression-scope";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { sealedTableSchema } from "@grasp-os/workflow-schema/sealed";
 import { env } from "cloudflare:workers";
@@ -20,7 +21,10 @@ import {
   withEventWaits,
   withLoops,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
-import { buildGeneratedWorkflow } from "../src/pages.ts";
+import {
+  buildGeneratedWorkflow,
+  checkWorkflowExpressions,
+} from "../src/pages.ts";
 
 // grasp-workflow/2's generated code, held to the compiler's own type
 // check against the SDK's real declarations, as the host's generated
@@ -56,7 +60,7 @@ const fixtures = {
         {
           id: "refused",
           type: "raise",
-          if: { $expr: "!approve.approved" },
+          if: { $expr: "approve.timedOut || !approve.approved" },
           error: { code: "test.refused", message: "Failed." },
         },
       ],
@@ -106,7 +110,7 @@ const fixtures = {
         type: "call",
         connection: "mail",
         action: "mail.send",
-        if: { $expr: "!reply.timedOut" },
+        if: { $expr: "reply?.timedOut === false" },
         args: {
           to: { $expr: "reply.event.data.from" },
           subject: { $expr: "reply.event.type" },
@@ -218,6 +222,78 @@ describe("grasp-workflow/2's generated code", () => {
       longest: true,
       tooLongChecked: false,
       tooLongSealed: false,
+    });
+  });
+});
+
+/**
+ * A document waiting for a reply only when `args.who` isn't Ada, then
+ * answering it, its answer guarded by `guard` and sent to `to`.
+ */
+const answering = (guard: string | undefined, to: string) =>
+  withEventWaits(eventWait({ if: { $expr: 'args.who !== "Ada"' } }), {
+    id: "answer",
+    type: "call",
+    connection: "mail",
+    action: "mail.send",
+    ...(guard === undefined ? {} : { if: { $expr: guard } }),
+    args: { to: { $expr: to }, subject: "Re" },
+  });
+
+/**
+ * What the publication's typed check finds in `document`, by pointer and
+ * code, and whether its generated module builds: the two never disagree.
+ */
+const checkedAndBuilt = async (document: unknown) => {
+  const workflow = checked(document);
+  const { scope, expressions } = expressionTypeRequest(workflow, () => {});
+  const typed = await checkWorkflowExpressions(
+    env,
+    scope,
+    expressions,
+    "workflow-schema-builds"
+  );
+  const build = await buildGeneratedWorkflow(
+    env,
+    { [generatedWorkflowEntry]: generateWorkflow(workflow).source },
+    "workflow-schema-builds"
+  );
+  return {
+    problems: Object.entries(typed.expressions).flatMap(([pointer, errors]) =>
+      errors.map(({ code }) => `${pointer} ${code}`)
+    ),
+    builds: build.ok,
+  };
+};
+
+describe("a skipped step's result", () => {
+  it("passes the typed check where its read is narrowed, and then builds", async () => {
+    expect([
+      await checkedAndBuilt(
+        answering("reply?.timedOut === false", "reply.event.data.from")
+      ),
+      await checkedAndBuilt(
+        answering(
+          undefined,
+          'reply?.timedOut === false ? reply.event.data.from : "nobody"'
+        )
+      ),
+    ]).toStrictEqual([
+      { problems: [], builds: true },
+      { problems: [], builds: true },
+    ]);
+  });
+
+  it("fails the typed check at its step where its read isn't, as its build would", async () => {
+    await expect(
+      checkedAndBuilt(answering("!reply.timedOut", "reply.event.data.from"))
+    ).resolves.toStrictEqual({
+      problems: [
+        "/steps/6/if TS18047",
+        "/steps/6/args/to TS18047",
+        "/steps/6/args/to TS2339",
+      ],
+      builds: false,
     });
   });
 });

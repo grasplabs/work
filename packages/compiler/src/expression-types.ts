@@ -61,6 +61,14 @@ export interface ExpressionScopeTypes {
 /** An expression, by its source. */
 export interface TypedExpression {
   readonly source: string;
+  /**
+   * The conditions that hold where the generated code evaluates it, as
+   * their sources: its step's `if`, an `if` step's condition around it (its
+   * negation in `else`), a loop's `while`, a catch's code and `when`. It is
+   * checked under them, so it narrows as the generated module does; a
+   * condition left out only makes the check stricter than the build.
+   */
+  readonly guards?: readonly string[];
 }
 
 /** A problem in an expression: the subset's (`expression.*`) or TypeScript's (`TS2339`). */
@@ -356,7 +364,27 @@ type $Scope = (${scopeParameters}) => unknown;
 `;
   const found: Record<string, ExpressionTypeError[]> = {};
   const placed: Placed[] = [];
-  for (const [index, [name, { source }]] of Object.entries(
+  /** Where the guards are in the module: their diagnostics are their own expressions'. */
+  const guarded: [number, number][] = [];
+  /** `guards` as the condition the expression stands under, at the module's end. */
+  const underGuards = (guards: readonly string[] | undefined): void => {
+    const held = (guards ?? []).filter(
+      (guard) => checkExpression(guard, { roots }).ok
+    );
+    if (held.length === 0) {
+      return;
+    }
+    const from = code.length;
+    code += `(\n${held.map((guard) => `(\n${formOf(guard, false).code}\n)`).join(" &&\n")}\n) ?\n`;
+    guarded.push([from, code.length]);
+  };
+  /** Closes what `underGuards` opened. */
+  const closeGuards = (guards: readonly string[] | undefined): void => {
+    if ((guards ?? []).some((guard) => checkExpression(guard, { roots }).ok)) {
+      code += " : undefined";
+    }
+  };
+  for (const [index, [name, { source, guards }]] of Object.entries(
     expressions
   ).entries()) {
     const subset = checkExpression(source, { roots });
@@ -368,10 +396,18 @@ type $Scope = (${scopeParameters}) => unknown;
     const plain = formOf(source, false);
     const wrapped = formOf(source, true);
     code += `export const e${index}: $Scope = (${parameters}) =>\n(\n`;
+    underGuards(guards);
+    code += "(\n";
     const plainAt = code.length;
-    code += `${plain.code}\n);\nexport const m${index}: $Scope = (${parameters}) =>\n(\n`;
+    code += `${plain.code}\n)`;
+    closeGuards(guards);
+    code += `\n);\nexport const m${index}: $Scope = (${parameters}) =>\n(\n`;
+    underGuards(guards);
+    code += "(\n";
     const wrappedAt = code.length;
-    code += `${wrapped.code}\n);\n`;
+    code += `${wrapped.code}\n)`;
+    closeGuards(guards);
+    code += "\n);\n";
     placed.push({
       name,
       source,
@@ -433,6 +469,8 @@ type $Scope = (${scopeParameters}) => unknown;
           ...error,
           ...inSource(form, plain.source, offset - at),
         });
+      } else if (guarded.some(([from, to]) => offset >= from && offset < to)) {
+        // A guard's own problem: its expression, checked on its own, has it.
       } else if (
         diagnostic.file === undefined ||
         diagnostic.file === modulePath

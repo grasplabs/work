@@ -7,7 +7,30 @@ export const everyStep = () => ({
   $schema: workflowSchemaUrl,
   args: {
     kind: "object",
-    fields: { who: { kind: "string" }, deadline: { kind: "number" } },
+    fields: {
+      who: { kind: "string" },
+      deadline: { kind: "number" },
+      // What the loops and event waits after its own steps read.
+      pages: {
+        kind: "array",
+        item: {
+          kind: "object",
+          fields: {
+            rows: {
+              kind: "array",
+              item: {
+                kind: "object",
+                fields: { name: { kind: "string" }, due: { kind: "number" } },
+              },
+            },
+            open: { kind: "boolean" },
+            owner: { kind: "string" },
+            marks: { kind: "array", item: { kind: "number" } },
+          },
+        },
+      },
+      rounds: { kind: "array", item: { kind: "number" } },
+    },
   },
   returns: { kind: "object", fields: { line: { kind: "string" } } },
   result: { line: { $expr: "greet.line" } },
@@ -152,6 +175,21 @@ export const everyCall = () => ({
  */
 export const everyOperator = () => ({
   $schema: workflowSchemaUrl,
+  args: {
+    kind: "object",
+    fields: {
+      at: { kind: "number" },
+      count: { kind: "number" },
+      who: { kind: "string" },
+      total: { kind: "number" },
+      lines: {
+        kind: "array",
+        item: { kind: "object", fields: { total: { kind: "number" } } },
+      },
+      note: { kind: "string", optional: true },
+      unknown: { kind: "boolean", optional: true },
+    },
+  },
   permissions: { connections: { mail: { contract: "composio.mail@1" } } },
   steps: [
     {
