@@ -184,13 +184,13 @@ function Desk() {
         {followUp.status === "idle" ? "" : followUp.runId}
       </output>
       <Button
-        onClick={() => void followUp.run({ who: "Ada", reviewer: "${admin}" })}
+        onClick={() => void followUp.start({ who: "Ada", reviewer: "${admin}" })}
       >
         Start follow-up
       </Button>
       <Button
         onClick={() =>
-          void followUp.run({ who: "Grace", reviewer: "${colleague}" })
+          void followUp.start({ who: "Grace", reviewer: "${colleague}" })
         }
       >
         Start colleague's follow-up

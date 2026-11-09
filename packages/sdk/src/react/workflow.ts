@@ -28,14 +28,14 @@ const maxRunIdLength = 256;
 /**
  * One workflow the App binds and one run of it, on the workflow
  * reference's own queries and mutations: the run's view, narrowed by
- * `status`, and `run`, `pause`, `resume`, `cancel`, `send` and `respond`,
- * with what may be done now (`canRun`, `canPause`, `canResume`,
+ * `status`, and `start`, `pause`, `resume`, `cancel`, `send` and `respond`,
+ * with what may be done now (`canStart`, `canPause`, `canResume`,
  * `canCancel`), whether a start is under way (`isStarting`) and a control
  * still settling (`pendingControl`).
  *
  * ```tsx
  * const summary = useWorkflow(workflows.summarizeNote);
- * // In a handler: await summary.run({ noteId });
+ * // In a handler: await summary.start({ noteId });
  * if (summary.status === "completed") summary.output.summary;
  * if (summary.status === "failed") summary.error.message;
  *
@@ -47,7 +47,7 @@ const maxRunIdLength = 256;
  *
  * Without `runId` it shows the run of its latest admitted start, idle
  * until the first; with one, exactly that run, whatever it starts. The
- * run is the live `queries.run`, `canRun` the live `queries.canStart`; a
+ * run is the live `queries.run`, `canStart` the live `queries.canStart`; a
  * start is `mutations.start`, a control `mutations.pause`, `.resume` or
  * `.cancel`, an event `mutations.send` (workflow-calls.ts). Nothing runs
  * or is controlled but by those calls: never on render, remount or

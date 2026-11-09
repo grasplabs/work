@@ -90,8 +90,8 @@ const Tasks = () => {
       {tasks.map((task) => (
         <Button
           key={task._id}
-          disabled={!review.canRun}
-          onClick={async () => await review.run({ task: task._id })}
+          disabled={!review.canStart}
+          onClick={async () => await review.start({ task: task._id })}
         >
           Review {task.title}
         </Button>

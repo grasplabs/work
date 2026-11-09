@@ -30,7 +30,7 @@ export interface WorkflowCommands<Input, Wait, Event = never> {
    * structured error otherwise. With no `runId` given to the hook, the
    * hook then shows the run of its latest admitted start.
    */
-  readonly run: (input: Input) => Promise<RunHandle>;
+  readonly start: (input: Input) => Promise<RunHandle>;
   /**
    * Pauses the selected run at its next safe point: resolves once the
    * host admitted it; the run's status says when it is paused.
@@ -73,7 +73,7 @@ export interface WorkflowCommands<Input, Wait, Event = never> {
     }
   ) => Promise<void>;
   /** Whether a new run may be started now (not a promise it will be). */
-  readonly canRun: boolean;
+  readonly canStart: boolean;
   readonly canPause: boolean;
   readonly canResume: boolean;
   readonly canCancel: boolean;
@@ -383,7 +383,7 @@ export interface ViewParts {
   readonly submitting: readonly Submitting[];
   readonly commands: Pick<
     WorkflowCommands<unknown, WorkflowWait, unknown>,
-    "run" | "pause" | "resume" | "cancel" | "send" | "respond"
+    "start" | "pause" | "resume" | "cancel" | "send" | "respond"
   >;
 }
 
@@ -411,7 +411,7 @@ export const workflowView = ({
     snapshot.status !== "compensating";
   const shared = {
     ...commands,
-    canRun: canStart === true,
+    canStart: canStart === true,
     canPause: free && snapshot.control.canPause && pending === null,
     canResume: free && snapshot.control.canResume && pending === null,
     canCancel: free && snapshot.control.canCancel && pending?.kind !== "cancel",

@@ -18,7 +18,7 @@ import { showsControl } from "./workflow-view.ts";
 // `canStart`): its own starts and controls, each a call of the workflow
 // reference's mutations through the session client, which sends it under
 // one key until the host answers, never twice. Nothing here sends a
-// request on its own: only `run`, `pause`, `resume`, `cancel`, `send` and
+// request on its own: only `start`, `pause`, `resume`, `cancel`, `send` and
 // `respond`, called by the page.
 //
 // - Selection: without a run ID, the hook shows the run of its latest
@@ -117,7 +117,7 @@ export class WorkflowCalls {
       return runId;
     };
     return {
-      run: this.start,
+      start: this.start,
       pause: async () => {
         await this.#control("pause", shown());
       },

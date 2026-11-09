@@ -25,27 +25,27 @@ declare const runId: string;
 
 export const useRunChecks = (): void => {
   const summary = useWorkflow(workflows.summarizeNote);
-  expectTypeOf(summary.run({ noteId })).toEqualTypeOf<Promise<RunHandle>>();
+  expectTypeOf(summary.start({ noteId })).toEqualTypeOf<Promise<RunHandle>>();
   // A defaulted field may be left out, or given.
-  void summary.run({ noteId, style: "long" });
+  void summary.start({ noteId, style: "long" });
   expectTypeOf(summary.pause()).toEqualTypeOf<Promise<void>>();
   expectTypeOf(summary.resume()).toEqualTypeOf<Promise<void>>();
   expectTypeOf(summary.cancel()).toEqualTypeOf<Promise<void>>();
-  expectTypeOf(summary.canRun).toEqualTypeOf<boolean>();
+  expectTypeOf(summary.canStart).toEqualTypeOf<boolean>();
   expectTypeOf(summary.isStarting).toEqualTypeOf<boolean>();
   // @ts-expect-error -- a note's ID, not a task's
-  void summary.run({ noteId: taskId });
+  void summary.start({ noteId: taskId });
   // @ts-expect-error -- a field the workflow doesn't take
-  void summary.run({ noteId, priority: 1 });
+  void summary.start({ noteId, priority: 1 });
   // @ts-expect-error -- its required field left out
-  void summary.run({});
+  void summary.start({});
   // @ts-expect-error -- a value outside the enum
-  void summary.run({ noteId, style: "medium" });
+  void summary.start({ noteId, style: "medium" });
   // @ts-expect-error -- `run` takes the input itself, not a string
-  void summary.run("summarize");
+  void summary.start("summarize");
 
   const archive = useWorkflow(workflows.archiveNotes);
-  void archive.run({});
+  void archive.start({});
   if (archive.status === "completed") {
     expectTypeOf(archive.output).toEqualTypeOf<null>();
   }

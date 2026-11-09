@@ -311,13 +311,13 @@ describe("useWorkflow", () => {
       const hook = mount(page);
       expect(hook.view()).toMatchObject({
         status: "idle",
-        canRun: false,
+        canStart: false,
         canPause: false,
         waits: [],
       });
       await flush();
       page.canStart().push(true);
-      expect(hook.view()).toMatchObject({ status: "idle", canRun: true });
+      expect(hook.view()).toMatchObject({ status: "idle", canStart: true });
       expect(page.calls).toStrictEqual([]);
     });
 
@@ -408,7 +408,7 @@ describe("useWorkflow", () => {
       const page = host();
       const hook = mount(page);
       hook.view();
-      const started = hook.view().run({ noteId });
+      const started = hook.view().start({ noteId });
       expect(hook.view().isStarting).toBeTruthy();
       await expect(started).resolves.toStrictEqual(handleOf("run-1"));
       expect(page.calls).toMatchObject([
@@ -431,8 +431,8 @@ describe("useWorkflow", () => {
       const page = host();
       const answers = page.holdAnswers();
       const hook = mount(page);
-      const older = hook.view().run({ noteId });
-      const newer = hook.view().run({ noteId });
+      const older = hook.view().start({ noteId });
+      const newer = hook.view().start({ noteId });
       await flush();
       answers[1]?.({ value: handleOf("run-2") });
       await newer;
@@ -445,7 +445,7 @@ describe("useWorkflow", () => {
       const page = host();
       const hook = await showing(page);
       page.answer(() => ({ failed: "workflow.start_denied" }));
-      await expect(codeOf(hook.view().run({ noteId }))).resolves.toBe(
+      await expect(codeOf(hook.view().start({ noteId }))).resolves.toBe(
         "workflow.start_denied"
       );
       expect(hook.view()).toMatchObject({ status: "running", runId: "run-1" });
@@ -462,7 +462,7 @@ describe("useWorkflow", () => {
         return { value: handleOf("run-1") };
       });
       const hook = mount(page);
-      const started = hook.view().run({ noteId });
+      const started = hook.view().start({ noteId });
       await vi.advanceTimersByTimeAsync(5000);
       await expect(started).resolves.toMatchObject({ runId: "run-1" });
       const [first, again] = page.calls;
@@ -476,7 +476,7 @@ describe("useWorkflow", () => {
       const page = host();
       const hook = await showing(page);
       page.answer(() => ({ value: handleOf("run-2") }));
-      await hook.view().run({ noteId });
+      await hook.view().start({ noteId });
       expect(hook.view()).toMatchObject({ runId: "run-1" });
     });
   });
