@@ -558,6 +558,40 @@ describe("related records", () => {
     });
   });
 
+  it("count toward splitting a page with an end, so a page loading them splits before it passes an answer", async () => {
+    const fixture = await storeWith();
+    // Small orders, each naming a customer of 60 KB: only what `with`
+    // loads makes the page large.
+    await put(
+      fixture,
+      "customers",
+      Array.from({ length: 4 }, (_, index) => ({
+        id: `big${index}`,
+        fields: { name: String(index).repeat(60_000) },
+      }))
+    );
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: 5 }, (_, index) => ({
+        id: `w${index}`,
+        fields: { region: "EU", paid: true, customer: `big${index % 4}` },
+      }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const withCustomers = () => db.query("orders").with("customer");
+    const whole = await withCustomers().paginate({ pageSize: 4 });
+    const grown = await withCustomers().paginate({
+      pageSize: 3,
+      endCursor: whole.nextCursor ?? "",
+    });
+    const half = await withCustomers().paginate({ pageSize: 2 });
+    expect({
+      grown: grown.items.length,
+      split: grown.splitCursor,
+    }).toStrictEqual({ grown: 4, split: half.nextCursor });
+  });
+
   it("are refused past their bounds, clearly", async () => {
     const fixture = await storeWith();
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));

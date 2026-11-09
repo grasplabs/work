@@ -307,11 +307,13 @@ type Holding = "none" | "cursors" | "all";
 
 const listHost = (titles: readonly string[]) => {
   const state: {
+    titles: string[];
     version: number;
     hidden: Set<string>;
     broken: boolean;
     hold: Holding;
   } = {
+    titles: [...titles],
     version: 0,
     hidden: new Set<string>(),
     broken: false,
@@ -336,10 +338,12 @@ const listHost = (titles: readonly string[]) => {
       return failedWith("data.cursor_expired", "domain").result;
     }
     const after = cursor === null ? undefined : titleOf(cursor);
-    const visible = titles.filter(
-      (title) =>
-        !state.hidden.has(title) && (after === undefined || title > after)
-    );
+    const visible = state.titles
+      .toSorted()
+      .filter(
+        (title) =>
+          !state.hidden.has(title) && (after === undefined || title > after)
+      );
     const until = endCursor === undefined ? undefined : titleOf(endCursor);
     const items =
       until === undefined
@@ -349,15 +353,30 @@ const listHost = (titles: readonly string[]) => {
     const hasMore = visible.length > items.length;
     const nextCursor =
       endCursor ?? (last === undefined ? null : `${state.version}:${last}`);
+    // A page with an end past twice its size says where to split it.
+    const splitAfter =
+      endCursor !== undefined && items.length > 2 * pageSize
+        ? items[pageSize - 1]
+        : undefined;
+    const split =
+      splitAfter === undefined
+        ? {}
+        : { splitCursor: `${state.version}:${splitAfter}` };
     return {
       ok: true,
       value:
         hasMore && nextCursor !== null
-          ? { items: items.map((title) => ({ title })), hasMore, nextCursor }
+          ? {
+              items: items.map((title) => ({ title })),
+              hasMore,
+              nextCursor,
+              ...split,
+            }
           : {
               items: items.map((title) => ({ title })),
               hasMore: false,
               nextCursor: null,
+              ...split,
             },
     };
   };
@@ -400,6 +419,17 @@ const listHost = (titles: readonly string[]) => {
       const now = [...followed];
       for (const page of now) {
         push(page);
+      }
+    },
+    /** Refuses every page `which` picks with `code`, as its last push. */
+    refuse: (which: (page: Asked) => boolean, code: string) => {
+      const now = [...followed];
+      for (const page of now.filter(({ asked: each }) => which(each))) {
+        page.revision += 1;
+        page.onSnapshot({
+          revision: page.revision,
+          result: failedWith(code).result,
+        });
       }
     },
     release: () => {
@@ -529,6 +559,81 @@ describe("the session client's paginated list started again", () => {
     host.release();
     await vi.waitFor(() => {
       expect(list.titles()).toStrictEqual(["a", "c", "d", "e"]);
+    });
+    list.stop();
+  });
+
+  it("starts a new person's list at its first page, never refilling to the length of the person before's", async () => {
+    const host = listHost(["a", "b", "c", "d", "e", "f"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    await list.pager.loadMore();
+    // A new version: the list starts again, refilling to four records,
+    // its later pages slow to answer.
+    host.state.version = 1;
+    host.state.hold = "cursors";
+    host.reread();
+    await vi.waitFor(() => {
+      expect(list.pager.refill).toBe(4);
+    });
+    // Someone else signs in meanwhile; their lists are tried again.
+    host.refuse(() => true, "auth.principal_changed");
+    host.release();
+    clientInternals(host.client).retryFailed();
+    await vi.waitFor(() => {
+      expect({
+        titles: list.titles(),
+        error: list.pager.snapshot.error,
+      }).toStrictEqual({ titles: ["a", "b"], error: undefined });
+    });
+    // Settled: none of the person before's refill goes on.
+    await vi.waitFor(() => {
+      expect(host.asked.at(-1)?.cursor).toBeNull();
+    });
+    expect({
+      titles: list.titles(),
+      refill: list.pager.refill,
+      pages: list.pager.pages.length,
+    }).toStrictEqual({ titles: ["a", "b"], refill: undefined, pages: 1 });
+    list.stop();
+  });
+
+  it("shows nothing of a page split mid-way once one of its halves is refused", async () => {
+    const host = listHost(["b", "c"]);
+    const list = listOf(host, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["b"]);
+    });
+    await list.pager.loadMore();
+    // Records move into the first page, past twice its size: it splits,
+    // and neither half's own answer comes yet.
+    host.state.titles.push("a0", "a1", "a2");
+    host.state.hold = "all";
+    host.reread();
+    await vi.waitFor(() => {
+      expect({
+        titles: list.titles(),
+        halvesHeld: list.pager.pages
+          .slice(0, 2)
+          .map(({ held }) => held !== undefined),
+      }).toStrictEqual({
+        titles: ["a0", "a1", "a2", "b", "c"],
+        halvesHeld: [true, true],
+      });
+    });
+    // The second half is refused: the person lost access to the table,
+    // which, unlike losing the App, doesn't clear the whole client.
+    host.refuse(
+      ({ cursor, endCursor }) => cursor !== null && endCursor !== undefined,
+      "data.access_denied"
+    );
+    await vi.waitFor(() => {
+      expect({
+        error: list.pager.snapshot.error?.code,
+        items: list.pager.snapshot.view.items,
+      }).toStrictEqual({ error: "data.access_denied", items: [] });
     });
     list.stop();
   });

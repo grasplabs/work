@@ -1773,20 +1773,19 @@ const compareAnchorValues = (left: AnchorValue, right: AnchorValue): number => {
 /**
  * Where a page with an end that grew is split (`readPage`): after its
  * first `pageSize` records once it holds more than twice that; else,
- * once its records pass half of what one answer may carry, after the
+ * once its records, with the related records `with` loads for each
+ * (`sizes`), pass half of what one answer may carry, after the
  * last record within the first half of their bytes, both halves holding
  * one at least. None while it is within both.
  */
 const splitAt = (
   found: readonly Match[],
+  sizes: readonly number[],
   pageSize: number
 ): Match | undefined => {
   if (found.length > 2 * pageSize) {
     return found[pageSize - 1];
   }
-  const sizes = found.map(({ row }) =>
-    typeof row.bytes === "number" ? row.bytes : 0
-  );
   const total = sizes.reduce((sum, size) => sum + size, 0);
   if (found.length < 2 || total <= pageLimits.answerBytes / 2) {
     return undefined;
@@ -1961,8 +1960,18 @@ export const readPage = (
   // half of what one answer may carry, where its records' bytes are
   // halved, so a live list keeps its pages near their size and within an
   // answer (as Convex's `splitCursor`).
+  // Each record's bytes, with those of the related records it carries.
+  const sizes = found.map(
+    ({ row }, position) =>
+      (typeof row.bytes === "number" ? row.bytes : 0) +
+      (items[position]?._with === undefined
+        ? 0
+        : JSON.stringify(items[position]?._with).length)
+  );
   const split =
-    end === null ? undefined : anchorAt(splitAt(found, terminal.pageSize));
+    end === null
+      ? undefined
+      : anchorAt(splitAt(found, sizes, terminal.pageSize));
   return {
     items,
     hasMore: more,

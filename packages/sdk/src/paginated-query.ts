@@ -565,6 +565,10 @@ export class Pagers {
    */
   restartPagers(refusal?: GraspError): void {
     for (const pager of this.#pagers.values()) {
+      // Nothing of the person before carries over, how far a refill of
+      // theirs was to go included.
+      pager.refill = undefined;
+      pager.held = undefined;
       this.#restart(pager);
       const [first] = pager.pages;
       if (

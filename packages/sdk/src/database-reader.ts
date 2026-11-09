@@ -41,7 +41,10 @@ import type { Id } from "./value-types.ts";
 // (`data.scan_limit` past them, never a part), whatever it answers. So
 // `collect` answers every record a read may reach, and longer lists page,
 // through a table of any size, each page bounded on its own; large
-// exports and aggregates are a workflow's.
+// exports and aggregates are a workflow's. What a query answers a page in
+// the browser is bounded apart from that: at most 256 KiB a push
+// (`pageLimits.answerBytes`), which a live list keeps its pages within
+// by splitting them (`splitCursor`).
 //
 // Besides queries: `search(table, text)` reads a table's full-text search
 // index in order of relevance; `group` counts and aggregates per value of

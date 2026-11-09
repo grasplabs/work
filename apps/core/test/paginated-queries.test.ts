@@ -934,6 +934,10 @@ describe(
         // oxlint-disable-next-line no-await-in-loop -- one after the other
         await theirs.mutation(api.create, { title });
       }
+      // Split: three pages, the first page's two halves in place of it.
+      await eventually(() => {
+        expect(list.pager.pages).toHaveLength(3);
+      });
       await opened.builder.api.apps.members.remove(opened.app, them);
       const owner = clientFor(opened).client;
       await pastAccessRecheck(async () => {

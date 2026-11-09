@@ -193,15 +193,25 @@ export const snapshotOf = (
   }
   // Started again: what it showed stays until its first page answers.
   const restarting = pager.held !== undefined;
+  const failed = error ?? pager.failure;
+  // A list whose page failed shows nothing: a page refused (access lost,
+  // say) takes the pages before it with it, a split half's held records
+  // too. A Load More's own failure keeps what shows.
+  let shownItems: unknown[] = items;
+  if (error !== undefined) {
+    shownItems = [];
+  } else if (restarting) {
+    shownItems = [...(pager.held ?? [])];
+  }
   return {
     snapshot: {
       view: {
-        items: restarting ? [...(pager.held ?? [])] : items,
+        items: shownItems,
         hasMore,
         isLoading,
         loadMore: pager.loadMore,
       },
-      error: error ?? pager.failure,
+      error: failed,
     },
     shown: restarting ? [pager.held] : shown,
   };
