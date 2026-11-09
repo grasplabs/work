@@ -3,7 +3,7 @@ import { expect } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
-import { answerSpeech } from "./speech.ts";
+import { answerSpeech, readUntil } from "./speech.ts";
 
 // Stephen says each step of the admin's onboarding (apps/web/src/voice):
 // with the sound on, each step's line is asked of the voice, the next
@@ -226,6 +226,10 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   const { admin } = peopleIn("setupStory");
   const page = await pageOf(admin);
   const asked = await answerSpeech(page);
+  // Read silently, the story goes at the pace of reading on the page's
+  // clock: the test goes on it to read it (`readUntil`). Heard, it takes
+  // the time its sound plays.
+  await page.clock.install();
 
   // The welcome, in Dutch from the moment it is picked.
   await page.goto("/setup?step=welcome");
@@ -262,14 +266,20 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   });
   await page.reload();
   const second = page.getByText(story.second);
-  await expect(second).toBeVisible();
+  await readUntil(page, async () => {
+    await expect(second).toBeVisible({ timeout: 100 });
+  });
   await page.getByRole("button", { name: "Pauzeren" }).click();
   await page.waitForTimeout(6000);
   await expect(second).toBeVisible();
   await expect(page.getByText(story.third)).toBeHidden();
   await page.getByRole("button", { name: "Afspelen" }).click();
-  await expect(page.getByText(story.third)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(story.summary)).toBeVisible({ timeout: 120_000 });
+  await readUntil(page, async () => {
+    await expect(page.getByText(story.third)).toBeVisible({ timeout: 100 });
+  });
+  await readUntil(page, async () => {
+    await expect(page.getByText(story.summary)).toBeVisible({ timeout: 100 });
+  });
   await page.getByRole("button", { name: "Doorgaan" }).click();
   await expect(
     page.getByRole("heading", { name: "Wie is wie in je bedrijf?" })

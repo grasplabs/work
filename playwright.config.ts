@@ -14,6 +14,7 @@ import {
   idpInspectorPort,
   idpOrigin,
   idpPort,
+  migratedStateDir,
   modelFakePort,
   origin,
   stateDir,
@@ -197,10 +198,15 @@ export default defineConfig({
         // Connect's config, which sends the AI providers' requests to the
         // fake ones below (e2e/connect-config.ts).
         "node e2e/connect-config.ts &&",
-        // Prebuilt, the state is the migrated empty one e2e/build.ts made.
-        // The dir comes from `env` below, so no path is ever shell syntax.
+        // Prebuilt, the state is a copy of the migrated empty one
+        // e2e/build.ts made. The dirs come from `env` below, so no path is
+        // ever shell syntax.
         ...(prebuilt
-          ? ["vp run --filter @grasp-os/core dev:start"]
+          ? [
+              'rm -rf "$DEV_PERSIST_TO" &&',
+              'cp -R "$E2E_MIGRATED_STATE" "$DEV_PERSIST_TO" &&',
+              "vp run --filter @grasp-os/core dev:start",
+            ]
           : [
               'rm -rf "$DEV_PERSIST_TO" &&',
               "vp run --filter @grasp-os/core dev",
@@ -229,6 +235,7 @@ export default defineConfig({
       ].join(" "),
       env: {
         DEV_PERSIST_TO: stateDir,
+        E2E_MIGRATED_STATE: migratedStateDir,
         // Core's dev script runs connect with it (e2e/connect-config.ts).
         CONNECT_WRANGLER_CONFIG: connectConfig,
         // Core signs each connector call's capability and connect checks
