@@ -6,11 +6,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   concurrentFiles,
-  maxShards,
   projectStartSeconds,
-  shardCountFor,
   shardSeconds,
-  shardTargetSeconds,
   splitIntoShards,
   spreadOver,
   startsFirst,
@@ -80,10 +77,32 @@ describe("splitting the test files between shards", () => {
     }
   });
 
-  it("gives the shards left over to the group whose shards would end last", () => {
+  it("gives the shards left over to the group whose shards would end last, of those another shard shortens", () => {
     const groups = splitIntoShards(suite, 6).map((shard) => shard[0]?.group);
 
-    expect(groups).toStrictEqual([0, 0, 0, 0, 1, 2]);
+    // Core's three end with its longest file; a fourth would end no sooner.
+    expect(groups).toStrictEqual([0, 0, 0, 1, 2, 2]);
+  });
+
+  it("gives a shard left over to a group it shortens, not to one its longest file holds up", () => {
+    const files = [
+      file("compiler long-build", 400, { group: 5, serial: true }),
+      file("compiler short-build", 10, { group: 5, serial: true }),
+      ...Array.from({ length: 40 }, (_, index) => file(`core ${index}`, 20)),
+    ];
+    const longestOfCompiler = (count: number): number =>
+      Math.max(
+        ...splitIntoShards(files, count)
+          .filter((shard) => shard[0]?.group === 5)
+          .map(shardSeconds)
+      );
+    const groups = splitIntoShards(files, 5).map((shard) => shard[0]?.group);
+
+    // Two shards take the compiler's short build off the long one's;
+    // a third would shorten nothing, so the rest go to core.
+    expect(longestOfCompiler(5)).toBe(projectStartSeconds + 400);
+    expect(groups.filter((group) => group === 5)).toHaveLength(2);
+    expect(groups.filter((group) => group === 0)).toHaveLength(3);
   });
 
   it("refuses fewer shards than groups, which would have to run two together", () => {
@@ -196,40 +215,5 @@ describe("splitting the test files between shards", () => {
     );
 
     expect(counts).toStrictEqual([6, 6, 6, 6]);
-  });
-});
-
-describe("choosing how many shards a run takes", () => {
-  it("takes the fewest shards that each end within the target", () => {
-    // Longer than the target in as few shards as it has groups.
-    const long = [
-      ...suite,
-      ...Array.from({ length: 600 }, (_, index) => file(`more ${index}`, 5)),
-    ];
-    const count = shardCountFor(long);
-    const longest = (shards: number): number =>
-      Math.max(...splitIntoShards(long, shards).map(shardSeconds));
-
-    expect(count).toBeGreaterThan(3);
-    expect(longest(count)).toBeLessThanOrEqual(shardTargetSeconds);
-    expect(longest(count - 1)).toBeGreaterThan(shardTargetSeconds);
-  });
-
-  it("gives each group a shard, however short", () => {
-    expect(
-      shardCountFor([file("sdk a", 1), file("pages a", 1, { group: 1 })])
-    ).toBe(2);
-  });
-
-  it("stops at the most shards a run may take", () => {
-    const huge = Array.from({ length: 400 }, (_, index) =>
-      file(`core ${index}`, 300)
-    );
-
-    expect(shardCountFor(huge)).toBe(maxShards);
-  });
-
-  it("takes no shards for no files", () => {
-    expect(shardCountFor([])).toBe(0);
   });
 });
