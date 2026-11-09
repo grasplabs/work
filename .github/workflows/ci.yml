@@ -173,6 +173,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # Chromium's headless shell, for the UI kit's component tests in
+      # Vitest's browser mode (@grasp-os/ui:browser,
+      # packages/ui/vite.browser.config.ts).
+      - uses: ./.github/actions/playwright-browser
       # gdb, for the stall reporter to print the thread stacks of each
       # workerd before it ends a stalled run (GRASP_STALL_DUMP_STACKS below,
       # scripts/stack-dump.ts). Ubuntu lets a process trace only its own
