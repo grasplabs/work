@@ -1410,6 +1410,8 @@ const recordsWithin = (
     }
     let answered = 0;
     for (const row of recordsOf(sql, scope, target, missing)) {
+      // Only one record's own related records, loaded before the answer
+      // bound is checked, can reach this: before them, it stops the page.
       if (!first && scan.bytes + row.bytes > queryMaxScannedBytes) {
         throw new PastBoundError();
       }

@@ -735,6 +735,68 @@ describe("related records", () => {
     });
   });
 
+  it("load record by record for a page with an end, so IDs of records gone past what one read may examine split it instead of failing", async () => {
+    const fixture = await storeWith({ products: "appMembers" });
+    await put(fixture, "orders", [
+      { id: "m", fields: { region: "M", paid: true } },
+      { id: "z", fields: { region: "Z", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRegion = () =>
+      db.query("orders").withIndex("by_region").with("items");
+    const first = await byRegion().paginate({ pageSize: 1 });
+    // An import lands inside the page: 5,000 orders naming ten products
+    // each that are gone. Each ID costs an entry to look up, yet adds
+    // almost nothing to an answer.
+    const imported = 5000;
+    const perOrder = 10;
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `i${numbered(index)}`,
+        fields: {
+          region: `A${numbered(index)}`,
+          paid: true,
+          items: Array.from(
+            { length: perOrder },
+            (_item, at) => `g${numbered(index * perOrder + at)}`
+          ),
+        },
+      }))
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byRegion().paginate({
+          pageSize: 10_000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    // Each order with null for every product it names.
+    const looked = tiled.items.filter(
+      ({ _with }) =>
+        Array.isArray(_with.items) &&
+        _with.items.length === perOrder &&
+        _with.items.every((product) => product === null)
+    );
+    expect({
+      split: tiled.reads > 1,
+      orders: tiled.items.length,
+      unique: new Set(tiled.items.map(({ _id }) => _id)).size,
+      last: tiled.items.at(-1)?._id,
+      looked: looked.length,
+    }).toStrictEqual({
+      split: true,
+      orders: imported + 1,
+      unique: imported + 1,
+      last: "m",
+      looked: imported,
+    });
+  });
+
   it("load record by record for a page with an end, so large related records past what one read may examine split it instead of failing", async () => {
     const fixture = await storeWith();
     await put(fixture, "orders", [
