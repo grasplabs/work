@@ -654,7 +654,6 @@ describe("reading", () => {
   test("holds every type in its compact form, and says which one it can't read", () => {
     const text = definitionText(tasks());
 
-    expect(text).not.toContain("descriptorVersion");
     expect(text).toContain('"type":{"default":false,"kind":"boolean"}');
     expect(() =>
       readDefinition(

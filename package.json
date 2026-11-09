@@ -50,6 +50,7 @@
     "aws4fetch": "catalog:",
     "capnweb": "catalog:",
     "lightningcss": "catalog:",
+    "oxc-parser": "catalog:oxc",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "secretlint": "catalog:",

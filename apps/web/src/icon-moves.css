@@ -38,8 +38,8 @@
  * for less motion; an icon that is already animated (a spinner) is left alone; and only a control's
  * own icon moves (its child, or one wrapper down), not every icon of a card that is one link.
  *
- * A new icon gets its move here: `icon-moves.test.ts` fails until every Lucide icon the app
- * uses has one, and when a part is named that the icon does not have (Lucide redrew it).
+ * A new icon gets its move here: the lint (`grasp/icon-has-move`) fails until every Lucide icon
+ * the app uses has one, and when a part is named that the icon does not have (Lucide redrew it).
  */
 
 @property --icon-move {

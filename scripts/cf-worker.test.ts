@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { parseSync } from "oxc-parser";
 import { describe, expect, it } from "vite-plus/test";
 
 import { cfWorker } from "../apps/admin/cf-worker.ts";
@@ -275,15 +276,33 @@ describe("the admin's Worker for cf", () => {
   });
 });
 
-/** Every module specifier `file` imports. */
-const importsOf = (file: string): string[] =>
-  [
-    ...readFileSync(file, "utf-8").matchAll(
-      /^import[^"']*["'](?<specifier>[^"']+)["']/gmu
+/**
+ * Every module `file` imports or re-exports, by its specifier, as oxc
+ * parses it: type-only ones too, and a dynamic import of a string.
+ */
+const importsOf = (file: string): string[] => {
+  const source = readFileSync(file, "utf-8");
+  const { module, errors } = parseSync(file, source);
+  if (errors.length > 0) {
+    throw new Error(`${file} doesn't parse: ${errors[0]?.message ?? ""}`);
+  }
+  const dynamic = module.dynamicImports.flatMap(({ moduleRequest }) => {
+    const written = source.slice(moduleRequest.start, moduleRequest.end);
+    const quoted = /^["'`](?<specifier>[^"'`]+)["'`]$/u.exec(written);
+    return quoted?.groups?.specifier === undefined
+      ? []
+      : [quoted.groups.specifier];
+  });
+  return [
+    ...module.staticImports.map(({ moduleRequest }) => moduleRequest.value),
+    ...module.staticExports.flatMap(({ entries }) =>
+      entries.flatMap(({ moduleRequest }) =>
+        moduleRequest === null ? [] : [moduleRequest.value]
+      )
     ),
-  ].flatMap((match) =>
-    match.groups?.specifier === undefined ? [] : [match.groups.specifier]
-  );
+    ...dynamic,
+  ];
+};
 
 /** The workspace packages `entry` reaches through its relative imports. */
 const workspaceImports = (entry: string): string[] => {
@@ -309,8 +328,12 @@ const workspaceImports = (entry: string): string[] => {
   return [...found];
 };
 
+// Vite's Cloudflare plugin loads cloudflare.config.ts on its own, before
+// the Worker's modules are built: a workspace package the config reached
+// would bring in modules only the Worker's build can load, and the admin's
+// dev server and build would fail to start.
 describe("the admin's cf config as Vite's Cloudflare plugin loads it", () => {
-  it("reaches none of the modules the Worker loads, which broke the dev server", () => {
+  it("loads from the admin's own files alone, reaching no workspace package", () => {
     expect(
       workspaceImports(
         path.join(import.meta.dirname, "../apps/admin/cloudflare.config.ts")

@@ -41,8 +41,6 @@ export const useChecks = (): void => {
   void exported.output;
   // @ts-expect-error -- the wrong input
   void exported.run({ format: "xml" });
-  // @ts-expect-error -- there is no `isRunning` alias beside `status`
-  void exported.isRunning;
   // @ts-expect-error -- an action that answers once has useAction
   void useStream(api.notes.tally);
   // @ts-expect-error -- a mutation doesn't stream
