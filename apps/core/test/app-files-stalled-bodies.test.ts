@@ -1,7 +1,8 @@
 import { fileChannel } from "@grasp-os/sdk/host";
 import { appFilesPath } from "@grasp-os/shared/app-file-limits";
+import { readDeadlineMs } from "@grasp-os/shared/http";
 import { pageLeaseHeader } from "@grasp-os/shared/pages";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appsOf, blobOf, fileStates, png, upload } from "./app-files.ts";
 import { mockIdp } from "./idp.ts";
@@ -54,14 +55,28 @@ describe("an App's files", { timeout: 120_000 }, () => {
         controller.enqueue(new TextEncoder().encode("{"));
       },
     });
-    const response = await page.fetch(`${appFilesPath}/${app}/files/uploads`, {
-      method: "POST",
-      headers: {
-        [pageLeaseHeader]: page.lease,
-        "content-type": "application/json",
-      },
-      body,
-    });
+    // Core's clock, which the test moves past the read's deadline
+    // (`readDeadlineMs`) instead of waiting it out.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let response: Response;
+    try {
+      const answer = page.fetch(`${appFilesPath}/${app}/files/uploads`, {
+        method: "POST",
+        headers: {
+          [pageLeaseHeader]: page.lease,
+          "content-type": "application/json",
+        },
+        body,
+      });
+      // Once core reads the body and waits for the rest.
+      await vi.waitFor(() => {
+        expect(vi.getTimerCount()).toBeGreaterThan(0);
+      });
+      await vi.advanceTimersByTimeAsync(readDeadlineMs);
+      response = await answer;
+    } finally {
+      vi.useRealTimers();
+    }
     expect({
       status: response.status,
       answer: await response.json(),
