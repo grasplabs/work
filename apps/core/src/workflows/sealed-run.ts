@@ -3262,6 +3262,7 @@ const callAliasesOf = (build: LoadedBuild): string[] => [
  */
 export const sealedRunStart = async (env: Env, run: HostedSealedRun) => ({
   runId: run.runId,
+  startedAt: run.createdAt,
   inbox: await inboxOf(env, run),
   params: Object.fromEntries(
     run.build.params.flatMap((name) =>

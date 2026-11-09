@@ -203,7 +203,12 @@ export interface WorkflowCtx<
   Permissions extends WorkflowPermissions,
   P extends Params,
 > {
-  readonly run: { readonly id: RunId };
+  /**
+   * The run: its ID, and when it started (ms since the epoch), as its
+   * start recorded it, so a scheduled run finds its day or week from it
+   * and replays alike.
+   */
+  readonly run: { readonly id: RunId; readonly startedAt: number };
   readonly params: ParamValues<P>;
   /**
    * What the workflow kept between its runs, by key, as this run's start

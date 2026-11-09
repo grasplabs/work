@@ -154,8 +154,8 @@ const guardsAt = (
   return [];
 };
 
-/** What a run's code knows of its run. */
-const runType = "{ readonly id: string }";
+/** What a run's code knows of its run: its ID, and when it started, in ms. */
+const runType = "{ readonly id: string; readonly startedAt: number }";
 
 /** A value whose type the document doesn't declare. */
 const untyped = "any";

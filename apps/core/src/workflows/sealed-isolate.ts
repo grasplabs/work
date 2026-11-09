@@ -240,13 +240,14 @@ import definition from ${JSON.stringify(module)};
 ${settling}
 
 export class Run extends WorkerEntrypoint {
-  async run(host, { runId, inbox, params, input, state, connections }) {
+  async run(host, { runId, startedAt, inbox, params, input, state, connections }) {
     return await settled(async () => {
       if (typeof definition?.run !== "function") {
         throw new Error(${JSON.stringify(refusal)});
       }
       const engine = {
         runId,
+        startedAt,
         inbox: Object.freeze({ ...inbox }),
         params,
         state,

@@ -750,7 +750,7 @@ export const journaledCtx = (
   }
 
   const ctx = membersOf<unknown>([
-    ["run", frozenData({ id: engine.runId })],
+    ["run", frozenData({ id: engine.runId, startedAt: engine.startedAt })],
     ["params", frozenData(params)],
     ["state", frozenData(snapshot)],
     ["inbox", frozenData(engine.inbox ?? {})],

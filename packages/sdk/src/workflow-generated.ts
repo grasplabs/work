@@ -2,7 +2,10 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 
 import { own as ownField } from "./expression-runtime.ts";
 import { WorkflowError } from "./workflow-error.ts";
-import { caughtError as caughtErrorOf } from "./workflow-journal.ts";
+import {
+  caughtError as caughtErrorOf,
+  frozenData,
+} from "./workflow-journal.ts";
 import type { CaughtError, Read } from "./workflow-steps.ts";
 
 // `@grasp-os/sdk/workflow-generated`: what only the code generated from a
@@ -16,6 +19,22 @@ import type { CaughtError, Read } from "./workflow-steps.ts";
  * field, never the method. Generated code imports it as `$own`.
  */
 export const own: (value: unknown, name: string) => Read = ownField;
+
+/**
+ * `JSON.parse(text)` as an expression calls it: `text`'s value as frozen
+ * data with no prototype (`frozenData`), as every value an expression
+ * reads is, so a `__proto__` or `constructor` key in it is an own field
+ * holding data, never a prototype. Only text parses; anything else is a
+ * `TypeError` (never converted to text, which would run a `toString`),
+ * and text that isn't JSON is JSON's own `SyntaxError`. Generated code
+ * imports it as `$parse`.
+ */
+export const parse = (text: unknown): Read => {
+  if (typeof text !== "string") {
+    throw new TypeError("`JSON.parse` takes text.");
+  }
+  return frozenData(JSON.parse(text));
+};
 
 /**
  * What a catch reads as `error`: the failure it took, as frozen data with

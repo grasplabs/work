@@ -368,6 +368,9 @@ class Generator {
     if (code.includes(`${runtimeNames.own}(`)) {
       this.#generatedImports.add(`own as ${runtimeNames.own}`);
     }
+    if (code.includes(`${runtimeNames.parse}(`)) {
+      this.#generatedImports.add(`parse as ${runtimeNames.parse}`);
+    }
     const slot = this.#expressions.length;
     this.#expressions.push({
       slot,
