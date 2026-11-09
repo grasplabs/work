@@ -58,6 +58,7 @@ import {
 } from "@grasp-os/workflow-schema/format";
 import type {
   Binding,
+  ConnectionCallStep,
   Step,
   WaitForEventStep,
 } from "@grasp-os/workflow-schema/format";
@@ -950,6 +951,41 @@ const eventTypeProblems = (
 };
 
 /**
+ * Where connection call `step` (at `pointer`) keeps a file or attaches
+ * run files where its action's contract (`operation`) doesn't answer or
+ * take files, as the connector's approval compared with what it serves:
+ * refused here rather than at the call.
+ */
+const fileProblems = (
+  step: ConnectionCallStep,
+  operation: { answersFile?: true; takesFiles?: true } | undefined,
+  pointer: string
+): WorkflowDefinitionProblem[] => [
+  ...(step.into !== undefined && operation?.answersFile !== true
+    ? [
+        {
+          code: "connector.no_file_answer",
+          message: `\`${step.action}\` doesn't answer a file, so nothing is kept \`into\` the run's files.`,
+          pointer: `${pointer}/into`,
+          remedy:
+            "Keep a file only from an action whose contract answers one, or leave `into` out.",
+        },
+      ]
+    : []),
+  ...(step.from !== undefined && operation?.takesFiles !== true
+    ? [
+        {
+          code: "connector.takes_no_files",
+          message: `\`${step.action}\` attaches no files, so none come \`from\` the run's files.`,
+          pointer: `${pointer}/from`,
+          remedy:
+            "Attach files only to an action whose contract takes them, or leave `from` out.",
+        },
+      ]
+    : []),
+];
+
+/**
  * What the format can't check of a document's bindings, against what
  * they resolve to: each binding's contract in the host catalog (or, for a
  * `local:` one, among the workflow's own modules, `modules`), of the kind
@@ -1016,7 +1052,17 @@ const bindingProblems = (
         pointer: `${pointer}/action`,
         remedy: "Call one of the actions its contract allows.",
       });
+      continue;
     }
+    problems.push(
+      ...fileProblems(
+        step,
+        Object.hasOwn(operations ?? {}, step.action)
+          ? operations?.[step.action]
+          : undefined,
+        pointer
+      )
+    );
   }
   return problems;
 };
@@ -1042,7 +1088,10 @@ const expressionTypeProblems = async (
   const bindings = documentBindings(checked.document);
   // A `call` step's result, as its call's contract answers it.
   const outputOf = (step: Step) => {
-    const called = step.type === "call" ? step : undefined;
+    const called =
+      step.type === "call" && ("connection" in step || "module" in step)
+        ? step
+        : undefined;
     let alias = "";
     if (called !== undefined) {
       alias = "connection" in called ? called.connection : called.module;

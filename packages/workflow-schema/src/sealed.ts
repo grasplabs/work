@@ -12,7 +12,12 @@ import {
 } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
-import { formatLimits, stepIdPattern } from "./format.ts";
+import {
+  brainActions,
+  filesActions,
+  formatLimits,
+  stepIdPattern,
+} from "./format.ts";
 import type { Json } from "./format.ts";
 
 // The sealed table: what the generator (generate.ts) writes beside the
@@ -96,6 +101,27 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     name: z.literal("grasp.connector"),
     binding: aliasSchema,
     operation: z.string().min(1).max(256),
+    arguments: templateSchema,
+    /**
+     * The files permission a read that answers a file keeps it in, as a
+     * file of the run, and the one a write's attachments are run files of:
+     * the build's choice alone, which the call's code must name the same.
+     */
+    into: aliasSchema.optional(),
+    from: aliasSchema.optional(),
+  }),
+  z.strictObject({
+    /** One call on the run's own files, through a files permission. */
+    name: z.literal("grasp.files"),
+    binding: aliasSchema,
+    operation: z.enum(filesActions),
+    arguments: templateSchema,
+  }),
+  z.strictObject({
+    /** One read of a Brain collection, through a brain permission. */
+    name: z.literal("grasp.brain"),
+    binding: aliasSchema,
+    operation: z.enum(brainActions),
     arguments: templateSchema,
   }),
   z.strictObject({

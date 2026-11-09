@@ -123,6 +123,19 @@ import type {
 //   wait's length, each event wait's permission, types and timeout, and
 //   the keys each task keeps in state with the template of each value: a
 //   call or record of anything else is the host's to refuse.
+// - The run's files and the Brain reached past what was approved. A files
+//   or Brain call names its permission and its action, both sealed (an
+//   action of the format's fixed lists, `filesActions`, `brainActions`),
+//   and only its arguments are the isolate's: a file is named by its ID,
+//   which an expression may compute, but the host looks each file up by
+//   that ID *and* the run's own, so no ID of another run's file, made up
+//   or carried in data, reaches one; a Brain collection is the
+//   permission's one, read as the run's person may (core's
+//   resource-reads.ts). A connection's `into` and `from`, the files
+//   permissions a read keeps its file in and a write attaches files from,
+//   are sealed too: the code names the same ones, and the host refuses a
+//   call that names others, or names any where the action's contract
+//   doesn't answer or take files.
 
 /** The SDK the generated module imports. */
 export const generatedImport = "@grasp-os/sdk/workflow";
@@ -138,10 +151,11 @@ export const generatedHelpersImport = "@grasp-os/sdk/workflow-generated";
  * code was generated for, which the run host's engine must fit, so a new
  * version here is a new contract between them: core loads only builds of
  * this one, and an older build is refused, to publish again
- * (`workflow.format_unsupported`), never half run. Version 4:
- * grasp-workflow/2's `defineWorkflow`, every `ctx` call journaling itself.
+ * (`workflow.format_unsupported`), never half run. Version 5: calls
+ * on the run's files and the Brain (`ctx.files`, `ctx.brain`), and a
+ * connection call's `into` and `from`, which the code sends with it.
  */
-export const generatorVersion = "grasp-workflow-ts/4";
+export const generatorVersion = "grasp-workflow-ts/5";
 
 /** A task as its generator writes it: the loops around it are added. */
 type Unscoped<Task> = Task extends unknown ? Omit<Task, "scope"> : never;
@@ -291,6 +305,17 @@ const callOptions = (
   state: readonly (readonly [string, string])[]
 ): string => {
   const options: (readonly [string, string])[] = [["step", literal(step.id)]];
+  // Where a connection's read keeps its file and where a write's
+  // attachments come from, as the build seals them: the code names the
+  // same, and the host refuses a call that names others.
+  if (step.type === "call" && "connection" in step) {
+    if (step.into !== undefined) {
+      options.push(["into", literal(step.into)]);
+    }
+    if (step.from !== undefined) {
+      options.push(["from", literal(step.from)]);
+    }
+  }
   if (retrying !== undefined) {
     options.push(["retry", retryCode(retrying)]);
   }
@@ -317,6 +342,9 @@ class Generator {
   readonly #decisions = new Set<string>();
   readonly #events = new Map<string, Set<string>>();
   readonly #modules = new Map<string, ModulePermission["kind"]>();
+  /** The actions each files and brain permission's steps take. */
+  readonly #files = new Map<string, Set<string>>();
+  readonly #brain = new Map<string, Set<string>>();
   #ai = false;
 
   constructor(workflow: CheckedWorkflow) {
@@ -512,6 +540,8 @@ class Generator {
         binding: step.connection,
         operation: step.action,
         arguments: args.template,
+        ...(step.into === undefined ? {} : { into: step.into }),
+        ...(step.from === undefined ? {} : { from: step.from }),
       };
       // The member path as an App's member reads (`memberPathsOf`:
       // `read-attachment` is `readAttachment`), mapped in the declaration
@@ -526,6 +556,8 @@ class Generator {
       member = `ctx.connections${memberOf(step.connection)}${path
         .map((segment) => memberOf(segment))
         .join("")}`;
+    } else if ("files" in step || "brain" in step) {
+      ({ call, member } = this.#resourceCall(step, args.template));
     } else {
       const permission =
         this.#workflow.document.permissions?.modules?.[step.module];
@@ -560,6 +592,44 @@ class Generator {
       depth,
       `${member}(${args.code}, ${callOptions(step, retrying, state.code)})`
     );
+  }
+
+  /**
+   * A call on the run's files or a Brain collection,
+   * `ctx.files.<alias>.<action>` or `ctx.brain.<alias>.<action>`: an action
+   * of the format's own fixed list, sealed as its call, and declared.
+   */
+  #resourceCall(
+    step: Exclude<
+      Extract<Step, { type: "call" }>,
+      { connection: string } | { module: string }
+    >,
+    args: Template
+  ): { call: SealedCall; member: string } {
+    const [kind, alias, actions] =
+      "files" in step
+        ? (["files", step.files, this.#files] as const)
+        : (["brain", step.brain, this.#brain] as const);
+    const declared = actions.get(alias) ?? new Set<string>();
+    declared.add(step.action);
+    actions.set(alias, declared);
+    return {
+      call:
+        "files" in step
+          ? {
+              name: "grasp.files",
+              binding: alias,
+              operation: step.action,
+              arguments: args,
+            }
+          : {
+              name: "grasp.brain",
+              binding: alias,
+              operation: step.action,
+              arguments: args,
+            },
+      member: `ctx.${kind}${memberOf(alias)}${memberOf(step.action)}`,
+    };
   }
 
   #generate(
@@ -1119,6 +1189,19 @@ class Generator {
           [...this.#events].map(([alias, types]) => [alias, listed(types)])
         ),
       ]);
+    }
+    for (const [kind, held] of [
+      ["files", this.#files],
+      ["brain", this.#brain],
+    ] as const) {
+      if (held.size > 0) {
+        kinds.push([
+          kind,
+          objectCode(
+            [...held].map(([alias, actions]) => [alias, listed(actions)])
+          ),
+        ]);
+      }
     }
     if (this.#modules.size > 0) {
       kinds.push([

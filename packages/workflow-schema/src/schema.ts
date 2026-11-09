@@ -67,28 +67,62 @@ const errorCode = {
   pattern: appErrorCodePattern.source,
 };
 
+/** The keys that name what a `call` step calls. */
+const callTargets = [
+  "connection",
+  "files",
+  "brain",
+  "module",
+  "action",
+  "into",
+  "from",
+] as const;
+
+/** A schema a `call` step matches when it has any of `callTargets` but `allowed`. */
+const callTargetsBut = (...allowed: readonly string[]) => ({
+  anyOf: callTargets
+    .filter((key) => !allowed.includes(key))
+    .map((key) => ({ required: [key] })),
+});
+
 const stepKinds = {
   call: {
     ...stepOf(
       "call",
       {
         connection: ref("alias"),
-        action: { type: "string", pattern: actionPattern, maxLength: 256 },
+        files: ref("alias"),
+        brain: ref("alias"),
         module: ref("alias"),
+        action: { type: "string", pattern: actionPattern, maxLength: 256 },
+        into: ref("alias"),
+        from: ref("alias"),
         args: ref("value"),
         timeout: ref("duration"),
         state: ref("state"),
       },
       []
     ),
-    // A connection's action, or one of the workflow's own modules.
+    // One member: a connection's action (which alone keeps a file `into`
+    // or attaches files `from` a files permission), an action on the run's
+    // files, an action on a Brain collection, or one of the workflow's
+    // own modules.
     oneOf: [
-      { required: ["connection", "action"], not: { required: ["module"] } },
+      {
+        required: ["connection", "action"],
+        not: callTargetsBut("connection", "action", "into", "from"),
+      },
+      {
+        required: ["files", "action"],
+        not: callTargetsBut("files", "action"),
+      },
+      {
+        required: ["brain", "action"],
+        not: callTargetsBut("brain", "action"),
+      },
       {
         required: ["module"],
-        not: {
-          anyOf: [{ required: ["connection"] }, { required: ["action"] }],
-        },
+        not: callTargetsBut("module"),
       },
     ],
   },

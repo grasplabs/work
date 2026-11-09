@@ -313,6 +313,14 @@ const notifyAt = (at: string, to = '"a"'): string =>
 const finishStep =
   'await step.sleep("finish", { key: "task", description: "Its sleep", duration: 1000 })';
 
+/** `send`'s mail, its call naming the files permissions `files` (code). */
+const mailNaming = (files: string): string =>
+  moduleOf(
+    send(
+      `return await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }, ${files});`
+    )
+  );
+
 describe("a sealed build's run on the run host", () => {
   let sealed: Sealed;
 
@@ -410,6 +418,19 @@ describe("a sealed build's run on the run host", () => {
       otherBinding: refusedAs('Step "send:task" calls only binding mail.'),
       otherOperation: refusedAs('Step "send:task" calls only mail.send.'),
     });
+  });
+
+  it("refuses a call naming files permissions its build doesn't: a file kept or run files attached of the isolate's own choosing", async () => {
+    const call = mailNaming;
+    const refused = refusedAs(
+      'Step "send:task" keeps and attaches files only where its build says.'
+    );
+    // A workflow of its own: its waiting runs count toward no other test's.
+    const own = await sealedWorkflow();
+    expect({
+      into: await ranAs(await waitingRun(own), call('{ into: "files" }')),
+      from: await ranAs(await waitingRun(own), call('{ from: "files" }')),
+    }).toStrictEqual({ into: refused, from: refused });
   });
 
   it("refuses a changed literal, an extra or a missing key, and a list of another length", async () => {

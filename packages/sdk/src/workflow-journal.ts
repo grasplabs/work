@@ -15,6 +15,7 @@ import { eventWaitSchema } from "./workflow-steps.ts";
 import type {
   CallOptions,
   CaughtError,
+  ConnectionCallOptions,
   Decision,
   DecisionRequest,
   Duration,
@@ -35,7 +36,7 @@ import type { WorkflowPermissions } from "./workflow.ts";
 //
 // | call | parts, and what each records |
 // | --- | --- |
-// | a connection's action, a module, the model | `task`: `{ output }`, or `{ output, state }` |
+// | a connection's action, a files or Brain action, a module, the model | `task`: `{ output }`, or `{ output, state }` |
 // | a decision | `enter`: `{ recipients, prompt, input }`; `task`: the decision opened; `task#ask`; `task#asked`: when; `task#answer`: the wait |
 // | an event wait | `enter`, with a match only: `{ key }`; `task`: the wait (`engine.listen`) |
 // | a sleep | `task`: the sleep |
@@ -369,6 +370,30 @@ const deadlineOf = (until: number): { output: null; until: number } => {
   return { output: null, until };
 };
 
+/**
+ * A connection call's files permissions (`into`, `from`), as the call
+ * sends them beside its arguments: none for any other call, and only
+ * aliases. The host holds them to the build's.
+ */
+const filesOf = (
+  options: ConnectionCallOptions
+): { into?: string; from?: string } | undefined => {
+  const { into, from } = options;
+  if (into === undefined && from === undefined) {
+    return undefined;
+  }
+  if (
+    (into !== undefined && typeof into !== "string") ||
+    (from !== undefined && typeof from !== "string")
+  ) {
+    throw invalidCall("A call's `into` and `from` name files permissions");
+  }
+  return {
+    ...(into === undefined ? {} : { into }),
+    ...(from === undefined ? {} : { from }),
+  };
+};
+
 interface JournalConfig {
   readonly permissions: WorkflowPermissions;
   readonly state: Readonly<Record<string, AnySchema>>;
@@ -504,8 +529,9 @@ export const journaledCtx = (
   /** A call through binding `alias`, as its step's one `task`. */
   const call =
     (alias: string, operation: string) =>
-    async (args: unknown, options: CallOptions): Promise<Json> => {
+    async (args: unknown, options: ConnectionCallOptions): Promise<Json> => {
       const { step, part } = named(options);
+      const files = filesOf(options);
       return await exclusive(step, async () => {
         const sent = args === undefined ? {} : jsonValue(args);
         const record = await engine.do(
@@ -520,7 +546,11 @@ export const journaledCtx = (
                 `This workflow has no permission named ${alias}.`
               );
             }
-            const output = jsonValue(await method(operation, sent));
+            const output = jsonValue(
+              await (files === undefined
+                ? method(operation, sent)
+                : method(operation, sent, files))
+            );
             const writes = kept(options.state, output);
             return writes === undefined
               ? { output }
@@ -540,6 +570,22 @@ export const journaledCtx = (
       ),
     ])
   );
+
+  /**
+   * The members of each files or brain permission: exactly the actions its
+   * steps take, each a call of that action through its alias.
+   */
+  const actionMembers = (
+    held: Readonly<Record<string, readonly string[]>> | undefined
+  ) =>
+    membersOf(
+      Object.entries(held ?? {}).map(([alias, actions]) => [
+        alias,
+        membersOf(actions.map((action) => [action, call(alias, action)])),
+      ])
+    );
+  const files = actionMembers(permissions.files);
+  const brain = actionMembers(permissions.brain);
 
   const modules = membersOf(
     Object.entries(permissions.modules ?? {}).map(([alias, kind]) => [
@@ -711,6 +757,8 @@ export const journaledCtx = (
     ["connections", connections],
     ["decisions", decisions],
     ["events", events],
+    ["files", files],
+    ["brain", brain],
     ["modules", modules],
     ["ai", ai],
     ["sleep", sleep],

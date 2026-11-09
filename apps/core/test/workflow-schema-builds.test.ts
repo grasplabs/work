@@ -15,10 +15,12 @@ import {
   eventWait,
   everyOperator,
   everyStep,
+  fileSteps,
   followedBy,
   keeping,
   withDecisions,
   withEventWaits,
+  withFiles,
   withLoops,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
 import {
@@ -38,6 +40,9 @@ const fixtures = {
   everyStep,
   everyCall,
   everyOperator,
+  // Every action on the run's files and the Brain, and a connection's
+  // calls keeping and attaching run files.
+  files: () => withFiles(...fileSteps()),
   decisions: () =>
     withDecisions(
       decision(),

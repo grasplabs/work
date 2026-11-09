@@ -143,9 +143,10 @@ export const isSensitive = (param: Param): boolean => !isPlain(param);
  * key, as an App's `permissions` are: `ai` is the workflow's one model,
  * whose alias is `ai`; `connections`, `decisions` and `events` are the
  * catalog's connectors, decision contracts and event contracts; `files`
- * (the run's own files) and `brain` (one Brain collection) only the
- * workflow's own actions reach; `modules` are its own compute and action
- * modules (`local:code/<file>.ts#<export>`).
+ * are the run's own files and `brain` one Brain collection each, which a
+ * `call` step reaches as `ctx.files.<alias>` and `ctx.brain.<alias>`;
+ * `modules` are its own compute and action modules
+ * (`local:code/<file>.ts#<export>`).
  */
 export const permissionKinds = [
   "ai",
@@ -308,11 +309,49 @@ interface CallBase extends StepBase {
 }
 
 /**
- * Calls an action of a connection, `ctx.connections.<connection>.<action>`,
- * or one of the workflow's own modules, `ctx.modules.<module>`.
+ * What a `call` step on a `files` permission does with the run's own
+ * files, as `ctx.files.<alias>.<action>` names it: reads a text file whole
+ * (`{ file }`: `{ file: <ref>, text }`), writes one (`{ name, type, text }`:
+ * its ref), lists them (`{}`: refs) or deletes one (`{ file }`).
+ */
+export const filesActions = ["read", "write", "list", "delete"] as const;
+export type FilesAction = (typeof filesActions)[number];
+
+/**
+ * What a `call` step on a `brain` permission does with its one Brain
+ * collection, as `ctx.brain.<alias>.<action>` names it: searches it, reads
+ * an entry, or recalls what bears on a question, each only as the run's
+ * person may read it.
+ */
+export const brainActions = ["search", "read", "recall"] as const;
+export type BrainAction = (typeof brainActions)[number];
+
+/**
+ * A call of a connection's action, `ctx.connections.<connection>.<action>`.
+ * A read whose contract answers a file (`answersFile`) may keep that file
+ * as the run's own, in files permission `into`; a write whose contract
+ * takes files (`takesFiles`) may attach run files, named by ID in its
+ * `attachments`, from files permission `from`.
+ */
+export interface ConnectionCallStep extends CallBase {
+  readonly connection: string;
+  readonly action: string;
+  readonly into?: string;
+  readonly from?: string;
+}
+
+/**
+ * A call of a workflow's typed member: a connection's action
+ * (`ctx.connections`), the run's own files (`ctx.files`), a Brain
+ * collection (`ctx.brain`), or one of the workflow's own modules
+ * (`ctx.modules.<module>`). One step type for every member call: the key
+ * that names its permission says which kind it is, as `ctx.<kind>.<alias>`
+ * does.
  */
 export type CallStep =
-  | (CallBase & { readonly connection: string; readonly action: string })
+  | ConnectionCallStep
+  | (CallBase & { readonly files: string; readonly action: FilesAction })
+  | (CallBase & { readonly brain: string; readonly action: BrainAction })
   | (CallBase & { readonly module: string });
 
 /**

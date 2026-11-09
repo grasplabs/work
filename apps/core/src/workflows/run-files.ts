@@ -90,6 +90,14 @@ import { inList } from "../db/d1.ts";
 //   name or content. A tiny file's SHA-256 can be guessed from a short
 //   list of likely contents, so a receipt's digest says as much of such a
 //   file as its content would; the audit log is read by admins only.
+// - A workflow's own step reaching more than its run's files (GRA-1662,
+//   `ctx.files.<alias>`): its reads and writes are this module's, by the
+//   same lookups (a file's ID *and* the run's), under the same limits. A
+//   step reads a file whole only when it is text of `runFileTextTypes` of
+//   at most `callBytes` (`readText`), and writes one whole, of text of
+//   those types (`write`, as `keepFile` keeps a connector's read: opened,
+//   written and finished under the step's own key, so the same call again
+//   answers the same file).
 // - Typing by signature only: a binary type's bytes are checked by their
 //   first bytes alone. Nothing serves a run file yet; before downloads
 //   (phase 2) serve one, check this again (a polyglot file passes).
@@ -102,8 +110,24 @@ export const filesCallOperations = {
   read: "read",
   list: "list",
   delete: "delete",
+  readText: "read",
+  write: "write",
 } as const;
 export type FilesCallOperation = keyof typeof filesCallOperations;
+
+/**
+ * The files call each action of a workflow's step makes
+ * (`ctx.files.<alias>.<action>`): a text file read whole, a text file
+ * written whole, the run's files listed, one deleted.
+ */
+export const stepFilesOperations = {
+  read: "readText",
+  write: "write",
+  list: "list",
+  delete: "delete",
+} as const satisfies Readonly<Record<string, FilesCallOperation>>;
+
+const utf8 = new TextEncoder();
 
 /** Base64 characters `callBytes` take at most. */
 const contentChars = Math.ceil(runFileLimits.callBytes / 3) * 4;
@@ -125,6 +149,18 @@ const argumentSchemas = {
   }),
   list: z.strictObject({}),
   delete: z.strictObject({ file: runFileIdSchema }),
+  readText: z.strictObject({ file: runFileIdSchema }),
+  // Text of a text type, named as that type's file is.
+  write: z
+    .strictObject({
+      name: runFileNameSchema,
+      type: runFileTypeSchema.refine((type) => runFileTextTypes.has(type)),
+      text: z
+        .string()
+        .min(1)
+        .refine((text) => utf8.encode(text).length <= runFileLimits.callBytes),
+    })
+    .refine(({ name, type }) => runFileNameFits(name, type)),
 } as const;
 
 /** The run a files call is made for, and the effect it is. */
@@ -656,6 +692,41 @@ const read = async (
   };
 };
 
+/**
+ * A finished text file of the run, read whole: its reference and its
+ * text. Any other file (binary, larger than one call's bytes) is
+ * `file.not_readable`; one that isn't the run's, `file.not_found`.
+ */
+const readText = async (
+  env: Env,
+  caller: FilesCaller,
+  args: z.infer<typeof argumentSchemas.readText>
+): Promise<FilesAnswer> => {
+  const row = await fileOf(env, caller, args.file);
+  if (row === undefined) {
+    throw notFound();
+  }
+  const type = runFileTypeSchema.safeParse(row.type);
+  if (
+    !type.success ||
+    !runFileTextTypes.has(type.data) ||
+    row.size > runFileLimits.callBytes
+  ) {
+    throw runFileErrors.create("file.not_readable");
+  }
+  const whole = await read(env, caller, {
+    file: row.id,
+    offset: 0,
+    length: Math.max(row.size, 1),
+  });
+  const { content } = z.object({ content: z.string() }).parse(whole.output);
+  const text = new TextDecoder("utf-8", {
+    fatal: true,
+    ignoreBOM: false,
+  }).decode(bytesOfBase64(content));
+  return { output: { file: refJson(row), text }, detail: whole.detail };
+};
+
 /** The run's finished files, oldest first. */
 const list = async (env: Env, caller: FilesCaller): Promise<FilesAnswer> => {
   const rows = await drizzle(env.DB)
@@ -729,14 +800,14 @@ export const requireFilesArguments = (
 };
 
 /**
- * Makes one files call for `caller`'s run: `operation`, its `args`
- * checked here against that operation's schema. The action host has
- * already checked that the files use declares the operation.
+ * One files call for `caller`'s run that touches one file or the list:
+ * `operation`, its `args` checked here against that operation's schema,
+ * the caller's lease checked first.
  */
-export const callFiles = async (
+const callFile = async (
   env: Env,
   caller: FilesCaller,
-  operation: FilesCallOperation,
+  operation: Exclude<FilesCallOperation, "write">,
   args: Json
 ): Promise<FilesAnswer> => {
   caller.requireHolds();
@@ -760,6 +831,13 @@ export const callFiles = async (
     case "delete": {
       return await remove(env, caller, parsed(argumentSchemas.delete, args));
     }
+    case "readText": {
+      return await readText(
+        env,
+        caller,
+        parsed(argumentSchemas.readText, args)
+      );
+    }
     default: {
       return operation satisfies never;
     }
@@ -768,13 +846,14 @@ export const callFiles = async (
 
 /**
  * Keeps `bytes` as a finished file of `caller`'s run, named `name` and of
- * `type`, for a connector read an action asked to have as a file
- * (GRA-886): opened, written in pieces of `callBytes` and finished as an
- * action's own writes are, each under a key of the call's own effect key,
- * so the same call again (a replay, a retry) answers the same file, and
- * its bytes must be the same, all of them: never a prefix of them. Every
- * limit, the lease check, the type check against the bytes and the
- * SHA-256 apply as they do to an action's writes.
+ * `type`, for a connector read an action or a step asked to have as a
+ * file (GRA-886), and for a step's whole write (`write`): opened, written
+ * in pieces of `callBytes` and finished as an action's own writes are,
+ * each under a key of the call's own effect key, so the same call again
+ * (a replay, a retry) answers the same file, and its bytes must be the
+ * same, all of them: never a prefix of them. Every limit, the lease
+ * check, the type check against the bytes and the SHA-256 apply as they
+ * do to an action's writes.
  */
 export const keepFile = async (
   env: Env,
@@ -787,12 +866,12 @@ export const keepFile = async (
     ...caller,
     effectKey: `${caller.effectKey}#${suffix}`,
   });
-  // Each through `callFiles`, as an action's own calls are: its lease
+  // Each through `callFile`, as an action's own calls are: its lease
   // checked before every one, so an attempt that went stale while Connect
   // was answering opens, reserves and seals nothing.
   // Named with its type's extension: a document typed docx is never
   // kept as `.docm`.
-  const opened = await callFiles(env, as("open"), "open", {
+  const opened = await callFile(env, as("open"), "open", {
     name: runFileNamed(file.name, file.type),
     type: file.type,
   });
@@ -805,7 +884,7 @@ export const keepFile = async (
     at += runFileLimits.callBytes, piece += 1
   ) {
     // oxlint-disable-next-line no-await-in-loop -- in order: each piece follows the last
-    await callFiles(env, as(`piece${String(piece)}`), "append", {
+    await callFile(env, as(`piece${String(piece)}`), "append", {
       file: id,
       content: toBase64(file.bytes.subarray(at, at + runFileLimits.callBytes)),
     });
@@ -818,12 +897,37 @@ export const keepFile = async (
   if (written?.state === "writing" && written.size !== file.bytes.length) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
-  const finished = await callFiles(env, as("finish"), "finish", { file: id });
+  const finished = await callFile(env, as("finish"), "finish", { file: id });
   const sealed = z.object({ sha256: z.string() }).parse(finished.output);
   if (sealed.sha256 !== (await sha256HexOfBytes(file.bytes))) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
   return finished;
+};
+
+/**
+ * Makes one files call for `caller`'s run: `operation`, its `args`
+ * checked here against that operation's schema. The action host, or the
+ * sealed table for a step, has already decided the operation may be made.
+ * A step's whole write (`write`) is kept as a connector's read is
+ * (`keepFile`), of text of a text type.
+ */
+export const callFiles = async (
+  env: Env,
+  caller: FilesCaller,
+  operation: FilesCallOperation,
+  args: Json
+): Promise<FilesAnswer> => {
+  if (operation !== "write") {
+    return await callFile(env, caller, operation, args);
+  }
+  caller.requireHolds();
+  const { name, type, text } = parsed(argumentSchemas.write, args);
+  return await keepFile(env, caller, {
+    name,
+    type: runFileTypeSchema.parse(type),
+    bytes: utf8.encode(text),
+  });
 };
 
 /** All the bytes of a finished file, whole, as stored and as hashed. */

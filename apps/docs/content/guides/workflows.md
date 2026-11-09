@@ -147,7 +147,7 @@ Grasp works the value out as the wait is reached, and hands the run only the eve
 
 ## What a workflow is made of
 
-A workflow is saved as JSON in the `grasp-workflow/2` format, which the canvas draws and the chat edits. It uses the same words as an App: the run's `args` and what it `returns` (with its `result`), its `params`, and the `permissions` it needs, by kind (`ai`, `connections`, `decisions`, `events`), each of which an admin approves. Its steps are `call` (a connection's action), `generate` (an answer from the workflow's model), `decide` (a person's decision), `waitForEvent`, `wait`, `forEach`, `if`, `try` and `raise`.
+A workflow is saved as JSON in the `grasp-workflow/2` format, which the canvas draws and the chat edits. It uses the same words as an App: the run's `args` and what it `returns` (with its `result`), its `params`, and the `permissions` it needs, by kind (`ai`, `connections`, `decisions`, `events`, `files`, `brain`), each of which an admin approves. Its steps are `call` (a connection's action, the run's own files, or a Brain collection), `generate` (an answer from the workflow's model), `decide` (a person's decision), `waitForEvent`, `wait`, `forEach`, `if`, `try` and `raise`.
 
 A value a step passes may be an expression in JavaScript, `{ "$expr": "invoice.total > params.limit" }`. It reads the run's `args`, `params`, `state` and `run`, and each earlier step's result by the step's ID. Expressions only read: they can't reach an object's prototype (`constructor`, `prototype`, `__proto__`), use a computed name such as `lines[index]`, or call anything but the methods of strings, numbers and lists.
 
@@ -170,5 +170,23 @@ export default defineWorkflow({
   },
 });
 ```
+
+A `call` step reaches the run's own files through a `files` permission: `read` (a text, CSV, Markdown or JSON file of up to 512 KB, whole), `write` (a text file, from its name, type and text), `list` and `delete`, as `ctx.files.<alias>.read(…)`. A run's files are its own: a file is named by its ID, and that ID finds nothing in any other run. A `call` step reads a Brain collection through a `brain` permission: `search`, `read` and `recall`, as `ctx.brain.<alias>.search(…)`, and only what the person the run acts for may read. A connection's action that answers a file, such as an email's attachment, can keep it in the run's files with `into`, and one that sends files can attach the run's files with `from`, each naming a files permission:
+
+```json
+{
+  "id": "invoice",
+  "type": "call",
+  "connection": "mail",
+  "action": "mail.readAttachment",
+  "args": {
+    "message": { "$expr": "args.message" },
+    "attachment": { "$expr": "args.attachment" }
+  },
+  "into": "runFiles"
+}
+```
+
+Its result names the kept file (`invoice.file`) in place of its content, which a later step reads (`{ "files": "runFiles", "action": "read", "args": { "file": { "$expr": "invoice.file.file" } } }`) or attaches.
 
 Each `ctx` call is a durable step: its result is recorded, and a run that picks up again after a failure gets it back rather than calling again. `{ step: "send" }` names the canvas step it belongs to. A step fails with an error that has a `code`, such as `connect.rate_limited`, a `message` and sometimes `details`; a `try` step's `catch` takes errors by `code`, and a `raise` step fails the run with an error of the workflow's own, in its own namespace (`billing.too_large`), never the platform's.

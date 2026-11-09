@@ -19,9 +19,13 @@ import type { Step } from "@grasp-os/workflow-schema/format";
 const detailOf = (step: Step): string | null => {
   switch (step.type) {
     case "call": {
-      return "connection" in step
-        ? `${step.connection} · ${step.action}`
-        : step.module;
+      if ("connection" in step) {
+        return `${step.connection} · ${step.action}`;
+      }
+      if ("files" in step) {
+        return `${step.files} · ${step.action}`;
+      }
+      return "brain" in step ? `${step.brain} · ${step.action}` : step.module;
     }
     case "generate": {
       return "ai";

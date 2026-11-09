@@ -839,7 +839,12 @@ const namesFileSchema = z.object({ file: runFileIdSchema });
  * The files operations that publish what a run hands them: a file's name
  * as it opens, its bytes as it's appended to, both once it's finished.
  */
-const filesWrites: ReadonlySet<string> = new Set(["open", "append", "finish"]);
+const filesWrites: ReadonlySet<string> = new Set([
+  "open",
+  "append",
+  "finish",
+  "write",
+]);
 
 /**
  * Whether `call` may hand out what its run recalled: a connector call, a

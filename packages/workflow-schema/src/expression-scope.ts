@@ -3,7 +3,12 @@ import { valueTypeOf } from "@grasp-os/sdk/host";
 
 import type { CheckedWorkflow } from "./check.ts";
 import { eachStep, resultStepTypes } from "./format.ts";
-import type { ExpressionRoot, Step } from "./format.ts";
+import type {
+  BrainAction,
+  ExpressionRoot,
+  FilesAction,
+  Step,
+} from "./format.ts";
 
 // What a checked document's expressions read, as TypeScript types, for
 // the compiler's typed check (@grasp-os/compiler's `expressionTypeCheck`):
@@ -199,6 +204,27 @@ const rootTypes = (
   output: untyped,
 });
 
+/** One of the run's own files, as a files call answers it (the SDK's `RunFile`). */
+const runFileType =
+  "{ readonly file: string; readonly name: string; readonly type: string; readonly size: number; readonly sha256: string }";
+
+/** What each action on the run's files answers (the SDK's `FilesActions`). */
+const filesTypes: Readonly<Record<FilesAction, string>> = {
+  read: `{ readonly file: ${runFileType}; readonly text: string }`,
+  write: runFileType,
+  list: `readonly ${runFileType}[]`,
+  delete: "null",
+};
+
+/** What each action on a Brain collection answers (the SDK's `BrainActions`). */
+const brainTypes: Readonly<Record<BrainAction, string>> = {
+  search:
+    "readonly { readonly id: string; readonly title: string; readonly excerpt: string }[]",
+  read: "{ readonly title: string; readonly text: string }",
+  recall:
+    "{ readonly items: readonly { readonly [field: string]: any }[]; readonly [field: string]: any }",
+};
+
 /**
  * What `checked`'s expressions read, typed, and their sources: each step
  * with a result by its ID. A `call` step's result is `output(step)`'s, its
@@ -222,6 +248,18 @@ export const expressionTypeRequest = (
         type = eventWaitType(
           typeof step.eventType === "string" ? [step.eventType] : step.eventType
         );
+      } else if (step.type === "call" && "files" in step) {
+        type = filesTypes[step.action];
+      } else if (step.type === "call" && "brain" in step) {
+        type = brainTypes[step.action];
+      } else if (
+        step.type === "call" &&
+        "connection" in step &&
+        step.into !== undefined
+      ) {
+        // A read kept as a file answers its contract's shape with the file
+        // in place of its content: no descriptor of its own.
+        type = untyped;
       } else {
         const answer =
           step.type === "generate"
