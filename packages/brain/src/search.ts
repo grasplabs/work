@@ -274,7 +274,9 @@ const askedOf = (
  * (`weightsSql`), so a narrow search never scores sections of collections
  * it doesn't search, nor sections that don't hold the whole query. With
  * `gate`, a one-row-or-none table, the index is only asked when the gate
- * holds a row: CROSS JOIN keeps it the outer loop.
+ * holds a row: CROSS JOIN keeps it the outer loop. The words too short for
+ * trigrams (`short`) filter the matches as a list: the unary `+` keeps
+ * SQLite from asking the trigram index once per row of that list.
  */
 const matchesSql = ({ table, pass, match, short }: Pass, gate?: SQL): SQL => {
   const name = sql.identifier(table);
@@ -285,7 +287,7 @@ const matchesSql = ({ table, pass, match, short }: Pass, gate?: SQL): SQL => {
     ${
       short === undefined
         ? sql``
-        : sql`AND matched.rowid IN (
+        : sql`AND +matched.rowid IN (
             SELECT rowid FROM search_words WHERE search_words MATCH ${short}
           )`
     }`;

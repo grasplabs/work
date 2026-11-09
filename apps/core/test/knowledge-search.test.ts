@@ -819,6 +819,8 @@ describe("search speed", { timeout: 300_000 }, () => {
       "salaris",
       "zorgverzekering thuiswerken",
       "verzekering",
+      // A word with one too short for trigrams, which must be a word too.
+      "verzekering de",
       "coordinator",
       "reiskostenvergoedng",
       "pensioenregeling",
