@@ -31,7 +31,7 @@ Vite+ (`vp`) is the toolchain. Run from the repo root:
 - `vp check --fix`: auto-fix
 - `vp test`: all tests; Worker tests run in workerd
 - `vp run -r build`: build everything
-- `vp run e2e`: Playwright end-to-end tests (`*.e2e.ts` in `e2e/`)
+- `vp run e2e`: Playwright end-to-end tests (`*.e2e.ts` in `e2e/`). Naming a file still runs every project it waits on, and a journey waits on the whole suite, so pick its project: `vp run e2e --project=chromium e2e/web.e2e.ts`, or `GRASP_E2E_PART=journeys vp run e2e e2e/admin-journey.e2e.ts` for a serial one (`onboarding`, `interview`, `journeys`). To run a file again without starting the stack each time, keep `vp run e2e:stack` running and run with `GRASP_E2E_REUSE=1` (parallel projects only; restart the stack for the serial ones)
 - `vp run smoke:workerd`: boot core on plain workerd (on-prem readiness)
 - `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/admin dev` for the admin
 - `vp run seed`: while `vp run dev` runs, fill it with a demo company (`scripts/seed/`): people in teams, Apps with 30 days of runs, Knowledge and chats; sign in as admin@acme.test. It adds only what's missing; to start over, stop dev and delete `apps/core/.wrangler/state`
