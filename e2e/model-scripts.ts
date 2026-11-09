@@ -189,7 +189,7 @@ export const modelScripts = {
       // page shows, on the server code that last built.
       (said) =>
         writesTally(said, "take-more", "Taking more.", {
-          "server/tally.ts": tallyServer("taken", 1000),
+          "server/tally.ts": tallyServer("taken", { builds: false }),
           "src/routes/index.tsx": tallyPage("Add more"),
         }),
       says("It takes more."),
