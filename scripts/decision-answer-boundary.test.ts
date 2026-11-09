@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { parseSync } from "oxc-parser";
+import { parseSync, Visitor } from "oxc-parser";
 import { describe, expect, it } from "vite-plus/test";
 
 // Agents never answer a person's decision (GRA-624, threat model T7): the
@@ -49,7 +49,7 @@ const unresolved = "an import it can't resolve";
 const sourceFile = /\.(?:ts|tsx|mts|js|mjs)$/u;
 
 /** A JavaScript extension a TypeScript import is written with, for the `.ts` it resolves to. */
-const javaScriptExtension = /\.(?:js|mjs|mts)$/u;
+const javaScriptExtension = /\.m?js$/u;
 
 /** The module `specifier`, imported from `file`, resolves to within core's sources, if it is one of its own. */
 const resolvedOf = (file: string, specifier: string): string | undefined => {
@@ -59,9 +59,7 @@ const resolvedOf = (file: string, specifier: string): string | undefined => {
   const resolved = path.posix
     .join(path.posix.dirname(file), specifier)
     .replace(javaScriptExtension, ".ts");
-  return resolved.endsWith(".ts") || resolved.endsWith(".tsx")
-    ? resolved
-    : `${resolved}.ts`;
+  return /\.(?:ts|tsx|mts)$/u.test(resolved) ? resolved : `${resolved}.ts`;
 };
 
 /** The one kind of import or re-export that takes names one by one: any other takes the module whole. */
@@ -99,7 +97,7 @@ const takes = (guard: Guard, kind: string, name: string | null): boolean =>
  * import it can't resolve. None of a guarded module from itself.
  */
 const reachesOf = (file: string, source: string): Reach[] => {
-  const { module, errors } = parseSync(file, source);
+  const { program, module, errors } = parseSync(file, source);
   if (errors.length > 0) {
     throw new Error(`${file} doesn't parse: ${errors[0]?.message ?? ""}`);
   }
@@ -117,6 +115,8 @@ const reachesOf = (file: string, source: string): Reach[] => {
   );
   const exports = module.staticExports.flatMap(
     ({ start, end, entries }): Reach[] => {
+      // An export of an imported name is one of its module's, as the
+      // standard reads it: its entry names that module.
       const reached = entries.flatMap(({ moduleRequest, importName }) => {
         const guard =
           moduleRequest === null
@@ -153,7 +153,17 @@ const reachesOf = (file: string, source: string): Reach[] => {
       ? [[unresolved, statementAt(source, start, end + 5)]]
       : []
   );
-  return [...imports, ...exports, ...dynamic, ...globs];
+  // CommonJS: a `require` a bundler would follow, which oxc lists among no
+  // imports.
+  const required: Reach[] = [];
+  new Visitor({
+    CallExpression: (node) => {
+      if (node.callee.type === "Identifier" && node.callee.name === "require") {
+        required.push([unresolved, statementAt(source, node.start, node.end)]);
+      }
+    },
+  }).visit(program);
+  return [...imports, ...exports, ...dynamic, ...globs, ...required];
 };
 
 /** Every source of core, relative to its `src`. */
@@ -228,6 +238,10 @@ describe("who answers a person's decision", () => {
       ),
       other: of(`import { stillOpen } from ${from};`),
       meta: of("const here = import.meta.url;"),
+      passedOn: of(
+        `import { answerDecision as answer } from ${from};\nexport { answer };`
+      ),
+      required: of('const d = require("../decisions/decisions.ts");'),
     }).toStrictEqual({
       named: [[service, `import { answerDecision } from ${from}`]],
       renamed: [[service, `import { confirmDecision as mint, } from ${from}`]],
@@ -259,6 +273,12 @@ describe("who answers a person's decision", () => {
       ],
       other: [],
       meta: [],
+      passedOn: [
+        [service, `import { answerDecision as answer } from ${from}`],
+        // oxc gives the export the import's place, where the name comes from.
+        [service, `import { answerDecision as answer } from ${from}`],
+      ],
+      required: [[unresolved, 'require("../decisions/decisions.ts")']],
     });
     // Allowed only where each guard allows it: the bridge from its
     // session, the service from the bridge.
