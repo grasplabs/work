@@ -412,6 +412,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        # No journey reads pnpm's store.
+        with:
+          store: false
       - id: playwright
         run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
       - id: browsers
@@ -523,6 +526,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        # No journey reads pnpm's store.
+        with:
+          store: false
       - id: playwright
         run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
       - id: browsers
@@ -664,6 +670,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        # No journey reads pnpm's store.
+        with:
+          store: false
       - id: playwright
         run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
       - id: browsers
