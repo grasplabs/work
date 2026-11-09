@@ -135,12 +135,22 @@ export const reviewedOf = async (
   id: string
 ): Promise<GrantReview> => {
   const listed = await api.permissions.list();
-  const subject = listed.find((permission) => permission.id === id)?.subject;
-  if (subject?.type !== "app") {
+  const found = listed.find((permission) => permission.id === id);
+  // The App asking, or the App whose one function a workflow asks for.
+  let reviewed: string | undefined;
+  if (found?.subject.type === "app") {
+    reviewed = found.subject.appId;
+  } else if (
+    found?.object.type === "app" &&
+    found.object.function !== undefined
+  ) {
+    reviewed = found.object.appId;
+  }
+  if (reviewed === undefined) {
     return { version: null };
   }
   const apps = await api.apps.list();
-  const app = apps.find(({ id: appId }) => appId === subject.appId);
+  const app = apps.find(({ id: appId }) => appId === reviewed);
   return { version: app?.currentVersion ?? null };
 };
 

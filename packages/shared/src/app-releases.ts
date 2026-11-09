@@ -247,6 +247,8 @@ export const versionErrors = defineErrorFamily({
   "version.revoked": "This version was revoked and no longer runs.",
   "version.mismatch":
     "That reference belongs to another version or contract than the one that runs.",
+  "version.functions_in_use":
+    "This version removes or changes App functions that workflows call. These details name each workflow and function: keep them as they are (renaming one in the definition keeps it), or ask an admin to revoke the workflow's permission first.",
   "version.tests_failed":
     "This version's App tests fail, so it can't be made current.",
   "version.tests_unavailable":

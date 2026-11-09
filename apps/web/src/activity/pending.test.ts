@@ -45,6 +45,28 @@ describe("a pending request on an App", () => {
       expect.stringMatching(/^Queries, mutations and actions of /u),
     ]);
   });
+
+  it("names the one function a workflow asks to call by its path, and what it may do", () => {
+    const asked: Permission = {
+      ...onApp(["call"]),
+      subject: {
+        type: "workflow",
+        workflowId: workflowResourceIdSchema.parse(
+          "55555555-5555-4555-8555-555555555555"
+        ),
+      },
+      object: { type: "app", appId: appIdSchema.parse(app), function: "f1" },
+    };
+
+    expect([
+      objectOf({ ...asked, functionName: "notes.create" }, directory),
+      objectOf(asked, directory),
+    ]).toStrictEqual([
+      expect.stringMatching(/^Calls notes\.create of .+ read or change/u),
+      // Its ID, once no current version gives it a path.
+      expect.stringMatching(/^Calls f1 of /u),
+    ]);
+  });
 });
 
 /** A workflow's request to read a collection. */

@@ -471,6 +471,35 @@ export const Route = createFileRoute("/")({ component: Page });
     });
   });
 
+  it("takes a chat's draft that changed the definition over a version that only brought a function, whose ID the commit gives", async () => {
+    const { apps } = await appsApi("builder");
+    const app = await newApp(apps);
+    const appId = appIdSchema.parse(app.id);
+    await commit(apps, app.id, first);
+    // A builder's version adds a query: its ID is the version's own.
+    await apps.files.commit(
+      app.id,
+      {
+        "server/extra.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
+
+export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
+`,
+      },
+      "Extra"
+    );
+
+    const drafted = await draftOverLatest(env, appId, {
+      base: 1,
+      changes: {},
+      definition: definitionText(withTable("tasks")),
+    });
+
+    expect(drafted.definition?.tables.map(({ name }) => name)).toStrictEqual([
+      "tasks",
+    ]);
+  });
+
   it("fails loudly when a version's files are missing or damaged", async () => {
     const { apps } = await appsApi("builder");
     const app = await newApp(apps);

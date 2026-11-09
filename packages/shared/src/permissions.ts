@@ -16,6 +16,7 @@ import {
   workspaceIdSchema,
 } from "./ids.ts";
 import type { PermissionId } from "./ids.ts";
+import { stableIdPattern } from "./store-limits.ts";
 import type { TriggerSummary } from "./workflow-triggers.ts";
 
 // Apps and agents start with nothing. Each thing they may use is one
@@ -146,8 +147,10 @@ const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
  * independent workflow (to follow its runs, `read`, start it, `start`,
  * or send events to its runs, `send`, which neither of the others
  * implies), an App's sealed functions, for an agent (reading with
- * `read`, writing with `write`: core's agent-apps.ts), or the platform's
- * own statistics.
+ * `read`, writing with `write`: core's agent-apps.ts), one of an App's
+ * functions, for an independent workflow (`function`, the stable ID the
+ * App's definition gives it, with the one action `call`: core's
+ * workflows/app-calls.ts), or the platform's own statistics.
  */
 export const permissionObjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -164,6 +167,12 @@ export const permissionObjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("app"),
     appId: appIdSchema,
+    /**
+     * One of the App's functions, by the stable ID its definition gives
+     * it (never its name, which a rename changes): a workflow's grant.
+     * Absent for an agent's, which reaches every public function.
+     */
+    function: z.string().regex(stableIdPattern).optional(),
   }),
   platformObjectSchema,
 ]);
@@ -199,9 +208,10 @@ const isActionOf = (type: PermissionObjectType, action: string): boolean => {
   if (type === "connection") {
     return connectionActionPattern.test(action);
   }
-  // An App's functions, for an agent: those that read, or all of them.
+  // An App's functions, for an agent: those that read, or all of them;
+  // one of them, for a workflow: calling it.
   if (type === "app") {
-    return action === "read" || action === "write";
+    return action === "read" || action === "write" || action === "call";
   }
   const actions: readonly string[] = platformActions[type];
   return actions.includes(action);
@@ -352,6 +362,29 @@ const checkGrant = (
       });
     }
   }
+  // One App function is only called; the whole App only read or written.
+  if (
+    object.type === "app" &&
+    (object.function === undefined) === actions.includes("call")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["actions"],
+      message:
+        "One of an App's functions is called (call); a whole App is read or written",
+    });
+  }
+  if (
+    object.type === "app" &&
+    object.function !== undefined &&
+    actions.length !== 1
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["actions"],
+      message: "A permission on one of an App's functions has one action",
+    });
+  }
   // A platform permission's stub does one thing: the action names it.
   if (object.type === "platform" && actions.length !== 1) {
     context.addIssue({
@@ -445,7 +478,10 @@ export type PermissionStatus = z.infer<typeof permissionStatusSchema>;
 
 /**
  * What an admin reviewed as they grant a permission: the version of its
- * App current then, or null for an agent's, or an App with none current.
+ * App current then; for a workflow's permission on one of an App's
+ * functions, the version of that App current then, whose definition
+ * named the function they saw; null for any other, or an App with none
+ * current.
  */
 export const grantReviewSchema = z.strictObject({
   version: z.int().positive().nullable(),
@@ -498,6 +534,14 @@ export interface Permission {
    * is reached. Absent where it names none.
    */
   workflowNames?: Record<string, string>;
+  /**
+   * For an independent workflow's permission on one of an App's functions
+   * (an `app` object with its `function`), that function's path in the
+   * App's current version, such as `tasks.create`: so whoever decides it
+   * knows what is called. Only a hint: the grant names the ID. Absent
+   * once no current version gives that ID.
+   */
+  functionName?: string;
 }
 
 /**

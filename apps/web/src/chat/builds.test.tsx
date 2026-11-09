@@ -1,7 +1,11 @@
 // @vitest-environment happy-dom
 import type { App, AppStatus, VersionReview } from "@grasp-os/shared/apps";
 import type { ChatDraft } from "@grasp-os/shared/chat";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  permissionIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -67,6 +71,7 @@ const review: VersionReview = {
   schema: null,
   permissions: [],
   grants: [],
+  callers: [],
   handsFilesToWorkflows: false,
   readsPeople: false,
   rowRules: [],
@@ -176,6 +181,40 @@ const saysDraft = (): boolean =>
     "Invoices is a draft: only its builders open it"
   ) ?? false;
 
+/** A workflow's grant to call one of the App's functions, as a review lists it. */
+const caller = (askedAgain: boolean, name?: string) => ({
+  askedAgain,
+  permission: {
+    id: permissionIdSchema.parse(crypto.randomUUID()),
+    subject: {
+      type: "workflow" as const,
+      workflowId: workflowResourceIdSchema.parse(
+        "44444444-4444-4444-8444-444444444444"
+      ),
+    },
+    object: {
+      type: "app" as const,
+      appId: appIdSchema.parse("invoice-desk"),
+      function: "fn1",
+    },
+    actions: ["call"],
+    binding: "NOTES",
+    status: "active" as const,
+    requestedBy: "user-1",
+    requestedAt: "2026-11-01T00:00:00.000Z",
+    grantedBy: "admin-1",
+    grantedAt: "2026-11-01T00:00:00.000Z",
+    revokedBy: null,
+    revokedAt: null,
+    requestedVia: null,
+    chat: null,
+    workflowNames: {
+      "44444444-4444-4444-8444-444444444444": "Weekly notes",
+    },
+    ...(name === undefined ? {} : { functionName: name }),
+  },
+});
+
 describe("releasing a version beside the chat", () => {
   afterEach(() => {
     act(() => {
@@ -249,6 +288,26 @@ describe("releasing a version beside the chat", () => {
       "Changed by the person in assignee, of the rows they can read",
       "Read by members of the team in team",
       "Changed by nobody",
+    ]);
+  });
+
+  it("shows the workflows that call the App, and whose grant making it current asks for again", async () => {
+    const { apps } = fakeApps({
+      ...review,
+      callers: [caller(true, "notes.create"), caller(false)],
+    });
+    await opened(appAt("published"), apps);
+    const section = document.querySelector(
+      'section[aria-label="Workflows that call it"]'
+    );
+
+    expect(
+      [...(section?.querySelectorAll("li") ?? [])].map(
+        (line) => line.textContent
+      )
+    ).toStrictEqual([
+      "Weekly notes calls notes.create, asked for again of an admin if you make this current",
+      "Weekly notes calls fn1",
     ]);
   });
 
