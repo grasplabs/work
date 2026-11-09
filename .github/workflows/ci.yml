@@ -415,8 +415,9 @@ jobs:
           DRAFT: ${{ github.event.pull_request.draft == true }}
           EVENT: ${{ github.event_name }}
 
-  # The e2e stack, built once for every e2e part (`vp run e2e:build`,
-  # e2e/build.ts): the frontend in development mode with the App compiler,
+  # The e2e stack, built once for every e2e part (`node e2e/build.ts`, run
+  # directly, not through `vp run`): the frontend in development mode with
+  # the App compiler,
   # the extractor and the docs beside it, core's generated modules,
   # connect's build, and the stack's empty state with every migration
   # applied. Each part built it for itself, about 80 s of its 3 to 6
