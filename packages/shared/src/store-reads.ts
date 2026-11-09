@@ -307,17 +307,28 @@ export type WriteRequest =
   | { kind: "replace"; table: string; id: string; fields: WriteFields }
   | { kind: "delete"; table: string; id: string };
 
+// The combining accents unicode61 keeps inside a word, then drops, when it
+// removes diacritics (`remove_diacritics 2`): SQLite's own table of them
+// (`sqlite3Fts5UnicodeIsdiacritic`). So decomposed "cafe\u0301s" is one
+// word, "cafes", as its precomposed form is. Every other mark splits:
+// the rest of U+0300 to U+036F, spacing marks (Mc, such as Devanagari's
+// vowel signs), viramas and enclosing marks.
+
 /**
- * What separates a search's words: anything but a letter, a number or a
- * private-use character, the token classes of the full-text index's
- * unicode61 tokenizer by default (marks, punctuation and spaces split).
- * So `INV-2024-001` is three words here as it is three tokens there, and
- * a search's words are what FTS5 reads (`searchMaxTerms`), however they
+ * What separates a search's words: anything but a letter, a number, a
+ * private-use character or one of the accents above (the last ranges),
+ * the token classes of the full-text index's unicode61 tokenizer. So
+ * `INV-2024-001` is three words here as it is three tokens there, and a
+ * search's words are what FTS5 reads (`searchMaxTerms`), however they
  * are joined.
  */
-const searchSeparator = /[^\p{L}\p{N}\p{Co}]+/u;
+const searchSeparator =
+  /[^\p{L}\p{N}\p{Co}\u0300-\u0304\u0306-\u030C\u030F\u0311\u031B\u0323-\u0328\u032D\u032E\u0330\u0331]+/u;
 
-/** What a word holds at least one of, as unicode61 tokens do. */
+/**
+ * What a word holds at least one of, as unicode61 tokens do: accents
+ * alone, which it drops, make no word.
+ */
 const wordCharacter = /[\p{L}\p{N}\p{Co}]/u;
 
 /**

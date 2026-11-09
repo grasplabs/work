@@ -278,12 +278,14 @@ describe("a read request", () => {
 });
 
 describe("a search's words", () => {
-  it("are the tokens the full-text index reads: letters, numbers and private-use characters", () => {
+  it("are the tokens the full-text index reads: letters, numbers, private-use characters and the accents it drops", () => {
     expect({
       // Split at punctuation, so an invoice number is three words.
       invoice: searchTerms("INV-2024-001"),
-      // A combining mark splits, as unicode61 splits at marks.
-      mark: searchTerms("cafe\u0301s"),
+      // An accent as a combining mark stays within its word, as unicode61
+      // keeps it before dropping it; a spacing mark (Mc) splits.
+      accent: searchTerms("cafe\u0301s"),
+      mark: searchTerms("\u0915\u093F\u0924\u093E\u092C"),
       // Private-use characters are word characters.
       privateUse: searchTerms("\uE000x y"),
       // Letters of any script, and numbers.
@@ -292,7 +294,8 @@ describe("a search's words", () => {
       none: searchTerms(" -- \u0301 "),
     }).toStrictEqual({
       invoice: ["INV", "2024", "001"],
-      mark: ["cafe", "s"],
+      accent: ["cafe\u0301s"],
+      mark: ["\u0915", "\u0924", "\u092C"],
       privateUse: ["\uE000x", "y"],
       scripts: ["日本", "Ünïcode", "٣"],
       none: [],

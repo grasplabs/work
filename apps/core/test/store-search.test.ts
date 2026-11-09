@@ -296,6 +296,47 @@ describe("a search", () => {
     });
   });
 
+  it("splits words where the index splits them: accents within a word, other marks between words", async () => {
+    const fixture = await storeWith("appMembers");
+    await insert(
+      fixture,
+      "ada",
+      // An accent as a combining mark of its own, and the same word
+      // precomposed: one word either way.
+      { name: "Cafés Paris", notes: null },
+      { name: "Cafés Lyon", notes: null },
+      // Devanagari, whose vowel signs are spacing marks (Mc), and whose
+      // virama is a mark too: both split a word in the index.
+      { name: "किताब घर", notes: null },
+      { name: "नमस्ते", notes: null },
+      // A spacing mark between two Latin letters.
+      { name: "Kaःlu", notes: null }
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const found = async (text: string) =>
+      namesOf(await db.search("customers", text).collect()).toSorted();
+    const cafes = ["Cafés Lyon", "Cafés Paris"].toSorted();
+    expect({
+      decomposed: await found("cafés"),
+      precomposed: await found("cafés"),
+      plain: await found("cafes"),
+      devanagari: await found("किताब"),
+      virama: await found("नमस्ते"),
+      spacingMark: await found("kaःlu"),
+      // Eight words as the index reads them, each accented one counting
+      // once: within what a search may look for.
+      eightWords: await found(`${"cafés ".repeat(7)}paris`),
+    }).toStrictEqual({
+      decomposed: cafes,
+      precomposed: cafes,
+      plain: cafes,
+      devanagari: ["किताब घर"],
+      virama: ["नमस्ते"],
+      spacingMark: ["Kaःlu"],
+      eightWords: ["Cafés Paris"],
+    });
+  });
+
   it("is filtered, counted and paged, every match once", async () => {
     const fixture = await storeWith("appMembers");
     await insertMany(fixture, 250, (index) => ({

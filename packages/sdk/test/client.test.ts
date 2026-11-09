@@ -665,6 +665,36 @@ describe("the session client's paginated list started again", () => {
     list.stop();
   });
 
+  it("splits a half again once both halves answered, the second saying to split", async () => {
+    const host = listHost(["b", "c"]);
+    const list = listOf(host, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["b"]);
+    });
+    await list.pager.loadMore();
+    // Records move into the first page, far past twice its size: it
+    // splits after its first record, and its second half, answering last,
+    // is itself past twice its size.
+    host.state.titles.push("a0", "a1", "a2", "a3", "a4", "a5");
+    host.state.hold = "all";
+    host.reread();
+    await vi.waitFor(() => {
+      expect(list.pager.pages).toHaveLength(3);
+    });
+    host.release();
+    // No further change comes: the second half splits on its own answer.
+    await vi.waitFor(() => {
+      expect({
+        ends: list.pager.pages.map(({ endCursor }) => endCursor),
+        titles: list.titles(),
+      }).toStrictEqual({
+        ends: ["0:a0", "0:a1", "0:b", null],
+        titles: ["a0", "a1", "a2", "a3", "a4", "a5", "b", "c"],
+      });
+    });
+    list.stop();
+  });
+
   it("shows nothing of a page split mid-way once one of its halves is refused", async () => {
     const host = listHost(["b", "c"]);
     const list = listOf(host, 1);

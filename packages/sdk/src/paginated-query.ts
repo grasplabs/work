@@ -268,13 +268,10 @@ export class Pagers {
       this.#restart(pager, pager.snapshot.view.items);
       return;
     }
-    if (this.#shrinkTooLarge(pager) || this.#split(pager)) {
-      this.#changed(pager);
-      return;
-    }
+    // What a page held goes once it answered, and its twin did too: first,
+    // so a half that answered only part of itself and said to split again
+    // splits now, not on some later change.
     for (const page of pager.pages) {
-      const { value } = page.entry.snapshot;
-      // What it held goes once it answered, and its twin did too.
       if (
         page.held !== undefined &&
         ownPage(page) !== undefined &&
@@ -282,6 +279,13 @@ export class Pagers {
       ) {
         page.held = undefined;
       }
+    }
+    if (this.#shrinkTooLarge(pager) || this.#split(pager)) {
+      this.#changed(pager);
+      return;
+    }
+    for (const page of pager.pages) {
+      const { value } = page.entry.snapshot;
       // A query that answers something other than a page doesn't page.
       if (value !== undefined && pageOf(value) === undefined) {
         pager.failure ??= clientError("contract.not_paginated");
