@@ -293,7 +293,7 @@ const decidingDefinitionOf = (contract: string): string =>
       },
     ],
     "done",
-    { approval: { kind: "decision", contract } }
+    { decisions: { approval: { contract } } }
   );
 
 const decisionsPageSchema = z.object({
