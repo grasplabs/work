@@ -11,6 +11,7 @@ import type {
   SchemaManifest,
 } from "@grasp-os/sdk/host";
 import { isRecord } from "@grasp-os/shared/json";
+import { pageLimits } from "@grasp-os/shared/pages";
 import {
   queryMaxScannedBytes,
   queryMaxScannedEntries,
@@ -734,8 +735,10 @@ export interface EndBound {
   exhausted: boolean;
   /**
    * How many shares of the scan bound the read takes: one for its own
-   * records, one more for each relation `with` loads for them, so a
-   * page's related records fit within what is left of the bound.
+   * records, one more for each relation `with` loads for them. Related
+   * records load record by record within what is left (`relatedWithin`),
+   * so this only leaves room for them: without it, a read taking the
+   * whole bound would answer one record and split after it.
    */
   shares: number;
 }
@@ -1212,10 +1215,34 @@ const idsIn = (value: unknown): string[] => {
     : [];
 };
 
+/** The rows `recordsOf` reads: a record with its document and its bytes. */
+type RelatedRow = ReadRow & { value_json: string; bytes: number };
+
 /**
- * The records of `target` with IDs `ids` the caller may see, by ID: one
+ * The rows of `target`'s records with IDs `ids` the caller may see: one
  * statement, by primary key, under the owner predicate of an owner-only
- * table.
+ * table, read as it is iterated.
+ */
+const recordsOf = (
+  sql: ReadSql,
+  scope: ReadScope,
+  target: ReadTable,
+  ids: readonly string[]
+): Iterable<RelatedRow> => {
+  const scoped = scopeClause(target, scope);
+  return sql
+    .on(target.name)
+    .exec<RelatedRow>(
+      `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${scoped.sql}`,
+      target.tableId,
+      JSON.stringify(ids),
+      ...scoped.params
+    );
+};
+
+/**
+ * The records of `target` with IDs `ids` the caller may see, by ID, each
+ * ID and document counted against the read's scan bound (`scan`).
  */
 const recordsById = (
   sql: ReadSql,
@@ -1231,16 +1258,7 @@ const recordsById = (
   for (const _id of ids) {
     scanned(scan, 0);
   }
-  const scoped = scopeClause(target, scope);
-  const rows = sql
-    .on(target.name)
-    .exec<ReadRow & { value_json: string; bytes: number }>(
-      `SELECT record_id, owner_id, revision, created_at, updated_at, value_json, length(CAST(value_json AS BLOB)) AS bytes FROM sdk_records WHERE table_id = ? AND record_id IN (SELECT value FROM json_each(?))${scoped.sql}`,
-      target.tableId,
-      JSON.stringify([...ids]),
-      ...scoped.params
-    );
-  for (const row of rows) {
+  for (const row of recordsOf(sql, scope, target, [...ids])) {
     scannedBytes(scan, row.bytes);
     found.set(row.record_id, documentOf(target, row, row.value_json));
   }
@@ -1249,48 +1267,73 @@ const recordsById = (
 };
 
 /**
- * Adds to each of `documents` (records of `table`) the related records of
- * `fields` under `_with`, as the header above says.
+ * A relation `with` loads: the field holding the IDs, whether it holds a
+ * list of them, and the table they name, undefined when the caller can't
+ * read it.
  */
-const withRelated = (
-  sql: ReadSql,
+interface Relation {
+  readonly field: string;
+  readonly many: boolean;
+  readonly target: ReadTable | undefined;
+}
+
+/** The relations of `fields` of `table`, under `scope`'s access. */
+const relationsOf = (
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
-  documents: readonly ReadDocument[],
-  fields: readonly string[],
-  scan: Scan
-): void => {
-  const relations = fields.map(
-    (field) => [field, relationIn(table, field)] as const
-  );
-  if (relations.length === 0 || documents.length === 0) {
-    return;
-  }
-  const related = documents.map((): Record<string, unknown> => ({}));
-  for (const [field, relation] of relations) {
-    let target: ReadTable | undefined;
+  fields: readonly string[]
+): Relation[] =>
+  fields.map((field) => {
+    const relation = relationIn(table, field);
     try {
-      target = readableTable(pinned, scope, relation.table);
+      return {
+        field,
+        many: relation.many,
+        target: readableTable(pinned, scope, relation.table),
+      };
     } catch (error) {
       if (dataErrors.codeOf(error) !== "data.access_denied") {
         throw error;
       }
+      return { field, many: relation.many, target: undefined };
     }
+  });
+
+/** Loads the records of `target` with IDs `ids` the caller may see, by ID. */
+type RecordsLoad = (
+  target: ReadTable,
+  ids: ReadonlySet<string>
+) => ReadonlyMap<string, ReadDocument>;
+
+/**
+ * Adds to each of `documents` the related records of `relations` under
+ * `_with`, as the header above says, loading them through `load`.
+ */
+const attachRelated = (
+  documents: readonly ReadDocument[],
+  relations: readonly Relation[],
+  load: RecordsLoad
+): void => {
+  if (relations.length === 0 || documents.length === 0) {
+    return;
+  }
+  const related = documents.map((): Record<string, unknown> => ({}));
+  for (const { field, many, target } of relations) {
     if (target === undefined) {
       for (const shown of related) {
         shown[field] = withheld;
       }
       continue;
     }
-    const ids = new Set(
-      documents.flatMap((document) => idsIn(document[field]))
+    const found = load(
+      target,
+      new Set(documents.flatMap((document) => idsIn(document[field])))
     );
-    const found = recordsById(sql, scope, target, ids, scan);
     for (const [position, document] of documents.entries()) {
       const value = document[field];
       const shown = related[position] ?? {};
-      if (relation.many) {
+      if (many) {
         shown[field] = Array.isArray(value)
           ? value.map((id: unknown) =>
               typeof id === "string" ? (found.get(id) ?? null) : null
@@ -1305,6 +1348,143 @@ const withRelated = (
   for (const [position, document] of documents.entries()) {
     document._with = related[position] ?? {};
   }
+};
+
+/**
+ * Adds to each of `documents` (records of `table`) the related records of
+ * `fields` under `_with`, as the header above says: in one statement per
+ * field, refused past the read's scan bound.
+ */
+const withRelated = (
+  sql: ReadSql,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  table: ReadTable,
+  documents: readonly ReadDocument[],
+  fields: readonly string[],
+  scan: Scan
+): void => {
+  attachRelated(
+    documents,
+    relationsOf(pinned, scope, table, fields),
+    (target, ids) => recordsById(sql, scope, target, ids, scan)
+  );
+};
+
+/** A record's related records would pass what is left of a page's bounds. */
+class PastBoundError extends Error {
+  override name = "PastBoundError";
+}
+
+/**
+ * The records of `target` with IDs `ids` the caller may see, by ID, read
+ * once each across a page (`loaded`, by ID, null for one it may not see):
+ * the IDs not read yet, then their documents, counted against the read's
+ * scan bound (`scan`) as they are read. Past it, `PastBoundError`, or the
+ * read's own `data.scan_limit` for a page's first record (`first`), which
+ * no split makes any smaller.
+ */
+const recordsWithin = (
+  sql: ReadSql,
+  scope: ReadScope,
+  target: ReadTable,
+  ids: ReadonlySet<string>,
+  {
+    scan,
+    loaded,
+    first,
+  }: {
+    scan: Scan;
+    loaded: Map<string, ReadDocument | null>;
+    first: boolean;
+  }
+): Map<string, ReadDocument> => {
+  const missing = [...ids].filter((id) => !loaded.has(id));
+  if (missing.length > 0) {
+    if (!first && scan.entries + missing.length > queryMaxScannedEntries) {
+      throw new PastBoundError();
+    }
+    for (const id of missing) {
+      scanned(scan, 0);
+      loaded.set(id, null);
+    }
+    let answered = 0;
+    for (const row of recordsOf(sql, scope, target, missing)) {
+      if (!first && scan.bytes + row.bytes > queryMaxScannedBytes) {
+        throw new PastBoundError();
+      }
+      scannedBytes(scan, row.bytes);
+      loaded.set(row.record_id, documentOf(target, row, row.value_json));
+      answered += 1;
+    }
+    sql.answered(target.name, answered);
+  }
+  const found = new Map<string, ReadDocument>();
+  for (const id of ids) {
+    const document = loaded.get(id);
+    if (document !== undefined && document !== null) {
+      found.set(id, document);
+    }
+  }
+  return found;
+};
+
+/**
+ * Adds the related records of `fields` to an ended page's `documents`,
+ * record by record in its order, against what is left of the read's scan
+ * bound (`scan`) and what one answer may carry, with each record's own
+ * bytes (`ownSizes`): how many of them carry theirs. It stops at the
+ * first record whose related records wouldn't fit, which the page splits
+ * before, as a read stopped at its scan bound splits. However many IDs a
+ * record holds, or however large the records they name, a page never
+ * fails for them, but for its first record's alone.
+ */
+const relatedWithin = (
+  sql: ReadSql,
+  {
+    pinned,
+    scope,
+    table,
+  }: {
+    pinned: PinnedSchema;
+    scope: ReadScope;
+    table: ReadTable;
+  },
+  documents: readonly ReadDocument[],
+  fields: readonly string[],
+  { scan, ownSizes }: { scan: Scan; ownSizes: readonly number[] }
+): number => {
+  const relations = relationsOf(pinned, scope, table, fields);
+  if (relations.length === 0) {
+    return documents.length;
+  }
+  const loaded = new Map<string, Map<string, ReadDocument | null>>();
+  let answer = 0;
+  for (const [position, document] of documents.entries()) {
+    const first = position === 0;
+    try {
+      attachRelated([document], relations, (target, ids) => {
+        const ofTarget =
+          loaded.get(target.tableId) ?? new Map<string, ReadDocument | null>();
+        loaded.set(target.tableId, ofTarget);
+        return recordsWithin(sql, scope, target, ids, {
+          scan,
+          loaded: ofTarget,
+          first,
+        });
+      });
+    } catch (error) {
+      if (error instanceof PastBoundError) {
+        return position;
+      }
+      throw error;
+    }
+    answer += (ownSizes[position] ?? 0) + answerSize(document._with);
+    if (!first && answer > pageLimits.answerBytes) {
+      return position;
+    }
+  }
+  return documents.length;
 };
 
 /** Refuses `with` on a terminal that returns no records. */
@@ -1929,13 +2109,17 @@ const answeredPage = (
     pageSize: number;
     more: boolean;
     anchorFields: number | undefined;
-    /** Loads the related records of the documents kept (`with`). */
-    related: (documents: ReadDocument[]) => void;
+    /**
+     * Loads the related records of the documents kept (`with`), given
+     * their own bytes: how many of them carry theirs, those after them
+     * left for the page's second half.
+     */
+    related: (documents: ReadDocument[], ownSizes: number[]) => number;
   }
 ): PageRead => {
   // Cut on its own records first, so related records load only for the
-  // records it answers; then again with them, should they push it past
-  // an answer.
+  // records it answers; then again with them, should they stop short of
+  // its records or push it past an answer.
   const own =
     bound === undefined
       ? undefined
@@ -1945,19 +2129,26 @@ const answeredPage = (
           { stopped: bound.exhausted, lastRow: bound.lastRow },
           pageSize
         );
-  const kept = own === undefined ? read : read.slice(0, own.keep);
-  related(kept);
+  const ownKept = own === undefined ? read : read.slice(0, own.keep);
+  const fit = related(
+    ownKept,
+    ownKept.map((_document, position) => bytesOf(found[position]?.row))
+  );
+  // Short of every record kept, it stopped as a read stops at its scan
+  // bound: split after the last record whose related records fit.
+  const short = fit < ownKept.length;
+  const kept = short ? ownKept.slice(0, fit) : ownKept;
   const full =
-    bound === undefined || own?.keep === 0
+    bound === undefined || kept.length === 0
       ? undefined
       : pageSplit(
           found,
           kept,
-          { stopped: false, lastRow: undefined },
+          { stopped: short, lastRow: found[fit - 1]?.row },
           pageSize
         );
   const recut =
-    full !== undefined && full.keep < kept.length ? full : undefined;
+    full !== undefined && (short || full.keep < kept.length) ? full : undefined;
   const items = recut === undefined ? kept : kept.slice(0, recut.keep);
   const split = anchorOfRow(
     recut?.after ?? own?.after ?? full?.after,
@@ -2090,8 +2281,26 @@ export const readPage = (
     pageSize: terminal.pageSize,
     more,
     anchorFields,
-    related: (documents) => {
-      withRelated(sql, pinned, scope, table, documents, query.with ?? [], scan);
+    related: (documents, ownSizes) => {
+      if (bound === undefined) {
+        withRelated(
+          sql,
+          pinned,
+          scope,
+          table,
+          documents,
+          query.with ?? [],
+          scan
+        );
+        return documents.length;
+      }
+      return relatedWithin(
+        sql,
+        { pinned, scope, table },
+        documents,
+        query.with ?? [],
+        { scan, ownSizes }
+      );
     },
   });
   sql.answered(table.name, page.items.length);

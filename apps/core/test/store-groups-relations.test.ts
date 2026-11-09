@@ -664,6 +664,143 @@ describe("related records", () => {
     });
   });
 
+  it("load record by record for a page with an end, so lists of IDs past what one read may examine split it instead of failing", async () => {
+    const fixture = await storeWith({ products: "appMembers" });
+    await put(fixture, "orders", [
+      { id: "m", fields: { region: "M", paid: true } },
+      { id: "z", fields: { region: "Z", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRegion = () =>
+      db.query("orders").withIndex("by_region").with("items");
+    const first = await byRegion().paginate({ pageSize: 1 });
+    // An import lands inside the page: 5,000 small orders of five
+    // products each, far more IDs than one read may examine.
+    const imported = 5000;
+    const perOrder = 5;
+    await put(
+      fixture,
+      "products",
+      Array.from({ length: imported * perOrder }, (_, index) => ({
+        id: `p${numbered(index)}`,
+        fields: { title: `p${numbered(index)}` },
+      }))
+    );
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `i${numbered(index)}`,
+        fields: {
+          region: `A${numbered(index)}`,
+          paid: true,
+          items: Array.from(
+            { length: perOrder },
+            (_item, at) => `p${numbered(index * perOrder + at)}`
+          ),
+        },
+      }))
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byRegion().paginate({
+          pageSize: 10_000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    // Each order with every product it names, in its order.
+    const loaded = tiled.items.filter(
+      ({ items, _with }) =>
+        Array.isArray(_with.items) &&
+        _with.items.length === perOrder &&
+        _with.items.every(
+          (product, at) => product !== null && product.title === items?.[at]
+        )
+    );
+    expect({
+      split: tiled.reads > 1,
+      orders: tiled.items.length,
+      unique: new Set(tiled.items.map(({ _id }) => _id)).size,
+      last: tiled.items.at(-1)?._id,
+      loaded: loaded.length,
+    }).toStrictEqual({
+      split: true,
+      orders: imported + 1,
+      unique: imported + 1,
+      last: "m",
+      loaded: imported,
+    });
+  });
+
+  it("load record by record for a page with an end, so large related records past what one read may examine split it instead of failing", async () => {
+    const fixture = await storeWith();
+    await put(fixture, "orders", [
+      { id: "m", fields: { region: "M", paid: true } },
+      { id: "z", fields: { region: "Z", paid: true } },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRegion = () =>
+      db.query("orders").withIndex("by_region").with("customer");
+    const first = await byRegion().paginate({ pageSize: 1 });
+    // An import lands inside the page: 400 small orders, each naming a
+    // customer of 50 KB, more bytes than one read may examine.
+    const imported = 400;
+    const padding = "x".repeat(50_000);
+    await put(
+      fixture,
+      "customers",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `c${numbered(index)}`,
+        fields: { name: `c${numbered(index)}${padding}` },
+      }))
+    );
+    await put(
+      fixture,
+      "orders",
+      Array.from({ length: imported }, (_, index) => ({
+        id: `i${numbered(index)}`,
+        fields: {
+          region: `A${numbered(index)}`,
+          paid: true,
+          customer: `c${numbered(index)}`,
+        },
+      }))
+    );
+    const tiled = await tiledPage(
+      async (from, until) =>
+        await byRegion().paginate({
+          pageSize: 10_000,
+          cursor: from,
+          endCursor: until,
+        }),
+      null,
+      first.nextCursor ?? ""
+    );
+    // Each order with the customer it names.
+    const loaded = tiled.items.filter(
+      ({ customer, _with }) =>
+        _with.customer !== null &&
+        !("_withheld" in _with.customer) &&
+        _with.customer.name === `${customer}${padding}`
+    );
+    expect({
+      split: tiled.reads > 1,
+      orders: tiled.items.length,
+      unique: new Set(tiled.items.map(({ _id }) => _id)).size,
+      last: tiled.items.at(-1)?._id,
+      loaded: loaded.length,
+    }).toStrictEqual({
+      split: true,
+      orders: imported + 1,
+      unique: imported + 1,
+      last: "m",
+      loaded: imported,
+    });
+  });
+
   it("are refused past their bounds, clearly", async () => {
     const fixture = await storeWith();
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
