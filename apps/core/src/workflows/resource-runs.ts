@@ -375,6 +375,18 @@ export const settleControl = async (
     ...(also === undefined
       ? []
       : [outboxedWhere(db, also, storedEvent(event.id))]),
+    db
+      .update(workflowResourceRuns)
+      .set({
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+      })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, run.id),
+          inArray(workflowResourceRuns.status, unended),
+          storedEvent(event.id)
+        )
+      ),
   ]);
   await tellQueryFollowers(env, run.id);
 };
@@ -556,6 +568,7 @@ const startAbandoned = async (
         status: "failed",
         endedAt: now,
         failureCode: "workflow.start_unconfirmed",
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
       })
       .where(
         and(
@@ -682,6 +695,7 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
       .update(workflowResourceRuns)
       .set({
         status: "running",
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
       })
       .where(
         and(
@@ -1350,6 +1364,9 @@ export const projectResourceRun = async (
       .update(workflowResourceRuns)
       .set({
         status,
+        // Every status the engine takes: a wait opened or closed is one,
+        // and a page's snapshot shows its waits (run-waits.ts).
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
         ...(engine.sequence === undefined
           ? {}
           : { engineSequence: engine.sequence }),
@@ -1528,6 +1545,7 @@ const cancelStarting = async (
       .set({
         status: "cancelled",
         endedAt: now,
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
       })
       .where(
         and(

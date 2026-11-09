@@ -1225,6 +1225,7 @@ const writeReceipt = async (
             .update(workflowResourceRuns)
             .set({
               controlGeneration: generation,
+              summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
             })
             .where(and(unchanged, may)),
           insert(sql`changes() > 0`),
