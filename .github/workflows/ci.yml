@@ -354,7 +354,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
+          echo "static: $STATIC, test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, e2e-build: $E2E_BUILD, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
           if [ "$STATIC" != success ]; then
             echo "::error title=check::static ended as $STATIC; check passes only when it succeeds."
             exit 1
@@ -398,8 +398,8 @@ jobs:
   # connect's build, and the stack's empty state with every migration
   # applied. Each part built it for itself, about 80 s of its 3 to 6
   # minutes (November 2026); now it only starts it (GRASP_E2E_PREBUILT,
-  # playwright.config.ts). Chromium's headless shell is cached here too, by Playwright's version, for the
-  # parts to restore.
+  # playwright.config.ts). Chromium's headless shell is cached here too,
+  # by Playwright's version, for the parts to restore.
   e2e-build:
     name: e2e-build
     if: github.event_name != 'push' && github.event.pull_request.draft != true
@@ -413,7 +413,7 @@ jobs:
         # No journey reads pnpm's store.
         with:
           store: false
-      - uses: ./.github/actions/playwright-chromium
+      - uses: ./.github/actions/playwright-browser
         with:
           save: true
       # About 70 s, the most of this job's 2 minutes: the parts wait for it.
@@ -430,8 +430,9 @@ jobs:
           if-no-files-found: error
           # The state sits under .wrangler.
           include-hidden-files: true
-          # Only this run's parts read it, minutes after.
-          retention-days: 1
+          # This run's parts read it minutes after; kept for a few days, for
+          # a re-run of a failed part.
+          retention-days: 5
           # Mostly minified code and wasm: the fastest level packs it
           # nearly as small.
           compression-level: 1
@@ -516,7 +517,7 @@ jobs:
         # No journey reads pnpm's store.
         with:
           store: false
-      - uses: ./.github/actions/playwright-chromium
+      - uses: ./.github/actions/playwright-browser
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
@@ -596,32 +597,24 @@ jobs:
         with:
           store: false
       - id: playwright
-        run: |
-          echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
-          echo "image=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
-      - id: browsers
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: ./.github/actions/playwright-browser
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ matrix.browser }}-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      - if: steps.browsers.outputs.cache-hit != 'true'
-        run: vp exec playwright install "$BROWSER"
-      - if: steps.browsers.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ matrix.browser }}-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          browser: ${{ matrix.browser }}
+          save: true
+      - id: image
+        run: echo "image=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
       # An older image's files when this one's are missing: most of what
       # apt needs, and it fetches the rest.
       - id: debs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/playwright-debs
-          key: playwright-debs-${{ matrix.browser }}-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}
+          key: playwright-debs-${{ matrix.browser }}-${{ steps.image.outputs.image }}-${{ steps.playwright.outputs.version }}
           restore-keys: playwright-debs-${{ matrix.browser }}-
       # apt finds the cached files in its own archive and fetches only what
-      # they lack, and keeps what it fetched, so the cache can be saved
-      # with it.
+      # they lack, and keeps what it fetched. Kept for the cache: only the
+      # files of the packages now installed, at the versions installed, so
+      # an older image's files don't pile up in it.
       - run: |
           shopt -s nullglob
           mkdir -p ~/playwright-debs
@@ -631,15 +624,20 @@ jobs:
             sudo cp "${debs[@]}" /var/cache/apt/archives/
           fi
           vp exec playwright install-deps "$BROWSER"
-          fetched=(/var/cache/apt/archives/*.deb)
-          if [ ${#fetched[@]} -gt 0 ]; then
-            cp "${fetched[@]}" ~/playwright-debs/
-          fi
+          rm -f ~/playwright-debs/*.deb
+          for deb in /var/cache/apt/archives/*.deb; do
+            package=$(dpkg-deb -f "$deb" Package)
+            version=$(dpkg-deb -f "$deb" Version)
+            installed=$(dpkg-query -W -f '${Version}' "$package" 2>/dev/null || true)
+            if [ "$installed" = "$version" ]; then
+              cp "$deb" ~/playwright-debs/
+            fi
+          done
       - if: steps.debs.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/playwright-debs
-          key: playwright-debs-${{ matrix.browser }}-${{ steps.playwright.outputs.image }}-${{ steps.playwright.outputs.version }}
+          key: playwright-debs-${{ matrix.browser }}-${{ steps.image.outputs.image }}-${{ steps.playwright.outputs.version }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
@@ -685,7 +683,7 @@ jobs:
         # No journey reads pnpm's store.
         with:
           store: false
-      - uses: ./.github/actions/playwright-chromium
+      - uses: ./.github/actions/playwright-browser
       - run: vp run e2e:admin --shard "$SHARD"
         env:
           SHARD: ${{ matrix.shard }}
