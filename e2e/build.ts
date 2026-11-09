@@ -82,9 +82,11 @@ const frontendDist = "../web/dist";
 /**
  * Where what core's build writes into the built frontend (the App
  * compiler, the extractor) is built meanwhile, to be copied in once the
- * frontend is built.
+ * frontend is built. Relative to core's folder, where the steps run, so
+ * no checkout's path goes into a shell command.
  */
-const besideFrontend = path.join(import.meta.dirname, "dist/frontend");
+const besideFrontendFromCore = "../../e2e/dist/frontend";
+const besideFrontend = path.join(coreDir, besideFrontendFromCore);
 
 if (import.meta.main) {
   // dev:build is the frontend's build, core's `build`, connect's build.
@@ -101,7 +103,7 @@ if (import.meta.main) {
   await Promise.all([
     run(frontend),
     ...coreBuild.map(async (step) => {
-      await run(step.replaceAll(frontendDist, besideFrontend));
+      await run(step.replaceAll(frontendDist, besideFrontendFromCore));
     }),
     ...devBuild.map(runStep),
     run(stepsOf("dev:migrate").join(" && "), {

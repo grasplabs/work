@@ -11,8 +11,7 @@
     "./lib/*": "./src/lib/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
     "./styles.css": "./src/styles.css",
-    "./form": "./src/form.tsx",
-    "./catalog/overlays": "./catalog/overlays.ts"
+    "./form": "./src/form.tsx"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",
