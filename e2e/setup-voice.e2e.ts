@@ -3,7 +3,7 @@ import { expect } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
-import { answerSpeech, readUntil } from "./speech.ts";
+import { answerSpeech, readOn, readUntil } from "./speech.ts";
 
 // Stephen says each step of the admin's onboarding (apps/web/src/voice):
 // with the sound on, each step's line is asked of the voice, the next
@@ -138,6 +138,9 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
   try {
     await leaveNothingChosen();
     const page = await pageOf(admin);
+    // The steps' lines are read silently, at the pace of reading on the
+    // page's clock: the test goes on it to read them (`readOn`).
+    await page.clock.install();
     await page.goto("/setup?step=sources");
     // What Grasp knows of the organization, said apart from how far the admin is through the steps.
     const bar = page.getByRole("button", {
@@ -153,6 +156,10 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
 
     // SharePoint comes with the company's Microsoft sign-in, and Microsoft
     // 365 is connected for everyone (e2e/connections-seed.ts): connected.
+    await readOn(
+      page,
+      page.getByRole("button", { name: "Connect SharePoint" })
+    );
     await page.getByRole("button", { name: "Connect SharePoint" }).click();
     await expect(
       page.getByText(
@@ -172,18 +179,21 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
     await expect(page.getByText("Noted", { exact: true })).toBeVisible();
     expect(await known()).toBe(before + 5);
     await page.getByRole("button", { name: "Continue" }).click();
+    await readOn(page, page.getByRole("button", { name: "Skip for now" }));
     await page.getByRole("button", { name: "Skip for now" }).click();
 
     // Pulse skipped counts nothing.
     await expect(
       page.getByRole("heading", { name: "Which tools do people actually use?" })
     ).toBeVisible();
+    await readOn(page, page.getByRole("button", { name: "Skip for now" }));
     await page.getByRole("button", { name: "Skip for now" }).click();
 
     // The HR platform comes before the organization: Personio, noted, counts as the leads (10).
     await expect(
       page.getByRole("heading", { name: "Which HR platform do you use?" })
     ).toBeVisible();
+    await readOn(page, page.getByRole("button", { name: "Connect Personio" }));
     await page.getByRole("button", { name: "Connect Personio" }).click();
     await expect(
       page.getByText(
