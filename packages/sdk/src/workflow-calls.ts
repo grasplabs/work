@@ -28,23 +28,20 @@ import { showsControl } from "./workflow-view.ts";
 //   and then a cancel in one handler cancel the run just started, and the
 //   host checks every one as it would any. A selection changed while one
 //   is under way doesn't redirect it, and one asked of another run shows
-//   nothing on this one. A start admitted late, or a run ID a child's
-//   effect sees before the hook's own commits, is addressed as soon as it
-//   is selected, a render before the page shows it.
+//   nothing on this one. The hook commits its run ID before any layout
+//   effect runs, and once it lets go of these calls (another workflow or
+//   client, or it unmounted) a kept command refuses. A start admitted
+//   late is addressed as soon as it is admitted, a render before the page
+//   shows it.
 // - An event is sent only by a reference this very workflow's reference
 //   holds, never another workflow's, a stale release's or one made up; the
 //   host checks it, and its data, again.
 // - A control looks settled before it is: once admitted, it stays
 //   `applying` while the run's query still shows what it showed when the
-//   control was sent, unless that already shows it. A push that arrived
-//   while the control was under way may already be where the host ended
-//   up, its last if nothing changes after (equal reads push nothing), so
-//   the control is then left to the host's snapshot (`pendingControl`).
-//   And as a host that ends up where it was pushes nothing either,
-//   `applying` ends after `applyingAtMostMs` whatever comes. Either way a
-//   push read before the control was written can make it look settled
-//   for as long as the next read takes; the same control asked again
-//   meanwhile joins the first on the host, or finds it done.
+//   answer came, unless that already shows it; the host's snapshot says
+//   the rest (`pendingControl`). A host that ends up where it was (another
+//   page undid the control) pushes nothing new, so `applying` ends after
+//   `applyingAtMostMs` whatever comes.
 // - Capabilities are the host's alone: what a snapshot of the `run` query
 //   says may be done, narrowed by this hook's own controls. As any live
 //   query's, a snapshot kept through a lost connection stays shown, and
@@ -78,6 +75,8 @@ export class WorkflowCalls {
   #admittedSeq = 0;
   /** The run ID the hook committed, if it was given one. */
   #selected: string | undefined;
+  /** Whether the hook let go of these calls: its commands then refuse. */
+  #retired = false;
 
   constructor(client: GraspClient, read: ReadWorkflow) {
     this.#client = client;
@@ -99,6 +98,16 @@ export class WorkflowCalls {
    */
   readonly select = (runId: string | undefined): void => {
     this.#selected = runId;
+    this.#retired = false;
+  };
+
+  /**
+   * The hook let go of these calls (another workflow or client, or it
+   * unmounted): its kept commands refuse (`workflow.not_attached`) until
+   * it selects again.
+   */
+  readonly retire = (): void => {
+    this.#retired = true;
   };
 
   /** Starts a run with `input`: its handle, once the host admitted it. */
@@ -146,10 +155,10 @@ export class WorkflowCalls {
     },
   };
 
-  /** The run the hook selects now, once loaded: what a command addresses. */
+  /** The run the hook selects now: what a command addresses. */
   #attached(): string {
     const runId = this.#selected ?? this.#local.startedRunId;
-    if (runId === undefined) {
+    if (runId === undefined || this.#retired) {
       throw clientError("workflow.not_attached");
     }
     return runId;
@@ -163,28 +172,21 @@ export class WorkflowCalls {
   async #control(kind: PendingControl["kind"]): Promise<void> {
     const runId = this.#attached();
     const asked: Submitting = { kind, runId, stage: "submitting" };
-    // What a newer snapshot has settled no longer counts.
+    // What a newer snapshot has settled no longer counts: read before the
+    // control shows, so nothing here can leave it `submitting`.
     const kept = this.#local.submitting.filter(
       (each) =>
         each.stage === "submitting" ||
         each.before === this.#entry(each.runId).snapshot.value
     );
     this.#set({ submitting: [...kept, asked] });
-    const sent = this.#entry(runId);
-    const shownWhenSent = sent.settled;
     let applying: Submitting | undefined;
     try {
       const receipt = await this.#client.mutation(this.#read.functions[kind], {
         runId,
       });
-      const now = this.#entry(runId);
-      const overtaken = now !== sent || now.settled !== shownWhenSent;
-      const before = now.snapshot.value;
-      if (
-        receipt.state === "admitted" &&
-        !overtaken &&
-        !showsControl(kind, before)
-      ) {
+      const before = this.#entry(runId).snapshot.value;
+      if (receipt.state === "admitted" && !showsControl(kind, before)) {
         applying = { kind, runId, stage: "applying", before };
       }
     } finally {

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { useInsertionEffect, useState, useSyncExternalStore } from "react";
 
 import { WorkflowCalls } from "../workflow-calls.ts";
 import { readWorkflowReference } from "../workflow-reference-read.ts";
@@ -86,10 +86,16 @@ export const useWorkflow = <Reference extends AnyWorkflowReference>(
   const { calls } = current;
   const local = useSyncExternalStore(calls.subscribe, calls.local);
   const selected = options?.runId;
-  // Committed, so a command the page kept addresses what the hook shows
-  // now, never what a render it was made in showed (workflow-calls.ts).
-  useLayoutEffect(() => {
+  // Committed before any layout effect, so a command the page kept
+  // addresses what the hook shows now, never what a render it was made in
+  // showed; and retired once the hook lets go of these calls (another
+  // workflow or client, or unmounted), so a kept command refuses rather
+  // than act on a run the page no longer shows (workflow-calls.ts).
+  useInsertionEffect(() => {
     calls.select(selected);
+    return () => {
+      calls.retire();
+    };
   }, [calls, selected]);
   const runId = selected ?? local.startedRunId;
   const snapshot = useQuery(

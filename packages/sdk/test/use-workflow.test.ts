@@ -665,7 +665,7 @@ describe("useWorkflow", () => {
       });
     });
 
-    it("leaves a control to the host's snapshot when a push overtook it, which may be the last", async () => {
+    it("ends a control's applying within the most it waits when the host's last push came before its answer", async () => {
       const page = host();
       const hook = await showing(page);
       const answers = page.holdAnswers();
@@ -676,10 +676,38 @@ describe("useWorkflow", () => {
       page.run("run-1").push(snapshotOf());
       answers[0]?.({ value: { kind: "pause", state: "admitted" } });
       await paused;
+      const answered = hook.view().pendingControl;
+      await vi.advanceTimersByTimeAsync(applyingAtMostMs);
       expect({
-        pendingControl: hook.view().pendingControl,
-        canPause: hook.view().canPause,
-      }).toStrictEqual({ pendingControl: null, canPause: true });
+        answered,
+        after: {
+          pendingControl: hook.view().pendingControl,
+          canPause: hook.view().canPause,
+        },
+      }).toStrictEqual({
+        answered: { kind: "pause", stage: "applying" },
+        after: { pendingControl: null, canPause: true },
+      });
+    });
+
+    it("refuses a kept command once the hook lets go of its calls, sending nothing", async () => {
+      const page = host();
+      const hook = await showing(page);
+      const { pause, send } = hook.view();
+      // Another workflow or client, or unmounted.
+      hook.calls.retire();
+      expect({
+        codes: [
+          await codeOf(pause()),
+          await codeOf(
+            send(workflows.summarizeNote.events.styleChosen, { style: "long" })
+          ),
+        ],
+        calls: page.calls,
+      }).toStrictEqual({
+        codes: ["workflow.not_attached", "workflow.not_attached"],
+        calls: [],
+      });
     });
 
     it("shows a control applying no longer than the most it waits, if the host never pushes again", async () => {
