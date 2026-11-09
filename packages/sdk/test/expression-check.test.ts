@@ -491,6 +491,19 @@ describe("the code generated from an expression", () => {
     }).toStrictEqual({ continued: "ab", crlf: "ab", escapedSlash: "a\\\nb" });
   });
 
+  it("keeps a template's text whole through the module's UTF-8, a lone surrogate too", () => {
+    // The generated module is stored and loaded as UTF-8, where a lone
+    // surrogate would become U+FFFD: its code holds only ASCII.
+    const stored = new TextDecoder().decode(
+      new TextEncoder().encode(generated("`a\\uD800é${args.a}😀`"))
+    );
+    // oxlint-disable-next-line typescript/no-implied-eval, no-new-func -- runs the code the check generated, as a workflow's isolate does
+    const code = new Function("args", "$own", `return ${stored};`);
+    expect(Reflect.apply(code, undefined, [{ a: "x" }, own])).toBe(
+      "a\uD800éx😀"
+    );
+  });
+
   it("keeps a template's text text, whatever its escapes and continuations spell", () => {
     // Each reads as the text `${…}`, `\`` or `\${…}`: never a placeholder
     // the check didn't see, nor the template's end.

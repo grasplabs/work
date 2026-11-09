@@ -128,14 +128,17 @@ const escaped = /[^ !#-[\]-~]/gu;
 const digit = /[0-9]/u;
 
 /**
- * `value` as a string literal in double quotes, in ASCII: `\0` (unless a
- * digit follows), the usual single escapes, `\xHH` below U+0100 and
- * `\uHHHH` above (each half of a surrogate pair, and a lone one): the
- * generated code is ASCII, whatever its strings hold.
+ * `value` with what `pattern` matches escaped, in ASCII: `singles` by
+ * their own escape, `\0` (unless a digit follows), `\xHH` below U+0100
+ * and `\uHHHH` above (each half of a surrogate pair, and a lone one).
  */
-const quoted = (value: string): string =>
-  `"${value.replaceAll(escaped, (char, offset: number) => {
-    const single = singleEscapes[char];
+const asciiEscaped = (
+  value: string,
+  pattern: RegExp,
+  singles: Readonly<Record<string, string>>
+): string =>
+  value.replaceAll(pattern, (char, offset: number) => {
+    const single = singles[char];
     if (single !== undefined) {
       return single;
     }
@@ -150,7 +153,15 @@ const quoted = (value: string): string =>
       units += unit > 0xff ? `\\u${hex(unit, 4)}` : `\\x${hex(unit, 2)}`;
     }
     return units;
-  })}"`;
+  });
+
+/**
+ * `value` as a string literal in double quotes, in ASCII
+ * (`asciiEscaped`): the generated code is ASCII, whatever its strings
+ * hold.
+ */
+const quoted = (value: string): string =>
+  `"${asciiEscaped(value, escaped, singleEscapes)}"`;
 
 /** How tightly each binary and logical operator binds. */
 const precedence: ReadonlyMap<string, number> = new Map([
@@ -281,29 +292,25 @@ interface Context {
   arrowBody: boolean;
 }
 
-/** What a template's text escapes: what would end it, open a placeholder or break its line. */
-const templateEscapes = /[\\`$\r\n\u2028\u2029]/gu;
+/** What a template's text escapes: what a string's does, a backtick and `$`. */
+const templateEscapes = /[^ !#-[\]-~]|[`$]/gu;
 
-const templateEscape: Readonly<Record<string, string>> = {
-  "\\": "\\\\",
+const templateSingleEscapes: Readonly<Record<string, string>> = {
+  ...singleEscapes,
   "`": "\\`",
   $: "\\$",
-  "\r": "\\r",
-  "\n": "\\n",
-  "\u2028": "\\u2028",
-  "\u2029": "\\u2029",
 };
 
 /**
- * A template's text, from what it reads (cooked), escaped anew: every
- * `\`, backtick and `$` escaped, so no text closes the template or opens a
- * placeholder, and every line break an escape, so code the generator
- * indents line by line holds none. Printed from the cooked value, never
- * the raw, no escape or line continuation as written can change what the
- * code reads.
+ * A template's text, from what it reads (cooked), escaped anew as a
+ * string's is (`asciiEscaped`), a backtick and `$` too: no text closes the
+ * template or opens a placeholder, no line break breaks the code's lines,
+ * and the code stays ASCII. Printed from the cooked value, never the raw,
+ * no escape or line continuation as written can change what the code
+ * reads.
  */
 const templateText = (cooked: string): string =>
-  cooked.replaceAll(templateEscapes, (char) => templateEscape[char] ?? char);
+  asciiEscaped(cooked, templateEscapes, templateSingleEscapes);
 
 /** `node` printed (see the header). */
 // One case per node type: its length is the tree's, not complexity.
