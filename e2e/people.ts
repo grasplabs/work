@@ -14,11 +14,18 @@ import type { TestSource } from "../apps/core/test/app-definitions.ts";
  * the local stack is the fake IdP (apps/core/test/idp-worker.ts), and the
  * IdP sends them back signed in. The configured admin then gives each the
  * role the tests need, through the members API. Everyone is signed in up
- * front, before any test runs; tests only look theirs up.
+ * front, before any test runs, and again for a retry, before it runs;
+ * tests only look theirs up.
  */
 import { localAdmin, localStaff } from "../apps/core/test/sign-in-config.ts";
 import { expectModelRequestsHere } from "./model-fake.ts";
-import { e2eModel, e2eModelKey, e2eThinkingModel, origin } from "./stack.ts";
+import {
+  e2eModel,
+  e2eModelKey,
+  e2eThinkingModel,
+  origin,
+  workersPerStack,
+} from "./stack.ts";
 
 /** Signs session cookies on the test stack only; never a real secret. */
 export const testAuthSecret = "e2e-only-better-auth-secret-of-32-chars-or-more";
@@ -385,70 +392,107 @@ type Scene = keyof typeof cast;
 export type Cast = Record<string, Record<string, Person>>[];
 
 /**
- * Sign-ins `signInCast` runs at once. All of them at once (over a hundred)
- * keep the one local core isolate so busy that, on a slow CI runner, a
- * callback's fetch of the IdP's keys can wait past the 5 s the SSO plugin
- * gives it (jose's `createRemoteJWKSet` default, which the plugin doesn't
- * let us change). The plugin then refuses the sign-in as
+ * Sign-ins `signInAttempt` runs at once. All of them at once (over a
+ * hundred) keep the one local core isolate so busy that, on a slow CI
+ * runner, a callback's fetch of the IdP's keys can wait past the 5 s the
+ * SSO plugin gives it (jose's `createRemoteJWKSet` default, which the
+ * plugin doesn't let us change). The plugin then refuses the sign-in as
  * `token_not_verified`. Eight at a time keep that fetch well inside its
  * 5 s on a starved core, and cost the setup about half a second when it
  * isn't. At sixteen it came within a few milliseconds of the limit.
  */
 const signInsAtOnce = 8;
 
-/** How `signInCast` hands everyone to the test workers. */
+/**
+ * Sign-ins a retry runs at once: tests run beside it, and so may a retry
+ * on the stack's other worker, so each keeps to a share of `signInsAtOnce`
+ * (playwright.config.ts's `workers`, e2e/stack.ts).
+ */
+const retrySignInsAtOnce = signInsAtOnce / workersPerStack;
+
+/** How the casts signed in so far reach the tests, by attempt. */
 const castVariable = "E2E_CAST";
 
 /** How `signInCast` hands the configured admin's session to the test workers. */
 const adminVariable = "E2E_ADMIN";
 
+/** The casts signed in so far, by attempt: the global setup's first. */
+const castsSoFar = (): Cast => {
+  const json = process.env[castVariable];
+  if (json === undefined) {
+    throw new Error(
+      `${castVariable} is unset: the global setup in playwright.config.ts signs people in`
+    );
+  }
+  // SAFETY: signInCast and signInRetry wrote it, as a Cast.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return JSON.parse(json) as Cast;
+};
+
 /**
- * Signs in the whole cast, once for each attempt a test may get, so a
- * retry starts from people as they were, not as the failed attempt left
- * them. Everyone is called Person (person.<id>@acme.test, as the IdP names
- * people by their email's first word) and joins as a user; the configured
- * admin then gives the others their roles. The global setup (e2e/setup.ts)
- * runs it before any test, and returns them.
+ * Signs in the whole cast for one attempt: everyone is called Person
+ * (person.<id>@acme.test, as the IdP names people by their email's first
+ * word) and joins as a user; the configured admin, signed in as
+ * `adminCookie`, then gives the others their roles.
  */
-export const signInCast = async (attempts: number): Promise<Cast> => {
+const signInAttempt = async (
+  adminCookie: string,
+  atOnce: number
+): Promise<Cast[number]> => {
   const people = await mapConcurrently(
-    Array.from({ length: attempts }, (_, attempt) =>
-      Object.entries(cast).flatMap(([scene, roles]) =>
-        Object.entries<Role>(roles).map(([name, role]) => ({
-          attempt,
-          scene,
-          name,
-          role,
-          email: `person.${crypto.randomUUID()}@acme.test`,
-        }))
-      )
-    ).flat(),
-    signInsAtOnce,
+    Object.entries(cast).flatMap(([scene, roles]) =>
+      Object.entries<Role>(roles).map(([name, role]) => ({
+        scene,
+        name,
+        role,
+        email: `person.${crypto.randomUUID()}@acme.test`,
+      }))
+    ),
+    atOnce,
     async (person) => ({ ...person, cookie: await signInAs(person.email) })
   );
-  const adminCookie = await signInAs(localAdmin);
-  // Playwright hands the global setup's environment to the test workers.
-  process.env[adminVariable] = adminCookie;
   const { core, api } = apiOf({ cookie: adminCookie });
   try {
     const members = await api.members.list();
     const userIds = new Map(
       members.map(({ email, userId }) => [email, userId])
     );
-    const signedIn = people.map((person) => {
-      const userId = userIds.get(person.email);
+    const scenes: Cast[number] = {};
+    const roles: Promise<void>[] = [];
+    for (const { scene, name, role, email, cookie } of people) {
+      const userId = userIds.get(email);
       if (userId === undefined) {
-        throw new Error(`${person.email} signed in but isn't a member`);
+        throw new Error(`${email} signed in but isn't a member`);
       }
-      return { ...person, userId };
-    });
-    await Promise.all(
-      signedIn
-        .filter(({ role }) => role !== "user")
-        .map(async ({ userId, role }) => {
-          await api.members.setRole(userId, role);
-        })
-    );
+      scenes[scene] ??= {};
+      scenes[scene][name] = { userId, email, role, cookie };
+      if (role !== "user") {
+        roles.push(api.members.setRole(userId, role));
+      }
+    }
+    await Promise.all(roles);
+    return scenes;
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * Signs in the configured admin and the whole cast for a test's first
+ * attempt, and connects the stack's AI providers. A retry signs in a cast
+ * of its own when it starts (`signInRetry`), so it starts from people as
+ * they were, not as the failed attempt left them: signing in all three
+ * attempts' casts up front, over 400 sign-ins, took 30 to 40 s of every CI
+ * part's start for the rare test that is retried (November 2026). The
+ * global setup (e2e/setup.ts) runs it before any test, and returns them.
+ */
+export const signInCast = async (): Promise<Cast> => {
+  const adminCookie = await signInAs(localAdmin);
+  // Playwright hands the global setup's environment to the test workers.
+  process.env[adminVariable] = adminCookie;
+  const first = await signInAttempt(adminCookie, signInsAtOnce);
+  const { core, api } = apiOf({ cookie: adminCookie });
+  try {
     // The stack's AI providers and models (e2e/stack.ts), as an admin
     // connects them in Settings: every page that offers a model reads them.
     await api.aiProviders.add({ provider: "mistral", key: e2eModelKey });
@@ -462,23 +506,40 @@ export const signInCast = async (attempts: number): Promise<Cast> => {
     await api.aiProviders.test("mistral", e2eModel);
     await api.aiProviders.test("anthropic", e2eThinkingModel);
     await expectModelRequestsHere(["api.mistral.ai", "api.anthropic.com"]);
-    const byAttempt: Cast = Array.from({ length: attempts }, () => ({}));
-    for (const { attempt, scene, name, ...person } of signedIn) {
-      const scenes = byAttempt[attempt] ?? {};
-      scenes[scene] ??= {};
-      scenes[scene][name] = {
-        userId: person.userId,
-        email: person.email,
-        role: person.role,
-        cookie: person.cookie,
-      };
-    }
-    // Playwright hands the global setup's environment to the test workers.
-    process.env[castVariable] = JSON.stringify(byAttempt);
-    return byAttempt;
   } finally {
     core[Symbol.dispose]();
   }
+  const casts: Cast = [first];
+  // Playwright hands the global setup's environment to the test workers.
+  process.env[castVariable] = JSON.stringify(casts);
+  return casts;
+};
+
+/**
+ * Signs in a cast for the running test's attempt, when it is a retry the
+ * worker has no cast for yet, and calls `seed` with it (the connections
+ * the scenes expect, e2e/connections-seed.ts). A retry runs in a worker of
+ * its own, so this runs once per retried attempt, before the test, or in
+ * the `beforeAll` of a file whose tests share people.
+ */
+export const signInRetry = async (
+  seed: (scenes: Cast[number], attempt: number) => Promise<void>
+): Promise<void> => {
+  const { retry } = test.info();
+  const casts = castsSoFar();
+  if (casts[retry] !== undefined) {
+    return;
+  }
+  const adminCookie = process.env[adminVariable];
+  if (adminCookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const scenes = await signInAttempt(adminCookie, retrySignInsAtOnce);
+  await seed(scenes, retry);
+  casts[retry] = scenes;
+  process.env[castVariable] = JSON.stringify(casts);
 };
 
 /** The scene's people, signed in for this attempt at the running test. */
@@ -486,15 +547,7 @@ export const peopleIn = <S extends Scene>(
   scene: S
 ): Record<keyof (typeof cast)[S], Person> => {
   const { retry } = test.info();
-  const json = process.env[castVariable];
-  if (json === undefined) {
-    throw new Error(
-      `${castVariable} is unset: the global setup in playwright.config.ts signs people in`
-    );
-  }
-  // SAFETY: signInCast wrote it, as a Cast.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const people = (JSON.parse(json) as Cast)[retry]?.[scene];
+  const people = castsSoFar()[retry]?.[scene];
   if (people === undefined) {
     throw new Error(`Nobody is signed in for ${scene}, attempt ${retry + 1}`);
   }

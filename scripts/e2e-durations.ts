@@ -1,84 +1,41 @@
-// Records how long each e2e file takes, for the split between CI's e2e
+// Records how long each e2e test takes, for the split between CI's e2e
 // parts (scripts/e2e-parts.ts), from the parts' e2e-results artifacts
 // (Playwright's JSON report):
 //
 //   gh run download <run> -p 'e2e-results-*-of-*' -D runs/<run>
 //   vp run e2e:durations runs/*/*/e2e-results.json
 //
-// A file's time is the sum of its tests' passing attempts, in every
-// browser it runs in. Several runs make it steadier: each file takes the
-// median of the runs it ran in. Files the reports don't name keep the
-// time they had. Rewrites scripts/e2e-durations.json.
+// A Chromium test's time is its passing attempt's: only Chromium's are split.
+// Several runs make it steadier: each test takes the median of the runs it
+// ran in. Tests the reports don't name keep the time they had. Rewrites
+// scripts/e2e-durations.json.
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 
 import { z } from "zod";
 
-import { e2eDurationsFile } from "./e2e-parts.ts";
+import { e2eDurationsFile, testsIn } from "./e2e-parts.ts";
 import { byKey } from "./test-shards.ts";
 
-/** What this reads of a Playwright JSON report. */
-interface ReportSuite {
-  readonly file?: string | undefined;
-  readonly suites?: readonly ReportSuite[] | undefined;
-  readonly specs?:
-    | readonly {
-        readonly file?: string | undefined;
-        readonly tests: readonly {
-          readonly results: readonly {
-            readonly duration: number;
-            readonly status: string;
-          }[];
-        }[];
-      }[]
-    | undefined;
-}
-
-const resultSchema = z.object({
-  duration: z.number(),
-  status: z.string(),
-});
-const suiteSchema: z.ZodType<ReportSuite> = z.lazy(() =>
-  z.object({
-    file: z.string().optional(),
-    suites: z.array(suiteSchema).optional(),
-    specs: z
-      .array(
-        z.object({
-          file: z.string().optional(),
-          tests: z.array(z.object({ results: z.array(resultSchema) })),
-        })
-      )
-      .optional(),
-  })
-);
-const reportSchema = z.object({ suites: z.array(suiteSchema) });
+/** The project whose tests the parts split; the others run whole. */
+const splitProject = "[chromium] › ";
 
 /**
- * Seconds per `e2e/<file>` in one report: each test's passing attempt, or
- * its last when none passed.
+ * Seconds per Chromium test (`testsIn`'s key) in one report: its passing
+ * attempt, or its last when none passed.
  */
-export const fileSecondsIn = (json: string): Map<string, number> => {
-  const files = new Map<string, number>();
-  const walk = (suite: ReportSuite, file?: string): void => {
-    const own = suite.file ?? file;
-    for (const child of suite.suites ?? []) {
-      walk(child, own);
+export const testSecondsIn = (json: string): Map<string, number> => {
+  const tests = new Map<string, number>();
+  for (const { key, results } of testsIn(json)) {
+    if (!key.startsWith(splitProject)) {
+      continue;
     }
-    for (const spec of suite.specs ?? []) {
-      const key = `e2e/${spec.file ?? own ?? ""}`;
-      for (const { results } of spec.tests) {
-        const counted =
-          results.find(({ status }) => status === "passed") ?? results.at(-1);
-        if (counted !== undefined) {
-          files.set(key, (files.get(key) ?? 0) + counted.duration / 1000);
-        }
-      }
+    const counted =
+      results.find(({ status }) => status === "passed") ?? results.at(-1);
+    if (counted !== undefined) {
+      tests.set(key, (tests.get(key) ?? 0) + counted.duration / 1000);
     }
-  };
-  for (const suite of reportSchema.parse(JSON.parse(json)).suites) {
-    walk(suite);
   }
-  return files;
+  return tests;
 };
 
 const median = (values: readonly number[]): number => {
@@ -90,8 +47,8 @@ const median = (values: readonly number[]): number => {
 };
 
 /**
- * `known` updated from `reports`, each a run's reports concatenated: each
- * file they name takes the median of its times, to a tenth of a second.
+ * `known` updated from `runs`, each a run's reports: each test they name
+ * takes the median of its times, to a tenth of a second.
  */
 export const updatedDurations = (
   known: Readonly<Record<string, number>>,
@@ -101,17 +58,17 @@ export const updatedDurations = (
   for (const reports of runs) {
     const run = new Map<string, number>();
     for (const report of reports) {
-      for (const [file, seconds] of fileSecondsIn(report)) {
-        run.set(file, (run.get(file) ?? 0) + seconds);
+      for (const [test, seconds] of testSecondsIn(report)) {
+        run.set(test, (run.get(test) ?? 0) + seconds);
       }
     }
-    for (const [file, seconds] of run) {
-      times.set(file, [...(times.get(file) ?? []), seconds]);
+    for (const [test, seconds] of run) {
+      times.set(test, [...(times.get(test) ?? []), seconds]);
     }
   }
   const durations = new Map(Object.entries(known));
-  for (const [file, seconds] of times) {
-    durations.set(file, Math.round(median(seconds) * 10) / 10);
+  for (const [test, seconds] of times) {
+    durations.set(test, Math.round(median(seconds) * 10) / 10);
   }
   return Object.fromEntries([...durations].toSorted(([a], [b]) => byKey(a, b)));
 };
@@ -125,7 +82,7 @@ if (import.meta.main) {
     const known = z
       .record(z.string(), z.number())
       .parse(JSON.parse(readFileSync(e2eDurationsFile, "utf-8")));
-    // A run's parts each report their own files; the directory a report
+    // A run's parts each report their own tests; the directory a report
     // came from names its run (runs/<run>/<part>/e2e-results.json).
     const byRun = Map.groupBy(reports, (report) =>
       report.split("/").slice(0, -2).join("/")

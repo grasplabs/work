@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import type { TestSource } from "../apps/core/test/app-definitions.ts";
 import { attackAppFiles, injectingAppFiles } from "./attack-apps.ts";
-import { test } from "./contexts.ts";
+import { retryCast, test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
 import { pageAppFiles, serveAttacker } from "./page-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
@@ -116,6 +116,7 @@ let injecting: string;
 test.beforeAll(async () => {
   attacker = await serveAttacker();
   turn = await serveTurn();
+  await retryCast();
   ({ builder } = peopleIn("pageAttacks"));
   const files = attackAppFiles({ attacker: attacker.url, turn: turn.url });
   probing = await releaseApp(builder, "Probes", pageAppFiles(attacker.url));

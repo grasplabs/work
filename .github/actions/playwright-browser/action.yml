@@ -1,0 +1,54 @@
+# A Playwright browser for the journeys, on the runner itself: restored
+# from the cache by the installed Playwright's version and the runner's
+# image, else downloaded. Chromium as its headless shell, whose system
+# packages the image has; Firefox's and WebKit's the job installs (e2e-browsers
+# in ci.yml). Only a job that says so saves it: e2e-build for Chromium,
+# which runs before every part.
+name: Playwright browser
+description: Restore or install one of Playwright's browsers
+
+inputs:
+  browser:
+    description: "chromium, firefox or webkit"
+    default: chromium
+  save:
+    description: "Save the browser when its cache missed: true or false"
+    default: "false"
+
+outputs:
+  version:
+    description: The installed Playwright's version
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      run: |
+        version=$(node -p 'require("@playwright/test/package.json").version')
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "key=playwright-$BROWSER-$RUNNER_OS-$ImageOS-$version" >> "$GITHUB_OUTPUT"
+      env:
+        BROWSER: ${{ inputs.browser }}
+    - id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.version.outputs.key }}
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      # Chromium's headless shell is all the journeys run of it.
+      run: |
+        if [ "$BROWSER" = chromium ]; then
+          vp exec playwright install --only-shell chromium
+        else
+          vp exec playwright install "$BROWSER"
+        fi
+      env:
+        BROWSER: ${{ inputs.browser }}
+    - if: steps.cache.outputs.cache-hit != 'true' && inputs.save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.version.outputs.key }}

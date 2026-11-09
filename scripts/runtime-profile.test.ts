@@ -27,6 +27,13 @@ const coreScripts = (): Record<string, string> =>
     .object({ scripts: z.record(z.string(), z.string()) })
     .parse(JSON.parse(read("apps/core/package.json"))).scripts;
 
+/**
+ * The script that starts core's local dev server: `dev:start`, which `dev`
+ * runs after building and migrating, and the e2e stack runs on its own
+ * (playwright.config.ts).
+ */
+const localDev = (): string => coreScripts()["dev:start"] ?? "";
+
 const whitespace = /\s+/u;
 
 /**
@@ -60,8 +67,7 @@ const wranglerVars = (
 
 describe("the runtime profile each deployment says", () => {
   it("is workerd in local dev", () => {
-    const dev = coreScripts().dev ?? "";
-    expect(wranglerVars(dev, "dev")?.RUNTIME_PROFILE).toBe("workerd");
+    expect(wranglerVars(localDev(), "dev")?.RUNTIME_PROFILE).toBe("workerd");
   });
 
   it("is workerd in the on-prem smoke run on plain workerd", () => {
@@ -83,7 +89,7 @@ describe("the runtime profile each deployment says", () => {
   // A deployed core's vars are exactly what the admin gives it, without
   // this one: apps/admin/test/core-vars.test.ts.
   it("lets local dev run App code in core without a sandbox, and never core's wrangler.jsonc", () => {
-    const { dev = "" } = coreScripts();
+    const dev = localDev();
     const { vars } = z
       .object({ vars: z.record(z.string(), z.unknown()).default({}) })
       .parse(parseJsonc(read("apps/core/wrangler.jsonc")));
