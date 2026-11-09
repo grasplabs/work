@@ -247,16 +247,21 @@ const referenceLength = 600;
 const columnWeights = [10, 5, 3, 1] as const;
 
 /**
- * What a row is scored by, as one JSON array bound once: for each of the
- * query's words in each column, the FTS5 query that finds it there, what
- * it counts towards the score, and towards the section's own score
- * (headings and text alone).
+ * What a pass's matches are scored by, as one JSON array bound once: for
+ * each of the query's words in each column, the FTS5 query that finds the
+ * pass's matches holding it there (`match`, so only rows the pass found,
+ * never the rest of a common word's rows), what it counts towards the
+ * score, and towards the section's own score (headings and text alone).
  */
-const askedOf = (table: string, terms: readonly string[]): string =>
+const askedOf = (
+  table: string,
+  match: string,
+  terms: readonly string[]
+): string =>
   JSON.stringify(
     terms.flatMap((term) =>
       (columnsOf[table] ?? []).map((column, index) => [
-        `${column} : (${term})`,
+        `(${match}) AND ${column} : (${term})`,
         columnWeights[index] ?? 0,
         index >= 2 ? (columnWeights[index] ?? 0) : 0,
       ])
@@ -266,52 +271,63 @@ const askedOf = (table: string, terms: readonly string[]): string =>
 /**
  * One pass's matches: the rows holding the query's words as the pass asks
  * for them, unscored. Only the matches a reader may read are scored
- * (`scoreSql`), so a narrow search never scores sections of collections it
- * doesn't search, nor sections that don't hold the whole query.
+ * (`weightsSql`), so a narrow search never scores sections of collections
+ * it doesn't search, nor sections that don't hold the whole query. With
+ * `gate`, a one-row-or-none table, the index is only asked when the gate
+ * holds a row: CROSS JOIN keeps it the outer loop. The words too short for
+ * trigrams (`short`) filter the matches as a list: the unary `+` keeps
+ * SQLite from asking the trigram index once per row of that list.
  */
-const matchesSql = ({ table, pass, match, short }: Pass): SQL => {
+const matchesSql = ({ table, pass, match, short }: Pass, gate?: SQL): SQL => {
   const name = sql.identifier(table);
   return sql`SELECT matched.rowid AS row_id, ${pass} AS pass
-    FROM ${name} AS matched
+    FROM ${gate === undefined ? sql`` : sql`(${gate}) AS gate CROSS JOIN`}
+      ${name} AS matched
     WHERE matched.${name} MATCH ${match}
     ${
       short === undefined
         ? sql``
-        : sql`AND matched.rowid IN (
+        : sql`AND +matched.rowid IN (
             SELECT rowid FROM search_words WHERE search_words MATCH ${short}
           )`
     }`;
 };
 
-/** Which of `askedOf`'s weights a score sums: the row's, or its own headings and text alone. */
-const weightAt = { score: 1, own: 2 } as const;
-
 /**
- * The score of the row `found.row_id` in the pass `found.pass` found it
- * in, lower first: minus the weight of every column each of the query's
- * words is in (`weight`: the whole row's, or its own headings and text
- * alone). Never BM25: its weights count a word over every row of the
- * index, sections of collections the reader can't read too, so the order
- * of a reader's own results would tell them how often a word is in those
- * (GRA-1083). A row's score is its own words alone: each lookup asks
- * whether this one row holds a word in a column, and no count over other
+ * Each row of `found` (a CTE of `row_id` and the `pass` that found it)
+ * with its score in that pass: `score`, the weight of every column each of
+ * the query's words is in, and `own`, its own headings and text alone.
+ * Never BM25: its weights count a word over every row of the index,
+ * sections of collections the reader can't read too, so the order of a
+ * reader's own results would tell them how often a word is in those
+ * (GRA-1083). A row's score is its own words alone: no count over other
  * rows reaches it.
+ *
+ * Asked as sets, never row by row: each word in each column is one lookup
+ * of the pass's matches that hold it there (`askedOf`), and a row's score
+ * is what its lookups add up to. Asking each row whether it holds a word
+ * reads the word's whole posting list for every row, so a word in
+ * thousands of sections cost a scan of the index per section (GRA-1668).
+ * A pass none of `found` is from isn't asked at all, and only the rows of
+ * `found` are added up: the unary `+` keeps that filter off the index, so
+ * SQLite can't turn it back into a lookup per row.
  */
-const scoreSql = (
-  passes: readonly Pass[],
-  weight: keyof typeof weightAt
-): SQL => {
-  const at = sql.raw(`'$[${weightAt[weight]}]'`);
-  const cases = passes.map(({ table, pass, terms }) => {
+const weightsSql = (passes: readonly Pass[], found: string): SQL => {
+  const from = sql.identifier(found);
+  const lookups = passes.map(({ table, pass, match, terms }) => {
     const name = sql.identifier(table);
-    return sql`WHEN ${pass} THEN (
-      SELECT coalesce(sum(json_extract(asked.value, ${at})), 0)
-      FROM json_each(${askedOf(table, terms)}) AS asked, ${name}
-      WHERE ${name}.rowid = found.row_id
-        AND ${name} MATCH json_extract(asked.value, '$[0]')
-    )`;
+    return sql`SELECT ${name}.rowid AS row_id, ${pass} AS pass,
+        json_extract(asked.value, '$[1]') AS score,
+        json_extract(asked.value, '$[2]') AS own
+      FROM (SELECT 1 FROM ${from} WHERE ${from}.pass = ${pass} LIMIT 1) AS present
+      CROSS JOIN json_each(${askedOf(table, match, terms)}) AS asked
+      CROSS JOIN ${name}
+      WHERE ${name} MATCH json_extract(asked.value, '$[0]')`;
   });
-  return sql`-(CASE found.pass ${sql.join(cases, sql` `)} ELSE 0 END)`;
+  return sql`SELECT row_id, pass, sum(score) AS score, sum(own) AS own
+    FROM (${sql.join(lookups, sql` UNION ALL `)}) AS looked
+    WHERE (+looked.row_id, looked.pass) IN (SELECT row_id, pass FROM ${from})
+    GROUP BY row_id, pass`;
 };
 
 /**
@@ -462,12 +478,14 @@ const nearestCollections = async (
         ]),
   ];
   // MATERIALIZED: with one pass the CTE is a lone SELECT, which SQLite
-  // would flatten into the query below, putting FTS5's own lookups inside
-  // min(), where it can't evaluate them. A query of only short or digit
-  // words has one pass.
+  // would flatten into the query below, where FTS5's MATCH can't be
+  // evaluated. A query of only short or digit words has one pass.
   const rows = await db.all(sql`
     WITH matches AS MATERIALIZED (
-      ${sql.join(passes.map(matchesSql), sql` UNION ALL `)}
+      ${sql.join(
+        passes.map((pass) => matchesSql(pass)),
+        sql` UNION ALL `
+      )}
     ),
     found AS MATERIALIZED (
       SELECT matches.row_id, min(matches.pass) AS pass,
@@ -478,10 +496,13 @@ const nearestCollections = async (
       JOIN collections ON collections.id = documents.collection_id
       WHERE ${allowed.documents()}
       GROUP BY matches.row_id
-    )
+    ),
+    weights AS MATERIALIZED (${weightsSql(passes, "found")})
     SELECT found.collection_id AS collectionId,
-      min(${scoreSql(passes, "score")}) AS score
+      min(-coalesce(weights.score, 0)) AS score
     FROM found
+    LEFT JOIN weights ON weights.row_id = found.row_id
+      AND weights.pass = found.pass
     GROUP BY found.collection_id
     ORDER BY score, found.collection_id
     LIMIT ${nearestCollectionsMax}
@@ -684,16 +705,15 @@ export const searchSections = async <C>(
     exact === undefined
       ? passesOf(terms, recall === undefined ? " AND " : " OR ")
       : exactPassesOf(exact);
-  const rows = await db.all(sql`
-    WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)}),
-    readable AS (
-      SELECT matches.row_id, matches.pass,
-        ${freshness} AS freshness, ${lengthNorm} AS length_norm,
-        search_rows.document_id, search_rows.position,
-        collections.id AS collection_id, collections.sensitive,
-        row_number() OVER (PARTITION BY matches.row_id ORDER BY matches.pass) AS nth
-      FROM matches
-      JOIN search_rows ON search_rows.id = matches.row_id
+  // The typo pass is only asked when the others find nothing the reader
+  // may read (`gate`): a word in thousands of sections never pays for it.
+  const early = passes.filter(({ pass }) => pass < typoPass);
+  const typo = passes.filter(({ pass }) => pass >= typoPass);
+  /** The matches of the CTE `source` the reader may read, in what they searched. */
+  const reachable = (source: string): SQL => {
+    const from = sql.identifier(source);
+    return sql`FROM ${from}
+      JOIN search_rows ON search_rows.id = ${from}.row_id
       JOIN documents ON documents.id = search_rows.document_id
       JOIN collections ON collections.id = documents.collection_id
       WHERE ${allowed.documents()}
@@ -706,19 +726,47 @@ export const searchSections = async <C>(
                 sql`, `
               )})`
         }
-        ${type === undefined ? sql`` : sql`AND documents.type = ${type}`}
+        ${type === undefined ? sql`` : sql`AND documents.type = ${type}`}`;
+  };
+  const gate = sql`SELECT 1 WHERE NOT EXISTS (SELECT 1 ${reachable("early")})`;
+  const rows = await db.all(sql`
+    WITH early AS MATERIALIZED (
+      ${sql.join(
+        early.map((pass) => matchesSql(pass)),
+        sql` UNION ALL `
+      )}
     ),
-    found AS (
-      SELECT * FROM readable
-      WHERE nth = 1 AND (pass < ${typoPass}
-        OR NOT EXISTS (SELECT 1 FROM readable WHERE pass < ${typoPass}))
+    -- Each row once, in the first pass that found it.
+    matches AS MATERIALIZED (
+      SELECT row_id, min(pass) AS pass FROM (
+        SELECT row_id, pass FROM early
+        ${
+          typo.length === 0
+            ? sql``
+            : sql`UNION ALL ${sql.join(
+                typo.map((pass) => matchesSql(pass, gate)),
+                sql` UNION ALL `
+              )}`
+        }
+      )
+      GROUP BY row_id
+    ),
+    found AS MATERIALIZED (
+      SELECT matches.row_id, matches.pass,
+        ${freshness} AS freshness, ${lengthNorm} AS length_norm,
+        search_rows.document_id, search_rows.position,
+        collections.id AS collection_id, collections.sensitive
+      ${reachable("matches")}
     ),
     -- Only now scored: the matches of the whole query the reader may read,
     -- in what they searched.
-    scored AS (
-      SELECT found.*, ${scoreSql(passes, "score")} AS coverage,
-        ${scoreSql(passes, "own")} AS own
+    weights AS MATERIALIZED (${weightsSql(passes, "found")}),
+    scored AS MATERIALIZED (
+      SELECT found.*, -coalesce(weights.score, 0) AS coverage,
+        -coalesce(weights.own, 0) AS own
       FROM found
+      LEFT JOIN weights ON weights.row_id = found.row_id
+        AND weights.pass = found.pass
     ),
     weighed AS (
       SELECT *, coverage * freshness / length_norm AS rank FROM scored
