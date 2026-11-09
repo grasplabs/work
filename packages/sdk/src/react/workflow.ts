@@ -5,8 +5,8 @@ import { readWorkflowReference } from "../workflow-reference-read.ts";
 import type {
   AnyWorkflowReference,
   WorkflowEventsOf,
-  WorkflowInputOf,
-  WorkflowOutputOf,
+  WorkflowArgsOf,
+  WorkflowReturnOf,
   WorkflowWaitOf,
 } from "../workflow-references.ts";
 import { workflowView } from "../workflow-view.ts";
@@ -16,8 +16,8 @@ import { useQuery } from "./queries.ts";
 
 /** The view `useWorkflow` answers for `Reference`. */
 export type WorkflowViewOf<Reference> = WorkflowView<
-  WorkflowInputOf<Reference>,
-  WorkflowOutputOf<Reference>,
+  WorkflowArgsOf<Reference>,
+  WorkflowReturnOf<Reference>,
   WorkflowWaitOf<Reference>,
   WorkflowEventsOf<Reference>[keyof WorkflowEventsOf<Reference>]
 >;
@@ -36,7 +36,7 @@ const maxRunIdLength = 256;
  * ```tsx
  * const summary = useWorkflow(workflows.summarizeNote);
  * // In a handler: await summary.start({ noteId });
- * if (summary.status === "completed") summary.output.summary;
+ * if (summary.status === "completed") summary.result.summary;
  * if (summary.status === "failed") summary.error.message;
  *
  * const existing = useWorkflow(workflows.summarizeNote, { runId });

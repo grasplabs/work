@@ -91,8 +91,8 @@ const grasp = permission.grasp();
 
 /** A workflow the App declares, which no function here starts. */
 const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string() }),
-  output: v.object({ status: v.string() }),
+  args: v.object({ who: v.string() }),
+  returns: v.object({ status: v.string() }),
 });
 
 /** The App's config: its permissions, which every function may use. */

@@ -2133,11 +2133,11 @@ const workflowStart = (
       maxBytes: operationInputMaxBytes,
     });
   }
-  const checked = schemaOfDescriptor(declaration.input)["~standard"].validate(
+  const checked = schemaOfDescriptor(declaration.args)["~standard"].validate(
     given
   );
   if ("then" in checked) {
-    throw new Error("A workflow's input schema validated asynchronously");
+    throw new Error("A workflow's args schema validated asynchronously");
   }
   if (checked.issues !== undefined) {
     throw operationErrors.create("contract.invalid_args", {

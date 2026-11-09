@@ -44,7 +44,7 @@ interface Flow {
   status: unknown;
 }
 
-/** A workflow of `flow`, its input `who` and output `status`. */
+/** A workflow of `flow`, its args `who` and its result `status`. */
 const definitionOf = (
   { steps, status }: Flow,
   permissions: Record<string, unknown>
@@ -97,7 +97,7 @@ const filesWith = (
         },
       },
       permissions: [
-        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("followUp", {\n  args: v.object({ who: v.string().trim().min(1) }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {
@@ -174,8 +174,8 @@ const requestsApp = async (
 
 type RequestsApp = Awaited<ReturnType<typeof requestsApp>>;
 
-/** A start of `followUp` with `input`, as the SDK sends it. */
-const startOf = async (release: Release, input: unknown): Promise<string> => {
+/** A start of `followUp` with `args`, as the SDK sends it. */
+const startOf = async (release: Release, args: unknown): Promise<string> => {
   const declared = declaredWorkflows(release.app, release.workflows).find(
     ({ alias }) => alias === "followUp"
   );
@@ -188,7 +188,7 @@ const startOf = async (release: Release, input: unknown): Promise<string> => {
         name: "workflows.followUp.mutations.start",
         kind: "mutation",
       },
-      input: { input },
+      input: { args },
     })
   );
 };
@@ -314,7 +314,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
       const run = await owner.start(workflows.followUp, { who: "Ada" });
       t.equal(await t.runs.untilTerminal(run), {
         status: "completed",
-        output: { status: "Hello from the fixture" },
+        result: { status: "Hello from the fixture" },
       });
       t.equal(await t.effects.completedCount(run, "summarize"), 1);`),
       }
@@ -422,7 +422,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
     await session.close();
     expect({ ended, completed, asked: provider.requests.length }).toStrictEqual(
       {
-        ended: { status: "completed", output: { status: "Hello" } },
+        ended: { status: "completed", result: { status: "Hello" } },
         completed: 1,
         asked: 0,
       }

@@ -369,7 +369,7 @@ const requestsFiles = (fixture: unknown): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("followUp", {\n  args: v.object({ who: v.string().trim().min(1) }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {
@@ -500,8 +500,8 @@ describe(
       );
       const { runId } = await startCandidateRun(env, ada, workflow.id, {
         revision,
-        input: { who: "Ada" },
-        fixtures: { ai: { output: { line: "Hello Ada" } } },
+        args: { who: "Ada" },
+        fixtures: { ai: { result: { line: "Hello Ada" } } },
       });
       // Its own engine leaves it waiting out its linger.
       await candidateOnce(
@@ -645,10 +645,10 @@ describe(
       const waiting = async (who = "person:approver") => {
         const { runId } = await startCandidateRun(env, ada, workflow.id, {
           revision,
-          input: { who },
+          args: { who },
           fixtures: {
             approval: {
-              output: {
+              result: {
                 answered: true,
                 approved: true,
                 by: "person:pat",

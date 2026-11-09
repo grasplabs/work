@@ -248,8 +248,8 @@ const permissionOf = (
       return call(permission, "workflow", [
         alias,
         objectOf([
-          ["input", validatorOf(declared.input)],
-          ["output", validatorOf(declared.output)],
+          ["args", validatorOf(declared.args)],
+          ["returns", validatorOf(declared.returns)],
         ]),
       ]);
     }
@@ -341,7 +341,7 @@ const configSource = (definition: AppDefinition): string => {
   if (answers.length > 0) {
     config.push(["answers", literal(answers)]);
   }
-  // `v` declares a workflow's input and output.
+  // `v` declares a workflow's args and returns.
   const validated = declarations.some(
     (declared) => declared["~permission"] === "workflows"
   );

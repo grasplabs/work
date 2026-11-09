@@ -45,16 +45,16 @@ const files = (): TestApp =>
       permissions: [
         "permission.ai({ maxOutputTokens: 100 })",
         `permission.workflow("followUp", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
+  args: ${workflowShape},
+  returns: v.object({ status: v.string() }),
 })`,
         `permission.workflow("remind", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
+  args: ${workflowShape},
+  returns: v.object({ status: v.string() }),
 })`,
         `permission.workflow("later", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
+  args: ${workflowShape},
+  returns: v.object({ status: v.string() }),
 })`,
       ],
     },

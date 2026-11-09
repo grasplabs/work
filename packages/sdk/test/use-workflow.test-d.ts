@@ -1,8 +1,8 @@
 // Compile-time guarantees of `useWorkflow` (spec 10.4.1, 10.4.4, 10.4.7,
 // 10.7.2, 10.7.3), against workflow references as the generator writes
-// them: a run's input and output are inferred from the reference without
+// them: a run's args and result are inferred from the reference without
 // a cast or generic argument; a wrong table's ID, an unknown field, an
-// operation's reference, an internal or string one are refused; output
+// operation's reference, an internal or string one are refused; a result
 // exists only once completed and an error only once failed, each read off
 // the narrowed view itself; the compensating variant carries its cause;
 // the pending control and the waits narrow by kind. Type-checked by
@@ -41,20 +41,20 @@ export const useRunChecks = (): void => {
   void summary.start({});
   // @ts-expect-error -- a value outside the enum
   void summary.start({ noteId, style: "medium" });
-  // @ts-expect-error -- `run` takes the input itself, not a string
+  // @ts-expect-error -- `start` takes the args themselves, not a string
   void summary.start("summarize");
 
   const archive = useWorkflow(workflows.archiveNotes);
   void archive.start({});
   if (archive.status === "completed") {
-    expectTypeOf(archive.output).toEqualTypeOf<null>();
+    expectTypeOf(archive.result).toEqualTypeOf<null>();
   }
 };
 
 export const useViewChecks = (): void => {
   const summary = useWorkflow(workflows.summarizeNote, { runId });
   if (summary.status === "completed") {
-    expectTypeOf(summary.output).toEqualTypeOf<{
+    expectTypeOf(summary.result).toEqualTypeOf<{
       summary: string;
       words: number;
     }>();
@@ -65,12 +65,12 @@ export const useViewChecks = (): void => {
   }
   if (summary.status === "failed") {
     expectTypeOf(summary.error).toEqualTypeOf<Readonly<AppErrorPayload>>();
-    // @ts-expect-error -- a failed run has no output
-    void summary.output;
+    // @ts-expect-error -- a failed run has no result
+    void summary.result;
   }
   if (summary.status === "cancelled") {
-    // @ts-expect-error -- a cancelled run has neither output nor error
-    void summary.output;
+    // @ts-expect-error -- a cancelled run has neither result nor error
+    void summary.result;
     // @ts-expect-error -- as above
     void summary.error;
   }
@@ -82,8 +82,8 @@ export const useViewChecks = (): void => {
   ) {
     expectTypeOf(summary.finishedAt).toEqualTypeOf<null>();
     expectTypeOf(summary.startedAt).toEqualTypeOf<number | null>();
-    // @ts-expect-error -- no output before it completed
-    void summary.output;
+    // @ts-expect-error -- no result before it completed
+    void summary.result;
   }
   if (summary.status === "compensating") {
     expectTypeOf(summary.activity).toEqualTypeOf<
@@ -98,7 +98,7 @@ export const useViewChecks = (): void => {
       void summary.originalError;
     }
     // @ts-expect-error -- cleanup is not a terminal outcome
-    void summary.output;
+    void summary.result;
   }
   if (summary.status === "loading") {
     expectTypeOf(summary.runId).toEqualTypeOf<string>();
@@ -109,8 +109,8 @@ export const useViewChecks = (): void => {
     // @ts-expect-error -- no run is selected while idle
     void summary.runId;
   }
-  // @ts-expect-error -- no output before narrowing to completed
-  void summary.output;
+  // @ts-expect-error -- no result before narrowing to completed
+  void summary.result;
   // @ts-expect-error -- no error before narrowing to failed
   void summary.error;
   // @ts-expect-error -- the status is a literal union, not any string

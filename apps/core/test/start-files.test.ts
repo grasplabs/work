@@ -75,7 +75,7 @@ const files = ({
       },
       permissions: [
         `permission.files({ operations: ${operations} })`,
-        `permission.workflow("review", { input: v.object({ doc: ${doc} }), output: v.object({ status: v.string() }) })`,
+        `permission.workflow("review", { args: v.object({ doc: ${doc} }), returns: v.object({ status: v.string() }) })`,
         ...workflows,
       ],
     },
@@ -262,7 +262,7 @@ const started = async (
     },
     body: JSON.stringify({
       reference: fixture.start,
-      input: { input: { doc: { id: doc } } },
+      input: { args: { doc: { id: doc } } },
       idempotencyKey: key,
     }),
   });
@@ -896,7 +896,7 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       doc: "v.object({ id: v.string() })",
       workflows: extras.map(
         (name) =>
-          `permission.workflow("${name}", { input: v.object({ note: v.string() }), output: v.null() })`
+          `permission.workflow("${name}", { args: v.object({ note: v.string() }), returns: v.null() })`
       ),
     });
     const { version } = await commitApp(

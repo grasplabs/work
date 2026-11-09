@@ -134,7 +134,7 @@ const filesWith = (
         },
       },
       permissions: [
-        'permission.workflow("approval", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("approval", {\n  args: v.object({ amount: v.number() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {
@@ -221,7 +221,7 @@ const startOf = async (release: Release, amount: number): Promise<string> => {
         name: "workflows.approval.mutations.start",
         kind: "mutation",
       },
-      input: { input: { amount } },
+      input: { args: { amount } },
     })
   );
 };
@@ -376,7 +376,7 @@ describe(
         organization: await organizationDecisionsOf(runId),
       }).toStrictEqual({
         answered: "ok",
-        end: { status: "completed", output: { status: "approved" } },
+        end: { status: "completed", result: { status: "approved" } },
         decisions: [
           {
             recipients: '["approver"]',
@@ -397,7 +397,7 @@ describe(
         end: await endOf(session, run),
       }).toStrictEqual({
         answered: "ok",
-        end: { status: "completed", output: { status: "rejected" } },
+        end: { status: "completed", result: { status: "rejected" } },
       });
       await session.close();
     });
@@ -438,7 +438,7 @@ describe(
         ],
         waiting: "waiting",
         answered: "ok",
-        end: { status: "completed", output: { status: "rejected" } },
+        end: { status: "completed", result: { status: "rejected" } },
       });
       await session.close();
     });
@@ -460,7 +460,7 @@ describe(
         wrong: "decision.invalid",
         meanwhile: ["open"],
         answered: "ok",
-        end: { status: "completed", output: { status: "approved" } },
+        end: { status: "completed", result: { status: "approved" } },
       });
       await session.close();
     });
@@ -520,7 +520,7 @@ describe(
         withOwnDecisions: await decisionsOf(second.runId),
       }).toStrictEqual({
         answered: "ok",
-        end: { status: "completed", output: { status: "approved" } },
+        end: { status: "completed", result: { status: "approved" } },
         decisions: [
           {
             recipients: '["approver","other"]',
@@ -554,7 +554,7 @@ describe(
       }).toStrictEqual({
         first: "ok",
         second: "decision.closed",
-        end: { status: "completed", output: { status: "approved" } },
+        end: { status: "completed", result: { status: "approved" } },
         decisions: [
           {
             recipients: '["approver"]',
@@ -582,7 +582,7 @@ describe(
         decisions: await decisionsOf(runId),
       }).toStrictEqual({
         answered: "ok",
-        end: { status: "completed", output: { status: "approved" } },
+        end: { status: "completed", result: { status: "approved" } },
         decisions: [
           {
             recipients: '["approver"]',
@@ -631,7 +631,7 @@ describe(
         completed: await session.completedCount(run, "review"),
       }).toStrictEqual({
         answered: "ok",
-        end: { status: "completed", output: { status: "approved" } },
+        end: { status: "completed", result: { status: "approved" } },
         decisions: 1,
         completed: 1,
       });
@@ -685,7 +685,7 @@ describe(
         first: "ok",
         second: "ok",
         again: "decision.closed",
-        end: { status: "completed", output: { status: "asked" } },
+        end: { status: "completed", result: { status: "asked" } },
         decisions: ["approved", "rejected"],
       });
       await session.close();
@@ -724,7 +724,7 @@ export default workflowTest({
       });
       t.equal(await t.runs.untilTerminal(run), {
         status: "completed",
-        output: { status: "approved" },
+        result: { status: "approved" },
       });
       await t.rejectsCode(
         approver.respond(run, "review", { approved: false }),

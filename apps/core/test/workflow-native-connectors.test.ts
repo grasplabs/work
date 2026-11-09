@@ -493,7 +493,7 @@ describe("a workflow binding a native connector's operation", () => {
     const tested = async (attachment: string, output: unknown) => {
       const { runId } = await startCandidateRun(env, builder, workflow.id, {
         revision: saved.revision,
-        input: { mailbox, message: "m1", attachment },
+        args: { mailbox, message: "m1", attachment },
         fixtures: { mail: { output } },
       });
       const run: WorkflowCandidateRun = await vi.waitFor(

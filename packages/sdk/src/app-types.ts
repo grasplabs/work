@@ -66,7 +66,7 @@ export interface AppPermissions {
   /** The Brain's collections (`ctx.brain`). */
   readonly brain?: BrainPermission;
   /** The workflows it starts, each under its alias (`ctx.workflows.<alias>`). */
-  // oxlint-disable-next-line typescript/no-explicit-any -- any workflow's input and output
+  // oxlint-disable-next-line typescript/no-explicit-any -- any workflow's args and returns
   readonly workflows?: readonly WorkflowPermission<string, any, any>[];
   /** The platform's own read-only functions (`ctx.grasp`). */
   readonly grasp?: GraspPermission;

@@ -23,14 +23,14 @@ export interface PendingControl {
 }
 
 /** What a hook does, and may do now, whatever its run's status. */
-export interface WorkflowCommands<Input, Wait, Event = never> {
+export interface WorkflowCommands<Args, Wait, Event = never> {
   /**
-   * Starts a new run with `input`: resolves with its handle once the host
+   * Starts a new run with `args`: resolves with its handle once the host
    * admitted it durably (never when it finishes); rejects with a
    * structured error otherwise. With no `runId` given to the hook, the
    * hook then shows the run of its latest admitted start.
    */
-  readonly start: (input: Input) => Promise<RunHandle>;
+  readonly start: (args: Args) => Promise<RunHandle>;
   /**
    * Pauses the selected run at its next safe point: resolves once the
    * host admitted it; the run's status says when it is paused.
@@ -93,7 +93,7 @@ export type ObservedRun = Readonly<RunHandle> & {
 };
 
 /** The selected run's status, and what each status has. */
-export type WorkflowRunView<Output> =
+export type WorkflowRunView<Returns> =
   | { readonly status: "idle" }
   | { readonly status: "loading"; readonly runId: string }
   /**
@@ -120,7 +120,7 @@ export type WorkflowRunView<Output> =
   | (ObservedRun & {
       readonly status: "completed";
       readonly finishedAt: number;
-      readonly output: Output;
+      readonly result: Returns;
     })
   | (ObservedRun & {
       readonly status: "failed";
@@ -134,11 +134,11 @@ export type WorkflowRunView<Output> =
 
 /** What `useWorkflow` answers: the commands and the selected run's view. */
 export type WorkflowView<
-  Input,
-  Output,
+  Args,
+  Returns,
   Wait = WorkflowWait,
   Event = never,
-> = WorkflowCommands<Input, Wait, Event> & WorkflowRunView<Output>;
+> = WorkflowCommands<Args, Wait, Event> & WorkflowRunView<Returns>;
 
 /** A wait as the `run` query names it: its event by alias. */
 type RunWait =
@@ -177,7 +177,7 @@ export interface RunSnapshot extends RunHandle {
         readonly cause: "cancellation";
         readonly activity: "running" | "waiting" | "paused";
       };
-  readonly output?: unknown;
+  readonly result?: unknown;
   readonly error?: AppErrorPayload;
   readonly waits: readonly RunWait[];
   readonly control: {
@@ -235,7 +235,7 @@ const runView = (snapshot: RunSnapshot): WorkflowRunView<unknown> => {
         ...observed,
         status,
         finishedAt: endedAt(),
-        output: snapshot.output,
+        result: snapshot.result,
       };
     }
     case "failed": {

@@ -78,13 +78,13 @@ export const readPermissionDeclaration = (data: unknown): AppPermission => {
     return grasp;
   }
   if (kind === "workflows") {
-    const { input, output, ...rest } = config;
-    // SAFETY: as above: `workflow` refuses any key but `input` and `output`.
+    const { args, returns, ...rest } = config;
+    // SAFETY: as above: `workflow` refuses any key but `args` and `returns`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const workflowConfig = {
       ...rest,
-      input: schemaOf(readDescriptor(input, 1, { nodes: 0 })),
-      output: schemaOf(readDescriptor(output, 1, { nodes: 0 })),
+      args: schemaOf(readDescriptor(args, 1, { nodes: 0 })),
+      returns: schemaOf(readDescriptor(returns, 1, { nodes: 0 })),
     } as never;
     return permission.workflow(alias, workflowConfig);
   }

@@ -158,8 +158,8 @@ describe("what a function may use", () => {
     });
     const files = permission.files({ operations: ["upload"] });
     const followUp = permission.workflow("followUp", {
-      input: v.object({}),
-      output: v.null(),
+      args: v.object({}),
+      returns: v.null(),
     });
     const { manifest } = inspectApp(
       notes({
@@ -288,8 +288,8 @@ describe("permissions", () => {
     });
     const ai = permission.ai({ maxOutputTokens: 100 });
     const followUp = permission.workflow("mail", {
-      input: v.object({}),
-      output: v.null(),
+      args: v.object({}),
+      returns: v.null(),
     });
     const { manifest } = inspectApp(
       notes({ permissions: { ai, connections: [mail], people: true } })
@@ -565,8 +565,8 @@ describe("the App's permissions in a function's context", () => {
     actions: ["send"],
   });
   const followUp = permission.workflow("followUp", {
-    input: v.object({ title: v.string().trim() }),
-    output: v.object({ done: v.boolean() }),
+    args: v.object({ title: v.string().trim() }),
+    returns: v.object({ done: v.boolean() }),
   });
 
   test("an action has every permission the App declares, and nothing else", async () => {
@@ -803,7 +803,7 @@ describe("the App's permissions in a function's context", () => {
     const declared = manifest.permissions.followUp;
     expect({
       kind: declared?.["~permission"],
-      input: declared?.["~permission"] === "workflows" ? declared.input : null,
+      args: declared?.["~permission"] === "workflows" ? declared.args : null,
       readBack:
         canonicalText(readAppManifest(JSON.stringify(manifest))) ===
         canonicalText(manifest),
@@ -822,36 +822,36 @@ describe("the App's permissions in a function's context", () => {
       ).includes("alias `followUp`"),
     }).toStrictEqual({
       kind: "workflows",
-      input: v.object({ title: v.string().trim() }).descriptor,
+      args: v.object({ title: v.string().trim() }).descriptor,
       readBack: true,
       sameAlias: true,
     });
   });
 
-  test("a workflow's input is there, or its default, when a start leaves it out", () => {
+  test("a workflow's args are there, or their default, when a start leaves them out", () => {
     const optional = refusal(() =>
       permission.workflow("followUp", {
-        input: v.string().optional(),
-        output: v.null(),
+        args: v.string().optional(),
+        returns: v.null(),
       })
     );
     const defaulted = permission.workflow("followUp", {
-      input: v.string().default("Today"),
-      output: v.null(),
+      args: v.string().default("Today"),
+      returns: v.null(),
     });
-    // Declared without the output a run gives, it is refused, whatever
+    // Declared without what a run returns, it is refused, whatever
     // the types let through.
-    const noOutput = refusal(() =>
+    const noReturns = refusal(() =>
       Reflect.apply(permission.workflow, permission, [
         "followUp",
-        { input: v.object({}) },
+        { args: v.object({}) },
       ])
     );
     expect({
       optional: optional.includes("never only optional"),
-      defaulted: defaulted.input.presence,
-      noOutput: noOutput.length > 0,
-    }).toStrictEqual({ optional: true, defaulted: "default", noOutput: true });
+      defaulted: defaulted.args.presence,
+      noReturns: noReturns.length > 0,
+    }).toStrictEqual({ optional: true, defaulted: "default", noReturns: true });
   });
 
   test("a manifest can't file a permission under another alias, or make one out of something else", () => {
@@ -874,14 +874,14 @@ describe("the App's permissions in a function's context", () => {
         permissions.other = permissions.followUp;
         delete permissions.followUp;
       }).includes("isn't filed under its alias"),
-      // A workflow without the output a run gives.
-      noOutput:
+      // A workflow without what a run returns.
+      noReturns:
         altered((permissions) => {
-          // SAFETY: the workflow declaration, an object with its output.
-          const { output: _output, ...withoutOutput } =
+          // SAFETY: the workflow declaration, an object with its returns.
+          const { returns: _returns, ...withoutReturns } =
             // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-            permissions.followUp as { output: unknown };
-          permissions.followUp = withoutOutput;
+            permissions.followUp as { returns: unknown };
+          permissions.followUp = withoutReturns;
         }).length > 0,
       // `people` that declares more than itself.
       widenedPeople: altered((permissions) => {
@@ -897,7 +897,7 @@ describe("the App's permissions in a function's context", () => {
       }).includes("isn't one this SDK knows"),
     }).toStrictEqual({
       renamed: true,
-      noOutput: true,
+      noReturns: true,
       widenedPeople: true,
       unknownKind: true,
     });

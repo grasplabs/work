@@ -10,17 +10,17 @@ export const links = permission.links({
 
 /** Summarizes a note: takes its ID, gives its summary. */
 export const summarizeNote = permission.workflow("summarizeNote", {
-  input: v.object({
+  args: v.object({
     noteId: v.id("notes"),
     style: v.enum(["short", "long"]).default("short"),
   }),
-  output: v.object({ summary: v.string(), words: v.number().integer() }),
+  returns: v.object({ summary: v.string(), words: v.number().integer() }),
 });
 
 /** Archives the notes: takes nothing, gives nothing. */
 export const archiveNotes = permission.workflow("archiveNotes", {
-  input: v.object({}),
-  output: v.null(),
+  args: v.object({}),
+  returns: v.null(),
 });
 
 export default defineApp({

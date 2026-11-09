@@ -1790,8 +1790,8 @@ const buildDeclaration = `/**
  * and a write under \`workflows/\` is refused: for something that runs on
  * its own or takes steps, build an independent workflow with
  * \`env.workflowBuild\`, add it to the App's permissions
- * (\`define\` with \`addPermission\`, \`permission.workflow("alias", { input, output })\`,
- * started with \`ctx.workflows.alias.start(input)\`) and bind it to the App
+ * (\`define\` with \`addPermission\`, \`permission.workflow("alias", { args, returns })\`,
+ * started with \`ctx.workflows.alias.start(args)\`) and bind it to the App
  * under that alias.
  *
  * Reading the App's data (\`ctx.db\` in queries and mutations) is bounded

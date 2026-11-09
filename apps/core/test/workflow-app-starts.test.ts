@@ -103,8 +103,8 @@ const schema = defineSchema({
 /** The workflow the App declares, by the alias its builders bind. */
 const followUp = permission.workflow("followUp", {
   // Started with no input, it takes its declared default.
-  input: v.object({ who: v.string().trim().min(1) }).default({ who: "Anyone" }),
-  output: v.object({ status: v.string() }),
+  args: v.object({ who: v.string().trim().min(1) }).default({ who: "Anyone" }),
+  returns: v.object({ status: v.string() }),
 });
 
 /** The App's config: the one workflow it declares. */

@@ -56,7 +56,7 @@ const ${componentOf(alias)} = ({ runId }: { runId: string }) => {
     <div className="flex flex-col gap-2">
       <Badge variant="secondary">{statusLabels[run.status] ?? run.status}</Badge>
       {run.status === "completed" ? (
-        <pre className="text-sm whitespace-pre-wrap">{JSON.stringify(run.output, null, 2)}</pre>
+        <pre className="text-sm whitespace-pre-wrap">{JSON.stringify(run.result, null, 2)}</pre>
       ) : null}
       {run.status === "failed" ? <p className="text-sm text-destructive">{run.error.message}</p> : null}
     </div>

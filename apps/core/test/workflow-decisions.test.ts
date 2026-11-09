@@ -1390,9 +1390,9 @@ describe("a test run of a JSON workflow's decision", () => {
     ) => {
       const { runId } = await startCandidateRun(env, owner, workflow.id, {
         revision: saved.revision,
-        input: { amount: 5000 },
+        args: { amount: 5000 },
         params: { reviewer },
-        fixtures: { invoiceApproval: { output: answer } },
+        fixtures: { invoiceApproval: { result: answer } },
       });
       const ran = await vi.waitFor(
         async () => {

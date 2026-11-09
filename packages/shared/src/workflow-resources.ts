@@ -1012,21 +1012,21 @@ export const maxCandidateLifetimeMs = 60 * 60 * 1000;
 
 /**
  * A test run of a draft's checkpoint (GRA-815): the checkpoint's exact
- * revision, the run's input, the parameter values it runs with (each
+ * revision, the run's args, the parameter values it runs with (each
  * left out takes its default; the workflow's own values never count),
- * and what each binding it calls answers, by alias, and each App
+ * and the result each binding it calls answers, by alias, and each App
  * function by `<alias>/<function ID>`. A test run never calls anything:
  * a call with no answer here fails (`workflow.candidate_unfixtured`).
  */
 export const workflowCandidateStartSchema = z.strictObject({
   revision: z.int().min(1),
-  input: z.json(),
+  args: z.json(),
   params: z.record(z.string().max(64), z.json()).optional(),
   fixtures: z
     .record(
       // An alias, or an App permission's alias and a function's ID.
       z.string().min(1).max(129),
-      z.strictObject({ output: z.json() })
+      z.strictObject({ result: z.json() })
     )
     .refine(
       (fixtures) => Object.keys(fixtures).length <= maxCandidateFixtures,
@@ -1066,14 +1066,14 @@ export const maxItemTestItems = maxLiveCandidateRuns;
 
 /**
  * A test of a draft's checkpoint over recent real items (GRA-513): the
- * checkpoint's exact revision runs once on the input of each of the
+ * checkpoint's exact revision runs once on the args of each of the
  * tester's most recent runs whose details they may see and whose input is
  * still kept (`items` of them, at most `maxItemTestItems`), each as a test
  * run (`workflowCandidateStartSchema`): with the parameters given here or
  * their defaults, and every call answered from `fixtures`, never made.
  */
 export const workflowItemTestStartSchema = workflowCandidateStartSchema
-  .omit({ input: true })
+  .omit({ args: true })
   .extend({ items: z.int().min(1).max(maxItemTestItems).optional() });
 
 /** One real item of a test, and how the draft did on it. */

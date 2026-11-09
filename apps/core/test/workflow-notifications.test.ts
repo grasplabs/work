@@ -117,8 +117,8 @@ const schema = defineSchema({
   }),
 });
 const review = permission.workflow("review", {
-  input: v.object({ jobId: v.string() }),
-  output: v.object({ status: v.string() }),
+  args: v.object({ jobId: v.string() }),
+  returns: v.object({ status: v.string() }),
 });
 
 /** The App's config: the one workflow it declares. */

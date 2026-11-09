@@ -183,7 +183,7 @@ const handsFilesOf = async (
     return false;
   }
   const workflows = declaredPermissions(manifest, "workflows");
-  if (workflows.some(({ input }) => takesFile(input))) {
+  if (workflows.some(({ args }) => takesFile(args))) {
     return true;
   }
   // What a start hands is copied by the bound workflow's own input

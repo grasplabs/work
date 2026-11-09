@@ -21,7 +21,7 @@ export const appDefinition = (seed: AppSeed): AppDefinition => {
   for (const { alias, declared } of seed.workflows) {
     definition = applyOperation(definition, {
       op: "addPermission",
-      permission: `permission.workflow(${JSON.stringify(alias)}, { input: ${declared.input}, output: ${declared.output} })`,
+      permission: `permission.workflow(${JSON.stringify(alias)}, { args: ${declared.args}, returns: ${declared.returns} })`,
     });
   }
   return definition;

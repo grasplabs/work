@@ -645,7 +645,7 @@ describe(
                   name: "workflows.followUp.mutations.start",
                   kind: "mutation",
                 },
-                input: { input: {} },
+                input: { args: {} },
                 idempotencyKey: "preview-start",
               }),
               { as: served.builder, lease: own.lease }

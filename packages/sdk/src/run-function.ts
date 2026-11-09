@@ -159,13 +159,13 @@ const workflowsOf = (
   for (const declared of permissions) {
     if (declared["~permission"] === "workflows") {
       workflows[declared.alias] = Object.freeze({
-        start: async (input?: unknown): Promise<unknown> =>
+        start: async (args?: unknown): Promise<unknown> =>
           await channel.resource(
             declared.alias,
             "start",
-            // No input travels as no argument, which JSON can carry: the
+            // No args travel as no argument, which JSON can carry: the
             // host applies the workflow's declared default.
-            input === undefined ? [] : [input]
+            args === undefined ? [] : [args]
           ),
       });
     }

@@ -34,16 +34,16 @@ export type SendEvent<Grants extends Grant> = <
   }
 ) => void;
 
-/** Any workflow declaration, whatever its input. */
-// oxlint-disable-next-line typescript/no-explicit-any -- the input is only read, by `WorkflowInput`
+/** Any workflow declaration, whatever its args. */
+// oxlint-disable-next-line typescript/no-explicit-any -- the args are only read, by `WorkflowArgs`
 type AnyWorkflow = WorkflowPermission<string, any>;
 
 /** The workflows among `Grants`. */
 type GrantedWorkflow<Grants extends Grant> = Extract<Grants, AnyWorkflow>;
 
-/** The input a caller starts workflow `Workflow` with. */
-type WorkflowInput<Workflow> =
-  Workflow extends WorkflowPermission<string, infer Input> ? Input : never;
+/** The args a caller starts workflow `Workflow` with. */
+type WorkflowArgs<Workflow> =
+  Workflow extends WorkflowPermission<string, infer Args> ? Args : never;
 
 /**
  * A workflow start the host admitted: durable from the moment it resolves,
@@ -62,20 +62,20 @@ export interface RunHandle {
 }
 
 /**
- * What a start of `Workflow` takes: its input, which may be left out where
- * the input schema takes none (its default, say).
+ * What a start of `Workflow` takes: its args, which may be left out where
+ * the args schema takes none (its default, say).
  */
 type StartArgs<Workflow> =
-  undefined extends WorkflowInput<Workflow>
-    ? [input?: WorkflowInput<Workflow>]
-    : [input: WorkflowInput<Workflow>];
+  undefined extends WorkflowArgs<Workflow>
+    ? [args?: WorkflowArgs<Workflow>]
+    : [args: WorkflowArgs<Workflow>];
 
 /**
- * `ctx.workflows`: each workflow among `Grants`, by its alias, started with its input,
+ * `ctx.workflows`: each workflow among `Grants`, by its alias, started with its args,
  * answering `Started`.
  */
 export type Workflows<Grants extends Grant, Started> = {
   readonly [Workflow in GrantedWorkflow<Grants> as Workflow["alias"]]: {
-    readonly start: (...input: StartArgs<Workflow>) => Promise<Started>;
+    readonly start: (...args: StartArgs<Workflow>) => Promise<Started>;
   };
 };

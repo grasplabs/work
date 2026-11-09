@@ -614,7 +614,7 @@ describe("reading", () => {
       {
         op: "addPermission",
         permission:
-          'permission.workflow("triage", { input: v.object({ title: v.string(), body: v.string() }), output: v.null() })',
+          'permission.workflow("triage", { args: v.object({ title: v.string(), body: v.string() }), returns: v.null() })',
       }
     );
     // Every key reversed, an object type's fields too: another type.

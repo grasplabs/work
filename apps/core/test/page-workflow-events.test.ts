@@ -70,7 +70,7 @@ const files = (): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("review", {\n  input: v.object({ jobId: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("review", {\n  args: v.object({ jobId: v.string() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {
@@ -317,7 +317,7 @@ const startedRun = async (
           person,
           app,
           lease,
-          mutationCall(reference, "start", { input: { jobId } })
+          mutationCall(reference, "start", { args: { jobId } })
         )
       )
     );

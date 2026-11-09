@@ -332,7 +332,7 @@ describe("workflow references", () => {
    */
   const generatedWith = async (
     bound: readonly WorkflowBindingExtras[],
-    declared?: Partial<Pick<BoundWorkflow, "input" | "output">>
+    declared?: Partial<Pick<BoundWorkflow, "args" | "returns">>
   ) => {
     const manifest = notesManifest();
     return await generateModules(
@@ -401,8 +401,8 @@ describe("workflow references", () => {
       ...identity,
       alias: "summarizeNote",
       contractId: "workflows.summarizeNote",
-      input: summarizeNote.input,
-      output: summarizeNote.output,
+      args: summarizeNote.args,
+      returns: summarizeNote.returns,
       listens: summarize.listens,
     });
   });
@@ -511,7 +511,7 @@ describe("workflow references", () => {
     expect(text).not.toContain("workflows.archiveNotes.mutations.send");
   });
 
-  test("take only what each mutation declares: the workflow's input, a run, and an event it declares with that event's data", () => {
+  test("take only what each mutation declares: the workflow's args, a run, and an event it declares with that event's data", () => {
     const bound = declaredWorkflows(notesManifest(), notesWorkflows).find(
       ({ alias }) => alias === "summarizeNote"
     );
@@ -521,10 +521,10 @@ describe("workflow references", () => {
     const { mutations } = workflowFunctions(bound);
     const noteId = "01890000-0000-7000-8000-000000000001";
     const cases = {
-      start: [mutations.start, { input: { noteId } }],
-      "start: input the workflow doesn't take": [
+      start: [mutations.start, { args: { noteId } }],
+      "start: args the workflow doesn't take": [
         mutations.start,
-        { input: { noteId: 1 } },
+        { args: { noteId: 1 } },
       ],
       cancel: [mutations.cancel, { runId: "run-1" }],
       "cancel: a field it doesn't take": [
@@ -562,7 +562,7 @@ describe("workflow references", () => {
     );
     expect(accepted).toStrictEqual({
       start: true,
-      "start: input the workflow doesn't take": false,
+      "start: args the workflow doesn't take": false,
       cancel: true,
       "cancel: a field it doesn't take": false,
       send: true,
@@ -603,7 +603,7 @@ describe("workflow references", () => {
     );
   });
 
-  test("answer only what each query declares: declared keys, no output, a known context", () => {
+  test("answer only what each query declares: declared keys, no result, a known context", () => {
     // What core checks each query's answer against, by the binding.
     const bound = declaredWorkflows(notesManifest(), notesWorkflows).find(
       ({ alias }) => alias === "summarizeNote"
@@ -637,7 +637,7 @@ describe("workflow references", () => {
         canCancel: false,
         pendingControl: null,
       },
-      output: { summary: "s", words: 1 },
+      result: { summary: "s", words: 1 },
     };
     const runRow = {
       run: {
@@ -673,14 +673,14 @@ describe("workflow references", () => {
         queries.history,
         pageOf([{ ...historyRow, key: "documentUploaded" }]),
       ],
-      "history: a run's input": [
+      "history: a run's args": [
         queries.history,
-        pageOf([{ ...historyRow, input: { noteId: "n" } }]),
+        pageOf([{ ...historyRow, args: { noteId: "n" } }]),
       ],
       runs: [queries.runs, pageOf([runRow])],
-      "runs: a run's output": [
+      "runs: a run's result": [
         queries.runs,
-        pageOf([{ ...runRow, output: { summary: "s" } }]),
+        pageOf([{ ...runRow, result: { summary: "s" } }]),
       ],
       decision: [queries.decision, detail],
       "decision: closed": [queries.decision, null],
@@ -694,11 +694,11 @@ describe("workflow references", () => {
       ],
       run: [queries.run, completed],
       "run: not seen": [queries.run, null],
-      "run: an output the App doesn't declare": [
+      "run: a result the App doesn't declare": [
         queries.run,
-        { ...completed, output: { summary: "s" } },
+        { ...completed, result: { summary: "s" } },
       ],
-      "run: its input": [queries.run, { ...completed, input: { noteId: "n" } }],
+      "run: its args": [queries.run, { ...completed, args: { noteId: "n" } }],
       canStart: [queries.canStart, true],
     } as const;
     const accepted = Object.fromEntries(
@@ -713,24 +713,24 @@ describe("workflow references", () => {
     expect(accepted).toStrictEqual({
       history: true,
       "history: an undeclared event": false,
-      "history: a run's input": false,
+      "history: a run's args": false,
       runs: true,
-      "runs: a run's output": false,
+      "runs: a run's result": false,
       decision: true,
       "decision: closed": true,
       "decision: another decision's context": false,
       "decision: another decision's wait": false,
       run: true,
       "run: not seen": true,
-      "run: an output the App doesn't declare": false,
-      "run: its input": false,
+      "run: a result the App doesn't declare": false,
+      "run: its args": false,
       canStart: true,
     });
   });
 
-  test("pin the workflow's input and output, each event and decision its own contract, and the release all of it", async () => {
+  test("pin the workflow's args and returns, each event and decision its own contract, and the release all of it", async () => {
     const text = v.string().descriptor;
-    const declarationChanges = [{ input: text }, { output: text }];
+    const declarationChanges = [{ args: text }, { returns: text }];
     const workflowPrints = await Promise.all(
       [{}, ...declarationChanges].map(
         async (change) =>
@@ -822,7 +822,7 @@ describe("workflow references", () => {
 
   test("are covered by the contracts the release's hash covers", async () => {
     const files = await generatedWith(notesWorkflows, {
-      output: v.string().descriptor,
+      returns: v.string().descriptor,
     });
     expect(files[".grasp/contracts.json"]).not.toBe(contractsText);
     expect(JSON.parse(contractsText)).toMatchObject({

@@ -101,7 +101,7 @@ const files = (page = pageOf("approval")): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("review", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("review", {\n  args: v.object({ amount: v.number() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {

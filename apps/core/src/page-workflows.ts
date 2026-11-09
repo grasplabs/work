@@ -133,7 +133,7 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   (permissions.ts); a live query shows only its newest read.
 // - What a run returned reaching anyone else: only the run's person sees
 //   its snapshot, through the App that started it, under the run's
-//   retention (`resultOf`). What it returned is projected by the output
+//   retention (`resultOf`). What it returned is projected by the `returns`
 //   the App declares, which the version that started it declared alike,
 //   refused if it doesn't fit;
 //   why it failed, only as a code the platform defines, in the platform's
@@ -688,19 +688,19 @@ const compensationShown = (
       };
 
 /**
- * What a completed run returned, projected by the output the App declared:
+ * What a completed run returned, projected by the `returns` the App declared:
  * `contract.invalid_return` for anything else, `workflow.run_details_removed`
  * past its retention.
  */
-export const outputOf = (declared: unknown, output: unknown): Json => {
-  if (output === undefined) {
-    // The contract has a completed run's output, always: past its
+export const resultAsDeclared = (declared: unknown, result: unknown): Json => {
+  if (result === undefined) {
+    // The contract has a completed run's result, always: past its
     // retention, there is none to show.
     throw workflowResourceErrors.create("workflow.run_details_removed");
   }
   const checked = schemaFromDescriptor(JSON.stringify(declared))[
     "~standard"
-  ].validate(output);
+  ].validate(result);
   if (checked instanceof Promise || checked.issues !== undefined) {
     throw operationErrors.create("contract.invalid_return");
   }
@@ -914,9 +914,9 @@ const runSnapshot = async (
     throw permissionErrors.create("permission.restricted");
   }
   const result = returned ? await resultOf(env, row) : {};
-  const output =
+  const completed =
     row.status === "completed"
-      ? outputOf(resolved.declared.output, result.output)
+      ? resultAsDeclared(resolved.declared.returns, result.output)
       : undefined;
   return {
     runId: row.id,
@@ -932,7 +932,7 @@ const runSnapshot = async (
       mayStart,
       compensating: compensation !== undefined,
     }),
-    ...(output === undefined ? {} : { output }),
+    ...(completed === undefined ? {} : { result: completed }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
     // Compensating after a failure: what it failed with, as a failed run
     // says it; its cleanup's activity, which the engine reports as running.
@@ -940,12 +940,12 @@ const runSnapshot = async (
   };
 };
 
-/** A start of `resolved` with `input` under `key`, admitted: its run's handle. */
+/** A start of `resolved` with `args` under `key`, admitted: its run's handle. */
 const started = async (
   env: Env,
   asking: Asking,
   resolved: Resolved,
-  input: Json,
+  args: Json,
   key: string
 ): Promise<Json> => {
   const pin = pinOf(resolved);
@@ -953,7 +953,7 @@ const started = async (
     env,
     authorityOf(asking),
     resolved.alias,
-    { input, key: coreStartKey("page", key) },
+    { input: args, key: coreStartKey("page", key) },
     undefined,
     // The binding still names the version the release's seal pinned.
     bindingPinnedSql(asking.app, resolved.alias, pin),
@@ -1588,7 +1588,7 @@ const mutationNames: ReadonlySet<string> = new Set<WorkflowMutationName>([
 const isMutationName = (name: string): name is WorkflowMutationName =>
   mutationNames.has(name);
 
-const startArgs = z.object({ input: z.json() });
+const startArgs = z.object({ args: z.json() });
 const controlArgs = z.object({ runId: z.string() });
 const sendArgs = z.object({
   runId: z.string(),
@@ -1654,7 +1654,7 @@ export const answerWorkflowMutation = async (
       env,
       asking,
       resolved,
-      argsOf(startArgs, args).input,
+      argsOf(startArgs, args).args,
       key
     );
   } else if (name === "send") {
@@ -1683,7 +1683,7 @@ const startCallSchema = z.strictObject({
 });
 
 /**
- * The workflow `request` starts in `release`, and its input, checked: a
+ * The workflow `request` starts in `release`, and its args, checked: a
  * call's JSON text of a workflow reference's `start` mutation, as an App's
  * tests send it (fixture-runs.ts); `contract.invalid_request` for any
  * other.
@@ -1691,7 +1691,7 @@ const startCallSchema = z.strictObject({
 export const startCallIn = async (
   release: Release,
   request: unknown
-): Promise<{ readonly resolved: Resolved; readonly input: Json }> => {
+): Promise<{ readonly resolved: Resolved; readonly args: Json }> => {
   let parsed: unknown;
   try {
     parsed = typeof request === "string" ? JSON.parse(request) : undefined;
@@ -1715,7 +1715,7 @@ export const startCallIn = async (
     call.data.input,
     "contract.invalid_args"
   );
-  return { resolved, input: argsOf(startArgs, args).input };
+  return { resolved, args: argsOf(startArgs, args).args };
 };
 
 /** Who reads a workflow reference's query, and through which App. */

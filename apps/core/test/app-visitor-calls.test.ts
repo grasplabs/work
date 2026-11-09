@@ -70,7 +70,7 @@ const portalFiles = (marker = "1"): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("followUp", {\n  input: v.object({ who: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("followUp", {\n  args: v.object({ who: v.string() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {

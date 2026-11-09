@@ -147,7 +147,8 @@ export const permission = Object.freeze({
     }) as BrainPermission<Operations>;
   },
   /**
-   * An independent workflow the App starts, with input of `input`: listed
+   * An independent workflow the App starts with `args`, a completed run
+   * returning `returns`: listed
    * in the App's `permissions.workflows`, started by its actions and
    * staged by its mutations. Only ever what
    * the App's builders bind under the alias, started through the App's
@@ -155,20 +156,20 @@ export const permission = Object.freeze({
    */
   workflow: <
     const Alias extends string,
-    Input extends AnySchema,
-    Output extends AnySchema,
+    Args extends AnySchema,
+    Returns extends AnySchema,
   >(
     alias: Alias,
-    config: WorkflowConfig<Input, Output>
-  ): WorkflowPermission<Alias, InferInput<Input>, Infer<Output>> => {
-    const checked = checkedConfig(config, ["input", "output"]);
-    const input = descriptorOf(checked.input);
-    const output = descriptorOf(checked.output);
-    // A start left without input takes the schema's default; an input that
-    // may be absent with none would be no JSON for the run to start with.
-    if (input.presence === "optional") {
+    config: WorkflowConfig<Args, Returns>
+  ): WorkflowPermission<Alias, InferInput<Args>, Infer<Returns>> => {
+    const checked = checkedConfig(config, ["args", "returns"]);
+    const args = descriptorOf(checked.args);
+    const returns = descriptorOf(checked.returns);
+    // A start left without args takes the schema's default; args that may
+    // be absent with none would be no JSON for the run to start with.
+    if (args.presence === "optional") {
       refuse(
-        "A workflow's input is required or has a default, never only optional."
+        "A workflow's args are required or have a default, never only optional."
       );
     }
     // SAFETY: built from what was checked of the arguments the type is
@@ -178,9 +179,9 @@ export const permission = Object.freeze({
       "~permission": "workflows",
       alias: checkedAlias(alias),
       // The descriptors, as data: what the host checks a start against.
-      input: structuredClone(input),
-      output: structuredClone(output),
-    }) as WorkflowPermission<Alias, InferInput<Input>, Infer<Output>>;
+      args: structuredClone(args),
+      returns: structuredClone(returns),
+    }) as WorkflowPermission<Alias, InferInput<Args>, Infer<Returns>>;
   },
   /**
    * The platform's own read-only functions (`graspFunctions`), such as the

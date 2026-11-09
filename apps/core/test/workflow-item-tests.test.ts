@@ -232,7 +232,7 @@ const callsOf = async (runId: string) => {
 };
 
 /** The fixtures every test here starts with: the mail is never sent. */
-const held = { mail: { output: { messageId: "held" } } };
+const held = { mail: { result: { messageId: "held" } } };
 
 describe("a test of a draft over recent real items", () => {
   it("runs the draft once on each of the tester's newest runs, newest first, every call answered from its fixtures and none made", async () => {

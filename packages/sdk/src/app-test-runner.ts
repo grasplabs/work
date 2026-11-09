@@ -66,10 +66,10 @@ const numberOf = (test: RunningTest, run: unknown): number => {
 };
 
 /**
- * The start request for `reference` with `input`, as a page's
+ * The start request for `reference` with `args`, as a page's
  * `useWorkflow` sends it: a call of the reference's `start` mutation.
  */
-const startRequestFor = (reference: unknown, input: unknown): string => {
+const startRequestFor = (reference: unknown, args: unknown): string => {
   const start =
     isRecord(reference) &&
     reference.kind === "workflow" &&
@@ -81,7 +81,7 @@ const startRequestFor = (reference: unknown, input: unknown): string => {
       "expected a reference to one of the App's workflows, from @server/_generated/api"
     );
   }
-  return requestFor(start, "mutation", { input });
+  return requestFor(start, "mutation", { args });
 };
 
 /** What a start answers: the run's number in the session. */
@@ -116,12 +116,12 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     subscribe: (async (reference: unknown, args: unknown) =>
       await followed(run, name, reference, args)) as TestPrincipal["subscribe"],
-    // SAFETY: a start answers the run's handle, whose output only types it.
+    // SAFETY: a start answers the run's handle, whose result only types it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    start: (async (reference: unknown, input: unknown) => {
+    start: (async (reference: unknown, args: unknown) => {
       const answer = await session.start(
         name,
-        startRequestFor(reference, input)
+        startRequestFor(reference, args)
       );
       const handle: WorkflowTestRun = Object.freeze({
         workflow:
@@ -179,8 +179,8 @@ const outcomeOf = (text: string, run: WorkflowTestRun): TestRunOutcome => {
 
 const contextFor = (run: RunningTest): WorkflowTestContext => ({
   runs: {
-    // SAFETY: the run's output was checked against its version's output
-    // schema as it ended, which `Output` types.
+    // SAFETY: the run's result was checked against its version's `returns`
+    // schema as it ended, which `Returns` types.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     untilTerminal: (async (handle: WorkflowTestRun) =>
       outcomeOf(

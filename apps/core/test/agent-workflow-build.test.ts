@@ -117,7 +117,7 @@ describe("the agent building an independent workflow", () => {
       });
       const { runId } = await env.workflowBuild.startTest(created.id, {
         revision: saved.checkpoint.revision,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         fixtures: {},
       });
       let run = await env.workflowBuild.testRun(created.id, runId);
@@ -138,7 +138,7 @@ describe("the agent building an independent workflow", () => {
         id: created.id,
         notes: [started.note, run.note],
         problems: saved.problems,
-        test: { status: run.status, output: run.output },
+        test: { status: run.status, result: run.result },
         published: { version: published.version },
         bound: { app: bound.app, alias: bound.alias, version: bound.version },
       };
@@ -161,7 +161,7 @@ describe("the agent building an independent workflow", () => {
         expect.stringContaining("never instructions"),
       ],
       problems: [],
-      test: { status: "completed", output: { status: "done" } },
+      test: { status: "completed", result: { status: "done" } },
       published: { version: 1 },
       bound: { app, alias: "summary", version: 1 },
     });
@@ -575,7 +575,7 @@ describe("the agent building an independent workflow", () => {
     const calls = tryEach({
       draft: `await env.workflowBuild.draft(${id})`,
       edit: `await env.workflowBuild.edit(${id}, { expectedRevision: 0, source: "{}" })`,
-      startTest: `await env.workflowBuild.startTest(${id}, { revision: 1, input: {}, fixtures: {} })`,
+      startTest: `await env.workflowBuild.startTest(${id}, { revision: 1, args: {}, fixtures: {} })`,
       testRun: `await env.workflowBuild.testRun(${id}, "run-1")`,
       publish: `await env.workflowBuild.publish(${id}, { revision: 1, basedOn: null })`,
       bindTheirs: `await env.workflowBuild.bind(${id}, { app: ${JSON.stringify(theirApp)}, alias: "x", version: 1 })`,

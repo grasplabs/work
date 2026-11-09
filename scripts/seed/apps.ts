@@ -72,8 +72,8 @@ export interface WorkflowSeed {
   parts: DefinitionParts;
   /** Its decision, if it asks one. */
   decision?: DecisionSeed;
-  /** What the App declares of it: its input and output, as `v` code. */
-  declared: { input: string; output: string };
+  /** What the App declares of it: its args and returns, as `v` code. */
+  declared: { args: string; returns: string };
   /** Its `workflowTest` suite, in the App's `tests/`. */
   tests: string;
   /** What its page starts a run with. */
@@ -216,18 +216,17 @@ const clientOnboarding: WorkflowSeed = {
     ],
   },
   declared: {
-    input:
-      "v.object({ client: v.string(), town: v.string(), documents: v.array(v.string()) })",
-    output:
+    args: "v.object({ client: v.string(), town: v.string(), documents: v.array(v.string()) })",
+    returns:
       "v.object({ client: v.string(), town: v.string(), complete: v.boolean(), chase: v.array(v.string()) })",
   },
   tests: suite({
     "opens a complete file when nothing is missing": `const run = await desk.start(workflows.clientOnboarding, { client: "Fam. Willems", town: "Utrecht", documents: ${JSON.stringify(requiredDocuments)} });
-t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { client: "Fam. Willems", town: "Utrecht", complete: true, chase: [] } });`,
+t.equal(await t.runs.untilTerminal(run), { status: "completed", result: { client: "Fam. Willems", town: "Utrecht", complete: true, chase: [] } });`,
     "lists the documents to chase": `const run = await desk.start(workflows.clientOnboarding, { client: "D. Mulder", town: "Zeist", documents: ["identity"] });
 t.equal(await t.runs.untilTerminal(run), {
   status: "completed",
-  output: { client: "D. Mulder", town: "Zeist", complete: false, chase: ["payslip", "employer statement", "bank statements"] },
+  result: { client: "D. Mulder", town: "Zeist", complete: false, chase: ["payslip", "employer statement", "bank statements"] },
 });`,
     "refuses an application without a client": `const run = await desk.start(workflows.clientOnboarding, { client: " ", town: "Zeist", documents: [] });
 ${failsWith("application.no_client")}`,
@@ -348,16 +347,15 @@ const emailTriage: WorkflowSeed = {
     ],
   },
   declared: {
-    input:
-      "v.object({ from: v.string(), subject: v.string(), body: v.string() })",
-    output:
+    args: "v.object({ from: v.string(), subject: v.string(), body: v.string() })",
+    returns:
       "v.object({ from: v.string(), queue: v.string(), urgent: v.boolean() })",
   },
   tests: suite({
     "sends a complaint to the complaints queue, urgently": `const run = await desk.start(workflows.emailTriage, { from: "M. Hendriks", subject: "Complaint", body: "I'm not happy with the valuation." });
-t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { from: "M. Hendriks", queue: "complaints", urgent: true } });`,
+t.equal(await t.runs.untilTerminal(run), { status: "completed", result: { from: "M. Hendriks", queue: "complaints", urgent: true } });`,
     "sends a question about a file to file status": `const run = await desk.start(workflows.emailTriage, { from: "S. Peeters", subject: "Where is my file?", body: "Has it gone to the lender?" });
-t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { from: "S. Peeters", queue: "file status", urgent: false } });`,
+t.equal(await t.runs.untilTerminal(run), { status: "completed", result: { from: "S. Peeters", queue: "file status", urgent: false } });`,
     "refuses an empty email": `const run = await desk.start(workflows.emailTriage, { from: "R. Bos", subject: "Question", body: "" });
 ${failsWith("triage.empty_email")}`,
   }),
@@ -472,15 +470,15 @@ const weeklyReport: WorkflowSeed = {
     steps: [],
   },
   declared: {
-    input: "v.object({ week: v.string().optional() })",
-    output:
+    args: "v.object({ week: v.string().optional() })",
+    returns:
       "v.object({ week: v.string(), sections: v.array(v.object({ section: v.string(), from: v.string() })), due: v.string() })",
   },
   tests: suite({
     "plans the week's board pack": `const run = await desk.start(workflows.weeklyReport, { week: "2026-10-05" });
 t.equal(await t.runs.untilTerminal(run), {
   status: "completed",
-  output: {
+  result: {
     week: "2026-10-05",
     sections: [
       { section: "Revenue and costs", from: "Exact" },

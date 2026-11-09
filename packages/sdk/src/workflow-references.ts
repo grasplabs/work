@@ -13,11 +13,11 @@ declare const waitType: unique symbol;
 /**
  * A generated reference to one of the workflows an App binds: the App
  * and release it belongs to, the binding's alias, the
- * contract it pins (its ID and fingerprint, over its input and output;
- * each event and decision has its own), the descriptors of its input and
- * output, its event references under `events` and its decisions' schemas
- * under `decisions`. Its types, the input a run takes,
- * the output a completed run has and the waits it can be held at, live
+ * contract it pins (its ID and fingerprint, over its args and returns;
+ * each event and decision has its own), the descriptors of its args and
+ * returns, its event references under `events` and its decisions' schemas
+ * under `decisions`. Its types, the args a run takes,
+ * what a completed run returns and the waits it can be held at, live
  * in phantom members only. It holds no binding and grants nothing: the
  * host resolves it against the release and binding in force. Its runs
  * are read and changed through its ordinary `queries` and `mutations`,
@@ -25,8 +25,8 @@ declare const waitType: unique symbol;
  */
 export interface WorkflowReference<
   Alias extends string = string,
-  Input = unknown,
-  Output = unknown,
+  Args = unknown,
+  Returns = unknown,
   Wait = WorkflowWait,
   Events = Readonly<Record<string, WorkflowEventReference>>,
   Decisions = Readonly<Record<string, WorkflowDecisionReference>>,
@@ -40,10 +40,10 @@ export interface WorkflowReference<
   readonly alias: Alias;
   /** Its registered path, e.g. `workflows.summarizeNote`. */
   readonly contractId: string;
-  /** The SHA-256 of its exact input and output contract, in hex. */
+  /** The SHA-256 of its exact args and returns contract, in hex. */
   readonly fingerprint: string;
-  readonly input: ValueDescriptor;
-  readonly output: ValueDescriptor;
+  readonly args: ValueDescriptor;
+  readonly returns: ValueDescriptor;
   /** Its events, by their binding's alias in the workflow. */
   readonly events: Events;
   /**
@@ -65,9 +65,9 @@ export interface WorkflowReference<
    */
   readonly mutations: Mutations;
   /** Types only: never set. */
-  readonly [argsType]?: Input;
+  readonly [argsType]?: Args;
   /** Types only: never set. */
-  readonly [returnType]?: Output;
+  readonly [returnType]?: Returns;
   /** Types only: never set. */
   readonly [waitType]?: Wait;
 }
@@ -75,9 +75,9 @@ export interface WorkflowReference<
 /** Any generated workflow reference, whatever it takes and gives. */
 export type AnyWorkflowReference = WorkflowReference<
   string,
-  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowInputOf`
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowArgsOf`
   any,
-  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowOutputOf`
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowReturnOf`
   any,
   // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowWaitOf`
   any,
@@ -91,14 +91,14 @@ export type AnyWorkflowReference = WorkflowReference<
   any
 >;
 
-/** The input a run of `Reference` takes, as a caller passes it. */
-export type WorkflowInputOf<Reference> =
-  Reference extends WorkflowReference<string, infer Input> ? Input : never;
+/** The args a run of `Reference` takes, as a caller passes them. */
+export type WorkflowArgsOf<Reference> =
+  Reference extends WorkflowReference<string, infer Args> ? Args : never;
 
-/** The output a completed run of `Reference` has. */
-export type WorkflowOutputOf<Reference> =
-  Reference extends WorkflowReference<string, unknown, infer Output>
-    ? Output
+/** What a completed run of `Reference` returns. */
+export type WorkflowReturnOf<Reference> =
+  Reference extends WorkflowReference<string, unknown, infer Returns>
+    ? Returns
     : never;
 
 /** The waits a run of `Reference` can be held at. */

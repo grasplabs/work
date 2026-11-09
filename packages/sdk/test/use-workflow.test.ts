@@ -328,7 +328,7 @@ describe("useWorkflow", () => {
       expect(page.calls).toStrictEqual([]);
     });
 
-    it("shows a run's status, its output once completed, and what the host says may be done with it", async () => {
+    it("shows a run's status, its result once completed, and what the host says may be done with it", async () => {
       const page = host();
       const hook = await showing(page);
       expect(hook.view()).toMatchObject({
@@ -343,7 +343,7 @@ describe("useWorkflow", () => {
         snapshotOf({
           status: "completed",
           finishedAt: 2000,
-          output: { summary: "Short.", words: 1 },
+          result: { summary: "Short.", words: 1 },
           control: {
             canPause: true,
             canResume: true,
@@ -356,7 +356,7 @@ describe("useWorkflow", () => {
       expect(hook.view()).toMatchObject({
         status: "completed",
         finishedAt: 2000,
-        output: { summary: "Short.", words: 1 },
+        result: { summary: "Short.", words: 1 },
         canPause: false,
         canResume: false,
         canCancel: false,
@@ -411,7 +411,7 @@ describe("useWorkflow", () => {
   });
 
   describe("starting runs", () => {
-    it("calls the reference's start mutation with the input under one key, and shows the run it admitted", async () => {
+    it("calls the reference's start mutation with the args under one key, and shows the run it admitted", async () => {
       const page = host();
       const hook = mount(page);
       hook.view();
@@ -422,7 +422,7 @@ describe("useWorkflow", () => {
         {
           name: path("mutations.start"),
           kind: "mutation",
-          input: { input: { noteId } },
+          input: { args: { noteId } },
         },
       ]);
       expect(hook.view()).toMatchObject({
@@ -650,7 +650,7 @@ describe("useWorkflow", () => {
       }).toStrictEqual({
         same: true,
         first: [
-          { name: path("mutations.start"), input: { input: { noteId } } },
+          { name: path("mutations.start"), input: { args: { noteId } } },
           { name: path("mutations.cancel"), input: { runId: "run-1" } },
           {
             name: path("mutations.send"),

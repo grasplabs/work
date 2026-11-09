@@ -4,7 +4,7 @@
     {
       "~permission": "workflows",
       "alias": "extract",
-      "input": {
+      "args": {
         "kind": "object",
         "fields": {
           "notes": {
@@ -29,7 +29,7 @@
           }
         }
       },
-      "output": {
+      "returns": {
         "kind": "object",
         "fields": {
           "statements": {

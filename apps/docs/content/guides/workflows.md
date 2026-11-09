@@ -11,7 +11,7 @@ An App doesn't contain workflows. It starts them, and follows their runs. This g
 
 ## Declaring the workflows an App starts
 
-An App declares each workflow it starts as a permission in its definition, with `addPermission`: an alias, and the input and output it expects. Like every permission, it grants nothing yet. The App's builders bind the alias to a version of a workflow, and an admin grants the App permission to start it. Until both, every start fails.
+An App declares each workflow it starts as a permission in its definition, with `addPermission`: an alias, the `args` a run starts with and what it `returns`, in `v`'s words, as a function declares them. Like every permission, it grants nothing yet. The App's builders bind the alias to a version of a workflow, and an admin grants the App permission to start it. Until both, every start fails.
 
 Grasp generates the permission into `grasp.config.ts`, which exports it as `permissions.<alias>`:
 
@@ -20,8 +20,8 @@ import { defineApp, permission, v } from "@grasp-os/sdk";
 
 export const permissions = {
   review: permission.workflow("review", {
-    input: v.object({ task: v.id("tasks") }),
-    output: v.object({ approved: v.boolean() }),
+    args: v.object({ task: v.id("tasks") }),
+    returns: v.object({ approved: v.boolean() }),
   }),
 };
 
@@ -61,12 +61,12 @@ export const reviewNow = action({
 
 A function starts one of the App's workflows by its alias:
 
-A mutation and an action both start it with `ctx.workflows.<alias>.start(input)`:
+A mutation and an action both start it with `ctx.workflows.<alias>.start(args)`:
 
 - In a mutation, the start happens only once the mutation's writes commit. If the mutation fails, nothing starts. `finish` above saves the task and starts its review as one change.
 - In an action, the start happens right away. It resolves once Grasp has accepted the start, durably: with its `startId`, the workflow `version` it started and the `runId` of its run. The run goes on after the action returns; a Page follows it by that ID.
 
-Grasp checks every start's input against the workflow's, so a start the workflow can't take fails at once.
+Grasp checks every start's args against the workflow's, so a start the workflow can't take fails at once.
 
 ## Following a run from a Page
 
@@ -97,7 +97,7 @@ const Tasks = () => {
         </Button>
       ))}
       {review.status === "completed" && (
-        <p>{review.output.approved ? "Approved" : "Not approved"}</p>
+        <p>{review.result.approved ? "Approved" : "Not approved"}</p>
       )}
       {review.status === "failed" && <p>{review.error.message}</p>}
     </main>
@@ -107,11 +107,11 @@ const Tasks = () => {
 export const Route = createFileRoute("/")({ component: Tasks });
 ```
 
-Before its first start, `useWorkflow` is `idle`, and `loading` while the run you gave it by ID loads. A run is `queued`, `running`, `waiting` (for time, an event or a decision) or `paused`; `compensating` while it undoes its work after a failure or a cancellation; and it ends `completed` with its output, `failed` with its error, or `cancelled`. A run the person may no longer see, such as one whose decision someone else answered, is `unavailable`.
+Before its first start, `useWorkflow` is `idle`, and `loading` while the run you gave it by ID loads. A run is `queued`, `running`, `waiting` (for time, an event or a decision) or `paused`; `compensating` while it undoes its work after a failure or a cancellation; and it ends `completed` with its `result`, `failed` with its error, or `cancelled`. A run the person may no longer see, such as one whose decision someone else answered, is `unavailable`.
 
 `pause`, `resume` and `cancel` control the run, for whoever may. `send` sends it an event its workflow declares, typed by that event: `review.send(workflows.review.events.<name>, data)`.
 
-`useWorkflow` is built on the workflow reference's own queries and mutations, which a Page can also use directly: `useQuery(workflows.review.queries.run, { runId })` follows one run (`null` for a run the person may not see), `useQuery(workflows.review.queries.canStart)` says whether they may start one, and `useMutation(workflows.review.mutations.start)` starts one with `{ input }`. `mutations.pause`, `.resume` and `.cancel` take `{ runId }`, and `mutations.send` takes `{ runId, event, data }`, the event by its name. `queries.runs` lists the person's runs, and `queries.history` one run's history.
+`useWorkflow` is built on the workflow reference's own queries and mutations, which a Page can also use directly: `useQuery(workflows.review.queries.run, { runId })` follows one run (`null` for a run the person may not see), `useQuery(workflows.review.queries.canStart)` says whether they may start one, and `useMutation(workflows.review.mutations.start)` starts one with `{ args }`. `mutations.pause`, `.resume` and `.cancel` take `{ runId }`, and `mutations.send` takes `{ runId, event, data }`, the event by its name. `queries.runs` lists the person's runs, and `queries.history` one run's history.
 
 ## Events from outside
 
