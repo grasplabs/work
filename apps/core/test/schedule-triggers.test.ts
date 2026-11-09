@@ -79,9 +79,9 @@ const person = async (role: Role): Promise<Identity> => {
 const definitionOf = (field: string, version = "1"): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ [field]: { type: "string" } }),
+    input: objectSchema({ [field]: { kind: "string" } }),
     output: {
-      schema: objectSchema({ [field]: { type: "string" } }),
+      schema: objectSchema({ [field]: { kind: "string" } }),
       value: { [field]: { $expr: `input.${field}` } },
     },
     steps: [

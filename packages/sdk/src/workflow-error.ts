@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { ValueSchema } from "./value-descriptor.ts";
+
 const workflowErrorCodes = [
   "workflow.invalid_definition",
   "workflow.invalid_step_call",
@@ -69,4 +71,33 @@ export const parseOrThrow = <Schema extends z.ZodType>(
     throw new WorkflowError(code, `${what}: ${z.prettifyError(result.error)}`);
   }
   return result.data;
+};
+
+/**
+ * What a value's check found wrong, as one line: the first issue, where
+ * in the value it is (`at lines.0.total: …`).
+ */
+export const issueText = (
+  issues: readonly {
+    readonly message: string;
+    readonly path?: readonly PropertyKey[];
+  }[]
+): string => {
+  const [issue] = issues;
+  const at = issue?.path?.map(String).join(".") ?? "";
+  return `${at === "" ? "" : `at ${at}: `}${issue?.message ?? "not of its schema"}`;
+};
+
+/** `value` checked by `schema`, a `v` schema, or `code` thrown naming `what`. */
+export const checkOrThrow = <Input, Output>(
+  schema: ValueSchema<Input, Output>,
+  value: unknown,
+  code: WorkflowErrorCode,
+  what: string
+): Output => {
+  const result = schema["~standard"].validate(value);
+  if (result.issues === undefined) {
+    return result.value;
+  }
+  throw new WorkflowError(code, `${what}: ${issueText(result.issues)}`);
 };

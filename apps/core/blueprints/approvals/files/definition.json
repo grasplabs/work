@@ -10,12 +10,8 @@
           "id": "0eb0bfc1-ea68-406b-a4da-2e0028549235",
           "name": "title",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "string",
             "trim": true,
-            "email": false,
             "min": 1,
             "max": 200
           }
@@ -24,23 +20,16 @@
           "id": "86d68dc3-c6a8-45a1-a109-5d82f0566e97",
           "name": "details",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "default",
-            "defaultValue": "",
             "kind": "string",
             "trim": true,
-            "email": false,
-            "max": 2000
+            "max": 2000,
+            "default": ""
           }
         },
         {
           "id": "ce788a8a-6ae6-4618-9535-d366624f8e74",
           "name": "amount",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "money"
           }
         },
@@ -48,9 +37,6 @@
           "id": "19038123-7454-47d8-8ff3-37cacb5e4c25",
           "name": "status",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": false,
-            "presence": "required",
             "kind": "enum",
             "values": ["pending", "approved", "rejected"]
           }
@@ -59,37 +45,23 @@
           "id": "ede84b39-68ba-4603-a60c-a170fa175ec3",
           "name": "decision",
           "type": {
-            "descriptorVersion": 1,
-            "nullable": true,
-            "presence": "default",
-            "defaultValue": null,
             "kind": "object",
             "fields": {
               "by": {
-                "descriptorVersion": 1,
-                "nullable": false,
-                "presence": "required",
                 "kind": "string",
-                "trim": false,
-                "email": false,
                 "max": 200
               },
               "note": {
-                "descriptorVersion": 1,
-                "nullable": false,
-                "presence": "required",
                 "kind": "string",
                 "trim": true,
-                "email": false,
                 "max": 1000
               },
               "at": {
-                "descriptorVersion": 1,
-                "nullable": false,
-                "presence": "required",
                 "kind": "timestamp"
               }
-            }
+            },
+            "nullable": true,
+            "default": null
           }
         }
       ],

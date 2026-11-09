@@ -60,9 +60,9 @@ interface Shape {
 const definitionOf = (shape: Shape): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema(shape.input ?? { who: { type: "string" } }),
+    input: objectSchema(shape.input ?? { who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: shape.status },
     },
     ...(shape.bindings === undefined ? {} : { bindings: shape.bindings }),
@@ -361,7 +361,7 @@ export const profileProofs = (where: string): void => {
       it("wait: sleeps its length and until an expression's deadline, through a restart while it sleeps", async () => {
         const by = await person("builder");
         const workflow = await published(by, {
-          input: { who: { type: "string" }, deadline: { type: "number" } },
+          input: { who: { kind: "string" }, deadline: { kind: "number" } },
           steps: [
             pause(2),
             { id: "linger", type: "wait", until: { $expr: "input.deadline" } },
@@ -439,7 +439,7 @@ export const profileProofs = (where: string): void => {
               binding: "summary",
               instructions: "Greet them.",
               input: { who: { $expr: "input.who" } },
-              output: objectSchema({ line: { type: "string" } }),
+              output: objectSchema({ line: { kind: "string" } }),
             },
             pause(2),
           ],
@@ -507,9 +507,9 @@ export const profileProofs = (where: string): void => {
         const workflow = await published(builder.identity, {
           bindings: { mail: { kind: "connector", contract: key } },
           input: {
-            mailbox: { type: "string" },
-            message: { type: "string" },
-            attachment: { type: "string" },
+            mailbox: { kind: "string" },
+            message: { kind: "string" },
+            attachment: { kind: "string" },
           },
           steps: [
             {

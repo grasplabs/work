@@ -182,11 +182,9 @@ export const send = action({
 });
 `;
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A definition that runs `send`, its mail and files bindings `mail` and `files`. */
@@ -194,15 +192,15 @@ const definitionOf = (mail: string, files: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     input: objectSchema({
-      mailbox: { type: "string" },
-      from: { type: "string" },
-      count: { type: "number" },
-      size: { type: "number" },
-      reuse: { type: "string" },
-      twice: { type: "string" },
+      mailbox: { kind: "string" },
+      from: { kind: "string" },
+      count: { kind: "number" },
+      size: { kind: "number" },
+      reuse: { kind: "string" },
+      twice: { kind: "string" },
     }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { $expr: "steps.send.output" },
     },
     bindings: {

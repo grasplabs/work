@@ -14,9 +14,13 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import {
   fieldValueOf,
+  isBlank,
   nextFieldBase,
   paramKindOf,
+  paramParts,
   paramText,
+  partsOf,
+  withPart,
 } from "./param-values.ts";
 import type { FieldBase, ParamKind } from "./param-values.ts";
 
@@ -48,6 +52,60 @@ const changeInput = (name: string, revision: number, change: Change) =>
     ? { expectedRevision: revision, values: {}, reset: [name] }
     : { expectedRevision: revision, values: { [name]: change.value } };
 
+/** Money's or a schedule's field: an input for each of its parts. */
+const PartsInput = ({
+  id,
+  kind,
+  editable,
+  text,
+  errorId,
+  onText,
+}: {
+  id: string;
+  kind: "money" | "schedule";
+  editable: boolean;
+  text: string;
+  errorId: string | undefined;
+  onText: (text: string) => void;
+}) => {
+  const { t } = useLingui();
+  const parts = partsOf(text);
+  const labels: Record<string, string> = {
+    amount: t`Amount`,
+    currency: t`Currency`,
+    cron: t`Cron fields`,
+    timeZone: t`Time zone`,
+  };
+  const placeholders: Record<string, string> = {
+    amount: "5000.00",
+    currency: "EUR",
+    cron: "0 8 * * 1",
+    timeZone: "Europe/Amsterdam",
+  };
+  return (
+    <div className="flex flex-wrap gap-2">
+      {paramParts[kind].map((part, index) => (
+        <Input
+          aria-describedby={errorId}
+          aria-invalid={errorId !== undefined}
+          aria-label={labels[part]}
+          className={part === "currency" ? "w-24" : "flex-1"}
+          disabled={!editable}
+          // The first part is what the parameter's label names.
+          id={index === 0 ? id : `${id}-${part}`}
+          inputMode={part === "amount" ? "decimal" : undefined}
+          key={part}
+          onChange={(event) => {
+            onText(withPart(text, part, event.target.value));
+          }}
+          placeholder={placeholders[part]}
+          value={parts[part] ?? ""}
+        />
+      ))}
+    </div>
+  );
+};
+
 /** A parameter's field, as its kind takes a value. */
 const ParamInput = ({
   id,
@@ -76,6 +134,18 @@ const ParamInput = ({
     param.sensitive && param.set
       ? t`Set. Type a new value to replace it.`
       : undefined;
+  if (kind === "money" || kind === "schedule") {
+    return (
+      <PartsInput
+        editable={editable}
+        errorId={errorId}
+        id={id}
+        kind={kind}
+        onText={onText}
+        text={text}
+      />
+    );
+  }
   if (kind === "boolean") {
     return (
       <Switch
@@ -136,7 +206,7 @@ const ParamField = ({
 }) => {
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
-  const kind = paramKindOf(param.schema);
+  const kind = paramKindOf(param.schema, param.sensitive);
   const fresh = baseOf(kind, param, revision);
   // What the field shows came from, its revision the one its save names.
   const [base, setBase] = useState(fresh);
@@ -166,7 +236,7 @@ const ParamField = ({
     toggled,
     sensitive: param.sensitive,
   });
-  const invalid = read === undefined && text.trim() !== "";
+  const invalid = read === undefined && !isBlank(kind, text);
   const save = async (change: Change): Promise<void> => {
     setSaved(false);
     const updated = await run(

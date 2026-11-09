@@ -39,7 +39,7 @@ import { organizationPeopleAndTeams } from "./workflow-share-candidates.ts";
 /**
  * `descriptor` as the start form's exact JSON Schema, each field of the
  * input that takes a person, team or role (`person:`, `team:` or `role:`)
- * marked as a workflow's JSON writes it (`"x-grasp-value": { "kind": "person" }`), so
+ * marked as a person (`"x-grasp-value": { "kind": "person" }`), so
  * the form offers people to pick, never an ID to type. The mark only
  * annotates: what a start takes stays the descriptor's to check.
  */

@@ -3,7 +3,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type {
   Authority,
   PermissionRequest,
@@ -153,9 +153,9 @@ const documentOf = ({
 }): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     params,
@@ -201,17 +201,20 @@ const definitionOf = ({
   documentOf({
     ...(status === undefined ? {} : { status }),
     params: {
-      limit: { kind: "number", label: "Limit", default: 3, sensitive: false },
+      limit: {
+        label: "Limit",
+        type: { kind: "number", default: 3 },
+        sensitive: false,
+      },
       ...(token === undefined
         ? {}
         : {
             token:
               token === "sensitive"
-                ? { kind: "text", label: "Token" }
+                ? { label: "Token", type: { kind: "string" } }
                 : {
-                    kind: "text",
                     label: "Token",
-                    default: "none",
+                    type: { kind: "string", default: "none" },
                     sensitive: false,
                   },
           }),
@@ -234,7 +237,7 @@ const definitionOf = ({
               binding: "summary",
               instructions: "Greet them.",
               input: { who: { $expr: "input.who" } },
-              output: objectSchema({ line: { type: "string" } }),
+              output: objectSchema({ line: { kind: "string" } }),
             },
           ]),
       ...(waits ? [{ id: "pause", type: "wait", for: "1 hour" }] : []),
@@ -1410,7 +1413,7 @@ describe("what a start freezes", () => {
           binding: alias,
           instructions: "Greet them.",
           input: { who: { $expr: "input.who" } },
-          output: objectSchema({ line: { type: "string" } }),
+          output: objectSchema({ line: { kind: "string" } }),
         })),
       }),
       basedOn: null,
@@ -1580,11 +1583,10 @@ describe("parameter configuration", () => {
       definition: documentOf({
         params: {
           // Sensitive, with no default: required.
-          token: { kind: "text", label: "Token" },
+          token: { label: "Token", type: { kind: "string" } },
           limit: {
-            kind: "number",
             label: "Limit",
-            default: 3,
+            type: { kind: "number", default: 3 },
             sensitive: false,
           },
         },
@@ -1626,6 +1628,48 @@ describe("parameter configuration", () => {
     });
   });
 
+  it("marks money and a schedule for the page, which takes each in parts", async () => {
+    const ada = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `kinds-${unique()}`
+    );
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: documentOf({
+        params: {
+          fee: {
+            label: "Fee",
+            type: {
+              kind: "money",
+              default: { minorUnits: 500, currency: "EUR" },
+            },
+            sensitive: false,
+          },
+          when: {
+            label: "When",
+            type: {
+              kind: "schedule",
+              default: { cron: "0 8 * * 1", timeZone: "Europe/Amsterdam" },
+            },
+            sensitive: false,
+          },
+        },
+      }),
+      basedOn: null,
+    });
+    const { params } = await workflowParams(env, ada, workflow.id);
+    expect(
+      params.map(({ name, schema }) => [
+        name,
+        isRecord(schema) ? schema["x-grasp-value"] : undefined,
+      ])
+    ).toStrictEqual([
+      ["fee", { kind: "money" }],
+      ["when", { kind: "schedule" }],
+    ]);
+  });
+
   it("refuses values too large together to fit a start's receipt, before saving anything", async () => {
     const ada = await person("builder");
     const workflow = await createWorkflowResource(env, ada, `big-${unique()}`);
@@ -1634,7 +1678,11 @@ describe("parameter configuration", () => {
         params: Object.fromEntries(
           ["first", "second"].map((name) => [
             name,
-            { kind: "text", label: name, default: "", sensitive: false },
+            {
+              label: name,
+              type: { kind: "string", default: "" },
+              sensitive: false,
+            },
           ])
         ),
       }),

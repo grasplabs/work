@@ -2145,6 +2145,10 @@ msgstr "Bon, voici le plan."
 msgid "Also release its name, so a new workflow can take it."
 msgstr "Libérer aussi son nom, pour qu’un nouveau workflow puisse le prendre."
 
+#: src/workflows/resource-params.tsx
+msgid "Amount"
+msgstr "Montant"
+
 #: src/apps/field-kinds.tsx
 msgid "Amounts, counts and scores"
 msgstr "Montants, quantités et scores"
@@ -4294,9 +4298,17 @@ msgctxt "kind of app"
 msgid "CRM"
 msgstr "CRM"
 
+#: src/workflows/resource-params.tsx
+msgid "Cron fields"
+msgstr "Champs cron"
+
 #: src/apps/app-data.tsx
 msgid "CSV file"
 msgstr "Fichier CSV"
+
+#: src/workflows/resource-params.tsx
+msgid "Currency"
+msgstr "Devise"
 
 #: src/apps/app-versions.tsx
 msgid "Current"
@@ -13751,6 +13763,7 @@ msgid "Time wasters"
 msgstr "Pertes de temps"
 
 #: src/routes/_shell.settings.workspace.tsx
+#: src/workflows/resource-params.tsx
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Time zone"
 msgstr "Fuseau horaire"

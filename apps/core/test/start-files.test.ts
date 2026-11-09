@@ -118,19 +118,9 @@ export const Route = createFileRoute("/")({ component: Desk });
 /** A workflow taking a file, whose run says which file it was handed. */
 const definition = JSON.stringify({
   $schema: workflowSchemaUrl,
-  input: {
-    type: "object",
-    properties: { doc: { type: "object", "x-grasp-value": { kind: "file" } } },
-    required: ["doc"],
-    additionalProperties: false,
-  },
+  input: { kind: "object", fields: { doc: { kind: "file" } } },
   output: {
-    schema: {
-      type: "object",
-      properties: { status: { type: "string" } },
-      required: ["status"],
-      additionalProperties: false,
-    },
+    schema: { kind: "object", fields: { status: { kind: "string" } } },
     value: { status: { $expr: "input.doc.id" } },
   },
   steps: [],

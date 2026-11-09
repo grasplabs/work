@@ -30,12 +30,10 @@ import { auditedDuring, unique } from "./sign-in.ts";
 // call the fixture gives nothing falls through to a real one; a replay
 // answers again. Then what a test sees: the fixture's answer.
 
-/** A JSON object schema of `properties`, each required, and nothing else. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** An object of `fields`, each required. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A workflow's steps, and the `status` it ends with. */
@@ -51,9 +49,9 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     bindings,
@@ -67,7 +65,7 @@ const summarize = {
   binding: "summary",
   instructions: "Greet them.",
   input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { type: "string" } }),
+  output: objectSchema({ line: { kind: "string" } }),
 };
 
 /** The line `summarize` answered. */

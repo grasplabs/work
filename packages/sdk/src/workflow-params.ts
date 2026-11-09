@@ -1,12 +1,15 @@
 import {
-  paramDeclarationSchema,
-  paramDeclarationsSchema,
+  maxWorkflowParams,
   sensitiveParamKey,
+  workflowParamNamePattern,
 } from "@grasp-os/shared/workflows";
 
-import { currencySchema, paramValueSchemas } from "./params.ts";
-import type { ParamDefault, ParamKind, ParamValue } from "./params.ts";
-import { invalidCall, parseOrThrow } from "./workflow-error.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
+import type { ValueDescriptor } from "./value-descriptor.ts";
+import { ValueDefinitionError } from "./value-descriptor.ts";
+import type { AnySchema } from "./value-schema.ts";
+import type { Infer } from "./value-types.ts";
+import { checkOrThrow, invalidCall, WorkflowError } from "./workflow-error.ts";
 
 /**
  * The runtime's `Object.freeze`, kept as this module loads: a run's main
@@ -39,119 +42,86 @@ export const sensitiveParam = (
 
 // Parameters
 
-export type Person = ParamValue<"person">;
-export type Schedule = ParamValue<"schedule">;
-export type Template = ParamValue<"template">;
-
-/** A tunable value people see and can change without touching the code. */
-export interface Param<Kind extends ParamKind = ParamKind> {
-  kind: Kind;
-  /** What people see next to the value, e.g. "Review invoices above". */
-  label: string;
-  default: ParamDefault<Kind>;
-  /**
-   * Its value needs care where it's shown. People set it like any other,
-   * and no value ever goes in the audit log.
-   */
-  sensitive: boolean;
-  /** For money: the ISO 4217 currency its amounts are in, e.g. `EUR`. */
-  currency?: string;
-}
-
-interface ParamOptions<Kind extends ParamKind> {
-  label: string;
-  default: ParamDefault<Kind>;
-  /** Its value needs care where it's shown; defaults to false. */
-  sensitive?: boolean;
-}
-
-const param =
-  <Kind extends ParamKind>(kind: Kind) =>
-  (options: ParamOptions<Kind>): Param<Kind> => ({
-    kind,
-    label: options.label,
-    default: options.default,
-    sensitive: options.sensitive ?? false,
-  });
-
 /**
- * An amount of money in whole minor units of `currency` (cents for EUR):
- * `default: 500_000` is €5,000.00.
+ * A tunable value people see and can change without touching the code:
+ * its label, and its type as `v` declares it, with the `.default()` it
+ * takes until someone sets it: `{ label: "Review invoices above", type:
+ * v.money().default({ minorUnits: 500_000, currency: "EUR" }) }`.
  */
-export const money = (
-  options: ParamOptions<"money"> & {
-    /** ISO 4217, e.g. `EUR`. */
-    currency: string;
-  }
-): Param<"money"> => ({
-  ...param("money")(options),
-  currency: options.currency,
-});
-/** A number. */
-export const number = param("number");
-/** A piece of text. */
-export const text = param("text");
-/** A person or group, e.g. who reviews; required by `step.decision`. */
-export const person = param("person");
-/** A schedule, as five cron fields. */
-export const schedule = param("schedule");
-/** A template, e.g. for an email. */
-export const template = param("template");
+export interface Param {
+  /** What people see next to the value, e.g. "Review invoices above". */
+  readonly label: string;
+  readonly type: AnySchema;
+}
 
 export type Params = Record<string, Param>;
 
 /** Parameter values as workflow code reads them: `params.threshold`. */
 export type ParamValues<P extends Params> = {
-  readonly [Name in keyof P]: ParamValue<P[Name]["kind"]>;
+  readonly [Name in keyof P]: Infer<P[Name]["type"]>;
 };
 
 /** A parameter as the UI shows it. */
 export interface ParamMetadata {
-  name: string;
-  kind: ParamKind;
-  label: string;
-  default: string | number;
-  sensitive: boolean;
-  /** For money: its ISO 4217 currency; amounts are in its minor units. */
-  currency?: string;
+  readonly name: string;
+  readonly label: string;
+  readonly type: ValueDescriptor;
 }
 
 export const describeParams = (params: Params): ParamMetadata[] =>
   Object.entries(params).map(([name, definition]) => ({
     name,
-    kind: definition.kind,
     label: definition.label,
-    default: definition.default,
-    sensitive: definition.sensitive,
-    ...(definition.currency === undefined
-      ? {}
-      : { currency: definition.currency }),
+    type: definition.type.descriptor,
   }));
 
+/** The longest label a parameter has, as the format holds it. */
+const maxLabelLength = 200;
+
+/**
+ * Refuses (`workflow.invalid_definition`) more than 64 parameters, or one
+ * whose name isn't an identifier (`params.<name>`), whose label isn't 1
+ * to 200 characters, or whose type isn't a `v` schema with a default: the
+ * code declares only the parameters it reads, never a sensitive one, so
+ * each has a value to start with. A definition outside them fails as it
+ * loads, so its tests fail and the version is never made current.
+ */
 export const validateParams = (params: Params): void => {
-  // Within the bounds core keeps (`paramDeclarationsSchema`): a definition
-  // outside them fails here, so its tests fail and the version is never
-  // made current, rather than every run of it failing to load.
-  parseOrThrow(
-    paramDeclarationsSchema(paramDeclarationSchema),
-    describeParams(params),
-    "workflow.invalid_definition",
-    "Parameters"
-  );
-  for (const [name, definition] of Object.entries(params)) {
-    parseOrThrow(
-      paramValueSchemas[definition.kind],
-      definition.default,
+  // An object's keys are each one name, so none is declared twice.
+  const declared = Object.entries(params);
+  if (declared.length > maxWorkflowParams) {
+    throw new WorkflowError(
       "workflow.invalid_definition",
-      `Default of parameter "${name}"`
+      `A workflow declares at most ${maxWorkflowParams} parameters`
     );
-    if (definition.kind === "money") {
-      parseOrThrow(
-        currencySchema,
-        definition.currency,
+  }
+  for (const [name, { label, type }] of declared) {
+    const invalid = (reason: string): never => {
+      throw new WorkflowError(
         "workflow.invalid_definition",
-        `Currency of parameter "${name}"`
+        `Parameter "${name.slice(0, 64)}": ${reason}`
       );
+    };
+    if (!workflowParamNamePattern.test(name)) {
+      invalid("its name is a lower-case letter, then letters and digits");
+    }
+    if (
+      typeof label !== "string" ||
+      label === "" ||
+      label.length > maxLabelLength
+    ) {
+      invalid(`its label is 1 to ${maxLabelLength} characters`);
+    }
+    let presence: string | undefined;
+    try {
+      ({ presence } = descriptorOf(type));
+    } catch (error) {
+      if (!(error instanceof ValueDefinitionError)) {
+        throw error;
+      }
+    }
+    if (presence !== "default") {
+      invalid("its type is a `v` schema with a `.default()`");
     }
   }
 };
@@ -163,11 +133,11 @@ export const resolveParams = (
   Object.fromEntries(
     Object.entries(params).map(([name, definition]) => [
       name,
-      parseOrThrow(
-        paramValueSchemas[definition.kind],
-        // A value that is set but empty fails, rather than quietly falling
-        // back to the default.
-        Object.hasOwn(configured, name) ? configured[name] : definition.default,
+      // One that isn't set takes its type's default; one set to a value
+      // its type doesn't take fails, rather than falling back to it.
+      checkOrThrow(
+        definition.type,
+        Object.hasOwn(configured, name) ? configured[name] : undefined,
         "workflow.invalid_param",
         `Parameter "${name}"`
       ),

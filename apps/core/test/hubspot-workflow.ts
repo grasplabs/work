@@ -117,7 +117,7 @@ export const crmWorkflow = async (by: Admin, connectionId: string) => {
       $schema: workflowSchemaUrl,
       input: objectSchema({}),
       output: {
-        schema: objectSchema({ status: { type: "string" } }),
+        schema: objectSchema({ status: { kind: "string" } }),
         value: { status: "done" },
       },
       bindings: { ...binding("crm"), ...binding("mail") },

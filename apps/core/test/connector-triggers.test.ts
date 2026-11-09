@@ -88,17 +88,15 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A workflow of `admin`'s taking `{ subject, folder }` and handing it back. */
 const filing = async (admin: Identity) => {
   const workflow = await createWorkflowResource(env, admin, `file-${unique()}`);
-  const fields = { subject: { type: "string" }, folder: { type: "string" } };
+  const fields = { subject: { kind: "string" }, folder: { kind: "string" } };
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,

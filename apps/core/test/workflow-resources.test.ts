@@ -94,16 +94,15 @@ const definitionOf = ({
 }: Draft = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     params: {
       instructions: {
-        kind: "text",
         label: "Instructions",
-        default: instructions,
+        type: { kind: "string", default: instructions },
         sensitive: false,
       },
     },
@@ -511,7 +510,7 @@ const bindingDefinition = (key: string, status = "done") =>
         binding: "greeting",
         instructions: "Greet them.",
         input: { who: { $expr: "input.who" } },
-        output: objectSchema({ line: { type: "string" } }),
+        output: objectSchema({ line: { kind: "string" } }),
       },
     ],
   });
@@ -844,8 +843,8 @@ describe("stored versions", () => {
       (_, index) => `${String(index).padStart(4, "0")}-${"v".repeat(100)}`
     );
     const big = definitionOf().replace(
-      '"who":{"type":"string"}',
-      JSON.stringify({ who: { type: "string", enum: values } }).slice(1, -1)
+      '"who":{"kind":"string"}',
+      JSON.stringify({ who: { kind: "enum", values } }).slice(1, -1)
     );
     expect({
       definition: await outcome(publish(ada, workflow.id, oversized)),

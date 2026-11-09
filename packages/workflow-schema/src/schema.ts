@@ -1,5 +1,6 @@
 import type { Schema } from "@cfworker/json-schema";
 import { blockedProperties } from "@grasp-os/sdk/expression-check";
+import { compactDescriptorSchema } from "@grasp-os/sdk/host";
 import { decisionLimits } from "@grasp-os/shared/decisions";
 import {
   eventTypePattern,
@@ -12,7 +13,6 @@ import {
   forEachDescription,
   formatLimits,
   localContractPattern,
-  paramKinds,
   paramNamePattern,
   recipientPattern,
   stateDeclarationDescription,
@@ -72,7 +72,7 @@ const stepKinds = {
       binding: ref("alias"),
       instructions: ref("value"),
       input: ref("value"),
-      output: { type: "object" },
+      output: ref("descriptor"),
       timeout: ref("duration"),
       state: ref("state"),
     },
@@ -260,11 +260,11 @@ export const workflowSchema: Schema = {
   properties: {
     // Exactly this format's URL: a document of another is never read as one.
     $schema: { const: workflowSchemaUrl },
-    input: { type: "object" },
+    input: ref("descriptor"),
     output: {
       type: "object",
       required: ["schema", "value"],
-      properties: { schema: { type: "object" }, value: ref("value") },
+      properties: { schema: ref("descriptor"), value: ref("value") },
       additionalProperties: false,
     },
     params: {
@@ -284,7 +284,7 @@ export const workflowSchema: Schema = {
       type: "object",
       maxProperties: formatLimits.stateKeys,
       propertyNames: ref("stateKey"),
-      additionalProperties: { type: "object" },
+      additionalProperties: ref("descriptor"),
     },
     steps: ref("steps"),
   },
@@ -377,37 +377,28 @@ export const workflowSchema: Schema = {
         },
       ],
     },
+    // A value's schema, in the SDK descriptor's compact form, as `v`
+    // declares it: what check.ts reads with `descriptorFromCompact`.
+    ...compactDescriptorSchema,
     // Sensitive unless `sensitive: false` (format.ts, `Param`): only a
     // parameter that isn't sensitive has a default, so no secret's value
     // is ever in the document.
     param: {
       type: "object",
-      required: ["kind", "label"],
+      required: ["label", "type"],
       properties: {
-        kind: { enum: [...paramKinds] },
         label: { type: "string", minLength: 1, maxLength: 200 },
-        default: true,
+        type: ref("descriptor"),
         sensitive: { type: "boolean" },
-        currency: { type: "string", pattern: "^[A-Z]{3}$" },
       },
       additionalProperties: false,
-      allOf: [
-        {
-          if: { properties: { kind: { const: "money" } } },
-          // oxlint-disable-next-line unicorn/no-thenable -- JSON Schema's if/then
-          then: { required: ["currency"] },
-          else: { not: { required: ["currency"] } },
-        },
-        {
-          if: {
-            properties: { sensitive: { const: false } },
-            required: ["sensitive"],
-          },
-          // oxlint-disable-next-line unicorn/no-thenable -- JSON Schema's if/then
-          then: { required: ["default"] },
-          else: { not: { required: ["default"] } },
-        },
-      ],
+      if: {
+        properties: { sensitive: { const: false } },
+        required: ["sensitive"],
+      },
+      // oxlint-disable-next-line unicorn/no-thenable -- JSON Schema's if/then
+      then: { properties: { type: { required: ["default"] } } },
+      else: { properties: { type: { not: { required: ["default"] } } } },
     },
     binding: {
       type: "object",

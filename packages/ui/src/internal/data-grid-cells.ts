@@ -1,3 +1,4 @@
+import { currencyDecimals } from "@grasp-os/sdk";
 import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
 
 import type { DataGridText } from "./data-grid-text.ts";
@@ -64,15 +65,20 @@ const shownMoney = (value: unknown, language: string): string => {
   ) {
     return "";
   }
+  // Its decimals as ISO 4217 pins them, never as `Intl` guesses them.
+  const digits = currencyDecimals(value.currency);
+  if (digits === undefined) {
+    // A currency the catalog doesn't have: its code and amount as they are.
+    return `${value.currency} ${value.minorUnits}`;
+  }
   try {
-    const format = new Intl.NumberFormat(localeOf(language), {
+    return new Intl.NumberFormat(localeOf(language), {
       style: "currency",
       currency: value.currency,
-    });
-    const digits = format.resolvedOptions().maximumFractionDigits ?? 2;
-    return format.format(value.minorUnits / 10 ** digits);
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(value.minorUnits / 10 ** digits);
   } catch {
-    // A currency `Intl` doesn't know: its code and amount as they are.
     return `${value.currency} ${value.minorUnits}`;
   }
 };

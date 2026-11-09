@@ -54,11 +54,9 @@ import { unique } from "./sign-in.ts";
 //   calls run on its test's own store, never the App's, once whatever its
 //   step's attempts; any other call is refused before it is audited.
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /**
@@ -72,9 +70,9 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     bindings,
@@ -91,7 +89,7 @@ const summarize = {
   binding: "summary",
   instructions: "Greet them.",
   input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { type: "string" } }),
+  output: objectSchema({ line: { kind: "string" } }),
 };
 
 /** The greeting `summarize` answered, as a run's status. */

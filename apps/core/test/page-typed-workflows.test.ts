@@ -94,11 +94,11 @@ const failingOf = (): string =>
 const widerOf = (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
       schema: objectSchema({
-        status: { type: "string" },
-        secret: { type: "string" },
+        status: { kind: "string" },
+        secret: { kind: "string" },
       }),
       value: { status: "hello", secret: "ultramarine" },
     },

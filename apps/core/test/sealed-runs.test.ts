@@ -1007,7 +1007,7 @@ try {
             binding: "summary",
             instructions: "Sum up.",
             input: { who: whoInput, rows: [whoInput] },
-            output: objectOf({ line: { type: "string" } }),
+            output: objectOf({ line: { kind: "string" } }),
           },
         ],
         catch: { errors: { type: `${standardErrors}validation` } },
@@ -1625,8 +1625,8 @@ return { status: line };`);
 
 /** A module of the test's own whose run on input `{ reviewer, invoice }` is `body`. */
 const reviewModuleOf = (body: string): string => `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ reviewer: z.string(), invoice: z.string() }) }, async (step, { input }) => {
+import { workflow, v } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: v.object({ reviewer: v.string(), invoice: v.string() }) }, async (step, { input }) => {
 ${body}
 });
 `;

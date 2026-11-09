@@ -45,11 +45,9 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 const filesModule = `import { action, resource, v } from "@grasp-os/sdk/action";
@@ -88,9 +86,9 @@ describe("a workflow action's run files on-prem", () => {
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: JSON.stringify({
         $schema: workflowSchemaUrl,
-        input: objectSchema({ text: { type: "string" } }),
+        input: objectSchema({ text: { kind: "string" } }),
         output: {
-          schema: objectSchema({ status: { type: "string" } }),
+          schema: objectSchema({ status: { kind: "string" } }),
           value: { $expr: "steps.keep.output" },
         },
         bindings: {

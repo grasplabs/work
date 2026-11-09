@@ -78,12 +78,10 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-/** A JSON object schema of `properties`, each required, and nothing else. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** An object value of `fields`, each required, and nothing else. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /**
@@ -110,7 +108,7 @@ const replyWorkflow = async (aliases: readonly string[] = ["replies"]) => {
       $schema: workflowSchemaUrl,
       input: objectSchema({}),
       output: {
-        schema: objectSchema({ subject: { type: "string" } }),
+        schema: objectSchema({ subject: { kind: "string" } }),
         value: {
           subject: {
             $expr: `steps.reply${aliases.length}.output.event?.data.subject ?? ""`,

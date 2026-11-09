@@ -173,9 +173,9 @@ const sendContract = async (
 };
 
 const echoInput = {
-  id: { type: "string" },
-  subject: { type: "string" },
-  stamp: { type: "string" },
+  id: { kind: "string" },
+  subject: { kind: "string" },
+  stamp: { kind: "string" },
 };
 
 /**
@@ -190,8 +190,8 @@ const echoOf = (key: string, from: string, to: string) => (): string =>
     input: objectSchema(echoInput),
     output: {
       schema: objectSchema({
-        id: { type: "string" },
-        stamp: { type: "string" },
+        id: { kind: "string" },
+        stamp: { kind: "string" },
       }),
       value: {
         id: { $expr: "input.id" },

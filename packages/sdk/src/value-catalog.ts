@@ -25,6 +25,56 @@ export const currencyCodes = words(
 );
 
 /**
+ * The currencies of ISO 4217 whose minor unit isn't two decimals, by its
+ * decimals (List One, as amended to 2026): those with none, and those
+ * with three, and the units ISO gives no minor unit at all (`XDR`, `XSU`),
+ * whose amounts are their whole units as they are. Every other code of
+ * `currencyCodes` has two.
+ */
+const otherDecimals: Readonly<Record<string, number>> = {
+  BIF: 0,
+  CLP: 0,
+  DJF: 0,
+  GNF: 0,
+  ISK: 0,
+  JPY: 0,
+  KMF: 0,
+  KRW: 0,
+  PYG: 0,
+  RWF: 0,
+  UGX: 0,
+  VND: 0,
+  VUV: 0,
+  XAF: 0,
+  XOF: 0,
+  XPF: 0,
+  BHD: 3,
+  IQD: 3,
+  JOD: 3,
+  KWD: 3,
+  LYD: 3,
+  OMR: 3,
+  TND: 3,
+  XDR: 0,
+  XSU: 0,
+};
+
+/**
+ * How many decimals a major unit of `currency` has, as ISO 4217 says:
+ * what whole minor units (`v.money()`'s `minorUnits`) are divided by to
+ * show an amount. Pinned, as `currencyCodes` is: `Intl` answers otherwise
+ * in some engines (HUF, IDR and IQD on Node). A unit with no minor unit
+ * (`XDR`, `XSU`) has none: its amount is its units as they are, as
+ * `v.money()` takes them. Undefined for a code this catalog doesn't have.
+ */
+export const currencyDecimals = (currency: string): number | undefined => {
+  if (!currencyCodes.has(currency)) {
+    return undefined;
+  }
+  return Object.hasOwn(otherDecimals, currency) ? otherDecimals[currency] : 2;
+};
+
+/**
  * The IANA time zones (tzdata 2026c): every `Area/Location` zone and link,
  * so both `Asia/Kolkata` and its older name `Asia/Calcutta`, plus `UTC`.
  * Listed from the files of a tzdata 2026c install (`/usr/share/zoneinfo`,

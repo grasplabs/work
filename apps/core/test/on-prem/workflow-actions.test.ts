@@ -51,9 +51,9 @@ const person = async (role: Role): Promise<Identity> => {
 const definitionOf = (bindings: Record<string, unknown> = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: { $expr: "steps.notify.output.status" } },
     },
     bindings: {

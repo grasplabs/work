@@ -1,6 +1,11 @@
+import type { CompactDescriptor } from "@grasp-os/sdk/host";
 import { decidersPattern } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
+import {
+  maxWorkflowParams,
+  workflowParamNamePattern,
+} from "@grasp-os/shared/workflows";
 
 // grasp-workflow/1: a workflow as JSON, the stored form of a workflow on
 // `@grasp-os/sdk/workflow`. One step is one SDK call; steps name each
@@ -105,45 +110,34 @@ export type Duration = `${number} ${DurationUnit}${"" | "s"}`;
 export const durationUnits = ["second", "minute", "hour", "day", "week"];
 export type DurationUnit = "second" | "minute" | "hour" | "day" | "week";
 
-/** The kinds of parameter, as the SDK has them (`@grasp-os/sdk/params`). */
-export const paramKinds = [
-  "text",
-  "number",
-  "money",
-  "person",
-  "schedule",
-  "template",
-] as const;
-export type ParamKind = (typeof paramKinds)[number];
-
-interface ParamBase {
-  readonly kind: ParamKind;
-  readonly label: string;
-  /** A money parameter's ISO 4217 currency. */
-  readonly currency?: string;
-}
+/**
+ * A value's schema, as `v` declares it, in the compact form an SDK value
+ * descriptor is written by hand in (`@grasp-os/sdk/host`'s
+ * `descriptorFromCompact`): `{ "kind": "string", "max": 200 }` is
+ * `v.string().max(200)`. A run's input, its output, an agent's answer, a
+ * key of the state and a parameter are each declared so.
+ */
+export type Descriptor = CompactDescriptor;
 
 /**
- * A parameter: a value people set without touching the workflow.
+ * A parameter: a value people set without touching the workflow, of
+ * `type`, as `v` declares it (`{ "kind": "money", "default": … }`).
  *
  * Sensitive unless it says `sensitive: false`, so a parameter nobody
  * thought about (an API key, say) is never shown, logged or handed to the
  * run's code. A sensitive parameter carries no value in the document,
  * which drafts, exports and reviews show: its value is set where parameter
- * values are kept. Only a parameter that isn't sensitive has a `default`.
+ * values are kept, so its type has no `default`. A parameter that isn't
+ * sensitive always has one.
  */
-export type Param = ParamBase &
-  (
-    | { readonly sensitive: false; readonly default: Json }
-    | { readonly sensitive?: true; readonly default?: never }
-  );
-
-/** A parameter that isn't sensitive: the run's code may read it. */
-export type PlainParam = Extract<Param, { readonly sensitive: false }>;
+export interface Param {
+  readonly label: string;
+  readonly type: Descriptor;
+  readonly sensitive?: boolean;
+}
 
 /** Whether `param` isn't sensitive: only one marked `sensitive: false`. */
-export const isPlain = (param: Param): param is PlainParam =>
-  param.sensitive === false;
+export const isPlain = (param: Param): boolean => param.sensitive === false;
 
 /** Whether `param` is sensitive: every parameter not marked otherwise. */
 export const isSensitive = (param: Param): boolean => !isPlain(param);
@@ -228,8 +222,8 @@ export interface AgentStep extends StepBase {
   readonly binding: string;
   readonly instructions: Value;
   readonly input: Value;
-  /** A JSON Schema the answer must match. */
-  readonly output: Json;
+  /** What the answer must be. */
+  readonly output: Descriptor;
   readonly timeout?: Duration;
   readonly state?: StateWrites;
 }
@@ -401,17 +395,17 @@ export type StepType = Step["type"];
 export interface WorkflowDocument {
   /** What the document is: the format's schema, `workflowSchemaUrl`. */
   readonly $schema: typeof workflowSchemaUrl;
-  /** A JSON Schema of what starts a run. */
-  readonly input?: Json;
-  /** What a run ends with: its JSON Schema, and its value. */
-  readonly output?: { readonly schema: Json; readonly value: Value };
+  /** What starts a run: an object of no fields when not given. */
+  readonly input?: Descriptor;
+  /** What a run ends with: its schema, and its value. */
+  readonly output?: { readonly schema: Descriptor; readonly value: Value };
   readonly params?: Readonly<Record<string, Param>>;
   readonly bindings?: Readonly<Record<string, Binding>>;
   /**
-   * What it keeps between its runs: each key's data schema, as `input`'s.
-   * A step writes only these keys, each value of its key's schema.
+   * What it keeps between its runs: each key's schema, as `input`'s. A
+   * step writes only these keys, each value of its key's schema.
    */
-  readonly state?: Readonly<Record<string, Json>>;
+  readonly state?: Readonly<Record<string, Descriptor>>;
   readonly steps: readonly Step[];
 }
 
@@ -437,7 +431,7 @@ export const formatLimits = {
   expressionLength: 2048,
   idLength: 64,
   titleLength: 200,
-  params: 64,
+  params: maxWorkflowParams,
   bindings: 64,
   /** The keys one step keeps in its workflow's state, as the host seals them. */
   stateKeys: 64,
@@ -489,7 +483,7 @@ export const stateStepTypes = ["do", "agent"] as const;
 export const stateDescription = `What the step keeps in its workflow's state once it succeeded: \`{ "<key>": <value> }\`, each key one the workflow declares under its top-level \`state\`, and each value of that key's schema. A value is JSON, any part of which may be an expression; there \`output\` is this step's result. A literal value is checked against its key's schema as the workflow is; every value is checked again as the step records it, and one of another shape fails the step, keeping nothing. Every expression of the workflow reads the state as it was when the run started, as \`state.<key>\`, which is undefined until a run kept it: write \`state.<key> ?? <default>\`. Every version of the workflow keeps the same state, so a value kept under an older schema that doesn't fit this version's reads as undefined too, as a key never written. A step its \`if\` skips keeps nothing, and a replay never writes twice. A restricted run reads the workflow's state but doesn't change it, and nor does a test run. A workflow's state holds at most 64 KB in all, which only a run can reach: a step that would pass it fails with workflow.state_too_large, and since its call already answered, the run ends with workflow.failed_after_effect, as it does when a value isn't of its key's schema. Only a \`do\` or an \`agent\` step keeps state.`;
 
 /** What a workflow's `state` declares, to whoever writes one. */
-export const stateDeclarationDescription = `What the workflow keeps between its runs: \`{ "<key>": <JSON Schema> }\`, at most ${formatLimits.stateKeys} keys, each a letter then letters, digits and \`_\`, each with a data schema as \`input\` has one. A \`do\` or \`agent\` step's \`state\` writes these keys alone, and every expression reads them as \`state.<key>\`.`;
+export const stateDeclarationDescription = `What the workflow keeps between its runs: \`{ "<key>": <descriptor> }\`, at most ${formatLimits.stateKeys} keys, each a letter then letters, digits and \`_\`, each with a value's schema as \`input\` has one, such as \`{ "kind": "number", "integer": true }\`. A \`do\` or \`agent\` step's \`state\` writes these keys alone, and every expression reads them as \`state.<key>\`.`;
 
 /** What a wait is, to whoever writes one: the schema's description. */
 export const waitDescription =
@@ -513,7 +507,7 @@ export const stepIdPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$";
  * Like a step's ID and a binding's alias, a stable key, never changed once
  * made: a parameter is renamed by its `label`.
  */
-export const paramNamePattern = "^[a-z][A-Za-z0-9]{0,63}$";
+export const paramNamePattern = workflowParamNamePattern.source;
 
 /**
  * A key of a workflow's state, as the host keeps it and an expression
@@ -585,3 +579,11 @@ export const eachStep = (
       ),
     ];
   });
+
+const pointerEscape = /[~/]/gu;
+
+/** `pointer` with `token` appended, escaped (RFC 6901). */
+export const pointerJoin = (pointer: string, token: string | number): string =>
+  `${pointer}/${String(token).replaceAll(pointerEscape, (char) =>
+    char === "~" ? "~0" : "~1"
+  )}`;

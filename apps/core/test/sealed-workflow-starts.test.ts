@@ -85,11 +85,9 @@ export const kickOff = action({
 `,
 });
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /**
@@ -110,9 +108,9 @@ const passing = (id: string) => ({
 const definitionOf = (wait?: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: { $expr: '"Hello, " + input.who' } },
     },
     steps: [
@@ -741,9 +739,9 @@ const pinnedApp = async (
 const longDefinitionOf = (tasks: number): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: "done" },
     },
     steps: Array.from({ length: tasks }, (_, index) =>
@@ -757,9 +755,9 @@ const longDefinitionOf = (tasks: number): string =>
  */
 const failingDefinition = JSON.stringify({
   $schema: workflowSchemaUrl,
-  input: objectSchema({ who: { type: "string" } }),
+  input: objectSchema({ who: { kind: "string" } }),
   output: {
-    schema: objectSchema({ status: { type: "string" } }),
+    schema: objectSchema({ status: { kind: "string" } }),
     value: { status: "done" },
   },
   steps: [
@@ -1262,9 +1260,9 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     await publishWorkflowVersion(env, owner, workflow.id, {
       definition: JSON.stringify({
         $schema: workflowSchemaUrl,
-        input: objectSchema({ who: { type: "string" } }),
+        input: objectSchema({ who: { kind: "string" } }),
         output: {
-          schema: objectSchema({ status: { type: "string" } }),
+          schema: objectSchema({ status: { kind: "string" } }),
           value: { status: "done" },
         },
         steps: [

@@ -30,9 +30,9 @@ import { auditedDuring, outcome, unique } from "./sign-in.ts";
 const definitionOf = (linger?: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: { $expr: '"" + steps.add.output' } },
     },
     bindings: {

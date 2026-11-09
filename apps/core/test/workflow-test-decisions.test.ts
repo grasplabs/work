@@ -33,11 +33,9 @@ import { unique } from "./sign-in.ts";
 // answer taken for an approval; the decision reaching the organization's
 // own decisions. Then the run taking the branch its answer chose.
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** The review: asks `recipients` (the reviewer parameter's) about `input`. */
@@ -92,16 +90,15 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ amount: { type: "number" } }),
+    input: objectSchema({ amount: { kind: "number" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     params: {
       reviewer: {
-        kind: "person",
         label: "Reviewer",
-        default: "role:admin",
+        type: { kind: "person", default: "role:admin" },
         sensitive: false,
       },
     },

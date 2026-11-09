@@ -461,8 +461,8 @@ return null;`),
       { sealed: keepsFetch }
     );
     const reads = `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { state }) => ({ state, frozen: Object.isFrozen(state) && Object.isFrozen(state.seen) }));
+import { v, workflow } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: v.object({ who: v.string() }) }, async (step, { state }) => ({ state, frozen: Object.isFrozen(state) && Object.isFrozen(state.seen) }));
 `;
     // Two activations, each loading the run afresh, as after a restart.
     const first = await ranAs(reader, reads);

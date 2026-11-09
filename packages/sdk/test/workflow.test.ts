@@ -2,15 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { createTestEngine } from "../src/testing.ts";
-import {
-  money,
-  number,
-  person,
-  text,
-  workflow,
-  WorkflowError,
-  z,
-} from "../src/workflow.ts";
+import { v, workflow, WorkflowError } from "../src/workflow.ts";
 import type { DoOptions, Duration, StepRunner } from "../src/workflow.ts";
 
 const noParams = {};
@@ -21,27 +13,48 @@ const withStep = <Output>(
 ) =>
   workflow(
     "sample",
-    { params: noParams, input: z.unknown() },
+    { params: noParams },
     async (step, { input }) => await body(step, input)
   );
 
-/** A workflow with one money parameter. */
-const priced = (currency: string, amount: number) =>
+/** A workflow with one money parameter, its default given. */
+const priced = (minorUnits: number) =>
   workflow(
     "priced",
     {
       params: {
-        limit: money({ label: "Limit", currency, default: amount }),
+        limit: {
+          label: "Limit",
+          type: v.money().default({ minorUnits, currency: "EUR" }),
+        },
       },
     },
-    async () => null
+    async (_step, { params }) => params.limit
   );
 
 /** A workflow with one number parameter labelled `label`. */
 const labelled = (label: string) =>
   workflow(
     "labelled",
-    { params: { limit: number({ label, default: 1 }) } },
+    { params: { limit: { label, type: v.number().default(1) } } },
+    async () => null
+  );
+
+/** A workflow declaring `params`, as a thunk. */
+const named = (params: Record<string, unknown>) => () =>
+  workflow(
+    "named",
+    // @ts-expect-error -- each parameter is a label and a `v` type
+    { params },
+    async () => null
+  );
+
+/** A workflow declaring one parameter of `type`, as a thunk. */
+const declared = (type: unknown) => () =>
+  workflow(
+    "typed",
+    // @ts-expect-error -- a type is a `v` schema
+    { params: { limit: { label: "Limit", type } } },
     async () => null
   );
 
@@ -57,17 +70,44 @@ const settledOutcome = async (
 };
 
 describe("workflow definitions", () => {
-  it("rejects an empty ID and a default that doesn't fit its kind", () => {
+  it("rejects an empty ID", () => {
     expect(() => workflow("", { params: noParams }, async () => null)).toThrow(
       expect.objectContaining({ code: "workflow.invalid_definition" })
     );
-    expect(() =>
-      workflow(
-        "bad-default",
-        { params: { limit: number({ label: "Limit", default: Number.NaN }) } },
-        async () => null
-      )
-    ).toThrow(expect.objectContaining({ code: "workflow.invalid_definition" }));
+  });
+
+  it("rejects parameters by a name code can't read, or too many", () => {
+    const param = { label: "Limit", type: v.number().default(1) };
+    const many = Object.fromEntries(
+      Array.from({ length: 65 }, (_, index) => [`p${index}`, param])
+    );
+
+    for (const params of [
+      { Limit: param },
+      { "max-items": param },
+      { [`l${"x".repeat(64)}`]: param },
+      many,
+    ]) {
+      expect(named(params)).toThrow(
+        expect.objectContaining({ code: "workflow.invalid_definition" })
+      );
+    }
+    expect(named({ maxItems: param })).not.toThrow();
+  });
+
+  it("rejects a parameter whose type isn't a `v` schema with a default", () => {
+    for (const type of [
+      v.number(),
+      v.number().optional(),
+      { descriptor: { kind: "number" } },
+      "number",
+      undefined,
+    ]) {
+      expect(declared(type)).toThrow(
+        expect.objectContaining({ code: "workflow.invalid_definition" })
+      );
+    }
+    expect(declared(v.number().default(3))).not.toThrow();
   });
 
   it("rejects parameters past the bounds the platform keeps, such as a label over 200 characters", () => {
@@ -79,30 +119,39 @@ describe("workflow definitions", () => {
     );
   });
 
-  it("holds money in whole minor units of a declared currency", () => {
-    expect(priced("EUR", 500_000).metadata.params[0]).toMatchObject({
-      currency: "EUR",
-      default: 500_000,
-    });
-    for (const [currency, amount] of [
-      ["EUR", 5000.5],
-      ["euro", 500_000],
-      ["ZZZ", 500_000],
-    ] as const) {
-      expect(() => priced(currency, amount)).toThrow(
-        expect.objectContaining({ code: "workflow.invalid_definition" })
+  it("runs with a parameter's default, and with the value set, checked by its type", async () => {
+    const run = async (params: Record<string, unknown>) =>
+      await settledOutcome(
+        async () =>
+          await priced(500_000).run(createTestEngine({ params }).engine)
       );
-    }
+
+    expect({
+      unset: await run({}),
+      set: await run({ limit: { minorUnits: 7, currency: "USD" } }),
+      unfit: String(await run({ limit: 7 })).startsWith('Parameter "limit"'),
+    }).toStrictEqual({
+      unset: { minorUnits: 500_000, currency: "EUR" },
+      set: { minorUnits: 7, currency: "USD" },
+      unfit: true,
+    });
   });
 
-  it("treats parameters as not sensitive unless declared so", () => {
-    const { metadata } = workflow(
+  it("checks its input by the schema it declares", async () => {
+    const greeting = workflow(
       "greeting",
-      { params: { greeting: text({ label: "Greeting", default: "Hi" }) } },
-      async () => null
+      { params: noParams, input: v.object({ who: v.string() }) },
+      async (_step, { input }) => `Hello, ${input.who}`
     );
+    const run = async (input: unknown) =>
+      await settledOutcome(
+        async () => await greeting.run(createTestEngine().engine, input)
+      );
 
-    expect(metadata.params[0]?.sensitive).toBeFalsy();
+    expect({
+      fits: await run({ who: "Ada" }),
+      unfit: String(await run({ who: 7 })).startsWith("Input: at who"),
+    }).toStrictEqual({ fits: "Hello, Ada", unfit: true });
   });
 });
 
@@ -261,7 +310,7 @@ describe("step.do", () => {
           "mail",
           { description: "Mail", input: { to: "anna" } },
           async ({ input }) =>
-            String(await context.env.OUTLOOK?.call?.("mail.send", input))
+            (await context.env.OUTLOOK?.call?.("mail.send", input)) ?? null
         )
     );
 
@@ -394,11 +443,12 @@ describe("step.sleep", () => {
   });
 
   it("rejects a duration that isn't whole milliseconds, up to 365 days", async () => {
-    const definition = withStep(async (step, duration) => {
-      // @ts-expect-error -- durations are milliseconds or "<n> <unit>"
-      await step.sleep("pause", { description: "Pause", duration });
-    });
-    const run = definition.run.bind(null, createTestEngine().engine);
+    const run = async (duration: unknown) => {
+      await withStep(async (step) => {
+        // @ts-expect-error -- durations are milliseconds or "<n> <unit>"
+        await step.sleep("pause", { description: "Pause", duration });
+      }).run(createTestEngine().engine);
+    };
 
     const durations = [
       "soon",
@@ -422,7 +472,10 @@ const decisionWorkflow = (limits: { timeout: Duration }) =>
     "decide",
     {
       params: {
-        approver: person({ label: "Approver", default: "person:anna" }),
+        approver: {
+          label: "Approver",
+          type: v.person().default("person:anna"),
+        },
       },
     },
     async (step, { params }) =>
@@ -628,7 +681,10 @@ describe("errors", () => {
       "coded",
       {
         params: {
-          approver: person({ label: "Approver", default: "person:anna" }),
+          approver: {
+            label: "Approver",
+            type: v.person().default("person:anna"),
+          },
         },
       },
       async () => null

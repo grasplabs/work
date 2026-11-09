@@ -51,11 +51,9 @@ const person = async (role: Role = "builder"): Promise<Acting> => {
   return { userId, role, teams: [], staff: false };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A definition of `steps`, input `{ who }`, ending `{ status: "done" }`. */
@@ -65,9 +63,9 @@ const definitionOf = (
 ) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: "done" },
     },
     bindings,

@@ -1,7 +1,6 @@
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { z } from "zod";
 
 import type { WorkflowEngine, WorkflowEnv } from "./engine.ts";
 import {
@@ -9,7 +8,11 @@ import {
   optionalChain as optionalGuard,
   readMember as readGuard,
 } from "./expression-runtime.ts";
-import { parseOrThrow, WorkflowError } from "./workflow-error.ts";
+import type { ValueSchema } from "./value-descriptor.ts";
+import type { AnySchema } from "./value-schema.ts";
+import type { Infer } from "./value-types.ts";
+import { v } from "./values.ts";
+import { checkOrThrow, parseOrThrow, WorkflowError } from "./workflow-error.ts";
 import {
   describeParams,
   resolveParams,
@@ -28,8 +31,12 @@ import type { StepRunner } from "./workflow-steps.ts";
  * ```ts
  * export default workflow("invoice-approval", {
  *   params: {
- *     threshold: money({ label: "Review invoices above", currency: "EUR", default: 500_000 }),
+ *     threshold: {
+ *       label: "Review invoices above",
+ *       type: v.money().default({ minorUnits: 500_000, currency: "EUR" }),
+ *     },
  *   },
+ *   input: v.object({ invoice: v.number() }),
  * }, async (step, { params, env }) => {
  *   await step.do("book", { key: "task", description: "book" },
  *     async () => ({ output: await env.ledger.call("entries.create", { invoice: 7 }) }));
@@ -37,8 +44,9 @@ import type { StepRunner } from "./workflow-steps.ts";
  * ```
  */
 
-// Workflow code imports only this module, so it gets Zod from here too.
-export { z } from "zod";
+// Workflow code imports only this module, so it gets `v` from here too:
+// a workflow declares its values as an App does.
+export { v } from "./values.ts";
 export { brain } from "./brain.ts";
 // The guards a workflow's JavaScript expressions run through, as the
 // code generated from them imports them (expression-check.ts,
@@ -75,32 +83,15 @@ export const callMethod: (
 /** `optionalChain`, for generated code: on `Read` values. */
 export const optionalChain: (value: Read, rest: (value: Read) => Read) => Read =
   optionalGuard;
+
 // What generated code holds the state it keeps and reads to.
 export { fittedState, fittedValue } from "./fitted-value.ts";
-export type { ParamKind, ParamValue } from "./params.ts";
-// The value each kind of parameter holds: generated code parses the
-// recipients a decision records as `person` values, as `from` takes one.
-export { paramValueSchemas } from "./params.ts";
 // What a step records and a binding is handed: a workflow's code names it
 // to narrow what a binding answers (`unknown`) into a step's result.
 export type { Json } from "@grasp-os/shared/json";
 export { WorkflowError } from "./workflow-error.ts";
-export {
-  money,
-  number,
-  person,
-  schedule,
-  sensitiveParam,
-  template,
-  text,
-} from "./workflow-params.ts";
-export type {
-  Param,
-  ParamMetadata,
-  Person,
-  Schedule,
-  Template,
-} from "./workflow-params.ts";
+export { sensitiveParam } from "./workflow-params.ts";
+export type { Param, ParamMetadata } from "./workflow-params.ts";
 export type {
   CaughtError,
   Decision,
@@ -201,17 +192,17 @@ export interface WorkflowDefinition<Output> {
 export const workflow = <
   const P extends Params,
   Output,
-  InputSchema extends z.ZodType = z.ZodUndefined,
+  InputSchema extends AnySchema = ValueSchema<undefined, undefined>,
 >(
   id: string,
   config: {
     params: P;
-    /** The run's input, e.g. the invoice that started it. */
+    /** The run's input, as `v` declares it, e.g. the invoice that started it. */
     input?: InputSchema;
   },
   run: (
     step: StepRunner,
-    context: WorkflowContext<P, z.output<InputSchema>>
+    context: WorkflowContext<P, Infer<InputSchema>>
   ) => Promise<Output>
 ): WorkflowDefinition<Output> => {
   const workflowId = parseOrThrow(
@@ -221,21 +212,21 @@ export const workflow = <
     "Workflow ID"
   );
   validateParams(config.params);
-  const inputSchema: z.ZodType = config.input ?? z.undefined();
+  // With no input declared, a run takes none.
+  const inputSchema: AnySchema = config.input ?? v.null().optional();
 
   const runOnce = async (
     engine: WorkflowEngine,
     rawInput: unknown
   ): Promise<Output> => {
-    // SAFETY: parsed by `config.input`, or checked to be undefined when
-    // there is none, which is the default of `InputSchema`.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const input = parseOrThrow(
+    // SAFETY: checked by `config.input`, or to be null or left out when
+    // there is none, as the default of `InputSchema` says.
+    const input = checkOrThrow(
       inputSchema,
       rawInput,
       "workflow.invalid_input",
       "Input"
-    ) as z.output<InputSchema>;
+    ) as Infer<InputSchema>;
     // Recorded, so a replay runs with the values the run started with. A
     // value that doesn't fit fails for good: the error is non-retryable.
     const params = await engine.do(
@@ -254,8 +245,8 @@ export const workflow = <
         runId: engine.runId,
         inbox: Object.freeze({ ...engine.inbox }),
         input,
-        // SAFETY: resolveParams parses every declared parameter with the
-        // schema of its kind, which is what ParamValues<P> describes.
+        // SAFETY: resolveParams checks every declared parameter with its
+        // type, which is what ParamValues<P> describes.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         params: Object.freeze(params) as ParamValues<P>,
         state: frozenJson(engine.state),

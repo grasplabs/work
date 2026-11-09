@@ -58,6 +58,15 @@ export type { ReadManifest } from "./schema-manifest-read.ts";
 // What a host reads a descriptor from its JSON text with: one reader,
 // which a workflow's run uses too (`fittedValue`).
 export { descriptorFromText, schemaFromDescriptor } from "./descriptor-text.ts";
+// A descriptor's compact form, as a workflow's JSON and an App's definition
+// hold it: its one reader and writer, and its JSON Schema for editors.
+export {
+  compactDescriptor,
+  CompactDescriptorError,
+  compactDescriptorSchema,
+  descriptorFromCompact,
+} from "./value-compact.ts";
+export type { CompactDescriptor } from "./value-compact.ts";
 
 // An App's manifest as the host reads it back from what inspection or a
 // release answered, and the modules and references it generates from it.

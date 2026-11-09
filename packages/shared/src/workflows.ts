@@ -89,42 +89,14 @@ export const workflowErrors = defineErrorFamily({
 });
 
 /**
- * A parameter as a workflow's code declares it (the SDK's
- * `ParamMetadata`), within the bounds core keeps and shows: the SDK
- * refuses a definition outside them, so a version whose declarations core
- * would refuse never passes its tests. Kinds, and whether a default fits
- * its kind, are the SDK's to check (`paramValueSchemas`).
+ * A workflow parameter's name: an identifier, so code reads it as
+ * `params.<name>`. The format's check (grasp-workflow/1) and the SDK's
+ * (`validateParams`) both hold a name to it.
  */
-export const paramDeclarationSchema = z.object({
-  name: z.string().regex(/^[A-Za-z_$][\w$]{0,63}$/u),
-  kind: z.string(),
-  label: z.string().max(200),
-  default: z.union([z.string().max(4096), z.number()]),
-  sensitive: z.boolean(),
-  currency: z.string().max(3).optional(),
-});
+export const workflowParamNamePattern = /^[a-z][A-Za-z0-9]{0,63}$/u;
 
 /** Most parameters one workflow declares. */
-const maxParamDeclarations = 100;
-
-/**
- * A workflow's parameter declarations, each as `item` has it: at most
- * {@link maxParamDeclarations}, and each name once: with two declarations
- * of one name, which one a read goes by would be anyone's guess.
- */
-export const paramDeclarationsSchema = <
-  Item extends z.ZodType<{ name: string }>,
->(
-  item: Item
-) =>
-  z
-    .array(item)
-    .max(maxParamDeclarations)
-    .refine(
-      (params) =>
-        new Set(params.map(({ name }) => name)).size === params.length,
-      { message: "Each name once" }
-    );
+export const maxWorkflowParams = 64;
 
 /** Whether the runtime knows `timeZone`, an IANA name like `Europe/Amsterdam`. */
 export const isTimeZone = (timeZone: string): boolean => {

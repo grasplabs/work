@@ -31,32 +31,23 @@ const answers = v.union(
 
 /** `answers`, as the workflow's output schema has it. */
 const responseSchema = {
-  anyOf: [
-    { type: "null" },
-    {
-      type: "object",
-      properties: {
-        comment: { type: "string" },
-        total: { type: "number" },
-        nested: {
-          type: "object",
-          properties: { a: { type: "null" }, b: { type: "number" } },
-          required: ["a", "b"],
-          additionalProperties: false,
-        },
-      },
-      required: ["comment"],
-      additionalProperties: false,
+  kind: "object",
+  fields: {
+    comment: { kind: "string" },
+    total: { kind: "number", optional: true },
+    nested: {
+      kind: "object",
+      fields: { a: { kind: "null" }, b: { kind: "number" } },
+      optional: true,
     },
-  ],
+  },
+  nullable: true,
 };
 
-/** A JSON object schema of `properties`, each required, and nothing else. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+/** A value's schema: an object of exactly `fields`, each required. */
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** How the approval workflow asks: whom, and for how long. */
@@ -80,12 +71,12 @@ const answered = "steps.review.output";
 const approvalOf = (contract: string, { from, timeout }: Asking): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ invoice: { type: "string" } }),
+    input: objectSchema({ invoice: { kind: "string" } }),
     output: {
       schema: objectSchema({
-        answered: { type: "boolean" },
-        approved: { type: "boolean" },
-        by: { type: "string" },
+        answered: { kind: "boolean" },
+        approved: { kind: "boolean" },
+        by: { kind: "string" },
         value: responseSchema,
       }),
       value: {

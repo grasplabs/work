@@ -229,9 +229,8 @@ describe("generating a workflow", () => {
         params: {
           ...document.params,
           greeting: {
-            kind: "text",
             label: hostile[1],
-            default: hostile[2],
+            type: { kind: "string", default: hostile[2] },
             sensitive: false,
           },
         },
@@ -259,7 +258,7 @@ describe("generating a workflow", () => {
     });
   });
 
-  it("makes no name of an ID, imports only the workflow SDK, and loops only as a forEach", () => {
+  it("makes no name of an ID, imports only the workflow SDK and its generated helpers, and loops only as a forEach", () => {
     const generated = generateWorkflow(checked(withLoops()), "workflow");
     const { body } = parse(generated.source).program;
     const imports = body.flatMap((statement) =>
@@ -292,7 +291,7 @@ describe("generating a workflow", () => {
         "ForInStatement",
       ].filter((type) => types.has(type)),
     }).toStrictEqual({
-      imports: ["@grasp-os/sdk/workflow"],
+      imports: ["@grasp-os/sdk/workflow", "@grasp-os/sdk/workflow-generated"],
       ids: [],
       loops: [],
     });
@@ -597,7 +596,7 @@ describe("generating a workflow", () => {
       reply: taskOf("reply"),
       literal: taskOf("literal"),
       // The enter step records `{ key }`, then the task step waits.
-      records: generated.source.includes('{ ["key"]: z.json().parse('),
+      records: generated.source.includes('{ ["key"]: $json('),
     }).toStrictEqual({
       reply: {
         steps: ["enter", "task"],
@@ -788,6 +787,48 @@ describe("generating a workflow", () => {
         "decided.then",
       ].toSorted(),
     });
+  });
+
+  it("declares its input and parameters with `v`, as an App declares values, and takes no Zod", () => {
+    const { source } = generateWorkflow(
+      checked(withDecisions(decision())),
+      "workflow"
+    );
+    const names = namesIn(source);
+
+    expect({
+      input: source.includes("input: v.object({\n  who: v.string()\n}),"),
+      greeting: source.includes(
+        '["greeting"]: { label: "Greeting", type: v.string().default("Hello") }'
+      ),
+      // Sensitive: never declared, so its value never reaches the code.
+      token: source.includes('["token"]'),
+      zod: names.has("z"),
+    }).toStrictEqual({
+      input: true,
+      greeting: true,
+      token: false,
+      zod: false,
+    });
+  });
+
+  it("imports every helper of the SDK its code calls", () => {
+    const helpers = ["parse", "itemsOf", "fittedValue", "sensitiveParam"];
+    const unimported = [everyStep(), withDecisions(decision()), withLoops()]
+      .map((document) => generateWorkflow(checked(document), "workflow"))
+      .flatMap(({ source }) => {
+        const imported = source
+          .split("\n")
+          .filter((line) => line.startsWith("import "))
+          .join("\n");
+        return helpers.filter(
+          (name) =>
+            source.includes(`${name}(`) &&
+            !new RegExp(`[{ ,]${name}[ ,}]`, "u").test(imported)
+        );
+      });
+
+    expect(unimported).toStrictEqual([]);
   });
 
   it("generates the same module from the same document", () => {

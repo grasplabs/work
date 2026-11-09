@@ -152,9 +152,9 @@ const response = v.union(v.null(), v.object({ comment: v.string() }));
 const approvalDefinition = (contract: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: {
         status: {
           $expr: 'steps.review.output.approved ? "approved" : "rejected"',
@@ -163,9 +163,8 @@ const approvalDefinition = (contract: string): string =>
     },
     params: {
       reviewer: {
-        kind: "person",
         label: "Reviewer",
-        default: "role:admin",
+        type: { kind: "person", default: "role:admin" },
         sensitive: false,
       },
     },

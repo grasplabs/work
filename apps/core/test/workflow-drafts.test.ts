@@ -45,11 +45,9 @@ const person = async (role: Role, staff = false): Promise<Acting> => {
   return { userId, role, teams: [], staff };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A definition that passes, ending in `status`, with `steps` (none by default). */
@@ -59,9 +57,9 @@ const definitionOf = ({
 }: { status?: string; steps?: unknown[] } = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     steps,
@@ -388,16 +386,16 @@ describe("a workflow's draft", () => {
       JSON.stringify({
         $schema: workflowSchemaUrl,
         input: objectSchema({
-          who: { type: "string" },
-          count: { type: "number" },
+          who: { kind: "string" },
+          count: { kind: "number" },
         }),
         output: {
-          schema: objectSchema({ status: { type: "string" } }),
+          schema: objectSchema({ status: { kind: "string" } }),
           value: { status: { $expr: status } },
         },
         bindings: { summary: { kind: "model", contract: model } },
         // What it keeps between runs, read as `state`, typed by its schema.
-        state: { count: { type: "number" }, line: { type: "string" } },
+        state: { count: { kind: "number" }, line: { kind: "string" } },
         steps: [
           {
             id: "greet",
@@ -405,7 +403,7 @@ describe("a workflow's draft", () => {
             binding: "summary",
             instructions: "Greet them.",
             input: { who: { $expr: "input.who" } },
-            output: objectSchema({ line: { type: "string" } }),
+            output: objectSchema({ line: { kind: "string" } }),
             // `output` in its state: the answer, as it keeps it.
             state: {
               count: { $expr: "(state.count ?? 0) + 1" },
@@ -633,12 +631,12 @@ describe("a workflow's draft", () => {
     const properties = Object.fromEntries(
       Array.from({ length: 3000 }, (_, index) => [
         `p${String(index).padStart(4, "0")}${"n".repeat(59)}`,
-        { type: "string" },
+        { kind: "string" },
       ])
     );
     const source = JSON.stringify({
       ...JSON.parse(definitionOf()),
-      input: { type: "object", properties, additionalProperties: false },
+      input: { kind: "object", fields: properties },
     });
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
@@ -676,7 +674,9 @@ describe("a workflow's draft", () => {
     // escapes as two: its problem alone is larger than the text.
     const source = JSON.stringify({
       ...JSON.parse(definitionOf()),
-      params: { ["/".repeat(750_000)]: { kind: "text", label: "Name" } },
+      params: {
+        ["/".repeat(750_000)]: { label: "Name", type: { kind: "string" } },
+      },
     });
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
@@ -949,13 +949,12 @@ describe("a step edited on the canvas", () => {
       return refused;
     };
     const refusals = {
-      notAStep: await change("/input/properties"),
+      notAStep: await change("/input/fields"),
       theList: await change("/steps"),
       pastTheEnd: await change("/steps/1"),
       leadingZero: await change("/steps/00"),
       prototype: await change("/__proto__/0"),
       notAList: await insert("/input"),
-      notAStepList: await insert("/input/required"),
       listItsTypeHasNot: await insert("/steps/0/then"),
       beyondTheList: await insert("/steps", 2),
       stale: await change("/steps/0", 0),
@@ -991,7 +990,6 @@ describe("a step edited on the canvas", () => {
         leadingZero: "workflow.step_not_found",
         prototype: "workflow.step_not_found",
         notAList: "workflow.step_not_found",
-        notAStepList: "workflow.step_not_found",
         listItsTypeHasNot: "workflow.step_not_found",
         beyondTheList: "workflow.step_not_found",
         stale: "workflow.draft_conflict",

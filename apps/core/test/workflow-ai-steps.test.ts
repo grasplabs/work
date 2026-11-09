@@ -52,8 +52,8 @@ const readTasks = [
     instructions: "Read the total in cents, and who sent it.",
     input: { text: "Total 12.34 EUR" },
     output: objectSchema({
-      total: { type: "integer" },
-      from: { type: "string", format: "email" },
+      total: { kind: "number", integer: true },
+      from: { kind: "string", email: true },
     }),
   },
 ];
@@ -120,7 +120,7 @@ const checkedTasks = [
     binding: "writer",
     instructions: "Write a one-line greeting for them.",
     input: { who: { $expr: "input.who" } },
-    output: objectSchema({ line: { type: "string" } }),
+    output: objectSchema({ line: { kind: "string" } }),
   },
   {
     id: "check",

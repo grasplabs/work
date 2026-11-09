@@ -82,11 +82,9 @@ const person = async (role: Role): Promise<Identity> => {
   return identityOf(userId, role);
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** The `reviewer` parameter's person, as a decision's recipients. */
@@ -147,28 +145,25 @@ const definitionOf = (
 ) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ amount: { type: "number" } }),
+    input: objectSchema({ amount: { kind: "number" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     params: {
       approvalThreshold: {
-        kind: "number",
         label: "Approval threshold",
-        default: 1000,
+        type: { kind: "number", default: 1000 },
         sensitive: false,
       },
       reviewer: {
-        kind: "person",
         label: "Reviewer",
-        default: "role:admin",
+        type: { kind: "person", default: "role:admin" },
         sensitive: false,
       },
       approvalPrompt: {
-        kind: "text",
         label: "Approval prompt",
-        default: "Approve this invoice?",
+        type: { kind: "string", default: "Approve this invoice?" },
         sensitive: false,
       },
     },

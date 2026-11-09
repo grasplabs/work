@@ -68,7 +68,7 @@ const definitionOf = (
   label: string,
   {
     bindings,
-    who = { type: "string" },
+    who = { kind: "string" },
     steps = [passing("echo", label)],
     status = { $expr: "input.who" },
   }: {
@@ -82,7 +82,7 @@ const definitionOf = (
     $schema: workflowSchemaUrl,
     input: objectSchema({ who }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status },
     },
     ...(bindings === undefined ? {} : { bindings }),
@@ -295,7 +295,7 @@ describe("a test of a draft over recent real items", () => {
     const key = await mailContract(admin);
     const { workflow, revision } = await workflowOf(by, {
       ...mailing(key),
-      who: { type: "string", maxLength: 4 },
+      who: { kind: "string", max: 4 },
     });
     const ada = await ranFor(by, workflow.id, "Ada");
     const grace = await ranFor(by, workflow.id, "Grace");

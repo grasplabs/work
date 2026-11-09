@@ -47,11 +47,9 @@ const builder = async (role: Role = "builder"): Promise<Acting> => {
   return { userId, role, teams: [], staff: false };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  type: "object",
-  properties,
-  required: Object.keys(properties),
-  additionalProperties: false,
+const objectSchema = (fields: Record<string, unknown>) => ({
+  kind: "object",
+  fields,
 });
 
 /** A domain error a raise raises: of the workflow's own type. */
@@ -78,9 +76,9 @@ const guarded = (
 const definitionOf = (steps: unknown[]) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { type: "string" } }),
+    input: objectSchema({ who: { kind: "string" } }),
     output: {
-      schema: objectSchema({ status: { type: "string" } }),
+      schema: objectSchema({ status: { kind: "string" } }),
       value: { status: "done" },
     },
     steps,
