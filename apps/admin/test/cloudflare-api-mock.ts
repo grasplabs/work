@@ -14,10 +14,13 @@ import { testStage } from "./grasp-account.ts";
 /**
  * A fake Cloudflare API that lets `token` (the deployer's) in, for each
  * test in the file: it answers `fetch` in the tests' isolate, which
- * is also where the admin's runs' steps run.
+ * is also where the admin's runs' steps run. Files that share a harness
+ * pass its `fake`, each registering its own hooks.
  */
-export const mockCloudflareApi = (token: string) => {
-  const fake = fakeCloudflareApi(token);
+export const mockCloudflareApi = (
+  token: string,
+  fake = fakeCloudflareApi(token)
+) => {
   const namespace = fake.dispatcher(
     platformAccountId,
     clientsNamespace(testStage)
