@@ -344,12 +344,21 @@ jobs:
           if [ "$TEST" = skipped ] && [ "$PLAN" = success ] && [ "$SHARDS" = '[]' ]; then
             TEST="success (no tests affected)"
           fi
-          # e2e's parts, its Firefox and WebKit part and the build they
-          # start: one result, the first that isn't a success.
+          # e2e's parts, its Firefox and WebKit parts and the build they
+          # start: one result, the first that isn't a success. A build or
+          # browser part that failed or was cancelled fails it whatever the
+          # parts did: e2e-build runs before the plan says whether any
+          # journey runs, and the parts it held back show as skipped,
+          # which the unchanged-stack rule below would pass.
           for part in "$E2E_BUILD" "$E2E_BROWSERS"; do
-            if [ "$E2E" = success ] && [ "$part" != success ]; then
-              E2E=$part
-            fi
+            case "$part" in
+              failure | cancelled) E2E=$part ;;
+              *)
+                if [ "$E2E" = success ] && [ "$part" != success ]; then
+                  E2E=$part
+                fi
+                ;;
+            esac
           done
           if [ "$EVENT" = merge_group ] && [ "$E2E" = skipped ] && [ "$ADMIN_E2E" = skipped ]; then
             echo "The merge queue skips the journeys: the pull request's head passed them."
