@@ -409,7 +409,7 @@ const signInsAtOnce = 8;
  * may another file's on the stack's other worker, so each keeps to a share
  * of `signInsAtOnce` (playwright.config.ts's `workers`, e2e/stack.ts).
  */
-const retrySignInsAtOnce = signInsAtOnce / workersPerStack;
+const fileSignInsAtOnce = signInsAtOnce / workersPerStack;
 
 /** How the casts signed in so far reach the tests, by attempt. */
 const castVariable = "E2E_CAST";
@@ -570,7 +570,7 @@ export const signInFile = async (
       `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
     );
   }
-  const scenes = await signInScenes(adminCookie, missing, retrySignInsAtOnce);
+  const scenes = await signInScenes(adminCookie, missing, fileSignInsAtOnce);
   await seed(scenes, retry);
   while (casts.length < retry) {
     casts.push({});

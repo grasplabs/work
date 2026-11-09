@@ -25,7 +25,7 @@
   "[chromium] › brain.e2e.ts › a person folds the brain's navigation to a rail, which marks the page they are on": 6,
   "[chromium] › brain.e2e.ts › a person opens a region from the brain's navigation, and a note in it": 3,
   "[chromium] › brain.e2e.ts › a person opens the brain on its atlas, goes into a part of it, opens a note there and finds it on the atlas again": 9.1,
-  "[chromium] › catalog.e2e.ts › every page of the UI kit keeps to core's Content Security Policy": 25,
+  "[chromium] › catalog.e2e.ts › every page of the UI kit keeps to core's Content Security Policy, its overlays open": 30,
   "[chromium] › chart-packages.e2e.ts › a builder approves a chart library the agent asked for, a page draws with it, and a revoked one is no longer served": 14.8,
   "[chromium] › chat-builds.e2e.ts › the side panel shows an App being built, and a builder makes its version current": 4.8,
   "[chromium] › chat-packages.e2e.ts › the App's builder approves the packages its chat's agent asked for, on the chat's card": 6.6,

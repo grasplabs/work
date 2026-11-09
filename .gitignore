@@ -22,3 +22,7 @@ scripts/lab/out/
 
 # Cloudflare cf CLI build output and generated types (apps/admin)
 .cloudflare/
+
+# Vitest browser mode's failure screenshots and attachments
+__screenshots__/
+.vitest-attachments/

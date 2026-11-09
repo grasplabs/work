@@ -1,4 +1,6 @@
-import "../src/styles.css";
+// The gallery's own stylesheet: the kit's theme, the fonts, the icons'
+// moves and Base UI's scrollbar rule, so layouts measure as the gallery's.
+import "../../../apps/web/src/styles.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
 import type { ComponentType } from "react";
 import { StrictMode } from "react";
@@ -6,12 +8,19 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { commands, page, userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import type { Locator } from "vite-plus/test/browser";
 
 import { demos } from "../catalog/demos.ts";
 import { loadExample } from "../catalog/examples.ts";
 import type { ExampleName } from "../catalog/examples.ts";
+import {
+  componentOverlays,
+  desktop,
+  exampleOverlays,
+  phone,
+} from "../catalog/overlays.ts";
+import type { Overlay, Target } from "../catalog/overlays.ts";
 import { PageHeaderTitle } from "../src/components/page-header.tsx";
 
 // Every component in the UI kit, and every example for agents, rendered as
@@ -24,38 +33,31 @@ import { PageHeaderTitle } from "../src/components/page-header.tsx";
 // this file. Core's Content Security Policy over the gallery's pages is
 // held on the e2e stack (e2e/catalog.e2e.ts).
 
-declare module "vite-plus/test/browser" {
-  interface BrowserCommands {
-    /** Emulates the system's colour scheme (vite.browser.config.ts). */
-    colorScheme: (scheme: "light" | "dark") => Promise<void>;
-  }
-}
-
-const phone = { width: 390, height: 844 };
-const desktop = { width: 1280, height: 800 };
-
-// The theme's `dark` class follows the system's colour scheme, as the
-// frontend's apps/web/public/theme.js applies it for someone who chose none.
-const darkScheme = matchMedia("(prefers-color-scheme: dark)");
-const applyScheme = (): void => {
-  document.documentElement.classList.toggle("dark", darkScheme.matches);
+/**
+ * The theme's dark side, through its `dark` class. Following the system's
+ * colour scheme into that class is the frontend's apps/web/public/theme.js,
+ * which e2e/kit.e2e.ts checks.
+ */
+const setDark = (dark: boolean): void => {
+  document.documentElement.classList.toggle("dark", dark);
 };
-applyScheme();
-darkScheme.addEventListener("change", applyScheme);
 
 const pages: {
   name: string;
   heading: string;
   load: () => Promise<ComponentType>;
+  overlays: readonly Overlay[];
 }[] = [
   ...Object.entries(demos).map(([name, Demo]) => ({
     name,
     heading: name,
     load: async () => await Promise.resolve(Demo),
+    overlays: componentOverlays(name),
   })),
   ...Object.keys(loadExample).map((name) => ({
     name: `example ${name}`,
     heading: name,
+    overlays: exampleOverlays(name),
     // SAFETY: a key of loadExample.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     load: loadExample[name as ExampleName],
@@ -76,7 +78,7 @@ const render = (heading: string, Content: ComponentType): void => {
         <CSPProvider disableStyleElements>
           <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
             <PageHeaderTitle>{heading}</PageHeaderTitle>
-            <div data-catalog-content="">
+            <div data-catalog-content="" data-testid="catalog-content">
               <Content />
             </div>
           </main>
@@ -86,122 +88,19 @@ const render = (heading: string, Content: ComponentType): void => {
   });
 };
 
-/**
- * How each demo's overlay opens: from its trigger with a key, on focus (a
- * tooltip), on hover (a preview card) or on right click (a context menu),
- * and what then shows. Each closes with Escape; the ones opened from the
- * keyboard give focus back to their trigger. The command demo is inline,
- * not an overlay, so it isn't here.
- */
-interface Overlay {
-  trigger: () => Locator;
-  open: "Enter" | "ArrowDown" | "focus" | "hover" | "right click";
-  opened: () => Locator;
-  /** Only there at this width, such as a phone's menu button. */
-  viewport?: { width: number; height: number };
-}
-
-const openButton = (name: string) => () =>
-  page.getByRole("button", { name: `Open ${name}`, exact: true });
-
-const overlayList: Record<string, Overlay> = {
-  "alert-dialog": {
-    trigger: openButton("alert dialog"),
-    open: "Enter",
-    opened: () => page.getByRole("alertdialog"),
-  },
-  combobox: {
-    trigger: () => page.getByRole("combobox", { name: "Framework" }),
-    open: "ArrowDown",
-    opened: () => page.getByRole("listbox"),
-  },
-  "context-menu": {
-    trigger: () => page.getByText("Right-click here"),
-    open: "right click",
-    opened: () => page.getByRole("menu"),
-  },
-  dialog: {
-    trigger: openButton("dialog"),
-    open: "Enter",
-    opened: () => page.getByRole("dialog"),
-  },
-  drawer: {
-    trigger: openButton("drawer"),
-    open: "Enter",
-    opened: () => page.getByRole("dialog"),
-  },
-  "dropdown-menu": {
-    trigger: openButton("dropdown menu"),
-    open: "Enter",
-    opened: () => page.getByRole("menu"),
-  },
-  "hover-card": {
-    trigger: () => page.getByRole("link", { name: "Maya Jansen" }),
-    open: "hover",
-    opened: () => page.getByText("Account manager for Benelux."),
-  },
-  menubar: {
-    trigger: () => page.getByRole("menuitem", { name: "File" }),
-    open: "Enter",
-    opened: () => page.getByRole("menu"),
-  },
-  "navigation-menu": {
-    trigger: openButton("navigation menu"),
-    open: "Enter",
-    opened: () => page.getByRole("link", { name: "Guides" }),
-  },
-  popover: {
-    trigger: openButton("popover"),
-    open: "Enter",
-    opened: () => page.getByRole("dialog"),
-  },
-  select: {
-    trigger: () => page.getByRole("combobox", { name: "Model" }),
-    open: "Enter",
-    opened: () => page.getByRole("listbox"),
-  },
-  sheet: {
-    trigger: openButton("sheet"),
-    open: "Enter",
-    opened: () => page.getByRole("dialog"),
-  },
-  tooltip: {
-    trigger: openButton("tooltip"),
-    open: "focus",
-    // Base UI gives the popup no role; it describes the trigger.
-    opened: () => page.getByText("Add to the library"),
-  },
-};
-
-/** A button in the page's own content, not in a popup over it. */
-const pageButton = (name: string) => () =>
-  page.getByRole("main").getByRole("button", { name, exact: true });
-
-/** Every page's overlays: one per component demo, several on an example. */
-const overlays: Record<string, readonly Overlay[]> = {
-  ...Object.fromEntries(
-    Object.entries(overlayList).map(([name, overlay]) => [name, [overlay]])
-  ),
-  "example dialog": [
-    {
-      trigger: pageButton("Rename"),
-      open: "Enter",
-      opened: () => page.getByRole("dialog"),
-    },
-    {
-      trigger: pageButton("Delete"),
-      open: "Enter",
-      opened: () => page.getByRole("alertdialog"),
-    },
-  ],
-  "example responsive-navigation": [
-    {
-      trigger: pageButton("Open the menu"),
-      open: "Enter",
-      opened: () => page.getByRole("dialog"),
-      viewport: phone,
-    },
-  ],
+/** The element `target` names (catalog/overlays.ts). */
+const locate = (target: Target): Locator => {
+  if ("text" in target) {
+    return page.getByText(target.text);
+  }
+  const within =
+    "inMain" in target && target.inMain === true
+      ? page.getByRole("main")
+      : page;
+  return within.getByRole(target.role, {
+    name: target.name,
+    exact: "exact" in target ? target.exact : undefined,
+  });
 };
 
 /** The roles of controls, each of which needs a name. */
@@ -365,14 +264,29 @@ const openOverlay = async (
   }
 };
 
+/**
+ * The <style> elements Base UI wrote of its own (React hoists them into
+ * the head, under a `base-ui` precedence): the select's and the scroll
+ * area's, which hide their scrollbars. The gallery renders in
+ * CSPProvider's `disableStyleElements` (apps/web/src/main.tsx), and
+ * apps/web/src/styles.css carries the rule instead, so there are none.
+ */
+const baseUiStyles = (): string[] =>
+  [...document.querySelectorAll('style[data-precedence^="base-ui"]')].map(
+    (style) => style.textContent
+  );
+
 const expectOverlayOpensAndCloses = async (overlay: Overlay): Promise<void> => {
   if (overlay.viewport !== undefined) {
     await page.viewport(overlay.viewport.width, overlay.viewport.height);
   }
-  const trigger = overlay.trigger();
+  const trigger = locate(overlay.trigger);
   await openOverlay(trigger, overlay.open);
-  const opened = overlay.opened();
+  const opened = locate(overlay.opened);
   await expect.element(opened).toBeVisible();
+  // Open, it writes no <style> of its own: Base UI's select and scroll
+  // area write one unless told not to.
+  expect(baseUiStyles()).toStrictEqual([]);
   await expectNamedControls(opened);
   await userEvent.keyboard("{Escape}");
   await expectHidden(opened);
@@ -489,17 +403,17 @@ const bodyBackground = (): string =>
   getComputedStyle(document.body).backgroundColor;
 
 describe("the UI kit", () => {
-  afterEach(async () => {
+  afterEach(() => {
     mounted?.unmount();
     mounted = undefined;
     document.body.replaceChildren();
-    await commands.colorScheme("light");
+    setDark(false);
   });
 
   it.each(pages.map((shown) => [shown.name, shown] as const))(
     "%s is accessible in light and dark, on a phone and a desktop",
-    async (name, { heading, load }) => {
-      await commands.colorScheme("light");
+    async (name, { heading, load, overlays }) => {
+      setDark(false);
       await page.viewport(phone.width, phone.height);
       render(heading, await load());
       const main = page.getByRole("main");
@@ -510,15 +424,7 @@ describe("the UI kit", () => {
         .toBeVisible();
       // The demo or example itself, which on an example page loads after
       // the heading: every check below reads it.
-      await expect
-        .poll(
-          () =>
-            main
-              .element()
-              .querySelector("[data-catalog-content]")
-              ?.checkVisibility() ?? false
-        )
-        .toBe(true);
+      await expect.element(page.getByTestId("catalog-content")).toBeVisible();
       // An example composes controls; a component's demo may show none.
       expect(
         controlCount(main) > 0 || !name.startsWith("example ")
@@ -530,14 +436,16 @@ describe("the UI kit", () => {
       await page.viewport(desktop.width, desktop.height);
       await expectNoSidewaysScroll();
       await expectVisibleKeyboardFocus(main);
-      for (const overlay of overlays[name] ?? []) {
+      for (const overlay of overlays) {
         // oxlint-disable-next-line no-await-in-loop -- one overlay open at a time
         await expectOverlayOpensAndCloses(overlay);
       }
       await keyboardChecks[name]?.();
 
       const light = bodyBackground();
-      await commands.colorScheme("dark");
+      // Nothing on the page, open or not, wrote a <style> of its own.
+      expect(baseUiStyles()).toStrictEqual([]);
+      setDark(true);
       await expect.poll(bodyBackground).not.toBe(light);
       await expectNamedControls(main);
       await page.viewport(phone.width, phone.height);

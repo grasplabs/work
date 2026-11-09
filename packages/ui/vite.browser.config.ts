@@ -2,18 +2,6 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineProject } from "vite-plus";
 import { playwright } from "vite-plus/test/browser-playwright";
-import type { BrowserCommand } from "vite-plus/test/node";
-
-/**
- * Emulates the browser's colour scheme, as a person's system setting
- * does: `prefers-color-scheme`, which the theme follows.
- */
-const colorScheme: BrowserCommand<["light" | "dark"]> = async (
-  { page },
-  scheme
-) => {
-  await page.emulateMedia({ colorScheme: scheme });
-};
 
 // The kit's component tests (test/*.browser.test.tsx) in a real Chromium,
 // Chromium's headless shell as the journeys use: what is accessible needs
@@ -32,7 +20,6 @@ export default defineProject({
       headless: true,
       provider: playwright(),
       instances: [{ browser: "chromium" }],
-      commands: { colorScheme },
       // The width a phone and a desktop see, each test sets its own.
       viewport: { width: 1280, height: 800 },
     },
