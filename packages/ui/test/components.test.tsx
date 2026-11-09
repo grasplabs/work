@@ -10,7 +10,7 @@ import { Slider } from "../src/components/slider.tsx";
 
 // What the kit's wrappers hand on to Base UI and recharts, read from what
 // they render. Behaviour that needs a browser, such as arrow keys following
-// a group's orientation, is in e2e/catalog.e2e.ts.
+// a group's orientation, is in kit.browser.test.tsx.
 
 const thumbs = (markup: string): number =>
   markup.split('data-slot="slider-thumb"').length - 1;

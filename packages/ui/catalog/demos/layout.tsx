@@ -1,6 +1,6 @@
 // Demos of the kit's layout primitives and the direction provider. One per
 // component, for the dev-only gallery and its accessibility checks
-// (e2e/catalog.e2e.ts).
+// (test/kit.browser.test.tsx).
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {

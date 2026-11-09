@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { mapConcurrently } from "@grasp-os/shared/release";
 import type { Role } from "@grasp-os/shared/roles";
 import type { CoreApi } from "@grasp-os/shared/rpc";
@@ -391,7 +393,7 @@ type Scene = keyof typeof cast;
 export type Cast = Record<string, Record<string, Person>>[];
 
 /**
- * Sign-ins `signInAttempt` runs at once. All of them at once (over a
+ * Sign-ins `signInScenes` runs at once. All of them at once (over a
  * hundred) keep the one local core isolate so busy that, on a slow CI
  * runner, a callback's fetch of the IdP's keys can wait past the 5 s the
  * SSO plugin gives it (jose's `createRemoteJWKSet` default, which the
@@ -403,11 +405,11 @@ export type Cast = Record<string, Record<string, Person>>[];
 const signInsAtOnce = 8;
 
 /**
- * Sign-ins a retry runs at once: tests run beside it, and so may a retry
- * on the stack's other worker, so each keeps to a share of `signInsAtOnce`
- * (playwright.config.ts's `workers`, e2e/stack.ts).
+ * Sign-ins a test file's people run at once: tests run beside them, and so
+ * may another file's on the stack's other worker, so each keeps to a share
+ * of `signInsAtOnce` (playwright.config.ts's `workers`, e2e/stack.ts).
  */
-const retrySignInsAtOnce = signInsAtOnce / workersPerStack;
+const fileSignInsAtOnce = signInsAtOnce / workersPerStack;
 
 /** How the casts signed in so far reach the tests, by attempt. */
 const castVariable = "E2E_CAST";
@@ -423,30 +425,33 @@ const castsSoFar = (): Cast => {
       `${castVariable} is unset: the global setup in playwright.config.ts signs people in`
     );
   }
-  // SAFETY: signInCast and signInRetry wrote it, as a Cast.
+  // SAFETY: signInCast and signInFile wrote it, as a Cast.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return JSON.parse(json) as Cast;
 };
 
 /**
- * Signs in the whole cast for one attempt: everyone is called Person
- * (person.<id>@acme.test, as the IdP names people by their email's first
- * word) and joins as a user; the configured admin, signed in as
+ * Signs in the people of `names`, scenes of the cast: everyone is called
+ * Person (person.<id>@acme.test, as the IdP names people by their email's
+ * first word) and joins as a user; the configured admin, signed in as
  * `adminCookie`, then gives the others their roles.
  */
-const signInAttempt = async (
+const signInScenes = async (
   adminCookie: string,
+  names: readonly string[],
   atOnce: number
 ): Promise<Cast[number]> => {
   const people = await mapConcurrently(
-    Object.entries(cast).flatMap(([scene, roles]) =>
-      Object.entries<Role>(roles).map(([name, role]) => ({
-        scene,
-        name,
-        role,
-        email: `person.${crypto.randomUUID()}@acme.test`,
-      }))
-    ),
+    Object.entries(cast)
+      .filter(([scene]) => names.includes(scene))
+      .flatMap(([scene, roles]) =>
+        Object.entries<Role>(roles).map(([name, role]) => ({
+          scene,
+          name,
+          role,
+          email: `person.${crypto.randomUUID()}@acme.test`,
+        }))
+      ),
     atOnce,
     async (person) => ({ ...person, cookie: await signInAs(person.email) })
   );
@@ -477,19 +482,27 @@ const signInAttempt = async (
 };
 
 /**
- * Signs in the configured admin and the whole cast for a test's first
- * attempt, and connects the stack's AI providers. A retry signs in a cast
- * of its own when it starts (`signInRetry`), so it starts from people as
- * they were, not as the failed attempt left them: signing in all three
- * attempts' casts up front, over 400 sign-ins, took 30 to 40 s of every CI
- * part's start for the rare test that is retried (November 2026). The
- * global setup (e2e/setup.ts) runs it before any test, and returns them.
+ * Signs in the configured admin, the platform warm-up's builder and the
+ * connections scene, and
+ * connects the stack's AI providers. Each test file's people are signed in
+ * as the file starts (`signInFile`): signing in every scene's people up
+ * front, for every attempt a test may get, took 30 to 40 s of every CI
+ * part's start, most of them for tests other parts run (November 2026).
+ * The global setup (e2e/setup.ts) runs it before any test, and returns
+ * them.
  */
 export const signInCast = async (): Promise<Cast> => {
   const adminCookie = await signInAs(localAdmin);
   // Playwright hands the global setup's environment to the test workers.
   process.env[adminVariable] = adminCookie;
-  const first = await signInAttempt(adminCookie, signInsAtOnce);
+  // The connections scene too: its connections, written by the global setup
+  // (e2e/setup.ts), are what every test finds connected, as Microsoft 365
+  // for everyone (setup-voice.e2e.ts reads it as connected).
+  const first = await signInScenes(
+    adminCookie,
+    ["platformWarmUp", "connections"],
+    signInsAtOnce
+  );
   const { core, api } = apiOf({ cookie: adminCookie });
   try {
     // The stack's AI providers and models (e2e/stack.ts), as an admin
@@ -514,19 +527,41 @@ export const signInCast = async (): Promise<Cast> => {
   return casts;
 };
 
+/** A scene a test file looks up: `peopleIn("<scene>")`. */
+const sceneLookedUp = /\bpeopleIn\(\s*"(?<scene>\w+)"/gu;
+
+/** The scenes of the cast that `source`, a test file, looks up. */
+export const scenesOf = (source: string): string[] =>
+  [
+    ...new Set(
+      Array.from(
+        source.matchAll(sceneLookedUp),
+        (found) => found.groups?.scene ?? ""
+      )
+    ),
+  ].filter((scene) => Object.hasOwn(cast, scene));
+
 /**
- * Signs in a cast for the running test's attempt, when it is a retry the
- * worker has no cast for yet, and calls `seed` with it (the connections
- * the scenes expect, e2e/connections-seed.ts). A retry runs in a worker of
- * its own, so this runs once per retried attempt, before the test, or in
- * the `beforeAll` of a file whose tests share people.
+ * Signs in the scenes the running test's file looks up (`scenesOf`) for
+ * its attempt, those this worker has none for yet, and calls `seed` with
+ * them (the connections the connections scene expects,
+ * e2e/connections-seed.ts). A file's tests run in one worker, so a scene's
+ * people are signed in once for the file, and a retry, which runs in a
+ * worker of its own, gets people of its own: it starts from people as
+ * they were, not as the failed attempt left them. It runs before each test
+ * (e2e/contexts.ts), and in the `beforeAll` of a file that looks people up
+ * there, as that runs before any fixture.
  */
-export const signInRetry = async (
+export const signInFile = async (
   seed: (scenes: Cast[number], attempt: number) => Promise<void>
 ): Promise<void> => {
-  const { retry } = test.info();
+  const { retry, file } = test.info();
   const casts = castsSoFar();
-  if (casts[retry] !== undefined) {
+  const signedIn = casts[retry] ?? {};
+  const missing = scenesOf(readFileSync(file, "utf-8")).filter(
+    (scene) => signedIn[scene] === undefined
+  );
+  if (missing.length === 0) {
     return;
   }
   const adminCookie = process.env[adminVariable];
@@ -535,9 +570,12 @@ export const signInRetry = async (
       `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
     );
   }
-  const scenes = await signInAttempt(adminCookie, retrySignInsAtOnce);
+  const scenes = await signInScenes(adminCookie, missing, fileSignInsAtOnce);
   await seed(scenes, retry);
-  casts[retry] = scenes;
+  while (casts.length < retry) {
+    casts.push({});
+  }
+  casts[retry] = { ...signedIn, ...scenes };
   process.env[castVariable] = JSON.stringify(casts);
 };
 
@@ -548,7 +586,9 @@ export const peopleIn = <S extends Scene>(
   const { retry } = test.info();
   const people = castsSoFar()[retry]?.[scene];
   if (people === undefined) {
-    throw new Error(`Nobody is signed in for ${scene}, attempt ${retry + 1}`);
+    throw new Error(
+      `Nobody is signed in for ${scene}, attempt ${retry + 1}: a test's file signs in the scenes it names as peopleIn("<scene>"), from its test (\`test\` of e2e/contexts.ts or e2e/csp.ts) or a beforeAll that calls fileCast()`
+    );
   }
   // SAFETY: signInCast signed in every name in the scene's cast.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

@@ -173,6 +173,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # Chromium's headless shell, for the UI kit's component tests in
+      # Vitest's browser mode (@grasp-os/ui:browser,
+      # packages/ui/vite.browser.config.ts).
+      - uses: ./.github/actions/playwright-browser
       # gdb, for the stall reporter to print the thread stacks of each
       # workerd before it ends a stalled run (GRASP_STALL_DUMP_STACKS below,
       # scripts/stack-dump.ts). Ubuntu lets a process trace only its own
@@ -266,6 +270,19 @@ jobs:
           path: ${{ runner.temp }}/test-progress.log
           if-no-files-found: ignore
           retention-days: 14
+      # The UI kit's browser tests (@grasp-os/ui:browser) save a screenshot
+      # of each failing page, and what it attached: kept when the shard
+      # fails, else lost with the runner.
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-browser-failures-${{ matrix.shard }}-of-${{ strategy.job-total }}
+          path: |
+            packages/ui/test/__screenshots__
+            packages/ui/.vitest-attachments
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 7
       # What the runner looked like when the job failed: its memory, the
       # processes holding the most (workerd left running shows here), and
       # any process the kernel killed for memory, which ends a step with
@@ -428,8 +445,12 @@ jobs:
       - uses: ./.github/actions/playwright-browser
         with:
           save: true
-      # About 70 s, the most of this job's 2 minutes: the parts wait for it.
-      - run: vp run e2e:build
+      # The parts wait for it: every build at once (e2e/build.ts).
+      # Then the parallel parts' tests, listed once for all fourteen
+      # (scripts/e2e-parts.ts). The same count as e2e's matrix, below:
+      # change both together. Each part checks that it got as many lists
+      # as its name says, so a part the lists left out fails, not skips.
+      - run: node e2e/build.ts && node scripts/e2e-parts.ts --all 14
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-stack
@@ -439,6 +460,7 @@ jobs:
             apps/connect/dist
             packages/compiler/dist
             apps/core/.wrangler/e2e-state-migrated
+            e2e/dist/parts
           if-no-files-found: error
           # The state sits under .wrangler.
           include-hidden-files: true
@@ -462,8 +484,8 @@ jobs:
   # their tests take about a minute each, near the longest test's 82 s
   # (setup-voice.e2e.ts's story), after about a minute of setup and
   # starting the stack (November 2026). Add a parallel part by adding an
-  # entry and raising the count in every entry's `part`. Part of the
-  # required `check` (above).
+  # entry and raising the count in every entry's `part` and in e2e-build's
+  # `--all` (above). Part of the required `check` (above).
   #
   # Not in the merge queue, here and in admin-e2e: the pull request's head
   # already passed every journey, and repeating them on main plus the batch
@@ -547,17 +569,22 @@ jobs:
           sampler=$!
           trap 'kill "$sampler"' EXIT
           if [ "$GRASP_E2E_PART" = parallel ]; then
-            node scripts/e2e-parts.ts "$PART" > "$RUNNER_TEMP/e2e-tests.txt"
-            vp run e2e --project chromium --test-list "$RUNNER_TEMP/e2e-tests.txt" --reporter=github,json
+            # As many lists as parts: e2e-build's `--all` and this matrix agree.
+            lists=$(find e2e/dist/parts -name '*.txt' | wc -l)
+            if [ "$lists" -ne "${PART##*-of-}" ]; then
+              echo "::error title=e2e parts::e2e-build listed $lists parts, the matrix has ${PART##*-of-}: change both together."
+              exit 1
+            fi
+            node_modules/.bin/playwright test --project chromium --test-list "e2e/dist/parts/$PART.txt" --reporter=github,json
           elif [ -n "$SHARD" ]; then
-            vp run e2e --shard "$SHARD" --reporter=github,json
+            node_modules/.bin/playwright test --shard "$SHARD" --reporter=github,json
           else
-            vp run e2e --reporter=github,json
+            node_modules/.bin/playwright test --reporter=github,json
           fi
         env:
           GRASP_E2E_PART: ${{ matrix.project }}
           GRASP_E2E_PREBUILT: "true"
-          PART: ${{ matrix.part }}
+          PART: ${{ matrix.artifact }}
           SHARD: ${{ matrix.shard }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/e2e-results.json
       # Kept for passing runs too: the times the parts are split by come
@@ -652,7 +679,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
-      - run: vp run e2e --project "$BROWSER" --reporter=github,json
+      - run: node_modules/.bin/playwright test --project "$BROWSER" --reporter=github,json
         env:
           GRASP_E2E_PART: parallel
           GRASP_E2E_PREBUILT: "true"
@@ -696,7 +723,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - uses: ./.github/actions/playwright-browser
-      - run: vp run e2e:admin --shard "$SHARD"
+      - run: node_modules/.bin/playwright test -c playwright.admin.config.ts --shard "$SHARD"
         env:
           SHARD: ${{ matrix.shard }}
       # A failing journey keeps its trace (playwright.admin.config.ts).

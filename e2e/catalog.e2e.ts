@@ -2,28 +2,27 @@ import { readdirSync } from "node:fs";
 import nodePath from "node:path";
 
 import { expect, test } from "@playwright/test";
-import type { ElementHandle, Locator, Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
+import {
+  componentOverlays,
+  desktop,
+  exampleOverlays,
+} from "../packages/ui/catalog/overlays.ts";
+import type { Overlay, Target } from "../packages/ui/catalog/overlays.ts";
 import { recordCspViolations } from "./csp.ts";
 
-// Every component in the UI kit, and every example for agents, on its own
-// page of the local gallery (apps/web/src/routes/kit_.*): each has names for
-// its controls, a visible focus from the keyboard, no sideways scroll on a
-// phone, overlays that open from the keyboard and close with Escape, and a
-// dark theme. The list comes from the kit's components and examples
-// directories, so a component added to the kit is checked without touching
-// this file.
-
-// A trace of every failing page, kept as the run's artifact.
-test.use({ trace: "retain-on-failure" });
-
-// Its pages share nothing, so their tests run apart, on any worker and in
-// any CI part: one after another they took about 3.5 minutes, longer
-// than any part's other tests (October 2026, GRA-1094).
-test.describe.configure({ mode: "parallel" });
-
-const phone = { width: 390, height: 844 };
-const desktop = { width: 1280, height: 800 };
+// The UI kit's pages of the local gallery (apps/web/src/routes/kit_.*)
+// under core's Content Security Policy, which only the stack serves: no
+// component or example breaks it, nor does any overlay once open, as a
+// popup may start a request, load an image or a script, or open a frame
+// only then (the overlays: packages/ui/catalog/overlays.ts). What makes
+// each accessible, in light and dark, on a phone and a desktop, is the
+// kit's own component tests in a real Chromium
+// (packages/ui/test/kit.browser.test.tsx), apart from the stack: they read
+// nothing from core, and took 18% of all e2e time here (November 2026).
+// The list comes from the kit's components and examples directories, so
+// a component added to the kit is checked here too.
 
 /** The names of the `.tsx` modules in `dir` of the UI kit, tests aside. */
 const modulesIn = (dir: string): string[] =>
@@ -33,465 +32,70 @@ const modulesIn = (dir: string): string[] =>
 
 const pages = [
   ...modulesIn("src/components").map((name) => ({
-    name,
-    heading: name,
     path: `/kit/components/${name}`,
+    overlays: componentOverlays(name),
   })),
   ...modulesIn("catalog/examples").map((name) => ({
-    name: `example ${name}`,
-    heading: name,
     path: `/kit/examples/${name}`,
+    overlays: exampleOverlays(name),
   })),
 ];
 
-/**
- * How each demo's overlay opens: from its trigger with a key, on focus (a
- * tooltip), on hover (a preview card) or on right click (a context menu),
- * and what then shows. Each closes with Escape; the ones opened from the
- * keyboard give focus back to their trigger. The command demo is inline,
- * not an overlay, so it isn't here.
- */
-interface Overlay {
-  trigger: (page: Page) => Locator;
-  open: "Enter" | "ArrowDown" | "focus" | "hover" | "right click";
-  opened: (page: Page) => Locator;
-  /** Only there at this width, such as a phone's menu button. */
-  viewport?: { width: number; height: number };
-}
-
-const openButton = (name: string) => (page: Page) =>
-  page.getByRole("button", { name: `Open ${name}`, exact: true });
-
-const overlayList: Record<string, Overlay> = {
-  "alert-dialog": {
-    trigger: openButton("alert dialog"),
-    open: "Enter",
-    opened: (page) => page.getByRole("alertdialog"),
-  },
-  combobox: {
-    trigger: (page) => page.getByRole("combobox", { name: "Framework" }),
-    open: "ArrowDown",
-    opened: (page) => page.getByRole("listbox"),
-  },
-  "context-menu": {
-    trigger: (page) => page.getByText("Right-click here"),
-    open: "right click",
-    opened: (page) => page.getByRole("menu"),
-  },
-  dialog: {
-    trigger: openButton("dialog"),
-    open: "Enter",
-    opened: (page) => page.getByRole("dialog"),
-  },
-  drawer: {
-    trigger: openButton("drawer"),
-    open: "Enter",
-    opened: (page) => page.getByRole("dialog"),
-  },
-  "dropdown-menu": {
-    trigger: openButton("dropdown menu"),
-    open: "Enter",
-    opened: (page) => page.getByRole("menu"),
-  },
-  "hover-card": {
-    trigger: (page) => page.getByRole("link", { name: "Maya Jansen" }),
-    open: "hover",
-    opened: (page) => page.getByText("Account manager for Benelux."),
-  },
-  menubar: {
-    trigger: (page) => page.getByRole("menuitem", { name: "File" }),
-    open: "Enter",
-    opened: (page) => page.getByRole("menu"),
-  },
-  "navigation-menu": {
-    trigger: openButton("navigation menu"),
-    open: "Enter",
-    opened: (page) => page.getByRole("link", { name: "Guides" }),
-  },
-  popover: {
-    trigger: openButton("popover"),
-    open: "Enter",
-    opened: (page) => page.getByRole("dialog"),
-  },
-  select: {
-    trigger: (page) => page.getByRole("combobox", { name: "Model" }),
-    open: "Enter",
-    opened: (page) => page.getByRole("listbox"),
-  },
-  sheet: {
-    trigger: openButton("sheet"),
-    open: "Enter",
-    opened: (page) => page.getByRole("dialog"),
-  },
-  tooltip: {
-    trigger: openButton("tooltip"),
-    open: "focus",
-    // Base UI gives the popup no role; it describes the trigger.
-    opened: (page) => page.getByText("Add to the library"),
-  },
-};
-
-/** A button in the page's own content, not in a popup over it. */
-const pageButton = (name: string) => (page: Page) =>
-  page.getByRole("main").getByRole("button", { name, exact: true });
-
-/** Every page's overlays: one per component demo, several on an example. */
-const overlays: Record<string, readonly Overlay[]> = {
-  ...Object.fromEntries(
-    Object.entries(overlayList).map(([name, overlay]) => [name, [overlay]])
-  ),
-  "example dialog": [
-    {
-      trigger: pageButton("Rename"),
-      open: "Enter",
-      opened: (page) => page.getByRole("dialog"),
-    },
-    {
-      trigger: pageButton("Delete"),
-      open: "Enter",
-      opened: (page) => page.getByRole("alertdialog"),
-    },
-  ],
-  "example responsive-navigation": [
-    {
-      trigger: pageButton("Open the menu"),
-      open: "Enter",
-      opened: (page) => page.getByRole("dialog"),
-      viewport: { width: 390, height: 844 },
-    },
-  ],
-};
-
-/** The roles of controls, each of which needs a name. */
-const namedRoles = [
-  "button",
-  "checkbox",
-  "combobox",
-  "link",
-  "listbox",
-  "menuitem",
-  "radio",
-  "searchbox",
-  "slider",
-  "spinbutton",
-  "switch",
-  "tab",
-  "textbox",
-  "img",
-] as const;
-
-const expectNamedControls = async (main: Locator): Promise<void> => {
-  for (const role of namedRoles) {
-    // oxlint-disable-next-line no-await-in-loop -- one role at a time keeps a failure readable
-    for (const control of await main.getByRole(role).all()) {
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      await expect(control).toHaveAccessibleName(/\S/u);
-    }
+/** The element `target` names (packages/ui/catalog/overlays.ts). */
+const locate = (page: Page, target: Target): Locator => {
+  if ("text" in target) {
+    return page.getByText(target.text);
   }
-};
-
-// Polled: content that sizes itself to the viewport, such as a chart,
-// re-lays out a frame after the viewport changes.
-const controlCount = async (main: Locator): Promise<number> => {
-  let count = 0;
-  for (const role of namedRoles) {
-    // oxlint-disable-next-line no-await-in-loop -- counted one role at a time
-    count += await main.getByRole(role).count();
-  }
-  return count;
-};
-
-/**
- * Help and error text under a field is read out with its control: each
- * one's id is in some control's aria-describedby.
- */
-const expectConnectedHints = async (main: Locator): Promise<void> => {
-  const loose = await main.evaluate((root) =>
-    [
-      ...root.querySelectorAll(
-        '[data-slot="field-description"], [data-slot="field-error"]'
-      ),
-    ]
-      .filter(
-        (hint) =>
-          hint.id === "" ||
-          root.querySelector(`[aria-describedby~="${hint.id}"]`) === null
-      )
-      .map((hint) => hint.textContent)
-  );
-  expect(loose).toStrictEqual([]);
-};
-
-const expectNoSidewaysScroll = async (page: Page): Promise<void> => {
-  await expect
-    .poll(
-      async () =>
-        await page.evaluate(
-          () =>
-            document.documentElement.scrollWidth -
-            document.documentElement.clientWidth
-        )
-    )
-    .toBeLessThanOrEqual(0);
-};
-
-/**
- * What an element and its nearest ancestors look like, once their
- * transitions are done. Read with focus and again without, it shows whether
- * focus is visible, wherever the component draws its ring.
- */
-const lookOf = async (element: ElementHandle): Promise<string> =>
-  await element.evaluate(async (node) => {
-    await Promise.all(
-      document
-        .getAnimations()
-        .filter((animation) => animation instanceof CSSTransition)
-        .map(async (animation) => await animation.finished.catch(() => null))
-    );
-    const looks: string[] = [];
-    let current: Element | null = node instanceof Element ? node : null;
-    for (let depth = 0; current !== null && depth < 4; depth += 1) {
-      const style = getComputedStyle(current);
-      looks.push(
-        [
-          style.outlineStyle,
-          style.outlineColor,
-          style.boxShadow,
-          style.borderColor,
-          style.backgroundColor,
-        ].join(" ")
-      );
-      current = current.parentElement;
-    }
-    return looks.join(" | ");
+  const within =
+    "inMain" in target && target.inMain === true
+      ? page.getByRole("main")
+      : page;
+  return within.getByRole(target.role, {
+    name: target.name,
+    exact: "exact" in target ? target.exact : undefined,
   });
-
-const expectVisibleKeyboardFocus = async (
-  page: Page,
-  main: Locator
-): Promise<void> => {
-  const focusable = await main.evaluate(
-    (root) =>
-      root.querySelectorAll(
-        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])'
-      ).length
-  );
-  await page.keyboard.press("Tab");
-  const inside = await main.evaluate((root) =>
-    root.contains(document.activeElement)
-  );
-  // Nothing to focus, nothing focused; something to focus, focus lands in it.
-  expect(inside).toBe(focusable > 0);
-  const focused = await page.evaluateHandle(() => document.activeElement);
-  const element = focused.asElement();
-  if (!inside || element === null) {
-    return;
-  }
-  // A text field shows its focus with the caret, ring or not.
-  const takesText = await element.evaluate(
-    (node) =>
-      node instanceof HTMLTextAreaElement ||
-      (node instanceof HTMLInputElement &&
-        ![
-          "button",
-          "checkbox",
-          "color",
-          "file",
-          "radio",
-          "range",
-          "reset",
-          "submit",
-        ].includes(node.type)) ||
-      (node instanceof HTMLElement && node.isContentEditable)
-  );
-  if (takesText) {
-    return;
-  }
-  const withFocus = await lookOf(element);
-  await element.evaluate((node) => {
-    if (node instanceof HTMLElement || node instanceof SVGElement) {
-      node.blur();
-    }
-  });
-  expect(await lookOf(element)).not.toBe(withFocus);
 };
 
-const openOverlay = async (
-  page: Page,
-  trigger: Locator,
-  open: Overlay["open"]
-): Promise<void> => {
-  if (open === "hover") {
+/**
+ * Opens `overlay` as a person does, waits until it shows, then closes it
+ * with Escape and waits until it is gone, so the next one opens on its own.
+ */
+const open = async (page: Page, overlay: Overlay): Promise<void> => {
+  await page.setViewportSize(overlay.viewport ?? desktop);
+  const trigger = locate(page, overlay.trigger);
+  if (overlay.open === "hover") {
     await trigger.hover();
-  } else if (open === "right click") {
+  } else if (overlay.open === "right click") {
     await trigger.click({ button: "right" });
   } else {
     await trigger.focus();
-    if (open === "focus") {
-      // Focus from the keyboard, which is what opens a tooltip: away and back.
+    if (overlay.open === "focus") {
+      // Focus from the keyboard, which is what opens a tooltip.
       await page.keyboard.press("Shift+Tab");
       await page.keyboard.press("Tab");
     } else {
-      await page.keyboard.press(open);
+      await page.keyboard.press(overlay.open);
     }
   }
-};
-
-const expectOverlayOpensAndCloses = async (
-  page: Page,
-  overlay: Overlay
-): Promise<void> => {
-  const viewport = page.viewportSize();
-  if (overlay.viewport !== undefined) {
-    await page.setViewportSize(overlay.viewport);
-  }
-  const trigger = overlay.trigger(page);
-  await openOverlay(page, trigger, overlay.open);
-  const opened = overlay.opened(page);
+  const opened = locate(page, overlay.opened);
   await expect(opened).toBeVisible();
-  await expectNamedControls(opened);
   await page.keyboard.press("Escape");
   await expect(opened).toBeHidden();
-  // Opened from the keyboard, focus goes back where it was.
-  if (overlay.open !== "hover" && overlay.open !== "right click") {
-    await expect(trigger).toBeFocused();
-  }
-  if (overlay.viewport !== undefined && viewport !== null) {
-    await page.setViewportSize(viewport);
-  }
 };
 
-/** Keyboard behaviour particular to a component, checked on its page. */
-/**
- * Once an item is picked up from the keyboard, the arrows move it: dnd-kit
- * listens for them a task after the pick-up, which a person never beats
- * but a test's next key can.
- */
-const pickedUp = async (page: Page): Promise<void> => {
-  await page.evaluate(async () => {
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        resolve(true);
-      }, 0);
-    });
-    await promise;
-  });
-};
-
-const keyboardChecks: Record<string, (page: Page) => Promise<void>> = {
-  // An item moves from the keyboard, each step said to screen readers:
-  // Space picks it up, an arrow moves it, Space puts it down; Escape puts
-  // it back.
-  "sortable-list": async (page) => {
-    const options = page.getByRole("list", { name: "Options" });
-    const second = options.getByRole("listitem").nth(1);
-    const said = (text: string) => page.getByText(text, { exact: true });
-    await options.getByRole("button", { name: "Move Done" }).focus();
-    await page.keyboard.press("Space");
-    await expect(said("Done is now at place 3.")).toBeAttached();
-    await pickedUp(page);
-    await page.keyboard.press("ArrowUp");
-    await expect(said("Done is now at place 2.")).toBeAttached();
-    await page.keyboard.press("Space");
-    await expect(said("Put Done down at place 2.")).toBeAttached();
-    await expect(second.getByRole("textbox")).toHaveAccessibleName("Done");
-
-    await options.getByRole("button", { name: "Move Open" }).focus();
-    await page.keyboard.press("Space");
-    await expect(said("Open is now at place 1.")).toBeAttached();
-    await pickedUp(page);
-    await page.keyboard.press("ArrowDown");
-    await expect(said("Open is now at place 2.")).toBeAttached();
-    await page.keyboard.press("Escape");
-    await expect(said("Put Open back where it was.")).toBeAttached();
-    await expect(second.getByRole("textbox")).toHaveAccessibleName("Done");
-  },
-  // A vertical group moves with the up and down arrows, which only works
-  // when the orientation reaches Base UI, not just the styles.
-  "toggle-group": async (page) => {
-    const alignment = page.getByRole("group", { name: "Alignment" });
-    await alignment.getByRole("button", { name: "Left" }).focus();
-    await page.keyboard.press("ArrowDown");
-    await expect(
-      alignment.getByRole("button", { name: "Center" })
-    ).toBeFocused();
-  },
-  // Arrow keys in a field inside a slide move the cursor, not the slide;
-  // a vertical carousel moves with ArrowDown.
-  carousel: async (page) => {
-    const note = page.getByRole("textbox", { name: "First slide note" });
-    await note.focus();
-    await page.keyboard.press("End");
-    await page.keyboard.press("ArrowLeft");
-    expect(
-      await note.evaluate(
-        (input) => input instanceof HTMLInputElement && input.selectionStart
-      )
-    ).toBe(3);
-    await expect(
-      page.getByRole("button", { name: "Previous slide" })
-    ).toBeDisabled();
-    await expect(
-      page.getByRole("button", { name: "Next slide" })
-    ).toBeEnabled();
-
-    const next = page.getByRole("button", { name: "Next card" });
-    await next.focus();
-    await page.keyboard.press("ArrowDown");
-    await expect(
-      page.getByRole("button", { name: "Previous card" })
-    ).toBeEnabled();
-  },
-  // A single value is one thumb.
-  slider: async (page) => {
-    await expect(page.getByRole("main").getByRole("slider")).toHaveCount(1);
-  },
-};
-
-const bodyBackground = async (page: Page): Promise<string> =>
-  await page
-    .locator("body")
-    .evaluate((body) => getComputedStyle(body).backgroundColor);
-
-for (const { name, heading, path } of pages) {
-  test(`${name} is accessible in light and dark, on a phone and a desktop`, async ({
-    page,
-  }) => {
-    const violations = await recordCspViolations(page);
-    await page.emulateMedia({ colorScheme: "light" });
-    await page.setViewportSize(phone);
+test("every page of the UI kit keeps to core's Content Security Policy, its overlays open", async ({
+  page,
+}) => {
+  const violations = await recordCspViolations(page);
+  for (const { path, overlays } of pages) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
     await page.goto(path);
-    const main = page.getByRole("main");
-    await expect(
-      main.getByRole("heading", { level: 1, name: heading, exact: true })
-    ).toBeVisible();
-    // The demo or example itself, which on an example page loads after the
-    // heading: every check below reads it.
-    await expect(main.locator("[data-catalog-content]")).toBeVisible();
-    if (path.startsWith("/kit/examples/")) {
-      expect(await controlCount(main)).toBeGreaterThan(0);
-    }
-    await expectNoSidewaysScroll(page);
-    await expectNamedControls(main);
-    await expectConnectedHints(main);
-
-    await page.setViewportSize(desktop);
-    await expectNoSidewaysScroll(page);
-    await expectVisibleKeyboardFocus(page, main);
-    for (const overlay of overlays[name] ?? []) {
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await expect(page.locator("[data-catalog-content]")).toBeVisible();
+    for (const overlay of overlays) {
       // oxlint-disable-next-line no-await-in-loop -- one overlay open at a time
-      await expectOverlayOpensAndCloses(page, overlay);
+      await open(page, overlay);
     }
-    await keyboardChecks[name]?.(page);
-
-    const light = await bodyBackground(page);
-    await page.emulateMedia({ colorScheme: "dark" });
-    await expect.poll(async () => await bodyBackground(page)).not.toBe(light);
-    await expectNamedControls(main);
-    await page.setViewportSize(phone);
-    await expectNoSidewaysScroll(page);
-
-    expect(violations).toStrictEqual([]);
-  });
-}
+  }
+  expect(violations).toStrictEqual([]);
+});

@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { defineConfig, devices } from "@playwright/test";
 import type { Project } from "@playwright/test";
+import { z } from "zod";
 
 import { localSignIn } from "./apps/core/test/sign-in-config.ts";
 import {
@@ -60,6 +64,29 @@ const ci = process.env.CI === "true";
  * between runs.
  */
 const prebuilt = process.env.GRASP_E2E_PREBUILT === "true";
+
+/**
+ * Core's `dev:start` (apps/core/package.json), which starts core and
+ * connect on wrangler dev: run as it is, from core's folder, with the
+ * workspace's binaries on the path, not through `vp run --filter`, which
+ * took 3 s of each CI part's start to find it (November 2026).
+ */
+const coreDevStart = z
+  .object({ scripts: z.object({ "dev:start": z.string() }) })
+  .parse(
+    JSON.parse(
+      readFileSync(
+        path.join(import.meta.dirname, "apps/core/package.json"),
+        "utf-8"
+      )
+    )
+  ).scripts["dev:start"];
+
+/** The workspace's binaries, core's first, as its scripts find them. */
+const binaries = [
+  path.join(import.meta.dirname, "apps/core/node_modules/.bin"),
+  path.join(import.meta.dirname, "node_modules/.bin"),
+].join(path.delimiter);
 
 /** A `--var` for wrangler dev, quoted once for the shell. */
 const devVar = (name: string, value: string): string =>
@@ -206,7 +233,8 @@ export default defineConfig({
           ? [
               'rm -rf "$DEV_PERSIST_TO" &&',
               'cp -R "$E2E_MIGRATED_STATE" "$DEV_PERSIST_TO" &&',
-              "vp run --filter @grasp-os/core dev:start",
+              "cd apps/core &&",
+              coreDevStart,
             ]
           : [
               'rm -rf "$DEV_PERSIST_TO" &&',
@@ -235,6 +263,7 @@ export default defineConfig({
         ),
       ].join(" "),
       env: {
+        PATH: `${binaries}${path.delimiter}${process.env.PATH ?? ""}`,
         DEV_PERSIST_TO: stateDir,
         E2E_MIGRATED_STATE: migratedStateDir,
         // Core's dev script runs connect with it (e2e/connect-config.ts).

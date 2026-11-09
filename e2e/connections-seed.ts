@@ -5,9 +5,9 @@
  * leaves behind straight into connect's local database: the connection
  * rows only, with no tokens, which nothing here uses. The flows themselves,
  * through a fake Entra and Composio, are core's tests
- * (apps/core/test/connections.test.ts). Written in one write before any
- * test runs, and again for each retry's own cast; tests only look theirs
- * up.
+ * (apps/core/test/connections.test.ts). Written in one write once the
+ * connections scene's people are signed in, for each attempt; tests only
+ * look theirs up.
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -187,9 +187,8 @@ const seededSoFar = (): (SeededConnections | null)[] => {
 
 /**
  * Writes the connections scene's connections for one attempt's cast
- * (`scenes`), in one write. The global setup (e2e/setup.ts) runs it for the
- * first attempt right after it signs everyone in, and a retry for its own
- * (`signInRetry`, e2e/people.ts).
+ * (`scenes`), in one write, once that scene's people are signed in
+ * (`fileCast`, e2e/contexts.ts).
  */
 export const seedConnections = async (
   scenes: Cast[number],
@@ -243,7 +242,7 @@ export const seededConnections = (): SeededConnections => {
   const seeded = seededSoFar()[retry];
   if (seeded === undefined || seeded === null) {
     throw new Error(
-      `No connections for attempt ${retry + 1}: the global setup in playwright.config.ts writes the first's, and signInRetry a retry's`
+      `No connections for attempt ${retry + 1}: fileCast writes them once the file's connections scene is signed in`
     );
   }
   return seeded;
