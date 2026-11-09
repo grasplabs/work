@@ -436,7 +436,11 @@ export const journaledCtx = (
       if (schema === undefined) {
         throw new TypeError(`The workflow keeps no "${key}" in its state.`);
       }
-      record[key] = fitted(schema, value, `State "${key}"`);
+      // Held to its key's schema, but kept as the code wrote it: what the
+      // host holds the record to is the sealed template, whose literals
+      // are exactly the document's, never the schema's defaults filled in.
+      fitted(schema, value, `State "${key}"`);
+      record[key] = jsonValue(value);
     }
     return record;
   };

@@ -425,7 +425,10 @@ describe("a workflow's ctx", () => {
 const generatedLike = defineWorkflow({
   args: v.object({ pages: v.array(v.object({ rows: v.array(v.string()) })) }),
   returns: v.object({ sent: v.number() }),
-  state: { last: v.string() },
+  state: {
+    last: v.string(),
+    badge: v.object({ tone: v.string().default("plain") }),
+  },
   permissions,
   handler: async (ctx, args) => {
     let sent = 0;
@@ -437,7 +440,11 @@ const generatedLike = defineWorkflow({
             { to: row },
             {
               step: "mailed",
-              state: (output: { id: unknown }) => ({ last: output.id }),
+              // A value its schema fills defaults into is kept as written.
+              state: (output: { id: unknown }) => ({
+                last: output.id,
+                badge: {},
+              }),
             }
           );
           sent += 1;
@@ -519,7 +526,7 @@ describe("a workflow's journal", () => {
       reply: recorded("reply:enter"),
       until: recorded("until:enter"),
     }).toStrictEqual({
-      mailed: { output: { id: "m-1" }, state: { last: "m-1" } },
+      mailed: { output: { id: "m-1" }, state: { last: "m-1", badge: {} } },
       approve: {
         recipients: ["role:finance"],
         prompt: "Fine?",
