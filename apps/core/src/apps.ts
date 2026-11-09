@@ -119,12 +119,10 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   sealed release names the hash next to the tree's (`definitionHash`),
 //   and its schema is applied only by the definition of that hash
 //   (app-schema.ts).
-// - A version committed before definitions left the tree (its row has
-//   none, its tree a `definition.json` nothing reads now): refused
-//   wherever its definition is needed (`app.definition_missing`, which
-//   says to create the App again), a draft's writes included, and its
-//   release, sealed in an earlier format, is refused to load or make
-//   current (`version.format_unsupported`). Nothing reads the old file.
+// - A row that holds no definition: the column is nullable only as it
+//   was added (expand, then contract), and every version is written with
+//   one. Read anyway, it is an invalid definition (`readStored`), refused
+//   as any other is.
 // - A chat's draft and a version committed meanwhile both change the
 //   definition: the draft keeps its own copy (workspace.ts), and
 //   proposing it over a version that changed the definition since it
@@ -541,8 +539,7 @@ export const storedDefinition = async (
  * The definition a version's row, a chat's draft or a blueprint holds,
  * read and checked whole: the one reader of a stored definition. Checked
  * against the hash the row holds, where it holds one (a version's, see
- * the header). `app.definition_missing` for one made before definitions
- * left the tree, which has none.
+ * the header). `app.definition_invalid` for one that holds none.
  */
 export const readStored = async (stored: {
   readonly definition: string | null;
@@ -550,7 +547,9 @@ export const readStored = async (stored: {
 }): Promise<StoredDefinition> => {
   const { definition: text, definitionHash } = stored;
   if (text === null || definitionHash === null) {
-    throw appErrors.create("app.definition_missing");
+    throw appErrors.create("app.definition_invalid", {
+      issues: ["The App's version holds no definition."],
+    });
   }
   const hash = await sha256Hex(text);
   if (definitionHash !== undefined && hash !== definitionHash) {

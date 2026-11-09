@@ -385,8 +385,6 @@ export const markBlueprint = async (
   const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const row = await findVersion(env, found.id, version);
-  // A version without a definition, committed before definitions left
-  // the tree, is never a blueprint: its copies would have none.
   const definition = await readStored(row);
   const db = drizzle(env.DB);
   const marked = async () =>
@@ -864,14 +862,10 @@ const pendingUpdate = async (
       ? undefined
       : await blueprintRow(env, blueprintIdSchema.parse(origin.blueprintId));
   const latest = await latestVersion(env, found.id);
-  // An origin or a built-in from before definitions left the tree has no
-  // definition to merge over or from.
   if (
     origin === undefined ||
     blueprint === undefined ||
     blueprint.appId !== null ||
-    origin.definition === null ||
-    blueprint.definition === null ||
     (blueprint.tree === origin.tree &&
       blueprint.definition === origin.definition) ||
     latest === null

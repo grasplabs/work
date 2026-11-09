@@ -356,24 +356,18 @@ const proposerOf = async (
  * (`schema`, the store's plan). The definition is no file: a change of it
  * alone (two fields' IDs swapped, say) changes no code, yet moves the
  * records' values as the version is made current, so it counts as a
- * change of the server code. A version committed before definitions left
- * the tree has none: the current one, if so, is planned from as no
- * definition, and this one, if so, plans nothing (it can't be made
- * current anyway).
+ * change of the server code.
  */
 const definitionReviewOf = async (
   row: VersionRow,
   current: VersionRow | undefined
 ): Promise<{ changed: boolean; schema: VersionReview["schema"] }> => {
   const changed = row.definitionHash !== current?.definitionHash;
-  if (!changed || row.definition === null) {
+  if (!changed) {
     return { changed, schema: null };
   }
   const { definition } = await readStored(row);
-  const held =
-    current === undefined || current.definition === null
-      ? null
-      : await readStored(current);
+  const held = current === undefined ? null : await readStored(current);
   return {
     changed,
     schema: definitionPlan(held?.definition ?? null, definition),

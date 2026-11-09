@@ -77,16 +77,11 @@ export const withDefinitionCode = (
 };
 
 /**
- * The problem an `app.definition_invalid` refusal names, in words, the
- * whole of an `app.definition_missing` one, or undefined for any other
- * error: as the definition tools answer it.
+ * The problem an `app.definition_invalid` refusal names, in words, or
+ * undefined for any other error: as the definition tools answer it.
  */
 export const definitionRefusal = (error: unknown): string | undefined => {
-  const code = appErrors.codeOf(error);
-  if (code === "app.definition_missing") {
-    return appErrors.create(code).message;
-  }
-  if (code !== "app.definition_invalid") {
+  if (appErrors.codeOf(error) !== "app.definition_invalid") {
     return undefined;
   }
   const details: unknown =

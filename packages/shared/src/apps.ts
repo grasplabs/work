@@ -1023,8 +1023,6 @@ export const appErrors = defineErrorFamily({
     "grasp.config.ts and server/schema.ts are the code Grasp generates from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts), never by writing them.",
   "app.definition_invalid":
     "The App's definition, from which its grasp.config.ts and server/schema.ts are generated, isn't valid.",
-  "app.definition_missing":
-    "This App was made before Grasp kept an App's definition apart from its files, so it has none. Create the App again.",
   "app.chat_has_app":
     "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
   "app.draft_failed":
