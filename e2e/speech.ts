@@ -1,4 +1,5 @@
-import type { Locator, Page, Request } from "@playwright/test";
+import type { Locator, Page, Request, WebSocket } from "@playwright/test";
+import { z } from "zod";
 
 // Stephen's voice on the onboarding's pages (apps/web/src/voice) is
 // ElevenLabs behind the model gateway, which the local stack doesn't
@@ -90,27 +91,75 @@ const readingStepMs = 1000;
 const lookMs = 100;
 
 /**
- * How long a frame the page sent to core without one back counts as a
- * call core is still answering: past it, the page is taken as waiting on
- * nothing, so a frame that is never answered holds no step for good.
+ * What a page is waiting on from core: its requests, and the calls on each
+ * of its sockets core hasn't answered yet, by their ids, with when each
+ * was made.
  */
-const unansweredMs = 2000;
-
-/** What a page is waiting on from core: its requests, and its socket's last frames. */
 interface Traffic {
   requests: Set<Request>;
-  sentAt: number;
-  receivedAt: number;
+  calls: Map<WebSocket, Map<number, number>>;
 }
 
+/**
+ * How long the page gives core's answer to a call, on its clock
+ * (apps/web/src/core.ts's `timeoutMs`). A call unanswered for longer in
+ * real time is past its deadline already, as the page's clock went on in
+ * real time all along, or is one that never had one, such as a live
+ * subscription that stays open: a step can't fail it.
+ */
+const answerDeadlineMs = 5000;
+
 const trafficOf = new WeakMap<Page, Traffic>();
+
+/**
+ * A capnweb message (capnweb's RpcSession, one JSON array a frame): a
+ * `["pull", id]` the page sends asks for a call's answer, and a
+ * `["resolve", id, …]` or `["reject", id, …]` back gives it. Every other
+ * message, a `release` that follows each answer say, expects none.
+ */
+const messageSchema = z.tuple([z.string(), z.number()]).rest(z.unknown());
+
+/** The message in `payload`: its kind and id, or undefined for none. */
+const messageOf = (
+  payload: string | Buffer
+): { kind: string; id: number } | undefined => {
+  try {
+    const parsed = messageSchema.safeParse(JSON.parse(String(payload)));
+    return parsed.success
+      ? { kind: parsed.data[0], id: parsed.data[1] }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Follows the calls the page makes on `socket`, until it closes. */
+const followCalls = (traffic: Traffic, socket: WebSocket): void => {
+  const calls = new Map<number, number>();
+  traffic.calls.set(socket, calls);
+  socket.on("framesent", ({ payload }) => {
+    const message = messageOf(payload);
+    if (message?.kind === "pull") {
+      calls.set(message.id, Date.now());
+    }
+  });
+  socket.on("framereceived", ({ payload }) => {
+    const message = messageOf(payload);
+    if (message?.kind === "resolve" || message?.kind === "reject") {
+      calls.delete(message.id);
+    }
+  });
+  socket.on("close", () => {
+    traffic.calls.delete(socket);
+  });
+};
 
 /**
  * Installs Playwright's clock on `page`, before it loads, and watches what
  * it waits on from core, for `readUntil`.
  */
 export const installReadingClock = async (page: Page): Promise<void> => {
-  const traffic: Traffic = { requests: new Set(), sentAt: 0, receivedAt: 0 };
+  const traffic: Traffic = { requests: new Set(), calls: new Map() };
   trafficOf.set(page, traffic);
   page.on("request", (request) => {
     const from = request.redirectedFrom();
@@ -125,22 +174,27 @@ export const installReadingClock = async (page: Page): Promise<void> => {
   page.on("requestfinished", done);
   page.on("requestfailed", done);
   page.on("websocket", (socket) => {
-    socket.on("framesent", () => {
-      traffic.sentAt = Date.now();
-    });
-    socket.on("framereceived", () => {
-      traffic.receivedAt = Date.now();
-    });
+    followCalls(traffic, socket);
   });
   await page.clock.install();
 };
 
-/** Whether the page is waiting on core: a request, or a call on its socket. */
-const waitingOnCore = (traffic: Traffic | undefined): boolean =>
-  traffic !== undefined &&
-  (traffic.requests.size > 0 ||
-    (traffic.sentAt > traffic.receivedAt &&
-      Date.now() - traffic.sentAt < unansweredMs));
+/**
+ * Whether the page is waiting on core: a request, or a call on a socket
+ * still within its deadline.
+ */
+const waitingOnCore = (traffic: Traffic | undefined): boolean => {
+  if (traffic === undefined) {
+    return false;
+  }
+  const now = Date.now();
+  return (
+    traffic.requests.size > 0 ||
+    [...traffic.calls.values()].some((calls) =>
+      [...calls.values()].some((madeAt) => now - madeAt < answerDeadlineMs)
+    )
+  );
+};
 
 /**
  * How long a step's way on may take to come on the page's clock: its

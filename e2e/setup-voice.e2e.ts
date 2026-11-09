@@ -281,14 +281,13 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   });
   await page.reload();
   const second = page.getByText(story.second);
-  // Within a line's 20 s, as the next line is: the page's clock counts
-  // the reload's own requests too, which a slow runner took seconds over.
+  // Within expect's 5 s, as it was waited for in real time.
   await readUntil(
     page,
     async () => {
       await expect(second).toBeVisible({ timeout: 100 });
     },
-    20_000
+    5000
   );
   await page.getByRole("button", { name: "Pauzeren" }).click();
   await page.waitForTimeout(6000);
