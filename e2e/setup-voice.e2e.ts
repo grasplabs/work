@@ -276,20 +276,35 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   });
   await page.reload();
   const second = page.getByText(story.second);
-  await readUntil(page, async () => {
-    await expect(second).toBeVisible({ timeout: 100 });
-  });
+  // Within expect's 5 s, as it was waited for in real time.
+  await readUntil(
+    page,
+    async () => {
+      await expect(second).toBeVisible({ timeout: 100 });
+    },
+    5000
+  );
   await page.getByRole("button", { name: "Pauzeren" }).click();
   await page.waitForTimeout(6000);
   await expect(second).toBeVisible();
   await expect(page.getByText(story.third)).toBeHidden();
   await page.getByRole("button", { name: "Afspelen" }).click();
-  await readUntil(page, async () => {
-    await expect(page.getByText(story.third)).toBeVisible({ timeout: 100 });
-  });
-  await readUntil(page, async () => {
-    await expect(page.getByText(story.summary)).toBeVisible({ timeout: 100 });
-  });
+  await readUntil(
+    page,
+    async () => {
+      await expect(page.getByText(story.third)).toBeVisible({ timeout: 100 });
+    },
+    20_000
+  );
+  await readUntil(
+    page,
+    async () => {
+      await expect(page.getByText(story.summary)).toBeVisible({
+        timeout: 100,
+      });
+    },
+    120_000
+  );
   await page.getByRole("button", { name: "Doorgaan" }).click();
   await expect(
     page.getByRole("heading", { name: "Wie is wie in je bedrijf?" })
