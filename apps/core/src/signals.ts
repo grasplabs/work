@@ -477,6 +477,7 @@ const costSignals = async (
       INNER JOIN ${workflowResources} ON ${workflowResources.id} = ${modelUsage.workflowId}
       INNER JOIN ${workflowResourceRuns} ON ${workflowResourceRuns.id} = ${modelUsage.runId}
       WHERE ${modelUsage.createdAt} >= ${from.getTime()}
+        AND ${modelUsage.workflowAppId} IS NULL
         AND ${workflowResourceRuns.createdAt} >= ${from.getTime()}
       GROUP BY ${workflowResources.name}, ${modelUsage.runId}
     ) WHERE place <= ${samples}`);

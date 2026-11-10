@@ -14,7 +14,7 @@ import { projectCandidateRun } from "./candidate-runs.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import type { PinnedResourceRun, RunPin } from "./engine.ts";
-import { newAiCalls } from "./host.ts";
+import { newAiCalls, waitKeyOf, waitStepPrefix } from "./host.ts";
 import type { AiCalls } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
 import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
@@ -22,24 +22,36 @@ import type { EngineStatus } from "./runs.ts";
 import type { StepError } from "./sealed-isolate.ts";
 import type { RunModelCalls, SentCalls } from "./sealed-run.ts";
 import { sealedStepOf, sealedStepsOf } from "./sealed-steps.ts";
-import type { SealedSteps } from "./sealed-steps.ts";
 
 /**
- * The task engine step `name` is a step of, as the run's build places it
- * (`sealedStepOf`): the step itself, or the task step it is a part of
- * (`<task>:<kind>:retry:<n>:run`, a held call's round, host.ts), by its
- * longest name the build has a step of. None for a step of core's own
- * (`$grasp:…`).
+ * The key of the task step a step of core's own is a round or a wait of
+ * (`$grasp:wait:<key>:…`, host.ts, `waitKeyOf` of the task step's name);
+ * none for any other step.
  */
-const taskOfStep = (name: string, steps: SealedSteps): string | undefined => {
-  const parts = name.split(":");
-  for (let end = parts.length; end >= 2; end -= 1) {
-    const placed = sealedStepOf(parts.slice(0, end).join(":"), steps);
-    if (placed !== undefined) {
-      return placed.task;
+const coreRoundKey = new RegExp(
+  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):`,
+  "u"
+);
+
+/**
+ * The task of `tasks` (task steps by name) whose round or wait of core's
+ * own step `name` is, by its key; none for any other step.
+ */
+const roundTaskOf = async (
+  name: string,
+  tasks: ReadonlyMap<string, string>
+): Promise<string | null> => {
+  const key = coreRoundKey.exec(name)?.groups?.key;
+  if (key === undefined) {
+    return null;
+  }
+  for (const [step, task] of tasks) {
+    // oxlint-disable-next-line no-await-in-loop -- a digest each, few
+    if ((await waitKeyOf(step)) === key) {
+      return task;
     }
   }
-  return undefined;
+  return null;
 };
 
 /** The most records one page of the run's history holds (workerflow's). */
@@ -604,8 +616,12 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       sequence: latest.sequence,
       ...this.#compensationOf(latest.status),
     } as const;
+    // Its notification of its end, the once its failure is read: a later
+    // one (how a rollback went) finds its row ended, and changes nothing.
     const failure =
-      live?.status === "errored" && !stoppedEnd ? live.error : undefined;
+      latest.status === "errored" && live?.status === "errored" && !stoppedEnd
+        ? live.error
+        : undefined;
     const failureCode = failure?.code ?? null;
     await (pin.type === "resource"
       ? projectResourceRun(
@@ -638,17 +654,21 @@ export class WorkflowRuns extends WorkflowRun<Env> {
 
   /**
    * The task whose step's failure ended the run, as its row keeps it
-   * (`failed_task`): the last step of a task in its own journal that
-   * failed with the very error the run ended with (`failure`), placed by
-   * its build's table of tasks. Read once, as the run ends failed. None
-   * when no such step did: a raise ended it, say, after a step whose
-   * failure a catch took. A build that can't be read names none, logged.
+   * (`failed_task`): the last step in its own journal that failed with the
+   * very error the run ended with (`failure`), as its build's table of
+   * tasks places it (`sealedStepOf`), or, for a round or a wait of core's
+   * own (a retry, a held call timed out: host.ts), the task step it is of,
+   * by its key. Read once, as the run ends failed. None when no step of a
+   * task did: a raise ended it, say, after a step whose failure a catch
+   * took. A build that can't be read names none, logged: the run's end
+   * never waits on it, as a run whose build was tampered with fails for
+   * that very reason.
    */
   async #failedTask(
     pin: PinnedResourceRun,
     failure: WorkflowError
   ): Promise<string | null> {
-    let steps: SealedSteps;
+    let steps: ReturnType<typeof sealedStepsOf>;
     try {
       steps = sealedStepsOf(
         await loadWorkflowBuild(
@@ -665,30 +685,40 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       });
       return null;
     }
-    // Every page in one synchronous turn: nothing lands in between.
-    let task: string | null = null;
+    // The journal's task steps by name, and the last step that failed
+    // with the run's error: every page in one synchronous turn.
+    const tasks = new Map<string, string>();
+    let failed: string | undefined;
     let after = 0;
-    for (;;) {
+    let more = true;
+    while (more) {
       const page = this.history({ after, limit: historyPage });
       if (page === undefined || page.records.length === 0) {
-        return task;
+        break;
       }
       for (const record of page.records) {
         after = record.eventId;
+        if (record.unreadable || record.step === null) {
+          continue;
+        }
+        const { name } = record.step;
+        const placed = sealedStepOf(name, steps);
+        if (placed !== undefined) {
+          tasks.set(name, placed.task);
+        }
         if (
-          !record.unreadable &&
           record.type === "step_errored" &&
-          record.step !== null &&
           record.error?.code === failure.code &&
           record.error?.message === failure.message
         ) {
-          task = taskOfStep(record.step.name, steps) ?? task;
+          failed = name;
         }
       }
-      if (!page.more) {
-        return task;
-      }
+      ({ more } = page);
     }
+    return failed === undefined
+      ? null
+      : (tasks.get(failed) ?? (await roundTaskOf(failed, tasks)));
   }
 
   /**
