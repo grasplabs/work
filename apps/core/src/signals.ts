@@ -3,19 +3,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { signalWindowDays } from "@grasp-os/shared/signals";
 import type { ImprovementSignal, SignalKind } from "@grasp-os/shared/signals";
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  gt,
-  gte,
-  inArray,
-  lt,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -37,12 +25,10 @@ import {
   workflowDecisions,
   workflowResourceRuns,
   workflowResources,
-  workflowRuns,
 } from "./db/core/schema.ts";
-import { chunks, inList } from "./db/d1.ts";
+import { chunks } from "./db/d1.ts";
 import { collectionsPerQuestion } from "./signal-tally.ts";
 import type { SignalTally } from "./signal-tally.ts";
-import { auditableCode } from "./workflows/host.ts";
 
 // Improvement signals, level 1: where to look to improve the Apps'
 // workflows (@grasp-os/shared/signals has what each one means). Each is a
@@ -108,30 +94,21 @@ const rowsPerInsert = 14;
 const insertsPerBatch = 50;
 
 /** Statuses of a run that hasn't ended. */
-const unended: (typeof workflowRuns.$inferSelect)["status"][] = [
+const unended: (typeof workflowResourceRuns.$inferSelect)["status"][] = [
   "starting",
   "running",
   "paused",
 ];
 
-/** Statuses of an independent workflow's run that hasn't ended. */
-const resourceUnended: (typeof workflowResourceRuns.$inferSelect)["status"][] =
-  ["starting", "running", "paused"];
-
 /**
- * A decision's run, as the signals name it: an App's workflow, or an
- * independent workflow (a JSON workflow's decision step), of no App
+ * A decision's run, as the signals name it: its workflow, of no App
  * (`app_id` empty) and by its name, as its decisions' page names it.
  * Decisions of a run that is gone have none: they're skipped.
  */
 const decisionRun = {
-  runId: sql<
-    string | null
-  >`coalesce(${workflowDecisions.runId}, ${workflowDecisions.resourceRunId})`,
-  appId: sql<string>`coalesce(${workflowRuns.appId}, '')`,
-  workflowId: sql<
-    string | null
-  >`coalesce(${workflowRuns.workflowId}, ${workflowResources.name})`,
+  runId: workflowDecisions.resourceRunId,
+  appId: sql<string>`''`,
+  workflowId: workflowResources.name,
 };
 
 /** One signal as it is stored: `app_id` and `workflow_id` empty for none. */
@@ -161,9 +138,6 @@ const signalRow = <Kind extends SignalKind>(
 export const workflowKey = (appId: string, workflowId: string): string =>
   JSON.stringify([appId, workflowId]);
 
-/** Money rounded to millionths of a dollar, as model spend is counted. */
-const dollars = (amount: number): number => Math.round(amount * 1e6) / 1e6;
-
 /**
  * A step's name without the key of a keyed step or the part of a
  * decision (`review:<key>#ask`), whose key can come from what the run
@@ -171,10 +145,6 @@ const dollars = (amount: number): number => Math.round(amount * 1e6) / 1e6;
  */
 const stepName = (step: string | null): string =>
   /^[A-Za-z][\w-]{0,63}(?=$|[:#])/u.exec(step ?? "")?.[0] ?? "";
-
-/** The entries of `counts`, most first, then by name. */
-const mostFirst = (counts: ReadonlyMap<string, number>) =>
-  [...counts].toSorted(([a, x], [b, y]) => y - x || a.localeCompare(b));
 
 /**
  * Reads every row `read` finds, a page at a time: `read` is given the last
@@ -258,8 +228,7 @@ const waitingForPeople = (
 
 /**
  * Runs waiting longest for a person: each workflow's open decisions, by
- * the deciders they're from, valued at how long the oldest has waited.
- * An App's workflow's runs and an independent workflow's alike
+ * the deciders they're from, valued at how long the oldest has waited
  * (`decisionRun`).
  */
 const waitingSignals = async (
@@ -287,7 +256,6 @@ const waitingSignals = async (
           openedAt: workflowDecisions.openedAt,
         })
         .from(workflowDecisions)
-        .leftJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
         .leftJoin(
           workflowResourceRuns,
           eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
@@ -305,10 +273,7 @@ const waitingSignals = async (
           and(
             eq(workflowDecisions.status, "open"),
             gt(workflowDecisions.expiresAt, now),
-            or(
-              inArray(workflowRuns.status, unended),
-              inArray(workflowResourceRuns.status, resourceUnended)
-            ),
+            inArray(workflowResourceRuns.status, unended),
             pastCursor(
               workflowDecisions.openedAt,
               workflowDecisions.id,
@@ -358,156 +323,6 @@ const waitingSignals = async (
   return [...rows, ...waitingForPeople([...groups.values()], waited)];
 };
 
-/** An App workflow's runs started in the window. */
-interface Started {
-  appId: string;
-  workflowId: string;
-  runs: number;
-}
-
-/** How many runs of each App workflow started since `from`. */
-const runsSince = async (
-  db: DrizzleD1Database,
-  from: Date
-): Promise<Map<string, Started>> => {
-  const rows = await db
-    .select({
-      appId: workflowRuns.appId,
-      workflowId: workflowRuns.workflowId,
-      runs: count(),
-    })
-    .from(workflowRuns)
-    .where(gte(workflowRuns.createdAt, from))
-    .groupBy(workflowRuns.appId, workflowRuns.workflowId);
-  return new Map(
-    rows.map((row) => [workflowKey(row.appId, row.workflowId), row])
-  );
-};
-
-/**
- * Of the runs `ids`, those started before `from`: looked up by ID, a page
- * at a time. Only runs that made model calls in the window are asked
- * about, which the audit tally holds already, so this holds no more.
- */
-const startedBefore = async (
-  db: DrizzleD1Database,
-  from: Date,
-  ids: readonly string[]
-): Promise<Set<string>> => {
-  const before = new Set<string>();
-  for (let start = 0; start < ids.length; start += pageRows) {
-    // One page after another, so a large tally never floods D1.
-    // oxlint-disable-next-line no-await-in-loop
-    const found = await db
-      .select({ id: workflowRuns.id })
-      .from(workflowRuns)
-      .where(
-        and(
-          inList(workflowRuns.id, ids.slice(start, start + pageRows)),
-          lt(workflowRuns.createdAt, from)
-        )
-      );
-    for (const { id } of found) {
-      before.add(id);
-    }
-  }
-  return before;
-};
-
-/**
- * Steps failing most: runs that failed since `from`, by the step they
- * stopped at (empty for none), with their error codes. Only the step's
- * name and the error's code, never its message or the step's input.
- */
-const failingSignals = async (
-  db: DrizzleD1Database,
-  from: Date,
-  runs: ReadonlyMap<string, Started>
-): Promise<SignalRow[]> => {
-  const groups = new Map<
-    string,
-    {
-      appId: string;
-      workflowId: string;
-      step: string;
-      failures: number;
-      codes: Map<string, number>;
-      recent: NonNullable<EvidenceOf<"failing_step">["recent"]>;
-    }
-  >();
-  const endedAt = sql<number>`${workflowRuns.endedAt}`;
-  await eachPage(
-    async (after: { id: string; endedAt: Date | null } | undefined) =>
-      await db
-        .select({
-          id: workflowRuns.id,
-          appId: workflowRuns.appId,
-          workflowId: workflowRuns.workflowId,
-          endedAt: workflowRuns.endedAt,
-          step: sql<
-            string | null
-          >`json_extract(${workflowRuns.failure}, '$.step')`,
-          code: sql<
-            string | null
-          >`json_extract(${workflowRuns.failure}, '$.error.code')`,
-        })
-        .from(workflowRuns)
-        .where(
-          and(
-            eq(workflowRuns.status, "failed"),
-            gte(workflowRuns.endedAt, from),
-            pastCursor(
-              endedAt,
-              workflowRuns.id,
-              after?.endedAt ? { at: after.endedAt, id: after.id } : undefined,
-              "desc"
-            )
-          )
-        )
-        .orderBy(desc(workflowRuns.endedAt), desc(workflowRuns.id))
-        .limit(pageRows),
-    (row) => {
-      const step = stepName(row.step);
-      const key = JSON.stringify([row.appId, row.workflowId, step]);
-      const group = groups.get(key) ?? {
-        appId: row.appId,
-        workflowId: row.workflowId,
-        step,
-        failures: 0,
-        codes: new Map<string, number>(),
-        recent: [],
-      };
-      group.failures += 1;
-      const code = auditableCode(row.code) ?? "workflow.run_failed";
-      group.codes.set(code, (group.codes.get(code) ?? 0) + 1);
-      // Read latest first.
-      if (group.recent.length < samples) {
-        group.recent.push(runIdSchema.parse(row.id));
-      }
-      groups.set(key, group);
-    }
-  );
-  return [...groups.values()].map((group) =>
-    signalRow(
-      "failing_step",
-      {
-        appId: group.appId,
-        workflowId: group.workflowId,
-        subject: group.step,
-      },
-      group.failures,
-      {
-        failures: group.failures,
-        runs: runs.get(workflowKey(group.appId, group.workflowId))?.runs ?? 0,
-        errors: mostFirst(group.codes)
-          .slice(0, samples)
-          .map(([code, times]) => ({ code, count: times })),
-        recent: group.recent,
-      }
-    )
-  );
-};
-
 /**
  * Where corrections keep happening: each step's decisions answered since
  * `from`, where any was rejected, changing what the workflow proposed.
@@ -540,7 +355,6 @@ const correctionSignals = async (
           decidedAt: workflowDecisions.decidedAt,
         })
         .from(workflowDecisions)
-        .leftJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
         .leftJoin(
           workflowResourceRuns,
           eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
@@ -610,8 +424,6 @@ const correctionSignals = async (
 
 /** What the audit log holds of the window, added up across its stretches. */
 export interface SignalTotals {
-  /** Each App workflow's model cost, in total and per run. */
-  costs: Map<string, { cost: number; perRun: Map<string, number> }>;
   /** Each unanswered question, by App workflow (or none) and key. */
   questions: Map<
     string,
@@ -630,7 +442,6 @@ export interface SignalTotals {
 
 /** Totals of nothing yet, to add stretches to. */
 export const noSignalTotals = (): SignalTotals => ({
-  costs: new Map(),
   questions: new Map(),
 });
 
@@ -639,13 +450,6 @@ export const addSignalTally = (
   totals: SignalTotals,
   tally: SignalTally
 ): void => {
-  for (const { appId, workflowId, runId, cost } of tally.costs) {
-    const key = workflowKey(appId, workflowId);
-    const found = totals.costs.get(key) ?? { cost: 0, perRun: new Map() };
-    found.cost += cost;
-    found.perRun.set(runId, (found.perRun.get(runId) ?? 0) + cost);
-    totals.costs.set(key, found);
-  }
   for (const question of tally.questions) {
     const key = JSON.stringify([
       question.appId,
@@ -675,43 +479,6 @@ export const addSignalTally = (
     totals.questions.set(key, found);
   }
 };
-
-/**
- * Cost per run, for each App workflow with runs started in the window:
- * the cost of those runs' model calls in the window, over them.
- *
- * A run started before the window counts neither as a run nor for what it
- * spent, so the cost and `costliest` name the same runs. The window rolls
- * (the last `signalWindowDays` days), while model spend
- * (model-spend.ts) counts a UTC calendar month: the two don't match.
- */
-const costSignals = (
-  { costs }: SignalTotals,
-  runs: ReadonlyMap<string, Started>,
-  before: ReadonlySet<string>
-): SignalRow[] =>
-  [...runs].map(([key, { appId, workflowId, runs: started }]) => {
-    const perRun = new Map(
-      [...(costs.get(key)?.perRun ?? [])].filter(([run]) => !before.has(run))
-    );
-    const cost = [...perRun.values()].reduce((sum, amount) => sum + amount, 0);
-    const costPerRun = cost / started;
-    return signalRow(
-      "cost_per_run",
-      { appId, workflowId, subject: "" },
-      dollars(costPerRun),
-      {
-        runs: started,
-        cost: dollars(cost),
-        costliest: mostFirst(perRun)
-          .slice(0, samples)
-          .map(([run, amount]) => ({
-            run: runIdSchema.parse(run),
-            cost: dollars(amount),
-          })),
-      }
-    );
-  });
 
 /**
  * Unanswered Knowledge questions: searches that found nothing the asker
@@ -764,25 +531,11 @@ const computeSignals = async (
   totals: SignalTotals
 ): Promise<SignalRow[]> => {
   const db = drizzle(env.DB);
-  const from = signalsFrom(now);
-  const runs = await runsSince(db, from);
-  const [waiting, failing, corrections] = await Promise.all([
+  const [waiting, corrections] = await Promise.all([
     waitingSignals(db, now),
-    failingSignals(db, from, runs),
-    correctionSignals(db, from),
+    correctionSignals(db, signalsFrom(now)),
   ]);
-  const before = await startedBefore(
-    db,
-    from,
-    [...totals.costs.values()].flatMap(({ perRun }) => [...perRun.keys()])
-  );
-  return [
-    ...waiting,
-    ...failing,
-    ...corrections,
-    ...costSignals(totals, runs, before),
-    ...unansweredSignals(totals),
-  ];
+  return [...waiting, ...corrections, ...unansweredSignals(totals)];
 };
 
 /**

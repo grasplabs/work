@@ -399,9 +399,8 @@ export const decisionOf = async (
 
 /**
  * Ends every JSON workflow run a test left live in the engine: a run held
- * an hour would go on in the background of whatever test file runs next
- * (see `endLiveRuns` in runs.ts, which ends App runs). A run the engine
- * has no record of has nothing to end.
+ * an hour would go on in the background of whatever test file runs next.
+ * A run the engine has no record of has nothing to end.
  */
 export const endLiveResourceRuns = async (): Promise<void> => {
   const { results } = await env.DB.prepare(

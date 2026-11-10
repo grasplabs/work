@@ -868,12 +868,6 @@ export interface StoreReset {
   readonly actor: AuditActor;
   /** The App the store serves. */
   readonly app: string;
-  /**
-   * Whether a store that holds a working schema may be reset: an admin's
-   * full reset. Without it only a store from before stable IDs is
-   * (`migration.metadata_missing`), as a builder resets it.
-   */
-  readonly everything: boolean;
   /** The App's current version's schema, applied to the empty store. */
   readonly apply?: SchemaApply;
 }
@@ -1756,9 +1750,7 @@ export class StoreHost {
    * file-host.ts), and the mutation receipts and outbox go, so a key sent
    * again can't answer for a record that is gone.
    *
-   * Without `everything`, only a store from before stable IDs is reset:
-   * one whose schema has no catalog (`migration.metadata_missing`); any
-   * other is refused (`migration.reset_refused`). Audited as `actor`'s,
+   * Audited as `actor`'s,
    * in the same transaction: `store.reset` with the records it held, the
    * files it deleted, the outbox entries it dropped and the version applied, and how many records each table held
    * (`app.data.erased`). Answers what applying the schema did, or null
@@ -1777,7 +1769,7 @@ export class StoreHost {
     const reset = new Map<string, number>();
     const applied = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId);
-      this.#requireResettable(input.everything, applying?.change.version);
+      this.#requireResettable(applying?.change.version);
       const held = this.ctx.storage.sql
         .exec<{ name: string; records: number; generation: number }>(
           `SELECT t.name AS name, count(r.record_id) AS records,
@@ -1835,7 +1827,6 @@ export class StoreHost {
         target: { type: "store", id: storeId },
         detail: {
           app: appId,
-          everything: input.everything ? 1 : 0,
           tables: held.length,
           records: held.reduce((sum, { records: taken }) => sum + taken, 0),
           files: fileCount,
@@ -1858,34 +1849,16 @@ export class StoreHost {
   }
 
   /**
-   * Refuses a reset of the store's data where it may not go: without
-   * `everything`, of a store that can still be read
-   * (`migration.reset_refused`); and over another version than `version`,
-   * the one it was asked for as current (none, without a schema to apply),
-   * as a publish goes only over its base (`#requireBase`): one published
-   * meanwhile refuses it.
+   * Refuses a reset of the store's data over another version than
+   * `version`, the one it was asked for as current (none, without a schema
+   * to apply), as a publish goes only over its base (`#requireBase`): one
+   * published meanwhile refuses it.
    */
   #requireResettable(
-    everything: boolean,
     version:
       | { readonly number: number; readonly basedOn: number | null }
       | undefined
   ): void {
-    const row = this.#db
-      .select({
-        hash: store.contractHash,
-        manifest: store.contractManifest,
-        catalog: store.schemaCatalog,
-      })
-      .from(store)
-      .get();
-    const unreadable =
-      row?.hash !== null &&
-      row?.hash !== undefined &&
-      (row.manifest === null || row.catalog === null);
-    if (!everything && !unreadable) {
-      throw migrationErrors.create("migration.reset_refused");
-    }
     this.#requireBase(
       { number: version?.number ?? null, basedOn: version?.basedOn ?? null },
       Date.now()
@@ -2033,8 +2006,9 @@ export class StoreHost {
     if (row?.hash === null || row?.hash === undefined) {
       return undefined;
     }
+    // Written with the hash, always (`applySchema`), and cleared with it.
     if (row.manifest === null || row.catalog === null) {
-      throw migrationErrors.create("migration.metadata_missing");
+      throw new Error("The store's schema has no catalog.");
     }
     if (
       this.#heldNow?.hash !== row.hash ||

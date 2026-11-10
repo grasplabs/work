@@ -930,14 +930,6 @@ export interface AppsApi {
    */
   archive: (app: string) => Promise<App>;
   /**
-   * Resets the data of an App stored before schemas were applied by
-   * stable ID (`migration.metadata_missing`), for its builders, never
-   * Grasp staff: refused for any other (`migration.reset_refused`). Its
-   * current version's schema is applied to the empty store. Audited as
-   * `store.reset`.
-   */
-  resetLegacyData: (app: string) => Promise<void>;
-  /**
    * Resets every record of an App for good, for the organization's
    * admins, never Grasp staff nor builders, confirmed by the App's `name`
    * as it is now (`app.reset_name_mismatch`). Its current version's

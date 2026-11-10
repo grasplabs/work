@@ -358,9 +358,9 @@ const sessionShape = {
     .optional(),
   requestId: auditEventSchema.shape.requestId,
   /**
-   * For a call of an independent workflow's run, whose trigger names no
-   * App's run (`system`): the run lineage its spend counts in, by its
-   * root, and the workflow the run is of (model-spend.ts, `spendKeysOf`).
+   * For a call of a workflow's run: the run lineage its spend counts in,
+   * by its root, and the workflow the run is of (model-spend.ts,
+   * `spendKeysOf`).
    * From the run's row; set by core's host only, never by App code.
    */
   lineage: z

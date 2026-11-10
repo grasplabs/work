@@ -335,9 +335,8 @@ export const runStubCall = async (
     call
   );
   try {
-    // A run's mail carries the run's tokens, recorded before the call
-    // leaves (on its recipients at the deployment's domain, and as its
-    // stamp), so the runs it starts join its lineage. A record that fails
+    // A run's mail carries the run's stamp, recorded before the call
+    // leaves, so the runs it starts join its lineage. A record that fails
     // fails the call, which sent nothing.
     const sent =
       stamping === undefined

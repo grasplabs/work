@@ -529,10 +529,6 @@ export const dataErrors = defineErrorFamily({
 export const migrationErrors = defineErrorFamily({
   "migration.required":
     "This schema change can't be published as it is: each change it lists needs a migration in code, and each field records lack needs a value for them (an answer) or a migration.",
-  "migration.metadata_missing":
-    "This App's data was stored before schemas were applied by stable ID, so it can't be read or changed any more. Reset the App's data in its settings, then publish it again.",
-  "migration.reset_refused":
-    "This App's data can still be read, so a builder can't reset it. Only an admin of the organization can, in the App's settings.",
   "migration.busy":
     "This store changed while the schema was applied, or another version was being published. Publish again in a moment.",
   "migration.invalid":

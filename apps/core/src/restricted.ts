@@ -1,13 +1,12 @@
-import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
+import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import type { AppId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
-import { apps, workflowResourceRuns, workflowRuns } from "./db/core/schema.ts";
+import { apps, workflowResourceRuns } from "./db/core/schema.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 
 // Restricted mode. Once a chat or an App reads restricted data (in
@@ -48,15 +47,9 @@ import { appHost, workspace } from "./durable-objects.ts";
 // the next restricted read records it again.
 
 /**
- * Where an App or agent works, and keeps its restricted mode
- * (`workContextSchema`): a chat, an App, or a run of one of the App's
- * workflows. The host sets it, like the authority.
- *
- * A run keeps its App's flag, not one of its own: a run and its App share
- * data both ways (a run calls its App's methods, which keep what it sends
- * and whose answers carry the App's data), so a run
- * starts restricted when its App is, becomes so when its App does, and
- * restricts its App when it reads restricted data itself.
+ * Where an App, agent or workflow works, and keeps its restricted mode
+ * (`workContextSchema`): a chat, an App, or a run of an independent
+ * workflow. The host sets it, like the authority.
  */
 export type { WorkContext } from "@grasp-os/shared/permissions";
 
@@ -71,53 +64,26 @@ const contextInvalid = () =>
 
 /**
  * Refuses an App context that isn't the App `authority` names, or an App
- * that isn't in the registry, so no App can read or set another's flag;
- * for a run, a run that isn't one of that App's. Returns the run's
- * workflow, for a run.
+ * that isn't in the registry, so no App can read or set another's flag.
  */
-/** A run context's workflow, and the root of its lineage (none for a root). */
-interface RunOf {
-  workflow?: string;
-  rootRunId?: string | null;
-}
-
 const requireOwnApp = async (
   env: RestrictedEnv,
   authority: Authority,
-  context: Extract<WorkContext, { appId: AppId }>
-): Promise<RunOf> => {
+  context: Extract<WorkContext, { type: "app" }>
+): Promise<void> => {
   const { subject } = authority;
   const { appId } = context;
   if (subject.type !== "app" || subject.appId !== appId) {
     throw contextInvalid();
   }
-  const db = drizzle(env.DB);
-  const found =
-    context.type === "run"
-      ? await db
-          .select({
-            workflow: workflowRuns.workflowId,
-            rootRunId: workflowRuns.rootRunId,
-          })
-          .from(workflowRuns)
-          .where(
-            and(
-              eq(workflowRuns.id, context.runId),
-              eq(workflowRuns.appId, appId)
-            )
-          )
-          .get()
-      : await db
-          .select({ id: apps.id })
-          .from(apps)
-          .where(eq(apps.id, appId))
-          .get();
+  const found = await drizzle(env.DB)
+    .select({ id: apps.id })
+    .from(apps)
+    .where(eq(apps.id, appId))
+    .get();
   if (!found) {
     throw contextInvalid();
   }
-  return "workflow" in found
-    ? { workflow: found.workflow, rootRunId: found.rootRunId }
-    : {};
 };
 
 /**
@@ -154,7 +120,7 @@ const requireOwnResourceRun = async (
 };
 
 /**
- * Whether `context` has read restricted data, and a run's workflow. Throws
+ * Whether `context` has read restricted data. Throws
  * `permission.context_invalid` for a context `authority` can't work in, or
  * one that doesn't exist: it has nowhere to keep the flag.
  */
@@ -162,15 +128,14 @@ const restrictedState = async (
   env: RestrictedEnv,
   authority: Authority,
   context: WorkContext
-): Promise<{ restricted: boolean } & RunOf> => {
+): Promise<boolean> => {
   if (context.type === "workflowRun") {
     // As its start decided, pinned on its row (`restrict`).
-    return { restricted: await requireOwnResourceRun(env, authority, context) };
+    return await requireOwnResourceRun(env, authority, context);
   }
-  if (context.type !== "chat") {
-    const run = await requireOwnApp(env, authority, context);
-    const restricted = await appHost(env, context.appId).isRestricted();
-    return { restricted, ...run };
+  if (context.type === "app") {
+    await requireOwnApp(env, authority, context);
+    return await appHost(env, context.appId).isRestricted();
   }
   // A chat is the organization's agent's to work in, as the chat stored it,
   // and no one else's, whichever object holds it (a person's own, say).
@@ -184,17 +149,16 @@ const restrictedState = async (
   if (chat === undefined || chat.agentId !== subject.agentId) {
     throw contextInvalid();
   }
-  return { restricted: chat.restricted };
+  return chat.restricted;
 };
 
 /**
- * The audit entry of `context` entering restricted mode, by `authority`
- * (a run as itself), after reading from `sources`. A run's is its App's.
+ * The audit entry of `context` entering restricted mode, by `authority`,
+ * after reading from `sources`.
  */
 const restrictedEntry = (
   authority: Authority,
   context: WorkContext,
-  { workflow, rootRunId }: RunOf,
   sources: string[]
 ): AuditEntry => {
   const provenance = [...new Set(sources)];
@@ -212,15 +176,7 @@ const restrictedEntry = (
     };
   }
   return {
-    actor:
-      context.type === "run" && workflow !== undefined
-        ? runActorOf({
-            runId: context.runId,
-            app: context.appId,
-            workflow,
-            rootRunId,
-          })
-        : delegateActorOf(authority),
+    actor: delegateActorOf(authority),
     action: "context.restricted",
     target: { type: "app", id: context.appId },
     provenance,
@@ -248,8 +204,7 @@ export const restrict = async (
   context: WorkContext,
   sources: string[]
 ): Promise<void> => {
-  const { restricted, ...run } = await restrictedState(env, authority, context);
-  if (restricted) {
+  if (await restrictedState(env, authority, context)) {
     return;
   }
   if (context.type === "workflowRun") {
@@ -257,9 +212,9 @@ export const restrict = async (
   }
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
-    outboxed(db, restrictedEntry(authority, context, run, sources)),
+    outboxed(db, restrictedEntry(authority, context, sources)),
   ]);
-  if (context.type !== "chat") {
+  if (context.type === "app") {
     await appHost(env, context.appId).restrict();
     return;
   }
@@ -276,7 +231,4 @@ export const isRestricted = async (
   env: RestrictedEnv,
   authority: Authority,
   context: WorkContext
-): Promise<boolean> => {
-  const { restricted } = await restrictedState(env, authority, context);
-  return restricted;
-};
+): Promise<boolean> => await restrictedState(env, authority, context);

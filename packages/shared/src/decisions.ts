@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
-import type { AppId, RunId, WorkflowId, WorkflowResourceId } from "./ids.ts";
+import type { RunId, WorkflowId, WorkflowResourceId } from "./ids.ts";
 import type { Json } from "./json.ts";
 
 // A decision is a person's answer a workflow run waits for
@@ -85,32 +85,25 @@ export type DecisionStatus =
 /** A decision as the people who answer it see it. */
 export interface DecisionView {
   id: string;
-  /** The App whose workflow's run asks; none for an independent workflow's. */
-  app?: { id: AppId; name: string };
-  /**
-   * The independent workflow whose run asks (a JSON workflow's
-   * `grasp.decision` call); none for an App's workflow.
-   */
-  workflowResource?: {
+  /** The workflow whose run asks (its `grasp.decision` call). */
+  workflowResource: {
     id: WorkflowResourceId;
     name: string;
   };
   /**
    * Present when core confirmed, as the decision was read for its page,
-   * that the reader may open the page of the workflow that asks: its
-   * App's workflow, or the independent workflow's own page.
+   * that the reader may open the workflow's own page.
    */
   opens?: true;
-  /** The workflow's ID in its App, or an independent workflow's name. */
+  /** The workflow's name. */
   workflow: WorkflowId;
   run: RunId;
   /** What is decided, as the workflow's code describes the step. */
   description: string;
   /**
-   * What the decision is about, as the run passed it (an independent
-   * workflow's call `input`, checked against its decision contract): part
-   * of the review context. None for an App's workflow, and once removed
-   * with its run's details.
+   * What the decision is about, as the run passed it (the workflow's call
+   * `input`, checked against its decision contract): part of the review
+   * context. None once removed with its run's details.
    */
   input?: Json;
   status: DecisionStatus;

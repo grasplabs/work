@@ -1434,19 +1434,14 @@ export type HeldOutcome =
     }
   | { state: "failed"; reason: string; output: string | null };
 
-/** Workflow runs that have ended, each with its App: at most 50. */
+/** Workflow runs that have ended, each with its workflow: at most 50. */
 export const endedRunsSchema = z.strictObject({
   runs: z
     .array(
-      z.union([
-        // An App's run.
-        z.strictObject({ appId: identifierSchema, runId: identifierSchema }),
-        // A run of an independent workflow (a restricted one's).
-        z.strictObject({
-          workflowId: identifierSchema,
-          runId: identifierSchema,
-        }),
-      ])
+      z.strictObject({
+        workflowId: identifierSchema,
+        runId: identifierSchema,
+      })
     )
     .max(50),
 });
