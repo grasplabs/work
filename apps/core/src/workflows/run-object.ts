@@ -63,6 +63,17 @@ const taskOfStep = async (
   return null;
 };
 
+/**
+ * Whether a step's error (`step`) is the run's (`run`): the same code, and
+ * the same message as far as both kept it (the isolate cuts what it sends
+ * shorter than the journal keeps a step's: host.ts).
+ */
+const sameError = (step: WorkflowError | null, run: WorkflowError): boolean =>
+  step !== null &&
+  step.code === run.code &&
+  (step.message.startsWith(run.message) ||
+    run.message.startsWith(step.message));
+
 /** The most records one page of the run's history holds (workerflow's). */
 const historyPage = 500;
 
@@ -665,7 +676,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   /**
    * The task whose step's failure ended the run, as its row keeps it
    * (`failed_task`): the last step in its own journal that failed with the
-   * code the run ended with (`failure`), as its build's table of
+   * error the run ended with (`sameError`), as its build's table of
    * tasks places it (`sealedStepOf`), or, for a round or a wait of core's
    * own (a retry, a held call timed out: host.ts), the task step it is of,
    * by its key. Read once, as the run ends failed. None when no step of a
@@ -696,8 +707,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       return null;
     }
     // The journal's steps, its task steps by name, and the last step that
-    // failed with the run's error, by its code (its message may come back
-    // cut): every page in one synchronous turn.
+    // failed with the run's error: every page in one synchronous turn.
     const names = new Set<string>();
     const tasks = new Map<string, string>();
     let failed: string | undefined;
@@ -721,7 +731,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         }
         if (
           record.type === "step_errored" &&
-          record.error?.code === failure.code
+          sameError(record.error, failure)
         ) {
           failed = name;
         }
