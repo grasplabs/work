@@ -2,15 +2,16 @@
  * The split between CI's shards (test-shards.ts): every file runs exactly
  * once, the same way on every runner, and the long files spread out.
  */
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   concurrentFiles,
-  maxShards,
+  installsOffline,
   projectStartSeconds,
-  shardCountFor,
   shardSeconds,
-  shardTargetSeconds,
   splitIntoShards,
   spreadOver,
   startsFirst,
@@ -21,13 +22,18 @@ import type { ShardFile, TimedFile } from "./test-shards.ts";
 const file = (
   key: string,
   seconds: number,
-  { group = 0, serial = false }: { group?: number; serial?: boolean } = {}
+  {
+    group = 0,
+    serial = false,
+    browser = false,
+  }: { group?: number; serial?: boolean; browser?: boolean } = {}
 ): ShardFile => ({
   key,
   project: key.split(" ")[0] ?? key,
   seconds,
   group,
   serial,
+  browser,
 });
 
 /** Many short files and a few long ones, as a test suite has. */
@@ -86,6 +92,92 @@ describe("splitting the test files between shards", () => {
     expect(groups).toStrictEqual([0, 0, 0, 0, 1, 2]);
   });
 
+  it("gives a shard left over to a group it shortens, not to one its longest file holds up", () => {
+    const files = [
+      file("compiler long-build", 400, { group: 5, serial: true }),
+      file("compiler short-build", 10, { group: 5, serial: true }),
+      ...Array.from({ length: 40 }, (_, index) => file(`core ${index}`, 20)),
+    ];
+    const longestOfCompiler = (count: number): number =>
+      Math.max(
+        ...splitIntoShards(files, count)
+          .filter((shard) => shard[0]?.group === 5)
+          .map(shardSeconds)
+      );
+    const groups = splitIntoShards(files, 5).map((shard) => shard[0]?.group);
+
+    // Two shards take the compiler's short build off the long one's;
+    // a third would end no sooner, so the rest go to core.
+    expect(longestOfCompiler(5)).toBe(projectStartSeconds + 400);
+    expect(groups.filter((group) => group === 5)).toHaveLength(2);
+    expect(groups.filter((group) => group === 0)).toHaveLength(3);
+  });
+
+  it("leaves empty the shards no group ends sooner with", () => {
+    // Two at once on a runner: three shards end with the longest file.
+    const files = Array.from({ length: 6 }, (_, index) =>
+      file(`core ${index}`, 100)
+    );
+    const shards = splitIntoShards(files, 5);
+
+    expect(shards.map((shard) => shard.length)).toStrictEqual([2, 2, 2, 0, 0]);
+  });
+
+  it("runs the files that install offline from pnpm's store in the first shard, whatever their time", () => {
+    const offline = "scripts scripts/package-definition.test.ts";
+    const files = [
+      ...suite,
+      file(offline, 1),
+      ...Array.from({ length: 300 }, (_, index) =>
+        file(`scripts ${index}`, 30)
+      ),
+    ];
+
+    for (const count of [3, 6, 12]) {
+      expect(splitIntoShards(files, count)[0]?.map(({ key }) => key)).toContain(
+        offline
+      );
+    }
+  });
+
+  it("runs a browser project's files in the first shard, where CI installs the browser", () => {
+    const browser = "kit test/kit.browser.test.tsx";
+    const files = [
+      ...suite,
+      file(browser, 30, { browser: true }),
+      ...Array.from({ length: 300 }, (_, index) =>
+        file(`scripts ${index}`, 30)
+      ),
+    ];
+
+    expect(splitIntoShards(files, 8)[0]?.map(({ key }) => key)).toContain(
+      browser
+    );
+  });
+
+  it("knows every test file that installs offline from pnpm's store", () => {
+    const offlineFlag = ["--", "offline"].join("");
+    const installing = execFileSync(
+      "git",
+      ["grep", "-l", "-e", offlineFlag, "--", "*.test.ts"],
+      { cwd: path.join(import.meta.dirname, ".."), encoding: "utf-8" }
+    )
+      .split("\n")
+      .filter((each) => each !== "")
+      .map((each) => `scripts ${each}`);
+
+    expect(installing.length).toBeGreaterThan(0);
+    expect(installing.filter((key) => !installsOffline(key))).toStrictEqual([]);
+  });
+
+  it("refuses a file that installs offline outside the first group", () => {
+    const offline = "scripts scripts/package-definition.test.ts";
+
+    expect(() =>
+      splitIntoShards([...suite, file(offline, 1, { group: 1 })], 4)
+    ).toThrow("must be in the tests' first group");
+  });
+
   it("refuses fewer shards than groups, which would have to run two together", () => {
     expect(() => splitIntoShards(suite, 2)).toThrow(
       "2 shards can't hold the tests' 3 groups apart: run at least 3."
@@ -137,6 +229,12 @@ describe("splitting the test files between shards", () => {
 
     expect(shardSeconds([file("core long", 300), ...builds])).toBe(
       2 * projectStartSeconds + 300 + 180
+    );
+  });
+
+  it("adds a shard's projects up, as Vitest starts each once the one before has ended", () => {
+    expect(shardSeconds([file("admin a", 50), file("scripts a", 50)])).toBe(
+      2 * projectStartSeconds + 100
     );
   });
 
@@ -196,40 +294,5 @@ describe("splitting the test files between shards", () => {
     );
 
     expect(counts).toStrictEqual([6, 6, 6, 6]);
-  });
-});
-
-describe("choosing how many shards a run takes", () => {
-  it("takes the fewest shards that each end within the target", () => {
-    // Longer than the target in as few shards as it has groups.
-    const long = [
-      ...suite,
-      ...Array.from({ length: 600 }, (_, index) => file(`more ${index}`, 5)),
-    ];
-    const count = shardCountFor(long);
-    const longest = (shards: number): number =>
-      Math.max(...splitIntoShards(long, shards).map(shardSeconds));
-
-    expect(count).toBeGreaterThan(3);
-    expect(longest(count)).toBeLessThanOrEqual(shardTargetSeconds);
-    expect(longest(count - 1)).toBeGreaterThan(shardTargetSeconds);
-  });
-
-  it("gives each group a shard, however short", () => {
-    expect(
-      shardCountFor([file("sdk a", 1), file("pages a", 1, { group: 1 })])
-    ).toBe(2);
-  });
-
-  it("stops at the most shards a run may take", () => {
-    const huge = Array.from({ length: 400 }, (_, index) =>
-      file(`core ${index}`, 300)
-    );
-
-    expect(shardCountFor(huge)).toBe(maxShards);
-  });
-
-  it("takes no shards for no files", () => {
-    expect(shardCountFor([])).toBe(0);
   });
 });

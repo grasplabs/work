@@ -16,12 +16,24 @@ import { z } from "zod";
 
 import { byKey } from "./test-shards.ts";
 
+/**
+ * A project's name in a progress log: Vitest names a browser project's
+ * instance after its browser, with a space, as in
+ * `@grasp-os/ui:browser (chromium)`.
+ */
+const projectPattern = String.raw`(?<project>\S+(?: \([^)\s]+\))?)`;
+
 /** A finished test in a progress log: when, how it ended, how long it took, and its file and name. */
-const progressLine =
-  /^(?<at>\S+) \S+(?: (?<ms>\d+)ms)? (?<project>\S+) (?<file>\S+) > /u;
+const progressLine = new RegExp(
+  String.raw`^(?<at>\S+) \S+(?: (?<ms>\d+)ms)? ${projectPattern} (?<file>\S+) > `,
+  "u"
+);
 
 /** A finished file in a progress log: how long Vitest timed it, hooks included. */
-const fileLine = /^\S+ file (?<ms>\d+)ms (?<project>\S+) (?<file>\S+)$/u;
+const fileLine = new RegExp(
+  String.raw`^\S+ file (?<ms>\d+)ms ${projectPattern} (?<file>\S+)$`,
+  "u"
+);
 
 /**
  * Seconds per file, `<project> <file>`, as one progress log has them: from

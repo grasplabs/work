@@ -17,11 +17,16 @@
 # (November 2026). Now node_modules are restored only beside the store their
 # lockfile installed, and a store is saved only by the install that filled it.
 #
-# Only a job that says so saves a cache it missed: `plan` for a pull
-# request, which runs before the test shards, so they hit what it saved,
-# and `release` on a push to main, whose caches every pull request can
-# read. Every job saving would have them all pack the same 2 GB at once,
-# for one to win.
+# Only the tests that install offline read the store
+# (scripts/package-definition*.test.ts, all in the first test shard): a
+# job restores node_modules alone, about 9 s sooner than with the store,
+# and the store only to install when node_modules missed, unless it
+# passes `store: true`.
+#
+# Only a job that says so saves a cache it missed: `static` for a pull
+# request, so the pull request's next run hits it, and `release` on a
+# push to main, whose caches every pull request can read. Every job saving
+# would have them all pack the same 2 GB at once, for one to win.
 #
 # Then oxc.wasm, which the compiler builds in (.github/actions/oxc-wasm),
 # with no token: every workflow that sets up can build.
@@ -31,6 +36,9 @@ description: Install Vite+ and Node.js, restore or install node_modules, and dow
 inputs:
   save:
     description: "Save node_modules and pnpm's store when their cache missed: true or false"
+    default: "false"
+  store:
+    description: "Restore pnpm's store even when node_modules hit, for tests that install offline from it: true or false"
     default: "false"
   oxc-wasm:
     description: "Download oxc.wasm, for a job that builds or tests the compiler: true or false"
@@ -54,19 +62,21 @@ runs:
         LOCKFILE_HASH: ${{ hashFiles('pnpm-lock.yaml') }}
         MODULES_HASH: ${{ hashFiles('.node-version', 'package.json', 'apps/*/package.json', 'packages/*/package.json', 'packages/connectors/*/package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
     # An older lockfile's store when this one's is missing: most of what the
-    # install needs, and it fetches the rest.
-    - id: store
+    # install needs, and it fetches the rest. Before node_modules for a job
+    # that reads the store: they are restored only beside this lockfile's
+    # own store, as with an older one an install that found node_modules
+    # up to date wouldn't fetch what the store lacks.
+    - id: store-first
+      if: inputs.store == 'true'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.keys.outputs.store-path }}
         key: ${{ steps.keys.outputs.store }}
         restore-keys: pnpm-store-${{ runner.os }}-${{ runner.arch }}-
     # Every node_modules of the workspace's packages (pnpm-workspace.yaml):
-    # each holds links into the root's virtual store. Only beside this
-    # lockfile's own store: with an older one, an install that found
-    # node_modules up to date wouldn't fetch what the store lacks.
+    # each holds links into the root's virtual store.
     - id: modules
-      if: steps.store.outputs.cache-hit == 'true'
+      if: inputs.store != 'true' || steps.store-first.outputs.cache-hit == 'true'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
@@ -75,11 +85,19 @@ runs:
           packages/*/node_modules
           packages/connectors/*/node_modules
         key: ${{ steps.keys.outputs.modules }}
+    # A job that doesn't read the store needs it only to install.
+    - id: store-late
+      if: inputs.store != 'true' && steps.modules.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.keys.outputs.store-path }}
+        key: ${{ steps.keys.outputs.store }}
+        restore-keys: pnpm-store-${{ runner.os }}-${{ runner.arch }}-
     - if: steps.modules.outputs.cache-hit != 'true'
       shell: bash
       run: vp install --frozen-lockfile
     # The store first: node_modules saved without it are what broke before.
-    - if: steps.modules.outputs.cache-hit != 'true' && steps.store.outputs.cache-hit != 'true' && inputs.save == 'true'
+    - if: steps.modules.outputs.cache-hit != 'true' && steps.store-first.outputs.cache-hit != 'true' && steps.store-late.outputs.cache-hit != 'true' && inputs.save == 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.keys.outputs.store-path }}

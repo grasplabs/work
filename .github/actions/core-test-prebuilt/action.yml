@@ -1,0 +1,36 @@
+# Core's tests' global-setup builds (the App compiler, the extractor, the
+# connect bundle: about 30 s of a test shard's start), kept by the hash of
+# their inputs (apps/core/test/prebuilt.ts). On a hit, global setup only
+# copies them, and it checks the key itself, so a wrong restore is built
+# again. A job that passes `save` builds and saves those it missed: CI's
+# test-caches job on a push to main, where every pull request can read
+# them, and a pull request's first test shard, for its own next run; the
+# other shards only restore, so no two jobs race to pack the same files.
+# After Set up.
+name: Core's test builds
+description: Restore core's tests' global-setup builds by their inputs' key, or build and save them
+
+inputs:
+  save:
+    description: "Build and save them when the cache missed: true or false"
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: bash
+      run: echo "key=test-prebuilt-$(node apps/core/test/prebuilt-key.ts)" >> "$GITHUB_OUTPUT"
+    - id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: apps/core/dist/test-prebuilt
+        key: ${{ steps.key.outputs.key }}
+    - if: steps.restore.outputs.cache-hit != 'true' && inputs.save == 'true'
+      shell: bash
+      run: node scripts/build-core-test-prebuilt.ts
+    - if: steps.restore.outputs.cache-hit != 'true' && inputs.save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: apps/core/dist/test-prebuilt
+        key: ${{ steps.key.outputs.key }}

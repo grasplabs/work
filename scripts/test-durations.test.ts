@@ -56,6 +56,19 @@ describe("reading test files' durations from progress logs", () => {
     });
   });
 
+  it("reads a browser project's instance, named after its browser with a space", () => {
+    const seconds = fileSecondsIn(
+      log(
+        "2026-11-10T10:00:30.000Z passed 1000ms @grasp-os/ui:browser (chromium) test/kit.browser.test.tsx > kit > renders",
+        "2026-11-10T10:00:31.000Z file 31000ms @grasp-os/ui:browser (chromium) test/kit.browser.test.tsx"
+      )
+    );
+
+    expect(Object.fromEntries(seconds)).toStrictEqual({
+      "@grasp-os/ui:browser (chromium) test/kit.browser.test.tsx": 31,
+    });
+  });
+
   it("skips lines that aren't a finished test", () => {
     expect(fileSecondsIn(log("", "not a test line"))).toStrictEqual(new Map());
   });

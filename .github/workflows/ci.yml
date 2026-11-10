@@ -10,17 +10,21 @@
 # with the Deploy platform workflow. Jobs with secrets never run for pull
 # requests from forks. CI deploys no client: the admins roll releases out.
 #
-# A draft pull request runs only the fast checks (static):
-# the tests, workerd, the release build and the journeys wait until it is
-# ready for review, which runs them all (`ready_for_review`). A draft can't
-# be merged, and the merge queue runs the rest again on top of main.
-# A ready pull request runs only the test projects its changes can affect
-# (plan, below); the merge queue runs every one, but not the journeys
-# (e2e, below). A nightly run on main runs everything: merges an admin
-# makes skip the queue, and with them the full suite, so a gap in what the
-# plan selects would otherwise show only once someone touches the package
-# it missed. A run by hand from the Actions tab is the same full run. When
-# the nightly run fails, it opens an issue (nightly-alert, below).
+# A draft pull request runs only the fast checks (static): the tests,
+# workerd, the release build and the journeys wait until it is ready for
+# review, which runs them all (`ready_for_review`). A draft can't be
+# merged.
+#
+# Every other run runs everything: every test project, every journey, the
+# builds, all at once: a run took 4.9 to 5.9 minutes (November 2026), so
+# there is nothing left to select: the pull request's run, the merge
+# queue's and a run by hand are the same run. No job waits for another
+# but `check`: a plan job ahead of the tests (which projects a change
+# reaches) cost 45 s on every run's critical path, and a pull request's
+# run that tested only part of the suite then needed a second, full run
+# before it could merge (November 2026). A nightly run on main runs it
+# all again, for merges an admin makes outside the queue; when it fails,
+# it opens an issue (nightly-alert, below).
 name: CI
 
 on:
@@ -65,7 +69,12 @@ jobs:
           # history's took most of this job's 9 s checkout.
           fetch-depth: 0
           filter: blob:none
+      # Saves what its setup missed (a changed lockfile, a new Vite+), for
+      # this branch's next run: static runs on every event but a push, where
+      # release saves.
       - uses: ./.github/actions/setup
+        with:
+          save: true
       - run: vp check
       - run: vp run check:secrets
       - run: vp run check:docs
@@ -98,98 +107,86 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
 
-  # Which test projects the run's changes can affect, and how many shards
-  # their files take (scripts/test-plan.ts). A pull request compares its
-  # merge commit with the main it was made on (HEAD^1): a change in a
-  # workspace package runs the projects of that package and of every
-  # package that depends on it, by pnpm's graph, and a change outside every
-  # package (config, lockfile, CI, tooling) runs them all. The merge queue
-  # runs them all. Shards: the fewest that each end within about 10 minutes
-  # by the durations (scripts/test-shards.ts), at most 16. Not for drafts.
-  # Small on purpose: the checkout's last two commits, the cached install,
-  # and a few seconds of Vitest resolving its projects (no tests run).
-  plan:
-    name: plan
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      projects: ${{ steps.plan.outputs.projects }}
-      shards: ${{ steps.plan.outputs.shards }}
-      e2e: ${{ steps.plan.outputs.e2e }}
-      admin-e2e: ${{ steps.plan.outputs['admin-e2e'] }}
-      oxc-wasm: ${{ steps.oxc-wasm.outputs.changed }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # The merge commit and its first parent, the base it compares with.
-          fetch-depth: 2
-      # Saves node_modules when its cache missed, for the test shards after.
-      - uses: ./.github/actions/setup
-        with:
-          save: true
-      - id: plan
-        run: node scripts/test-plan.ts
-        env:
-          GRASP_TEST_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
-      # Whether oxc.wasm's glue, its build, its pin or the committed
-      # oxc-parse.wasm changed against the base, as the merge commit's first
-      # parent: then the oxc-wasm job proves the pin and the committed module
-      # (below). A full run (by hand, nightly) proves them too.
-      - id: oxc-wasm
-        run: |
-          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm packages/sdk/src/oxc-parse.wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          EVENT: ${{ github.event_name }}
-
   # `vp test` in shards, a runner each: unsharded, one passing run reached
   # 16 minutes at about 5,300 tests (October 2026). Each shard gets its part
-  # of the planned projects' test files, split by how long each takes
+  # of every project's test files, split by how long each takes
   # (scripts/test-sequencer.ts, with the times in
   # scripts/test-durations.json), so the shards end together and together
-  # run every file once. The plan (above) sets how many: `--shard` takes
-  # the count from the matrix. Skipped when the plan has no tests to run.
-  # Part of the required `check` (below).
+  # run every file once; `--shard` takes the count from the matrix. Thirty
+  # shards: each about half a minute of setup, up to a minute and a half
+  # before core's first test (its global setup's builds and its runtime's
+  # first load of core) and two to three minutes of tests (November 2026).
+  # Forty ended only about 20 s sooner, as each is then set by that start
+  # and its longest file, and with them a run took more than the account's
+  # 60 concurrent runners (measured: 60 jobs at once, no more), so the
+  # journeys waited for runners. The shards no group ends sooner with are
+  # left empty (scripts/test-shards.ts). Part of the required `check`
+  # (below).
   test:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
-    needs: plan
-    if: needs.plan.outputs.shards != '[]'
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    # The test step's 15 minutes, and room for the steps around it.
-    timeout-minutes: 21
+    # The test step's timeout, and room for the steps around it.
+    timeout-minutes: 15
     strategy:
       # A failing shard doesn't cancel the other: each says what failed in
       # it.
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+        shard:
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+          ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # pnpm's store, and Chromium for the UI kit's browser checks, only
+      # where a test needs them: the first shard holds every such file
+      # (scripts/test-shards.ts, `runsInFirstShard`). The rest restore
+      # node_modules alone, 9 s sooner.
       - uses: ./.github/actions/setup
-      # Chromium's headless shell, for the UI kit's component tests in
-      # Vitest's browser mode (@grasp-os/ui:browser,
-      # packages/ui/vite.browser.config.ts).
-      - uses: ./.github/actions/playwright-browser
-      # gdb, for the stall reporter to print the thread stacks of each
-      # workerd before it ends a stalled run (GRASP_STALL_DUMP_STACKS below,
-      # scripts/stack-dump.ts). Ubuntu lets a process trace only its own
-      # descendants, and workerd is gdb's sibling, so tracing is opened up:
-      # the runner is a throwaway VM. A failed install leaves the dump to say
-      # gdb didn't run, and the tests run regardless.
-      # In the background, beside the tests: the dump needs it only once a
-      # run has stalled, minutes in, and the install took 10 to 15 s.
-      - name: Install gdb for stall stack dumps
-        continue-on-error: true
-        run: |
-          sudo sysctl -w kernel.yama.ptrace_scope=0
-          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb > "$RUNNER_TEMP/gdb-install.log" 2>&1 &)
+        with:
+          store: ${{ matrix.shard == 1 }}
+      - if: matrix.shard == 1
+        uses: ./.github/actions/playwright-browser
+      # Core's tests' global-setup builds, restored by their inputs' key;
+      # test-caches (below) saves them on main. On a pull request the first
+      # shard builds and saves those it missed too, in the pull request's
+      # own scope, so its next run restores them in every shard; the rest
+      # only restore, so no two shards race to pack the same files.
+      - uses: ./.github/actions/core-test-prebuilt
+        with:
+          save: ${{ github.event_name == 'pull_request' && matrix.shard == 1 }}
       # Shards split by how long each file takes (scripts/test-sequencer.ts,
       # with the times in scripts/test-durations.json), each shard running
       # one project group only (scripts/test-shards.ts): a shard that ran
@@ -220,7 +217,7 @@ jobs:
       # hang outside any test, after the files ended (a worker's teardown
       # after its file): once no file has run for the same grace, the run
       # ends with the workerd stacks, before this step's timeout when the
-      # last file ended by about minute 9. Two minutes before
+      # last file ended by about minute 4. Two minutes before
       # that timeout, the reporter prints the files and tests still running, and
       # each finished test is in the shard's test-progress artifact. "0
       # files, 0 tests" there means the hang is outside any test, after the
@@ -233,18 +230,25 @@ jobs:
       # Beside the tests, the runner's memory once a minute
       # (scripts/memory-log.ts): a runner that runs out of memory dies with
       # only "shutdown signal" to say, and this step's log is all it keeps.
-      # The plan's `--project` arguments, unquoted, none for every project.
+      # gdb, for the stall reporter to print the thread stacks of each
+      # workerd before it ends a stalled run (GRASP_STALL_DUMP_STACKS below,
+      # scripts/stack-dump.ts). Ubuntu lets a process trace only its own
+      # descendants, and workerd is gdb's sibling, so tracing is opened up:
+      # the runner is a throwaway VM. In the background, beside the tests:
+      # the dump needs it only once a run has stalled, minutes in, and as a
+      # step of its own it held every shard up 5 s. A failed install
+      # leaves the dump to say gdb didn't run.
       - run: |
+          (sudo sysctl -w kernel.yama.ptrace_scope=0 && { command -v gdb || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb; }; }) > "$RUNNER_TEMP/gdb-install.log" 2>&1 &
           node scripts/memory-log.ts &
           sampler=$!
           trap 'kill "$sampler"' EXIT
-          vp test $GRASP_TEST_PROJECTS --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
-        timeout-minutes: 15
+          vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
+        timeout-minutes: 10
         env:
-          GRASP_TEST_PROJECTS: ${{ needs.plan.outputs.projects }}
           # Below the step's timeout, so the reporter says what still runs
           # before the step is killed.
-          GRASP_STALL_REPORT_AFTER_MINUTES: 13
+          GRASP_STALL_REPORT_AFTER_MINUTES: 8
           # Seconds past a test's own timeout (counted for each attempt):
           # room for the hooks around it, which have timeouts of their own.
           # The longest is 120 s, set by workerflow's process tests
@@ -272,8 +276,9 @@ jobs:
           retention-days: 14
       # The UI kit's browser tests (@grasp-os/ui:browser) save a screenshot
       # of each failing page, and what it attached: kept when the shard
-      # fails, else lost with the runner.
-      - if: failure()
+      # fails, else lost with the runner. Only the first shard runs them
+      # (scripts/test-shards.ts, `runsInFirstShard`).
+      - if: failure() && matrix.shard == 1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ui-browser-failures-${{ matrix.shard }}-of-${{ strategy.job-total }}
@@ -297,44 +302,55 @@ jobs:
             echo "The kernel log is unavailable, so an OOM kill can't be ruled out: $kernel_log"
           fi
 
-  # The one required check (.github/rulesets/main.json), for every job of
-  # the run: a job added, split or removed leaves the ruleset as it is, and
-  # no runner starts only to report a name the ruleset asks for. It runs
-  # however they ended, and passes only if all of them passed: GitHub
-  # counts a skipped required check as passing, so this job mustn't be
-  # skipped when one of them failed, was cancelled or was skipped. Two
-  # skips pass: the test shards when the plan has none to run, and, on a
-  # draft, everything but static (a draft can't be merged; marking it
-  # ready runs it all, and this check again). In the merge queue the
-  # journeys (e2e, admin-e2e) skip too, and pass (why: e2e, below), and so
-  # does a journey suite whose stack the plan finds unchanged.
-  # Proves the pin of oxc.wasm before it merges, when the plan finds its
-  # glue, its build or pin.json changed: builds it read-only from this
-  # checkout, publishes nothing, and fails unless the release pin.json
-  # names exists and its digest, the pin and this build are one
-  # (.github/actions/oxc-wasm-build). Whoever published the release, the
-  # bytes CI and every deployment run are then the glue's. About five
-  # minutes of Rust, on a rare pull request. Part of the required `check`.
+  # Proves the pin of oxc.wasm before it merges, when its glue, its
+  # build, its pin or the committed oxc-parse.wasm changed against the base
+  # (the merge commit's first parent), and on every full run (by hand,
+  # nightly): builds it read-only from this checkout, publishes nothing,
+  # and fails unless the release pin.json names exists and its digest, the
+  # pin and this build are one (.github/actions/oxc-wasm-build). Whoever
+  # published the release, the bytes CI and every deployment run are then
+  # the glue's. About five minutes of Rust, on a rare pull request; on the
+  # rest, a few seconds of git. Part of the required `check`.
   oxc-wasm:
     name: oxc-wasm
-    needs: plan
-    if: needs.plan.outputs.oxc-wasm == 'true'
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/oxc-wasm-build
+          # The merge commit and its first parent, the base it compares with.
+          fetch-depth: 2
+      - id: changed
+        run: |
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm packages/sdk/src/oxc-parse.wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "oxc.wasm's glue, build and pin are main's: nothing to prove." >> "$GITHUB_STEP_SUMMARY"
+          fi
+        env:
+          EVENT: ${{ github.event_name }}
+      - if: steps.changed.outputs.changed == 'true'
+        uses: ./.github/actions/oxc-wasm-build
         with:
           check: true
 
+  # The one required check (.github/rulesets/main.json), for every job of
+  # the run: a job added, split or removed leaves the ruleset as it is, and
+  # no runner starts only to report a name the ruleset asks for. It runs
+  # however they ended, and passes only if all of them passed: GitHub
+  # counts a skipped required check as passing, so this job mustn't be
+  # skipped when one of them failed, was cancelled or was skipped. One skip
+  # passes: on a draft, everything but static (a draft can't be merged;
+  # marking it ready runs it all, and this check again).
   check:
     name: check
     needs:
       [
         static,
-        plan,
         test,
         release,
         workerd,
@@ -349,7 +365,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, plan: $PLAN ($SHARDS), test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, e2e-build: $E2E_BUILD, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
+          echo "static: $STATIC, test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, e2e-build: $E2E_BUILD, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
           if [ "$STATIC" != success ]; then
             echo "::error title=check::static ended as $STATIC; check passes only when it succeeds."
             exit 1
@@ -358,43 +374,10 @@ jobs:
             echo "A draft runs only the fast checks; marking it ready for review runs the rest."
             exit 0
           fi
-          if [ "$TEST" = skipped ] && [ "$PLAN" = success ] && [ "$SHARDS" = '[]' ]; then
-            TEST="success (no tests affected)"
-          fi
-          # e2e's parts, its Firefox and WebKit parts and the build they
-          # start: one result, the first that isn't a success. A build or
-          # browser part that failed or was cancelled fails it whatever the
-          # parts did: e2e-build runs before the plan says whether any
-          # journey runs, and the parts it held back show as skipped,
-          # which the unchanged-stack rule below would pass.
-          for part in "$E2E_BUILD" "$E2E_BROWSERS"; do
-            case "$part" in
-              failure | cancelled) E2E=$part ;;
-              *)
-                if [ "$E2E" = success ] && [ "$part" != success ]; then
-                  E2E=$part
-                fi
-                ;;
-            esac
-          done
-          if [ "$EVENT" = merge_group ] && [ "$E2E" = skipped ] && [ "$ADMIN_E2E" = skipped ]; then
-            echo "The merge queue skips the journeys: the pull request's head passed them."
-            E2E=success
-            ADMIN_E2E=success
-          fi
-          if [ "$E2E" = skipped ] && [ "$PLAN" = success ] && [ "$E2E_RUNS" = false ]; then
-            echo "The change doesn't reach e2e's stack: no journey to run."
-            E2E="success (stack unchanged)"
-          fi
-          if [ "$ADMIN_E2E" = skipped ] && [ "$PLAN" = success ] && [ "$ADMIN_E2E_RUNS" = false ]; then
-            echo "The change doesn't reach the admin's stack: no admin journey to run."
-            ADMIN_E2E="success (stack unchanged)"
-          fi
-          if [ "$OXC_WASM" = skipped ] && [ "$PLAN" = success ] && [ "$OXC_WASM_RUNS" != true ]; then
-            OXC_WASM="success (glue unchanged)"
-          fi
+          # Each job by its own name: when e2e-build fails, the parts it
+          # holds back show as skipped, and the build is what failed.
           failed=""
-          for job in "plan=$PLAN" "test shards=${TEST%% *}" "release=$RELEASE" "workerd=$WORKERD" "e2e parts=${E2E%% *}" "admin-e2e=${ADMIN_E2E%% *}" "oxc-wasm=${OXC_WASM%% *}"; do
+          for job in "test shards=$TEST" "release=$RELEASE" "workerd=$WORKERD" "e2e-build=$E2E_BUILD" "e2e parts=$E2E" "e2e browsers=$E2E_BROWSERS" "admin-e2e=$ADMIN_E2E" "oxc-wasm=$OXC_WASM"; do
             [ "${job#*=}" = success ] || failed="$failed ${job%%=*} (${job#*=}),"
           done
           if [ -n "$failed" ]; then
@@ -403,8 +386,6 @@ jobs:
           fi
         env:
           STATIC: ${{ needs.static.result }}
-          PLAN: ${{ needs.plan.result }}
-          SHARDS: ${{ needs.plan.outputs.shards }}
           RELEASE: ${{ needs.release.result }}
           WORKERD: ${{ needs.workerd.result }}
           # A matrix job's result: a failure if any shard or part failed.
@@ -413,28 +394,22 @@ jobs:
           E2E_BUILD: ${{ needs.e2e-build.result }}
           E2E_BROWSERS: ${{ needs.e2e-browsers.result }}
           ADMIN_E2E: ${{ needs.admin-e2e.result }}
-          E2E_RUNS: ${{ needs.plan.outputs.e2e }}
-          ADMIN_E2E_RUNS: ${{ needs.plan.outputs['admin-e2e'] }}
           OXC_WASM: ${{ needs.oxc-wasm.result }}
-          OXC_WASM_RUNS: ${{ needs.plan.outputs.oxc-wasm }}
           DRAFT: ${{ github.event.pull_request.draft == true }}
           EVENT: ${{ github.event_name }}
 
-  # The e2e stack, built once for every e2e part (`vp run e2e:build`,
-  # e2e/build.ts): the frontend in development mode with the App compiler,
+  # The e2e stack, built once for every e2e part (`node e2e/build.ts`, run
+  # directly, not through `vp run`): the frontend in development mode with
+  # the App compiler,
   # the extractor and the docs beside it, core's generated modules,
   # connect's build, and the stack's empty state with every migration
   # applied. Each part built it for itself, about 80 s of its 3 to 6
   # minutes (November 2026); now it only starts it (GRASP_E2E_PREBUILT,
-  # playwright.config.ts). Beside the plan, not after it. Chromium's
-  # headless shell is cached here too, by Playwright's version, for the
-  # parts to restore.
-  # For every ready pull request, whether or not the plan finds the
-  # journeys' stack changed: it runs beside the plan, so it can't wait for
-  # it, and a build nobody downloads costs only its runner.
+  # playwright.config.ts). Chromium's headless shell is cached here too,
+  # by Playwright's version, for the parts to restore.
   e2e-build:
     name: e2e-build
-    if: github.event_name != 'push' && github.event_name != 'merge_group' && github.event.pull_request.draft != true
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -485,15 +460,8 @@ jobs:
   # (setup-voice.e2e.ts's story), after about a minute of setup and
   # starting the stack (November 2026). Add a parallel part by adding an
   # entry and raising the count in every entry's `part` and in e2e-build's
-  # `--all` (above). Part of the required `check` (above).
-  #
-  # Not in the merge queue, here and in admin-e2e: the pull request's head
-  # already passed every journey, and repeating them on main plus the batch
-  # took 8 of the run's 28 jobs while the account runs at most 20 at once,
-  # which halved how fast the queue merged (November 2026). The queue still
-  # runs static, every test shard, workerd and the release build; the
-  # nightly full run (nightly-alert, below) catches a journey two pull
-  # requests break only together.
+  # `--all` (above). Part of the required `check` (above), in the merge
+  # queue too: it is the run that tests the tree that lands.
   #
   # On the runner itself, with Chromium's headless shell from e2e-build's
   # cache: the runner's image has the system packages Chromium needs.
@@ -501,14 +469,10 @@ jobs:
   # install cache lives elsewhere in it (November 2026). Firefox and WebKit
   # need packages the runner lacks: their part caches them
   # (e2e-browsers, below).
-  #
-  # Only when the plan finds the change reaches its stack
-  # (scripts/test-plan.ts, `journeysReached`): a change to the admin, the
-  # router or Vitest's test files alone leaves what it runs as it was.
   e2e:
     name: e2e (${{ matrix.part }})
-    needs: [plan, e2e-build]
-    if: needs.plan.outputs.e2e == 'true' && github.event_name != 'merge_group'
+    needs: e2e-build
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     # About 1 minute of setup and starting the stack, then each part's
     # tests.
@@ -619,8 +583,8 @@ jobs:
   # as e2e, above.
   e2e-browsers:
     name: e2e (${{ matrix.browser }})
-    needs: [plan, e2e-build]
-    if: needs.plan.outputs.e2e == 'true' && github.event_name != 'merge_group'
+    needs: e2e-build
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -703,14 +667,10 @@ jobs:
   # own, the admin on the fake Cloudflare API, so apart from e2e's, in
   # parts (`--shard`), a stack each: one after another they took 4
   # minutes (November 2026). Chromium only, on the runner, as e2e's
-  # parts. Only when the plan finds the change reaches the admin
-  # (scripts/test-plan.ts, `journeysReached`). Skipped so, `check` passes
-  # it, and fails the run when the plan itself failed.
+  # parts.
   admin-e2e:
     name: admin-e2e (${{ matrix.shard }})
-    # Not in the merge queue, as e2e above.
-    needs: plan
-    if: needs.plan.outputs['admin-e2e'] == 'true' && github.event_name != 'merge_group'
+    if: github.event_name != 'push' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -802,6 +762,27 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Core's tests' global-setup builds on main, where every pull request can
+  # read them (a pull request's own are its alone), built without a test
+  # run (scripts/build-core-test-prebuilt.ts). One job saves, so the shards
+  # never race to pack the same files. Nothing waits for it. Vitest's
+  # pre-bundled dependencies aren't cached: restored warm, they started
+  # core's shards no sooner (50 s to the first file either way, November
+  # 2026).
+  test-caches:
+    name: test-caches
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/core-test-prebuilt
+        with:
+          save: true
+
   # Every push to main deploys staging's platform (the admin, router and
   # connect gateway) with the Deploy platform workflow, the same steps a
   # run by hand takes, in staging's GitHub and 1Password environments.
@@ -882,9 +863,9 @@ jobs:
       - run: vp run release:upload --release release-out --assign-id
 
   # When the nightly full run fails, an issue says so: nobody watches the
-  # Actions tab at 02:17, and the merge queue no longer runs the journeys
-  # (e2e, above), so this run is where a break between two pull requests
-  # shows. One open issue at a time: a later failure comments on it.
+  # Actions tab at 02:17, and merges an admin makes outside the queue
+  # are tested only on their own, so this run is where a break between two
+  # of them shows. One open issue at a time: a later failure comments on it.
   # Only the nightly run, and not when it was cancelled.
   nightly-alert:
     name: nightly-alert

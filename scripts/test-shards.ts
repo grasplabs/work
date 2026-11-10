@@ -22,6 +22,8 @@ export interface ShardFile {
   readonly group: number;
   /** Whether the project runs its files one at a time (`fileParallelism: false`). */
   readonly serial: boolean;
+  /** Whether the project runs its files in a browser (`browser.enabled`). */
+  readonly browser: boolean;
   /** How long the file's tests take, in seconds. */
   readonly seconds: number;
 }
@@ -58,49 +60,28 @@ const workOf = (files: readonly ShardFile[]): number =>
   files.reduce((total, file) => total + costOf(file), 0);
 
 /**
- * How long a shard with `files` takes, roughly: its groups one after
- * another, each as long as its files run at once (their work spread over
- * the files a runner works through together, or its longest such file if
- * that is longer), then those of each project that runs its files one
- * after another (`serial`: their work added up); and the start of each of
- * its projects. Vitest runs a serial project's files after the rest of
- * the group's, not beside them: in CI the compiler's started once core's
- * had ended (November 2026). A project runs its files one at a time when
+ * How long a shard with `files` takes, roughly: its projects one after
+ * another, each its start and then as long as its files run at once
+ * (their work spread over the files a runner works through together, or
+ * its longest file if that is longer), or, for a project that runs its
+ * files one after another (`serial`), their work added up. Vitest starts a
+ * project's files once the project before it in the shard has ended: in
+ * CI the scripts' longest build began after the admin's last file, and
+ * core's first file 40 s after the scripts' last, its runtime starting
+ * only then (November 2026). A project runs its files one at a time when
  * two at once starve each other, such as the compiler's builds, each of
  * which starts Node, TypeScript and three bundles across the runner's CPUs.
  */
 export const shardSeconds = (files: readonly ShardFile[]): number => {
-  const groups = new Map<
-    number,
-    {
-      parallel: number;
-      serial: Map<string, number>;
-      /** The longest file run at once with others, never a serial one. */
-      longest: number;
-    }
-  >();
-  for (const file of files) {
-    const group = groups.get(file.group) ?? {
-      parallel: 0,
-      serial: new Map<string, number>(),
-      longest: 0,
-    };
-    if (file.serial) {
-      group.serial.set(
-        file.project,
-        (group.serial.get(file.project) ?? 0) + costOf(file)
-      );
-    } else {
-      group.parallel += costOf(file);
-      group.longest = Math.max(group.longest, costOf(file));
-    }
-    groups.set(file.group, group);
-  }
-  let total =
-    new Set(files.map(({ project }) => project)).size * projectStartSeconds;
-  for (const { parallel, serial, longest } of groups.values()) {
-    const oneByOne = [...serial.values()].reduce((sum, each) => sum + each, 0);
-    total += Math.max(parallel / concurrentFiles, longest) + oneByOne;
+  let total = 0;
+  for (const own of Map.groupBy(files, ({ project }) => project).values()) {
+    const work = workOf(own);
+    const longest = Math.max(...own.map(costOf));
+    total +=
+      projectStartSeconds +
+      (own[0]?.serial === true
+        ? work
+        : Math.max(work / concurrentFiles, longest));
   }
   return total;
 };
@@ -126,6 +107,25 @@ const unitsOf = (files: readonly ShardFile[]): ShardFile[][] => {
   );
 };
 
+/**
+ * The test files that install offline from pnpm's store, by `key`: they
+ * run in the first shard, whatever the split, as CI restores the store,
+ * about 9 s of a shard's setup, only there (.github/workflows/ci.yml,
+ * `test`). They must be in the tests' first group, whose first shard is
+ * the run's first. test-shards.test.ts checks that every test file that
+ * installs offline matches.
+ */
+export const installsOffline = (key: string): boolean =>
+  /^scripts scripts\/package-definition[\w-]*\.test\.ts$/u.test(key);
+
+/**
+ * Whether a test file runs in the first shard, whatever the split: those
+ * that install offline (`installsOffline`), and those of a project run in
+ * a browser, as CI installs the test shards' browser only there too.
+ */
+export const runsInFirstShard = ({ key, browser }: ShardFile): boolean =>
+  browser || installsOffline(key);
+
 /** A unit by its first file's key, for an order that is the same on every runner. */
 const keyOfUnit = (unit: readonly ShardFile[]): string => unit[0]?.key ?? "";
 
@@ -139,9 +139,17 @@ export const spreadOver = (
   count: number
 ): ShardFile[][] => {
   const shards: ShardFile[][] = Array.from({ length: count }, () => []);
-  const longestFirst = unitsOf(files).toSorted(
-    (a, b) => workOf(b) - workOf(a) || byKey(keyOfUnit(a), keyOfUnit(b))
-  );
+  const units = unitsOf(files);
+  const pinned = (unit: readonly ShardFile[]): boolean =>
+    unit.some(runsInFirstShard);
+  for (const unit of units.filter(pinned)) {
+    shards[0]?.push(...unit);
+  }
+  const longestFirst = units
+    .filter((unit) => !pinned(unit))
+    .toSorted(
+      (a, b) => workOf(b) - workOf(a) || byKey(keyOfUnit(a), keyOfUnit(b))
+    );
   for (const unit of longestFirst) {
     let best = 0;
     let bestSeconds = Number.POSITIVE_INFINITY;
@@ -172,8 +180,10 @@ export const spreadOver = (
  * GRA-1094). Of one group each, a shard starts only its own, and a group
  * kept apart to run alone (vite.brain.config.ts) has its runner to itself.
  * Each group gets one shard, and each shard left over goes to the group
- * whose shards would end last. The same files always split the same way,
- * on every runner.
+ * whose shards would end last, of those that end later than their longest
+ * unit alone would: a group held up by one long file (the compiler's
+ * longest build) gains nothing from more, which then go where they help.
+ * The same files always split the same way, on every runner.
  */
 export const splitIntoShards = (
   files: readonly ShardFile[],
@@ -186,20 +196,37 @@ export const splitIntoShards = (
       `${count} shards can't hold the tests' ${order.length} groups apart: run at least ${order.length}.`
     );
   }
+  const misplaced = files.filter(
+    (each) => runsInFirstShard(each) && each.group !== order[0]
+  );
+  if (misplaced.length > 0) {
+    throw new Error(
+      `${misplaced.map(({ key }) => key).join(", ")} must be in the tests' first group to run in the first shard.`
+    );
+  }
   const shardsOf = new Map(
     order.map((group) => [group, spreadOver(groups.get(group) ?? [], 1)])
   );
   const longestOf = (shards: readonly ShardFile[][]): number =>
     Math.max(...shards.map(shardSeconds));
+  /** The soonest a group's shards can end, however many: its longest unit's. */
+  const floorOf = new Map(
+    order.map((group) => [group, longestOf(unitsOf(groups.get(group) ?? []))])
+  );
   for (let left = count - order.length; left > 0; left -= 1) {
-    let slowest = order[0] ?? 0;
+    let slowest: number | undefined;
+    let slowestSeconds = Number.NEGATIVE_INFINITY;
     for (const group of order) {
-      if (
-        longestOf(shardsOf.get(group) ?? []) >
-        longestOf(shardsOf.get(slowest) ?? [])
-      ) {
+      const seconds = longestOf(shardsOf.get(group) ?? []);
+      const shortens = seconds > (floorOf.get(group) ?? 0);
+      if (shortens && seconds > slowestSeconds) {
         slowest = group;
+        slowestSeconds = seconds;
       }
+    }
+    if (slowest === undefined) {
+      // Every group ends with its longest unit: more shards end no sooner.
+      break;
     }
     shardsOf.set(
       slowest,
@@ -209,7 +236,12 @@ export const splitIntoShards = (
       )
     );
   }
-  return order.flatMap((group) => shardsOf.get(group) ?? []);
+  const shards = order.flatMap((group) => shardsOf.get(group) ?? []);
+  // A shard each for the rest, empty: Vitest runs none of its files.
+  return [
+    ...shards,
+    ...Array.from({ length: count - shards.length }, (): ShardFile[] => []),
+  ];
 };
 
 /** A file as the order within its project sees it: its time, if anyone took it. */
@@ -231,42 +263,4 @@ export const startsFirst = (a: TimedFile, b: TimedFile): number => {
     );
   }
   return b.seconds - a.seconds || byKey(a.key, b.key);
-};
-
-/**
- * How long a shard may take, by `shardSeconds`, before CI adds another: a
- * run splits its files into the fewest shards that each end within it
- * (`shardCountFor`). Every shard is a runner, with about a minute of
- * checkout and install before its first test, and GitHub runs at most
- * about 60 of the organization's jobs at once, so fewer, longer shards
- * let more pull requests through. On GitHub's 4-CPU runners the model
- * matched the shards' measured test steps (24 shards: at most 301 s
- * modelled, 313 s measured, October 2026). Ten minutes keeps a shard well
- * inside the test step's 15 and the stall reporter's 13: the whole suite
- * in 13 shards instead of 24.
- */
-export const shardTargetSeconds = 600;
-
-/** The most shards a run splits into, however long its files take. */
-export const maxShards = 16;
-
-/**
- * The fewest shards, of at least one per group, that run `files` each
- * within `shardTargetSeconds`, or `maxShards` if none do; none for no
- * files.
- */
-export const shardCountFor = (files: readonly ShardFile[]): number => {
-  if (files.length === 0) {
-    return 0;
-  }
-  const groups = new Set(files.map(({ group }) => group)).size;
-  for (let count = groups; count < maxShards; count += 1) {
-    const longest = Math.max(
-      ...splitIntoShards(files, count).map(shardSeconds)
-    );
-    if (longest <= shardTargetSeconds) {
-      return count;
-    }
-  }
-  return Math.max(groups, maxShards);
 };

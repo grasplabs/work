@@ -42,6 +42,7 @@ export const shardFileOf = (spec: TestSpecification): ShardFile => ({
   group: spec.project.config.sequence.groupOrder,
   // `fileParallelism: false` resolves to one worker.
   serial: spec.project.config.maxWorkers === 1,
+  browser: spec.project.config.browser.enabled,
   seconds: secondsOf(spec),
 });
 
@@ -70,7 +71,12 @@ export default class DurationSequencer extends BaseSequencer {
         (a, b) =>
           a.project.config.sequence.groupOrder -
             b.project.config.sequence.groupOrder ||
-          // Projects one after another, as Vitest's own order has them.
+          // Projects one after another, as Vitest's own order has them,
+          // and as the split counts them (scripts/test-shards.ts,
+          // `shardSeconds`). Longest first across a shard's projects
+          // started core's runtime beside the brain's files, and a brain
+          // test that takes under a second alone took 15 s and timed out
+          // (November 2026).
           byKey(a.project.name, b.project.name) ||
           startsFirst(timed(a), timed(b))
       )
