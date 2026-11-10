@@ -87,13 +87,19 @@ const pageFunctionOf = (value: unknown): PageFunction | undefined => {
   return { kind: value.kind as ReferenceKind, args, returns };
 };
 
-/** The own entries of `value`, at most `max`; none for anything else. */
-const entriesOf = (value: unknown, max: number): [string, unknown][] => {
+/**
+ * The own entries of `value`, a record of at most `max`; undefined for
+ * anything else, which is no part of a workflow, never an empty one.
+ */
+const entriesOf = (
+  value: unknown,
+  max: number
+): [string, unknown][] | undefined => {
   if (!isPlainObject(value)) {
-    return [];
+    return undefined;
   }
   const entries = Object.entries(value);
-  return entries.length > max ? [] : entries;
+  return entries.length > max ? undefined : entries;
 };
 
 /** `value` as one event's entry, or undefined when it isn't one. */
@@ -131,11 +137,24 @@ const pageWorkflowOf = (value: unknown): PageWorkflow | undefined => {
   if (!isPlainObject(value)) {
     return undefined;
   }
+  const eventEntries = entriesOf(value.events, workflowReferenceLimits.events);
+  const listenEntries = entriesOf(
+    value.listens,
+    workflowReferenceLimits.listens
+  );
+  const decisionEntries = entriesOf(
+    value.decisions,
+    workflowReferenceLimits.decisions
+  );
+  if (
+    eventEntries === undefined ||
+    listenEntries === undefined ||
+    decisionEntries === undefined
+  ) {
+    return undefined;
+  }
   const events = new Map<string, BoundWorkflowEvent>();
-  for (const [alias, entry] of entriesOf(
-    value.events,
-    workflowReferenceLimits.events
-  )) {
+  for (const [alias, entry] of eventEntries) {
     const event = pageEventOf(entry);
     if (!namePattern.test(alias) || event === undefined) {
       return undefined;
@@ -143,10 +162,7 @@ const pageWorkflowOf = (value: unknown): PageWorkflow | undefined => {
     events.set(alias, event);
   }
   const listens = new Map<string, ReadonlySet<string>>();
-  for (const [task, aliases] of entriesOf(
-    value.listens,
-    workflowReferenceLimits.listens
-  )) {
+  for (const [task, aliases] of listenEntries) {
     if (
       task.length === 0 ||
       task.length > workflowReferenceLimits.taskPathLength ||
@@ -162,10 +178,7 @@ const pageWorkflowOf = (value: unknown): PageWorkflow | undefined => {
     listens.set(task, new Set<string>(aliases));
   }
   const decisions = new Map<string, BoundWorkflowDecision>();
-  for (const [alias, entry] of entriesOf(
-    value.decisions,
-    workflowReferenceLimits.decisions
-  )) {
+  for (const [alias, entry] of decisionEntries) {
     const decision = pageDecisionOf(entry);
     if (!namePattern.test(alias) || decision === undefined) {
       return undefined;

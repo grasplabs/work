@@ -10,15 +10,13 @@
 // `@ts-expect-error` must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { v } from "../src/index.ts";
 import type {
   AnyWorkflowReference,
   DecisionContextOf,
+  DecisionOutputOf,
   DecisionValueOf,
   EventDataOf,
   Id,
-  Infer,
-  InferInput,
   WorkflowDecisionWait,
   WorkflowEventReference,
   WorkflowEventsOf,
@@ -26,7 +24,13 @@ import type {
   WorkflowReturnOf,
   WorkflowWaitOf,
 } from "../src/index.ts";
-import { useMutation, usePaginatedQuery, useQuery } from "../src/react.ts";
+import {
+  useForm,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from "../src/react.ts";
+import type { DecisionAnswer } from "../src/react.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 
 /**
@@ -63,31 +67,23 @@ expectTypeOf<WorkflowArgsOf<typeof archive>>().toEqualTypeOf<
   Record<never, never>
 >();
 expectTypeOf<WorkflowReturnOf<typeof archive>>().toEqualTypeOf<null>();
-expectTypeOf(summarize.alias).toEqualTypeOf<"summarizeNote">();
+expectTypeOf(summarize.name).toEqualTypeOf<"workflows.summarizeNote">();
 
-// Data and events only: no children that act, and no phantom names.
+// Names only: no children that act, no contract, and no phantom names.
 expectTypeOf<Extract<keyof typeof summarize, string>>().toEqualTypeOf<
-  | "kind"
-  | "visibility"
-  | "resourceId"
-  | "resourceVersion"
-  | "alias"
-  | "contractId"
-  | "fingerprint"
-  | "args"
-  | "returns"
-  | "events"
-  | "listens"
-  | "decisions"
-  | "queries"
-  | "mutations"
+  "name" | "events" | "decisions" | "queries" | "mutations"
 >();
+// @ts-expect-error -- a reference holds no descriptor of the declaration's
+void summarize.args;
+// @ts-expect-error -- nor the release it was generated in
+void summarize.resourceId;
 
-// Each event binds its workflow binding and its exact type, literally.
+// Each event is named under its workflow, literally.
 const edited = summarize.events.noteEdited;
-expectTypeOf(edited.workflow).toEqualTypeOf<"workflows.summarizeNote">();
-expectTypeOf(edited.alias).toEqualTypeOf<"noteEdited">();
-expectTypeOf(edited.type).toEqualTypeOf<"notes.note.edited">();
+expectTypeOf(
+  edited.name
+).toEqualTypeOf<"workflows.summarizeNote.events.noteEdited">();
+expectTypeOf<Extract<keyof typeof edited, string>>().toEqualTypeOf<"name">();
 expectTypeOf<EventDataOf<typeof edited>>().toEqualTypeOf<{
   noteId: Id<"notes">;
   title?: string;
@@ -138,14 +134,16 @@ if (wait.kind === "event") {
     void send(summarize, wait.event, { noteId });
   }
   if (wait.key === "do/2/awaitEdit") {
-    // Two events: the alias narrows to one.
-    if (wait.event.alias === "noteEdited") {
+    // Two events: the name narrows to one.
+    if (wait.event.name === "workflows.summarizeNote.events.noteEdited") {
       expectTypeOf<EventDataOf<typeof wait.event>>().toEqualTypeOf<{
         noteId: Id<"notes">;
         title?: string;
       }>();
     } else {
-      expectTypeOf(wait.event.alias).toEqualTypeOf<"styleChosen">();
+      expectTypeOf(
+        wait.event.name
+      ).toEqualTypeOf<"workflows.summarizeNote.events.styleChosen">();
     }
   }
   // @ts-expect-error -- no listen task has this path
@@ -185,11 +183,12 @@ declare const respond: <Wait extends WorkflowDecisionWait>(
   }
 ) => Promise<void>;
 
-// Each decision binds its workflow binding and key, literally, and holds
-// its value schema as data.
+// Each decision is named under its workflow, literally, its value's and
+// context's types phantom.
 const approve = summarize.decisions.approveSummary;
-expectTypeOf(approve.workflow).toEqualTypeOf<"workflows.summarizeNote">();
-expectTypeOf(approve.key).toEqualTypeOf<"approveSummary">();
+expectTypeOf(
+  approve.name
+).toEqualTypeOf<"workflows.summarizeNote.decisions.approveSummary">();
 expectTypeOf<DecisionValueOf<typeof approve>>().toEqualTypeOf<{
   comment: string;
   rating?: number;
@@ -211,22 +210,38 @@ expectTypeOf<keyof typeof summarize.decisions>().toEqualTypeOf<
 void summarize.decisions.reviewInvoice;
 // @ts-expect-error -- read-only schema metadata: nothing answers through it
 void approve.respond;
-// @ts-expect-error -- a value schema is data: nothing to call
-void approve.valueSchema["~standard"];
+// @ts-expect-error -- a name, with no value schema of its own
+void approve.valueSchema;
+expectTypeOf<DecisionOutputOf<typeof approve>>().toEqualTypeOf<{
+  comment: string;
+  rating?: number;
+}>();
 
-// A decision's form schema is built from its generated value schema.
-const responseSchema = v.object({
-  approved: v.boolean(),
-  value: approve.valueSchema,
-});
-expectTypeOf<InferInput<typeof responseSchema>>().toEqualTypeOf<{
-  approved: boolean;
-  value: { comment: string; rating?: number };
-}>();
-expectTypeOf<Infer<typeof responseSchema>>().toEqualTypeOf<{
-  approved: boolean;
-  value: { comment: string; rating?: number };
-}>();
+// A decision's answer form is typed from its reference alone.
+export const useDecisionFormChecks = (): void => {
+  void useForm(approve, {
+    defaultValues: { approved: false, value: { comment: "" } },
+    onSubmit: (answer) => {
+      expectTypeOf(answer).toEqualTypeOf<
+        DecisionAnswer<{ comment: string; rating?: number }>
+      >();
+    },
+  });
+  void useForm(summarize.decisions.chooseLength, {
+    defaultValues: { approved: true, value: "short" },
+    onSubmit: () => null,
+  });
+  // @ts-expect-error -- chooseLength's value, not approveSummary's
+  void useForm(approve, {
+    defaultValues: { approved: false, value: "short" },
+    onSubmit: () => null,
+  });
+  // @ts-expect-error -- an answer says whether it approves
+  void useForm(approve, {
+    defaultValues: { value: { comment: "" } },
+    onSubmit: () => null,
+  });
+};
 
 // Decision waits narrow by key to their own value, never another's.
 if (wait.kind === "decision") {

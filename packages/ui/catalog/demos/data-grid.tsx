@@ -115,7 +115,7 @@ const demoClient = (): GraspClient =>
         };
       },
     },
-    functions
+    { functions, workflows: {} }
   );
 
 const noChange = (): (() => void) => () => {

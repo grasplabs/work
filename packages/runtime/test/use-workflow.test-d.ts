@@ -9,12 +9,7 @@
 // `vp check`, never run: every `@ts-expect-error` must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type {
-  DecisionValueOf,
-  Id,
-  RunHandle,
-  WorkflowReference,
-} from "../src/index.ts";
+import type { DecisionValueOf, Id, RunHandle } from "../src/index.ts";
 import { useWorkflow } from "../src/react.ts";
 import type { AppErrorPayload, PendingControl } from "../src/react.ts";
 import { api, workflows } from "./notes/server/_generated/api.ts";
@@ -167,18 +162,15 @@ export const useWaitChecks = (): void => {
   }
 };
 
-declare const internal: Omit<
-  WorkflowReference<"summarizeNote", { noteId: Id<"notes"> }>,
-  "visibility"
-> & { readonly visibility: "internal" };
-
 export const useRefusedReferences = (): void => {
   // @ts-expect-error -- a hand-written workflow name
   void useWorkflow("summarizeNote");
   // @ts-expect-error -- an operation's reference, not a workflow's
   void useWorkflow(api.notes.create);
-  // @ts-expect-error -- an internal reference is no browser's
-  void useWorkflow(internal);
+  // @ts-expect-error -- a workflow's own event, not the workflow
+  void useWorkflow(workflows.summarizeNote.events.styleChosen);
+  // @ts-expect-error -- a decision's reference, not the workflow's
+  void useWorkflow(workflows.summarizeNote.decisions.approveSummary);
   // @ts-expect-error -- options are exactly { runId }
   void useWorkflow(workflows.summarizeNote, { runId: null });
   // @ts-expect-error -- no hidden generic arguments

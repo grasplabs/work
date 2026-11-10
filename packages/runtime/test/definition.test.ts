@@ -310,6 +310,16 @@ describe("operations", () => {
         /no name/u,
       ],
       [{ op: "addIndex", table: "tasks", fields: ["title"] }, /has a name/u],
+      // A workflow's events, listens and decisions are set on a workflow
+      // the App declares, never declaring one.
+      [
+        {
+          op: "setWorkflowContract",
+          alias: "triage",
+          contract: { events: {}, listens: {}, decisions: {} },
+        },
+        /declares no workflow `triage`/u,
+      ],
     ];
     for (const [operation, message] of refusals) {
       expect(() => applyOperation(before, operation)).toThrow(message);
@@ -548,6 +558,155 @@ describe("operations", () => {
     expect(definitionManifest(after).answers).toStrictEqual([
       { table: "tasks", field: "priority", value: "low" },
     ]);
+  });
+});
+
+describe("a workflow's contract", () => {
+  const triage = () =>
+    defined(
+      {
+        op: "addPermission",
+        permission:
+          'permission.workflow("triage", { args: v.object({ title: v.string() }), returns: v.null() })',
+      },
+      { op: "addPermission", permission: "people" }
+    );
+  const title = descriptorOf(v.object({ title: v.string().max(200) }));
+  const contract = {
+    events: {
+      edited: { type: "tasks.task.edited", data: title },
+      approved: { type: "tasks.task.approved", data: descriptorOf(v.null()) },
+    },
+    listens: { "do/1/wait": ["edited", "approved"] },
+    decisions: {
+      sign: { value: descriptorOf(v.boolean()), context: title },
+    },
+  };
+
+  test("is set on a declared workflow, read back from its text, and declared in grasp.config.ts", () => {
+    const definition = applyOperation(triage(), {
+      op: "setWorkflowContract",
+      alias: "triage",
+      contract,
+    });
+    const readBack = readDefinition(JSON.parse(definitionText(definition)));
+    const declared = definitionManifest(readBack).permissions.triage;
+    const config = definitionSources(definition)["grasp.config.ts"] ?? "";
+    expect({
+      readBack: definitionText(readBack) === definitionText(definition),
+      sources:
+        JSON.stringify(definitionSources(readBack)) ===
+        JSON.stringify(definitionSources(definition)),
+      // The manifest holds it as `permission.workflow` declares it: each
+      // listen's events in name order.
+      declared:
+        declared?.["~permission"] === "workflows"
+          ? {
+              events: declared.events,
+              listens: declared.listens,
+              decisions: declared.decisions,
+            }
+          : undefined,
+      printed: [
+        "events: {",
+        'type: "tasks.task.edited"',
+        "title: v.string().max(200)",
+        "listens: {",
+        '"do/1/wait": ["approved", "edited"]',
+        "decisions: {",
+        "value: v.boolean()",
+      ].filter((part) => !config.includes(part)),
+    }).toStrictEqual({
+      readBack: true,
+      sources: true,
+      declared: {
+        events: contract.events,
+        listens: { "do/1/wait": ["approved", "edited"] },
+        decisions: contract.decisions,
+      },
+      printed: [],
+    });
+    // Set again with none, it declares none, and prints none.
+    const cleared = applyOperation(definition, {
+      op: "setWorkflowContract",
+      alias: "triage",
+      contract: { events: {}, listens: {}, decisions: {} },
+    });
+    const clearedConfig = definitionSources(cleared)["grasp.config.ts"] ?? "";
+    expect(
+      ["events:", "listens:", "decisions:"].filter((part) =>
+        clearedConfig.includes(part)
+      )
+    ).toStrictEqual([]);
+  });
+
+  test.each<[string, string, Record<string, unknown>, RegExp]>([
+    [
+      "another kind's permission",
+      "people",
+      contract,
+      /declares no workflow `people`/u,
+    ],
+    ["an inherited key", "constructor", contract, /declares no workflow/u],
+    [
+      "a listen naming an event it doesn't declare",
+      "triage",
+      { ...contract, listens: { "do/1/wait": ["uploaded"] } },
+      /listens for events the workflow declares/u,
+    ],
+    [
+      "an event type that isn't one",
+      "triage",
+      {
+        ...contract,
+        events: { ...contract.events, edited: { type: "", data: title } },
+      },
+      /type is 1 to/u,
+    ],
+    [
+      "an event alias that isn't plain",
+      "triage",
+      {
+        events: { "task edited": contract.events.edited },
+        listens: {},
+        decisions: {},
+      },
+      /isn't an event's or a decision's alias/u,
+    ],
+    [
+      "a decision's own value schema",
+      "triage",
+      {
+        ...contract,
+        decisions: {
+          sign: { ...contract.decisions.sign, valueSchema: title },
+        },
+      },
+      /has no `valueSchema`/u,
+    ],
+    [
+      "a descriptor that doesn't read",
+      "triage",
+      {
+        ...contract,
+        decisions: {
+          sign: { value: { kind: "script" }, context: title },
+        },
+      },
+      /./u,
+    ],
+  ])("refuses %s, changing nothing", (_case, alias, given, message) => {
+    const before = triage();
+    expect(() =>
+      applyOperation(before, {
+        op: "setWorkflowContract",
+        alias,
+        // SAFETY: deliberately ill-formed contracts, as a tool might send.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        contract: given as never,
+      })
+    ).toThrow(message);
+    expect(definitionText(before)).toBe(definitionText(triage()));
   });
 });
 

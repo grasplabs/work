@@ -43,7 +43,9 @@ expectTypeOf<WorkflowReturnOf<typeof workflows.archiveNotes>>().toEqualTypeOf<
   DeclaredReturns<typeof archiveNotes>
 >();
 expectTypeOf<DeclaredReturns<typeof archiveNotes>>().toEqualTypeOf<null>();
-expectTypeOf(workflows.summarizeNote.alias).toEqualTypeOf<"summarizeNote">();
+expectTypeOf(
+  workflows.summarizeNote.name
+).toEqualTypeOf<"workflows.summarizeNote">();
 
 // A declaration names what it returns as well as its args: neither is optional.
 // @ts-expect-error -- no returns
@@ -52,6 +54,26 @@ permission.workflow("followUp", { args: v.object({}) });
 permission.workflow("followUp", { returns: v.null() });
 // @ts-expect-error -- returns is a value schema, not a descriptor or a type
 permission.workflow("followUp", { args: v.object({}), returns: "null" });
+// Its events and decisions are declared with value schemas too.
+permission.workflow("followUp", {
+  args: v.object({}),
+  returns: v.null(),
+  events: { edited: { type: "notes.note.edited", data: v.null() } },
+  listens: { "do/0/wait": ["edited"] },
+  decisions: { sign: { value: v.boolean(), context: v.null() } },
+});
+permission.workflow("followUp", {
+  args: v.object({}),
+  returns: v.null(),
+  // @ts-expect-error -- an event's data is a value schema, not a descriptor
+  events: { edited: { type: "notes.note.edited", data: v.null().descriptor } },
+});
+permission.workflow("followUp", {
+  args: v.object({}),
+  returns: v.null(),
+  // @ts-expect-error -- a decision has a context to review
+  decisions: { sign: { value: v.boolean() } },
+});
 
 // A page follows the generated reference, never the declaration itself.
 export const UseDeclaration = (): null => {

@@ -15,9 +15,11 @@ import type { WorkflowViewOf } from "../src/react.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
 import { applyingAtMostMs, WorkflowCalls } from "../src/workflow-calls.ts";
 import { readWorkflowReference } from "../src/workflow-reference-read.ts";
+import { workflowReferenceLimits } from "../src/workflow-references.ts";
 import { workflowView } from "../src/workflow-view.ts";
 import type { RunSnapshot } from "../src/workflow-view.ts";
-import { workflows } from "./notes/server/_generated/api.ts";
+import { functions as builtFunctions } from "./notes/.grasp/functions.ts";
+import { api, workflows } from "./notes/server/_generated/api.ts";
 
 // What `useWorkflow` shows and does (spec 10.4–10.4.7, 10.7.3), through
 // the session client exactly as the hook drives it: its two live queries
@@ -81,8 +83,11 @@ const handleOf = (runId: string) => ({
 
 const path = (name: string): string => `workflows.summarizeNote.${name}`;
 
-/** The page and host a client reaches, scripted by each test. */
-const host = () => {
+/**
+ * The page and host a client reaches, scripted by each test; the page
+ * built with `build`, the Notes fixture's `.grasp/functions.ts` unless given.
+ */
+const host = (build: unknown = builtFunctions) => {
   const calls: Call[] = [];
   const followed: Followed[] = [];
   const responses: { run: string; decision: string; answer: unknown }[] = [];
@@ -145,7 +150,7 @@ const host = () => {
     return found;
   };
   return {
-    client: new GraspClient(transport),
+    client: new GraspClient(transport, build),
     calls,
     followed,
     responses,
@@ -188,19 +193,24 @@ const snapshotOf = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-/** An event wait of `summarizeNote` as its `run` query names it. */
-const listening = (event: Record<string, unknown> = {}) => ({
+/**
+ * An event wait of `summarizeNote` as its `run` query names it, in
+ * listen task `key`.
+ */
+const listening = (
+  event: Record<string, unknown> = {},
+  key = "do/2/awaitEdit"
+) => ({
   kind: "event",
   id: "wait-1",
-  taskId: "do/2/awaitEdit",
-  key: "do/2/awaitEdit",
+  taskId: key,
+  key,
   title: "Waiting for an edit",
   openedAt: 1000,
   deadline: null,
   event: {
     kind: "workflowEvent",
     alias: "noteEdited",
-    fingerprint: workflows.summarizeNote.events.noteEdited.fingerprint,
     ...event,
   },
   canSend: true,
@@ -215,14 +225,19 @@ const unheard = (): void => {
 };
 
 /**
- * A hook showing `selection` of `summarizeNote` through `page`'s client,
- * as `useWorkflow` composes it: its calls, its live `run` query (while a
- * run is selected) and `canStart`, read and followed as `useQuery` does.
+ * A hook showing `selection` of `workflow` (`summarizeNote`'s unless
+ * given) through `page`'s client, as `useWorkflow` composes it: its
+ * calls, its live `run` query (while a run is selected) and `canStart`,
+ * read and followed as `useQuery` does.
  */
-const mount = (page: Host, initial?: string) => {
+const mount = (
+  page: Host,
+  initial?: string,
+  workflow: unknown = workflows.summarizeNote
+) => {
   let selection = initial;
   const internals = clientInternals(page.client);
-  const read = readWorkflowReference(workflows.summarizeNote);
+  const read = readWorkflowReference(internals, workflow);
   const calls = new WorkflowCalls(page.client, read);
   calls.select(selection);
   const stops = new Map<string, () => void>();
@@ -303,6 +318,37 @@ const showing = async (page: Host, snapshot: unknown = snapshotOf()) => {
   page.canStart().push(true);
   return hook;
 };
+
+/** The Notes fixture's build, its `summarizeNote` changed by `change`. */
+const buildWith = (
+  change: (summarize: Record<string, unknown>) => void
+): unknown => {
+  const build: unknown = structuredClone(builtFunctions);
+  const summarize: unknown =
+    isPlainObject(build) && isPlainObject(build.workflows)
+      ? build.workflows.summarizeNote
+      : undefined;
+  if (!isPlainObject(summarize)) {
+    throw new Error("The fixture's build declares summarizeNote");
+  }
+  change(summarize);
+  return build;
+};
+
+/** `record`'s entry `key`, which must be a plain object. */
+const entry = (record: unknown, key: string): Record<string, unknown> => {
+  const found: unknown = isPlainObject(record) ? record[key] : undefined;
+  if (!isPlainObject(found)) {
+    throw new Error(`Nothing at ${key}`);
+  }
+  return found;
+};
+
+/** As many of `make`'s entries as a workflow holds of them, and one more. */
+const tooMany = (max: number, make: () => unknown) =>
+  Object.fromEntries(
+    Array.from({ length: max + 1 }, (_, index) => [`entry${index}`, make()])
+  );
 
 describe("useWorkflow", () => {
   beforeEach(() => {
@@ -392,18 +438,55 @@ describe("useWorkflow", () => {
       expect(hook.view()).toMatchObject({ status: "running" });
     });
 
-    it("shows an event wait with the event's own generated reference, and refuses a snapshot naming an event the reference doesn't hold", async () => {
+    it("shows an event wait with the event's reference, by its name, which sends that event", async () => {
       const page = host();
+      page.answer(() => ({ value: { eventId: "event-1" } }));
       const hook = await showing(page, snapshotOf({ waits: [listening()] }));
       const [wait] = hook.view().waits;
-      expect(wait?.kind === "event" ? wait.event : undefined).toBe(
-        workflows.summarizeNote.events.noteEdited
-      );
-      page
-        .run("run-1")
-        .push(
-          snapshotOf({ waits: [listening({ alias: "documentUploaded" })] })
-        );
+      const event = wait?.kind === "event" ? wait.event : undefined;
+      if (event === undefined) {
+        throw new Error("Expected the event wait");
+      }
+      await hook.view().send(event, { noteId });
+      expect({
+        event,
+        frozen: Object.isFrozen(event),
+        calls: page.calls.map(({ name, input }) => ({ name, input })),
+      }).toStrictEqual({
+        event: workflows.summarizeNote.events.noteEdited,
+        frozen: true,
+        calls: [
+          {
+            name: path("mutations.send"),
+            input: { runId: "run-1", event: "noteEdited", data: { noteId } },
+          },
+        ],
+      });
+    });
+
+    it.each([
+      [
+        "an event the page's build doesn't declare",
+        listening({ alias: "documentUploaded" }),
+      ],
+      ["another workflow's event", listening({ alias: "confirmed" })],
+      ["an inherited key", listening({ alias: "constructor" })],
+      ["the prototype's key", listening({ alias: "__proto__" })],
+      [
+        "an event in a task that doesn't listen for it",
+        listening({ alias: "noteEdited" }, "do/0/chooseStyle"),
+      ],
+      [
+        "an event in a task the workflow doesn't have",
+        listening({ alias: "noteEdited" }, "do/9/elsewhere"),
+      ],
+      [
+        "an event in a task named by an inherited key",
+        listening({ alias: "noteEdited" }, "constructor"),
+      ],
+    ])("refuses a snapshot waiting on %s as invalid", async (_case, wait) => {
+      const page = host();
+      const hook = await showing(page, snapshotOf({ waits: [wait] }));
       expect(() => hook.view()).toThrow(
         expect.objectContaining({ code: "contract.invalid_snapshot" })
       );
@@ -768,28 +851,298 @@ describe("useWorkflow", () => {
       ]);
     });
 
-    it("sends nothing for another workflow's event or one made up", async () => {
+    it("sends nothing for another workflow's event, one it doesn't declare, or one made up", async () => {
       const page = host();
       const hook = await showing(page);
       // Untyped, as a page that skips its types would send them.
       const send = async (event: unknown, data: unknown): Promise<void> => {
         await Reflect.apply(hook.view().send, undefined, [event, data]);
       };
-      const codes = await Promise.all([
-        codeOf(send(workflows.archiveNotes.events.confirmed, {})),
-        codeOf(
-          send(
-            { ...workflows.summarizeNote.events.styleChosen, type: "made.up" },
-            { style: "short" }
-          )
-        ),
-        codeOf(send({ alias: "styleChosen" }, { style: "short" })),
-      ]);
+      const events: unknown[] = [
+        // Another workflow's, though it has a send mutation of its own.
+        workflows.archiveNotes.events.confirmed,
+        // This one's name, for an event it doesn't declare.
+        { name: "workflows.summarizeNote.events.documentUploaded" },
+        // Another workflow's event alias, under this one's name.
+        { name: "workflows.summarizeNote.events.confirmed" },
+        // Keys every object inherits.
+        { name: "workflows.summarizeNote.events.constructor" },
+        { name: "workflows.summarizeNote.events.__proto__" },
+        // A workflow the release doesn't declare.
+        { name: "workflows.translateNote.events.styleChosen" },
+        // Names that aren't an event's.
+        { name: "workflows.summarizeNote" },
+        { name: "workflows.summarizeNote.mutations.send" },
+        { name: "workflows.summarizeNote.events.styleChosen.more" },
+        { name: " workflows.summarizeNote.events.styleChosen" },
+        api.notes.create,
+        // Forged objects: no name, an inherited one, a name that isn't text.
+        { alias: "styleChosen" },
+        {
+          kind: "workflowEvent",
+          workflow: "workflows.summarizeNote",
+          alias: "styleChosen",
+          type: "notes.summary.style_chosen",
+        },
+        Object.create(workflows.summarizeNote.events.styleChosen),
+        { name: ["workflows.summarizeNote.events.styleChosen"] },
+        "workflows.summarizeNote.events.styleChosen",
+        null,
+      ];
+      const codes = await Promise.all(
+        events.map(
+          async (event) => await codeOf(send(event, { style: "short" }))
+        )
+      );
       expect({ codes, calls: page.calls }).toStrictEqual({
-        codes: Array.from({ length: 3 }, () => "contract.invalid_request"),
+        codes: events.map(() => "contract.invalid_request"),
         calls: [],
       });
     });
+  });
+
+  // A workflow reference is a name: the hook reads `name` alone and
+  // resolves it in the page's build, so nothing else a reference carries
+  // (its own events, decisions or function names) is ever read, and a
+  // name the build doesn't declare, or a key every object inherits, finds
+  // no workflow.
+  describe("the workflow a reference names", () => {
+    it.each<[string, unknown]>([
+      [
+        "a workflow the build doesn't declare",
+        { name: "workflows.translateNote" },
+      ],
+      ["the prototype's key", { name: "workflows.__proto__" }],
+      ["an inherited key", { name: "workflows.constructor" }],
+      ["another inherited key", { name: "workflows.toString" }],
+      ["a function's name", { name: "notes.create" }],
+      ["a function's reference", api.notes.create],
+      ["one of its own functions", workflows.summarizeNote.mutations.start],
+      ["one of its own events", workflows.summarizeNote.events.styleChosen],
+      [
+        "a name with more after it",
+        { name: "workflows.summarizeNote.queries" },
+      ],
+      ["a name with a space", { name: "workflows.summarizeNote " }],
+      ["a name it inherits", Object.create(workflows.summarizeNote)],
+      ["a name that isn't text", { name: ["workflows.summarizeNote"] }],
+      ["its name alone, as text", "workflows.summarizeNote"],
+      ["nothing", null],
+    ])("is refused for %s, calling nothing", async (_case, reference) => {
+      const page = host();
+      expect(() => mount(page, "run-1", reference)).toThrow(
+        expect.objectContaining({ code: "contract.invalid_request" })
+      );
+      await flush();
+      expect({ calls: page.calls, followed: page.followed }).toStrictEqual({
+        calls: [],
+        followed: [],
+      });
+    });
+
+    it("is refused in a page built without it, though the reference is the App's own", () => {
+      expect(() => mount(host({ functions: {} }), "run-1")).toThrow(
+        expect.objectContaining({ code: "contract.invalid_request" })
+      );
+    });
+
+    it("reads its functions, events and decisions under its own name, whatever a forged reference carries", async () => {
+      const elsewhere = workflows.archiveNotes;
+      const forged = {
+        name: "workflows.summarizeNote",
+        events: {
+          styleChosen: elsewhere.events.confirmed,
+          documentUploaded: {
+            name: "workflows.summarizeNote.events.documentUploaded",
+          },
+        },
+        listens: { "do/0/chooseStyle": ["documentUploaded"] },
+        decisions: elsewhere.decisions,
+        queries: {
+          ...elsewhere.queries,
+          run: api.notes.list,
+          canStart: api.notes.list,
+        },
+        mutations: {
+          start: api.notes.remove,
+          pause: api.notes.remove,
+          resume: api.notes.remove,
+          cancel: api.notes.remove,
+          send: elsewhere.mutations.send,
+        },
+      };
+      const page = host();
+      page.answer((call) =>
+        call.name === path("mutations.start")
+          ? { value: handleOf("run-1") }
+          : { value: { eventId: "event-1" } }
+      );
+      const internals = clientInternals(page.client);
+      const hook = mount(page, undefined, forged);
+      hook.view();
+      await hook.view().start({ noteId });
+      hook.view();
+      await flush();
+      page.run("run-1").push(snapshotOf());
+      await hook
+        .view()
+        .send(workflows.summarizeNote.events.styleChosen, { style: "long" });
+      // Untyped, as a page that skips its types would send it.
+      const sendUntyped = async (event: unknown): Promise<void> => {
+        await Reflect.apply(hook.view().send, undefined, [event, {}]);
+      };
+      const refused = await codeOf(sendUntyped(forged.events.documentUploaded));
+      expect({
+        same:
+          readWorkflowReference(internals, forged) ===
+          readWorkflowReference(internals, workflows.summarizeNote),
+        calls: page.calls.map(({ name }) => name),
+        followed: page.followed.map(({ name }) => name).toSorted(),
+        refused,
+      }).toStrictEqual({
+        same: true,
+        calls: [path("mutations.start"), path("mutations.send")],
+        followed: [path("queries.canStart"), path("queries.run")],
+        refused: "contract.invalid_request",
+      });
+    });
+
+    it.each<[string, (summarize: Record<string, unknown>) => void]>([
+      [
+        "a listen naming an event it doesn't declare",
+        (summarize) => {
+          entry(summarize, "listens")["do/0/chooseStyle"] = [
+            "documentUploaded",
+          ];
+        },
+      ],
+      [
+        "a listen naming an inherited key",
+        (summarize) => {
+          entry(summarize, "listens")["do/0/chooseStyle"] = ["constructor"];
+        },
+      ],
+      [
+        "a listen naming one event twice",
+        (summarize) => {
+          entry(summarize, "listens")["do/2/awaitEdit"] = [
+            "noteEdited",
+            "noteEdited",
+          ];
+        },
+      ],
+      [
+        "a listen naming no event",
+        (summarize) => {
+          entry(summarize, "listens")["do/0/chooseStyle"] = [];
+        },
+      ],
+      [
+        "a listen task with no path",
+        (summarize) => {
+          entry(summarize, "listens")[""] = ["noteEdited"];
+        },
+      ],
+      [
+        "listens that aren't a record",
+        (summarize) => {
+          summarize.listens = [];
+        },
+      ],
+      [
+        "an event whose data doesn't read as a descriptor",
+        (summarize) => {
+          entry(entry(summarize, "events"), "noteEdited").data = {
+            kind: "anything",
+          };
+        },
+      ],
+      [
+        "an event whose type isn't one",
+        (summarize) => {
+          entry(entry(summarize, "events"), "noteEdited").type = "note\tedited";
+        },
+      ],
+      [
+        "an event under an alias that isn't plain",
+        (summarize) => {
+          const events = entry(summarize, "events");
+          events["note-edited"] = events.noteEdited;
+        },
+      ],
+      [
+        "more events than a workflow holds",
+        (summarize) => {
+          summarize.events = tooMany(workflowReferenceLimits.events, () => ({
+            type: "notes.note.edited",
+            data: {
+              descriptorVersion: 1,
+              kind: "null",
+              nullable: false,
+              presence: "required",
+            },
+          }));
+          summarize.listens = {};
+        },
+      ],
+      [
+        "events that aren't a record",
+        (summarize) => {
+          summarize.events = "noteEdited";
+          summarize.listens = {};
+        },
+      ],
+      [
+        "a decision without its context",
+        (summarize) => {
+          const { value } = entry(
+            entry(summarize, "decisions"),
+            "chooseLength"
+          );
+          entry(summarize, "decisions").chooseLength = { value };
+        },
+      ],
+      [
+        "a decision under an alias that isn't plain",
+        (summarize) => {
+          const decisions = entry(summarize, "decisions");
+          decisions["choose length"] = decisions.chooseLength;
+        },
+      ],
+      [
+        "more decisions than a workflow holds",
+        (summarize) => {
+          const { chooseLength } = entry(summarize, "decisions");
+          summarize.decisions = tooMany(
+            workflowReferenceLimits.decisions,
+            () => chooseLength
+          );
+        },
+      ],
+      [
+        "decisions that aren't a record",
+        (summarize) => {
+          summarize.decisions = null;
+        },
+      ],
+    ])(
+      "finds no workflow, never part of one, in a build with %s",
+      (_case, change) => {
+        const page = host(buildWith(change));
+        const internals = clientInternals(page.client);
+        expect(() =>
+          readWorkflowReference(internals, workflows.summarizeNote)
+        ).toThrow(
+          expect.objectContaining({ code: "contract.invalid_request" })
+        );
+        // Another workflow of the same build reads as declared.
+        expect(
+          readWorkflowReference(internals, workflows.archiveNotes).events.has(
+            "confirmed"
+          )
+        ).toBeTruthy();
+      }
+    );
   });
 
   describe("answering a decision the run shown is held at", () => {
