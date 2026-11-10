@@ -133,6 +133,14 @@ const eventBindingOf = (
     : { alias, events: contract.contract.events };
 
 /**
+ * What `versionEventContract` read of a version: its contract, and
+ * whether all of it read (`complete`).
+ */
+export interface VersionEventContract extends WorkflowEventContract {
+  readonly complete: boolean;
+}
+
+/**
  * The events, listen tasks and decisions version `version` of workflow
  * `workflow` has, as a page may send and answer them: its decisions and
  * its browser-callable events by their binding's alias, with the listen
@@ -140,12 +148,13 @@ const eventBindingOf = (
  * longer resolves is left out, logged; corrupt data (a contract the
  * catalog refuses, a stored contract that no longer hashes) leaves its
  * events out, logged too, so it differs from any declaration naming them.
+ * Either makes it not `complete`.
  */
 export const versionEventContract = async (
   env: Env,
   workflow: string,
   version: number
-): Promise<WorkflowEventContract> => {
+): Promise<VersionEventContract> => {
   const pinned = await drizzle(env.DB)
     .select({
       alias: sdkResourceBindings.alias,
@@ -167,6 +176,7 @@ export const versionEventContract = async (
   ]);
   const decisions: Record<string, BoundWorkflowDecision> = {};
   const eventBindings: PinnedEventBinding[] = [];
+  let complete = true;
   for (const row of pinned) {
     if (!aliasPattern.test(row.alias)) {
       continue;
@@ -175,6 +185,7 @@ export const versionEventContract = async (
     if (row.kind === "event") {
       const bound = eventBindingOf(row.alias, contract, row.fingerprint);
       if (bound === undefined) {
+        complete = false;
         log.warn("app.workflow_event_unresolved", {
           workflowId: workflow,
           version,
@@ -188,6 +199,7 @@ export const versionEventContract = async (
     try {
       const decision = decisionOf(contract, row.fingerprint);
       if (decision === undefined) {
+        complete = false;
         log.warn("app.workflow_decision_unresolved", {
           workflowId: workflow,
           version,
@@ -199,6 +211,7 @@ export const versionEventContract = async (
     } catch (error) {
       // Published through the catalog's own reader, so a descriptor it
       // took and this one refuses is the platform's error, never the App's.
+      complete = false;
       log.error("app.workflow_decision_unreadable", {
         workflowId: workflow,
         version,
@@ -208,21 +221,21 @@ export const versionEventContract = async (
     }
   }
   if (eventBindings.length === 0) {
-    return { events: {}, listens: {}, decisions };
+    return { events: {}, listens: {}, decisions, complete };
   }
   try {
     const { events, listens } = boundEventsOf(
       eventBindings,
       await recordedListens(env, workflow, version)
     );
-    return { events, listens, decisions };
+    return { events, listens, decisions, complete };
   } catch (error) {
     log.error("app.workflow_events_unreadable", {
       workflowId: workflow,
       version,
       ...errorFields(error),
     });
-    return { events: {}, listens: {}, decisions };
+    return { events: {}, listens: {}, decisions, complete: false };
   }
 };
 

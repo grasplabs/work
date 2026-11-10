@@ -321,7 +321,7 @@ export class GraspClient {
       },
       workflowOf: (alias) => client.#build.workflows.get(alias),
       useFunctions: (functions) => {
-        client.#build = readPageBuild(functions);
+        client.#build = readPageBuild(functions, client.#build);
       },
     });
   }

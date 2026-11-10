@@ -137,7 +137,16 @@ export const bindableContract = async (
 ): Promise<WorkflowEventContract> => {
   requireNotStaff(by);
   const workflow = await bindableVersion(env, by, id, version);
-  return await versionEventContract(env, workflow.id, version);
+  const { complete, ...contract } = await versionEventContract(
+    env,
+    workflow.id,
+    version
+  );
+  // Never part of a contract: a draft declares all of it or nothing.
+  if (!complete) {
+    throw invalid();
+  }
+  return contract;
 };
 
 /**
@@ -265,10 +274,13 @@ export const bindWorkflowToApp = async (
         ),
       db.insert(appWorkflowBindings).values({
         ...row,
-        // Only while the App isn't archived, as the batch runs: otherwise
-        // NULL, which fails the batch (app-status.ts).
+        // Only while the App isn't archived, as the batch runs, and its
+        // current version is still the one whose declaration the contract
+        // was checked against: otherwise NULL, which fails the batch
+        // (app-status.ts).
         appId: sql`(SELECT id FROM apps
-          WHERE id = ${found.id} AND status != 'archived')`,
+          WHERE id = ${found.id} AND status != 'archived'
+            AND current_version IS ${found.currentVersion})`,
         // Only while the workflow is live: otherwise NULL, which fails the
         // batch, so a deletion and this binding never both land.
         workflowResourceId: sql`(SELECT id FROM workflow_resources
@@ -293,7 +305,11 @@ export const bindWorkflowToApp = async (
     ]);
   } catch (error) {
     if (notNullFailed(error, "app_workflow_bindings.app_id")) {
-      throw appErrors.create("app.archived");
+      // Archived, or another version made current since the check.
+      const now = await appFor(env, by, found.id, "builder");
+      throw now.status === "archived"
+        ? appErrors.create("app.archived")
+        : workflowResourceErrors.create("workflow.binding_conflict");
     }
     if (notNullFailed(error, "app_workflow_bindings.workflow_resource_id")) {
       throw workflowResourceErrors.create("workflow.resource_unavailable");

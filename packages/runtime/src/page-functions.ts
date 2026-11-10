@@ -1,3 +1,4 @@
+import { canonicalText } from "@grasp-os/shared/json";
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import type { FunctionManifest } from "./app-types.ts";
@@ -188,13 +189,24 @@ const pageWorkflowOf = (value: unknown): PageWorkflow | undefined => {
   return { events, listens, decisions };
 };
 
+/** Each workflow read, by the canonical text of the entry it was read from. */
+const entryTexts = new WeakMap<PageWorkflow, string>();
+
 /**
  * What `value`, `.grasp/functions.ts`'s `functions`, holds: the
  * release's functions and workflows, each as a map, by name and alias:
  * only its own entries that read as one, so no name finds what every
  * object inherits. None of either for anything else.
  */
-export const readPageBuild = (value: unknown): PageBuild => {
+export const readPageBuild = (
+  value: unknown,
+  /**
+   * The build this one replaces (a preview's draft changed): each of its
+   * workflows whose entry reads the same is kept, the very object, so a
+   * page's hook on it keeps its runs and controls (react/workflow.ts).
+   */
+  previous?: PageBuild
+): PageBuild => {
   const functions = new Map<string, PageFunction>();
   const workflows = new Map<string, PageWorkflow>();
   if (!isPlainObject(value)) {
@@ -212,7 +224,11 @@ export const readPageBuild = (value: unknown): PageBuild => {
     for (const [alias, entry] of Object.entries(value.workflows)) {
       const workflow = pageWorkflowOf(entry);
       if (namePattern.test(alias) && workflow !== undefined) {
-        workflows.set(alias, workflow);
+        const text = canonicalText(entry);
+        const kept = previous?.workflows.get(alias);
+        const same = kept !== undefined && entryTexts.get(kept) === text;
+        entryTexts.set(workflow, text);
+        workflows.set(alias, same ? kept : workflow);
       }
     }
   }

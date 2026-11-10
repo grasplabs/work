@@ -369,6 +369,19 @@ const permissionFrom = (
       `\`${declared.alias}\` can't be a permission's alias: it is a word JavaScript keeps.`
     );
   }
+  // A workflow's events, listen tasks and decisions are what the version
+  // bound has, written from it (`setWorkflowContract`), never by hand: a
+  // hand-written one would type references the bound version can't take.
+  if (
+    isWorkflowPermission(declared) &&
+    (Object.keys(declared.events).length > 0 ||
+      Object.keys(declared.listens).length > 0 ||
+      Object.keys(declared.decisions).length > 0)
+  ) {
+    return refuse(
+      "A workflow's events, listen tasks and decisions come from the version you bind: add the workflow with its args and returns, then declare them with `bindWorkflow`."
+    );
+  }
   // A declaration is JSON data, which `readPermissionDeclaration` reads back.
   return {
     alias: declared.alias,

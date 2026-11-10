@@ -575,7 +575,10 @@ export const definitionOperationsSchema = z.union([
   z.array(definitionOperationSchema).min(1).max(8),
 ]);
 
-/** An audit's detail of one operation: its op, table and alias. */
+/**
+ * An audit's detail of one operation: its op, table and alias, and for a
+ * workflow bound from the draft, the workflow and version it named.
+ */
 const singleDetail = (operation: unknown): Record<string, string | null> => {
   const parsed = definitionOperationSchema.safeParse(operation);
   if (!parsed.success) {
@@ -596,7 +599,12 @@ const singleDetail = (operation: unknown): Record<string, string | null> => {
   } else if (data.op === "removePermission" || data.op === "bindWorkflow") {
     alias = data.alias.slice(0, 64);
   }
-  return { op: data.op, table, alias };
+  // Which version a workflow's declared contract was read from.
+  const bound: Record<string, string> =
+    data.op === "bindWorkflow"
+      ? { workflow: data.workflow.slice(0, 256), version: String(data.version) }
+      : {};
+  return { op: data.op, table, alias, ...bound };
 };
 
 /**

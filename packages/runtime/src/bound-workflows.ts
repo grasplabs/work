@@ -59,7 +59,10 @@ export interface WorkflowPin {
  * contract the declaration gives (`BoundWorkflow`): the version its
  * binding pins. Never from App code.
  */
-export type WorkflowBindingExtras = Pick<BoundWorkflow, "alias" | "pinned">;
+export interface WorkflowBindingExtras {
+  readonly alias: string;
+  readonly pinned: WorkflowPin;
+}
 
 /** A workflow's events, listen tasks and decisions: what an App relies on. */
 export type WorkflowEventContract = Pick<
@@ -101,7 +104,7 @@ export const declaredWorkflows = (
   manifest: AppManifest,
   bound: readonly WorkflowBindingExtras[]
 ): BoundWorkflow[] => {
-  const pins = new Map<string, WorkflowPin | undefined>();
+  const pins = new Map<string, WorkflowPin>();
   for (const resolved of bound) {
     if (
       declaredPermission(manifest, resolved.alias, "workflows") === undefined

@@ -68,9 +68,7 @@ export const generateModules = async (
     manifest,
     fingerprints: await contractFingerprints(manifest),
     workflows: Object.fromEntries(
-      workflows.flatMap(({ alias, pinned }) =>
-        pinned === undefined ? [] : [[alias, { alias, pinned }]]
-      )
+      bound.map(({ alias, pinned }) => [alias, { alias, pinned }])
     ),
   });
   return {
