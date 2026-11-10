@@ -2,7 +2,7 @@
  * The demo company's Apps, each binding independent
  * workflows that run on the local stack as they would anywhere:
  * grasp-workflow/2 definitions, their calculations
- * in compute modules, with `workflowTest` suites in the App, calling
+ * in expressions, with `workflowTest` suites in the App, calling
  * nothing outside Grasp, so a run needs no connection. Inputs stand in
  * for what a connection would bring (an email, an invoice from the
  * bookkeeping), so the seed starts each run with one, and a few are bad
@@ -12,14 +12,7 @@ import { v } from "@grasp-os/sdk";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 
 import type { PersonKey, TeamName } from "./company.ts";
-import {
-  boolean,
-  computeBinding,
-  computeStep,
-  listOf,
-  objectOf,
-  text,
-} from "./definitions.ts";
+import { boolean, listOf, objectOf, raiseWhen, text } from "./definitions.ts";
 import type { DefinitionParts } from "./definitions.ts";
 
 /** Every value an input holds: what a run is started with. */
@@ -75,9 +68,9 @@ export interface WorkflowSeed {
    * builder, as only a builder creates a workflow.
    */
   owner?: PersonKey;
-  /** Its definition, its calculations and its decision, if it asks one. */
+  /** Its definition, with its calculations in expressions. */
   parts: DefinitionParts;
-  modules: Record<string, string>;
+  /** Its decision, if it asks one. */
   decision?: DecisionSeed;
   /** What the App declares of it: its input and output, as `v` code. */
   declared: { input: string; output: string };
@@ -145,10 +138,12 @@ ${body
 });
 `;
 
-/** A test's check that its run failed in its calculation. */
-const failsInItsCalculation = `const ended = await t.runs.untilTerminal(run);
+/** A test's check that its run failed with the error its workflow raises, `code`. */
+const failsWith = (
+  code: string
+): string => `const ended = await t.runs.untilTerminal(run);
 t.equal(ended.status, "failed");
-t.equal(ended.status === "failed" ? ended.code : null, "workflow.compute_failed");`;
+t.equal(ended.status === "failed" ? ended.code : null, ${JSON.stringify(code)});`;
 
 // Opportunity-to-Cash
 
@@ -186,23 +181,8 @@ const requiredDocuments = [
   "bank statements",
 ] as const;
 
-const onboardingModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-/** What every application needs before it becomes a client file. */
-const required = ${JSON.stringify(requiredDocuments)};
-
-export const check = compute({
-  input: v.object({ client: v.string(), town: v.string(), documents: v.array(v.string()) }),
-  output: v.object({ client: v.string(), town: v.string(), complete: v.boolean(), chase: v.array(v.string()) }),
-  handler: ({ client, town, documents }) => {
-    if (client.trim() === "") {
-      throw new Error("The application has no client name, so no file can be opened for it.");
-    }
-    const chase = required.filter((document) => !documents.includes(document));
-    return { client, town, complete: chase.length === 0, chase };
-  },
-});
-`;
+/** What every application needs before it becomes a client file, as an expression's list. */
+const required = JSON.stringify(requiredDocuments);
 
 const clientOnboarding: WorkflowSeed = {
   id: "client-onboarding",
@@ -217,11 +197,24 @@ const clientOnboarding: WorkflowSeed = {
       complete: boolean,
       chase: listOf(text),
     }),
-    result: { $expr: "check" },
-    permissions: { modules: { check: computeBinding("onboarding", "check") } },
-    steps: [computeStep("check", "check", "args")],
+    result: {
+      client: { $expr: "args.client" },
+      town: { $expr: "args.town" },
+      complete: {
+        $expr: `${required}.every((document) => args.documents.includes(document))`,
+      },
+      chase: {
+        $expr: `${required}.filter((document) => !args.documents.includes(document))`,
+      },
+    },
+    steps: [
+      raiseWhen("noClient", 'args.client.trim() === ""', {
+        code: "application.no_client",
+        message:
+          "The application has no client name, so no file can be opened for it.",
+      }),
+    ],
   },
-  modules: { "code/onboarding.ts": onboardingModule },
   declared: {
     input:
       "v.object({ client: v.string(), town: v.string(), documents: v.array(v.string()) })",
@@ -237,7 +230,7 @@ t.equal(await t.runs.untilTerminal(run), {
   output: { client: "D. Mulder", town: "Zeist", complete: false, chase: ["payslip", "employer statement", "bank statements"] },
 });`,
     "refuses an application without a client": `const run = await desk.start(workflows.clientOnboarding, { client: " ", town: "Zeist", documents: [] });
-${failsInItsCalculation}`,
+${failsWith("application.no_client")}`,
   }),
   sample: {
     client: "Fam. Willems",
@@ -313,29 +306,22 @@ const subjects = [
   },
 ] as const;
 
-const triageModule = `import { compute, v } from "@grasp-os/sdk/compute";
+/** The words that give a complaint away: an urgent email's. */
+const complaintWords = ["complaint", "not happy", "unacceptable"];
 
-/** Where each kind of question goes, by words that give it away. */
-const queues = [
-  { queue: "complaints", words: ["complaint", "not happy", "unacceptable"] },
-  { queue: "payments", words: ["payment", "bank account", "repayment", "pay off"] },
+/** Where each kind of question goes, by words that give it away, as an expression's list. */
+const queues = JSON.stringify([
+  { queue: "complaints", words: complaintWords },
+  {
+    queue: "payments",
+    words: ["payment", "bank account", "repayment", "pay off"],
+  },
   { queue: "documents", words: ["document", "payslip", "offer", "attachment"] },
   { queue: "file status", words: ["file", "lender", "status"] },
-];
+]);
 
-export const sort = compute({
-  input: v.object({ from: v.string(), subject: v.string(), body: v.string() }),
-  output: v.object({ from: v.string(), queue: v.string(), urgent: v.boolean() }),
-  handler: ({ from, subject, body }) => {
-    if (body.trim() === "") {
-      throw new Error(\`The email from \${from} has no text to sort.\`);
-    }
-    const words = \`\${subject} \${body}\`.toLowerCase();
-    const found = queues.find(({ words: giveaways }) => giveaways.some((word) => words.includes(word)));
-    return { from, queue: found?.queue ?? "general", urgent: found?.queue === "complaints" };
-  },
-});
-`;
+/** The email's subject and body, lower-cased, as one text. */
+const mailText = '(args.subject + " " + args.body).toLowerCase()';
 
 const emailTriage: WorkflowSeed = {
   id: "email-triage",
@@ -344,11 +330,23 @@ const emailTriage: WorkflowSeed = {
   parts: {
     args: objectOf({ from: text, subject: text, body: text }),
     returns: objectOf({ from: text, queue: text, urgent: boolean }),
-    result: { $expr: "sort" },
-    permissions: { modules: { sort: computeBinding("triage", "sort") } },
-    steps: [computeStep("sort", "sort", "args")],
+    result: {
+      from: { $expr: "args.from" },
+      // The first queue whose words the email gives away, or general.
+      queue: {
+        $expr: `(${queues}.find((kind) => kind.words.some((word) => ${mailText}.includes(word))) ?? { queue: "general" }).queue`,
+      },
+      urgent: {
+        $expr: `${JSON.stringify(complaintWords)}.some((word) => ${mailText}.includes(word))`,
+      },
+    },
+    steps: [
+      raiseWhen("noText", 'args.body.trim() === ""', {
+        code: "triage.empty_email",
+        message: "The email has no text to sort.",
+      }),
+    ],
   },
-  modules: { "code/triage.ts": triageModule },
   declared: {
     input:
       "v.object({ from: v.string(), subject: v.string(), body: v.string() })",
@@ -361,7 +359,7 @@ t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { from: 
     "sends a question about a file to file status": `const run = await desk.start(workflows.emailTriage, { from: "S. Peeters", subject: "Where is my file?", body: "Has it gone to the lender?" });
 t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { from: "S. Peeters", queue: "file status", urgent: false } });`,
     "refuses an empty email": `const run = await desk.start(workflows.emailTriage, { from: "R. Bos", subject: "Question", body: "" });
-${failsInItsCalculation}`,
+${failsWith("triage.empty_email")}`,
   }),
   sample: {
     from: "M. Hendriks",
@@ -424,8 +422,6 @@ Nothing runs here yet.
   workflows: [],
 };
 
-const reportModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
 /** What the board pack holds, and who brings it. */
 const sections = [
   { section: "Revenue and costs", from: "Exact" },
@@ -434,20 +430,27 @@ const sections = [
   { section: "Commissions", from: "the lenders' statements" },
 ];
 
-const section = v.object({ section: v.string(), from: v.string() });
-
-export const plan = compute({
-  input: v.object({ week: v.string().nullable() }),
-  output: v.object({ week: v.string(), sections: v.array(section), due: v.string() }),
-  handler: ({ week }) => {
-    // The Monday of the week it ran in, unless it was given one: its
-    // answer is kept with the run, so a replay never reads the clock again.
-    const monday = new Date();
-    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
-    return { week: week ?? monday.toISOString().slice(0, 10), sections, due: "10:00" };
-  },
-});
-`;
+/**
+ * The Monday of the week the run started in, as YYYY-MM-DD, from
+ * `run.startedAt` (ms since the epoch, the same on every replay): an
+ * expression has no clock and no `Date`, so it counts the days, steps
+ * back to Monday (day 0, 1970-01-01, was a Thursday) and turns the day
+ * into a date by Howard Hinnant's `civil_from_days`, each `.map` on a
+ * list of one naming what the next step reads. `a - a % b` is
+ * `Math.floor`'s, for the whole numbers ≥ 0 these are.
+ */
+const mondayOfRun = [
+  "[run.startedAt - run.startedAt % 86400000]",
+  ".map((ms) => ms / 86400000)",
+  ".map((day) => day - (day + 3) % 7 + 719468)",
+  ".map((z) => ({ era: (z - z % 146097) / 146097, doe: z % 146097 }))",
+  ".map((e) => ({ era: e.era, doe: e.doe, t: e.doe - (e.doe - e.doe % 1460) / 1460 + (e.doe - e.doe % 36524) / 36524 - (e.doe - e.doe % 146096) / 146096 }))",
+  ".map((e) => ({ era: e.era, doe: e.doe, yoe: (e.t - e.t % 365) / 365 }))",
+  ".map((e) => ({ y: e.yoe + e.era * 400, doy: e.doe - (365 * e.yoe + (e.yoe - e.yoe % 4) / 4 - (e.yoe - e.yoe % 100) / 100) }))",
+  ".map((e) => ({ y: e.y, doy: e.doy, mp: (5 * e.doy + 2 - (5 * e.doy + 2) % 153) / 153 }))",
+  ".map((e) => ({ y: e.y, m: e.mp < 10 ? e.mp + 3 : e.mp - 9, d: e.doy - (153 * e.mp + 2 - (153 * e.mp + 2) % 5) / 5 + 1 }))",
+  '.map((e) => [e.m <= 2 ? e.y + 1 : e.y, e.m < 10 ? "0" + e.m : e.m, e.d < 10 ? "0" + e.d : e.d].join("-"))[0]',
+].join("");
 
 const weeklyReport: WorkflowSeed = {
   id: "weekly-report",
@@ -460,11 +463,14 @@ const weeklyReport: WorkflowSeed = {
       sections: listOf(objectOf({ section: text, from: text })),
       due: text,
     }),
-    result: { $expr: "plan" },
-    permissions: { modules: { plan: computeBinding("report", "plan") } },
-    steps: [computeStep("plan", "plan", "{ week: args.week ?? null }")],
+    // The Monday of the week it ran in, unless it was given one.
+    result: {
+      week: { $expr: `args.week ?? ${mondayOfRun}` },
+      sections,
+      due: "10:00",
+    },
+    steps: [],
   },
-  modules: { "code/report.ts": reportModule },
   declared: {
     input: "v.object({ week: v.string().optional() })",
     output:

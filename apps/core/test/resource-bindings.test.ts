@@ -1,6 +1,5 @@
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { valueDepth } from "@grasp-os/shared/value-depth";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -17,7 +16,6 @@ import {
   reviewResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
-import { publishTemplate } from "../src/resource-templates.ts";
 import { isRestricted } from "../src/restricted.ts";
 import {
   answer,
@@ -27,7 +25,6 @@ import {
   call,
   chooseModel,
   codeOfError,
-  deepLetter,
   hitsSchema,
   knowledgeApp,
   knowledgeFiles,
@@ -35,7 +32,6 @@ import {
   nextVersion,
   outcomeOf,
   providerEnv,
-  publishRefusal,
   requestFor,
   sealedApp,
   searchTextOf,
@@ -794,104 +790,6 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       missing: "resource.target_invalid",
       extra: "resource.target_invalid",
       anotherApps: "resource.target_invalid",
-    });
-  });
-
-  it("number a template's versions one at a time, even published at once", async () => {
-    const admin = await person("admin");
-    const first = await publishTemplate(env, admin, {
-      contract: "grasp.letter@1",
-      content: { greeting: "Dear" },
-    });
-    const publishNext = async (greeting: string): Promise<string> =>
-      await failure(
-        async () =>
-          await publishTemplate(env, admin, {
-            templateId: first.templateId,
-            contract: "grasp.letter@1",
-            content: { greeting },
-          })
-      );
-    const outcomes = await Promise.all([
-      publishNext("Hello"),
-      publishNext("Hi"),
-    ]);
-    const published = await auditedFor(
-      "resource.template.published",
-      first.templateId
-    );
-    expect({
-      outcomes: outcomes.toSorted(),
-      published: published.map(({ detail }) => detail?.version),
-    }).toStrictEqual({
-      outcomes: ["app.conflict", "ok"],
-      published: [1, 2],
-    });
-  });
-
-  it("publish templates by admins only, keeping each one's contract", async () => {
-    const admin = await person("admin");
-    const builder = await person("builder");
-    const first = await publishTemplate(env, admin, {
-      contract: "grasp.letter@1",
-      content: { greeting: "Dear" },
-    });
-    expect({
-      builder: await publishRefusal(builder, {
-        contract: "grasp.letter@1",
-        content: {},
-      }),
-      otherContract: await publishRefusal(admin, {
-        templateId: first.templateId,
-        contract: "grasp.invoice@1",
-        content: {},
-      }),
-      unknown: await publishRefusal(admin, {
-        templateId: "no-such-template",
-        contract: "grasp.letter@1",
-        content: {},
-      }),
-      tooLarge: await publishRefusal(admin, {
-        contract: "grasp.letter@1",
-        content: { text: "x".repeat(70_000) },
-      }),
-      // A contract too long to name in the publication's audit event.
-      longContract: await publishRefusal(admin, {
-        contract: `${"a".repeat(255)}@1`,
-        content: {},
-      }),
-      // Served inside its answer, one level down: too deep to be read.
-      tooDeep: await publishRefusal(admin, {
-        contract: "grasp.letter@1",
-        content: deepLetter(valueDepth),
-      }),
-    }).toStrictEqual({
-      builder: "role.forbidden",
-      otherContract: "resource.template_contract_changed",
-      unknown: "resource.template_not_found",
-      tooLarge: "resource.template_invalid",
-      longContract: "resource.template_invalid",
-      tooDeep: "resource.template_invalid",
-    });
-  });
-
-  it("refuse a publication by an admin demoted since their session was checked", async () => {
-    const admin = await person("admin");
-    await env.DB.prepare("UPDATE members SET role = 'member' WHERE user_id = ?")
-      .bind(admin.userId)
-      .run();
-    const refused = await publishRefusal(admin, {
-      contract: "grasp.letter@1",
-      content: { greeting: "Stale" },
-    });
-    const rows = await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM resource_templates WHERE published_by = ?"
-    )
-      .bind(admin.userId)
-      .first<{ count: number }>();
-    expect({ refused, published: rows?.count }).toStrictEqual({
-      refused: "role.forbidden",
-      published: 0,
     });
   });
 });

@@ -8,11 +8,16 @@ import type {
 
 import { isIdentifier } from "./code-print.ts";
 import {
+  jsonCallOf,
   literalKey,
   literalValue,
   lowerExpression,
 } from "./expression-lowering.ts";
-import type { ExpressionNode, ExpressionRead } from "./expression-lowering.ts";
+import type {
+  ExpressionNode,
+  ExpressionRead,
+  JsonMethod,
+} from "./expression-lowering.ts";
 import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
 import { parseExpression } from "./oxc-parse.ts";
 
@@ -279,6 +284,11 @@ class Checker {
 
   private call(node: CallExpression, scope: ReadonlySet<string>): void {
     const { callee } = node;
+    const json = jsonCallOf(node, scope);
+    if (json !== undefined) {
+      this.jsonCall(node, json, scope);
+      return;
+    }
     if (
       callee.type !== "MemberExpression" ||
       callee.computed ||
@@ -348,6 +358,45 @@ class Checker {
       return;
     }
     this.values(node.arguments, scope);
+  }
+
+  /**
+   * `JSON.stringify(value)` or `JSON.parse(text)`: called directly, never
+   * optionally or from parentheses, on one value, with no reviver,
+   * replacer or indent, so no function of an expression's own runs in it.
+   */
+  private jsonCall(
+    node: CallExpression,
+    method: JsonMethod,
+    scope: ReadonlySet<string>
+  ): void {
+    const [argument, ...more] = node.arguments;
+    const { callee } = node;
+    if (
+      this.parenthesized.has(callee) ||
+      node.optional ||
+      (callee.type === "MemberExpression" && callee.optional)
+    ) {
+      this.fail(
+        node,
+        "expression.syntax",
+        `Call \`JSON.${method}\` directly, as \`JSON.${method}(value)\`.`
+      );
+      return;
+    }
+    if (
+      argument === undefined ||
+      more.length > 0 ||
+      argument.type === "SpreadElement"
+    ) {
+      this.fail(
+        node,
+        "expression.syntax",
+        `\`JSON.${method}\` takes one value, and nothing else.`
+      );
+      return;
+    }
+    this.visit(argument, scope);
   }
 
   /** A call's arguments, each a value: no spread into a call. */

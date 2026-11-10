@@ -318,7 +318,6 @@ const drafted = async (by: Identity, steps: unknown[], status: unknown) => {
       },
       status
     ),
-    modules: {},
   });
   expect(saved.problems).toStrictEqual([]);
   return { workflow, revision: saved.revision };

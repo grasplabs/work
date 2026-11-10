@@ -1,8 +1,7 @@
-// What both sandboxed runners share: the migration runner (runner.ts) and
-// a workflow's compute runner (compute-runner.ts, compute-lockdown.ts).
-// Each loads this module before any App or workflow module, so the
-// intrinsics below are the platform's, whatever module code replaces
-// later.
+// What the sandboxed runners share: the migration runner (run-migration.ts)
+// and the determinism checks (determinism.ts). Each loads this module
+// before any App module, so the intrinsics below are the platform's,
+// whatever module code replaces later.
 
 const RefusalError = Error;
 const { get: reflectGet } = Reflect;

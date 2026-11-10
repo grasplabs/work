@@ -1,8 +1,7 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
-import { identifierMaxLength } from "./identifier.ts";
-import { appIdSchema, identifierSchema, permissionIdSchema } from "./ids.ts";
+import { appIdSchema, permissionIdSchema } from "./ids.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): which provider serves
 // each permission an App of spec 8's layout declares for its actions. A
@@ -288,62 +287,12 @@ export interface ResourceBindingsApi {
   review: (app: string) => Promise<ResourceBindingsReview>;
 }
 
-/**
- * A template's contract and major version, as the SDK checks it: no longer
- * than an identifier, so its publication's audit event can name it.
- */
-const templateContractSchema = z
-  .string()
-  .max(identifierMaxLength)
-  .regex(/^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*@[1-9]\d{0,5}$/u);
-
-/** The most bytes of one template version's content, as JSON text. */
-export const templateContentMaxBytes = 64 * 1024;
-
-/**
- * A template version an admin publishes: its content, as data (never
- * code), for a template of its own (`templateId` left out: a new one) or
- * the next version of one, which keeps its first version's contract.
- */
-export const templatePublicationSchema = z.strictObject({
-  templateId: identifierSchema.optional(),
-  contract: templateContractSchema,
-  content: z.json(),
-});
-export type TemplatePublication = z.input<typeof templatePublicationSchema>;
-
-/** A published template version, as the API returns it (content apart). */
-export interface PublishedTemplate {
-  templateId: string;
-  version: number;
-  contract: string;
-  /** The SHA-256 of its canonical content. */
-  contentHash: string;
-  publishedBy: string;
-  publishedAt: string;
-}
-
-/**
- * Published templates, over `/rpc`: what a template binding reads. Each
- * version is written once and never changed. Publishing is for admins of
- * the organization only, never Grasp staff, and audited; listing is for
- * admins and builders.
- */
-export interface TemplatesApi {
-  publish: (publication: TemplatePublication) => Promise<PublishedTemplate>;
-}
-
 /** Why a binding couldn't be approved, revoked or found. */
 export const resourceBindingErrors = defineErrorFamily({
   "resource.binding_invalid": "That isn't a valid resource binding.",
   "resource.binding_not_found": "There's no such resource binding.",
   "resource.undeclared":
     "The reviewed version doesn't declare that resource for its actions, or declares it of another kind.",
-  "resource.template_invalid":
-    "That isn't a valid template: a contract, and JSON content of at most 64 KiB.",
-  "resource.template_not_found": "There's no such template.",
-  "resource.template_contract_changed":
-    "A template keeps the contract of its first version: publish a new template for another contract.",
   "resource.model_too_small":
     "That model can't give an answer as long as this resource declares within its window. Choose a model with a larger window, or ask the App's builder for a smaller bound.",
   "resource.target_invalid":

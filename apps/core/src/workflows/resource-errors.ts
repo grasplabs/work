@@ -99,9 +99,9 @@ const invalidData: ReadonlySet<string> = new Set([
 
 /**
  * The calls whose step runs its effect once (sealed-run.ts,
- * `triedOnceCalls`): a model request, one of the workflow's own actions.
+ * `triedOnceCalls`): a model request.
  */
-const onceCalls: ReadonlySet<string> = new Set(["grasp.model", "grasp.action"]);
+const onceCalls: ReadonlySet<string> = new Set(["grasp.model"]);
 
 /**
  * The calls whose timeout leaves their effect unknown: those that run it
@@ -225,7 +225,6 @@ const permanentCodes: ReadonlySet<string> = new Set([
   "connect.declined",
   "resource.limit_reached",
   "workflow.model_call_limit",
-  "workflow.action_call_limit",
   "workflow.too_many_steps",
   "workflow.too_many_attempts",
   // A step's state past what a workflow keeps: the same values, the
@@ -262,9 +261,6 @@ export const retryable = (failure: Failure, task: SealedTask): boolean => {
   }
   // A call whose effect runs once runs again only after a failure that
   // says nothing was sent, as a busy store or a provider's rate limit do.
-  // An action's says so only when none of its calls before took effect:
-  // after one did, it fails as `workflow.failed_after_effect` instead,
-  // which no catch takes (resource-action.ts, `callAction`).
   if (task.kind === "call" && onceCalls.has(task.call.name)) {
     return code !== undefined && isRetryableCode(code);
   }

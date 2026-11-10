@@ -42,8 +42,7 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 //   nothing that holds one is read: no connection, permission or approval
 //   (a binding is its alias and kind), no parameter value, no record,
 //   member, guest, run, decision or audit row. A workflow travels as the
-//   TypeScript generated from it and its own modules, never its
-//   definition, and a sensitive parameter has no value in either: the
+//   TypeScript generated from it, never its definition, and a sensitive parameter has no value in either: the
 //   format keeps none in the document. The sealed generated files, which name this
 //   deployment's resources, are only their hashes. What builders wrote
 //   into source is scanned for known secret formats, and the export is
@@ -53,15 +52,6 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 //   events, listens and decisions, never a pin, and none for a workflow
 //   the package doesn't carry) are no files, but are counted and scanned
 //   as files are.
-// - A workflow version's approved packages are lost, so its modules'
-//   bare imports resolve nowhere, or travel as if approved: the version
-//   carries what it seals (`packages`), the graph's hash, the entries its
-//   modules import and the graph's lock, every exact version and
-//   integrity, without this deployment's build pins, its approval or its
-//   artifact. Nothing at the destination trusts it: a publication there
-//   seals only a graph approved for its own workflow, asked for and
-//   approved anew from the lock's exact versions. The record counts
-//   against the byte budget and is scanned like every file.
 // - Someone exports what they can't read: only the App's builders (its
 //   admins among them), never Grasp staff; and only workflows they build,
 //   as for a workflow's source. A workflow they don't is listed as
@@ -181,12 +171,6 @@ class PackagedVersions {
     }
     const key = `${workflowNamespace}/${found.name}/${found.definitionVersion}`;
     const files = this.#budget(`workflows/${key}`, found.files);
-    // Named as the package names it: it is no file of the version's.
-    if (found.packages !== null) {
-      this.#budget(`workflows/${key}`, {
-        packages: canonicalText(found.packages),
-      });
-    }
     this.packaged[key] = {
       provenance: {
         manifestHash: found.manifestHash,
@@ -198,14 +182,6 @@ class PackagedVersions {
       bindings: Object.fromEntries(
         found.bindings.map((binding) => [binding.alias, binding.kind])
       ),
-      packages:
-        found.packages === null
-          ? null
-          : {
-              graphHash: found.packages.graphHash,
-              entries: [...found.packages.entries],
-              lock: found.packages.lock,
-            },
     };
     return { key };
   }

@@ -84,6 +84,12 @@ interface EngineStepOptions {
 export interface WorkflowEngine {
   readonly runId: RunId;
   /**
+   * When the run started, in ms since the epoch, as its start recorded
+   * it: the same in every execution of the run, so code that reads it
+   * (`ctx.run.startedAt`) replays alike, as no clock would.
+   */
+  readonly startedAt: number;
+  /**
    * Parameter values people set, by name; missing ones use the default. The
    * SDK records them in the run's first step, so a run keeps the values it
    * started with even when people change them before it resumes.

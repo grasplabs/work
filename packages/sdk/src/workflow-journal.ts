@@ -36,7 +36,7 @@ import type { WorkflowPermissions } from "./workflow.ts";
 //
 // | call | parts, and what each records |
 // | --- | --- |
-// | a connection's action, a files or Brain action, a module, the model | `task`: `{ output }`, or `{ output, state }` |
+// | a connection's action, a files or Brain action, the model | `task`: `{ output }`, or `{ output, state }` |
 // | a decision | `enter`: `{ recipients, prompt, input }`; `task`: the decision opened; `task#ask`; `task#asked`: when; `task#answer`: the wait |
 // | an event wait | `enter`, with a match only: `{ key }`; `task`: the wait (`engine.listen`) |
 // | a sleep | `task`: the sleep |
@@ -587,13 +587,6 @@ export const journaledCtx = (
   const files = actionMembers(permissions.files);
   const brain = actionMembers(permissions.brain);
 
-  const modules = membersOf(
-    Object.entries(permissions.modules ?? {}).map(([alias, kind]) => [
-      alias,
-      call(alias, kind === "compute" ? "grasp.compute" : "grasp.action"),
-    ])
-  );
-
   const ai =
     permissions.ai === true
       ? membersOf([
@@ -750,7 +743,7 @@ export const journaledCtx = (
   }
 
   const ctx = membersOf<unknown>([
-    ["run", frozenData({ id: engine.runId })],
+    ["run", frozenData({ id: engine.runId, startedAt: engine.startedAt })],
     ["params", frozenData(params)],
     ["state", frozenData(snapshot)],
     ["inbox", frozenData(engine.inbox ?? {})],
@@ -759,7 +752,6 @@ export const journaledCtx = (
     ["events", events],
     ["files", files],
     ["brain", brain],
-    ["modules", modules],
     ["ai", ai],
     ["sleep", sleep],
     ["sleepUntil", sleepUntil],

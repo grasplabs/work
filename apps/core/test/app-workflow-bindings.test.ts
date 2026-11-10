@@ -30,7 +30,6 @@ const setUp = async () => {
   await builder.api.workflowResources.editDraft(flow.id, {
     expectedRevision: started.revision,
     source: greetingOf(undefined, "Version 1"),
-    modules: {},
   });
   await builder.api.workflowResources.publishDraft(flow.id, {
     revision: 1,
@@ -39,7 +38,6 @@ const setUp = async () => {
   await builder.api.workflowResources.editDraft(flow.id, {
     expectedRevision: 1,
     source: greetingOf(undefined, "Version 1.1"),
-    modules: {},
   });
   await builder.api.workflowResources.publishDraft(flow.id, {
     revision: 2,

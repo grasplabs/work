@@ -16,7 +16,6 @@ import { z } from "zod";
 import worker from "../src/index.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { unique } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
@@ -267,10 +266,6 @@ export const granted = async (
 export interface Starting {
   /** The workflow's definition, by its name. */
   definition?: (name: string) => string;
-  /** Its own modules, by path. */
-  modules?: Record<string, string>;
-  /** Its files binding, approved by the admin, for a catalog key of its own. */
-  files?: true;
   input?: InputMapping;
   /** The name its address takes, when not a random one of its own. */
   address?: string;
@@ -283,13 +278,7 @@ export interface Starting {
  */
 export const emailTriggerFor = async (
   builder: Person,
-  {
-    definition = () => definitionOf(),
-    modules,
-    files,
-    input = mapping,
-    address,
-  }: Starting = {}
+  { definition = () => definitionOf(), input = mapping, address }: Starting = {}
 ) => {
   const by = await admin();
   const { id, name } = await builder.api.workflowResources.create(
@@ -298,15 +287,7 @@ export const emailTriggerFor = async (
   await builder.api.workflowResources.publish(id, {
     definition: definition(name),
     basedOn: null,
-    ...(modules === undefined ? {} : { modules }),
   });
-  if (files === true) {
-    await approveWorkflowBinding(env, by, id, {
-      alias: "files",
-      target: { kind: "files" },
-      reviewed: { version: 1 },
-    });
-  }
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "email",
     workflowId: id,

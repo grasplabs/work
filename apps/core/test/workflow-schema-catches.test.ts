@@ -3,38 +3,47 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { workflowStateOf } from "../src/workflow-state.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
+import { answeringProvider, connectModels } from "./model-provider.ts";
+import type { SentRequest } from "./model-provider.ts";
 import {
+  allowedModel,
   anyText,
   checkedCalls,
   failedWith,
+  hello,
   ranAs,
   retryingEngine,
+  sealedWorkflow,
   waitingRun,
 } from "./sealed-run-harness.ts";
-import type { Tries } from "./sealed-run-harness.ts";
+import type { Sealed, Tries } from "./sealed-run-harness.ts";
 import {
   fail,
   generated,
-  local,
-  localWorkflow,
   objectOf,
+  unavailable,
 } from "./workflow-schema-runs.ts";
 
 // grasp-workflow/2's tries, catches and retries as their generated code
 // runs on the run host, one inside another: the innermost catch that
 // takes a failure has it, before any retry further out; a catch that
 // doesn't take it throws it on to the next; and an object's value left
-// out where its expression gave nothing, as JSON leaves it out.
+// out where its expression gave nothing, as JSON leaves it out. The step
+// that fails mails through a server that is unavailable: the engine tries
+// it three times a round.
 
 /** A retry of 3 attempts, a second apart. */
 const thrice = { attempts: 3, delay: "1 second", backoff: "constant" };
 
-/** Step `id` noting `error.code` through action `note`: a catch's recovery. */
+const greeting = objectOf({ line: { kind: "string" } });
+
+/** Step `id` asking the model about `error.code`: a catch's recovery. */
 const noting = (id: string) => ({
   id,
-  type: "call",
-  module: "note",
-  args: { to: { $expr: "error.code" } },
+  type: "generate",
+  instructions: "Say what went wrong.",
+  input: { code: { $expr: "error.code" } },
+  returns: greeting,
 });
 
 /** Try `id` around `inside`, with `catch`. */
@@ -46,18 +55,53 @@ const trying = (id: string, inside: unknown[], caught: unknown) => ({
 });
 
 /**
- * Step `remarked` passing `note` to action `remark`, and keeping the
- * run's optional `note` in state.
+ * Step `remarked` asking the model with the run's `who` and `note`, and
+ * keeping the run's optional `note` in state.
  */
 const remarking = (note: unknown) => [
   {
     id: "remarked",
-    type: "call",
-    module: "remark",
-    args: { to: { $expr: "args.who" }, note },
+    type: "generate",
+    instructions: "Remark on it.",
+    input: { who: { $expr: "args.who" }, note },
+    returns: greeting,
     state: { note: { $expr: "args.note" } },
   },
 ];
+
+/** The object a request sent the model as its input: one with a `who`. */
+const inputOf = (value: unknown): Record<string, unknown> | undefined => {
+  if (typeof value === "string") {
+    try {
+      return inputOf(JSON.parse(value));
+    } catch {
+      return undefined;
+    }
+  }
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value) && "who" in value) {
+    return Object.fromEntries(Object.entries(value));
+  }
+  for (const each of Object.values(value)) {
+    const found = inputOf(each);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
+};
+
+/** The model's answer: the keys of the input it was given, or a greeting. */
+const givenKeys = (requests: readonly SentRequest[]) => {
+  const input = inputOf(requests.at(-1)?.body);
+  if (input === undefined) {
+    return hello;
+  }
+  const line = Object.keys(input).toSorted().join(",");
+  return { ...hello, text: JSON.stringify({ line }) };
+};
 
 /**
  * What an engine ran, by `tries`: each step's attempts by its engine name,
@@ -77,10 +121,15 @@ const ranSteps = (tries: Tries) => {
 };
 
 describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
-  let owned: Awaited<ReturnType<typeof localWorkflow>>;
+  let failing: Sealed;
 
   beforeAll(async () => {
-    owned = await localWorkflow();
+    await connectModels(`test-model-key-${crypto.randomUUID()}`, [
+      allowedModel,
+    ]);
+    failing = await sealedWorkflow();
+    await unavailable(failing);
+    await answeringProvider(givenKeys, { models: [allowedModel] });
   });
 
   afterAll(endLiveResourceRuns);
@@ -102,11 +151,11 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
     const { source, sealed: withTable } = await generated(
       steps,
       output,
-      local,
+      undefined,
       state,
       input
     );
-    const runId = await waitingRun(owned);
+    const runId = await waitingRun(failing);
     const ran = await ranAs(runId, source, {
       engine: retryingEngine(tries),
       sealed: withTable,
@@ -134,7 +183,7 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
       // by the host alone.
       unconditional: await caught({ do: [noting("told")] }),
       byCode: await caught({
-        code: "workflow.compute_failed",
+        code: "connect.server_unavailable",
         do: [noting("told")],
       }),
       // Its `when` holds, but its code isn't the failure's: the outer try
@@ -153,31 +202,31 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
       // The host asks its code, which says no retry: the inner catch takes it.
       conditional: {
         ran: { ended: null, tampered: [] },
-        steps: { "fail:task": 1, "told:task": 1 },
+        steps: { "fail:task": 3, "told:task": 1 },
         decided: 1,
         retried: 0,
       },
       unconditional: {
         ran: { ended: null, tampered: [] },
-        steps: { "fail:task": 1, "told:task": 1 },
+        steps: { "fail:task": 3, "told:task": 1 },
         decided: 0,
         retried: 0,
       },
       byCode: {
         ran: { ended: null, tampered: [] },
-        steps: { "fail:task": 1, "told:task": 1 },
+        steps: { "fail:task": 3, "told:task": 1 },
         decided: 0,
         retried: 0,
       },
       otherCode: {
         ran: { ended: null, tampered: [] },
-        steps: { "fail:task": 1, "retold:task": 1 },
+        steps: { "fail:task": 3, "retold:task": 1 },
         decided: 2,
         retried: 2,
       },
       declines: {
         ran: { ended: null, tampered: [] },
-        steps: { "fail:task": 1, "retold:task": 1 },
+        steps: { "fail:task": 3, "retold:task": 1 },
         decided: 2,
         retried: 2,
       },
@@ -215,7 +264,7 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
     }).toStrictEqual({
       exhausted: {
         ran: { ended: null, tampered: [] },
-        steps: { "fail:task": 1, "told:task": 1 },
+        steps: { "fail:task": 3, "told:task": 1 },
         decided: 2,
         retried: 2,
       },
@@ -223,10 +272,10 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
       // takes it, its code the call's.
       declined: {
         ran: { ended: null, tampered: [] },
-        steps: { "fail:task": 1, "told:task": 1 },
+        steps: { "fail:task": 3, "told:task": 1 },
         decided: 0,
         retried: 0,
-        told: ["fail:task", "told:task"],
+        told: ["fail:task", "fail:task", "fail:task", "told:task"],
       },
     });
   });
@@ -255,9 +304,9 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
       eachItem: {
         ran: { ended: null, tampered: [] },
         steps: {
-          "fail:task": 1,
+          "fail:task": 3,
           "told:task": 1,
-          "fail:task@1": 1,
+          "fail:task@1": 3,
           "told:task@1": 1,
         },
         decided: 0,
@@ -265,7 +314,7 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
       },
       aroundLoop: {
         ran: { ended: null, tampered: [] },
-        steps: { "fail:task": 1, "told:task": 1 },
+        steps: { "fail:task": 3, "told:task": 1 },
         decided: 2,
         retried: 2,
       },
@@ -274,23 +323,19 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
 
   it("fails the run with what no catch may take, however many tries stand around it", async () => {
     const tries: Tries = new Map();
-    const { source, sealed: withTable } = await generated(
-      [
-        trying(
-          "outer",
-          [
-            trying("inner", [{ id: "linger", type: "wait", for: "1 hour" }], {
-              when: { $expr: "true" },
-              do: [noting("told")],
-            }),
-          ],
-          { retry: thrice, do: [noting("retold")] }
-        ),
-      ],
-      undefined,
-      local
-    );
-    const ran = await ranAs(await waitingRun(owned), source, {
+    const { source, sealed: withTable } = await generated([
+      trying(
+        "outer",
+        [
+          trying("inner", [{ id: "linger", type: "wait", for: "1 hour" }], {
+            when: { $expr: "true" },
+            do: [noting("told")],
+          }),
+        ],
+        { retry: thrice, do: [noting("retold")] }
+      ),
+    ]);
+    const ran = await ranAs(await waitingRun(failing), source, {
       engine: retryingEngine(tries),
       sealed: withTable,
       // A test run's waits are held to a minute: an hour's is past it.
@@ -312,10 +357,10 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
       }),
       state: { note: { kind: "string", optional: true } },
     };
-    // What the action was given, as it answers.
+    // The keys of the input the model was given, as it answers.
     const output = {
-      schema: objectOf({ given: { kind: "array", item: { kind: "string" } } }),
-      value: { given: { $expr: "remarked.given" } },
+      schema: objectOf({ given: { kind: "string" } }),
+      value: { given: { $expr: "remarked.line" } },
     };
     const absent = await runOf(remarking({ $expr: "args.note" }), {
       ...optional,
@@ -325,23 +370,23 @@ describe("a grasp-workflow/2 workflow's nested tries on the run host", () => {
     const { source, sealed: withTable } = await generated(
       remarking("by hand"),
       output,
-      local,
+      undefined,
       optional.state,
       optional.input
     );
     const forged = source.replace(",note:`by hand`", "");
-    const tampered = await ranAs(await waitingRun(owned), forged, {
+    const tampered = await ranAs(await waitingRun(failing), forged, {
       engine: retryingEngine(),
       sealed: withTable,
     });
     expect({
       absent: absent.outcome.ran,
-      state: await workflowStateOf(env, owned.workflow.id),
+      state: await workflowStateOf(env, failing.workflow.id),
       forged: forged !== source,
       tampered,
     }).toStrictEqual({
-      // The action was given no `note`, and the step kept nothing.
-      absent: { ended: { given: ["to"] }, tampered: [] },
+      // The model was given no `note`, and the step kept nothing.
+      absent: { ended: { given: "who" }, tampered: [] },
       state: {},
       forged: true,
       tampered: {

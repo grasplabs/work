@@ -177,7 +177,6 @@
     "./widgets": "./src/widgets.ts",
     "./workflow-diagrams": "./src/workflow-diagrams.ts",
     "./workflow-lifecycle": "./src/workflow-lifecycle.ts",
-    "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
     "./workflow-triggers": "./src/workflow-triggers.ts",
     "./work-knowledge": "./src/work-knowledge.ts",

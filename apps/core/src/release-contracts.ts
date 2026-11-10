@@ -8,8 +8,8 @@ import type { CatalogContractDefinition } from "@grasp-os/shared/workflow-resour
 // (`ensureReleaseContract`): published once, under a key nobody has taken,
 // and never changed; a new shape is a new key. Without them a fresh
 // deployment's catalog holds no model or decision contract a JSON
-// workflow can bind, so the only steps a builder or the chat could write
-// are a workflow's own `local:` code. Each is general, never a topic's or
+// workflow can bind, so a builder or the chat could write only steps that
+// wait or compute. Each is general, never a topic's or
 // a client's: what a call does is the workflow's to say (a model step's
 // instructions and output schema, an approval's prompt and input).
 //

@@ -66,7 +66,7 @@ import type {
  *   expressions (`@grasp-os/sdk/expression-check`) is the first layer, the
  *   isolate's frozen intrinsics the third.
  * - Members exposing undeclared names. `ctx.connections`, `ctx.decisions`,
- *   `ctx.events`, `ctx.modules` and `ctx.ai` are built only from
+ *   `ctx.events` and `ctx.ai` are built only from
  *   `permissions`, as frozen objects with no prototype (`membersOf`),
  *   never a `Proxy`: an alias or action nobody declared, `constructor`
  *   and `__proto__` included, is `undefined`, and calling it is a
@@ -120,7 +120,7 @@ export type {
  * What a workflow may reach, as its handler calls it: its model
  * (`ai: true`), each connection's actions by alias, its decisions' and
  * event permissions' aliases (an event permission with the types it
- * waits for), and its own modules, each a compute or an action.
+ * waits for).
  *
  * A connection's actions are each its member path (`send`, or a dotted
  * one, `invoices.create`) and the operation its call names, as the host's
@@ -139,10 +139,9 @@ export interface WorkflowPermissions {
   readonly files?: Readonly<Record<string, readonly (keyof FilesActions)[]>>;
   /** Each brain permission, by alias: the actions its steps take. */
   readonly brain?: Readonly<Record<string, readonly (keyof BrainActions)[]>>;
-  readonly modules?: Readonly<Record<string, "compute" | "action">>;
 }
 
-/** A call of one of the workflow's modules. */
+/** A call of a connection's action. */
 export type CallMember = (args: unknown, options: CallOptions) => Promise<Read>;
 
 /** A call of a connection's action. */
@@ -203,7 +202,12 @@ export interface WorkflowCtx<
   Permissions extends WorkflowPermissions,
   P extends Params,
 > {
-  readonly run: { readonly id: RunId };
+  /**
+   * The run: its ID, and when it started (ms since the epoch), as its
+   * start recorded it, so a scheduled run finds its day or week from it
+   * and replays alike.
+   */
+  readonly run: { readonly id: RunId; readonly startedAt: number };
   readonly params: ParamValues<P>;
   /**
    * What the workflow kept between its runs, by key, as this run's start
@@ -243,9 +247,6 @@ export interface WorkflowCtx<
       BrainActions,
       ListedOf<NonNullable<Permissions["brain"]>[Alias]>
     >;
-  };
-  readonly modules: {
-    readonly [Alias in keyof NonNullable<Permissions["modules"]>]: CallMember;
   };
   readonly ai: Permissions["ai"] extends true ? AiMembers : undefined;
   /** Durably pauses the run for `duration`. */

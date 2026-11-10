@@ -107,7 +107,7 @@ import { inList } from "../db/d1.ts";
 //   first bytes alone. Nothing serves a run file yet; before downloads
 //   (phase 2) serve one, check this again (a polyglot file passes).
 
-/** What each call of a files use asks for, as the action's use declares it. */
+/** What each call on a files binding asks of it. */
 export const filesCallOperations = {
   open: "write",
   append: "write",

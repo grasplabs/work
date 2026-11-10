@@ -2,7 +2,6 @@ import { memberName } from "@grasp-os/sdk/host";
 import type { CompactDescriptor } from "@grasp-os/sdk/host";
 import { decidersPattern } from "@grasp-os/shared/decisions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 import {
   maxWorkflowParams,
   workflowParamNamePattern,
@@ -144,9 +143,7 @@ export const isSensitive = (param: Param): boolean => !isPlain(param);
  * whose alias is `ai`; `connections`, `decisions` and `events` are the
  * catalog's connectors, decision contracts and event contracts; `files`
  * are the run's own files and `brain` one Brain collection each, which a
- * `call` step reaches as `ctx.files.<alias>` and `ctx.brain.<alias>`;
- * `modules` are its own compute and action modules
- * (`local:code/<file>.ts#<export>`).
+ * `call` step reaches as `ctx.files.<alias>` and `ctx.brain.<alias>`.
  */
 export const permissionKinds = [
   "ai",
@@ -155,7 +152,6 @@ export const permissionKinds = [
   "events",
   "files",
   "brain",
-  "modules",
 ] as const;
 export type PermissionKind = (typeof permissionKinds)[number];
 
@@ -167,8 +163,6 @@ export type PermissionKind = (typeof permissionKinds)[number];
 export const bindingKinds = [
   "connector",
   "model",
-  "compute",
-  "action",
   "decision",
   "event",
   "files",
@@ -186,11 +180,6 @@ export interface Permission {
   readonly title?: string;
 }
 
-/** One of the workflow's own modules: a compute or an action. */
-export interface ModulePermission extends Permission {
-  readonly kind: "compute" | "action";
-}
-
 /** What a workflow may reach, each kind by alias (`permissionKinds`). */
 export interface Permissions {
   readonly ai?: Permission;
@@ -199,7 +188,6 @@ export interface Permissions {
   readonly events?: Readonly<Record<string, Permission>>;
   readonly files?: Readonly<Record<string, Permission>>;
   readonly brain?: Readonly<Record<string, Permission>>;
-  readonly modules?: Readonly<Record<string, ModulePermission>>;
 }
 
 /** A permission held by alias: its kind, its alias, and what it binds. */
@@ -211,7 +199,7 @@ export interface AliasedPermission {
 
 /** The permissions of one kind held by alias, each binding as `bound`. */
 const held = (
-  kind: Exclude<PermissionKind, "ai" | "modules">,
+  kind: Exclude<PermissionKind, "ai">,
   entries: Readonly<Record<string, Permission>> | undefined,
   bound: BindingKind
 ): AliasedPermission[] =>
@@ -233,13 +221,6 @@ export const aliasedPermissions = (
   ...held("events", permissions.events, "event"),
   ...held("files", permissions.files, "files"),
   ...held("brain", permissions.brain, "brain"),
-  ...Object.entries(permissions.modules ?? {}).map(
-    ([alias, permission]): AliasedPermission => ({
-      kind: "modules",
-      alias,
-      binding: { ...permission },
-    })
-  ),
 ];
 
 /**
@@ -342,17 +323,15 @@ export interface ConnectionCallStep extends CallBase {
 
 /**
  * A call of a workflow's typed member: a connection's action
- * (`ctx.connections`), the run's own files (`ctx.files`), a Brain
- * collection (`ctx.brain`), or one of the workflow's own modules
- * (`ctx.modules.<module>`). One step type for every member call: the key
+ * (`ctx.connections`), the run's own files (`ctx.files`) or a Brain
+ * collection (`ctx.brain`). One step type for every member call: the key
  * that names its permission says which kind it is, as `ctx.<kind>.<alias>`
  * does.
  */
 export type CallStep =
   | ConnectionCallStep
   | (CallBase & { readonly files: string; readonly action: FilesAction })
-  | (CallBase & { readonly brain: string; readonly action: BrainAction })
-  | (CallBase & { readonly module: string });
+  | (CallBase & { readonly brain: string; readonly action: BrainAction });
 
 /**
  * Asks the workflow's model (`permissions.ai`) for an answer of
@@ -745,13 +724,6 @@ export const aliasPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
  */
 export const actionPattern =
   "^[A-Za-z][A-Za-z0-9_-]{0,63}(?:\\.[A-Za-z][A-Za-z0-9_-]{0,63}){0,3}$";
-
-/**
- * A workflow's own module and export, `local:code/<path>.ts#<export>`: its
- * module's path as the host keeps the workflow's modules
- * (`workflowModulePattern`), then an export's name.
- */
-export const localContractPattern = `^local:(${workflowModulePattern.source.slice(1, -1)})#([A-Za-z_$][A-Za-z0-9_$]*)$`;
 
 /**
  * The lists of steps a step of each type may hold, each by the path it is

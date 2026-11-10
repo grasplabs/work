@@ -27,7 +27,6 @@ import { readableSources } from "../history-access.ts";
 import type { Reader } from "../knowledge/access.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
-import { pinnedTemplate } from "../resource-templates.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 import {
@@ -37,8 +36,7 @@ import {
   recordRunEvidence,
 } from "./run-evidence.ts";
 
-// A run's reads of Knowledge and of published templates, for its
-// workflow's own actions (GRA-700; the threat model is on the issue). Each
+// A run's reads of Knowledge (GRA-700; the threat model is on the issue). Each
 // is one of the run's named calls (resource-calls.ts, `makeCall`): its
 // binding frozen at the start, its authority decided again first, its
 // receipts kept. What each closes:
@@ -58,9 +56,6 @@ import {
 //   (`permission.restricted`) before anything is returned, a search that
 //   finds nothing too, as that says something of what the collection
 //   holds (knowledge/search.ts). A run started restricted reads it.
-// - A template other than the one approved. A binding pins one version by
-//   its content's hash; content that no longer hashes to it serves
-//   nothing (`resource.unavailable`).
 // - A recall wider than the binding, or without the Brain (GRA-1067; the
 //   threat model is on the issue). A recall is the Brain's own, the same
 //   service as every caller's: over the binding's one collection, under
@@ -396,35 +391,6 @@ export const callKnowledge = async (
       throw workflowResourceErrors.create("workflow.call_denied");
     }
   }
-};
-
-/**
- * Reads the template version `binding` pins, as its approval pinned it:
- * its content, or `resource.unavailable` for content that no longer
- * hashes to the pin.
- */
-export const callTemplate = async (
-  env: Env,
-  binding: FrozenCatalogBinding
-): Promise<Json> => {
-  const { target } = binding;
-  if (target.kind !== "template") {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  const pinned = await pinnedTemplate(
-    env,
-    target.templateId,
-    target.version,
-    target.contentHash
-  );
-  if (pinned === undefined) {
-    throw operationErrors.create("resource.unavailable");
-  }
-  return {
-    contract: pinned.contract,
-    version: pinned.version,
-    content: pinned.content,
-  };
 };
 
 /**

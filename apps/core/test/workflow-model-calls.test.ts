@@ -28,6 +28,7 @@ import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
+import { withQuotas } from "./quota-limits.ts";
 import { runObject, woken } from "./runs.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import { webhookConfig } from "./source-config.ts";
@@ -40,6 +41,7 @@ import {
   ended,
   endOf,
   granted,
+  greetStep,
   greetingWorkflow,
   hold,
   identityOf,
@@ -155,6 +157,31 @@ describe("model calls", () => {
       status: run.status,
       requests: provider.requests.length,
     }).toStrictEqual({ status: "failed", requests: 1 });
+  });
+
+  it("holds a run's model calls to its limit across a replay, sending nothing past it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // The greeting spends the run's one call; the step after its replay
+    // asks for a second.
+    const { workflow } = await greetingWorkflow(ada, admin, {
+      after: [greetStep("again")],
+    });
+    const provider = await providerAnswering(
+      answer('{"line":"Hello Ada"}'),
+      answer('{"line":"Never sent"}')
+    );
+    const run = await withQuotas(
+      { lineageModelRequests: 1 },
+      async () => await ended(ada, workflow.id, await started(ada, workflow.id))
+    );
+    expect({
+      end: endOf(run),
+      requests: provider.requests.length,
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.model_call_limit" },
+      requests: 1,
+    });
   });
 
   it("waits while the provider refuses the key, provably billing nothing, and goes on once an admin replaces it, its call made again in a step of its own", async () => {

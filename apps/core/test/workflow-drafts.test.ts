@@ -112,7 +112,6 @@ describe("a workflow's draft", () => {
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: started.source,
-      modules: {},
     });
     expect(saved).toMatchObject({
       revision: 1,
@@ -130,7 +129,6 @@ describe("a workflow's draft", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 1,
       source: next,
-      modules: {},
     });
     await expect(
       outcome(
@@ -180,14 +178,12 @@ describe("a workflow's draft", () => {
         editWorkflowDraft(env, ada, workflow.id, {
           expectedRevision: 0,
           source: first,
-          modules: {},
         })
       ),
       outcome(
         editWorkflowDraft(env, bo, workflow.id, {
           expectedRevision: 0,
           source: second,
-          modules: {},
         })
       ),
     ]);
@@ -206,7 +202,6 @@ describe("a workflow's draft", () => {
         editWorkflowDraft(env, bo, workflow.id, {
           expectedRevision: 0,
           source: second,
-          modules: {},
         })
       )
     ).resolves.toBe("workflow.draft_conflict");
@@ -215,7 +210,6 @@ describe("a workflow's draft", () => {
         editWorkflowDraft(env, bo, workflow.id, {
           expectedRevision: 1,
           source: second,
-          modules: {},
         })
       )
     ).resolves.toBe("ok");
@@ -224,18 +218,15 @@ describe("a workflow's draft", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 2,
       source: "{",
-      modules: {},
     });
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 3,
       source: "{ still",
-      modules: {},
     });
     const stale = await outcome(
       editWorkflowDraft(env, bo, workflow.id, {
         expectedRevision: 2,
         source: second,
-        modules: {},
       })
     );
     const latest = await workflowDraft(env, ada, workflow.id);
@@ -274,7 +265,6 @@ describe("a workflow's draft", () => {
           },
         ],
       }),
-      modules: {},
     });
     expect({
       problems: saved.problems,
@@ -313,7 +303,6 @@ describe("a workflow's draft", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: good,
-      modules: {},
     });
     const secret = `secret-${unique()}`;
     const invalid = await editWorkflowDraft(env, ada, workflow.id, {
@@ -321,12 +310,10 @@ describe("a workflow's draft", () => {
       source: definitionOf({
         steps: [waitStep("finish", { unknown: secret })],
       }),
-      modules: {},
     });
     const incomplete = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 2,
       source: good.slice(0, 40),
-      modules: {},
     });
     expect({
       invalid: invalid.problems.map(
@@ -420,14 +407,12 @@ describe("a workflow's draft", () => {
     const passed = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: good,
-      modules: {},
     });
     // A state key reads its schema's type: a number is no string.
     const mistyped = typed("args.missing.x", 'state.count === "many"');
     const kept = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 1,
       source: mistyped,
-      modules: {},
     });
     const published = await outcome(
       publishWorkflowVersion(env, ada, workflow.id, {
@@ -474,7 +459,6 @@ describe("a workflow's draft", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: passing,
-      modules: {},
     });
     // Core's database, where another builder's edit that passes lands as
     // soon as this one's batch has, keeping only itself as its checkpoint.
@@ -508,7 +492,7 @@ describe("a workflow's draft", () => {
       { ...env, DB: racing },
       ada,
       workflow.id,
-      { expectedRevision: 1, source: "{ mine, not yet", modules: {} }
+      { expectedRevision: 1, source: "{ mine, not yet" }
     );
     const latest = await workflowDraft(env, ada, workflow.id);
     expect({
@@ -532,12 +516,10 @@ describe("a workflow's draft", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: passing,
-      modules: {},
     });
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 1,
       source: "{ not yet",
-      modules: {},
     });
     // Core's database, where another builder's edit that passes lands as
     // soon as a single read of the draft has run.
@@ -636,7 +618,6 @@ describe("a workflow's draft", () => {
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source,
-      modules: {},
     });
     expect({
       problems: saved.problems.map(({ code, pointer }) => `${code} ${pointer}`),
@@ -656,7 +637,6 @@ describe("a workflow's draft", () => {
         editWorkflowDraft(env, ada, workflow.id, {
           expectedRevision: 0,
           source: "界".repeat(700_000),
-          modules: {},
         })
       )
     ).resolves.toBe("workflow.resource_invalid");
@@ -676,7 +656,6 @@ describe("a workflow's draft", () => {
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source,
-      modules: {},
     });
     const read = await workflowDraft(env, ada, workflow.id);
     expect({
@@ -705,7 +684,6 @@ describe("a workflow's draft", () => {
     const edit = {
       expectedRevision: 0,
       source: definitionOf(),
-      modules: {},
     };
     expect({
       read: await outcome(workflowDraft(env, user, workflow.id)),
@@ -734,7 +712,6 @@ describe("a workflow's draft", () => {
       await editWorkflowDraft(env, ada, workflow.id, {
         expectedRevision: revision,
         source,
-        modules: {},
       });
     }
     const kept = await storedRevisions(workflow.id);
@@ -862,7 +839,6 @@ describe("a step edited on the canvas", () => {
           revision: 1,
           checked: true,
           problems: 0,
-          modules: 0,
           step: "insert",
           stepPointer: "/steps/0",
         },
@@ -870,7 +846,6 @@ describe("a step edited on the canvas", () => {
           revision: 2,
           checked: true,
           problems: 0,
-          modules: 0,
           step: "insert",
           stepPointer: "/steps/1/else/0",
         },
@@ -878,7 +853,6 @@ describe("a step edited on the canvas", () => {
           revision: 3,
           checked: true,
           problems: 0,
-          modules: 0,
           step: "change",
           stepPointer: "/steps/1/then/0",
         },
@@ -892,7 +866,6 @@ describe("a step edited on the canvas", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: definitionOf({ steps: [waitStep("finish")] }),
-      modules: {},
     });
     const refused = await editWorkflowStep(env, ada, workflow.id, {
       expectedRevision: 1,
@@ -922,7 +895,6 @@ describe("a step edited on the canvas", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: definitionOf({ steps: [waitStep("finish")] }),
-      modules: {},
     });
     const step = { type: "wait", for: "5 seconds" };
     const change = async (pointer: string, expectedRevision = 1) => {
@@ -969,7 +941,6 @@ describe("a step edited on the canvas", () => {
     await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 1,
       source: "{ not yet",
-      modules: {},
     });
     const notJson = await change("/steps/0", 2);
 

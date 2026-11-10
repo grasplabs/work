@@ -4,7 +4,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { WorkflowEngine } from "../src/engine.ts";
-import { caughtError } from "../src/workflow-generated.ts";
+import { caughtError, parse } from "../src/workflow-generated.ts";
 import { AppError, defineWorkflow, v } from "../src/workflow.ts";
 
 // The workflow runtime, from its threat model (workflow.ts): data a
@@ -80,6 +80,9 @@ const parsed = (text: string): Json => {
 const keysOf = (value: unknown): (string | symbol)[] =>
   typeof value === "object" && value !== null ? Reflect.ownKeys(value) : [];
 
+/** When the fake engine's run started, in ms since the epoch. */
+const startedAt = Date.UTC(2026, 10, 9, 8, 30);
+
 /** A mail call's answer whose JSON names the prototype's own keys. */
 const hostileAnswer = parsed(
   '{"id": "m-1", "__proto__": {"admin": true}, "constructor": {"prototype": 1}, "lines": [{"total": 3}, {"total": 9}]}'
@@ -136,6 +139,7 @@ const engineOf = ({
   };
   const engine: WorkflowEngine = {
     runId: runIdSchema.parse("run-1"),
+    startedAt,
     params: {},
     inbox: { replies: "reply-1@grasp.test" },
     state,
@@ -184,6 +188,10 @@ const permissions = {
   decisions: ["finance"],
   events: { replies: ["grasp.reply.received"] },
 } as const;
+
+/** JSON text of `levels` levels: lists around a leaf. */
+const nested = (levels: number): string =>
+  `${"[".repeat(levels - 1)}0${"]".repeat(levels - 1)}`;
 
 describe("a workflow's data", () => {
   /** What a run of a mail and a wait reads, on a first run and on its replay. */
@@ -291,6 +299,75 @@ describe("a workflow's data", () => {
       },
       raised: { code: "invoice.rejected", message: "No." },
       details: { id: 7 },
+    });
+  });
+
+  it("parses text into frozen data with no prototype, `__proto__` an own field", () => {
+    const value: unknown = parse(
+      '{"__proto__": {"admin": true}, "constructor": {"x": 1}, "lines": [{"a": 1}]}'
+    );
+    const scalar: unknown = parse("7");
+    expect({
+      data: isFrozenData(value),
+      ownProto: keysOf(value).includes("__proto__"),
+      inherited: read(value, "admin"),
+      constructorIsData: isFrozenData(read(value, "constructor")),
+      linesFrozen: Object.isFrozen(read(value, "lines")),
+      lineIsData: isFrozenData(read(value, "lines", "0")),
+      polluted: read({}, "admin"),
+      scalar,
+    }).toStrictEqual({
+      data: true,
+      ownProto: true,
+      inherited: undefined,
+      constructorIsData: true,
+      linesFrozen: true,
+      lineIsData: true,
+      polluted: undefined,
+      scalar: 7,
+    });
+    // Only text parses: anything else fails the expression, as JSON's own
+    // parse fails on what isn't JSON.
+    expect(() => {
+      parse({ toString: () => "{}" });
+    }).toThrow(TypeError);
+    expect(() => {
+      parse("{");
+    }).toThrow(SyntaxError);
+  });
+
+  it("parses text nested as deep as any value may be, and refuses deeper", () => {
+    expect(Object.isFrozen(parse(nested(32)))).toBeTruthy();
+    expect(() => {
+      parse(nested(33));
+    }).toThrow(RangeError);
+    // Far past it, as text from outside may be: refused, never walked.
+    expect(() => {
+      parse(nested(100_000));
+    }).toThrow(RangeError);
+  });
+
+  it("knows when its run started, as frozen data, the same on replay", async () => {
+    const seen: unknown[] = [];
+    const workflow = defineWorkflow({
+      handler: async (ctx) => {
+        seen.push(ctx.run);
+        return null;
+      },
+    });
+    const first = engineOf({});
+    await workflow.run(first.engine, {});
+    const replayed = engineOf({ journal: first.journal });
+    await workflow.run(replayed.engine, {});
+    const [started, again] = seen;
+    expect({
+      data: isFrozenData(started),
+      startedAt: read(started, "startedAt"),
+      again: read(again, "startedAt"),
+    }).toStrictEqual({
+      data: true,
+      startedAt,
+      again: startedAt,
     });
   });
 

@@ -35,13 +35,12 @@
  *   pins, or the network is reached: nothing here makes a network call.
  *   Every package the project installs is pinned, exactly and with its
  *   integrity, in its pnpm-lock.yaml (package-definition-lockfile.ts,
- *   GRA-723): the App's and each workflow version's approved packages
- *   from their own locks (GRA-737), the vendored packages' and the
- *   project's own, transitive ones included, from the checkout's
- *   lockfile; and its installs are frozen to it. Two locks that pin one
- *   package at different versions, or one package with other
- *   dependencies, are refused, as is a workflow that imports packages
- *   without a lock, since a project installs one of each. A lock that
+ *   GRA-723): the App's approved packages from its own lock (GRA-737),
+ *   the vendored packages' and the project's own, transitive ones
+ *   included, from the checkout's lockfile; and its installs are frozen
+ *   to it. Two locks that pin one package at different versions, or one
+ *   package with other dependencies, are refused, since a project
+ *   installs one of each. A lock that
  *   names a package the project pins itself (Grasp's scope, React, the
  *   type-checker), anywhere in its graph but its peers, is refused.
  *   Installing is the developer's step, after.
@@ -106,7 +105,6 @@ import { routeTree } from "../packages/compiler/src/route-tree.ts";
 import {
   appCodeTarget,
   compilerOptions,
-  computeTarget,
   generatedTarget,
 } from "../packages/compiler/src/type-check.ts";
 import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
@@ -488,8 +486,7 @@ const planWorkflows = (
     const base = `workflows/${groups.name}/${groups.version}`;
     for (const [file, text] of Object.entries(workflow.files)) {
       // Only code: the TypeScript generated from the definition, which is
-      // what runs, and the workflow's own modules. The definition stays
-      // with the version, in Grasp.
+      // what runs. The definition stays with the version, in Grasp.
       if (file !== "workflow.json") {
         project.add(`${base}/${safePath(file, key)}`, text);
       }
@@ -588,24 +585,6 @@ const appDependencies = (
   }
   return lockPins(lock.data, "the App", notices);
 };
-
-/**
- * Each workflow version's approved packages, as the lock its entry
- * carries pins them (`lockPins`): one that imports packages without a
- * lock is refused, since nothing would pin what its modules import.
- */
-const workflowDependencies = (
-  workflows: DefinitionPackage["workflows"],
-  notices: Notice[]
-): { owner: string; pins: LockPins }[] =>
-  Object.entries(workflows)
-    .toSorted(([a], [b]) => (a < b ? -1 : 1))
-    .flatMap(([key, { packages }]) => {
-      if (packages === null) {
-        return [];
-      }
-      return [{ owner: key, pins: lockPins(packages.lock, key, notices) }];
-    });
 
 /** A locked package's pinned edges, by name, as one text to compare. */
 const edgesText = (edges: Readonly<Record<string, string>>): string =>
@@ -775,8 +754,8 @@ const kindConfig = (
  * The project's tsconfigs, one a kind of code, each as the platform checks
  * it, and the root tsconfig.json that lists them (an editor's, and the
  * check's): the App's pages with the DOM and JSX; its server code with
- * a worker's lib and no DOM; and each workflow version's compute modules
- * likewise, and the module the host generated from it.
+ * a worker's lib and no DOM; and the module the host generated from each
+ * workflow version's definition.
  */
 const planTypeCheck = (project: Plan): void => {
   const configs: Record<string, ReturnType<typeof kindConfig>> = {
@@ -807,14 +786,6 @@ const planTypeCheck = (project: Plan): void => {
     })
   );
   for (const base of versions) {
-    if (
-      [...project.files.keys()].some((file) => file.startsWith(`${base}/code/`))
-    ) {
-      configs[`${base}/tsconfig.json`] = kindConfig("compute", computeTarget, {
-        include: ["code/**/*.ts"],
-        exclude: ["**/*.d.ts"],
-      });
-    }
     if (project.files.has(`${base}/.grasp/workflow.ts`)) {
       configs[`${base}/tsconfig.generated.json`] = kindConfig(
         "generated",
@@ -998,7 +969,6 @@ export const planProject = async (
   const notices: Notice[] = [];
   const pins = mergedPins([
     { owner: "the App", pins: appDependencies(definition.app.files, notices) },
-    ...workflowDependencies(definition.workflows, notices),
   ]);
   const catalogText = readFileSync(
     path.join(input.repo, "pnpm-workspace.yaml"),
@@ -1115,14 +1085,7 @@ export const planProject = async (
         "utf-8"
       ),
       importers,
-      locks: [
-        ...appLock(definition.app.files),
-        ...Object.entries(definition.workflows).flatMap(([key, workflow]) =>
-          workflow.packages === null
-            ? []
-            : [{ owner: key, lock: workflow.packages.lock }]
-        ),
-      ],
+      locks: appLock(definition.app.files),
     })
   );
   for (const [file, source] of Object.entries(checkFiles)) {
@@ -1141,16 +1104,7 @@ export const planProject = async (
       workflows: Object.fromEntries(
         Object.entries(definition.workflows).map(([key, workflow]) => [
           key,
-          {
-            provenance: workflow.provenance,
-            packages:
-              workflow.packages === null
-                ? null
-                : {
-                    graphHash: workflow.packages.graphHash,
-                    entries: workflow.packages.entries,
-                  },
-          },
+          { provenance: workflow.provenance },
         ])
       ),
       unresolved: definition.unresolved,

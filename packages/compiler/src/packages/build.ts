@@ -19,8 +19,8 @@
  * - An archive bomb: unpacking counts gzip's output and stops past
  *   `packageLimits.extractedBytes` for the whole graph.
  *
- * What the code does once it runs is bounded where it runs: a workflow's
- * compute sandbox, locked down before any module evaluates.
+ * What the code does once it runs is bounded where it runs: a page's
+ * sandbox, or an App's server isolate.
  */
 import { entryPackage, packageLimits } from "@grasp-os/shared/packages";
 import type {
@@ -41,7 +41,7 @@ import { kitPeers } from "../kit.ts";
 
 /**
  * Where a build runs: a page, in the browser, beside the kit's React; or
- * an isolate (an App's server code, a workflow's compute), a Worker's.
+ * an isolate (an App's server code), a Worker's.
  */
 export type PackageTarget = "browser" | "worker";
 

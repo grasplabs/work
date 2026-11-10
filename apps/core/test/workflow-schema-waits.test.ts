@@ -24,6 +24,7 @@ import { admitRunEvent } from "../src/workflows/run-events.ts";
 import type { HostedSealedRun } from "../src/workflows/sealed-run.ts";
 import { allEvents } from "./audit-events.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { connectModels } from "./model-provider.ts";
 import {
   allowedModel,
@@ -31,13 +32,17 @@ import {
   descriptorOf,
   echoingMail,
   failedWith,
+  granted,
   journalingEngine,
+  mailInput,
+  mailOutput,
   newerEngine,
   person,
   ranAs,
   retryingEngine,
   sealedRunOf,
   sealedWorkflow,
+  serving,
   waitingRun,
 } from "./sealed-run-harness.ts";
 import type { Engine, Journaled } from "./sealed-run-harness.ts";
@@ -269,38 +274,34 @@ const emailReplies = () => {
 };
 
 /**
- * The workflow's own mail: an action that answers whom it mailed and where
- * their replies go, reaching nothing, as a mail connector's call would
- * carry its Reply-To.
- */
-const askModule = `import { action, v } from "@grasp-os/sdk/action";
-
-export const ask = action({
-  args: { to: v.string(), replyTo: v.string() },
-  returns: v.object({ to: v.string(), replyTo: v.string() }),
-  uses: [],
-  handler: async (_ctx, { to, replyTo }) => ({ to, replyTo }),
-});
-`;
-
-/**
- * A workflow of `by`'s on input `{ who }`, published with its own mail
- * action `ask`, and its event binding `replies`, of the release's
- * contract for replies to the run's mail, approved by `admin`: so each of
- * its runs has a reply address for `replies`.
+ * A workflow of `by`'s on input `{ who }` that mails through connector
+ * binding `mail`, and its event binding `replies`, of the release's
+ * contract for replies to the run's mail, both approved by `admin`: so
+ * each of its runs has a reply address for `replies`.
  */
 const replyingWorkflow = async () => {
   const admin = await person("admin");
   const by = await person("builder");
   const reply = emailReplies();
   await ensureReleaseContract(env, reply.contract, { builtin: "release" });
+  const mailKey = `mail-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key: mailKey,
+    kind: "connector",
+    operations: {
+      "mail.send": {
+        input: descriptorOf(mailInput),
+        output: descriptorOf(mailOutput),
+      },
+    },
+  });
   const workflow = await createWorkflowResource(env, by, `asks-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectOf({ who: { kind: "string" } }),
       permissions: {
-        modules: { ask: { kind: "action", contract: "local:code/ask.ts#ask" } },
+        connections: { mail: { contract: mailKey } },
         events: { replies: { contract: reply.contract.key } },
       },
       steps: [
@@ -308,8 +309,9 @@ const replyingWorkflow = async () => {
         {
           id: "ask",
           type: "call",
-          module: "ask",
-          args: { to: { $expr: "args.who" }, replyTo: "x" },
+          connection: "mail",
+          action: "mail.send",
+          args: { to: { $expr: "args.who" }, subject: "x" },
         },
         {
           id: "reply",
@@ -321,14 +323,25 @@ const replyingWorkflow = async () => {
       ],
     }),
     basedOn: null,
-    modules: { "code/ask.ts": askModule },
+  });
+  const mail = await mailConnection();
+  const permissionId = await granted(by, admin, {
+    subject: { type: "workflow", workflowId: workflow.id },
+    object: { type: "connection", connectionId: mail.id },
+    actions: ["mail.send"],
+    binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
+  });
+  await approveWorkflowBinding(serving, admin, workflow.id, {
+    alias: "mail",
+    target: { kind: "connector", permissionId, contract: "composio.mail@1" },
+    reviewed: { version: 1 },
   });
   await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "replies",
     target: { kind: "event" },
     reviewed: { version: 1 },
   });
-  return { by, workflow, replyType: reply.type };
+  return { by, workflow, mail, replyType: reply.type };
 };
 
 /** A run's reply address, as `WorkflowContext.inbox` has it. */
@@ -771,11 +784,12 @@ describe("a grasp-workflow/2 run's inbox on the run host", () => {
         {
           id: "ask",
           type: "call",
-          module: "ask",
           if: { $expr: 'typeof inbox.replies === "string"' },
+          connection: "mail",
+          action: "mail.send",
           args: {
             to: { $expr: "args.who" },
-            replyTo: { $expr: "inbox.replies" },
+            subject: { $expr: "inbox.replies" },
           },
         },
         {
@@ -788,13 +802,11 @@ describe("a grasp-workflow/2 run's inbox on the run host", () => {
       ],
       {
         schema: objectOf({
-          mailed: { kind: "string" },
           replyTo: { kind: "string" },
           from: { kind: "string" },
           dmarc: { kind: "string" },
         }),
         value: {
-          mailed: { $expr: 'ask?.replyTo ?? ""' },
           replyTo: { $expr: 'inbox.replies ?? ""' },
           from: {
             $expr: 'reply.timedOut ? "" : reply.event.data.from.address ?? ""',
@@ -806,7 +818,7 @@ describe("a grasp-workflow/2 run's inbox on the run host", () => {
         },
       },
       {
-        modules: { ask: { kind: "action", contract: "local:code/ask.ts#ask" } },
+        connections: { mail: { contract: "composio.mail@1" } },
         events: { replies: { contract: "grasp/email-reply" } },
       }
     );
@@ -832,17 +844,19 @@ describe("a grasp-workflow/2 run's inbox on the run host", () => {
     });
     const address = z.object({ replyTo: z.string() }).safeParse(ran.ended)
       .data?.replyTo;
+    const { sent } = await replying.mail.did();
     expect({
       // The run's own address, as `inbox.replies` read it.
       address: replyAddress.test(address ?? ""),
+      // The mail went out with that address, as a Reply-To would carry it.
+      mailed: sent,
       ran,
       asked: asked.map(({ step, types }) => ({ step, types })),
     }).toStrictEqual({
       address: true,
+      mailed: [{ to: "Ada", subject: address }],
       ran: {
         ended: {
-          // The mail went out with that address as its Reply-To.
-          mailed: address,
           replyTo: address,
           from: "ada@acme.test",
           dmarc: "pass",

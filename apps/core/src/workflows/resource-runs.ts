@@ -99,7 +99,7 @@ import {
   sealedRunStart,
 } from "./sealed-run.ts";
 import type {
-  ActionModelCalls,
+  RunModelCalls,
   HostedResourceRun,
   HostedSealedRun,
   SealedRunKind,
@@ -801,8 +801,8 @@ const settledRun = async (
 export interface ResourceRunMemory {
   /** The engine's lease of a step's attempt, while it holds. */
   leaseOf: (key: string, attempt: number) => AttemptLease | undefined;
-  /** The model calls it and its actions made (`ActionModelCalls`). */
-  modelCalls?: ActionModelCalls;
+  /** The model calls it made (`RunModelCalls`). */
+  modelCalls?: RunModelCalls;
   /** A sealed build's calls tried once that went out (sealed-run.ts). */
   sentCalls?: SentCalls;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
@@ -1051,18 +1051,12 @@ export const sealedActivation = async (
   const step = countedStep(engineStep, stepLimitOf(env));
   const calls: AttemptCall[] = [];
   let tampered: StepError | undefined;
-  // The run's own sandbox session on-prem, its actions' parent.
-  let sessionId: string | undefined;
   let kind: SealedRunKind | undefined;
   const host = new RunHost(
     env,
     step,
     (controls) => {
-      kind = sealedRun(env, run, {
-        sentCalls,
-        modelCalls,
-        sessionId: () => sessionId,
-      })(controls);
+      kind = sealedRun(env, run, { sentCalls, modelCalls })(controls);
       return kind;
     },
     {
@@ -1095,9 +1089,6 @@ export const sealedActivation = async (
       attemptHostMethods,
     },
     {
-      onSession: (id) => {
-        sessionId = id;
-      },
       ...(memory.over === undefined ? {} : { over: memory.over }),
       ...(memory.current === undefined ? {} : { current: memory.current }),
     }

@@ -33,7 +33,6 @@ import {
 } from "./db/core/schema.ts";
 import { modelSettings } from "./models.ts";
 import { requireMemberAdmin } from "./permissions.ts";
-import { latestTemplateVersions } from "./resource-templates.ts";
 import {
   approvalOf,
   approvalServing,
@@ -62,22 +61,14 @@ import { ingressOf } from "./workflows/run-inboxes.ts";
 //   approval is).
 // - A long or slow read: a connector's candidates are the contracts
 //   connect lists for each of the workflow's own connection grants (a
-//   Composio one read from its server), a template's the latest version of the
-//   `templatesOffered` newest templates; each checked before it is
+//   Composio one read from its server), each checked before it is
 //   offered. So they are offered on one workflow's own read alone, never
-//   across workflows, where those kinds list without offers.
+//   across workflows, where connectors list without offers.
 // - A long read: at most `pendingWorkflowsMax` workflows, the most
 //   recently created first.
 
 /** Most workflows one read lists. */
 const pendingWorkflowsMax = 50;
-
-/**
- * Most templates offered for one template binding: the most recently
- * published, each at its latest version. Approving any other takes the
- * API.
- */
-const templatesOffered = 100;
 
 /** A target core offers, with what it names. */
 type Offered = PendingWorkflowBindings["bindings"][number]["offered"][number];
@@ -124,9 +115,6 @@ const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
     case "knowledge": {
       return grant ?? "";
     }
-    // A template's offer is named by its contract as it is read
-    // (`templateTargets`); an approval of one, by nothing.
-    case "template":
     case "decision":
     case "event":
     case "files": {
@@ -222,21 +210,10 @@ const connectorTargets = async (env: Env, id: string): Promise<Offered[]> => {
   return offered;
 };
 
-/** The newest templates' latest versions, each pinned by its content's hash. */
-const templateTargets = async (env: Env): Promise<Offered[]> => {
-  const published = await latestTemplateVersions(env, templatesOffered);
-  return published.map(
-    ({ templateId, version, contract, contentHash }): Offered => ({
-      target: { kind: "template", templateId, version, contentHash },
-      label: `${contract} v${version}`,
-    })
-  );
-};
-
 /**
  * The targets core can pick for `binding` of workflow `id`, before they
- * are checked; a connector's and template's only when
- * `everyKind` (one workflow's own read).
+ * are checked; a connector's only when `everyKind` (one workflow's own
+ * read).
  */
 const candidatesOf = async (
   env: Env,
@@ -244,10 +221,7 @@ const candidatesOf = async (
   binding: PinnedBinding,
   everyKind: boolean
 ): Promise<Offered[]> => {
-  if (
-    !everyKind &&
-    (binding.kind === "connector" || binding.kind === "template")
-  ) {
+  if (!everyKind && binding.kind === "connector") {
     return [];
   }
   switch (binding.kind) {
@@ -284,9 +258,6 @@ const candidatesOf = async (
     case "connector": {
       return await connectorTargets(env, id);
     }
-    case "template": {
-      return await templateTargets(env);
-    }
     // Who answers is the admin's to name, as they approve it.
     case "decision": {
       return [];
@@ -299,8 +270,7 @@ const candidatesOf = async (
 
 /**
  * What one workflow's read has offered so far, by binding kind and
- * contract: the same for each of its versions that declares it, and for a
- * template whatever the contract, as any template version serves one.
+ * contract: the same for each of its versions that declares it.
  */
 type Offers = Map<string, Promise<Offered[]>>;
 
@@ -336,10 +306,7 @@ const offersOf = async (
   binding: PinnedBinding,
   offer: () => Promise<Offered[]>
 ): Promise<Offered[]> => {
-  const key =
-    binding.kind === "template"
-      ? binding.kind
-      : `${binding.kind}:${binding.contractId}`;
+  const key = `${binding.kind}:${binding.contractId}`;
   const known = offers.get(key) ?? offer();
   offers.set(key, known);
   return await known;

@@ -296,8 +296,9 @@ const typeRules: readonly {
   // An App reading a measure the platform publishes of an App's runs
   // (src/statistics.ts): counts and sums only.
   { action: "statistics.read", type: "read" },
-  // Published templates (core's src/resource-templates.ts): an App reading
-  // the version its binding pins, and an admin publishing a version.
+  // Events already in the log from the removed published templates: a
+  // read of the version a binding pinned, and an admin publishing a
+  // version. Nothing writes them now.
   { action: "resource.template.read", type: "read" },
   { action: "resource.template", type: "config" },
   // A store's cascade job deleting, after their commit, the records a

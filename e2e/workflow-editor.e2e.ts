@@ -365,69 +365,6 @@ test("a builder changes one step on the Flow, saved as the draft's next revision
   ).toBeVisible();
 });
 
-/** A module whose `total` sums whole numbers, as a calculation. */
-const totalModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-export const total = compute({
-  input: v.array(v.number().integer().min(0)).max(100),
-  output: v.number().integer().min(0),
-  handler: (amounts) => amounts.reduce((all, amount) => all + amount, 0),
-});
-`;
-
-/** A definition whose one step calls `local:code/total.ts#total`. */
-const totalling = (): string =>
-  JSON.stringify(
-    {
-      $schema: workflowSchemaUrl,
-      args: objectOf({}),
-      returns: objectOf({ sum: { kind: "number" } }),
-      result: { sum: { $expr: "add" } },
-      permissions: {
-        modules: {
-          total: { kind: "compute", contract: "local:code/total.ts#total" },
-        },
-      },
-      steps: [{ id: "add", type: "call", module: "total", args: [1, 2, 3] }],
-    },
-    null,
-    2
-  );
-
-test("a builder writes a module beside the definition, calls it through a local binding, and publishes both", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("workflowModules");
-  const page = await pageOf(builder);
-  await page.goto("/workflows");
-  const name = await create(page);
-  await expect(page.getByRole("heading", { name })).toBeVisible();
-
-  // Without its module, the binding names nothing the workflow has.
-  await save(page, totalling());
-  await expect(
-    page.getByText("Revision 1 doesn't pass yet, and no revision has.")
-  ).toBeVisible();
-
-  await page.getByLabel("Path of a new module").fill("code/total.ts");
-  await page.getByRole("button", { name: "Add module" }).click();
-  await page.getByLabel("code/total.ts", { exact: true }).fill(totalModule);
-  await page.getByRole("button", { name: "Check and save" }).click();
-  await expect(
-    page.getByText("Revision 2 passes the profile and can be published.")
-  ).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Publish revision 2" }).click();
-  await expect(page.getByText("Published as version 1.")).toBeVisible({
-    timeout: 30_000,
-  });
-
-  // Read again, the draft carries the module it published.
-  await page.reload();
-  await expect(page.getByLabel("code/total.ts", { exact: true })).toHaveValue(
-    totalModule
-  );
-});
-
 test("a builder starts a new workflow on an empty Flow with Grasp's chat beside it, says which process it is for, and sees the Flow drawn as the chat's draft passes", async ({
   pageOf,
 }) => {
@@ -474,7 +411,6 @@ test("a builder starts a new workflow on an empty Flow with Grasp's chat beside 
     await api.workflowResources.editDraft(workflow, {
       expectedRevision: 0,
       source: definition("received"),
-      modules: {},
     });
 
     await asks.getByRole("radio", { name: "Purchase-to-Pay" }).click();

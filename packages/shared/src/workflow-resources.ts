@@ -14,8 +14,6 @@ import type {
   WorkflowRunTrace,
 } from "./workflow-diagrams.ts";
 import type { WorkflowLifecycleApi } from "./workflow-lifecycle.ts";
-import { workflowModulesError } from "./workflow-modules.ts";
-import type { ActionUse } from "./workflow-modules.ts";
 import type { WorkflowTriggersApi } from "./workflow-triggers.ts";
 import type { RunAiProviderWait } from "./workflows.ts";
 
@@ -71,40 +69,12 @@ export const workflowShareSchema = workflowMemberSchema.extend({
  * the publisher built on (null for the first), so two publications don't
  * silently move the current version past each other.
  */
-/**
- * The workflow's own modules, by path (`code/<file>.ts`): calculations its
- * `grasp.compute` tasks call (workflow-modules.ts), within what a version
- * carries.
- */
-const workflowModulesSchema = z
-  .record(z.string(), z.string())
-  .superRefine((modules, context) => {
-    const error = workflowModulesError(modules);
-    if (error !== undefined) {
-      context.addIssue({ code: "custom", message: error });
-    }
-  });
-
 export const workflowPublishSchema = z.strictObject({
   definition: z.string(),
   basedOn: z.number().int().positive().nullable(),
-  modules: workflowModulesSchema.optional(),
-  /**
-   * The approved npm packages its modules may import: the graph, by its
-   * hash, approved for this workflow's `computation`, whose built entries
-   * the version seals (GRA-665). Its modules import exactly those entries,
-   * by name, and nothing else of npm.
-   */
-  packages: z
-    .strictObject({ graphHash: z.string().regex(/^[0-9a-f]{64}$/u) })
-    .optional(),
 });
 
 export const workflowResourceErrors = defineErrorFamily({
-  "workflow.packages_invalid":
-    "These packages can't be sealed into a version of this workflow: they need what a calculation's sandbox doesn't have, or are more than a version holds.",
-  "workflow.packages_revoked":
-    "The packages this version of the workflow uses aren't approved any more. Someone with the permission to approve dependencies can approve them again, or publish a version without them.",
   "workflow.resource_invalid": "That isn't a valid request for a workflow.",
   "workflow.resource_unavailable":
     "This workflow doesn't exist or was deleted.",
@@ -225,10 +195,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "Nobody answered the run's decision before its deadline, so the run failed.",
   "workflow.model_call_limit":
     "The run made as many model calls as its workflow allows, so it failed.",
-  "workflow.modules_invalid":
-    "The workflow's code modules don't build: fix what the diagnostics name, then publish again.",
-  "workflow.compute_failed":
-    "A task's calculation threw, or the sandbox stopped it, so the run failed.",
   "workflow.draft_conflict":
     "Someone changed this draft since you read it. Read it again, then make your change.",
   "workflow.draft_unchecked":
@@ -249,12 +215,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "There's no step there in this draft: read the draft again and pick the step, or the list to insert into, from its diagram.",
   "workflow.draft_not_json":
     "This draft isn't JSON, so a step can't be edited on the canvas. Fix its text first.",
-  "workflow.action_failed":
-    "A task's action threw, or the sandbox stopped it, so the run failed.",
-  "workflow.action_restricted":
-    "This run is restricted, so its actions can't make connector calls: connect holds those for a decision, which an action can't wait for.",
-  "workflow.action_call_limit":
-    "A task's action made as many calls as one attempt of it may, so the run failed.",
   "workflow.candidate_unfixtured":
     "This test run made a call its start gave no answer for. A test run never calls anything: give each binding it calls an answer, then start it again.",
   "workflow.test_unfixtured":
@@ -283,8 +243,8 @@ export const workflowResourceErrors = defineErrorFamily({
 
 /**
  * The binding kinds the host catalog serves, beside other workflows. A
- * `knowledge`, `template` or `files` binding is reached only by the
- * workflow's own actions (GRA-700, GRA-724): no JSON task calls one.
+ * `knowledge` or `files` binding is for the Brain and files steps
+ * (GRA-1662); until they land, no JSON task calls one.
  */
 export const catalogBindingKinds = [
   "connector",
@@ -292,15 +252,13 @@ export const catalogBindingKinds = [
   "decision",
   "event",
   "knowledge",
-  "template",
   "files",
 ] as const;
 export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
 
 /**
  * A host catalog contract key: lowercase segments, never one of this
- * deployment's workflows (`workspace/...`) nor a workflow's own module
- * (`local:`).
+ * deployment's workflows (`workspace/...`).
  */
 export const catalogKeySchema = z
   .string()
@@ -373,13 +331,13 @@ export const catalogContractSchema = z
            */
           readOnly: z.boolean().optional(),
           /**
-           * That the operation answers a file an action may keep as a file
-           * of its run (GRA-886): only on an operation described by its
+           * That the operation answers a file a call may keep as a file of
+           * its run (GRA-886): only on an operation described by its
            * native connector's JSON Schemas, as connect confirms it.
            */
           answersFile: z.literal(true).optional(),
           /**
-           * That the operation attaches files an action names from its run
+           * That the operation attaches files a call names from its run
            * (GRA-887): only on an operation described by its native
            * connector's JSON Schemas, as connect confirms it.
            */
@@ -504,15 +462,6 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("knowledge"),
     permissionId: identifierSchema,
   }),
-  // One published template version, pinned by its content's hash as the
-  // admin approves it (GRA-700): content that no longer hashes to it
-  // serves nothing.
-  z.strictObject({
-    kind: z.literal("template"),
-    templateId: identifierSchema,
-    version: z.int().min(1),
-    contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
-  }),
   // The run's own files (GRA-724): what its actions write and read back,
   // its own alone, gone with its details. Nothing outside the run serves
   // it, so there is nothing to name: the admin approves that the version
@@ -565,8 +514,8 @@ export interface ListedWorkflowBindingApproval extends WorkflowBindingApproval {
  * with the targets core can offer now that would serve it, each checked as
  * an approval is. A decision is offered none: the admin names its
  * deciders. Across workflows (`pendingBindings`) only what is quick to
- * read is offered (models, events, files, Knowledge); a connector or
- * template is offered on the workflow's own read
+ * read is offered (models, events, files, Knowledge); a connector is
+ * offered on the workflow's own read
  * (`pendingBindingsOf`).
  */
 export interface PendingWorkflowBindings {
@@ -847,37 +796,13 @@ export interface WorkflowVersionBinding {
 }
 
 /**
- * One of a version's own actions a task can call (GRA-709): its binding,
- * the module and export it is, and what its sealed contract lets it
- * reach, each use the workflow's own binding by alias, a connector's with
- * the exact operations it calls. The host refuses anything else (GRA-704).
- * It names nothing outside the workflow, so every role sees it alike.
+ * A write a model's answers may steer, by its permission's alias: a
+ * connector's, with each of its operations that may write.
  */
-export interface WorkflowVersionAction {
-  binding: string;
-  module: string;
-  export: string;
-  uses: ActionUse[];
-}
-
-/**
- * A use whose writes a model's answers may steer, by its binding's alias:
- * a connector's, with each of its operations that may write; or an action
- * the version doesn't seal, any of which may write.
- */
-export type SteeredWrite =
-  | { alias: string; kind: "connector"; operations: string[] }
-  | { alias: string; kind: "action" };
-
-/**
- * One of a version's own actions as its review shows it (GRA-718): as
- * sealed, and, when it asks a model, each of its uses that may write, which
- * the model's answers may steer. Empty when it asks no model, or only
- * reads. It covers the action's own uses only, never a workflow's own
- * model task whose answer feeds a later task's call.
- */
-export interface WorkflowActionReview extends WorkflowVersionAction {
-  modelSteeredWrites: SteeredWrite[];
+export interface SteeredWrite {
+  alias: string;
+  kind: "connector";
+  operations: string[];
 }
 
 /** Why a deletion was refused with `workflow.resource_bound`, in its details. */
@@ -921,13 +846,11 @@ export interface WorkflowResourceVersion {
   contractHash: string;
   manifestHash: string;
   bindings: WorkflowVersionBinding[];
-  /** What its own actions may do, as sealed with it, by binding. */
-  actions: WorkflowActionReview[];
   /**
    * What the workflow's own model tasks may steer (GRA-727): when its build
-   * holds any model task, every write its call tasks may make, a called
-   * action's writing uses among them; empty otherwise. Conservative: a
-   * model task is taken to reach every call, whatever their order.
+   * holds any model task, every write its call tasks may make; empty
+   * otherwise. Conservative: a model task is taken to reach every call,
+   * whatever their order.
    */
   modelSteeredWrites: SteeredWrite[];
   /** Its build; null for a version that is refused (`refused`). */
@@ -936,7 +859,7 @@ export interface WorkflowResourceVersion {
    * Why the version is refused, when it is: it binds a kind the platform
    * no longer serves (`workflow.binding_kind_removed`), and is to be
    * published again. It never runs, starts, is reviewed or exported, so
-   * nothing of its actions or build is shown.
+   * nothing of its build is shown.
    */
   refused?: { code: "workflow.binding_kind_removed"; message: string };
   author: string;
@@ -945,7 +868,7 @@ export interface WorkflowResourceVersion {
 
 /**
  * A version's portable source, for its builders: the SDK TypeScript
- * generated from its definition and its own modules, by path. The
+ * generated from its definition, by path. The
  * definition itself stays with the version, for review: what leaves is
  * the code. Edited generated code can't come back: a version is only ever
  * published from a definition.
@@ -1032,11 +955,6 @@ export const workflowDraftEditSchema = z.strictObject({
       (text) => new TextEncoder().encode(text).byteLength <= 1024 * 1024,
       "A draft is at most 1 MiB of UTF-8."
     ),
-  /**
-   * Its modules, all of them: an edit says what the draft carries, so one
-   * that leaves them out drops none by mistake. Empty for none.
-   */
-  modules: workflowModulesSchema,
 });
 
 /**
@@ -1192,8 +1110,6 @@ export interface WorkflowItemTest {
 export interface WorkflowDraft {
   revision: number;
   source: string;
-  /** Its own modules, by path, as this revision carries them. */
-  modules: Record<string, string>;
   problems: WorkflowDefinitionProblem[];
   checkpoint: {
     revision: number;

@@ -40,7 +40,7 @@ describe("audit event types", () => {
     ).toStrictEqual(["decision", "decision", "action", "config", "config"]);
   });
 
-  it("files an App's template reads as reads, and publishing templates as configuration", () => {
+  it("files past template reads as reads, and template publications as configuration", () => {
     expect(
       ["resource.template.read", "resource.template.published"].map((action) =>
         typeOf(action)

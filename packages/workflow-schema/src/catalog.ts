@@ -5,10 +5,9 @@ import { isEventType } from "@grasp-os/shared/sealed-builds";
 import type { BindingKind } from "./format.ts";
 
 // The host catalog's contracts, as a definition's bindings resolve them:
-// a definition names contracts; the host's approved catalog (and, for
-// `local:` keys, the module manifest it extracted from the workflow's own
-// code) says what each one is. A binding is a requirement, never a grant:
-// this reads what the host has, within its limits, so a check can hold a
+// a definition names contracts; the host's approved catalog says what
+// each one is. A binding is a requirement, never a grant: this reads what
+// the host has, within its limits, so a check can hold a
 // definition to it. The catalog holds contracts of more kinds than a
 // grasp-workflow/2 step binds (`bindingKinds`, format.ts): Apps and their
 // pages bind the rest.
@@ -19,30 +18,20 @@ export const contractKinds = [
   "connector",
   "model",
   "workflow",
-  "compute",
   "decision",
   "event",
   "knowledge",
-  "template",
   "files",
 ] as const;
 export type ContractKind = (typeof contractKinds)[number];
 
 /**
  * The kind of contract a binding of `kind` names in the catalog: its own,
- * but for a `brain` binding, whose collection the catalog, the approvals
- * and an action's uses (`resource.knowledge`) know as `knowledge`.
+ * but for a `brain` binding, whose collection the catalog and the
+ * approvals know as `knowledge`.
  */
-export const contractKindOf = (kind: BindingKind): ContractKind | undefined => {
-  if (kind === "brain") {
-    return "knowledge";
-  }
-  // A workflow's own compute or action is its modules', never the catalog's.
-  if (kind === "compute" || kind === "action") {
-    return undefined;
-  }
-  return kind;
-};
+export const contractKindOf = (kind: BindingKind): ContractKind =>
+  kind === "brain" ? "knowledge" : kind;
 
 /** The binding kind that names a contract of `kind`, as `contractKindOf` maps it. */
 export const bindingKindOf = (kind: ContractKind): string =>
@@ -53,9 +42,9 @@ export type DescriptorText = string;
 
 export interface CatalogContract {
   kind: ContractKind;
-  /** operation, compute, decision and workflow: what a call passes. */
+  /** operation, decision and workflow: what a call passes. */
   input?: DescriptorText;
-  /** operation, compute and workflow: what it returns. */
+  /** operation and workflow: what it returns. */
   output?: DescriptorText;
   /** decision: what a recipient answers with. */
   response?: DescriptorText;
@@ -85,22 +74,6 @@ export interface CatalogContract {
   >;
   /** workflow: the exact workflow the binding pins. */
   workflow?: { namespace: string; name: string; version: string };
-  /**
-   * A workflow's own action (a `local:` operation): the workflow's other
-   * bindings it reaches, by alias and kind. Validation counts each as
-   * referenced, so it is sealed and approved like one a task names.
-   */
-  uses?: readonly ContractUse[];
-}
-
-/**
- * A use of a workflow's own action: an alias and a kind, and of a
- * connector the exact operations it calls (GRA-704).
- */
-export interface ContractUse {
-  readonly alias: string;
-  readonly kind: ContractKind;
-  readonly operations?: readonly string[];
 }
 
 /** Looks a contract key up; `undefined` when there is no such contract. */
@@ -136,8 +109,6 @@ export interface ResolvedContract {
     { data: ValueSchema<unknown, unknown>; browser: boolean }
   >;
   workflow?: { namespace: string; name: string; version: string };
-  /** A workflow's own action: the other bindings it reaches. */
-  uses?: readonly ContractUse[];
 }
 
 class CatalogError extends Error {
@@ -311,87 +282,6 @@ const readWorkflow = (value: unknown): ResolvedContract["workflow"] => {
 const isContractKind = (value: unknown): value is ContractKind =>
   contractKinds.some((kind) => kind === value);
 
-/** The most bindings one action reaches. */
-const maxUses = 32;
-/** An alias, as the profile's bindings name them. */
-const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
-
-/** The most operations an action declares of one connector. */
-const maxUseOperations = 64;
-
-/**
- * A use's operations: a connector's must list 1 to `maxUseOperations`
- * distinct names; any other kind's none.
- */
-const readUseOperations = (
-  use: unknown,
-  kind: ContractKind
-): readonly string[] | undefined => {
-  const value = ownData(use, "operations");
-  if (kind !== "connector") {
-    return value === undefined
-      ? undefined
-      : refuse("operations on a use that isn't a connector's");
-  }
-  if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    value.length > maxUseOperations
-  ) {
-    return refuse(
-      `a connector's use without 1 to ${maxUseOperations} operations`
-    );
-  }
-  const seen = new Set<string>();
-  return Object.freeze(
-    Array.from(value, (operation: unknown) => {
-      if (
-        typeof operation !== "string" ||
-        operation.length === 0 ||
-        operation.length > catalogLimits.nameLength ||
-        seen.has(operation)
-      ) {
-        return refuse("an operation that isn't a name, each once");
-      }
-      seen.add(operation);
-      return operation;
-    })
-  );
-};
-
-/**
- * An action's `uses`: each an alias and a binding kind, each alias once,
- * a connector's with its operations.
- */
-const readUses = (value: unknown): ResolvedContract["uses"] => {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!Array.isArray(value) || value.length > maxUses) {
-    return refuse(`more than ${maxUses} uses, or uses that aren't a list`);
-  }
-  const seen = new Set<string>();
-  return Object.freeze(
-    Array.from(value, (use: unknown) => {
-      const alias = ownData(use, "alias");
-      const kind = ownData(use, "kind");
-      if (
-        typeof alias !== "string" ||
-        !aliasPattern.test(alias) ||
-        !isContractKind(kind) ||
-        seen.has(alias)
-      ) {
-        return refuse("a use that isn't an alias and a kind, each alias once");
-      }
-      seen.add(alias);
-      const operations = readUseOperations(use, kind);
-      return Object.freeze(
-        operations === undefined ? { alias, kind } : { alias, kind, operations }
-      );
-    })
-  );
-};
-
 /**
  * The fields each kind can't do without. A contract missing one would
  * allow anything where it should allow its list (any operation, event
@@ -401,16 +291,13 @@ const requiredFields: Readonly<
   Record<ContractKind, readonly (keyof ResolvedContract)[]>
 > = {
   operation: ["input", "output"],
-  compute: ["input", "output"],
   connector: ["operations"],
   model: [],
   workflow: ["workflow", "input", "output"],
   decision: ["input", "response"],
   event: ["events"],
-  // Served by the host's own contract (search and read; a pinned version's
-  // content): an action's use is all that reaches one.
+  // Served by the host's own contract (search, read and recall).
   knowledge: [],
-  template: [],
   // The run's own files (GRA-724): the host's own contract too.
   files: [],
 };
@@ -441,14 +328,6 @@ const readContract = (
   const operations = readOperations(ownData(contract, "operations"), budget);
   const events = readEvents(ownData(contract, "events"), budget);
   const workflow = readWorkflow(ownData(contract, "workflow"));
-  const uses = readUses(ownData(contract, "uses"));
-  if (uses !== undefined) {
-    // Only an operation (an action) reaches other bindings.
-    if (kind !== "operation") {
-      return refuse("uses on a contract that isn't an operation");
-    }
-    resolved.uses = uses;
-  }
   if (input !== undefined) {
     resolved.input = input;
   }

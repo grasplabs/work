@@ -9,7 +9,7 @@ import {
 } from "./dependencies.ts";
 import { sha256Hex } from "./encoding.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { appIdSchema, workflowResourceIdSchema } from "./ids.ts";
+import { appIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 
 // npm packages as the registry has them, as connect fetches them for core.
@@ -247,11 +247,6 @@ export const packageLimits = {
   archiveBytes: 24 * 1024 * 1024,
   /** What they unpack to, together. */
   extractedBytes: 40 * 1024 * 1024,
-  /**
-   * The characters of the modules one workflow version seals: loaded with
-   * its build at every call, so bounded as its own modules are.
-   */
-  workflowPackageChars: 2 * 1024 * 1024,
 } as const;
 
 /**
@@ -277,9 +272,8 @@ export const entryPackage = (entry: string): string => {
 /** What the source asks for: its dependencies, and why. */
 export const dependencyIntentSchema = z
   .strictObject({
-    /** Whose they are: an App's, or a workflow's (exactly one). */
-    app: appIdSchema.optional(),
-    workflow: workflowResourceIdSchema.optional(),
+    /** Whose they are: an App's. */
+    app: appIdSchema,
     purpose: z.string().trim().min(1).max(500),
     /**
      * package.json's `dependencies`: each name and its range, as pairs,
@@ -311,10 +305,6 @@ export const dependencyIntentSchema = z
     ({ dependencies, remove }) =>
       dependencies.length > 0 || (remove?.length ?? 0) > 0,
     { message: "Ask for a package or remove one", path: ["dependencies"] }
-  )
-  .refine(
-    ({ app, workflow }) => (app === undefined) !== (workflow === undefined),
-    { message: "Either an App or a workflow, not both", path: ["app"] }
   );
 export type DependencyIntent = z.input<typeof dependencyIntentSchema>;
 

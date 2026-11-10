@@ -1311,6 +1311,9 @@ export const sdkResourceBindings = sqliteTable(
     resourceId: text("resource_id").notNull(),
     resourceVersion: integer("resource_version").notNull(),
     alias: text().notNull(),
+    // An older row may still say `template`: no binding is of that kind
+    // since workflows lost their template reads, and every read filters
+    // by the kinds still served.
     kind: text({
       enum: [
         "store",
@@ -1319,7 +1322,6 @@ export const sdkResourceBindings = sqliteTable(
         "decision",
         "event",
         "knowledge",
-        "template",
         "files",
       ],
     }).notNull(),
@@ -1598,10 +1600,13 @@ export const previewFixtureStores = sqliteTable(
 );
 
 /**
- * Published templates (resource-bindings.ts): each version's content,
- * written once by an admin and never changed, so a binding to a version
- * always reads exactly what was approved (spec 32.3). A template keeps the
- * contract of its first version; a new version is a new row.
+ * Published templates: each version's content, written once by an admin
+ * and never changed, for a workflow's template binding to read.
+ *
+ * Unused since workflows lost their own actions, the only readers of a
+ * template (GRA-1641): nothing reads or writes it. Kept so a rollback to
+ * the release before still has it; a later release drops it (expand,
+ * then contract).
  */
 export const resourceTemplates = sqliteTable(
   "resource_templates",
@@ -2579,15 +2584,15 @@ export const workflowDecisionConfirmations = sqliteTable(
 );
 
 /**
- * npm packages asked for an App or a workflow (src/packages/requests.ts),
- * one row per request. What was asked never changes: the subject, the
+ * npm packages asked for an App (src/packages/requests.ts), one row per
+ * request. What was asked never changes: the subject, the
  * graph's hash, and the review (`snapshot`: the lock and its findings, as
  * JSON). `status` moves from `pending` once, in one conditional update,
  * to a builder's decision (`approved`, `denied`), which keeps who made it,
  * when and why. A subject has one current approval: approving another
  * retires it (`retired`), still in force for what was built on it; the
  * clock's rescan revokes every row of a graph reported as malware, and an
- * App's removal or a workflow's deletion withdraws its own (`revoked`,
+ * App's removal withdraws its own (`revoked`,
  * `ended_at`, `ended_reason`). A decided row is never
  * deleted; a pending one is deleted when another request for the subject
  * takes its place, and its audit event keeps its ID and hash.
@@ -2603,11 +2608,13 @@ export const dependencyRequests = sqliteTable(
   {
     id: text().primaryKey(),
     /**
-     * Whose it is: an App (`app`, its ID) or an independent workflow
-     * resource (`workflow`, its ID). No foreign key names both tables,
-     * so a trigger refuses a subject neither has (migration 0097).
+     * Whose it is: an App (`app`, its ID). Workflows had packages of
+     * their own until GRA-1662 (`workflow`, a workflow resource's ID);
+     * nothing writes one now. No foreign key names the App, so a trigger
+     * refuses a subject `apps` (or `workflow_resources`) lacks (migration
+     * 0097).
      */
-    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectType: text("subject_type", { enum: ["app"] }).notNull(),
     subjectId: text("subject_id").notNull(),
     sourceRevision: text("source_revision").notNull(),
     graphHash: text("graph_hash").notNull(),
@@ -3250,8 +3257,8 @@ export const platformVersions = sqliteTable("platform_versions", {
  * admin asked them one of the brain's open questions (`gap_asked`,
  * src/brain-gaps.ts), that a schedule trigger of theirs stopped
  * (`trigger_stopped`), that connect stopped hearing a source their
- * triggers listen to (`events_stopped`), that packages of an App or
- * workflow they build or approved were revoked as malware
+ * triggers listen to (`events_stopped`), that packages of an App they
+ * build were revoked as malware
  * (`package_revoked`), or what an App told them (`app_message`). A
  * `gap_asked` row has its gap alone, once per person and gap. The
  * person's rows read over 30 days ago go when they next read, and all of
@@ -3289,8 +3296,9 @@ export const notifications = sqliteTable(
     /**
      * The package version a `package_revoked` row says was reported as
      * malware, and the advisory that reported it
-     * (dependencies/requests.ts); its `app_id` or `workflow_id` is the
-     * App or workflow whose packages were revoked.
+     * (packages/rescan.ts); its `app_id` is the App whose packages were
+     * revoked. Rows written before GRA-1662 may name a workflow's
+     * (`workflow_id`) instead; they are no longer listed.
      */
     packageName: text("package_name"),
     packageVersion: text("package_version"),
@@ -4642,16 +4650,10 @@ export const workflowCatalogContracts = sqliteTable(
   "workflow_catalog_contracts",
   {
     key: text().primaryKey(),
+    // An older row may still say `template` (or `operation`): read as not
+    // there, as every read filters by the kinds still served.
     kind: text({
-      enum: [
-        "connector",
-        "model",
-        "decision",
-        "event",
-        "knowledge",
-        "template",
-        "files",
-      ],
+      enum: ["connector", "model", "decision", "event", "knowledge", "files"],
     }).notNull(),
     contract: text().notNull(),
     fingerprint: text().notNull(),
@@ -4678,16 +4680,10 @@ export const workflowBindingApprovals = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     alias: text().notNull(),
+    // An older row may still say `template`: read as not there, as every
+    // read filters by the kinds still served.
     kind: text({
-      enum: [
-        "connector",
-        "model",
-        "decision",
-        "event",
-        "knowledge",
-        "template",
-        "files",
-      ],
+      enum: ["connector", "model", "decision", "event", "knowledge", "files"],
     }).notNull(),
     contractId: text("contract_id").notNull(),
     fingerprint: text().notNull(),
@@ -4828,10 +4824,9 @@ export const workflowResourceDrafts = sqliteTable(
 );
 
 /**
- * The modules each draft revision carries (src/workflow-drafts.ts), one
- * row per module: inserted with their revision, never changed, and kept
- * and removed with it. A row each keeps every row within what D1 holds,
- * however a revision's definition and modules add up.
+ * Unused: the modules a draft revision carried, before workflows lost
+ * their own modules (GRA-1662). Nothing reads or writes it; kept, as
+ * schemas only expand, for a later release to drop.
  */
 export const workflowResourceDraftModules = sqliteTable(
   "workflow_resource_draft_modules",
@@ -4851,11 +4846,10 @@ export const workflowResourceDraftModules = sqliteTable(
 );
 
 /**
- * What the sandbox's inspection of a draft revision's modules answered
- * (src/workflow-drafts.ts): kept with the revision, so a later edit that
- * carries exactly the same modules (`modules_hash`) checks its definition
- * against these contracts instead of running the modules again. Only an
- * inspection that succeeded is kept; a publication always inspects anew.
+ * Unused: what the sandbox's inspection of a draft revision's modules
+ * answered, before workflows lost their own modules (GRA-1662). Nothing
+ * reads or writes it; kept, as schemas only expand, for a later release
+ * to drop.
  */
 export const workflowResourceDraftInspections = sqliteTable(
   "workflow_resource_draft_inspections",

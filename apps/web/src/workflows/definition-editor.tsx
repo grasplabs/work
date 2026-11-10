@@ -15,10 +15,9 @@ import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
-import { ModuleFiles, sameModules } from "./module-files.tsx";
 
-// A workflow's definition as its builders edit it: the draft's JSON and its
-// own modules, each save one revision-checked edit that core checks against the profile,
+// A workflow's definition as its builders edit it: the draft's JSON, each
+// save one revision-checked edit that core checks against the profile,
 // what it found at its JSON Pointer and task, and publishing the latest
 // edit once it passes. The page never decides what passes: core's answer
 // does, and the editor keeps the person's text whatever it answers. What
@@ -121,7 +120,7 @@ const Problems = ({
   );
 
 /**
- * The draft the editor goes by, and the text and modules in it, from
+ * The draft the editor goes by, and the text in it, from
  * `loaded`; and whether they were edited since. A later revision the page
  * has (a step changed on the Flow) is taken, text and all, unless
  * something typed here would be lost: then saving meets it as a conflict,
@@ -130,18 +129,16 @@ const Problems = ({
 const useEdited = (loaded: WorkflowDraft) => {
   const [draft, setDraft] = useState(loaded);
   const [text, setText] = useState(loaded.source);
-  const [modules, setModules] = useState(loaded.modules);
-  const edited = text !== draft.source || !sameModules(modules, draft.modules);
+  const edited = text !== draft.source;
   const [seen, setSeen] = useState(loaded);
   if (loaded !== seen) {
     setSeen(loaded);
     if (loaded.revision > draft.revision && !edited) {
       setDraft(loaded);
       setText(loaded.source);
-      setModules(loaded.modules);
     }
   }
-  return { draft, setDraft, text, setText, modules, setModules, edited };
+  return { draft, setDraft, text, setText, edited };
 };
 
 export const DefinitionEditor = ({
@@ -168,8 +165,7 @@ export const DefinitionEditor = ({
 }) => {
   const core = useCore();
   const { t } = useLingui();
-  const { draft, setDraft, text, setText, modules, setModules, edited } =
-    useEdited(loaded);
+  const { draft, setDraft, text, setText, edited } = useEdited(loaded);
   // What a save or a read here left, here and on the page around it.
   const took = (next: WorkflowDraft): void => {
     setDraft(next);
@@ -195,7 +191,6 @@ export const DefinitionEditor = ({
           await session.workflowResources.editDraft(workflow, {
             expectedRevision: draft.revision,
             source: text,
-            modules,
           })
       );
       took(withHeldCheckpoint(draft, saved));
@@ -222,7 +217,6 @@ export const DefinitionEditor = ({
       took(latest);
       if (replace) {
         setText(latest.source);
-        setModules(latest.modules);
       }
       setOutcome(undefined);
     } catch (error) {
@@ -283,11 +277,6 @@ export const DefinitionEditor = ({
         />
         <DraftStatus draft={draft} />
       </div>
-      <ModuleFiles
-        modules={modules}
-        onChange={setModules}
-        readOnly={replacing}
-      />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           // The definition it starts from is saved as it is, too, as the

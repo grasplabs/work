@@ -1383,7 +1383,6 @@ describe("a test run of a JSON workflow's decision", () => {
     const saved = await editWorkflowDraft(env, owner, workflow.id, {
       expectedRevision: base,
       source: definitionOf(contract, approvalSteps()),
-      modules: {},
     });
     const run = async (
       answer: unknown,

@@ -102,8 +102,6 @@ export const greetingSource = (() => {
 /** A greeting workflow's files, as its version seals them. */
 export const greeting = (): Record<string, string> => ({
   ".grasp/workflow.ts": greetingSource,
-  "code/double.ts":
-    "export const double = (value: number): number => value * 2;\n",
 });
 
 /** A definition package of the Notes App binding the greeting workflow. */
@@ -157,7 +155,6 @@ export const definitionOf = (
       },
       files: greeting(),
       bindings: {},
-      packages: null,
     },
   },
   unresolved: [],

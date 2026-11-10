@@ -85,11 +85,11 @@ import { snapshotFrom, snapshotOf, snapshotStored } from "./state-snapshots.ts";
 //
 // - A test with an effect. A test run calls nothing: every named call it
 //   makes, a task's or an action's (connector, operation, model,
-//   Knowledge, template), is answered from the start's `fixtures` by the
+//   Knowledge), is answered from the start's `fixtures` by the
 //   binding it goes through, in `makeCall` before any binding, authority
 //   or receipt is looked at (resource-calls.ts); a call through a binding
 //   with no answer fails the run (`workflow.candidate_unfixtured`). Its
-//   compute and action code runs in the same sandbox as a version's.
+//   generated code runs in the same sandbox as a version's.
 // - Draft code reading a secret. Its parameters are the start's own values,
 //   else the defaults (`candidateParams`), never the values set on the
 //   workflow: its builder wrote its code, and a sensitive value they can't
@@ -323,13 +323,7 @@ export const startCandidateRun = async (
     input
   );
   const checkpoint = await draftCheckpoint(env, workflow.id, revision);
-  const built = await candidateBuildOf(
-    env,
-    by,
-    workflow,
-    checkpoint.source,
-    checkpoint.modules
-  );
+  const built = await candidateBuildOf(env, by, workflow, checkpoint.source);
   const inputText = acceptedInput(JSON.stringify(built.contract.input), given);
   const paramsText = candidateParams(built.contract, params);
   // What the workflow keeps between its runs, read once and frozen with

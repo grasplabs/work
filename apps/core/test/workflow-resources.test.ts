@@ -1,11 +1,8 @@
 import { v } from "@grasp-os/sdk";
-import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalJson } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import {
   bindWorkflowToApp,
@@ -203,8 +200,6 @@ describe("publishing a version", () => {
       definitionVersion: "1.0.0",
       profile: "grasp-workflow/2",
       bindings: [],
-      // No actions of its own: an empty list, recorded as such.
-      actions: [],
       author: ada.userId,
     });
     const second = await publish(
@@ -836,42 +831,21 @@ describe("stored versions", () => {
     )
       .bind(definitionOf({ status: "tampered" }), child.id)
       .run();
-    // A manifest that lost what its actions may do is malformed, even
-    // with its hash written to match: no version is listed as doing
-    // nothing for want of the record. And one whose list was changed,
-    // however well formed, no longer hashes to what was sealed: review
-    // never shows less than the build allows.
-    const bare = await workflowOf(ada, "bare");
-    await publish(ada, bare.id, definitionOf());
-    const sealed = await env.DB.prepare(
-      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ?"
-    )
-      .bind(bare.id)
-      .first<{ manifest: string }>();
-    const { actions: _dropped, ...withoutActions } = z
-      .record(z.string(), z.json())
-      .parse(JSON.parse(sealed?.manifest ?? "{}"));
-    const rehashed = canonicalJson(withoutActions);
-    await env.DB.prepare(
-      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ?"
-    )
-      .bind(rehashed, await sha256Hex(rehashed), bare.id)
-      .run();
+    // A manifest changed after it was sealed, however well formed, no
+    // longer hashes to what was sealed: it is never read.
     const altered = await workflowOf(ada, "altered");
     await publish(ada, altered.id, definitionOf());
     await env.DB.prepare(
-      `UPDATE workflow_resource_versions SET manifest = json_set(manifest, '$.actions', json('[{"binding":"notify","module":"code/notify.ts","export":"notify","uses":[]}]')) WHERE workflow_resource_id = ?`
+      `UPDATE workflow_resource_versions SET manifest = json_set(manifest, '$.name', 'tampered') WHERE workflow_resource_id = ?`
     )
       .bind(altered.id)
       .run();
     expect({
       definition: await outcome(workflowDefinition(env, ada, child.id, 1)),
-      actions: await outcome(workflowVersions(env, ada, bare.id)),
-      alteredActions: await outcome(workflowVersions(env, ada, altered.id)),
+      altered: await outcome(workflowVersions(env, ada, altered.id)),
     }).toStrictEqual({
       definition: "workflow.version_corrupt",
-      actions: "workflow.version_corrupt",
-      alteredActions: "workflow.version_corrupt",
+      altered: "workflow.version_corrupt",
     });
   });
 

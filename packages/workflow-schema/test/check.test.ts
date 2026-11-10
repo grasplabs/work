@@ -152,18 +152,7 @@ describe("checking a workflow", () => {
     });
   });
 
-  it("holds a call to a connection's action or a module, never both or neither", () => {
-    expect(
-      codesOf(
-        followedBy({
-          id: "both",
-          type: "call",
-          connection: "mail",
-          action: "mail.send",
-          module: "mail",
-        })
-      )
-    ).toStrictEqual(["workflow.call_kind"]);
+  it("holds a call to one member, never none", () => {
     expect(codesOf(followedBy({ id: "neither", type: "call" }))).toStrictEqual([
       "workflow.call_kind",
     ]);

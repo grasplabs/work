@@ -17,7 +17,6 @@ import type { Diagnostic as TscDiagnostic } from "@tsrs/wasm/core";
 
 import { generatedModules, serverSdkImports } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import { computeSdkImports } from "./imports.ts";
 import { pageDataModel, pageReferences } from "./kit.ts";
 
 /** A tsconfig's `compilerOptions`, as JSON. */
@@ -132,16 +131,6 @@ export const appCodeTarget = serverTarget(
     "@grasp-os/sdk/testing",
   ])
 );
-
-/**
- * How a JSON workflow's compute modules are type-checked:
- * a worker's lib and no DOM, which their isolate doesn't have, no JSX,
- * each file a module of its own; and by name only the SDK's modules they
- * may import (`computeSdkImports`), with their own files. An approved
- * package entry resolves to no file, so to the ambient module the host
- * declares for it (`buildComputeModules`), never to anything of the kit.
- */
-export const computeTarget = serverTarget({}, new Set(computeSdkImports));
 
 /**
  * What the check reads of the kit (build.ts `typeChunks`): the type

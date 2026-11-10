@@ -1,7 +1,7 @@
 /**
  * The pieces the seed's workflows are made of, as core publishes them:
- * independent grasp-workflow/2 documents and their compute modules,
- * which each App binds under an alias. A definition is written
+ * independent grasp-workflow/2 documents, which each App binds under an
+ * alias. A definition is written
  * here as data and sent as JSON text.
  */
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -39,21 +39,18 @@ export type DefinitionParts = Omit<WorkflowDocument, "$schema">;
 export const definitionText = (parts: DefinitionParts): string =>
   JSON.stringify({ $schema: workflowSchemaUrl, ...parts });
 
-/** A compute module permission to export `name` of the workflow's module `file`. */
-export const computeBinding = (file: string, name: string) =>
-  ({ kind: "compute", contract: `local:code/${file}.ts#${name}` }) as const;
-
 /**
- * Step `id` calling compute module `module` on the expression `args`,
- * its answer read later as `<id>`.
+ * Step `id`, which fails the run with the workflow's own `error` when the
+ * expression `condition` holds: an `if` around a `raise`.
  */
-export const computeStep = (
+export const raiseWhen = (
   id: string,
-  module: string,
-  args: string
+  condition: string,
+  error: { code: string; message: string }
 ): Step => ({
   id,
-  type: "call",
-  module,
-  args: { $expr: args },
+  type: "if",
+  condition: { $expr: condition },
+  // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+  then: [{ id: `${id}Raised`, type: "raise", error }],
 });

@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import { graspLockSchema, packageEntrySchema } from "./packages.ts";
 import { catalogBindingKinds } from "./workflow-resources.ts";
 
 // A definition package: an App's current sealed release and
@@ -12,17 +11,14 @@ import { catalogBindingKinds } from "./workflow-resources.ts";
 // approval, catalog target, parameter value, store, member, record or
 // audit data; bindings are their aliases and kinds, which the destination
 // binds anew. What builders wrote into source is theirs, scanned for
-// known secret formats before it leaves (definition-export.ts). A
-// workflow version's approved npm packages travel as their graph and the
-// entries its modules import, never as an approval: the destination asks
-// for and approves them again before anything it publishes seals them.
+// known secret formats before it leaves (definition-export.ts).
 
 /**
  * The format of a definition package. A package of another format is
  * refused, to be exported again, rather than read as this one: the
  * schema is strict, so another format's shape would read as no package.
  */
-export const definitionPackageFormatVersion = 5;
+export const definitionPackageFormatVersion = 6;
 
 /** The most workflow versions one package holds. */
 export const definitionPackageMaxWorkflows = 64;
@@ -159,29 +155,13 @@ export const definitionPackageSchema = z.strictObject({
         profile: z.string().min(1).max(128),
       }),
       /**
-       * The TypeScript generated from its definition and its own modules,
-       * as published. A sensitive parameter has no value in either: the
-       * format keeps none in the document.
+       * The TypeScript generated from its definition, as published. A
+       * sensitive parameter has no value in it: the format keeps none in
+       * the document.
        */
       files: filesSchema,
       /** Each catalog contract it binds, by alias: its kind. */
       bindings: z.record(aliasSchema, z.enum(catalogBindingKinds)),
-      /**
-       * The approved npm packages its modules import (GRA-665), null when
-       * it seals none: the graph's hash, the entries the modules import,
-       * and the graph's lock (`grasp.lock.json`), from which the
-       * destination asks for the same exact versions and a standalone
-       * project pins them. Never an approval: the
-       * destination approves the graph for its own workflow before
-       * anything it publishes seals it.
-       */
-      packages: z
-        .strictObject({
-          graphHash: sha256Schema,
-          entries: z.array(packageEntrySchema).min(1).max(256),
-          lock: graspLockSchema,
-        })
-        .nullable(),
     })
   ),
   /** Every workflow the App names that the package doesn't resolve. */

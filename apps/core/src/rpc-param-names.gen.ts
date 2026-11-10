@@ -404,9 +404,6 @@ export const rpcParamNames: ParamNames = {
   "Subscription": {
     "release": [],
   },
-  "TemplatesRpc": {
-    "publish": ["publication"],
-  },
   "UnknownOutcomesRpc": {
     "list": ["before"],
     "listAll": ["before"],

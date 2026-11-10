@@ -34,7 +34,7 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   hold what it read for its person, so they are listed as its results
 //   are shown (`resourceRunFor`): to that person and the organization's
 //   admins. A listing is what a file is, never its bytes: nothing serves
-//   those outside the run's own actions (workflows/run-files.ts). Runs in
+//   those outside the run itself (workflows/run-files.ts). Runs in
 //   the activity are as `listResourceRuns` shows them: every one to the
 //   workflow's builders, a user's own to a user.
 // - A collection named that its readers can't see: only collections the

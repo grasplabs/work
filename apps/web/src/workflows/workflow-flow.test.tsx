@@ -65,7 +65,6 @@ const draftOf = (
   return {
     revision,
     source,
-    modules: {},
     problems: [],
     checkpoint: passes ? { revision, source, diagram } : null,
     editedBy: null,

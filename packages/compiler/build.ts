@@ -55,12 +55,7 @@ import { oxcWasm, oxcWasmModule } from "./oxc-wasm/wasm.ts";
 import { serverSdkImports } from "./src/app-code.ts";
 import { extractCandidates } from "./src/candidates.ts";
 import { compileReact } from "./src/compile.ts";
-import {
-  computeRunnerImports,
-  computeSdkImports,
-  generatedWorkflowSdkImports,
-  sdkImports,
-} from "./src/imports.ts";
+import { generatedWorkflowSdkImports, sdkImports } from "./src/imports.ts";
 import {
   compilerAssets,
   kitModule,
@@ -850,7 +845,7 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
  * The type chunks: the platform's own packages as App code type-checks
  * against them, rolled up into one declaration file per module it may
  * import (`@grasp-os/sdk/react`, `@grasp-os/ui/components/button`, the
- * server, workflow and compute modules, …) and chunks for what those
+ * server and workflow modules, …) and chunks for what those
  * share, with the packages they reach inlined. A check parses only the
  * chunks the modules it imports reach, never the sources of everything
  * those name: any import of the SDK used to bring all of
@@ -1714,14 +1709,12 @@ const buildAppCompiler = async (
     sdkRoot,
   ];
   const stylesheets = collectStylesheets();
-  // Generated workflow code and compute modules are type-checked against
-  // their SDK entries too, and an App's server code against the SDK's
-  // server side.
+  // Generated workflow code is type-checked against its SDK entries too,
+  // and an App's server code against the SDK's server side.
   const typed = [
     ...imports,
     "lucide-react",
     ...generatedWorkflowSdkImports,
-    ...computeSdkImports,
     // An App's server code is type-checked against what it and its
     // generated modules import (app-code.ts).
     ...serverSdkImports,
@@ -1759,12 +1752,7 @@ const buildAppCompiler = async (
   const workflowSdkModules = modulesOf(
     // Generated code imports one of the App workflows' entries: each once.
     await buildSdkModules([
-      ...new Set([
-        ...sdkImports,
-        ...generatedWorkflowSdkImports,
-        ...computeSdkImports,
-        ...computeRunnerImports,
-      ]),
+      ...new Set([...sdkImports, ...generatedWorkflowSdkImports]),
     ])
   );
   const serverSdkModules = modulesOf(await buildSdkModules(serverSdkImports));

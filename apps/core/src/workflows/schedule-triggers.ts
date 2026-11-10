@@ -89,8 +89,7 @@ const minuteMs = 60_000;
  * The refusals of a start taken as for good: the schedule goes on from its
  * next occurrence. `start_denied` is a trigger whose person left or lost
  * their role, whose `start` grant was revoked, or whose workflow is gone;
- * `start_invalid` an input the version no longer takes; `packages_revoked`
- * an approval of the version's packages withdrawn; `paused` a workflow
+ * `start_invalid` an input the version no longer takes; `paused` a workflow
  * paused (workflow-lifecycle.ts), whose occurrences are skipped and never
  * counted toward stopping. A trigger disabled,
  * deleted or moved meanwhile (`trigger_unavailable`) is read as due no
@@ -99,7 +98,6 @@ const minuteMs = 60_000;
 const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.start_denied",
   "workflow.start_invalid",
-  "workflow.packages_revoked",
   "workflow.paused",
 ]);
 

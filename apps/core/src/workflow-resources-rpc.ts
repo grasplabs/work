@@ -100,7 +100,6 @@ import {
   terminateResourceRun,
 } from "./workflows/resource-runs.ts";
 import { runFilesFor } from "./workflows/run-file-downloads.ts";
-import { sealPackages } from "./workflows/sealed-packages.ts";
 
 // Independent workflows over `/rpc` (workflow-resources.ts, where who may
 // do what is decided).
@@ -162,7 +161,7 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) =>
-        await publishWorkflowVersion(this.#env, person, id, input, sealPackages)
+        await publishWorkflowVersion(this.#env, person, id, input)
     );
   }
 

@@ -1,6 +1,7 @@
 /* oxlint-disable unicorn/no-thenable -- an if step's list is its then */
 import { v } from "@grasp-os/sdk";
 import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
@@ -12,6 +13,8 @@ import {
   confirmDecision,
   reviewDecision,
 } from "../src/decisions/decisions.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -24,8 +27,15 @@ import { runObjectOf } from "../src/workflows/engine.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { endLiveRuns } from "./runs.ts";
 import { person as identityOf } from "./sealed-apps.ts";
+import {
+  descriptorOf,
+  mailInput,
+  mailOutput,
+  serving,
+} from "./sealed-run-harness.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A run laid over its version's diagram (resource-run-trace.ts): the
@@ -108,15 +118,19 @@ const routing = [
   passing("finished"),
 ];
 
-/** Starts version `version` of workflow `id` for `who`, and waits for its end. */
+/**
+ * Starts version `version` of workflow `id` for `who` on `startEnv`, and
+ * waits for its end.
+ */
 const ranFor = async (
   by: Acting,
   id: string,
   version: number,
-  who: string
+  who: string,
+  startEnv: Env = env
 ): Promise<string> => {
   const { runId } = await startWorkflow(
-    env,
+    startEnv,
     { type: "person", person: by },
     id,
     { version, input: { who }, key: unique() }
@@ -374,23 +388,66 @@ const toldOf = ({ steps }: Pick<WorkflowRunTrace, "steps">) =>
       `${task} ${state} ${attempts} ${errorCode ?? "-"}`
   );
 
-/** A compute module whose `fail` always fails, as a flaky dependency's. */
-const failingModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-export const fail = compute({
-  input: v.string(),
-  output: v.string(),
-  handler: () => {
-    throw new Error("The rates service didn't answer.");
-  },
-});
-`;
+/**
+ * A mail connection `by`'s workflow `id` sends through as `mail`, granted
+ * and approved by `admin`, to a mail server unavailable for longer than
+ * any retry.
+ */
+const unavailableMail = async (
+  by: Acting,
+  admin: Identity,
+  id: string
+): Promise<void> => {
+  const mail = await mailConnection(
+    Array.from({ length: 50 }, () => "unavailable" as const)
+  );
+  const asked = await requestPermission(
+    env,
+    by,
+    {
+      subject: { type: "workflow", workflowId: id },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
+    },
+    {
+      app: () => {
+        throw new Error("No App here");
+      },
+      resource: async (ref, needed) => {
+        await requireResourceRole(env, by, ref, needed);
+      },
+    }
+  );
+  await grantPermission(env, admin, asked.id, { version: null });
+  await approveWorkflowBinding(serving, admin, id, {
+    alias: "mail",
+    target: {
+      kind: "connector",
+      permissionId: asked.id,
+      contract: "composio.mail@1",
+    },
+    reviewed: { version: 1 },
+  });
+};
 
 describe("a run's trace, read over the session API", () => {
   afterEach(endLiveRuns);
 
   it("tells a try's retries of a failed step as that one step's attempts", async () => {
+    const admin = await identityOf("admin");
     const builder = await signedInBuilder();
+    const contract = `mail-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key: contract,
+      kind: "connector",
+      operations: {
+        "mail.send": {
+          input: descriptorOf(mailInput),
+          output: descriptorOf(mailOutput),
+        },
+      },
+    });
     const workflow = await createWorkflowResource(
       env,
       builder.acting,
@@ -404,10 +461,11 @@ describe("a run's trace, read over the session API", () => {
             type: "try",
             try: [
               {
-                id: "fetchRates",
+                id: "notify",
                 type: "call",
-                module: "rates",
-                args: { $expr: "args.who" },
+                connection: "mail",
+                action: "mail.send",
+                args: { to: { $expr: "args.who" }, subject: "Hello" },
               },
             ],
             catch: {
@@ -416,16 +474,12 @@ describe("a run's trace, read over the session API", () => {
             },
           },
         ],
-        {
-          modules: {
-            rates: { kind: "compute", contract: "local:code/rates.ts#fail" },
-          },
-        }
+        { connections: { mail: { contract } } }
       ),
       basedOn: null,
-      modules: { "code/rates.ts": failingModule },
     });
-    const runId = await ranFor(builder.acting, workflow.id, 1, "Ada");
+    await unavailableMail(builder.acting, admin, workflow.id);
+    const runId = await ranFor(builder.acting, workflow.id, 1, "Ada", serving);
 
     const whole = await builder.api.workflowResources.runTrace(
       workflow.id,
@@ -435,16 +489,18 @@ describe("a run's trace, read over the session API", () => {
     expect({
       status: whole.status,
       steps: toldOf(whole),
-      task: whole.tasks.find(({ task }) => task === "fetchRates"),
+      task: whole.tasks.find(({ task }) => task === "notify"),
     }).toStrictEqual({
       status: "completed",
-      // One step of three attempts in all, failed at the last, which the
-      // catch took, then the step its catch runs.
+      // One step of nine attempts in all, failed at the last, which the
+      // catch took, then the step its catch runs: the catch's three
+      // rounds, each of the engine's three tries of a call that may work
+      // when tried again (sealed-run.ts, `sealedRetries`).
       steps: [
-        "fetchRates failed 3 workflow.compute_failed",
+        "notify failed 9 connect.server_unavailable",
         "fellBack reached 0 -",
       ],
-      task: { task: "fetchRates", state: "failed", attempts: 3 },
+      task: { task: "notify", state: "failed", attempts: 9 },
     });
   });
 

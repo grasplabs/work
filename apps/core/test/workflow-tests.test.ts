@@ -15,7 +15,6 @@ import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { findApp, releaseIdsOf } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { actionMainModule } from "../src/workflow-modules.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
@@ -35,8 +34,8 @@ import { connectDb } from "./test-env.ts";
 // the engine, the same version as anyone's, but nothing of the
 // organization's. The threat model is in workflows/fixture-runs.ts; the
 // ways it can fail come first here: a test's run lands in the
-// organization's runs, receipts or audit; it reaches a model, a connection
-// or an action (its model calls are workflow-test-calls.test.ts's);
+// organization's runs, receipts or audit; it reaches a model or a
+// connection (its model calls are workflow-test-calls.test.ts's);
 // it outlives its test, or a test died before removing it; a test asks
 // about a run it didn't start; a test starts what the release doesn't
 // bind. Then what a test sees: the run's end, and how often each
@@ -139,22 +138,16 @@ const mailContract = async (admin: Identity): Promise<string> => {
   return key;
 };
 
-/** A workflow of `by`'s, its version 1 `steps`, with `modules` of its own. */
+/** A workflow of `by`'s, its version 1 `steps`. */
 const workflowOf = async (
   by: Acting,
   steps: unknown[],
-  {
-    modules,
-    ...shape
-  }: Parameters<typeof definitionOf>[1] & {
-    modules?: Record<string, string>;
-  } = {}
+  shape: Parameters<typeof definitionOf>[1] = {}
 ): Promise<string> => {
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: definitionOf(steps, shape),
     basedOn: null,
-    ...(modules === undefined ? {} : { modules }),
   });
   return workflow.id;
 };
@@ -899,7 +892,7 @@ export default workflowTest({
     });
   });
 
-  it("refuse a connector's call and an action's: connect and the action's sandbox are never asked", async () => {
+  it("refuse a connector's call: connect is never asked", async () => {
     const admin = await person("admin");
     const key = await mailContract(admin);
     const connectorRun = await requestsApp(
@@ -921,52 +914,6 @@ export default workflowTest({
           }
         )
     );
-    const actionRun = await requestsApp(
-      async (by) =>
-        await workflowOf(
-          by,
-          [
-            {
-              id: "notify",
-              type: "call",
-              module: "notify",
-              args: { to: { $expr: "args.who" } },
-            },
-          ],
-          {
-            permissions: {
-              modules: {
-                notify: {
-                  kind: "action",
-                  contract: "local:code/notify.ts#notify",
-                },
-              },
-            },
-            status: "notified",
-            modules: {
-              "code/notify.ts": `import { action, v } from "@grasp-os/sdk/action";
-
-export const notify = action({
-  args: { to: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [],
-  handler: async () => ({ status: "notified" }),
-});
-`,
-            },
-          }
-        )
-    );
-    const loaded: string[] = [];
-    const loader = env.LOADER;
-    const get = loader.get.bind(loader);
-    vi.spyOn(loader, "get").mockImplementation((name, code) =>
-      get(name, async () => {
-        const made = await code();
-        loaded.push(made.mainModule);
-        return made;
-      })
-    );
     const connectBefore = await connectCalls();
     const endedIn = async (
       fixture: Awaited<ReturnType<typeof requestsApp>>
@@ -984,14 +931,10 @@ export const notify = action({
     };
     expect({
       connector: await endedIn(connectorRun),
-      action: await endedIn(actionRun),
       connectAsked: (await connectCalls()) - connectBefore,
-      actionSandboxes: loaded.filter((main) => main === actionMainModule),
     }).toMatchObject({
       connector: { status: "failed", code: "resource.unavailable" },
-      action: { status: "failed", code: "resource.unavailable" },
       connectAsked: 0,
-      actionSandboxes: [],
     });
   });
 

@@ -199,7 +199,7 @@ const resolveGraph = async (
 };
 
 /**
- * Resolves what an App's or a workflow's source asks for (`input`) into
+ * Resolves what an App's source asks for (`input`) into
  * an exact lock, scans it, and proposes it for a builder's approval, for
  * one of its builders or the chat's agent acting for one; never Grasp
  * staff.

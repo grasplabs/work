@@ -7,7 +7,6 @@ import {
   checked,
   decision,
   eventWait,
-  everyCall,
   everyStep,
   followedBy,
   keeping,
@@ -310,9 +309,6 @@ describe("generating a workflow", () => {
       }).source
     ).toContain(
       'const noted = await ctx.connections.crm.notes.add({}, { step: "noted" });'
-    );
-    expect(generated(everyCall()).source).toContain(
-      'modules: { total: "compute", note: "action" }'
     );
   });
 

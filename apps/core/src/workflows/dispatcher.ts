@@ -15,7 +15,7 @@ import type { InternalWorkflow, RunPin } from "./engine.ts";
 import { runFixtureWorkflow } from "./fixture-runs.ts";
 import type { AiCalls, HostHooks, RunStep } from "./host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
-import type { ActionModelCalls, SentCalls } from "./sealed-run.ts";
+import type { RunModelCalls, SentCalls } from "./sealed-run.ts";
 
 // What every run executes (run-object.ts): each time the engine activates
 // a run, at its start and on every wake or recovery, the dispatcher loads
@@ -84,8 +84,8 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
  * now (run-object.ts).
  */
 export interface RunMemory {
-  /** The model calls its JSON workflow and its actions made (sealed-run.ts). */
-  modelCalls?: ActionModelCalls;
+  /** The model calls its JSON workflow made (sealed-run.ts). */
+  modelCalls?: RunModelCalls;
   /** Its sealed build's calls tried once that went out (sealed-run.ts). */
   sentCalls?: SentCalls;
   /** Its AI calls in flight and answers no attempt took (host.ts). */

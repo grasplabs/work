@@ -6,7 +6,6 @@ import type {
   WorkflowDraft,
   WorkflowParams,
   WorkflowResource,
-  WorkflowActionReview,
   WorkflowResourceRun,
   WorkflowResourceVersion,
   WorkflowState,
@@ -83,10 +82,8 @@ import {
 // its definition as a draft they edit, check and publish; for everyone
 // with a role, its published versions. Core decides who sees what: the
 // draft is read only for builders, as it can hold a sensitive default.
-// Each version shows what its own actions may call, as sealed with it
-// (GRA-709): each binding they use, and a connector's exact operations;
-// and, for one that asks a model, the writes its answers may steer
-// (GRA-718), which no reviewer should have to piece together. Its
+// Each version shows, for one that asks a model, the writes its answers
+// may steer (GRA-718), which no reviewer should have to piece together. Its
 // parameters, which its builders set, and its runs, as core lists them for
 // the reader (GRA-674), each opened beside the page with what it returned
 // or why it failed. Beside its name, whether it runs, with Pause and
@@ -107,25 +104,12 @@ import {
 // edits it.
 
 /**
- * One use whose writes a model's answers may steer (GRA-718), as its
- * neighbouring use badge names it: a connector's alias and the operations
- * that may write; an unsealed action's alias alone, as any of it may write.
+ * What a version's model tasks may steer (GRA-718, GRA-727), which no
+ * reviewer should have to piece together: each connector's alias and the
+ * operations that may write.
  */
-const SteeredWriteBadge = ({ write }: { write: SteeredWrite }) => {
-  const target =
-    write.kind === "connector"
-      ? `${write.alias}: ${formatList(write.operations)}`
-      : write.alias;
-  return (
-    <Badge variant="attention">
-      <Trans>Writes a model may steer: {target}</Trans>
-    </Badge>
-  );
-};
-
-/** What a version's own actions may call: each action, then its uses. */
-const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
-  if (actions.length === 0) {
+const SteeredWrites = ({ writes }: { writes: readonly SteeredWrite[] }) => {
+  if (writes.length === 0) {
     return (
       <span className="text-muted-foreground">
         <Trans>None</Trans>
@@ -133,23 +117,13 @@ const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
     );
   }
   return (
-    <ul className="flex flex-col gap-1">
-      {actions.map((action) => (
-        <li className="flex flex-wrap items-center gap-1" key={action.binding}>
-          <code>{action.binding}</code>
-          {action.uses.map((use) => (
-            <Badge key={use.alias} variant="outline">
-              {use.kind === "connector"
-                ? `${use.alias}: ${formatList(use.operations)}`
-                : use.alias}
-            </Badge>
-          ))}
-          {action.modelSteeredWrites.map((write) => (
-            <SteeredWriteBadge key={write.alias} write={write} />
-          ))}
-        </li>
+    <div className="flex flex-wrap items-center gap-1">
+      {writes.map((write) => (
+        <Badge key={write.alias} variant="attention">
+          {`${write.alias}: ${formatList(write.operations)}`}
+        </Badge>
       ))}
-    </ul>
+    </div>
   );
 };
 
@@ -184,7 +158,9 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
               <TableHead variant="card">{t`Version`}</TableHead>
               <TableHead variant="card">{t`Definition version`}</TableHead>
               <TableHead variant="card">{t`Published`}</TableHead>
-              <TableHead variant="card">{t`Actions`}</TableHead>
+              <TableHead variant="card">
+                {t`Writes a model may steer`}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -198,19 +174,7 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
                   {formatDateTime(version.createdAt)}
                 </TableCell>
                 <TableCell variant="roomy">
-                  <div className="flex flex-col gap-1">
-                    {version.modelSteeredWrites.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span className="text-muted-foreground">
-                          <Trans>Its model tasks</Trans>
-                        </span>
-                        {version.modelSteeredWrites.map((write) => (
-                          <SteeredWriteBadge key={write.alias} write={write} />
-                        ))}
-                      </div>
-                    )}
-                    <ActionEffects actions={version.actions} />
-                  </div>
+                  <SteeredWrites writes={version.modelSteeredWrites} />
                 </TableCell>
               </TableRow>
             ))}
@@ -219,10 +183,8 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
       </div>
       <p className="text-muted-foreground" id={captionId}>
         <Trans>
-          Writes a model may steer cover each action&apos;s own model uses and
-          the workflow&apos;s own model tasks. An action&apos;s model uses reach
-          only that action; each of the workflow&apos;s model tasks is taken to
-          reach every call the workflow makes.
+          Each of the workflow&apos;s model tasks is taken to reach every call
+          the workflow makes.
         </Trans>
       </p>
     </div>

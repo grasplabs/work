@@ -57,10 +57,6 @@ import { frozenParams } from "./workflow-params.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
 import { workflowStateOf } from "./workflow-state.ts";
-import {
-  packagesHoldSql,
-  manifestPackagesSchema,
-} from "./workflows/package-seal.ts";
 import { triggeredAccountClaimed } from "./workflows/quotas.ts";
 import type { LineagePlace } from "./workflows/quotas.ts";
 import { frozenBindingsOf } from "./workflows/resource-authority.ts";
@@ -273,13 +269,6 @@ export interface StartAuthorization {
    */
   holds: SQL;
   /**
-   * That the graph its version seals is still approved
-   * (GRA-665), as SQL, part of `holds`: read on its own as the admitting
-   * batch runs, to say a refusal was this one. Always true for a version
-   * that seals none.
-   */
-  packages: SQL;
-  /**
    * The ID its receipt and run are admitted under, minted with the
    * decision when its start hands the run files (GRA-885), so the copies
    * are the run's; minted as it is admitted otherwise.
@@ -456,34 +445,6 @@ export const appSendHoldsSql = (
 ): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "send");
 
 /**
- * That the approved graph `graphHash` workflow `id`'s version seals still
- * holds, as SQL for the admitting statement; a version that seals none
- * holds it always. A graph revoked already starts nothing: refused, and
- * audited (`workflow.packages_revoked`, decision 4 of GRA-665), before
- * anything is admitted.
- */
-const packagesHolding = async (
-  env: Env,
-  actor: AuditActor,
-  id: string,
-  graphHash: string | null,
-  detail: Record<string, AuditDetailValue>
-): Promise<SQL> => {
-  if (graphHash === null) {
-    return sql`1`;
-  }
-  const packages = packagesHoldSql(id, graphHash);
-  const approved = await drizzle(env.DB).get<{ holds: number }>(
-    sql`SELECT ${packages} AS holds`
-  );
-  if (approved.holds === 0) {
-    await refusedStart(env, actor, id, detail, "workflow.packages_revoked");
-    throw workflowResourceErrors.create("workflow.packages_revoked");
-  }
-  return packages;
-};
-
-/**
  * The live workflow `id` at `version`, its policy generation and the
  * version's manifest and input descriptor. A workflow that isn't live is
  * `workflow.resource_unavailable`; a version it never published
@@ -500,8 +461,6 @@ export const pinned = async (
   inputDescriptor: string;
   /** The executable identity of its build. */
   buildHash: string;
-  /** The approved graph its modules import (GRA-665); null for none. */
-  graphHash: string | null;
 }> => {
   const row = await drizzle(env.DB)
     .select({
@@ -537,12 +496,8 @@ export const pinned = async (
   // Read from the manifest the admitting statement pins by its hash: the
   // run is admitted for the build that manifest seals.
   let build: SealedBuild;
-  let graphHash: string | null;
   try {
     build = buildOf(row.manifest);
-    graphHash =
-      manifestPackagesSchema.parse(JSON.parse(row.manifest)).packages
-        ?.graphHash ?? null;
   } catch (error) {
     if (isExpectedError(error)) {
       throw error;
@@ -555,7 +510,6 @@ export const pinned = async (
     manifestHash: row.manifestHash,
     inputDescriptor: JSON.stringify(input),
     buildHash: build.hash,
-    graphHash,
   };
 };
 
@@ -1202,7 +1156,6 @@ export const decideWorkflowStart = async (
     manifestHash,
     inputDescriptor,
     buildHash,
-    graphHash,
   } = found;
   const base = {
     version,
@@ -1281,10 +1234,6 @@ export const decideWorkflowStart = async (
     );
     throw workflowResourceErrors.create("workflow.paused");
   }
-  const packages = await packagesHolding(env, rule.actor, id, graphHash, {
-    ...base,
-    inputHash,
-  });
   // Read after the invoker's code formed the input it starts with, so a
   // restricted read that fed it is seen (`restrictedStart`).
   const restricted = await restrictedStart(env, invoker);
@@ -1315,17 +1264,11 @@ export const decideWorkflowStart = async (
       WHERE pinned.workflow_resource_id = ${id} AND pinned.version = ${version}
         AND pinned.manifest_hash = ${manifestHash})
     AND ${requiredSql(id, version, JSON.stringify(bindings.required))}
-    AND ${packages}
     AND ${rule.holds})`;
   const decided = await drizzle(env.DB).get<{ holds: number }>(
     sql`SELECT ${holds} AS holds`
   );
   if (decided.holds === 0) {
-    // Its packages revoked since they were read: said, and audited, as such.
-    await packagesHolding(env, rule.actor, id, graphHash, {
-      ...base,
-      inputHash,
-    });
     throw await deniedAt(env, id, version, { generation, configRevision });
   }
   // The ID its run will have: its inboxes' tokens and its files' copies
@@ -1377,7 +1320,6 @@ export const decideWorkflowStart = async (
       actor: rule.actor,
       ...lineageOf(invoker),
       holds,
-      packages,
     },
   };
 };
@@ -1506,15 +1448,13 @@ export const admitWorkflowStart = async (
   };
   // Why it wasn't admitted, if it isn't: read in the admitting batch, just
   // before its insert, so the reason is the state it was refused in.
-  let refusedFor: { under: number; packaged: number } | undefined;
+  let refusedFor: { under: number } | undefined;
   beforeAdmit?.();
   try {
     const [[state]] = await auditedBatch(env, db, [
       db
         .select({
           under: sql<number>`${underRunLimit(authorization)}`.as("under"),
-          // Named, so no column of the statement shares its name.
-          packaged: sql<number>`(${authorization.packages})`.as("packaged"),
         })
         .from(sql`(SELECT 1)`),
       // Its run's snapshot, before the receipt that names it.
@@ -1587,18 +1527,8 @@ export const admitWorkflowStart = async (
       throw error;
     }
   }
-  // Refused by its packages revoked, by the cap on live runs, or by
-  // authority that changed: said as which, as the admitting batch found it.
-  if (refusedFor?.packaged === 0) {
-    await refusedStart(
-      env,
-      authorization.actor,
-      authorization.workflowId,
-      detail,
-      "workflow.packages_revoked"
-    );
-    throw workflowResourceErrors.create("workflow.packages_revoked");
-  }
+  // Refused by the cap on live runs, or by authority that changed: said as
+  // which, as the admitting batch found it.
   const limited = refusedFor?.under === 0;
   const reason = limited ? "workflow.run_limit" : "workflow.start_denied";
   await refusedStart(

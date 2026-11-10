@@ -1734,7 +1734,6 @@ msgstr "Action"
 #: src/apps/app-versions.tsx
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
-#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Actions"
 msgstr "Actions"
 
@@ -1866,10 +1865,6 @@ msgstr "Add HTTP connection"
 #: src/apps/indexes-view.tsx
 msgid "Add index"
 msgstr "Add index"
-
-#: src/workflows/module-files.tsx
-msgid "Add module"
-msgstr "Add module"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Add one so invoices are paid when they come."
@@ -4896,6 +4891,10 @@ msgstr "Each event of this type from the source starts a run, with its data as t
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Each invoice as a PDF, as soon as it is issued."
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Each of the workflow's model tasks is taken to reach every call the workflow makes."
+msgstr "Each of the workflow's model tasks is taken to reach every call the workflow makes."
+
 #: src/connections/http-connections.tsx
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
 msgstr "Each path prefix starts with /, on its own line, with no query or dot segments."
@@ -6885,10 +6884,6 @@ msgstr "Its messages are deleted for good, and every change its agent holds for 
 msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "Its migrations can't be read: it may rewrite the records of any table"
 
-#: src/routes/_shell.workflows.$workflow.tsx
-msgid "Its model tasks"
-msgstr "Its model tasks"
-
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
 msgstr "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
@@ -7691,10 +7686,6 @@ msgctxt "an advisory's severity"
 msgid "Moderate"
 msgstr "Moderate"
 
-#: src/workflows/module-files.tsx
-msgid "Modules"
-msgstr "Modules"
-
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
 msgid "Money"
@@ -8229,10 +8220,6 @@ msgstr "No model is chosen yet."
 #: src/workflows/requests/request-needs.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "No model is set up for this deployment yet."
-
-#: src/workflows/module-files.tsx
-msgid "No modules yet. A module holds calculations a task calls through a local binding."
-msgstr "No modules yet. A module holds calculations a task calls through a local binding."
 
 #: src/people/person-picker.tsx
 msgid "No owner yet"
@@ -9546,10 +9533,6 @@ msgstr "Paste the key from your provider's console. It is stored sealed and neve
 msgid "Path"
 msgstr "Path"
 
-#: src/workflows/module-files.tsx
-msgid "Path of a new module"
-msgstr "Path of a new module"
-
 #: src/connections/http-connections.tsx
 msgid "Path prefixes it allows, one per line"
 msgstr "Path prefixes it allows, one per line"
@@ -10392,7 +10375,6 @@ msgid "Remove"
 msgstr "Remove"
 
 #: src/onboarding/document-drop.tsx
-#: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "Remove {file}"
 
@@ -12615,10 +12597,6 @@ msgstr "Teams under five people show only whether their lead talked, so nobody c
 msgid "Tell me how this work runs today, step by step: who does what, in which app, and how often. I draw it as you go."
 msgstr "Tell me how this work runs today, step by step: who does what, in which app, and how often. I draw it as you go."
 
-#: src/workflows/binding-approvals.tsx
-msgid "Template {templateId}, version {version}"
-msgstr "Template {templateId}, version {version}"
-
 #: src/settings/ai-providers.tsx
 msgid "Test"
 msgstr "Test"
@@ -12827,12 +12805,12 @@ msgid "The App's actions can't use it until an admin binds it."
 msgstr "The App's actions can't use it until an admin binds it."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgid "The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr "The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-msgstr "The App's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
+msgid "The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves."
+msgstr "The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves."
 
 #: src/apps/access-view.tsx
 #: src/chat/builds.tsx
@@ -15587,12 +15565,8 @@ msgid "Write your answer"
 msgstr "Write your answer"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer cover each action's own model uses and the workflow's own model tasks. An action's model uses reach only that action; each of the workflow's model tasks is taken to reach every call the workflow makes."
-msgstr "Writes a model may steer cover each action's own model uses and the workflow's own model tasks. An action's model uses reach only that action; each of the workflow's model tasks is taken to reach every call the workflow makes."
-
-#: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer: {target}"
-msgstr "Writes a model may steer: {target}"
+msgid "Writes a model may steer"
+msgstr "Writes a model may steer"
 
 #: src/chat/thread.tsx
 msgid "Writing"

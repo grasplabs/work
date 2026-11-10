@@ -45,7 +45,6 @@ const published = (version: number): WorkflowResourceVersion => ({
   contractHash: "contract",
   manifestHash: "manifest",
   bindings: [],
-  actions: [],
   modelSteeredWrites: [],
   build: { hash: "build" },
   author: "ada",

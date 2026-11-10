@@ -253,7 +253,6 @@ const readingWorkflow = async () => {
   await publishWorkflowVersion(env, builder, workflow.id, {
     definition: definitionOf(key),
     basedOn: null,
-    modules: {},
   });
   const permissionId = await granted(builder, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
@@ -479,7 +478,6 @@ describe("a workflow binding a native connector's operation", () => {
     const saved = await editWorkflowDraft(env, builder, workflow.id, {
       expectedRevision: base,
       source: definitionOf(key),
-      modules: {},
     });
     expect(saved.problems).toStrictEqual([]);
     const answer = {

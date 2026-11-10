@@ -885,12 +885,11 @@ return { before, after: await late };
         async () => await exportedWorkflowVersion(env, by, workflow.id, 1)
       ),
       // Listed beside the new one, refused, never failing the listing.
-      listed: listed.map(({ version, refused, build, actions }) => ({
+      listed: listed.map(({ version, refused, build }) => ({
         version,
         refused: refused?.code,
         told: refused?.message.includes("publish the workflow again"),
         built: build !== null,
-        actions: actions.length,
       })),
     }).toStrictEqual({
       start: "workflow.binding_kind_removed",
@@ -901,14 +900,12 @@ return { before, after: await late };
           refused: undefined,
           told: undefined,
           built: true,
-          actions: 0,
         },
         {
           version: 1,
           refused: "workflow.binding_kind_removed",
           told: true,
           built: false,
-          actions: 0,
         },
       ],
     });

@@ -139,16 +139,12 @@ export const everyStep = () => ({
   ],
 });
 
-/** A workflow calling a permission of every kind a `call` step calls. */
+/** A workflow calling a connection's actions, one with a timeout. */
 export const everyCall = () => ({
   $schema: workflowSchemaUrl,
   args: { kind: "object", fields: { who: { kind: "string" } } },
   permissions: {
     connections: { mail: { contract: "composio.mail@1" } },
-    modules: {
-      total: { kind: "compute", contract: "local:code/total.ts#total" },
-      note: { kind: "action", contract: "local:code/note.ts#note" },
-    },
   },
   steps: [
     {
@@ -158,12 +154,12 @@ export const everyCall = () => ({
       action: "mail.send",
       args: { to: { $expr: "args.who" }, subject: "Hi" },
     },
-    { id: "add", type: "call", module: "total", args: [1, 2, 3] },
     {
       id: "tell",
       type: "call",
-      module: "note",
-      args: { to: { $expr: "args.who" } },
+      connection: "mail",
+      action: "mail.send",
+      args: { to: { $expr: "args.who" }, subject: "Again" },
       timeout: "30 seconds",
     },
   ],
@@ -223,6 +219,9 @@ export const everyOperator = () => ({
             },
             missing: { $expr: "args.note ?? 'none'" },
             known: { $expr: "!args.unknown || args.count < 0" },
+            body: { $expr: "JSON.stringify({ lines: args.lines })" },
+            parsed: { $expr: "JSON.parse(args.who).first ?? args.who" },
+            started: { $expr: "run.startedAt - args.at > 0" },
           },
         },
       ],

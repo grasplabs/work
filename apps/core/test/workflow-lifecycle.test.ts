@@ -137,7 +137,6 @@ describe("a workflow's lifecycle", { timeout: 60_000 }, () => {
     await editWorkflowDraft(env, owner, workflow.id, {
       expectedRevision: 0,
       source: greetingOf(),
-      modules: {},
     });
     const designed = await workflowLifecycle(env, owner, workflow.id);
     await publishWorkflowVersion(env, owner, workflow.id, {

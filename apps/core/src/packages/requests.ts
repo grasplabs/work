@@ -23,7 +23,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { graspLockHash, packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -48,8 +47,7 @@ import {
   subjectOfInput,
 } from "./subjects.ts";
 
-// npm packages asked for an App or a workflow, its builder's decision on
-// them, and the one check that says whether a graph may be used. Nothing
+// npm packages asked for an App, its builder's decision on them, and the one check that says whether a graph may be used. Nothing
 // here fetches or runs a package: a lock is data core resolved itself
 // (resolve.ts), and an approval is a row. What could go wrong, and what
 // stops it:
@@ -58,7 +56,7 @@ import {
 //   nothing more: its APIs have no decision, and `decideDependency`
 //   refuses any identity an agent acts under (`actor`, `via`). Deciding is
 //   only on a person's own `/rpc` session, with the session's identity.
-// - Someone who doesn't build the App or workflow deciding: the decider
+// - Someone who doesn't build the App deciding: the decider
 //   must build the request's own subject (`builtSubject`), never one they
 //   name; Grasp staff never decide.
 // - An approval replayed for another graph: the decision names the graph
@@ -317,7 +315,7 @@ export const propose = async (
   }
 };
 
-/** How an App's or a workflow's packages stand, for its builders. */
+/** How an App's packages stand, for its builders. */
 export const dependencyStatus = async (
   env: Env,
   by: Acting,
@@ -350,6 +348,9 @@ export const chatPackageRequests = async (
     .where(
       and(
         eq(dependencyRequests.status, "pending"),
+        // A workflow's, from before workflows lost their packages, is no
+        // one's to decide.
+        eq(dependencyRequests.subjectType, "app"),
         sql`EXISTS (SELECT 1 FROM json_each(coalesce(${dependencyRequests.requestedIn}, json_array(json(${dependencyRequests.requestedVia})))) AS asked
           WHERE json_extract(asked.value, '$.chatId') = ${chatId}
             AND json_extract(asked.value, '$.onBehalfOf') = ${userId})`
@@ -407,10 +408,7 @@ const requireDecider = async (env: Env, by: Acting, row: Row) => {
   try {
     await builtSubject(env, by, { type: row.subjectType, id: row.subjectId });
   } catch (error) {
-    if (
-      appErrors.codeOf(error) === "app.not_found" ||
-      workflowResourceErrors.codeOf(error) === "workflow.resource_unavailable"
-    ) {
+    if (appErrors.codeOf(error) === "app.not_found") {
       throw notFound();
     }
     if (roleErrors.codeOf(error) === "role.forbidden") {
@@ -422,7 +420,7 @@ const requireDecider = async (env: Env, by: Acting, row: Row) => {
 
 /**
  * Approves or denies a pending request for `by`, once, as a builder of
- * its App or workflow, from their own session: never an agent acting for
+ * its App, from their own session: never an agent acting for
  * them, nor Grasp staff. One conditional update is the decision: it lands
  * only while the request is pending with the graph `by` reviewed. The
  * person who asked may decide (the chat's card asks them): the audit

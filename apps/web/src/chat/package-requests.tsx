@@ -26,7 +26,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
 // The npm packages the chat's agent asked for (core's
-// packages/requests.ts), each on a card: the App's or workflow's builder
+// packages/requests.ts), each on a card: the App's builder
 // approves or denies them here, in their own session, which the agent
 // can't reach. The card shows the request as stored, and a decision names
 // the graph it showed, so what is approved is what was shown.

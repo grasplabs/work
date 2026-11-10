@@ -242,9 +242,6 @@ export default defineConfig({
         files: [
           "apps/core/src/workflows/host.ts",
           "apps/core/src/workflows/attempt-host.ts",
-          // An action's host, which bounds each call itself, so that a
-          // refusal of its bounds stands as any other (resource-action.ts).
-          "apps/core/src/workflows/resource-action.ts",
           // What holds a run's host to its time between steps, forwarding
           // each call to it unchanged (between-steps.ts).
           "apps/core/src/workflows/between-steps.ts",

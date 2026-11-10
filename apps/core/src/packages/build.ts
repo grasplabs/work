@@ -56,16 +56,13 @@ export type PackageBuildEnv = PlatformEnv &
 //   come from the build cache (`appPackageModules`), keyed by the graph's
 //   hash, which covers every tarball's integrity; the approval, the
 //   malware check and the audit run on every build all the same.
-//
-// A workflow's modules go into the version that seals them
-// (workflows/sealed-packages.ts), whose artifacts are content-addressed
-// and collected as releases' are.
 
 /**
- * Most bytes of modules core takes from the sandbox host: what a workflow
- * version seals at most, at UTF-8's four bytes a character.
+ * Most bytes of modules core takes from the sandbox host for one build:
+ * held whole in memory twice (its chunks, then joined), so well under an
+ * isolate's memory.
  */
-const maxModuleBytes = packageLimits.workflowPackageChars * 4;
+const maxModuleBytes = 8 * 1024 * 1024;
 
 /** `chunks`, in order, as one. */
 const joined = (chunks: readonly Uint8Array[]): Uint8Array => {
@@ -82,7 +79,7 @@ const joined = (chunks: readonly Uint8Array[]): Uint8Array => {
 
 /**
  * What the package builder answers for building `lock` from `tarballs`,
- * for `whose` (`app:<id>` or `workflow:<id>`, its sub-owner on the sandbox
+ * for `whose` (`app:<id>`, its sub-owner on the sandbox
  * host): the modules, or why not; checked by its caller.
  */
 export const runBuilder = async (

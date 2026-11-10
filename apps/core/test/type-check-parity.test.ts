@@ -8,7 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { loadBuiltinRelease } from "../src/builtins.ts";
 import { inspectDraft, withDraftReferences } from "../src/draft-references.ts";
-import { buildComputeModules, buildPages, checkAppCode } from "../src/pages.ts";
+import { buildPages, checkAppCode } from "../src/pages.ts";
 
 // The type check is a gate: what it passes is sealed and run. These tests
 // hold the checker to what the platform's previous one (TypeScript 6's
@@ -143,21 +143,6 @@ const serverMistakes: Record<string, string> = {
     'import type { useQuery } from ".kit/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
 };
 
-/** Mistakes in a JSON workflow's compute modules. */
-const computeMistakes: Record<string, string> = {
-  "code/total.ts": `import { compute, v } from "@grasp-os/sdk/compute";
-
-export const total = compute({
-  input: v.array(v.number()),
-  output: v.number(),
-  handler: (amounts) => amounts.join(","),
-});
-`,
-  "code/m-workflow.ts":
-    'import type { workflow } from "@grasp-os/sdk/workflow";\n\nexport type Wrong = typeof workflow;\n',
-  "code/m-dom.ts": "export const wrong = (): string => document.title;\n",
-};
-
 /**
  * What TypeScript 6's compiler API said of each corpus, the platform's
  * check before tsrs (recorded 2026-11-04 on #1939's type chunks): every
@@ -199,11 +184,6 @@ const said: Record<string, string[]> = {
     "server/m-react.ts:1:32 TS2307 error",
     "server/m-returns.ts:4:76 TS2322 error",
     "server/m-undefined.ts:1:45 TS18048 error",
-  ],
-  compute: [
-    "code/m-dom.ts:1:36 TS2584 error",
-    "code/m-workflow.ts:1:31 TS2307 error",
-    "code/total.ts:6:25 TS2322 error",
   ],
 };
 
@@ -344,14 +324,6 @@ describe(
       );
       expect(found).toStrictEqual(was);
     });
-
-    it("gives compute modules' mistakes", async () => {
-      const { found, said: was } = parity(
-        "compute",
-        await buildComputeModules(env, computeMistakes, "workflow-test")
-      );
-      expect(found).toStrictEqual(was);
-    });
   }
 );
 
@@ -373,15 +345,19 @@ describe("the type checker's isolate", { timeout: 120_000 }, () => {
     };
     const spied = { ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare" };
     const marks = [crypto.randomUUID(), crypto.randomUUID()];
-    const apps = marks.map(() => appIdSchema.parse(crypto.randomUUID()));
-    for (const [index, mark] of marks.entries()) {
+    const apps: AppId[] = [];
+    for (const mark of marks) {
       // oxlint-disable-next-line no-await-in-loop -- one App after another
-      const built = await buildComputeModules(
+      const { app, files } = await blueprintApp("intake");
+      apps.push(app);
+      // oxlint-disable-next-line no-await-in-loop -- one App after another
+      const built = await buildPages(
         spied,
         {
-          "code/total.ts": `// ${mark}\nexport const wrong: number = "${mark}";\n`,
+          ...files,
+          "src/components/m-mark.tsx": `// ${mark}\nexport const wrong: number = "${mark}";\n`,
         },
-        apps[index] ?? ""
+        app
       );
       expect(built.ok).toBeFalsy();
     }

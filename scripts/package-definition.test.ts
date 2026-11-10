@@ -8,8 +8,6 @@ import {
 import path from "node:path";
 
 import { definitionPackageFormatVersion } from "@grasp-os/shared/definition-packages";
-import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
-import { graspLockSchema } from "@grasp-os/shared/packages";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { parse } from "yaml";
 import { z } from "zod";
@@ -18,7 +16,6 @@ import { steeringCases } from "../apps/core/test/steering-cases.ts";
 import { oxcWasmPin } from "../packages/compiler/oxc-wasm/wasm.ts";
 import {
   ROOT,
-  hash,
   notesFiles,
   definitionOf,
   lockedIntegrity,
@@ -63,34 +60,6 @@ const withLock = (lock: string) =>
     }),
     "grasp.lock.json": lock,
   });
-
-/** The package with workflow `greet` sealing `packages`. */
-const withPackages = (
-  packages: DefinitionPackage["workflows"][string]["packages"],
-  files: Record<string, string> = notesFiles()
-): DefinitionPackage => {
-  const definition = definitionOf(files);
-  const greet = definition.workflows["workspace/greet/1.0.0"];
-  if (greet === undefined) {
-    throw new Error("No greeting workflow");
-  }
-  return {
-    ...definition,
-    workflows: { "workspace/greet/1.0.0": { ...greet, packages } },
-  };
-};
-
-const sealed = (lock: string) => ({
-  graphHash: hash("9"),
-  entries: ["date-kit"],
-  lock: graspLockSchema.parse(JSON.parse(lock)),
-});
-
-const dateKit = (version: string) =>
-  lockOf({ "date-kit": version }, [
-    locked("date-kit", version, "MIT", { "tz-data": "2.0.1" }),
-    locked("tz-data", "2.0.1", "Apache-2.0"),
-  ]);
 
 /** The Notes App depending on whatever `lock` locks directly, at any version. */
 const withAnyOfLock = (lock: string) =>
@@ -202,9 +171,7 @@ describe(
         ],
         workflow: [
           "workflows/greet/1.0.0/.grasp/workflow.ts",
-          "workflows/greet/1.0.0/code/double.ts",
           "workflows/greet/1.0.0/tsconfig.generated.json",
-          "workflows/greet/1.0.0/tsconfig.json",
         ],
         vendorTests: [],
         sameSource: true,
@@ -243,7 +210,7 @@ describe(
       // What the platform accepts, read as its parser reads it: a regular
       // expression holding `//` after a `)`, and a `///` comment of prose.
       const valid: Record<string, string> = {
-        "workflows/greet/1.0.0/code/pattern.ts":
+        "app/server/pattern.ts":
           "export const check = (text: string): void => {\n  if (text) /[//] @ts-ignore/u.test(text);\n};\n",
         "app/src/components/prose.tsx":
           "/// The notes page.\n/// <summary>Notes</summary>\nexport const notes = 1;\n",
@@ -268,29 +235,24 @@ describe(
       };
 
       // What the platform's check refuses, each in a file of its own: a
-      // type error in a page and in a compute module; server code and a
-      // compute module reaching the DOM, which their isolate lacks; and a
-      // compute module importing what its kind may not.
+      // type error in a page and in server code; server code reaching the
+      // DOM, which its isolate lacks; and server code importing what its
+      // kind may not.
       const mistyped: Record<string, string> = {
         "app/src/components/typo.tsx": 'export const count: number = "none";\n',
-        "workflows/greet/1.0.0/code/typo.ts":
+        "app/server/typo.ts":
           "export const half = (value: number): string => value / 2;\n",
-        "workflows/greet/1.0.0/code/window.ts":
-          "export const here = (): string => window.location.href;\n",
         "app/server/document.ts":
           "export const title = (): string => document.title;\n",
-        "workflows/greet/1.0.0/code/kit.ts":
+        "app/server/kit.ts":
           'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
-        // A package the SDK imports, which a compute module itself may not.
-        "workflows/greet/1.0.0/code/zod.ts":
-          'import { z } from "zod";\n\nexport const name = z.string();\n',
         // A directive below the top of a page, which TypeScript ignores
         // but the platform refuses wherever it stands.
         "app/src/components/late.tsx":
           'export const late = 1;\n/// <reference types="node" />\n',
       };
       // And what its build refuses before any check: every way a file
-      // could steer the check, in server code and a compute module alike.
+      // could steer the check, in server code and pages alike.
       const steering: Record<string, string> = {
         // Globals a page declares, which the platform refuses in every
         // kind of App code; and server code the parser refuses, or that
@@ -302,15 +264,15 @@ describe(
           '/// <reference path="./missing.ts" />\nexport const one = 1;\n',
         // A suppression after a division by a non-null value, never a
         // regular expression.
-        "workflows/greet/1.0.0/code/non-null.ts":
+        "app/server/non-null.ts":
           "const x: number | undefined = 1;\nexport const y = x! / 2; // @ts-ignore\nexport const b: string = 1;\n",
         "app/server/ambient.ts":
           "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
-        "workflows/greet/1.0.0/code/dom.ts":
+        "app/server/dom.ts":
           '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
         ...Object.fromEntries(
-          steeringCases("@grasp-os/sdk/compute").map(([, source], index) => [
-            `workflows/greet/1.0.0/code/steering-${index}.ts`,
+          steeringCases("@grasp-os/sdk/server").map(([, source], index) => [
+            `app/server/steering-${index}.ts`,
             source,
           ])
         ),
@@ -377,10 +339,8 @@ describe(
             "app/server/document.ts": ["TS2584"],
             "app/src/components/late.tsx": ["imports"],
             "app/src/components/typo.tsx": ["TS2322"],
-            "workflows/greet/1.0.0/code/kit.ts": ["TS2307"],
-            "workflows/greet/1.0.0/code/typo.ts": ["TS2322"],
-            "workflows/greet/1.0.0/code/window.ts": ["TS2304"],
-            "workflows/greet/1.0.0/code/zod.ts": ["TS2307"],
+            "app/server/kit.ts": ["TS2307"],
+            "app/server/typo.ts": ["TS2322"],
           },
         },
         failedBuild: {
@@ -551,94 +511,9 @@ describe(
       });
     });
 
-    it("pins a workflow version's approved packages exactly as its lock resolved them, and refuses one a project can't install", async () => {
-      const { out } = scratch();
-      await packaged(withPackages(sealed(dateKit("1.2.0"))), out);
-      const project = z
-        .object({ dependencies: z.record(z.string(), z.string()) })
-        .parse(
-          JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
-        );
-      const lockfile = lockfileOf(out);
-      const recorded = z
-        .object({
-          workflows: z.record(z.string(), z.object({ packages: z.unknown() })),
-        })
-        .parse(
-          JSON.parse(
-            readFileSync(path.join(out, "grasp-project.json"), "utf-8")
-          )
-        );
-      const notices = readFileSync(
-        path.join(out, "THIRD-PARTY-NOTICES.md"),
-        "utf-8"
-      );
-      const withAppLock = (version: string) => ({
-        ...notesFiles(),
-        "package.json": JSON.stringify({
-          dependencies: { "date-kit": `^${version}` },
-        }),
-        "grasp.lock.json": dateKit(version),
-      });
-      const refusals = {
-        // The App's lock and the workflow's pin one package at two versions.
-        conflicting: await refusalOf(
-          packaged(
-            withPackages(sealed(dateKit("1.2.0")), withAppLock("1.3.0")),
-            scratch().out
-          )
-        ),
-        // The same version in both is one pin.
-        agreeing: await refusalOf(
-          packaged(
-            withPackages(sealed(dateKit("1.2.0")), withAppLock("1.2.0")),
-            scratch().out
-          )
-        ),
-        ownedByProject: await refusalOf(
-          packaged(
-            withPackages(
-              sealed(
-                lockOf({ react: "18.0.0" }, [locked("react", "18.0.0", "MIT")])
-              )
-            ),
-            scratch().out
-          )
-        ),
-      };
-      expect({
-        dateKit: project.dependencies["date-kit"],
-        dependencies: lockfile.snapshots["date-kit@1.2.0"]?.dependencies,
-        recorded: recorded.workflows["workspace/greet/1.0.0"]?.packages,
-        notices: notices
-          .split("\n")
-          .filter((line) => line.startsWith("| date-kit")),
-        refusals,
-      }).toStrictEqual({
-        dateKit: "1.2.0",
-        dependencies: { "tz-data": "2.0.1" },
-        recorded: { graphHash: hash("9"), entries: ["date-kit"] },
-        notices: ["| date-kit | 1.2.0 | MIT | workspace/greet/1.0.0's lock |"],
-        refusals: {
-          conflicting: "refused",
-          agreeing: "ok",
-          ownedByProject: "refused",
-        },
-      });
-    });
-
     it("refuses a package of another format by its format, saying how to recover", async () => {
-      // As core exported them before a workflow carried its packages.
-      const { workflows, ...current } = definitionOf();
-      const older = {
-        ...current,
-        formatVersion: 1,
-        workflows: Object.fromEntries(
-          Object.entries(workflows).map(
-            ([key, { packages: _packages, ...workflow }]) => [key, workflow]
-          )
-        ),
-      };
+      const current = definitionOf();
+      const older = { ...current, formatVersion: 1 };
       let message = "packaged";
       try {
         await packaged(older, scratch().out);
@@ -649,11 +524,7 @@ describe(
       let newer = "packaged";
       try {
         await packaged(
-          {
-            ...current,
-            workflows,
-            formatVersion: definitionPackageFormatVersion + 1,
-          },
+          { ...current, formatVersion: definitionPackageFormatVersion + 1 },
           scratch().out
         );
       } catch (error) {

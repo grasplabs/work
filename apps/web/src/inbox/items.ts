@@ -450,26 +450,15 @@ const askedItems = (
     ];
   });
 
-/** What core's rescan found of an App's or workflow's approved packages. */
+/** What core's rescan found of an App's approved packages. */
 type PackageNotification = Extract<
   NotificationsPage["page"]["notifications"][number],
   { type: "package_revoked" | "package_advisory" }
 >;
 
-/** What a package notice is about: its name and its page. */
-const noticeSubject = (
-  subject: PackageNotification["subject"]
-): { name: string; about: Target } =>
-  subject.type === "app"
-    ? { name: subject.appName, about: { kind: "app", app: subject.app } }
-    : {
-        name: subject.workflowName,
-        about: { kind: "independentWorkflow", workflow: subject.workflow },
-      };
-
 /**
- * What core's rescan found of the approved packages of an App or workflow
- * the person builds: revoked as malware, or a new advisory.
+ * What core's rescan found of the approved packages of an App the person
+ * builds: revoked as malware, or a new advisory.
  */
 const packageNoticeItems = (
   notifications: NotificationsPage,
@@ -482,8 +471,8 @@ const packageNoticeItems = (
     ) {
       return [];
     }
-    const { at, advisory } = notification;
-    const { name, about } = noticeSubject(notification.subject);
+    const { at, advisory, app, appName: name } = notification;
+    const about: Target = { kind: "app", app };
     const found = `${notification.package.name}@${notification.package.version}`;
     const revoked = notification.type === "package_revoked";
     return [

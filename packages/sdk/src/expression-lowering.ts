@@ -1,6 +1,7 @@
 import type {
   Argument,
   ArrayExpressionElement,
+  CallExpression,
   Expression,
   ObjectPropertyKind,
   PropertyKey,
@@ -61,7 +62,35 @@ const isComparison = (node: Expression): boolean =>
  * imports `own` from `@grasp-os/sdk/workflow-generated` under it. No root,
  * step or callback parameter can take it, as none starts with `$`.
  */
-export const runtimeNames = { own: "$own" } as const;
+export const runtimeNames = { own: "$own", parse: "$parse" } as const;
+
+/** The methods of `JSON` an expression may call. */
+export type JsonMethod = "stringify" | "parse";
+
+/**
+ * The method of `JSON` that `node` calls, if it calls `JSON.stringify` or
+ * `JSON.parse` by name (`JSON` the global: no root or callback parameter
+ * named so in `scope`); undefined for any other call. How it is called
+ * (directly, on one value) is the check's to hold.
+ */
+export const jsonCallOf = (
+  node: CallExpression,
+  scope: ReadonlySet<string>
+): JsonMethod | undefined => {
+  const { callee } = node;
+  if (
+    callee.type !== "MemberExpression" ||
+    callee.computed ||
+    callee.object.type !== "Identifier" ||
+    callee.object.name !== "JSON" ||
+    scope.has("JSON") ||
+    callee.property.type !== "Identifier"
+  ) {
+    return undefined;
+  }
+  const { name } = callee.property;
+  return name === "stringify" || name === "parse" ? name : undefined;
+};
 
 /** A link of a member chain: `.key`, `[0]` or `.method(…)`, after `?.` or not. */
 type Link =
@@ -351,6 +380,24 @@ class Lowering {
       this.read(whole.base.name, pathOf(whole.links));
     }
     const { base, links } = this.linksOf(node, true);
+    const [first, ...rest] = links;
+    if (
+      base.type === "Identifier" &&
+      base.name === "JSON" &&
+      !this.roots.has("JSON") &&
+      !this.bound.includes("JSON") &&
+      first?.kind === "call" &&
+      first.method === "parse"
+    ) {
+      // What it parses is data as every value an expression reads is:
+      // frozen, with no prototype (`$parse`, workflow-generated.ts).
+      const parsed: Code = {
+        type: "Call",
+        callee: identifier(runtimeNames.parse),
+        arguments: first.args.map((arg) => this.argument(arg)),
+      };
+      return this.links(parsed, rest);
+    }
     if (base.type === "Identifier") {
       return this.links(identifier(base.name), links);
     }

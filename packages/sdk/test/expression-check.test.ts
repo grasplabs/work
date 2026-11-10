@@ -24,13 +24,14 @@
  * 6. It runs without end: nested `map` over large arrays. JavaScript has
  *    no loops here and no recursion (no function can name itself), so
  *    the work is at most polynomial in the data's size; what bounds it is
- *    the isolate's CPU and memory limits, as for compute modules, not the
+ *    the isolate's CPU and memory limits, not the
  *    check.
  */
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkExpression } from "../src/expression-check.ts";
 import { own } from "../src/expression-runtime.ts";
+import { parse } from "../src/workflow-generated.ts";
 
 /** The code an expression runs as. */
 const generated = (source: string): string => {
@@ -47,8 +48,13 @@ const generated = (source: string): string => {
  */
 const evaluated = (source: string, args: unknown): unknown => {
   // oxlint-disable-next-line typescript/no-implied-eval, no-new-func -- runs the code the check generated, as a workflow's isolate does
-  const code = new Function("args", "$own", `return ${generated(source)};`);
-  const answered: unknown = Reflect.apply(code, undefined, [args, own]);
+  const code = new Function(
+    "args",
+    "$own",
+    "$parse",
+    `return ${generated(source)};`
+  );
+  const answered: unknown = Reflect.apply(code, undefined, [args, own, parse]);
   return answered;
 };
 
@@ -129,7 +135,7 @@ describe("reaching a global", () => {
         "window",
         "process.env",
         "Object.keys(args)",
-        "JSON.stringify(args)",
+        "JSON",
         "Math.max(args.a, 1)",
         "Date.now()",
         "String(args.a)",
@@ -142,6 +148,46 @@ describe("reaching a global", () => {
         "args.lines.map((line) => line) && line",
       ].map(verdict)
     ).toStrictEqual(Array.from({ length: 19 }, () => "expression.global"));
+  });
+
+  it("is `JSON` only to call `JSON.stringify` or `JSON.parse` on one value", () => {
+    expect(
+      [
+        "JSON.stringify(args)",
+        "JSON.parse(args.body).total",
+        "JSON.stringify({ to: args.to, lines: args.lines })",
+      ].map(verdict)
+    ).toStrictEqual(["ok", "ok", "ok"]);
+    expect(
+      [
+        // Its other members, or its methods held as values.
+        "JSON.rawJSON('1')",
+        "JSON.isRawJSON(args)",
+        "JSON[Symbol.toStringTag]",
+        "JSON.parse",
+        "[JSON.stringify]",
+        "({ f: JSON.parse })",
+        "(JSON.parse)(args.body)",
+        "JSON?.parse(args.body)",
+        "JSON.parse?.(args.body)",
+        "JSON['parse'](args.body)",
+        // A reviver or replacer is a function: none is written.
+        "JSON.parse(args.body, (key, value) => value)",
+        "JSON.stringify(args, (key, value) => value)",
+        "JSON.stringify(args, null, 2)",
+        "JSON.stringify(...args.list)",
+        "JSON.stringify()",
+        // A prototype through what it parses is as out of reach as ever.
+        "JSON.parse(args.body).constructor",
+        "JSON.parse(args.body).__proto__",
+        "JSON.parse(args.body)[args.key]",
+      ].map(verdict)
+    ).not.toContain("ok");
+  });
+
+  it("reads a root named `JSON` as the root, never the global", () => {
+    const checked = checkExpression("JSON.total", { roots: ["JSON"] });
+    expect(checked.ok && checked.code).toBe("(JSON.total)");
   });
 
   it("reads `undefined` as the value it is, never a global's", () => {
@@ -529,6 +575,20 @@ describe("the code generated from an expression", () => {
       backslash: "a\\x",
       called: false,
     });
+  });
+
+  it("writes text with `JSON.stringify`, and parses text into data with `JSON.parse`", () => {
+    expect({
+      written: evaluated("JSON.stringify(args.to)", { to: { a: [1, "x"] } }),
+      parsed: evaluated("JSON.parse(args.body).total + 1", {
+        body: '{"total": 2}',
+      }),
+    }).toStrictEqual({ written: '{"a":[1,"x"]}', parsed: 3 });
+    // Nothing of it is a read of the workflow's values but its argument.
+    const checked = checkExpression("JSON.parse(args.body).total");
+    expect(checked.ok && checked.reads).toStrictEqual([
+      { root: "args", path: ["body"] },
+    ]);
   });
 
   it("puts every comparison in parentheses, so TypeScript reads no type arguments", () => {

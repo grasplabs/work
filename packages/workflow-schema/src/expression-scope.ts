@@ -22,8 +22,8 @@ import type {
 // (`expressionRoots`), each typed here.
 //
 // A step whose result the document doesn't type (a decision's, an event
-// wait's, a call of the workflow's own modules) is `any`: the check passes what
-// reads it rather than refuse what it can't know.
+// wait's) is `any`: the check passes what reads it rather than refuse what
+// it can't know.
 
 /** The types an expression reads, as the compiler's check takes them. */
 export interface ExpressionScope {
@@ -154,8 +154,8 @@ const guardsAt = (
   return [];
 };
 
-/** What a run's code knows of its run. */
-const runType = "{ readonly id: string }";
+/** What a run's code knows of its run: its ID, and when it started, in ms. */
+const runType = "{ readonly id: string; readonly startedAt: number }";
 
 /** A value whose type the document doesn't declare. */
 const untyped = "any";

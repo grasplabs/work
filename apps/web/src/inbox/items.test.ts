@@ -220,11 +220,8 @@ const waiting = (ranOut = true) =>
             {
               id: "revoked-1",
               type: "package_revoked",
-              subject: {
-                type: "app",
-                app: "app-invoices",
-                appName: "Invoices",
-              },
+              app: "app-invoices",
+              appName: "Invoices",
               package: { name: "left-pad", version: "1.3.0" },
               advisory: "MAL-2026-1",
               at: "2026-10-12T10:00:00.000Z",

@@ -82,7 +82,6 @@ const versionTwo: WorkflowResourceVersion = {
       fingerprint: "fingerprint",
     },
   ],
-  actions: [],
   modelSteeredWrites: [],
   build: { hash: "build" },
   author: "user-ada",

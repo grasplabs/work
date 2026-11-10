@@ -10,7 +10,6 @@ import type {
   NotificationPage,
   NotificationsApi,
 } from "@grasp-os/shared/notifications";
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   and,
@@ -37,14 +36,12 @@ import {
   brainRecords,
   notifications,
   triggerResources,
-  workflowResourceMembers,
   workflowResources,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { rowsOf } from "./sharing.ts";
 
 // What core tells a person in the product: that an admin asked them one
 // of the brain's open questions (`gap_asked`, written by brain-gaps.ts in the batch that
@@ -53,16 +50,15 @@ import { rowsOf } from "./sharing.ts";
 // batch that stops it), or that connect stopped hearing a mailbox or
 // drive their triggers listen to (`events_stopped`, written by
 // connector-source-notices.ts as connect's audit events reach core), or
-// that the clock found the approved packages of an App or workflow they
-// build reported as malware, and revoked them (`package_revoked`), or a
-// new advisory against them (`package_advisory`), both written by
+// that the clock found the approved packages of an App they build
+// reported as malware, and revoked them (`package_revoked`), or a new
+// advisory against them (`package_advisory`), both written by
 // packages/rescan.ts in the batch that records it, or what an App's
 // server code told them (`app_message`, written by app-notifications.ts).
 // A question is listed while it is open: once anyone answers or closes
 // it, it goes from the list by itself; a stopped trigger while it is
-// still theirs and not deleted; a package notice while they can still
-// open the App or workflow; an App's message while they can still open
-// the App.
+// still theirs and not deleted; a package notice or an App's message
+// while they can still open the App.
 //
 // A person lists only notifications of Apps they can still open
 // (`appsFoundBy`), so one of an App taken from them tells them nothing
@@ -131,12 +127,12 @@ export const eventsStopNoticed = (
 const packageTypes = ["package_revoked", "package_advisory"] as const;
 
 /**
- * What core's rescan found of an App's or workflow's approved packages
+ * What core's rescan found of an App's approved packages
  * (packages/rescan.ts), and whom it tells: its builders.
  */
 export interface PackageNotice {
   type: PackageNotification["type"];
-  subject: { type: "app" | "workflow"; id: string };
+  app: string;
   package: { name: string; version: string };
   advisory: string;
   personIds: readonly string[];
@@ -151,43 +147,24 @@ export interface PackageNotice {
  */
 export const packageNoticed = (
   db: DrizzleD1Database,
-  {
-    type,
-    subject,
-    package: found,
-    advisory,
-    personIds,
-    recorded,
-  }: PackageNotice
+  { type, app, package: found, advisory, personIds, recorded }: PackageNotice
 ) => {
   const now = Date.now();
-  const app = subject.type === "app" ? subject.id : null;
-  const workflow = subject.type === "workflow" ? subject.id : null;
   return [...new Set(personIds)].map((personId) =>
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, ${type}, ${app}, ${workflow}, NULL, ${now}, ${now}, NULL, NULL, ${found.name}, ${found.version}, ${advisory}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, ${type}, ${app}, NULL, NULL, ${now}, ${now}, NULL, NULL, ${found.name}, ${found.version}, ${advisory}, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
       )
   );
 };
 
 /**
- * That `person` has a role in the workflow joined to a row, as SQL: an
- * admin, its owner, or someone it is shared with, as a person or through
- * a team of theirs.
- */
-const workflowFoundBy = (person: Identity): SQL =>
-  isAdmin(person.role)
-    ? sql`1`
-    : sql`(${workflowResources.ownerId} = ${person.userId} OR EXISTS (SELECT 1 FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.workflowResourceId} = ${workflowResources.id} AND ${rowsOf(workflowResourceMembers, person)}))`;
-
-/**
  * `person`'s notifications: of Apps they can still open, of gaps still
  * open, of triggers still theirs, of the sources connect stopped hearing
- * for them, and of revocations of Apps or workflows they can still open,
- * or of any while they approve packages. Read with `apps`, `brain_records` and `brain_gap_states`
- * joined on the row (`appOn`, `gapOn`, `gapStateOn`).
+ * for them, and of package notices of Apps they can still open. Read with
+ * `apps`, `brain_records` and `brain_gap_states` joined on the row
+ * (`appOn`, `gapOn`, `gapStateOn`).
  */
 const visibleTo = (env: Env, person: Identity): SQL | undefined =>
   and(
@@ -211,18 +188,9 @@ const visibleTo = (env: Env, person: Identity): SQL | undefined =>
       eq(notifications.type, "events_stopped"),
       and(
         inList(notifications.type, packageTypes),
-        or(
-          and(
-            isNotNull(apps.id),
-            appsFoundBy(env, person),
-            isNull(apps.removedAt)
-          ),
-          and(
-            isNotNull(workflowResources.id),
-            isNull(workflowResources.deletedAt),
-            workflowFoundBy(person)
-          )
-        )
+        isNotNull(apps.id),
+        appsFoundBy(env, person),
+        isNull(apps.removedAt)
       )
     )
   );
@@ -238,12 +206,9 @@ const gapOn = and(
 const gapStateOn = eq(brainGapStates.gapId, notifications.gapId);
 /** Joins `trigger_resources` to a notification: a stopped trigger. */
 const triggerOn = eq(triggerResources.id, notifications.triggerId);
-/**
- * Joins `workflow_resources` to a notification: a stopped trigger's
- * workflow, or the one whose packages were revoked.
- */
+/** Joins `workflow_resources` to a notification: a stopped trigger's workflow. */
 const workflowOn = and(
-  inList(notifications.type, ["trigger_stopped", ...packageTypes]),
+  eq(notifications.type, "trigger_stopped"),
   eq(workflowResources.id, notifications.workflowId)
 );
 
@@ -287,31 +252,14 @@ const askedGapOf = (
   return record.success && record.data.type === "gap" ? record.data : null;
 };
 
-/** The subject of a package notice's row, by its name now. */
-const packageSubjectOf = (
-  row: ListedRow
-): PackageNotification["subject"] | null => {
-  if (row.app !== null && row.appName !== null) {
-    return { type: "app", app: row.app, appName: row.appName };
-  }
-  if (row.workflow !== null && row.workflowName !== null) {
-    return {
-      type: "workflow",
-      workflow: row.workflow,
-      workflowName: row.workflowName,
-    };
-  }
-  return null;
-};
-
 /** The package notice a listed row holds, if it reads. */
 const packageNoticeOf = (
   row: ListedRow,
   type: PackageNotification["type"]
 ): Notification[] => {
-  const subject = packageSubjectOf(row);
-  const { packageName, packageVersion, advisory } = row;
-  return subject === null ||
+  const { app, appName, packageName, packageVersion, advisory } = row;
+  return app === null ||
+    appName === null ||
     packageName === null ||
     packageVersion === null ||
     advisory === null
@@ -320,7 +268,8 @@ const packageNoticeOf = (
         {
           id: row.id,
           type,
-          subject,
+          app,
+          appName,
           package: { name: packageName, version: packageVersion },
           advisory,
           at: row.updatedAt.toISOString(),
