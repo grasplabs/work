@@ -38,19 +38,15 @@ export const hello = query({
 
 /** An App test of `helloFiles` expecting `greeting`. */
 const helloTest = (greeting: string): Record<string, string> => ({
-  "tests/fixtures/people.json": JSON.stringify({
-    principals: { reader: { role: "user" } },
-  }),
   "tests/hello.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
+import { expect } from "vitest";
+import schema from "../server/schema.ts";
 
-export default appTest({
-  fixtures: "people",
-  tests: {
-    "says ${greeting}": async (t) => {
-      const reader = await t.as("reader");
-      t.equal(await reader.query(api.hello.hello, {}), ${JSON.stringify(greeting)});
-    },
+export default appTest(schema, {
+  "says ${greeting}": async (t) => {
+    const reader = t.withIdentity({ name: "reader" });
+    expect(await reader.query(api.hello.hello, {})).toBe(${JSON.stringify(greeting)});
   },
 });
 `,

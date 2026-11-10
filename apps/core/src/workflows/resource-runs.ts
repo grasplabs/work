@@ -811,6 +811,17 @@ export interface ResourceRunMemory {
   over?: AbortSignal;
   /** Whether the run is still this activation's. */
   current?: () => boolean;
+  /**
+   * Ends the activation as a process that died would, and runs the run
+   * again from its journal (run-object.ts): an App's test's fault alone
+   * asks it (fixture-runs.ts).
+   */
+  restart?: () => Promise<void>;
+  /**
+   * The run's time (workerflow's `runTime`): the wall clock unless an
+   * App's test moved its clock on. The wall clock without it.
+   */
+  now?: () => number;
 }
 
 /**
@@ -1067,6 +1078,7 @@ export const sealedActivation = async (
       attemptCall: trackAttemptCalls(calls),
       ...(memory.aiCalls === undefined ? {} : { aiCalls: memory.aiCalls }),
       leaseOf: memory.leaseOf,
+      ...(memory.now === undefined ? {} : { now: memory.now }),
       tampered: (error) => {
         tampered ??= error;
       },

@@ -279,7 +279,20 @@ export interface RunEngine {
     id: string;
     pinned: PinnedResourceRun;
     input: Json;
+    /** How far its test moved its clock on before it started, in ms. */
+    clockMs: number;
   }) => Promise<void>;
+  /**
+   * Moves test run `id`'s clock `ms` on (an App's test's `t.clock`): what
+   * it waits for that comes due by then runs now. Refused for any run an
+   * App's test didn't start; nothing for a run the engine doesn't have.
+   */
+  advanceFixtureClock: (id: string, ms: number) => Promise<void>;
+  /**
+   * Whether test run `id` waits for something now, its wake not due:
+   * what an App's test waits for before moving its clock.
+   */
+  fixtureWaits: (id: string) => Promise<boolean>;
   /**
    * How many steps named `name` run `id` completed, each once however it
    * was replayed; nothing when the engine has no such run.
@@ -491,9 +504,17 @@ export const runEngine = (env: Env): RunEngine => ({
   createCandidate: async ({ id, pinned, input }) => {
     await admit(env, id, { type: "candidate", ...pinned }, input);
   },
-  createFixture: async ({ id, pinned, input }) => {
+  createFixture: async ({ id, pinned, input, clockMs }) => {
+    // Its clock moved on before it runs anything: the time it starts at.
+    if (clockMs > 0) {
+      await runObjectOf(env, id).advanceFixtureClock(clockMs);
+    }
     await admit(env, id, { type: "fixture", ...pinned }, input);
   },
+  advanceFixtureClock: async (id, ms) => {
+    await runObjectOf(env, id).advanceFixtureClock(ms);
+  },
+  fixtureWaits: async (id) => await runObjectOf(env, id).fixtureWaits(),
   succeededSteps: async (id, name) =>
     await runStub(env, id).succeededSteps(name),
   createInternal: async ({ id, workflow, input }) => {

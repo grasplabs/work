@@ -187,6 +187,9 @@ catalogs:
     '@vitest/browser-playwright':
       specifier: 4.1.11
       version: 4.1.11
+    '@vitest/expect':
+      specifier: 4.1.11
+      version: 4.1.11
     aws4fetch:
       specifier: 1.0.20
       version: 1.0.20
@@ -1204,6 +1207,9 @@ importers:
       '@tanstack/react-router':
         specifier: 'catalog:'
         version: 1.170.46(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@vitest/expect':
+        specifier: 'catalog:'
+        version: 4.1.11
       capnweb:
         specifier: 'catalog:'
         version: 0.12.0

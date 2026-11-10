@@ -1,5 +1,6 @@
 // An App's tests (`appTest`), which core's test runner runs against the
-// real host: app-test-suite.ts and app-test-runner.ts.
+// real host: app-test-suite.ts and app-test-runner.ts. They assert with
+// vitest's `expect`, imported from `vitest` (vitest.ts).
 export { appTestTimeoutMs, runAppSuite } from "./app-test-runner.ts";
 export type {
   AppTestHost,
@@ -13,24 +14,23 @@ export {
   maxAppTestName,
   maxAppTests,
   TestDefinitionError,
-  testNamePattern,
-  workflowTest,
 } from "./app-test-suite.ts";
 export type {
   AppTestContext,
-  AppTestDefinition,
   AppTestFunction,
   AppTestSuite,
   LiveQuery,
   PublicReference,
+  TestClock,
   TestDecisionAnswer,
   TestEffects,
-  TestPrincipal,
+  TestIdentity,
+  TestIdentityFields,
+  TestRun,
+  TestRunContext,
   TestRunOutcome,
   TestRuns,
-  WorkflowTestContext,
-  WorkflowTestDefinition,
-  WorkflowTestFunction,
+  TestStartOptions,
   WorkflowTestRun,
-  WorkflowTestSuite,
 } from "./app-test-types.ts";
+export { GraspError } from "./client-error.ts";

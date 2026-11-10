@@ -2,7 +2,7 @@
 title: Example Apps
 description: Four complete Apps to start from and copy, each with every file shown.
 sidebar:
-  order: 6
+  order: 7
 ---
 
 Four complete Apps ship with Grasp, written to be copied. Each passes every check Grasp runs on an App, and each is a blueprint: anyone who builds can create an App of their own from it. Their pages show every file in full.

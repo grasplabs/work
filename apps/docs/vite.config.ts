@@ -32,5 +32,11 @@ export default defineProject({
       },
     },
   ],
-  test: { name: "docs", environment: "node" },
+  test: {
+    name: "docs",
+    environment: "node",
+    // The guides' Apps the examples test writes hold App tests
+    // (`tests/*.test.ts`) of their own, which Grasp runs, never vitest.
+    exclude: ["**/node_modules/**", ".examples/**"],
+  },
 });

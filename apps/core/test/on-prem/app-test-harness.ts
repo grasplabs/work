@@ -19,21 +19,14 @@ import { person } from "../sealed-apps.ts";
 // app-test-sessions.test.ts): the Notes App with a suite, making its
 // version current, and places held in the sandbox supervisor.
 
-/** The Notes App, its pages left out, with a fixture. */
-export const appFiles: TestApp = withFiles(
-  appOf(
-    notesFiles.definition,
-    Object.fromEntries(
-      Object.entries(notesFiles.files).filter(
-        ([path]) => !path.startsWith("src/")
-      )
+/** The Notes App, its pages left out. */
+export const appFiles: TestApp = appOf(
+  notesFiles.definition,
+  Object.fromEntries(
+    Object.entries(notesFiles.files).filter(
+      ([path]) => !path.startsWith("src/")
     )
-  ),
-  {
-    "tests/fixtures/notes.json": JSON.stringify({
-      principals: { "note-owner": { role: "user" } },
-    }),
-  }
+  )
 );
 
 /** A suite of one test, `body`, with an owner and a page at hand. */
@@ -41,16 +34,15 @@ export const suiteOf = (
   body: string
 ): string => `import { appTest } from "@grasp-os/sdk/testing";
 import { ${["api", "workflows"].filter((name) => body.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
+${body.includes("expect(") ? 'import { expect } from "vitest";' : ""}
+import schema from "../server/schema.ts";
 
 export const page = { pagination: { pageSize: 50 } };
 
-export default appTest({
-  fixtures: "notes",
-  tests: {
-    "runs": async (t) => {
-${body.includes("owner") ? '      const owner = await t.as("note-owner");' : ""}
-      ${body}
-    },
+export default appTest(schema, {
+  "runs": async (t) => {
+${body.includes("owner") ? '    const owner = t.withIdentity({ name: "note-owner" });' : ""}
+    ${body}
   },
 });
 `;
@@ -60,8 +52,8 @@ export const passing = suiteOf(`
       const live = await owner.subscribe(api.notes.list, page);
       const id = await owner.mutation(api.notes.create, { title: "First note" });
       const snapshot = await live.next((found) => found.items.some((note) => note._id === id));
-      t.equal(snapshot.items.map((note) => note.title), ["First note"]);
-      t.equal((await owner.query(api.notes.list, page)).items.length, 1);
+      expect(snapshot.items.map((note) => note.title)).toEqual(["First note"]);
+      expect((await owner.query(api.notes.list, page)).items).toHaveLength(1);
       await live.close();
 `);
 

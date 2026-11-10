@@ -220,7 +220,7 @@ ${entries}  },
 `;
 };
 
-/** Where an App's tests are: suites, their helpers and their fixtures. */
+/** Where an App's tests are: suites and their helpers. */
 export const appTestsFolder = "tests/";
 
 /** Whether `path` is under `tests/`, whatever it is. */
@@ -238,19 +238,6 @@ const isTestFile = (path: string): boolean =>
   !path.endsWith(".d.ts") &&
   path.split("/").every((segment) => appPathSegmentPattern.test(segment));
 
-/** Whether `path` is one of an App's test fixtures: `tests/fixtures/<name>.json`. */
-const isTestFixture = (path: string): boolean => {
-  const parts = path.split("/");
-  return (
-    parts.length === 3 &&
-    parts[0] === "tests" &&
-    parts[1] === "fixtures" &&
-    parts[2] !== undefined &&
-    parts[2].endsWith(".json") &&
-    appPathSegmentPattern.test(parts[2])
-  );
-};
-
 /**
  * The most test suites an App has: each runs in an isolate of its own
  * when a version is made current, within one deadline for them all.
@@ -262,20 +249,21 @@ export const isAppTestSuite = (path: string): boolean =>
   isTestFile(path) && path.endsWith(".test.ts");
 
 /**
- * The files under `tests/` that are none of a suite, a helper (`.ts`) or
- * a fixture (`tests/fixtures/<name>.json`): a build of the tests refuses
- * each, so nothing there is ever silently left out.
+ * The files under `tests/` that are neither a suite nor a helper (`.ts`):
+ * a build of the tests refuses each, so nothing there is ever silently
+ * left out. A test says everything it runs with itself (`t.withIdentity`,
+ * a start's options): no fixture file.
  */
 export const strayTestFiles = (
   files: Readonly<Record<string, string>>
 ): string[] =>
   Object.keys(files).filter(
-    (path) => isUnderAppTests(path) && !isTestFile(path) && !isTestFixture(path)
+    (path) => isUnderAppTests(path) && !isTestFile(path)
   );
 
 /** Why `file`, one of `strayTestFiles`, is refused. */
 export const strayTestFileMessage = (file: string): string =>
-  `${file} is in tests/, which holds only test suites (*.test.ts), their helpers (*.ts) and fixtures (tests/fixtures/<name>.json).`;
+  `${file} is in tests/, which holds only test suites (*.test.ts) and their helpers (*.ts): a test gives who it acts as (t.withIdentity) and what a run starts with (its start's options) itself.`;
 
 /** The kind of `path`'s code, or undefined for a file that isn't server code. */
 export const appCodeKind = (path: string): AppCodeKind | undefined => {
@@ -341,6 +329,18 @@ export const appTestFiles = (
     })
   );
 
+/**
+ * What an App's tests import as `vitest`: the SDK's module holding
+ * vitest's own `expect` (`@vitest/expect`), and nothing else of vitest,
+ * whose runner doesn't run in the sandbox App tests run in. They import
+ * it from `vitest`, as any vitest test does and as Ultracite's vitest
+ * rules (`prefer-importing-vitest-globals`) and its fixes hold them to.
+ */
+export const testExpect = {
+  specifier: "vitest",
+  module: "@grasp-os/runtime/vitest",
+} as const;
+
 /** The kinds of file each kind's relative imports may reach. */
 const reachable: Readonly<Record<AppCodeKind, ReadonlySet<AppCodeKind>>> = {
   schema: new Set(["schema"]),
@@ -370,6 +370,9 @@ const platformImports: Readonly<
   test: new Map([
     ["@grasp-os/sdk", kitModuleName("@grasp-os/sdk")],
     ["@grasp-os/sdk/testing", kitModuleName("@grasp-os/sdk/testing")],
+    // vitest's `expect`, as any vitest test imports it, and nothing else
+    // of vitest, whose runner doesn't run in the sandbox (testExpect).
+    [testExpect.specifier, kitModuleName(testExpect.module)],
     [
       "@server/_generated/api",
       appModuleName(generatedModules["@server/_generated/api"]),
@@ -386,7 +389,7 @@ const described: Readonly<Record<AppCodeKind, string>> = {
   migration:
     "A migration (server/migrations/) imports only server/schema.ts, values.ts and @grasp-os/sdk",
   generated: `Generated code imports only @grasp-os/sdk/server, ${serverRunner}, server/schema.ts, the App's server code and its migrations`,
-  test: "Tests (tests/) import each other, server/schema.ts, values.ts, @grasp-os/sdk, @grasp-os/sdk/testing and @server/_generated/api: they reach the App through its references, as its callers do",
+  test: "Tests (tests/) import each other, server/schema.ts, values.ts, @grasp-os/sdk, @grasp-os/sdk/testing, vitest (for its expect) and @server/_generated/api: they reach the App through its references, as its callers do",
 };
 
 const javascriptExtension = /\.js$/u;

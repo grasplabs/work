@@ -531,13 +531,18 @@ export interface CodeKind {
  * it runs: the workflow runtime a sealed run's host drives
  * (`@grasp-os/runtime/workflow`, sealed-isolate.ts) and the test runner
  * an App's tests run on (`@grasp-os/runtime/testing`, app-tests.ts), and
- * the SDK's testing entry those tests import: built with the runner, so
- * the suites they declare are the ones it runs.
+ * what those tests import beside it, built with the runner: the SDK's
+ * testing entry, so the suites they declare are the ones it runs; its
+ * root, whose `defineSchema` made the schema a suite runs over, so the
+ * runner reads it; and vitest's `expect`, which they import as `vitest`
+ * (app-code.ts).
  */
 export const sdkImports = [
   "@grasp-os/runtime/workflow",
   "@grasp-os/runtime/testing",
   "@grasp-os/sdk/testing",
+  "@grasp-os/sdk",
+  "@grasp-os/runtime/vitest",
 ] as const;
 
 /**

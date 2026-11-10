@@ -1,27 +1,28 @@
-// `@grasp-os/sdk/testing`: an App's tests (`appTest`, `workflowTest`)
-// and what they reach. Re-exported by name from @grasp-os/runtime, whose
-// runner the platform runs them with.
+// `@grasp-os/sdk/testing`: an App's tests (`appTest`) and what they
+// reach. Re-exported by name from @grasp-os/runtime, whose runner the
+// platform runs them with. They assert with vitest's `expect`, which
+// they import from `vitest`.
 
 export {
   appTest,
+  GraspError,
   TestDefinitionError,
-  workflowTest,
 } from "@grasp-os/runtime/testing";
 export type {
   AppTestContext,
-  AppTestDefinition,
   AppTestFunction,
   AppTestSuite,
   LiveQuery,
   PublicReference,
+  TestClock,
   TestDecisionAnswer,
   TestEffects,
-  TestPrincipal,
+  TestIdentity,
+  TestIdentityFields,
+  TestRun,
+  TestRunContext,
   TestRunOutcome,
   TestRuns,
-  WorkflowTestContext,
-  WorkflowTestDefinition,
-  WorkflowTestFunction,
+  TestStartOptions,
   WorkflowTestRun,
-  WorkflowTestSuite,
 } from "@grasp-os/runtime/testing";

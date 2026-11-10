@@ -3,6 +3,7 @@ import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -19,6 +20,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { runObjectOf } from "../src/workflows/engine.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -26,11 +28,13 @@ import { resumed, sleeping, stopped } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 
-// The model calls of a run an App's test started (`workflowTest`,
+// The model calls of a run an App's test started (`identity.start`,
 // workflows/fixture-calls.ts), from its threat model first: a test's run
 // asks a real model, spends budget or leaves a trace of a model call; a
-// call the fixture gives nothing falls through to a real one; a replay
-// answers again. Then what a test sees: the fixture's answer.
+// call the start gives nothing falls through to a real one; a replay
+// answers again. Then what a test sees: the answer its start gives, how
+// many requests each task made, as the test's provider counted them, and
+// a fault that really restarts the run (`restartAfterStep`).
 
 /** An object of `fields`, each required. */
 const objectSchema = (fields: Record<string, unknown>) => ({
@@ -77,16 +81,14 @@ const hold = (duration: string) => ({
   for: duration,
 });
 
-/** What a test's fixture gives the workflow the App binds as `followUp`. */
-interface WorkflowFixture {
+/** What a test's start gives the workflow the App binds as `followUp`. */
+interface StartOptions {
   models?: Record<string, unknown>;
+  restartAfterStep?: string;
 }
 
 /** The App's files: it binds `followUp` and keeps requests; `tests`. */
-const filesWith = (
-  workflow: WorkflowFixture,
-  tests: Record<string, string> = {}
-): TestApp =>
+const filesWith = (tests: Record<string, string> = {}): TestApp =>
   testApp(
     {
       name: "Requests",
@@ -123,10 +125,6 @@ export const list = query({
 });
 `,
 
-      "tests/fixtures/desk.json": JSON.stringify({
-        principals: { "desk-user": { role: "user" } },
-        workflows: { followUp: workflow },
-      }),
       ...tests,
     }
   );
@@ -140,18 +138,18 @@ const modelContract = async (admin: Identity): Promise<string> => {
 
 /**
  * The Requests App binding a workflow of `flow` as `followUp`, its model
- * binding `summary`, with `workflow` as its fixture and `tests` as its
- * tests.
+ * binding `ai`, with `options` what a test's start of it gives and `tests`
+ * as its tests.
  */
 const requestsApp = async (
   flow: Flow,
-  workflow: WorkflowFixture,
+  options: StartOptions,
   tests: Record<string, string> = {}
 ) => {
   const admin = await person("admin");
   const model = await modelContract(admin);
   const builder = await person("builder");
-  const files = filesWith(workflow, tests);
+  const files = filesWith(tests);
   const fixture = await appWith(files, "Requests", builder);
   const resource = await createWorkflowResource(
     env,
@@ -169,7 +167,7 @@ const requestsApp = async (
   });
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
-  return { builder, app: fixture.app, release, files };
+  return { builder, app: fixture.app, release, options };
 };
 
 type RequestsApp = Awaited<ReturnType<typeof requestsApp>>;
@@ -203,15 +201,18 @@ const runningIn = async (app: RequestsApp) => {
   const host = fixtureHostFor(
     env,
     app.release,
-    app.files.files,
     await releaseIdsOf(env, app.release)
   );
-  const session = await host.open("desk", `test-${unique()}`);
+  const session = await host.open(`test-${unique()}`);
+  await session.identify(
+    JSON.stringify({ name: "desk-user", role: "user", teams: [] })
+  );
   const { value } = startedSchema.parse(
     JSON.parse(
       await session.start(
         "desk-user",
-        await startOf(app.release, { who: "Ada" })
+        await startOf(app.release, { who: "Ada" }),
+        JSON.stringify(app.options)
       )
     )
   );
@@ -286,37 +287,41 @@ const leftOf = async (app: string) => {
   return { stores: stores?.n, runs: runs?.n };
 };
 
-/** A suite of one workflow test, `body` with `owner` at hand. */
+/** A suite of one test of the App's workflow, `body` with `owner` at hand. */
 const suiteOf = (
   body: string
-): string => `import { workflowTest } from "@grasp-os/sdk/testing";
+): string => `import { appTest } from "@grasp-os/sdk/testing";
 import { ${["api", "workflows"].filter((name) => body.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
+import { expect } from "vitest";
+import schema from "../server/schema.ts";
 
-export default workflowTest({
-  fixtures: "desk",
-  tests: {
-    "runs": async (t) => {
-${body.includes("owner") ? '      const owner = await t.as("desk-user");' : ""}
-      ${body}
-    },
+export default appTest(schema, {
+  "runs": async (t) => {
+${body.includes("owner") ? '    const owner = t.withIdentity({ name: "desk-user" });' : ""}
+    ${body}
   },
 });
 `;
 
 describe("a workflow test's model calls", { timeout: 180_000 }, () => {
-  it("answer a model call with the fixture's answer, and never ask a model or leave a trace of one", async () => {
+  it("answer a model call with the start's answer, and never ask a model or leave a trace of one", async () => {
     const provider = await watchedProvider();
     const app = await requestsApp(
       { steps: [summarize], status: line },
-      { models: { ai: { line: "Hello from the fixture" } } },
+      {},
       {
         "tests/greet.test.ts": suiteOf(`
-      const run = await owner.start(workflows.followUp, { who: "Ada" });
-      t.equal(await t.runs.untilTerminal(run), {
+      const run = await owner.start(
+        workflows.followUp,
+        { who: "Ada" },
+        { models: { ai: { line: "Hello from the test" } } }
+      );
+      expect(await t.runs.untilTerminal(run)).toEqual({
         status: "completed",
-        result: { status: "Hello from the fixture" },
+        result: { status: "Hello from the test" },
       });
-      t.equal(await t.effects.completedCount(run, "summarize"), 1);`),
+      expect(await t.effects.completedCount(run, "summarize")).toBe(1);
+      expect(await t.effects.modelRequestCount(run, "summarize")).toBe(1);`),
       }
     );
     let outcome: unknown;
@@ -341,7 +346,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
     });
   });
 
-  it("fail a model call the fixture gives nothing, or an answer the task's schema doesn't take, without asking a model", async () => {
+  it("fail a model call the start gives nothing, or an answer the task's schema doesn't take, without asking a model", async () => {
     const provider = await watchedProvider();
     const tasks = { steps: [summarize], status: line };
     expect({
@@ -427,5 +432,137 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
         asked: 0,
       }
     );
+  });
+
+  it("restart a run for real after the step its fault names, replaying it from the journal: the step's effect isn't repeated", async () => {
+    const provider = await watchedProvider();
+    /** How `options`' run ended, its counts, and its activations. */
+    const ranWith = async (options: StartOptions) => {
+      const app = await requestsApp(
+        { steps: [summarize], status: line },
+        options
+      );
+      const { session, run, runId } = await runningIn(app);
+      const ended: unknown = JSON.parse(await session.runOutcome(run));
+      const completed = await session.completedCount(run, "summarize");
+      const requests = await session.modelRequestCount(run, "summarize");
+      const activations = await runInDurableObject(
+        runObjectOf(env, runId),
+        (_object, state) =>
+          state.storage.sql
+            .exec<{ generation: number; ended: string | null }>(
+              "SELECT generation, ended FROM activations ORDER BY generation"
+            )
+            .toArray()
+      );
+      await session.close();
+      return { ended, completed, requests, activations };
+    };
+    const models = { ai: { line: "Hello" } };
+    const faulted = await ranWith({ models, restartAfterStep: "summarize" });
+    const plain = await ranWith({ models });
+    expect({
+      faulted: {
+        ...faulted,
+        superseded: faulted.activations.filter(
+          ({ ended }) => ended === "superseded"
+        ).length,
+        generations: faulted.activations.length,
+      },
+      plain: {
+        ...plain,
+        superseded: plain.activations.filter(
+          ({ ended }) => ended === "superseded"
+        ).length,
+        generations: plain.activations.length,
+      },
+      asked: provider.requests.length,
+    }).toMatchObject({
+      faulted: {
+        ended: { status: "completed", result: { status: "Hello" } },
+        completed: 1,
+        requests: 1,
+        superseded: 1,
+        generations: 2,
+      },
+      plain: {
+        ended: { status: "completed", result: { status: "Hello" } },
+        completed: 1,
+        requests: 1,
+        superseded: 0,
+        generations: 1,
+      },
+      asked: 0,
+    });
+  });
+
+  it.each([
+    ["a task the workflow doesn't have", "summarise"],
+    ["a sleep, whose step journals no result", "hold"],
+  ])("refuse a fault after %s, which would never fire", async (_case, task) => {
+    const app = await requestsApp(
+      { steps: [summarize, hold("1 second")], status: line },
+      { models: { ai: { line: "Hello" } }, restartAfterStep: task }
+    );
+    const host = fixtureHostFor(
+      env,
+      app.release,
+      await releaseIdsOf(env, app.release)
+    );
+    const session = await host.open(`test-${unique()}`);
+    await session.identify(
+      JSON.stringify({ name: "desk-user", role: "user", teams: [] })
+    );
+    const answer: unknown = JSON.parse(
+      await session.start(
+        "desk-user",
+        await startOf(app.release, { who: "Ada" }),
+        JSON.stringify(app.options)
+      )
+    );
+    const left = await leftOf(app.app);
+    await session.close();
+    expect({ answer, left }).toMatchObject({
+      answer: { ok: false, error: { code: "contract.invalid_args" } },
+      left: { runs: 0 },
+    });
+  });
+
+  it("count each task's model requests as the test's provider answered them, apart", async () => {
+    const provider = await watchedProvider();
+    const again = { ...summarize, id: "again" };
+    const app = await requestsApp(
+      {
+        steps: [summarize, again, hold("1 second")],
+        status: line,
+      },
+      { models: { ai: { line: "Hello" } } }
+    );
+    const { session, run } = await runningIn(app);
+    const ended: unknown = JSON.parse(await session.runOutcome(run));
+    const counts = {
+      summarize: await session.modelRequestCount(run, "summarize"),
+      again: await session.modelRequestCount(run, "again"),
+      hold: await session.modelRequestCount(run, "hold"),
+      none: await session.modelRequestCount(run, "none"),
+    };
+    const invalid = await session
+      .modelRequestCount(run, "not a task")
+      .then(() => "counted")
+      .catch((error: unknown) =>
+        isExpectedError(error) ? error.code : "threw"
+      );
+    await session.close();
+    expect({
+      ended,
+      counts,
+      invalid,
+      asked: provider.requests.length,
+    }).toStrictEqual({
+      ended: { status: "completed", result: { status: "Hello" } },
+      counts: { summarize: 1, again: 1, hold: 0, none: 0 },
+      invalid: "contract.invalid_args",
+      asked: 0,
+    });
   });
 });

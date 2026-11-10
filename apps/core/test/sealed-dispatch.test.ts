@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
+import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { releaseIdsOf } from "../src/apps.ts";
@@ -357,8 +358,8 @@ const candidatePinOf = async (workflow: string, runId: string) => {
   };
 };
 
-/** The Requests App's files: it binds `followUp`, keeps requests, `desk`. */
-const requestsFiles = (fixture: unknown): TestApp =>
+/** The Requests App's files: it binds `followUp` and keeps requests. */
+const requestsFiles = (): TestApp =>
   testApp(
     {
       name: "Requests",
@@ -394,21 +395,13 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("requests").take(100)).map(({ who }) => who),
 });
 `,
-
-      "tests/fixtures/desk.json": JSON.stringify({
-        principals: {
-          "desk-user": { role: "user" },
-          approver: { role: "user" },
-        },
-        workflows: { followUp: fixture },
-      }),
     }
   );
 
 /**
  * The Requests App binding a workflow of `steps` ending in `status` as
  * `followUp` (the model `ai`, connector binding `mail`),
- * `fixture` its test's.
+ * `fixture` what its test starts it with (`TestStartOptions`).
  */
 const requestsApp = async (
   steps: unknown[],
@@ -418,7 +411,7 @@ const requestsApp = async (
   const admin = await person("admin");
   const keys = await contracts(admin);
   const builder = await person("builder");
-  const files = requestsFiles(fixture);
+  const files = requestsFiles();
   const app = await appWith(files, "Requests", builder);
   const resource = await createWorkflowResource(
     env,
@@ -444,7 +437,22 @@ const requestsApp = async (
   });
   await seal(app);
   const release = await loadRelease(env, app.app, 1);
-  return { app: app.app, resource: resource.id, release, files };
+  return { app: app.app, resource: resource.id, release, files, fixture };
+};
+
+/** A test's session of `app`, its two people named, as `t.withIdentity` names them. */
+const sessionOf = async (app: { release: Release }) => {
+  const host = fixtureHostFor(
+    env,
+    app.release,
+    await releaseIdsOf(env, app.release)
+  );
+  const session = await host.open(`test-${unique()}`);
+  for (const name of ["desk-user", "approver"]) {
+    // oxlint-disable-next-line no-await-in-loop -- one after another, as a test names them
+    await session.identify(JSON.stringify({ name, role: "user", teams: [] }));
+  }
+  return session;
 };
 
 /** A start of `followUp` with `args`, as the SDK sends it. */
@@ -525,14 +533,12 @@ describe(
       const app = await requestsApp([summarize], greeting, {
         models: { ai: { line: "Hello from the fixture" } },
       });
-      const host = fixtureHostFor(
-        env,
-        app.release,
-        app.files.files,
-        await releaseIdsOf(env, app.release)
+      const session = await sessionOf(app);
+      await session.start(
+        "desk-user",
+        startOf({ who: "Ada" }),
+        JSON.stringify(app.fixture)
       );
-      const session = await host.open("desk", `test-${unique()}`);
-      await session.start("desk-user", startOf({ who: "Ada" }));
       // The test's first run, by its number in the test.
       const run = 0;
       const completed = await vi.waitFor(
@@ -559,14 +565,12 @@ describe(
       const app = await requestsApp([linger, summarize], greeting, {
         models: { ai: { line: "Hello from the fixture" } },
       });
-      const host = fixtureHostFor(
-        env,
-        app.release,
-        app.files.files,
-        await releaseIdsOf(env, app.release)
+      const session = await sessionOf(app);
+      await session.start(
+        "desk-user",
+        startOf({ who: "Ada" }),
+        JSON.stringify(app.fixture)
       );
-      const session = await host.open("desk", `test-${unique()}`);
-      await session.start("desk-user", startOf({ who: "Ada" }));
       const { runId, pin } = await fixtureRunOf(app.app);
       const ended = await ranOnRunHost(
         await fixtureActivation(env, pin, runId)
@@ -582,14 +586,12 @@ describe(
       const app = await requestsApp([linger, summarize], greeting, {
         models: { ai: { line: "Hello" } },
       });
-      const host = fixtureHostFor(
-        env,
-        app.release,
-        app.files.files,
-        await releaseIdsOf(env, app.release)
+      const session = await sessionOf(app);
+      await session.start(
+        "desk-user",
+        startOf({ who: "Ada" }),
+        JSON.stringify(app.fixture)
       );
-      const session = await host.open("desk", `test-${unique()}`);
-      await session.start("desk-user", startOf({ who: "Ada" }));
       const { runId, pin } = await fixtureRunOf(app.app);
       const activation = await fixtureActivation(env, pin, runId);
       // One run's engine and memory across its activations: the first is
@@ -610,14 +612,12 @@ describe(
 
     it("refuses an App test's run on the run host a call its test doesn't serve, sending nothing", async () => {
       const app = await requestsApp([linger, send], "sent", {});
-      const host = fixtureHostFor(
-        env,
-        app.release,
-        app.files.files,
-        await releaseIdsOf(env, app.release)
+      const session = await sessionOf(app);
+      await session.start(
+        "desk-user",
+        startOf({ who: "Ada" }),
+        JSON.stringify(app.fixture)
       );
-      const session = await host.open("desk", `test-${unique()}`);
-      await session.start("desk-user", startOf({ who: "Ada" }));
       const { runId, pin } = await fixtureRunOf(app.app);
       const ended = await ranOnRunHost(
         await fixtureActivation(env, pin, runId)
@@ -698,17 +698,17 @@ describe(
       const app = await requestsApp([linger, review], reviewed, {
         deciders: { approval: ["approver"] },
       });
-      const host = fixtureHostFor(
-        env,
-        app.release,
-        app.files.files,
-        await releaseIdsOf(env, app.release)
-      );
-      const session = await host.open("desk", `test-${unique()}`);
+      const session = await sessionOf(app);
       const started = z
         .object({ ok: z.literal(true), value: z.object({ run: z.number() }) })
         .parse(
-          JSON.parse(await session.start("desk-user", startOf({ who: "Ada" })))
+          JSON.parse(
+            await session.start(
+              "desk-user",
+              startOf({ who: "Ada" }),
+              JSON.stringify(app.fixture)
+            )
+          )
         );
       const { runId, pin } = await fixtureRunOf(app.app);
       // Its answer owes the run no wake: the run looks again after its
@@ -773,17 +773,17 @@ describe(
       const app = await requestsApp([linger, batch], "signed", {
         deciders: { approval: ["approver"] },
       });
-      const host = fixtureHostFor(
-        env,
-        app.release,
-        app.files.files,
-        await releaseIdsOf(env, app.release)
-      );
-      const session = await host.open("desk", `test-${unique()}`);
+      const session = await sessionOf(app);
       const started = z
         .object({ ok: z.literal(true), value: z.object({ run: z.number() }) })
         .parse(
-          JSON.parse(await session.start("desk-user", startOf({ who: "Ada" })))
+          JSON.parse(
+            await session.start(
+              "desk-user",
+              startOf({ who: "Ada" }),
+              JSON.stringify(app.fixture)
+            )
+          )
         );
       const { runId, pin } = await fixtureRunOf(app.app);
       // Each wait answers the item it waits for: the first approved, the

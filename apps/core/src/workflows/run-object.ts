@@ -318,6 +318,17 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           current: () =>
             !cancelledIn(this.ctx.storage.sql) &&
             this.generation() === generation,
+          // The run's time, which only an App's test moves (`advanceClock`).
+          now: () => this.runTime(),
+          // Only a run an App's test started is ever restarted
+          // (fixture-runs.ts).
+          ...(pin.type === "fixture"
+            ? {
+                restart: async () => {
+                  await this.restartActivation();
+                },
+              }
+            : {}),
         });
       },
     };
@@ -448,6 +459,50 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   protected override extraAlarm(): number | null {
     const mark = cancelMarkIn(this.ctx.storage.sql);
     return unfinished(mark) ? (mark.due ?? null) : null;
+  }
+
+  /**
+   * Moves the clock of a run an App's test started `ms` on (workerflow's
+   * `advanceClock`, `t.clock.advance`). Refused for any other run: no
+   * run of the organization's has its time moved. A run not created yet
+   * (its test moved its clock before it started) is the test's to create
+   * next, and starts at that time.
+   */
+  async advanceFixtureClock(ms: number): Promise<void> {
+    await this.advanceClock(ms);
+  }
+
+  /**
+   * Whether the run waits for something now, its wake not due (workerflow's
+   * `waitsNow`): what an App's test waits for before moving its clock
+   * past a sleep (`t.runs.untilWaiting`).
+   */
+  async fixtureWaits(): Promise<boolean> {
+    return await this.waitsNow();
+  }
+
+  /**
+   * The time now as the run measures it (workerflow's `runTime`): what an
+   * App's test's answer to its decision is timed by (fixture-decisions.ts).
+   */
+  fixtureNow(): number {
+    return this.runTime();
+  }
+
+  /**
+   * Whether this is a run an App's test started, the only kind whose clock
+   * moves or whose activation is restarted (workerflow's `testsRun`). One
+   * not created yet is the test's to create next: its test moved its
+   * clock before it started (engine.ts, `createFixture`), under an ID core
+   * minted for it: an object that never held a run, never one whose run
+   * was removed.
+   */
+  // oxlint-disable-next-line grasp/no-unbounded-rpc-target -- the engine's hook, as `definition`
+  protected override testsRun(): boolean {
+    const identity = this.runIdentity();
+    return identity === undefined
+      ? this.neverRan()
+      : pinOf(identity)?.type === "fixture";
   }
 
   /** Records that the run's cancel is done (`markCancelled`). */

@@ -1099,9 +1099,9 @@ export const retryDecided = (
  * What a deadline's enter step whose record is `value` fails with, if its
  * deadline isn't one: a time in ms since the epoch, at most a year ahead.
  */
-const deadlineUnfit = (value: unknown): StepError | undefined => {
+const deadlineUnfit = (value: unknown, now: number): StepError | undefined => {
   const until = deadlineRecordSchema.safeParse(value).data?.until;
-  return until !== undefined && until - Date.now() <= maxDeadlineMs
+  return until !== undefined && until - now <= maxDeadlineMs
     ? undefined
     : forIsolate(
         workflowResourceErrors.create("workflow.call_invalid", {
@@ -1879,7 +1879,9 @@ class SealedRun implements SealedRunKind {
     if (matchesBy(task)) {
       return await this.#matchKeyChecked(attempt, task, value);
     }
-    const unfit = sleepsUntil(task) ? deadlineUnfit(value) : undefined;
+    const unfit = sleepsUntil(task)
+      ? deadlineUnfit(value, this.#host.now())
+      : undefined;
     return unfit === undefined ? undefined : { ok: false, error: unfit };
   }
 
@@ -2645,7 +2647,8 @@ class SealedRun implements SealedRunKind {
           // its one canonical encoding (`stepNameOf`), so decoding keeps
           // one decision per step.
           decodeURIComponent(attempt.step),
-          built
+          built,
+          this.#host.now()
         );
         this.#requireHolds(attempt);
         this.#openings.set(attempt, opened);
@@ -3049,7 +3052,13 @@ class SealedRun implements SealedRunKind {
     }
     // Tried once as a real call is: `fixtureCall` marks it as it goes out
     // (`SentCalls`), so no later attempt of its step sends it again.
-    return await fixtureCall(this.#env, fixtureRunOf(this.run), built, effect);
+    return await fixtureCall(
+      this.#env,
+      fixtureRunOf(this.run),
+      task.id,
+      built,
+      effect
+    );
   }
 
   /**

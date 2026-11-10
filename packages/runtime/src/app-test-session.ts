@@ -1,28 +1,30 @@
-// oxlint-disable max-classes-per-file -- the two failures a test can have, each a few lines
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
+import { readAnswer } from "./call-answers.ts";
 import type { ReferenceKind } from "./function-references.ts";
 
 /**
- * One test's session with core's test runner: a fresh fixture store, which
- * goes when the session closes. Core's side of it is an RPC target.
+ * One test's session with core's test runner: a fresh store, which goes
+ * when the session closes. Core's side of it is an RPC target. Each
+ * identity the test acts as is named by the name it was given.
  */
 export interface AppTestSession {
   /**
-   * Why principal `name` can't be used, such as a fixture that doesn't
-   * name them; nothing when it can. Answered, not thrown: what fails is
-   * the test, never the session.
+   * Registers who a test acts as: `request` is `{ name, role, teams }` as
+   * JSON text. Answers why they can't be (a name given another role
+   * before, too many people), nothing when they can: answered, not thrown,
+   * since what fails is the test, never the session.
    */
-  principal: (name: string) => Promise<string | undefined>;
+  identify: (request: string) => Promise<string | undefined>;
   /**
-   * Calls a function as principal `name`: `request` is the call's JSON
+   * Calls a function as identity `name`: `request` is the call's JSON
    * text (`{ reference, args }`), as a page sends it, and the answer
    * the JSON text of what the call answered (an `OperationResult`).
    */
   call: (name: string, request: string) => Promise<string>;
   /**
-   * Follows a query as principal `name`: `request` as `call` takes it.
+   * Follows a query as identity `name`: `request` as `call` takes it.
    * Each push of core's (`{ revision, result }`, the result an
    * `OperationResult`) goes to `onSnapshot`, and `onLost` is called once
    * core lets go of the subscription. Answers what releases it, or why
@@ -35,27 +37,66 @@ export interface AppTestSession {
     onLost: () => void
   ) => Promise<{ subscription: AppTestSubscription } | { refusal: string }>;
   /**
-   * Starts a workflow as principal `name`: `request` is a call of its
-   * reference's `start` mutation, as `call` takes one, and the answer the JSON text of an `OperationResult` holding the run's
-   * number in the session (`{ run }`).
+   * Opens a transaction on the test's store (`t.run`), as identity `name`
+   * or, for `null`, the test itself, which no access rule holds back.
+   * Answers the JSON text of an `OperationResult` holding its number
+   * (`{ transaction }`).
    */
-  start: (name: string, request: string) => Promise<string>;
+  begin: (name: string | null) => Promise<string>;
+  /**
+   * One read in transaction `transaction`, `request` a `ReadRequest` as
+   * JSON text: the JSON text of an `OperationResult`. It sees the
+   * transaction's own writes.
+   */
+  read: (transaction: number, request: string) => Promise<string>;
+  /**
+   * One write staged in transaction `transaction`, `request` a
+   * `WriteRequest` as JSON text: the JSON text of an `OperationResult`
+   * (an insert's minted ID).
+   */
+  write: (transaction: number, request: string) => Promise<string>;
+  /**
+   * Ends transaction `transaction`: commits what it staged when
+   * `commit`, else drops it. Answers the JSON text of an `OperationResult`
+   * holding nothing, or why the commit was refused.
+   */
+  end: (transaction: number, commit: boolean) => Promise<string>;
+  /**
+   * Starts a workflow as identity `name`: `request` is a call of its
+   * reference's `start` mutation, as `call` takes one, and `options` its
+   * `TestStartOptions` as JSON text, deciders by name. The answer is the
+   * JSON text of an `OperationResult` holding the run's number in the
+   * session (`{ run }`).
+   */
+  start: (name: string, request: string, options: string) => Promise<string>;
   /**
    * How run `run` ended, once it has, as JSON text (a `TestRunOutcome`):
    * `null` when it hadn't by the test's deadline.
    */
   runOutcome: (run: number) => Promise<string>;
+  /**
+   * Whether run `run` waits for something, or has ended, by the test's
+   * deadline: false when neither.
+   */
+  runWaits: (run: number) => Promise<boolean>;
   /** How many times run `run`'s task `task` completed its step. */
   completedCount: (run: number, task: string) => Promise<number>;
+  /** How many model requests run `run`'s task `task` made. */
+  modelRequestCount: (run: number, task: string) => Promise<number>;
   /**
-   * Answers, as principal `name`, the decision run `run` waits for:
-   * `request` is the answer's JSON text (`{ task, approved, value? }`), and
-   * the answer the JSON text of an `OperationResult` holding nothing.
+   * Moves the time of the session's runs `ms` milliseconds on: the JSON
+   * text of an `OperationResult` holding nothing, or why it was refused.
+   */
+  advanceClock: (ms: number) => Promise<string>;
+  /**
+   * Answers, as identity `name`, the decision run `run` waits for:
+   * `request` is the answer's JSON text (`{ task, approved, value? }`),
+   * and the answer the JSON text of an `OperationResult` holding nothing.
    */
   respond: (name: string, run: number, request: string) => Promise<string>;
   /**
    * Ends the session: removes the runs its test started, releases the
-   * live queries it left open, and discards its fixture store.
+   * live queries it left open, and discards its store.
    */
   close: () => Promise<void>;
 }
@@ -67,11 +108,8 @@ export interface AppTestSubscription {
 
 /** Core's test runner, as `runAppSuite` reaches it. */
 export interface AppTestHost {
-  /**
-   * A session for the test named `name`, on fixture `fixtures`; throws
-   * when the App has no such fixture, or it isn't one.
-   */
-  open: (fixtures: string, name: string) => Promise<AppTestSession>;
+  /** A session for the test named `name`. */
+  open: (name: string) => Promise<AppTestSession>;
 }
 
 /** How one test went: no failures when it passed. */
@@ -82,47 +120,31 @@ export interface AppTestResult {
 
 /** How a suite went, test by test, in order. */
 export interface AppTestReport {
-  fixtures: string;
   results: AppTestResult[];
 }
 
-/** A test's own assertion failing (`equal`, `rejectsCode`). */
+/** A test used the harness wrong, or a wait of its own failed. */
 export class TestAssertionError extends Error {
   override name = "TestAssertionError";
 }
 
-/** A call the App or the host refused or failed. */
-export class TestCallError extends Error {
-  override name = "TestCallError";
-  readonly code: string;
-
-  constructor(code: string, message: string) {
-    super(message);
-    this.code = code;
+/**
+ * The value core's answer (an `OperationResult`'s JSON text) holds; throws
+ * the `GraspError` a page's call gets for a refusal.
+ */
+export const unwrapped = (answer: string): unknown => {
+  const result: unknown = JSON.parse(answer);
+  const settled = readAnswer({ result });
+  if (settled.kind === "value") {
+    return settled.value;
   }
-}
-
-/** The value an `OperationResult` holds; throws the failure it holds. */
-export const settled = (parsed: unknown): unknown => {
-  if (isRecord(parsed) && parsed.ok === true) {
-    return parsed.value;
-  }
-  const error = isRecord(parsed) ? parsed.error : undefined;
-  if (
-    isRecord(error) &&
-    typeof error.code === "string" &&
-    typeof error.message === "string"
-  ) {
-    throw new TestCallError(error.code, error.message);
+  if (settled.kind === "failed") {
+    throw settled.error;
   }
   throw new Error("The test runner answered something else than a result.");
 };
 
-/** The value a call's answer (an `OperationResult`'s text) holds. */
-export const unwrapped = (answer: string): unknown =>
-  settled(JSON.parse(answer));
-
-/** The request a principal sends for `reference`, of `kind`, with `args`. */
+/** The request an identity sends for `reference`, of `kind`, with `args`. */
 export const requestFor = (
   reference: unknown,
   kind: ReferenceKind,
@@ -141,9 +163,9 @@ export const requestFor = (
   });
 };
 
-// Values as they cross from the host (JSON), in canonical JSON, so equal
-// values compare equal whatever order their keys are in. Serialised once:
-// a getter or `toJSON` is read a single time.
+// Values as they cross from the host (JSON), in canonical JSON, so a
+// failure shows them the same whatever order their keys are in.
+// Serialised once: a getter or `toJSON` is read a single time.
 export const canonical = (value: unknown): string => {
   const text = JSON.stringify(value);
   if (text === undefined) {
@@ -157,8 +179,7 @@ export const canonical = (value: unknown): string => {
 
 /**
  * Releases `stub`, an RPC stub core returned (a session, a subscription),
- * when it is one:
- * the isolate holds it no longer than its test.
+ * when it is one: the isolate holds it no longer than its test.
  */
 export const disposed = (stub: object): void => {
   const dispose: unknown = Reflect.get(stub, Symbol.dispose);
@@ -180,4 +201,9 @@ export interface RunningTest {
    * it fails even if the test never asks.
    */
   readonly faults: Set<Error>;
+  /**
+   * Who the test named, being registered with core (`identify`): why
+   * one couldn't be, or nothing.
+   */
+  readonly pending: Set<Promise<string | undefined>>;
 }

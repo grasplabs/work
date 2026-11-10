@@ -15,7 +15,7 @@ import {
 } from "@tsrs/wasm/core";
 import type { Diagnostic as TscDiagnostic } from "@tsrs/wasm/core";
 
-import { generatedModules, serverSdkImports } from "./app-code.ts";
+import { generatedModules, serverSdkImports, testExpect } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import { pageDataModel, pageReferences } from "./kit.ts";
 
@@ -137,6 +137,7 @@ export const appCodeTarget = serverTarget(
     ...serverSdkImports,
     // Its tests' (app-code.ts): what the source checks give tests alone.
     "@grasp-os/sdk/testing",
+    testExpect.module,
   ])
 );
 
@@ -350,6 +351,11 @@ export const typeCheck = (
         paths[name] = [`.${root}${resolved.slice(kitRoot.length)}`];
       }
     }
+  }
+  // What App tests import as `vitest` is the SDK's module of its
+  // `expect` (app-code.ts), here as at run time.
+  if (Object.hasOwn(paths, testExpect.module)) {
+    paths[testExpect.specifier] = paths[testExpect.module];
   }
   const given = options.paths;
   Object.assign(paths, typeof given === "object" ? given : {});

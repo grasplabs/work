@@ -4,7 +4,7 @@ import { suiteOf } from "./app-test-harness.ts";
 
 /** Passes on the refusal it gets while the App's calls have no place. */
 export const catching = suiteOf(`
-      await t.rejectsCode(owner.query(api.notes.list, page), "function.sandbox_busy");
+      await expect(owner.query(api.notes.list, page)).rejects.toMatchObject({ code: "function.sandbox_busy" });
 `);
 
 /** What a suite stopped past its CPU time fails with. */
@@ -23,7 +23,7 @@ export const parallel = suiteOf(`
         owner.query(api.notes.list, page),
         owner.query(api.notes.list, page),
       ]);
-      t.equal(lists.map((list) => list.items.length), [3, 3, 3]);
+      expect(lists.map((list) => list.items.length)).toEqual([3, 3, 3]);
       await live.next((found) => ids.every((id) => found.items.some((note) => note._id === id)));
       await live.close();
 `);

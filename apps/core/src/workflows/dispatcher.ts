@@ -102,6 +102,17 @@ export interface RunMemory {
    * over by a newer one (run-object.ts).
    */
   current?: () => boolean;
+  /**
+   * Ends the activation as a process that died would, and runs the run
+   * again from its journal: an App's test's fault alone asks it
+   * (fixture-runs.ts).
+   */
+  restart?: () => Promise<void>;
+  /**
+   * The run's time (workerflow's `runTime`): the wall clock unless an
+   * App's test moved its clock on. The wall clock without it.
+   */
+  now?: () => number;
 }
 
 /** Each of core's own workflows, by name. */

@@ -24,7 +24,7 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
   it("ask again for the builder's place while the App's builds hold it past one build's wait", async () => {
     // Files no build was made of yet, sealed before the builder is held.
     const built = await appWith(
-      suiteOf(`t.equal(1, 1); // ${crypto.randomUUID()}`)
+      suiteOf(`expect(1).toBe(1); // ${crypto.randomUUID()}`)
     );
     await sealRelease(env, { app: built.app, version: 1, by: built.owner });
     // The App's builds hold its part of the builder's share. It frees

@@ -8,14 +8,14 @@ import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { appOf, withFiles } from "./app-definitions.ts";
+import { appOf } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import { person } from "./sealed-apps.ts";
 
-// What app-test-live*.test.ts share: the Notes App and its fixture, and
-// how they build its tests and read how they went.
+// What app-test-live*.test.ts share: the Notes App and who its tests act
+// as, and how they build its tests and read how they went.
 
 /** A push of `notes.list`'s, as far as the tests read it. */
 export const pushOfNotes = z.object({
@@ -25,50 +25,56 @@ export const pushOfNotes = z.object({
   }),
 });
 
-/** The Notes App the session client's tests use, with a fixture. */
-export const appFiles: TestApp = withFiles(
-  appOf(
-    notesFiles.definition,
-    Object.fromEntries(
-      Object.entries(notesFiles.files).filter(
-        ([path]) => !path.startsWith("src/")
-      )
+/** The Notes App the session client's tests use. */
+export const appFiles: TestApp = appOf(
+  notesFiles.definition,
+  Object.fromEntries(
+    Object.entries(notesFiles.files).filter(
+      ([path]) => !path.startsWith("src/")
     )
-  ),
-  {
-    "tests/fixtures/notes.json": JSON.stringify({
-      principals: {
-        "note-owner": { role: "user" },
-        "other-owner": { role: "user" },
-      },
-    }),
-  }
+  )
 );
 
-/** Spec 28.2's first example, word for word, but for the package's scope. */
+/** The people a session's tests act as, as `t.withIdentity` names them. */
+export const identities = ["note-owner", "other-owner"] as const;
+
+/** Registers `identities` with `session` (`identify`), as users. */
+export const identified = async (session: {
+  identify: (request: string) => Promise<string | undefined>;
+}): Promise<void> => {
+  for (const name of identities) {
+    // oxlint-disable-next-line no-await-in-loop -- one after another, as a test names them
+    const refused = await session.identify(
+      JSON.stringify({ name, role: "user", teams: [] })
+    );
+    if (refused !== undefined) {
+      throw new Error(refused);
+    }
+  }
+};
+
+/** Spec 28.2's first example, in the SDK's words as an App writes it. */
 export const specExample = `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
+import { expect } from "vitest";
+import schema from "../server/schema.ts";
 
-export default appTest({
-  fixtures: "notes",
-  tests: {
-    "creating a note updates the authorized live list": async (t) => {
-      const viewer = await t.as("note-owner");
-      const live = await viewer.subscribe(api.notes.list, {
-        pagination: { pageSize: 50 },
-      });
-      const createdId = await viewer.mutation(api.notes.create, {
-        title: "First note",
-      });
-      const snapshot = await live.next((page) =>
-        page.items.some((note) => note._id === createdId)
-      );
-      t.equal(
-        snapshot.items.find((note) => note._id === createdId)?.title,
-        "First note"
-      );
-      await live.close();
-    },
+export default appTest(schema, {
+  "creating a note updates the authorized live list": async (t) => {
+    const viewer = t.withIdentity({ name: "Ada" });
+    const live = await viewer.subscribe(api.notes.list, {
+      pagination: { pageSize: 50 },
+    });
+    const createdId = await viewer.mutation(api.notes.create, {
+      title: "First note",
+    });
+    const snapshot = await live.next((page) =>
+      page.items.some((note) => note._id === createdId)
+    );
+    expect(
+      snapshot.items.find((note) => note._id === createdId)?.title
+    ).toBe("First note");
+    await live.close();
   },
 });
 `;
@@ -78,20 +84,19 @@ export const suiteOf = (
   tests: Record<string, string>
 ): string => `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
+import { expect } from "vitest";
+import schema from "../server/schema.ts";
 
 const page = { pagination: { pageSize: 50 } };
 
-export default appTest({
-  fixtures: "notes",
-  tests: {
+export default appTest(schema, {
 ${Object.entries(tests)
   .map(
-    ([name, body]) => `    ${JSON.stringify(name)}: async (t) => {
+    ([name, body]) => `  ${JSON.stringify(name)}: async (t) => {
 ${body}
-    },`
+  },`
   )
   .join("\n")}
-  },
 });
 `;
 

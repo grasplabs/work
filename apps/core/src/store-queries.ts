@@ -201,6 +201,10 @@ export const readableTable = (
   if (declared === undefined || tableId === undefined) {
     throw dataErrors.create("data.unknown_table", { table: name });
   }
+  // A test's own transaction reads every record (`unrestricted`).
+  if (scope.unrestricted === true) {
+    return { name, tableId, declared, ownerScoped: false, rows: undefined };
+  }
   const mode = declared.access.read;
   const admitted =
     mode === "owner" ||

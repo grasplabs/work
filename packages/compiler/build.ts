@@ -1753,8 +1753,10 @@ const buildAppCompiler = async (
     // An App's server code is type-checked against what it and its
     // generated modules import (app-code.ts).
     ...serverSdkImports,
-    // And its tests, against the SDK's testing module (app-code.ts).
+    // And its tests, against the SDK's testing module and vitest's
+    // `expect`, which they import as `vitest` (app-code.ts).
     "@grasp-os/sdk/testing",
+    "@grasp-os/runtime/vitest",
   ];
   const typeSources = collectTypes(typed);
   const kit: Kit = {

@@ -5,10 +5,11 @@ import {
   canonical,
   disposed,
   requestFor,
-  settled,
+  unwrapped,
 } from "./app-test-session.ts";
 import type { AppTestSubscription, RunningTest } from "./app-test-session.ts";
 import type { LiveQuery } from "./app-test-types.ts";
+import { readPush } from "./client-query-entry.ts";
 
 /**
  * The most snapshots a live query keeps that `next` hasn't taken: one
@@ -32,16 +33,6 @@ const contractOf = (reference: unknown): string =>
   isRecord(reference) && typeof reference.name === "string"
     ? reference.name
     : "a query";
-
-/** A push of core's, as far as a live query reads it. */
-const readPush = (
-  push: unknown
-): { revision: number; result: unknown } | undefined =>
-  isRecord(push) &&
-  typeof push.revision === "number" &&
-  Number.isSafeInteger(push.revision)
-    ? { revision: push.revision, result: push.result }
-    : undefined;
 
 /**
  * How many times in a row core may let go of a live query, with no
@@ -101,13 +92,16 @@ export const followed = async (
       return;
     }
     lostInARow = 0;
-    let value: unknown;
-    try {
-      value = settled(read.result);
-    } catch (error) {
-      fail(error);
+    // A push is read as a page reads it (`readPush`): a refusal fails
+    // the live query, as it fails a page's.
+    if (read.settled.kind === "failed") {
+      fail(read.settled.error);
       return;
     }
+    if (read.settled.kind !== "value") {
+      return;
+    }
+    const { value } = read.settled;
     // Dropping one unread could drop the very snapshot a `next` will
     // wait for, which would then wait until the test's deadline: the
     // test fails now, saying why.
@@ -158,8 +152,8 @@ export const followed = async (
         }
       );
       if ("refusal" in answer) {
-        // Throws the refusal it holds, as a call's: `t.rejectsCode` reads it.
-        settled(JSON.parse(answer.refusal));
+        // Throws the refusal it holds, as a call's.
+        unwrapped(answer.refusal);
         throw new Error(
           "The test runner refused a live query without saying why."
         );

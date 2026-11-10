@@ -1523,6 +1523,19 @@ export const appTestRuns = sqliteTable(
     operations: text().notNull().default("{}"),
     /** Unused, as `operations` is. */
     storeId: text("store_id"),
+    /**
+     * A fault its test gave it (`restartAfterStep`): the task after whose
+     * step's first journaled outcome its activation is restarted, once.
+     */
+    restartAfterStep: text("restart_after_step"),
+    /** When that fault restarted it: it restarts the run once. */
+    restartedAt: timestamp("restarted_at"),
+    /**
+     * How many model requests each of its tasks made, by task, as JSON:
+     * counted as the test's provider answers each (fixture-calls.ts), apart
+     * from the engine's journal.
+     */
+    modelRequests: text("model_requests").notNull().default("{}"),
   },
   (table) => [index("app_test_runs_deadline").on(table.deadline)]
 );
