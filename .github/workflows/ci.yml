@@ -180,8 +180,13 @@ jobs:
       - if: matrix.shard == 1
         uses: ./.github/actions/playwright-browser
       # Core's tests' global-setup builds, restored by their inputs' key;
-      # test-caches (below) saves them on main.
+      # test-caches (below) saves them on main. On a pull request the first
+      # shard builds and saves those it missed too, in the pull request's
+      # own scope, so its next run restores them in every shard; the rest
+      # only restore, so no two shards race to pack the same files.
       - uses: ./.github/actions/core-test-prebuilt
+        with:
+          save: ${{ github.event_name == 'pull_request' && matrix.shard == 1 }}
       # Shards split by how long each file takes (scripts/test-sequencer.ts,
       # with the times in scripts/test-durations.json), each shard running
       # one project group only (scripts/test-shards.ts): a shard that ran

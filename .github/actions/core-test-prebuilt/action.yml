@@ -2,9 +2,11 @@
 # connect bundle: about 30 s of a test shard's start), kept by the hash of
 # their inputs (apps/core/test/prebuilt.ts). On a hit, global setup only
 # copies them, and it checks the key itself, so a wrong restore is built
-# again. The test shards restore them; only CI's test-caches job, on a
-# push to main, builds and saves them (`save`), where every pull request
-# can read them, so no two jobs race to pack the same files. After Set up.
+# again. A job that passes `save` builds and saves those it missed: CI's
+# test-caches job on a push to main, where every pull request can read
+# them, and a pull request's first test shard, for its own next run; the
+# other shards only restore, so no two jobs race to pack the same files.
+# After Set up.
 name: Core's test builds
 description: Restore core's tests' global-setup builds by their inputs' key, or build and save them
 
