@@ -523,6 +523,33 @@ describe("the classes a company turned on", setUpTime, () => {
     );
   });
 
+  it("refuse an agent a mail tool it lacks either class for: the one the call is checked as, or the tool's own", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const { id, mailbox } = await connectShared(admin, readCompanyGrant);
+    await pointedAt(admin, mailbox);
+    await admin.api.connections.setToolClass("read-company", {
+      who: "everyone",
+    });
+
+    // Listing a mailbox is checked as reading the person's own: an agent
+    // without Read own doesn't list it, whatever it has Read company for.
+    const noOwn = await chatCalling(admin, person.userId, mailbox, id);
+    await agentClass(noOwn.agentId, "read-own", "nobody");
+    await agentClass(noOwn.agentId, "read-company", "everyone");
+    await expect(noOwn.answered()).resolves.toBe(
+      answer({ list: off, send: off })
+    );
+
+    // And one without the tool's own class doesn't either.
+    const noCompany = await chatCalling(admin, person.userId, mailbox, id);
+    await agentClass(noCompany.agentId, "read-own", "everyone");
+    await agentClass(noCompany.agentId, "read-company", "nobody");
+    await expect(noCompany.answered()).resolves.toBe(
+      answer({ list: off, send: off })
+    );
+  });
+
   it("give an agent whose class can't be read the class for nobody", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
