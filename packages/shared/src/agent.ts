@@ -16,6 +16,8 @@ export const agentErrors = defineErrorFamily({
   "agent.name_taken": "Another agent already has that name.",
   "agent.settings_elsewhere":
     "Who reaches the company's first agent, and what it may do, is set in Settings › Stephen.",
+  "agent.paused":
+    "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
   "agent.busy":
     "The agent is still working in this chat. Wait for it, or stop it.",
   "agent.invalid_question": "That isn't a question the agent can take.",
