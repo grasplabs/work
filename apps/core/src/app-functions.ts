@@ -106,13 +106,29 @@ interface FunctionCaller {
    */
   readonly agent?: CallingAgent;
   /**
-   * A live query read again because a write changed what it read: keeps
-   * no evidence of a refused use (`Invocation.refusedUse`). Its first
-   * read kept it; each write to a watched table would otherwise add one
-   * more, for every person following it.
+   * The refused uses a live query's subscription kept already
+   * (`refusalKey`), for one of its reads: each is kept once a
+   * subscription, however often a write reads it again, and one a read
+   * meets for the first time, after a write changed what it reads, is
+   * kept then. Every read keeps its own otherwise.
    */
-  readonly readAgain?: boolean;
+  readonly refusalsKept?: Set<string>;
 }
+
+/**
+ * What tells one refused use from another for a live query's
+ * subscription (`FunctionCaller.refusalsKept`): every field core's own,
+ * a name only one of the sealed release's, so a subscription keeps no
+ * more of them than its release has uses.
+ */
+const refusalKey = (refusal: UseRefusal): string =>
+  JSON.stringify([
+    refusal.function,
+    refusal.use.kind,
+    refusal.use.name,
+    refusal.reason,
+    refusal.errorCode,
+  ]);
 
 /** Whose call a refused use's evidence names (`keptUseRefusals`). */
 interface UseRefusalContext {
@@ -197,7 +213,7 @@ export const invocationFor = async (
     stillAllowed,
     sources = invocationSources(),
     agent,
-    readAgain = false,
+    refusalsKept,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -234,6 +250,13 @@ export const invocationFor = async (
       ? noStore()
       : await openStore(env, release.store.storeId);
   const actor = callerActor(by.userId, agent);
+  const keepRefusal = keptUseRefusals(env, {
+    app,
+    version: release.manifest.resourceVersion,
+    principal: by.userId,
+    requestId,
+    runId: null,
+  });
   return {
     principal: by.userId,
     actor,
@@ -265,17 +288,17 @@ export const invocationFor = async (
     deadline,
     runId: null,
     authorize,
-    ...(readAgain
-      ? {}
-      : {
-          refusedUse: keptUseRefusals(env, {
-            app,
-            version: release.manifest.resourceVersion,
-            principal: by.userId,
-            requestId,
-            runId: null,
-          }),
-        }),
+    refusedUse:
+      refusalsKept === undefined
+        ? keepRefusal
+        : async (refusal) => {
+            const key = refusalKey(refusal);
+            if (refusalsKept.has(key)) {
+              return;
+            }
+            refusalsKept.add(key);
+            await keepRefusal(refusal);
+          },
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
     // operation host admits each request through `authorize` first, as it
@@ -439,8 +462,8 @@ interface FunctionCallOptions {
   readonly agent?: CallingAgent;
   /** What a mutation's receipt is scoped by (`CallOptions.receiptScope`). */
   readonly receiptScope?: string;
-  /** A live query read again (`FunctionCaller.readAgain`). */
-  readonly readAgain?: boolean;
+  /** A live query's kept refusals (`FunctionCaller.refusalsKept`). */
+  readonly refusalsKept?: Set<string>;
 }
 
 /**
@@ -719,7 +742,7 @@ const invokedCall = async (
     agent,
     tellsForm,
     receiptScope,
-    readAgain,
+    refusalsKept,
   } = options;
   try {
     const invocation = await invocationFor(env, release, {
@@ -728,7 +751,7 @@ const invokedCall = async (
       deadline,
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       ...(agent === undefined ? {} : { agent }),
-      ...(readAgain === undefined ? {} : { readAgain }),
+      ...(refusalsKept === undefined ? {} : { refusalsKept }),
       sources,
     });
     const observed = observedInvocation(invocation, release, observeReads);
@@ -1291,15 +1314,15 @@ export const evaluateAppQuery = async (
   app: unknown,
   request: string,
   deadline: number,
-  /** Read again because a write changed what it read (`readAgain`). */
-  readAgain = false
+  /** What its subscription kept already (`FunctionCaller.refusalsKept`). */
+  refusalsKept?: Set<string>
 ): Promise<EvaluatedQuery> => {
   let reads: EvaluatedQuery["reads"];
   const answer = await callFunction(env, by, app, request, {
     deadline,
     kind: "query",
     page: true,
-    readAgain,
+    ...(refusalsKept === undefined ? {} : { refusalsKept }),
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },

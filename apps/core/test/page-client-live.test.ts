@@ -725,6 +725,88 @@ describe("live queries and a person's roles", { timeout: 180_000 }, () => {
     ).toBeFalsy();
   });
 
+  it("keeps the evidence of a table its query is first refused on a read a write caused, and once only", async () => {
+    const secretFiles = withSecrets();
+    const opened = await openedApp(
+      withFiles(secretFiles, {
+        "server/notes.ts": `${secretFiles.files["server/notes.ts"] ?? ""}
+export const glance = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(10);
+    // The secrets only once there are two notes.
+    if (notes.length < 2) {
+      return notes.length;
+    }
+    try {
+      return notes.length + (await ctx.db.query("secrets").take(10)).length;
+    } catch {
+      return -notes.length;
+    }
+  },
+});
+`,
+      })
+    );
+    const { member, lease, client } = await memberOf(opened);
+    const glance = referenceTo<Record<never, never>, number, "query">(
+      opened.release,
+      "notes.glance"
+    );
+    const api = apiOf(opened.release);
+    const follower = pageFollower();
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(glance, {}), follower.callback);
+    const keptNow = async () => {
+      const events = await allEvents();
+      return events
+        .filter(
+          (event) =>
+            event.action === "app.use.refused" &&
+            event.target?.id === opened.app
+        )
+        .map(({ detail }) => detail);
+    };
+    const kept = [];
+    for (const [count, shows] of [
+      [1, 1],
+      [2, -2],
+      [3, -3],
+      [4, -4],
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one write, one read again
+      await client.mutation(api.create, { title: `Note ${count}` });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result).toStrictEqual({
+          ok: true,
+          value: shows,
+        });
+      });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const now = await keptNow();
+      kept.push(now.length);
+    }
+    expect({ kept, details: await keptNow() }).toStrictEqual({
+      // None until a write makes it read the secrets, then that one only.
+      kept: [0, 1, 1, 1],
+      details: [
+        {
+          version: 1,
+          person: member.userId,
+          runId: null,
+          function: "notes.glance",
+          useKind: "table",
+          useName: "secrets",
+          reason: "request_not_allowed",
+          errorCode: "data.access_denied",
+        },
+      ],
+    });
+  });
+
   it("keeps the evidence of a table its query is refused once, on its first read, however often a write reads it again", async () => {
     const secretFiles = withSecrets();
     const opened = await openedApp(
