@@ -99,7 +99,7 @@ export { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 export { symbolicModules } from "./codegen-stand-ins.ts";
 export { workflowReferenceOf } from "./codegen-workflows.ts";
 export { generateModules } from "./generate.ts";
-export { workflowFunctions } from "./workflow-functions.ts";
+export { workflowFunctions, workflowQueryNames } from "./workflow-functions.ts";
 export type {
   WorkflowFunctions,
   WorkflowMutationName,

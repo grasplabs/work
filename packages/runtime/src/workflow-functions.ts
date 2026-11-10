@@ -34,13 +34,15 @@ import { workflowReferenceLimits } from "./workflow-references.ts";
 // literal.
 
 /** The names of the queries a workflow reference exposes. */
-export type WorkflowQueryName =
-  | "run"
-  | "canStart"
-  | "runs"
-  | "history"
-  | "decisions"
-  | "decision";
+export const workflowQueryNames = [
+  "run",
+  "canStart",
+  "runs",
+  "history",
+  "decisions",
+  "decision",
+] as const;
+export type WorkflowQueryName = (typeof workflowQueryNames)[number];
 
 /** The names of the mutations a workflow reference exposes. */
 export type WorkflowMutationName =

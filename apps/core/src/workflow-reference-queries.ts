@@ -1,4 +1,8 @@
-import { declaredWorkflows, workflowFunctions } from "@grasp-os/runtime/host";
+import {
+  declaredWorkflows,
+  workflowFunctions,
+  workflowQueryNames,
+} from "@grasp-os/runtime/host";
 import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
@@ -135,14 +139,7 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 const queryPath =
   /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})\.queries\.(?<name>\w+)$/u;
 
-const queryNames: ReadonlySet<string> = new Set<WorkflowQueryName>([
-  "run",
-  "canStart",
-  "runs",
-  "history",
-  "decisions",
-  "decision",
-]);
+const queryNames: ReadonlySet<string> = new Set(workflowQueryNames);
 
 const isQueryName = (name: string | undefined): name is WorkflowQueryName =>
   name !== undefined && queryNames.has(name);
