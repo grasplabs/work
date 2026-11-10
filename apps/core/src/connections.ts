@@ -1,4 +1,4 @@
-import type { Agent } from "@grasp-os/shared/agents";
+import type { Agent, AgentSettings } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   catalogLogoPath,
@@ -48,6 +48,7 @@ import {
   changeAgent,
   listAgents,
   makeAgent,
+  readAgentSettings,
   setAgentPaused,
   setAgentReach,
   setAgentToolClass,
@@ -751,6 +752,13 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async setAgentPaused(agentId: unknown, paused: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setAgentPaused(this.#env, identity, agentId, paused);
+    });
+  }
+
+  async agentSettings(agentId: unknown): Promise<AgentSettings> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readAgentSettings(this.#env, agentId);
     });
   }
 

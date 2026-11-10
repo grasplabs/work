@@ -1,6 +1,6 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { agentInputSchema } from "@grasp-os/shared/agents";
-import type { Agent, AgentInput } from "@grasp-os/shared/agents";
+import type { Agent, AgentInput, AgentSettings } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   companyToolClasses,
@@ -21,7 +21,7 @@ import {
   storedNarrowing,
   teamsDetail,
 } from "./stephen-reach.ts";
-import { storedOf } from "./tool-classes.ts";
+import { audienceOf, off, storedOf } from "./tool-classes.ts";
 
 // The agent builder, as core keeps it: the company's admins making an
 // agent, changing what it is called and told, pausing it, and saying whom
@@ -344,6 +344,41 @@ const requireOwnSettings = async (
     throw agentErrors.create("agent.settings_elsewhere");
   }
   return agent.id;
+};
+
+/**
+ * Whom the agent `agentId` reaches and for whom it has each class, for
+ * admins to read. Throws `agent.settings_elsewhere` for the first agent
+ * and `agent.unknown`. A class or a reach without a row reads as the
+ * layer above it, as the gates read it (agent-reach.ts); one that can't
+ * be read, as nobody.
+ */
+export const readAgentSettings = async (
+  env: Env,
+  agentId: unknown
+): Promise<AgentSettings> => {
+  const id = await requireOwnSettings(env, agentId);
+  const db = drizzle(env.DB);
+  const [whole, rows] = await Promise.all([
+    db.select().from(agentReach).where(eq(agentReach.agentId, id)).get(),
+    db.select().from(agentToolClasses).where(eq(agentToolClasses.agentId, id)),
+  ]);
+  const stored = new Map(rows.map((row) => [row.toolClass, row]));
+  return {
+    on: whole?.on ?? true,
+    audience:
+      whole === undefined ? { who: "everyone" } : (audienceOf(whole) ?? off),
+    classes: companyToolClasses.map((toolClass) => {
+      const row = stored.get(toolClass);
+      return {
+        toolClass,
+        audience:
+          row === undefined || row.who === "asClass"
+            ? { who: "asClass" }
+            : (audienceOf(row) ?? off),
+      };
+    }),
+  };
 };
 
 /**

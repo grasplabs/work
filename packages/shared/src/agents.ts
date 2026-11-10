@@ -48,6 +48,16 @@ export const agentInputSchema = z.strictObject({
 });
 export type AgentInput = z.infer<typeof agentInputSchema>;
 
+/** Whom an agent reaches and for whom it has each class, as core keeps it. */
+export interface AgentSettings {
+  /** Whether it answers people at all. */
+  on: boolean;
+  /** Who may reach it. */
+  audience: ToolClassAudience;
+  /** Every class the company turns on or off, as this agent has it. */
+  classes: { toolClass: CompanyToolClass; audience: AppClassAudience }[];
+}
+
 /**
  * The agents over `/rpc`, on `connections`: the company's own admins
  * only, never Grasp staff; every change audited.
@@ -64,6 +74,11 @@ export interface AgentsApi {
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */
   setAgentPaused: (agentId: string, paused: boolean) => Promise<void>;
+  /**
+   * Whom an agent reaches and for whom it has each class. Not the first
+   * agent's, which Settings › Stephen has.
+   */
+  agentSettings: (agentId: string) => Promise<AgentSettings>;
   /** Turns an agent on or off for people, and says who may reach it. */
   setAgentReach: (
     agentId: string,

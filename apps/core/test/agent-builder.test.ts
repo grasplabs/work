@@ -124,6 +124,7 @@ describe("the agent builder", setUpTime, () => {
 
     const tried = async (api: typeof member.api.connections) => ({
       reads: await outcome(api.agents()),
+      settings: await outcome(api.agentSettings(made.id)),
       makes: await outcome(api.makeAgent(said({ name: "Mallory" }))),
       changes: await outcome(api.changeAgent(made.id, said({ job: "Mine." }))),
       pauses: await outcome(api.setAgentPaused(made.id, true)),
@@ -139,6 +140,7 @@ describe("the agent builder", setUpTime, () => {
     }).toStrictEqual({
       member: {
         reads: refused,
+        settings: refused,
         makes: refused,
         changes: refused,
         pauses: refused,
@@ -147,6 +149,7 @@ describe("the agent builder", setUpTime, () => {
       },
       staff: {
         reads: refused,
+        settings: refused,
         makes: refused,
         changes: refused,
         pauses: refused,
@@ -303,8 +306,26 @@ describe("the agent builder", setUpTime, () => {
       "read-own": "asClass",
       "change-own": "nobody",
     });
+    // As an admin's page reads it.
+    const settings = await admin.api.connections.agentSettings(made.id);
+    expect({
+      on: settings.on,
+      audience: settings.audience,
+      readOwn: settings.classes.find((each) => each.toolClass === "read-own"),
+      changeOwn: settings.classes.find(
+        (each) => each.toolClass === "change-own"
+      ),
+    }).toStrictEqual({
+      on: true,
+      audience: { who: "teams", teams: [team] },
+      readOwn: { toolClass: "read-own", audience: { who: "asClass" } },
+      changeOwn: { toolClass: "change-own", audience: { who: "nobody" } },
+    });
 
     expect({
+      firstRead: await outcome(
+        admin.api.connections.agentSettings(chatAgentId)
+      ),
       firstReach: await outcome(setAgentReach(chatAgentId, false, everyone)),
       firstClass: await outcome(
         setAgentToolClass(chatAgentId, "read-own", { who: "nobody" })
@@ -319,6 +340,7 @@ describe("the agent builder", setUpTime, () => {
       // @ts-expect-error -- not a class, as a page could send it
       noSuchClass: await outcome(setAgentToolClass(made.id, "never", everyone)),
     }).toStrictEqual({
+      firstRead: "agent.settings_elsewhere",
       firstReach: "agent.settings_elsewhere",
       firstClass: "agent.settings_elsewhere",
       noSuchAgent: "agent.unknown",

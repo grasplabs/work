@@ -156,6 +156,7 @@ export const rpcParamNames: ParamNames = {
     "watch": ["chatId","after","onUpdate"],
   },
   "ConnectionsRpc": {
+    "agentSettings": ["agentId"],
     "agents": [],
     "appPointers": [],
     "appRequests": [],
