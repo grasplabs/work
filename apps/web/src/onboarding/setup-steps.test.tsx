@@ -90,6 +90,38 @@ interface Shown {
   mailDomain?: string | null;
 }
 
+/** What Grasp's AI has to call: Anthropic offered, and connected once a model is `ready`. */
+const aiOf = ({ ready }: { ready: boolean }): AiReadiness => {
+  const anthropic = {
+    provider: "anthropic" as const,
+    label: "Anthropic",
+    whereItRuns: "Anthropic, United States",
+    models: [
+      { model: "anthropic/claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+    ],
+  };
+  return {
+    ready,
+    listing: {
+      providers: ready
+        ? [
+            {
+              ...anthropic,
+              mask: "…a3f2",
+              baseUrl: null,
+              addedAt: 0,
+              updatedAt: 0,
+              status: null,
+            },
+          ]
+        : [],
+      offered: [anthropic],
+      choice: null,
+      platform: [],
+    },
+  };
+};
+
 /** A step as it is drawn as it arrives, its markup and all. */
 const drawn = (
   step: SetupStep,
@@ -102,7 +134,7 @@ const drawn = (
     choices = noChoices,
     documents = [],
     mailSends = true,
-    ai = { providers: ["Anthropic"], ready: true },
+    ai = aiOf({ ready: true }),
     mailDomain = "mail.example.test",
   }: Shown
 ): string => {
@@ -217,35 +249,46 @@ describe("what needs the admin", () => {
     }).toStrictEqual({ open: [true, false], done: [true, true, true] });
   });
 
-  it("asks them to connect an AI provider until a model is ready for calls, and holds them until then", () => {
-    const none = said("review", {
-      settled: ["mail"],
-      ai: { providers: [], ready: false },
-    });
-    const connected = said("review", { settled: ["mail"] });
-    const unknown = said("review", { settled: ["mail"], ai: null });
+  it("asks for the AI provider, its key and a model right after the welcome, until a model is ready for calls", () => {
+    const asked = said("ai", { ai: aiOf({ ready: false }) });
+    const ready = said("ai", {});
+    const unknown = said("ai", { ai: null });
     expect({
-      none: [
-        none.includes("Just one thing for you"),
-        none.includes("Connect a provider"),
-        none.includes("Continue"),
+      asked: [
+        asked.includes("Which AI should I think with?"),
+        asked.includes("Provider"),
+        asked.includes("Key"),
+        asked.includes("Model"),
+        asked.includes("Connected:"),
       ],
-      connected: [
-        connected.includes("Connected: Anthropic"),
-        connected.includes("Continue"),
+      ready: [
+        ready.includes("Yours is ready."),
+        ready.includes("Connected: Anthropic"),
+        ready.includes("Provider"),
+        ready.includes("Continue"),
       ],
-      unknown: [
-        unknown.includes("Connect an AI provider"),
-        unknown.includes("Continue"),
-      ],
+      // Core can't say: nothing is asked, and nothing holds them up.
+      unknown: [unknown.includes("Provider"), unknown.includes("Continue")],
     }).toStrictEqual({
-      none: [true, true, false],
-      connected: [true, true],
+      asked: [true, true, true, true, false],
+      ready: [true, true, false, true],
       unknown: [false, true],
     });
-    expect(
-      drawn("review", { ai: { providers: ["OpenAI"], ready: false } })
-    ).toContain('href="/settings/ai-providers"');
+    // The key is typed into a password field.
+    expect(drawn("ai", { ai: aiOf({ ready: false }) })).toContain(
+      'type="password"'
+    );
+  });
+
+  it("asks for no AI provider among what needs them: it was asked for before anything needed it", () => {
+    const review = said("review", {
+      settled: ["mail"],
+      ai: aiOf({ ready: false }),
+    });
+    expect({
+      asked: review.includes("AI provider"),
+      onward: review.includes("Continue"),
+    }).toStrictEqual({ asked: false, onward: true });
   });
 
   it("names no domain where core has no sender for Grasp's mail, says so, and leaves nothing to settle for it", () => {

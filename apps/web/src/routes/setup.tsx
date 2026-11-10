@@ -35,9 +35,9 @@ import {
   keptAt,
   listeningOf,
   reachedOf,
+  resumeStep,
   settledAs,
   stepIndex,
-  steps,
   suitesFor,
   waysFrom,
 } from "../onboarding/setup.ts";
@@ -66,6 +66,7 @@ const directorySuites = directorySuiteSchema.options;
 /** How wide the column is by step, and how large the brain: roomier where there is more to read. */
 const layout: Record<SetupStep, { width: string; brain: number }> = {
   welcome: { width: "max-w-120", brain: 400 },
+  ai: { width: "max-w-110", brain: 260 },
   about: { width: "max-w-140", brain: 340 },
   company: { width: "max-w-110", brain: 420 },
   sources: { width: "max-w-150", brain: 260 },
@@ -346,9 +347,9 @@ const Setup = () => {
   const data = loaded.state === "ready" ? loaded.data : null;
   const { roster, plan, progress, percent, parts, choices } = readOf(data);
   const stored = readKept(identity.userId).reached;
-  // Opened without a step, it goes on where they were.
+  // Opened without a step, it goes on where they were; or on the AI step, while no model is ready for calls.
   const step: SetupStep =
-    asked ?? steps[reachedOf(stored, { plan })] ?? "welcome";
+    asked ?? resumeStep(reachedOf(stored, { plan }), data?.ai ?? null);
   const index = stepIndex(step);
   const kept = useKept(identity.userId, index);
   const reached = reachedOf(kept.reached, { plan });
@@ -473,21 +474,18 @@ const companyOf = async (
 };
 
 /**
- * What Grasp's AI has to call, for what needs the admin: the connected AI
- * providers, and whether any model is ready for calls (the models a chat
- * may name); null when core can't say, which leaves the rest of the
- * onboarding as it is.
+ * What Grasp's AI has to call, for the AI step: the providers an admin
+ * can connect and those connected, and whether any model is ready for
+ * calls (the models a chat may name); null when core can't say, which
+ * leaves the rest of the onboarding as it is.
  */
 const aiReadinessOf = async (session: Session): Promise<AiReadiness | null> => {
   try {
-    const [{ providers }, models] = await Promise.all([
+    const [listing, models] = await Promise.all([
       session.aiProviders.list(),
       session.chats.models(),
     ]);
-    return {
-      providers: providers.map(({ label }) => label),
-      ready: models.length > 0,
-    };
+    return { listing, ready: models.length > 0 };
   } catch {
     return null;
   }

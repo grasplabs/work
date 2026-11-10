@@ -12,6 +12,7 @@ import {
   listeningOf,
   openItems,
   reachedOf,
+  resumeStep,
   settledAs,
   sourcesFor,
   stepIndex,
@@ -299,20 +300,25 @@ describe("what needs the admin", () => {
       unchanged: true,
     });
   });
+});
 
-  it("include connecting an AI provider until a model is ready for calls, and hold nothing up when core can't say", () => {
+describe("the step an admin comes back to", () => {
+  it("is the furthest they reached, or the AI step again while no model is ready for calls", () => {
+    const listening = stepIndex("listening");
     expect({
-      none: openItems(["mail"], true, { providers: [], ready: false }),
-      noModel: openItems(["mail"], true, {
-        providers: ["Anthropic"],
-        ready: false,
-      }),
-      ready: openItems(["mail"], true, {
-        providers: ["Anthropic"],
-        ready: true,
-      }),
-      unknown: openItems(["mail"], true, null),
-    }).toStrictEqual({ none: ["ai"], noModel: ["ai"], ready: [], unknown: [] });
+      ready: resumeStep(listening, { ready: true }),
+      notReady: resumeStep(listening, { ready: false }),
+      unknown: resumeStep(listening, null),
+      // Not there yet: they get to it on their own.
+      before: resumeStep(stepIndex("welcome"), { ready: false }),
+      onIt: resumeStep(stepIndex("ai"), { ready: false }),
+    }).toStrictEqual({
+      ready: "listening",
+      notReady: "ai",
+      unknown: "listening",
+      before: "welcome",
+      onIt: "ai",
+    });
   });
 });
 

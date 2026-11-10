@@ -1,3 +1,4 @@
+import type { AiProvidersListing } from "@grasp-os/shared/ai-providers";
 import type { CatalogSource, OAuthProvider } from "@grasp-os/shared/connect";
 import type {
   OnboardingProgress,
@@ -23,6 +24,7 @@ import { addDays } from "./send-plan.ts";
 
 export const steps = [
   "welcome",
+  "ai",
   "about",
   "company",
   "sources",
@@ -36,8 +38,8 @@ export const steps = [
 ] as const;
 export type SetupStep = (typeof steps)[number];
 
-/** The first eight steps are the wizard; after it, the bottom of the screen says where things stand in a word. */
-export const wizardSteps = 8;
+/** The first nine steps are the wizard; after it, the bottom of the screen says where things stand in a word. */
+export const wizardSteps = 9;
 
 export const isStep = (value: unknown): value is SetupStep =>
   steps.some((step) => step === value);
@@ -259,6 +261,7 @@ export const brainScene = (
   });
   const shapes: Record<SetupStep, ShapeKey> = {
     welcome: { kind: "head" },
+    ai: { kind: "head" },
     about: { kind: "head" },
     company: org(false),
     sources: {
@@ -361,38 +364,41 @@ export const isReviewItem = (value: unknown): value is ReviewItemId =>
   reviewItems.some((item) => item === value);
 
 /**
- * What Grasp's AI has to call: the connected AI providers' names, and
- * whether a model is ready for calls, a provider's model chosen (or,
- * until there is none, the deployment's own gateway). Only the admin can
- * make it ready (Settings › AI providers); core says once it is.
+ * What Grasp's AI has to call, as the AI step reads it: the providers an
+ * admin can connect with their models, those connected, and whether a
+ * model is ready for calls. Only the admin can make it ready, on the AI
+ * step or in Settings › AI providers; core says once it is.
  */
 export interface AiReadiness {
-  providers: string[];
+  listing: AiProvidersListing;
   ready: boolean;
 }
 
 /**
- * What needs the admin besides what they settle: an AI provider, while
- * no model is ready for calls.
+ * The step an admin who comes back is on: the furthest they reached, or
+ * the AI step again while no model is ready for calls, since every step
+ * after it has Grasp's AI read or talk (`ai`; null when core can't say,
+ * which holds nothing up).
  */
-export type OpenItemId = ReviewItemId | "ai";
+export const resumeStep = (
+  reached: number,
+  ai: Pick<AiReadiness, "ready"> | null
+): SetupStep =>
+  ai?.ready === false && reached > stepIndex("ai")
+    ? "ai"
+    : (steps[reached] ?? "welcome");
 
 /**
- * What still needs the admin: every item they haven't settled, and an AI
- * provider while no model is ready (`ai`; null when core can't say, which
- * holds nothing up). Where Grasp sends no mail (`mailSends`), there's no
- * mail to let through.
+ * What still needs the admin: every item they haven't settled. Where
+ * Grasp sends no mail (`mailSends`), there's no mail to let through.
  */
 export const openItems = (
   settled: readonly ReviewItemId[],
-  mailSends: boolean,
-  ai: AiReadiness | null = null
-): OpenItemId[] => [
-  ...(ai?.ready === false ? ["ai" as const] : []),
-  ...reviewItems.filter(
+  mailSends: boolean
+): ReviewItemId[] =>
+  reviewItems.filter(
     (item) => !settled.includes(item) && (item !== "mail" || mailSends)
-  ),
-];
+  );
 
 /** What this browser keeps of an admin's onboarding: the furthest step they reached, the message they wrote, and what they settled. */
 export interface Kept {

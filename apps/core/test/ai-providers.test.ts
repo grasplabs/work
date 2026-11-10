@@ -18,6 +18,7 @@ import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {
   aiCredentialPlaceholder,
   aiProviderErrors,
+  featuredModels,
 } from "@grasp-os/shared/ai-providers";
 import type { OrganizationProviderId } from "@grasp-os/shared/ai-providers";
 import type { AuditEvent } from "@grasp-os/shared/audit";
@@ -684,6 +685,30 @@ describe("AI providers", { timeout: 60_000 }, () => {
         defaultModel: last,
         fallbacks: last === openaiCase.model ? [] : [openaiCase.model],
       });
+    });
+
+    it("offers every provider's models before it is connected, the ones most choose among them", async () => {
+      const { admin: by } = await admin();
+
+      const { providers, offered } = await by.api.aiProviders.list();
+      const catalog = new Map<string, string[]>(
+        offered.map(({ provider, models: each }) => [
+          provider,
+          each.map(({ model }) => model),
+        ])
+      );
+
+      expect(providers).toStrictEqual([]);
+      // A custom endpoint's models are named by the organization.
+      expect(catalog.get("openai-compatible")).toStrictEqual([]);
+      // Every model an admin is offered first is one the gateway can call.
+      expect(
+        Object.entries(featuredModels).flatMap(([provider, featured]) =>
+          featured.filter(
+            (model) => !(catalog.get(provider) ?? []).includes(model)
+          )
+        )
+      ).toStrictEqual([]);
     });
 
     it("lets only the organization's admins read its providers, and its own admins change them", async () => {
