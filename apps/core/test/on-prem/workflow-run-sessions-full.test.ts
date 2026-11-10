@@ -79,7 +79,7 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
     const run = await endedRun(builder, id, runId);
     expect({
       whileFull,
-      after: { status: run.status, output: run.output },
+      after: { status: run.status, output: run.result },
     }).toStrictEqual({
       whileFull: "running",
       after: { status: "completed", output: { status: "Hello, Ada" } },

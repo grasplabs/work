@@ -217,7 +217,7 @@ describe(
         const shown = watched.received.at(-1)?.outcome;
         return typeof shown === "string"
           ? shown
-          : z.object({ output: z.unknown() }).parse(shown).output;
+          : z.object({ result: z.unknown() }).parse(shown).result;
       };
       const restricted = await shownOnce();
       // As only a write around the platform could: the App out of it again.
@@ -469,7 +469,7 @@ describe(
       const shown = channel.peekRun(handle.runId).value;
       stop();
       expect({
-        shown: { status: shown?.status, output: shown?.output },
+        shown: { status: shown?.status, result: shown?.result },
         receipt: await env.DB.prepare(
           "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
         )
@@ -486,7 +486,7 @@ describe(
           )
           .map(({ action, actor }) => ({ action, actor })),
       }).toStrictEqual({
-        shown: { status: "cancelled", output: undefined },
+        shown: { status: "cancelled", result: undefined },
         receipt: "applied",
         ended: [
           { action: "workflow.run.cancelled", actor: { type: "system" } },

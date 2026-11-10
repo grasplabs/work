@@ -63,5 +63,5 @@ export const requestFor = (
 ): string =>
   JSON.stringify({
     reference: { name: path, kind: release.app.operations[path]?.kind },
-    input,
+    args: input,
   });

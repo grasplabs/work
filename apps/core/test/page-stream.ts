@@ -477,7 +477,7 @@ export const requestFor = (
   key: string
 ): FunctionRequest => ({
   reference: { name: reference.name, kind: "action" },
-  input,
+  args: input,
   idempotencyKey: key,
 });
 

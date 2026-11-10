@@ -124,7 +124,7 @@ describe("the bounds on runs of JSON workflows", () => {
         workflow.id,
         {
           version: 1,
-          input: { who: "Ada" },
+          args: { who: "Ada" },
           key: unique(),
         }
       )
@@ -300,7 +300,7 @@ describe("the bounds on runs of JSON workflows", () => {
     await vi.waitFor(
       async () => {
         const run = await resourceRunFor(env, reader, workflow.id, third.runId);
-        expect(run.output).toStrictEqual({ status: "done" });
+        expect(run.result).toStrictEqual({ status: "done" });
       },
       { timeout: 30_000, interval: 100 }
     );

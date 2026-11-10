@@ -59,7 +59,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
       app,
       JSON.stringify({
         reference: { name: "requests.kickOff", kind: "action" },
-        input: { who: "Ada" },
+        args: { who: "Ada" },
       })
     );
     if (!kicked.ok) {
@@ -78,7 +78,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
         app,
         JSON.stringify({
           reference: queryReference(release, "followUp", "run"),
-          input: { runId },
+          args: { runId },
         }),
         Date.now() + 30_000
       );
@@ -88,7 +88,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
         env,
         bob,
         app,
-        JSON.stringify({ reference: runs, input: { pagination: {} } })
+        JSON.stringify({ reference: runs, args: { pagination: {} } })
       );
       const items = result.ok
         ? z
@@ -228,7 +228,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
         through.app,
         JSON.stringify({
           reference: { name: "requests.kickOff", kind: "action" },
-          input: { who: name },
+          args: { who: name },
         })
       );
       if (!result.ok) {
@@ -259,7 +259,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       env,
       { type: "person", person: owner },
       workflow.id,
-      { version: 1, input: { who: "Owner" }, key: `key-${unique()}` }
+      { version: 1, args: { who: "Owner" }, key: `key-${unique()}` }
     );
 
     const history = queryReference(release, "followUp", "history");
@@ -271,7 +271,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
         env,
         who,
         app,
-        JSON.stringify({ reference: history, input })
+        JSON.stringify({ reference: history, args: input })
       );
       return result;
     };
@@ -488,7 +488,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
         env,
         bob,
         app,
-        JSON.stringify({ reference: nextHistory, input })
+        JSON.stringify({ reference: nextHistory, args: input })
       );
       return answer.result;
     };
@@ -562,7 +562,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       fixture.app,
       JSON.stringify({
         reference: { name: "requests.kickOff", kind: "action" },
-        input: { who: "Bob" },
+        args: { who: "Bob" },
       })
     );
     if (!result.ok) {
@@ -582,7 +582,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       fixture.app,
       JSON.stringify({
         reference: queryReference(release, "followUp", "history"),
-        input: { runId, pagination: {} },
+        args: { runId, pagination: {} },
       })
     );
     const { items } = historySchema.parse(read.ok ? read.value : read);
@@ -619,7 +619,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       fixture.app,
       JSON.stringify({
         reference: { name: "requests.kickOff", kind: "action" },
-        input: { who: "Bob" },
+        args: { who: "Bob" },
       })
     );
     const runId = started.result.ok
@@ -638,7 +638,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
         env,
         bob,
         fixture.app,
-        JSON.stringify({ reference: history, input })
+        JSON.stringify({ reference: history, args: input })
       );
       if (!result.ok) {
         throw new Error(`${result.error.code}: ${result.error.message}`);

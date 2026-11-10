@@ -157,8 +157,8 @@ describe("whose word a run's row takes, and whose clock", () => {
     }
     const [removed, removedFailure, purgedFailure, unreachable] = reads;
     expect({
-      kept: kept.output,
-      removed: removed?.output,
+      kept: kept.result,
+      removed: removed?.result,
       failure: removedFailure?.error,
       purged: purgedFailure?.error,
       unreachable: unreachable?.error,
@@ -206,7 +206,7 @@ describe("whose word a run's row takes, and whose clock", () => {
     expect({
       status: stopped.status,
       inEngine,
-      read: { status: read.status, error: read.error, output: read.output },
+      read: { status: read.status, error: read.error, output: read.result },
     }).toStrictEqual({
       status: "cancelled",
       inEngine: "errored",

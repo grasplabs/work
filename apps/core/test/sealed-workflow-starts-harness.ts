@@ -32,7 +32,7 @@ export const files = (): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("followUp", {\n  args: v.object({ who: v.string().trim().min(1) }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {

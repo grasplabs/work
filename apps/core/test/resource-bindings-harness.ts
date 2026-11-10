@@ -180,7 +180,7 @@ export const requestFor = (
   }
   return JSON.stringify({
     reference: { name: path, kind: operation.kind },
-    input,
+    args: input,
   });
 };
 

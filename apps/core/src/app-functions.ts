@@ -719,41 +719,35 @@ const invokedCall = async (
     const submittedCall = call;
     const submittedKey = call.idempotencyKey;
     const submittedApp = appId;
-    const result = await callOperation(
-      hosted,
-      observed,
-      reference,
-      call.args,
-      {
-        ...(call.idempotencyKey === undefined
-          ? {}
-          : { idempotencyKey: call.idempotencyKey }),
-        ...(parentSession === undefined ? {} : { parentSession }),
-        ...(receiptScope === undefined ? {} : { receiptScope }),
-        ...(tellsForm !== true ||
-        submittedCall.reference.kind !== "mutation" ||
-        submittedKey === undefined
-          ? {}
-          : {
-              // Only for a form some webhook would hear: a receipt
-              // whose outbox owes nothing keeps to its own time.
-              // Its values left out when the commit wouldn't hold them.
-              commitIntent: async (startedAt: number) =>
-                (await formHeardBy(env, submittedApp, startedAt))
-                  ? formIntents(
-                      formSubmissionOf({
-                        app: submittedApp,
-                        userId: by.userId,
-                        call: submittedCall,
-                        key: submittedKey,
-                        operation: path,
-                        startedAt,
-                      })
-                    )
-                  : undefined,
-            }),
-      }
-    );
+    const result = await callOperation(hosted, observed, reference, call.args, {
+      ...(call.idempotencyKey === undefined
+        ? {}
+        : { idempotencyKey: call.idempotencyKey }),
+      ...(parentSession === undefined ? {} : { parentSession }),
+      ...(receiptScope === undefined ? {} : { receiptScope }),
+      ...(tellsForm !== true ||
+      submittedCall.reference.kind !== "mutation" ||
+      submittedKey === undefined
+        ? {}
+        : {
+            // Only for a form some webhook would hear: a receipt
+            // whose outbox owes nothing keeps to its own time.
+            // Its values left out when the commit wouldn't hold them.
+            commitIntent: async (startedAt: number) =>
+              (await formHeardBy(env, submittedApp, startedAt))
+                ? formIntents(
+                    formSubmissionOf({
+                      app: submittedApp,
+                      userId: by.userId,
+                      call: submittedCall,
+                      key: submittedKey,
+                      operation: path,
+                      startedAt,
+                    })
+                  )
+                : undefined,
+          }),
+    });
     return {
       result,
       provenance: sources.snapshot(),
@@ -924,7 +918,7 @@ export const callAppFunctionById = async (
       path,
       call: {
         reference: { name: path, kind: operation.kind },
-        input,
+        args: input,
         // Only a mutation keeps a receipt to answer a retry from.
         ...(operation.kind === "mutation" ? { idempotencyKey } : {}),
       },

@@ -97,7 +97,7 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
       valueOf(
         await call(admin, app, "drafts.propose", "mutation", {
           source: { ...read.source, notes: read.notes },
-          statements: foundSchema.parse(run.output).statements,
+          statements: foundSchema.parse(run.result).statements,
           guest: true,
         })
       )

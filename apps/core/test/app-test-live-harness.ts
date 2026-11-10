@@ -150,7 +150,7 @@ export const requestFor = (
   const operation = release.app.operations[path];
   return JSON.stringify({
     reference: { name: path, kind: operation?.kind },
-    input,
+    args: input,
   });
 };
 

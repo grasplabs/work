@@ -105,7 +105,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
       { notes, lines: [] },
       await answering()
     );
-    const output = foundSchema.parse(run.output);
+    const output = foundSchema.parse(run.result);
     // The page keeps what the run found, as the builder reviewing it.
     const draft = idSchema.parse(
       valueOf(

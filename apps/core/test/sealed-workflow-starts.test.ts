@@ -92,7 +92,7 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
         app,
         JSON.stringify({
           reference: { name: path, kind: operation?.kind },
-          input,
+          args: input,
         })
       );
       return result;
@@ -118,7 +118,7 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
           )
         );
         expect(runs.every(({ endedAt }) => endedAt !== null)).toBeTruthy();
-        return runs.map(({ output }) => output);
+        return runs.map(({ result: output }) => output);
       },
       { timeout: 30_000, interval: 100 }
     );
@@ -187,7 +187,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         app,
         JSON.stringify({
           reference: { name: "requests.kickOff", kind: "action" },
-          input: { who: "Someone" },
+          args: { who: "Someone" },
         })
       );
       if (!result.ok) {
@@ -203,7 +203,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       env,
       { type: "person", person: owner },
       workflow.id,
-      { version: 1, input: { who: "Owner" }, key: `key-${unique()}` }
+      { version: 1, args: { who: "Owner" }, key: `key-${unique()}` }
     );
 
     const references = {
@@ -219,7 +219,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         env,
         who,
         app,
-        JSON.stringify({ reference, input })
+        JSON.stringify({ reference, args: input })
       );
       return result;
     };
@@ -234,7 +234,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       env,
       bob,
       app,
-      JSON.stringify({ reference: references.runs, input: { pagination: {} } }),
+      JSON.stringify({ reference: references.runs, args: { pagination: {} } }),
       Date.now() + 30_000
     );
     expect({
@@ -326,7 +326,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       env,
       bob,
       app,
-      JSON.stringify({ reference: references.runs, input: { pagination: {} } }),
+      JSON.stringify({ reference: references.runs, args: { pagination: {} } }),
       Date.now() + 30_000,
       async () => {
         await Promise.reject(roleErrors.create("role.forbidden"));
@@ -360,7 +360,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         env,
         bob,
         app,
-        JSON.stringify({ reference: runs, input })
+        JSON.stringify({ reference: runs, args: input })
       );
       return result;
     };
@@ -412,7 +412,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         env,
         bob,
         first.app,
-        JSON.stringify({ reference: runs, input })
+        JSON.stringify({ reference: runs, args: input })
       );
       return result;
     };
@@ -423,7 +423,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
         second.app,
         JSON.stringify({
           reference: queryReference(second.release, "followUp", "runs"),
-          input: { pagination: {} },
+          args: { pagination: {} },
         })
       );
       return answer.result;
@@ -490,7 +490,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       env,
       bob,
       first.app,
-      JSON.stringify({ reference: runs, input: { pagination: {} } }),
+      JSON.stringify({ reference: runs, args: { pagination: {} } }),
       Date.now() - 1
     );
     expect(codeOf(lateAnswer.result)).toBe("function.deadline_exceeded");
@@ -506,7 +506,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
             app === first.app
               ? runs
               : queryReference(second.release, "followUp", "runs"),
-          input: { pagination: {} },
+          args: { pagination: {} },
         }),
         Date.now() + 30_000,
         async () => {

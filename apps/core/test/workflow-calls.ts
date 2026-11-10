@@ -161,7 +161,7 @@ export const started = async (
     startEnv,
     { type: "person", person: by },
     id,
-    { version: 1, input: { who: "Ada" }, key: unique() }
+    { version: 1, args: { who: "Ada" }, key: unique() }
   );
   if (runId === null) {
     const [version] = await workflowVersions(env, by, id);
@@ -191,7 +191,7 @@ export const ended = async (
 export const endOf = (run: WorkflowResourceRun) => ({
   status: run.status,
   ...(run.status === "completed"
-    ? { output: run.output }
+    ? { output: run.result }
     : { code: run.error?.code }),
 });
 
@@ -413,7 +413,7 @@ export const mailingWorkflow = async (
 /** A start request of Ada's, with a key of its own. */
 export const adaStart = () => ({
   version: 1,
-  input: { who: "Ada" },
+  args: { who: "Ada" },
   key: unique(),
 });
 

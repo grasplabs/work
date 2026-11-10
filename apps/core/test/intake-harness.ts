@@ -315,7 +315,7 @@ export const extracted = async (
       appVersion: 1,
     },
     "extract",
-    { input, key: crypto.randomUUID() }
+    { args: input, key: crypto.randomUUID() }
   );
   if (runId === null) {
     throw new Error("Expected the start to start a run");
