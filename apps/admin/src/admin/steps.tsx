@@ -495,6 +495,23 @@ const Agreed = ({
   );
 };
 
+/** Each screen of the company's own onboarding, as staff read where its admin is. */
+const adminStepWords: Readonly<Record<string, string>> = {
+  welcome: "The welcome",
+  ai: "Choosing its AI",
+  about: "How this works",
+  company: "Who’s who",
+  sources: "Where the work is written down",
+  documents: "Its documents",
+  pulse: "The tools people use",
+  leads: "The team leads",
+  team: "Telling the team",
+  listening: "Waiting while Stephen talks to the team",
+  review: "What needs its admin",
+  open: "The last screen, before Grasp opens",
+  done: "Finished every screen",
+};
+
 /**
  * What the company does itself, in its own onboarding: its admin
  * connects the sign-in, names the team leads and tells the team. Grasp
@@ -522,6 +539,18 @@ const Company = ({ view }: { view: OrgView }) => {
       description="In its own onboarding. Grasp waits on each of these, and sees it here the moment it is done."
       title="What the company does itself"
     >
+      <SectionRow
+        description="The screen its admin is on in its own onboarding, as its Grasp last heard."
+        label="Where its admin is"
+      >
+        {view.org.adminStep === undefined ? (
+          <span className="text-muted-foreground">Not started</span>
+        ) : (
+          <span>
+            {adminStepWords[view.org.adminStep] ?? view.org.adminStep}
+          </span>
+        )}
+      </SectionRow>
       <SectionRow
         description="It tells Grasp who works where: the teams, and everyone in them."
         label="The sign-in is connected"

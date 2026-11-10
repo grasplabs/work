@@ -251,6 +251,7 @@ export const snapshotOf = async (
     works,
     setup,
     flow,
+    place,
     failedMails,
     letIn,
   ] = await Promise.all([
@@ -267,6 +268,7 @@ export const snapshotOf = async (
     store.staffWorks(),
     store.stephen(),
     store.flow(),
+    store.place(),
     store.failedMails(),
     staffLetIn(env),
   ]);
@@ -316,6 +318,7 @@ export const snapshotOf = async (
       suggested: setup.suggested,
     },
     flow,
+    place,
     kickoff,
     gate: {
       open: gate.open,
