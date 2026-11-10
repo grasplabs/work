@@ -35,13 +35,15 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { testApp } from "./app-definitions.ts";
+import { changesOf, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
   contractOf,
   jobEventsDeclared,
+  keyOf,
   mutationCall,
   objectSchema,
   queryCall,
@@ -84,12 +86,32 @@ const files = (declares = jobEventsDeclared): TestApp =>
       contracts: { review: declares },
     },
     {
-      "server/invoices.ts": `import { v } from "@grasp-os/sdk";
-import { permissions } from "../grasp.config.ts";
+      "server/invoices.ts": `import { permissions } from "../grasp.config.ts";
 
 export const review = permissions.review;
 `,
+      // Only where the App declares the event it names.
+      ...(Object.hasOwn(declares.events, "jobEvents")
+        ? {
+            "server/jobs.ts": `import { v } from "@grasp-os/sdk";
+import { workflows } from "@server/_generated/api";
+import { mutation } from "@server/_generated/server";
 
+/** Tells run \`runId\` its job \`jobId\` is done, as the App declares the event. */
+export const jobDone = mutation({
+  args: { runId: v.string(), jobId: v.string() },
+  returns: v.null(),
+  handler: (ctx, args) => {
+    ctx.sendEvent(workflows.review.events.jobEvents, {
+      runId: args.runId,
+      data: { jobId: args.jobId },
+    });
+    return null;
+  },
+});
+`,
+          }
+        : {}),
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 function Desk() {
   return <main>Invoices</main>;
@@ -213,9 +235,13 @@ const granted = async (
 /**
  * The Invoices App sealed and current, `review` bound
  * to a workflow waiting for its job's completion through `jobEvents`
- * (approved), with the App's grants of `actions` on it, each its own.
+ * (approved), with the App's grants of `actions` on it, each its own; the
+ * App declaring `declares` of the workflow (`files`).
  */
-const invoicesApp = async (actions: readonly string[][]) => {
+const invoicesApp = async (
+  actions: readonly string[][],
+  declares = jobEventsDeclared
+) => {
   const admin = await signedIn("admin");
   const builder = await signedIn("builder");
   const contract = `job-events-${unique()}`;
@@ -238,7 +264,7 @@ const invoicesApp = async (actions: readonly string[][]) => {
     target: { kind: "event" },
     reviewed: { version: 1 },
   });
-  const fixture = await appWith(files(), "Invoices", builder.acting);
+  const fixture = await appWith(files(declares), "Invoices", builder.acting);
   await bindWorkflowToApp(env, builder.acting, workflow.id, {
     app: fixture.app,
     alias: "review",
@@ -387,6 +413,14 @@ const refusals = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
       code: detail?.code,
       via: detail?.via,
     }));
+
+/** Run `runId`'s status on the engine, once it is `expected`. */
+const statusOf = async (runId: string, expected: string) =>
+  await vi.waitFor(async () => {
+    const status = await liveStatus(runId);
+    expect(status).toBe(expected);
+    return status;
+  }, settles);
 
 /** The status run `runId` ended with. */
 const runStatus = async (runId: string): Promise<unknown> =>
@@ -711,11 +745,16 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
       version: number,
       declares: WorkflowEventContract
     ) => {
+      // Its files over the last version's: the mutation sending the
+      // event goes with the event's declaration.
+      const made = files(declares);
       await commitDefined(
         env,
         builder.acting,
         app,
-        files(declares),
+        changesOf(made, {
+          "server/jobs.ts": made.files["server/jobs.ts"] ?? null,
+        }),
         `Version ${version}`
       );
       await seal(fixture, version);
@@ -776,6 +815,115 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
       // A run of another contract: not shown, as a run that doesn't exist.
       second: { ownRun: [], firstVersionsRun: null },
       third: { firstVersionsRun: [eventWait], secondVersionsRun: null },
+    });
+  });
+
+  it("refuses a page's send and a mutation's event of a type the App declares but its binding's contract lets no page send, so nothing reaches the run, while a page-sendable type goes through", async () => {
+    // The binding's contract admits the timeout too, from no page: an
+    // App's committed definition naming it as the event's type.
+    const timeoutDeclared = contractOf({
+      events: {
+        jobEvents: {
+          type: "grasp.job.timeout",
+          data: v.object({ jobId: v.string() }).descriptor,
+        },
+      },
+      listens: { job: ["jobEvents"] },
+    });
+    const [forged, sendable] = await Promise.all([
+      invoicesApp([["start"], ["send"]], timeoutDeclared),
+      invoicesApp([["start"], ["send"]]),
+    ]);
+    /** What a page's send and a mutation's `ctx.sendEvent` each come to. */
+    const sentBy = async ({
+      builder,
+      app,
+      reference,
+    }: Awaited<ReturnType<typeof invoicesApp>>) => {
+      const lease = await pageOf(builder, app);
+      const pageRun = await startedRun(builder, app, lease, reference);
+      const mutationRun = await startedRun(
+        builder,
+        app,
+        lease,
+        reference,
+        "job-2"
+      );
+      const sent = outcomeOf(
+        await called(builder, app, lease, sendText(reference, pageRun))
+      );
+      const committed = outcomeOf(
+        await called(
+          builder,
+          app,
+          lease,
+          JSON.stringify({
+            reference: { name: "jobs.jobDone", kind: "mutation" },
+            args: { runId: mutationRun, jobId: "job-2" },
+            idempotencyKey: keyOf(),
+          })
+        )
+      );
+      // The mutation's event, once its store's outbox delivered or
+      // settled it: sent, or the refusal it was settled with.
+      const delivered = await vi.waitFor(async () => {
+        const events = await allEvents();
+        const settled = events.find(
+          ({ action, target }) =>
+            (action === "workflow.event.sent" ||
+              action === "workflow.notify_intent.refused") &&
+            target?.id === mutationRun
+        );
+        expect(settled).toBeDefined();
+        return settled?.action === "workflow.event.sent"
+          ? "sent"
+          : settled?.detail?.reason;
+      }, settles);
+      const events = await allEvents();
+      return {
+        page: isEvent(sent) ? "sent" : sent,
+        committed,
+        delivered,
+        sentToRuns: events.filter(
+          ({ action, target }) =>
+            action === "workflow.event.sent" &&
+            (target?.id === pageRun || target?.id === mutationRun)
+        ).length,
+        runs: { pageRun, mutationRun },
+      };
+    };
+    const refused = await sentBy(forged);
+    const taken = await sentBy(sendable);
+    expect({
+      refused: { ...refused, runs: undefined },
+      refusedRuns: [
+        await liveStatus(refused.runs.pageRun),
+        await liveStatus(refused.runs.mutationRun),
+      ],
+      taken: { ...taken, runs: undefined },
+      takenRuns: [
+        await statusOf(taken.runs.pageRun, "complete"),
+        await statusOf(taken.runs.mutationRun, "complete"),
+      ],
+    }).toStrictEqual({
+      // Refused before the run's inbox took anything; the mutation
+      // stands, its event settled undeliverable.
+      refused: {
+        page: "workflow.event_invalid",
+        committed: null,
+        delivered: "workflow.event_invalid",
+        sentToRuns: 0,
+        runs: undefined,
+      },
+      refusedRuns: ["waiting", "waiting"],
+      taken: {
+        page: "sent",
+        committed: null,
+        delivered: "sent",
+        sentToRuns: 2,
+        runs: undefined,
+      },
+      takenRuns: ["complete", "complete"],
     });
   });
 });
