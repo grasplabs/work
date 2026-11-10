@@ -1969,7 +1969,7 @@ describe("failures across the host's boundary", () => {
       )
     ).toStrictEqual({
       code: "contract.invalid_args",
-      message: "The arguments don't fit the operation.",
+      message: "The arguments don't fit the function.",
       category: "contract",
       retryable: false,
       details: {
@@ -2149,8 +2149,7 @@ describe("an action's nested calls", () => {
       )
     ).toStrictEqual({
       code: "function.unfinished_call",
-      message:
-        "The operation left a call it started running past its deadline.",
+      message: "The function left a call it started running past its deadline.",
       category: "contract",
       retryable: false,
     });

@@ -264,7 +264,7 @@ interface StreamEmit<Progress> {
   /**
    * Publishes `progress` as the action's latest snapshot, for the page
    * that runs it: validated against the action's `stream` schema, and no
-   * larger than an operation's result. Each snapshot is complete, so the
+   * larger than a function's result. Each snapshot is complete, so the
    * host may skip one a slow page hasn't read yet for a newer one: emit
    * the whole state (the text so far), never a delta, and keep critical
    * events in a mutation or a workflow, never in progress. Rejects once

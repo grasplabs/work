@@ -42,19 +42,19 @@ export type OperationResult =
 
 /** Why the operation host refused or failed a call. */
 export const operationErrors = defineErrorFamily({
-  "function.not_found": "There is no such operation.",
+  "function.not_found": "There is no such function.",
   "function.kind_mismatch":
-    "That operation is of another kind than the call expects.",
+    "That function is of another kind than the call expects.",
   "function.read_only": "A query reads records and can't change them.",
   "function.no_database":
     "An action has no database: it reads and writes through the App's queries and mutations.",
   "function.no_resources":
     "Only an action uses resources; queries and mutations never reach outside the App.",
-  "function.ended": "This operation's call has ended.",
+  "function.ended": "This function's call has ended.",
   "function.deadline_exceeded":
-    "The operation ran past its deadline, and was stopped before it changed anything more.",
+    "The function ran past its deadline, and was stopped before it changed anything more.",
   "function.unfinished_call":
-    "The operation left a call it started running past its deadline.",
+    "The function left a call it started running past its deadline.",
   "function.mode_mismatch":
     "That action streams its progress, or doesn't, unlike what the call expects: a streaming action is called through useStream or client.stream, any other through useAction or client.action.",
   "function.cancelled":
@@ -75,11 +75,11 @@ export const operationErrors = defineErrorFamily({
   "function.depth_exceeded":
     "Functions called each other deeper than one call may go.",
   "function.cpu_exceeded":
-    "The operation used more CPU time than one call may, so it was stopped.",
+    "The function used more CPU time than one call may, so it was stopped.",
   "function.memory_exceeded":
-    "The operation used more memory than one call may, so it was stopped.",
+    "The function used more memory than one call may, so it was stopped.",
   "function.sandbox_refused":
-    "The operation's code sent the host more than one call may.",
+    "The function's code sent the host more than one call may.",
   "function.sandbox_busy":
     "This App runs as many calls at once as it may. Try again shortly.",
   "function.sandbox_unavailable":
@@ -108,25 +108,25 @@ export const operationErrors = defineErrorFamily({
     "The App used this resource as much as it may in one call, one minute, one hour or one day, holds as much of it open as it may at once, or made as deep, as round or as many calls between Apps as it may, so this request wasn't made. Its details name which.",
   "contract.invalid_resource_result":
     "A resource answered something its contract doesn't allow.",
-  "contract.invalid_args": "The arguments don't fit the operation.",
+  "contract.invalid_args": "The arguments don't fit the function.",
   "contract.input_too_large":
-    "The arguments are larger than an operation accepts.",
+    "The arguments are larger than a function accepts.",
   "contract.invalid_return":
-    "The operation returned something its contract doesn't allow.",
+    "The function returned something its contract doesn't allow.",
   "contract.result_too_large":
-    "The operation returned more than an operation may return.",
+    "The function returned more than a function may return.",
   "contract.invalid_progress":
     "The action emitted progress its stream schema doesn't allow.",
   "contract.progress_too_large":
     "The action emitted a progress snapshot larger than one may be.",
   "contract.invalid_error":
-    "The operation failed with an error its contract doesn't allow.",
+    "The function failed with an error its contract doesn't allow.",
   "contract.invalid_query":
-    "The operation built a query its schema doesn't allow.",
+    "The function built a query its schema doesn't allow.",
   "contract.invalid_write":
-    "The operation staged a change its schema doesn't allow.",
+    "The function staged a change its schema doesn't allow.",
   "contract.invalid_request":
-    "The operation's code sent the host something that isn't JSON.",
+    "The function's code sent the host something that isn't JSON.",
   "contract.not_paginated":
     "That query doesn't take a pagination argument and answer pages, so it can't be read as a paginated list.",
   "mutation.too_large":

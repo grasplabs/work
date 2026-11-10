@@ -6,7 +6,7 @@ import {
 } from "@grasp-os/shared/page-limits";
 
 import { refusal } from "./client-shared.ts";
-import type { CoreFetch } from "./file-channel.ts";
+import type { CoreFetch } from "./file-requests.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 // The page's side of core's link channel (core's app-link-route.ts): what

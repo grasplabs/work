@@ -1241,7 +1241,7 @@ describe("bounds on one mutation", () => {
     }).toStrictEqual({
       large: {
         code: "contract.result_too_large",
-        message: "The operation returned more than an operation may return.",
+        message: "The function returned more than a function may return.",
         category: "contract",
         retryable: false,
         details: { maxBytes: 262_144 },
@@ -1459,8 +1459,7 @@ describe("App code misusing its channel", () => {
       nameGetter: unexpected,
       requestGetter: {
         code: "contract.invalid_request",
-        message:
-          "The operation's code sent the host something that isn't JSON.",
+        message: "The function's code sent the host something that isn't JSON.",
         category: "contract",
         retryable: false,
       },

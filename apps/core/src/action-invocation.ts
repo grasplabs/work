@@ -66,7 +66,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 //   per App (held in the App's object, which keeps the holds through a
 //   restart; a start past them records nothing), a plain one for at most
 //   `actionInvocationWallMs`, and what each object keeps is bounded: a
-//   hash of the input, the result (no larger than an operation's), never
+//   hash of the input, the result (no larger than a function's), never
 //   the input or a progress log. A refusal that ran nothing of the App's
 //   (`keepsReceipt`) keeps no receipt, so the same key may run again.
 // - A receipt outlives the release that made it: before answering one, or

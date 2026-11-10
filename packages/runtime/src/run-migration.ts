@@ -56,7 +56,8 @@ const asJson = (output: unknown): unknown => {
 /**
  * Runs migration `request.name` of `registered` (an App `app` made) on
  * `request.rows`, one at a time, in order, deterministically: each row's
- * output, or the first row whose handler threw or answered a promise. The
+ * output, or the first row whose handler threw or answered a promise (the
+ * first row when the clock or randomness couldn't be taken away). The
  * host validated each row before and validates each output after, so the
  * runner validates neither.
  */
@@ -72,30 +73,33 @@ export const runMigration = (
   }
   const handler = migrationHandler(declared);
   const { name, table, fromSchema, toSchema } = declared["~migration"];
-  return deterministically((): MigrationAnswer => {
-    const rows: unknown[] = [];
-    for (const [index, row] of request.rows.entries()) {
-      const ctx: MigrationContext = Object.freeze({
-        migration: name,
-        table,
-        fromSchema,
-        toSchema,
-        id: row.id,
-      });
-      try {
-        const output = handler(ctx, row.fields);
-        if (isThenable(output)) {
-          throw new Error(promiseMessage);
+  return deterministically(
+    (): MigrationAnswer => {
+      const rows: unknown[] = [];
+      for (const [index, row] of request.rows.entries()) {
+        const ctx: MigrationContext = Object.freeze({
+          migration: name,
+          table,
+          fromSchema,
+          toSchema,
+          id: row.id,
+        });
+        try {
+          const output = handler(ctx, row.fields);
+          if (isThenable(output)) {
+            throw new Error(promiseMessage);
+          }
+          rows.push(asJson(output));
+        } catch (error) {
+          return {
+            ok: false,
+            index,
+            message: messageOf(error),
+          };
         }
-        rows.push(asJson(output));
-      } catch (error) {
-        return {
-          ok: false,
-          index,
-          message: messageOf(error),
-        };
       }
-    }
-    return { ok: true, rows };
-  });
+      return { ok: true, rows };
+    },
+    (message) => ({ ok: false, index: 0, message })
+  );
 };

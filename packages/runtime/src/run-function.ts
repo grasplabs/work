@@ -30,7 +30,7 @@ import type { EventReferenceData } from "./workflow-events.ts";
 
 /** Why the runner couldn't run what it was asked to. */
 const unknownFunction = (): Error =>
-  Object.assign(new Error("There is no such operation."), {
+  Object.assign(new Error("There is no such function."), {
     code: "function.not_found",
   });
 
