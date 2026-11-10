@@ -6,26 +6,30 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { bulkEmbedder, questionEmbedder } from "../src/embedder.ts";
+import { Embedder, questionEmbedder } from "../src/embedder.ts";
 import { modelFileKey } from "../src/model-files.ts";
 import type { EmbedModel } from "../src/model-files.ts";
 import encoderFloat from "./fixtures/encoder-float.bin";
 import encoderInt8 from "./fixtures/encoder-int8.bin";
+import int8Bits from "./fixtures/int8-bits.json";
 import reference from "./fixtures/reference.json";
 import tokenizer from "./fixtures/tokenizer.bin";
 import tokensFloat from "./fixtures/tokens-float.bin";
 import tokensInt8 from "./fixtures/tokens-int8.bin";
-import { Int8Embedder, floatModel, int8Model } from "./worker.ts";
+import { floatModel, int8Model } from "./worker.ts";
+import type { CustomEmbedder, Int8Embedder } from "./worker.ts";
 
 /**
  * How close the embedder comes to the reference (Hugging Face transformers,
  * float32): the float path within float32 rounding, each component within
  * 1e-5 (measured 4e-7); the int8 path, which production runs, at cosine
- * 0.995 or more for every text (measured 0.9986 on this fixture; 0.9961 on
- * the real model, scripts/check-model.ts).
+ * 0.99 or more for every text (measured 0.9952 on this random, untrained
+ * fixture, which 8 bits suit worse than a trained model; 0.9961 on the
+ * real model, scripts/check-model.ts). The int8 path's exact bits are
+ * pinned as well (int8-bits.json).
  */
 const floatTolerance = 1e-5;
-const int8LeastCosine = 0.995;
+const int8LeastCosine = 0.99;
 
 type Which = "tokenizer" | "encoder" | "tokens";
 type Files = Record<Which, ArrayBuffer | Uint8Array>;
@@ -56,22 +60,95 @@ const upload = async (
 };
 
 /**
- * Fails unless embedding a text in `embedder` fails with `message`, twice:
- * a failed load leaves nothing behind that a second call could use. Run
- * inside the object, as an error thrown back across RPC reaches the test
- * pool as unhandled.
+ * What two embeds in a row in `embedder` end with: each error's message,
+ * or "embedded". Two, as a failed load must leave nothing behind that a
+ * second call could use. Run inside the object, as an error thrown back
+ * across RPC reaches the test pool as unhandled.
  */
-const failsClosed = async (
-  embedder: DurableObjectStub<Int8Embedder>,
-  message: string | RegExp
-): Promise<void> => {
+const twoEmbeds = async (
+  embedder: DurableObjectStub<Int8Embedder> | DurableObjectStub<CustomEmbedder>
+): Promise<string[]> =>
   await runInDurableObject(embedder, async (instance) => {
-    expect(instance).toBeInstanceOf(Int8Embedder);
-    if (instance instanceof Int8Embedder) {
-      await expect(instance.embed("Hallo")).rejects.toThrow(message);
-      await expect(instance.embed("Hallo")).rejects.toThrow(message);
+    if (!(instance instanceof Embedder)) {
+      throw new TypeError("Not an embedder.");
     }
+    const attempt = async (): Promise<string> => {
+      try {
+        await instance.embed("Hallo");
+        return "embedded";
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    return [await attempt(), await attempt()];
   });
+
+/** Rounds up to a multiple of 16, as the encoder file aligns its parts. */
+const pad16 = (n: number): number => Math.ceil(n / 16) * 16;
+/** The bytes of one rotary table (cos or sin) for `maxTokens` tokens. */
+const tableBytes = (maxTokens: number): number => maxTokens * 32 * 4;
+
+const hex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
+/**
+ * An embedder named `name` that runs a model made of `files`, each named
+ * by its own hash and put in the bucket: for files that are wrong on
+ * purpose but are what the model names.
+ */
+const customEmbedder = async (
+  name: string,
+  files: Record<Which, Uint8Array>
+): Promise<DurableObjectStub<CustomEmbedder>> => {
+  const named = async (bytes: Uint8Array) => ({
+    sha256: hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))),
+    size: bytes.byteLength,
+  });
+  const model: EmbedModel = {
+    name,
+    tokenizer: await named(files.tokenizer),
+    encoder: await named(files.encoder),
+    tokens: await named(files.tokens),
+  };
+  await upload(model, files);
+  const stub = env.CUSTOM.getByName(name);
+  await stub.use(model);
+  return stub;
+};
+
+/** The float fixture's encoder with header word `index` set to `value`. */
+const withHeaderWord = (index: number, value: number): Uint8Array => {
+  const bytes = Uint8Array.from(new Uint8Array(encoderFloat));
+  new DataView(bytes.buffer).setUint32(index * 4, value, true);
+  return bytes;
+};
+
+/**
+ * The float fixture's encoder declaring `maxTokens` tokens, with rotary
+ * tables of that size (zeros): a consistent file whose buffers need far
+ * more memory than the module may have.
+ */
+const withMaxTokens = (maxTokens: number): Uint8Array => {
+  const source = new Uint8Array(encoderFloat);
+  const view = new DataView(source.buffer);
+  const word = (i: number): number => view.getUint32(i * 4, true);
+  const [hidden, layers, oldMax, tables] = [word(3), word(6), word(7), word(9)];
+  const headerBytes = pad16((10 + layers) * 4);
+  const normsEnd = headerBytes + 2 * pad16(hidden * 4);
+  const layersStart = normsEnd + 2 * tables * tableBytes(oldMax);
+  const out = new Uint8Array(
+    normsEnd +
+      2 * tables * tableBytes(maxTokens) +
+      source.byteLength -
+      layersStart
+  );
+  out.set(source.subarray(0, normsEnd));
+  out.set(
+    source.subarray(layersStart),
+    normsEnd + 2 * tables * tableBytes(maxTokens)
+  );
+  new DataView(out.buffer).setUint32(7 * 4, maxTokens, true);
+  return out;
 };
 
 const dot = (a: ArrayLike<number>, b: ArrayLike<number>): number => {
@@ -157,27 +234,116 @@ describe("embedder", () => {
     expect(float.model.build).not.toBe(int8.model.build);
   });
 
-  it("answers questions and bulk work from separate objects, each with the same model", async () => {
+  it("gives the exact bits recorded for the int8 path, on whichever CPU runs it", async () => {
+    // fixtures/int8-bits.json was written once (scripts/fixture-bits.ts):
+    // CI on x86 and a laptop on ARM both have to give these bits.
+    await upload(int8Model, int8Files);
+    const embedder = env.INT8.getByName("bits");
+    const bits = await Promise.all(
+      reference.embeddings.map(async ({ text }) => {
+        const { vector } = await embedder.embed(text);
+        return hex(
+          new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength)
+        );
+      })
+    );
+    expect(bits).toStrictEqual(int8Bits);
+  });
+
+  it("answers questions from an object of their own, with the same model", async () => {
     await upload(int8Model, int8Files);
     const text = "Who approves purchase orders above 5,000 euros?";
-    const [question, bulk] = await Promise.all([
+    const [question, other] = await Promise.all([
       questionEmbedder(env.INT8).embed(text),
-      bulkEmbedder(env.INT8, 0).embed(text),
+      env.INT8.getByName("other").embed(text),
     ]);
-    expect(question).toStrictEqual(bulk);
+    expect(question).toStrictEqual(other);
+  });
+
+  it("reads a lone surrogate as the replacement character, as UTF-8 encoding does", async () => {
+    await upload(int8Model, int8Files);
+    const embedder = env.INT8.getByName("surrogate");
+    const [lone, replaced] = await Promise.all([
+      embedder.tokenize("a\uD800b \uDC00"),
+      embedder.tokenize("a�b �"),
+    ]);
+    expect(lone).toStrictEqual(replaced);
+    const [first, second] = await Promise.all([
+      embedder.embed("a\uD800b"),
+      embedder.embed("a\uD800b"),
+    ]);
+    expect(first).toStrictEqual(second);
+  });
+
+  it("cuts a long text without spaces at the most tokens the model reads", async () => {
+    await upload(int8Model, int8Files);
+    const embedder = env.INT8.getByName("long");
+    const [huge, long] = await Promise.all([
+      embedder.tokenize("Rechnungsprüfung".repeat(16_000)),
+      embedder.tokenize("Rechnungsprüfung".repeat(200)),
+    ]);
+    expect(huge).toHaveLength(128);
+    expect(huge).toStrictEqual(long);
+  });
+
+  it("fails closed on a model whose buffers don't fit the module's memory", async () => {
+    const embedder = await customEmbedder("too-large", {
+      tokenizer: new Uint8Array(tokenizer),
+      encoder: withMaxTokens(8192),
+      tokens: new Uint8Array(tokensFloat),
+    });
+    const tooLarge =
+      "The model's files and buffers don't fit the module's memory.";
+    await expect(twoEmbeds(embedder)).resolves.toStrictEqual([
+      tooLarge,
+      tooLarge,
+    ]);
+  });
+
+  it("fails closed on encoder files that are malformed but what the model names", async () => {
+    const shape = "The encoder file has a shape this runtime doesn't run.";
+    const sizes = "The encoder file has sizes that don't add up.";
+    const cases: [string, Uint8Array, string][] = [
+      ["truncated", new Uint8Array(encoderFloat.slice(0, 5000)), sizes],
+      // A head count whose product with the head width wraps on 32 bits.
+      ["heads", withHeaderWord(4, 2 ** 26 + 1), shape],
+      ["feed-forward", withHeaderWord(5, 0xff_ff_ff_f0), shape],
+      ["layers", withHeaderWord(6, 2 ** 30), shape],
+      // Within the bounds, but more than the file holds.
+      ["declared-larger", withHeaderWord(5, 16_384), sizes],
+      [
+        "version",
+        withHeaderWord(1, 2),
+        "The encoder file isn't an encoder file of this version.",
+      ],
+    ];
+    for (const [name, encoder, message] of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- one case at a time, each in an object of its own
+      const embedder = await customEmbedder(`malformed-${name}`, {
+        tokenizer: new Uint8Array(tokenizer),
+        encoder,
+        tokens: new Uint8Array(tokensFloat),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await expect(twoEmbeds(embedder)).resolves.toStrictEqual([
+        message,
+        message,
+      ]);
+    }
   });
 
   it("fails closed while a model file is missing, and loads once it is there", async () => {
     await upload(int8Model, int8Files);
     await env.MODEL_FILES.delete(modelFileKey(int8Model.tokens));
     const embedder = env.INT8.getByName("missing");
-    await failsClosed(
-      embedder,
-      `fixture-int8's tokens file is missing: no ${modelFileKey(int8Model.tokens)} in the model files bucket.`
-    );
+    const missing = `fixture-int8's tokens file is missing: no ${modelFileKey(int8Model.tokens)} in the model files bucket.`;
+    await expect(twoEmbeds(embedder)).resolves.toStrictEqual([
+      missing,
+      missing,
+    ]);
     await upload(int8Model, int8Files, ["tokens"]);
     const { vector } = await embedder.embed("Hallo");
-    expect(vector).toHaveLength(64);
+    expect(vector).toHaveLength(128);
   });
 
   it("fails closed on a model file whose bytes aren't the hash it is named by", async () => {
@@ -186,10 +352,13 @@ describe("embedder", () => {
     tampered.set([(tampered.at(-1) ?? 0) === 0 ? 1 : 0], tampered.length - 1);
     await upload(int8Model, { ...int8Files, tokens: tampered });
     const embedder = env.INT8.getByName("tampered");
-    await failsClosed(
-      embedder,
-      /fixture-int8's tokens file has SHA-256 [0-9a-f]{64} \(35596 bytes\), not f836/u
+    const wrongHash = new RegExp(
+      `^fixture-int8's tokens file has SHA-256 [0-9a-f]{64} \\(${String(int8Model.tokens.size)} bytes\\), not ${int8Model.tokens.sha256}\\.$`,
+      "u"
     );
+    const [first, second] = await twoEmbeds(embedder);
+    expect(first).toMatch(wrongHash);
+    expect(second).toBe(first);
     // With the right file, it loads.
     await upload(int8Model, int8Files, ["tokens"]);
     const { model } = await embedder.embed("Hallo");
@@ -202,13 +371,14 @@ describe("embedder", () => {
       encoder: new Uint8Array(encoderInt8.slice(0, 1000)),
     });
     const embedder = env.INT8.getByName("short");
-    await failsClosed(
-      embedder,
-      `fixture-int8's encoder file is 1000 bytes, not ${String(int8Model.encoder.size)}.`
-    );
+    const wrongSize = `fixture-int8's encoder file is 1000 bytes, not ${String(int8Model.encoder.size)}.`;
+    await expect(twoEmbeds(embedder)).resolves.toStrictEqual([
+      wrongSize,
+      wrongSize,
+    ]);
     await upload(int8Model, int8Files, ["encoder"]);
     const { vector } = await embedder.embed("Hallo");
-    expect(vector).toHaveLength(64);
+    expect(vector).toHaveLength(128);
   });
 
   it("after an eviction, loads again from its own storage, not the bucket", async () => {

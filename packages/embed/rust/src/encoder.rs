@@ -110,9 +110,18 @@ pub enum InitError {
     Size = -3,
 }
 
+/// n zeroed values of T; traps when the size overflows or the memory can't grow to it (`crate::alloc`).
 fn alloc<T>(n: usize) -> *mut T {
-    crate::alloc(n * core::mem::size_of::<T>()) as *mut T
+    let Some(bytes) = n.checked_mul(core::mem::size_of::<T>()) else { core::arch::wasm32::unreachable() };
+    crate::alloc(bytes) as *mut T
 }
+
+/// The most of each size an encoder file may declare: well past any model of the family, and small enough that
+/// no size computed from them overflows (the largest buffer, (8192 + 16) x 2 x 16384 floats, is 1 GiB).
+const MAX_HEADS: usize = 64;
+const MAX_FF: usize = 16384;
+const MAX_LAYERS: usize = 64;
+const MAX_TOKENS: usize = 8192;
 
 impl Model {
     /// Reads an encoder file (see scripts/export.py) that stays where it is, at `base`, for the life of the model.
@@ -125,15 +134,14 @@ impl Model {
         let w = |i: usize| word(i).ok_or(InitError::Header);
         let (variant, h, nh, ff, nl, maxn, window, nrope) = (w(2)?, w(3)?, w(4)?, w(5)?, w(6)?, w(7)?, w(8)?, w(9)?);
         let shape_ok = variant <= 1
-            && nh > 0
+            && (1..=MAX_HEADS).contains(&nh)
             && h == nh * HD
-            && ff > 0
+            && (1..=MAX_FF).contains(&ff)
             && ff % 16 == 0
-            && nl > 0
-            && nl <= 64
-            && maxn > 0
-            && maxn <= 8192
+            && (1..=MAX_LAYERS).contains(&nl)
+            && (1..=MAX_TOKENS).contains(&maxn)
             && maxn % 8 == 0
+            && window <= maxn
             && (1..=4).contains(&nrope);
         if !shape_ok {
             return Err(InitError::Shape);
@@ -148,9 +156,11 @@ impl Model {
         }
         let int8 = variant == 1;
         let mut off = ((HEADER_WORDS + nl) * 4 + 15) & !15;
+        // Each part starts 16-aligned. The sum saturates rather than wrap, so a file that declares more than it
+        // holds ends past `len` and fails the size check below, however large its sizes.
         let mut take = |bytes: usize| -> *const u8 {
             let p = unsafe { base.add(off.min(len)) };
-            off += (bytes + 15) & !15;
+            off = off.saturating_add(bytes.saturating_add(15) & !15);
             p
         };
         let eln = take(h * 4) as *const f32;

@@ -52,6 +52,25 @@ const encoderErrors: Record<number, string> = {
   [-3]: "has sizes that don't add up",
 };
 
+/**
+ * Runs `load`, a step that allocates in the module: the module traps when
+ * its memory can't grow to what it allocates, and that becomes a load
+ * error.
+ */
+const fitting = (load: () => number): number => {
+  try {
+    return load();
+  } catch (error) {
+    if (error instanceof WebAssembly.RuntimeError) {
+      throw new RangeError(
+        "The model's files and buffers don't fit the module's memory.",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+};
+
 /** The bytes one row of the token table takes in `format`. */
 export const rowBytes = (format: RowFormat, dim: number): number =>
   format === "float" ? 4 * dim : 4 + dim;
@@ -76,21 +95,18 @@ export class Engine {
     // The module imports nothing.
     const instance = new WebAssembly.Instance(module, {});
     this.exports = exportsSchema.parse(instance.exports);
-    const encoderStatus = this.exports.model_init(
-      this.copyIn(files.encoder),
-      files.encoder.size
+    const encoderStatus = fitting(() =>
+      this.exports.model_init(this.copyIn(files.encoder), files.encoder.size)
     );
     if (encoderStatus !== 0) {
       throw new Error(
         `The encoder file ${encoderErrors[encoderStatus] ?? `was refused (${encoderStatus})`}.`
       );
     }
-    if (
-      this.exports.tok_init(
-        this.copyIn(files.tokenizer),
-        files.tokenizer.size
-      ) !== 0
-    ) {
+    const tokenizerStatus = fitting(() =>
+      this.exports.tok_init(this.copyIn(files.tokenizer), files.tokenizer.size)
+    );
+    if (tokenizerStatus !== 0) {
       throw new Error(
         "The tokenizer file isn't a consistent tokenizer file of this version."
       );

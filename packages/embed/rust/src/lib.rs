@@ -11,7 +11,7 @@ mod simd;
 mod tokenizer;
 
 use encoder::{Kernel, Model, RowFormat};
-use std::alloc::{Layout, alloc_zeroed};
+use std::alloc::{Layout, alloc_zeroed, handle_alloc_error};
 use tokenizer::Tok;
 
 static mut MODEL: Option<Model> = None;
@@ -22,10 +22,17 @@ static mut KERNEL: Option<Kernel> = None;
 /// The most UTF-8 bytes of one text the tokenizer reads: far more than max tokens' worth of any text.
 const TEXT_CAP: usize = 1 << 18;
 
-/// Zeroed memory for `size` bytes, 16-aligned, never freed.
+/// Zeroed memory for `size` bytes, 16-aligned, never freed. Traps when the memory can't grow to it (its cap is
+/// 64 MiB, build.sh), so a model that doesn't fit is never copied over address 0 or run on missing buffers: the
+/// host sees the trap and drops the instance.
 #[unsafe(no_mangle)]
 pub extern "C" fn alloc(size: usize) -> *mut u8 {
-    unsafe { alloc_zeroed(Layout::from_size_align(size.max(16), 16).unwrap()) }
+    let Ok(layout) = Layout::from_size_align(size.max(16), 16) else { core::arch::wasm32::unreachable() };
+    let p = unsafe { alloc_zeroed(layout) };
+    if p.is_null() {
+        handle_alloc_error(layout);
+    }
+    p
 }
 
 /// Reads the encoder file the host copied to `base` (it stays there). 0, or a negative error: -1 not an encoder

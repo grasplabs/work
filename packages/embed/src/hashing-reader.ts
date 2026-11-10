@@ -62,6 +62,14 @@ export class HashingReader {
     return out;
   }
 
+  /**
+   * Stops reading and releases the stream, for a file given up on. Safe
+   * at any point: what is already closed stays closed.
+   */
+  async cancel(): Promise<void> {
+    await Promise.allSettled([this.reader.cancel(), this.hash.abort()]);
+  }
+
   /** The SHA-256 (hex) of everything read; call once the stream is read to its end. */
   async sha256(): Promise<string> {
     await this.hash.close();

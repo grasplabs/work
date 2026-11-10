@@ -216,26 +216,52 @@ export class Embedder extends DurableObject<EmbedderEnv> {
     }
   }
 
-  private async copyWhole(which: WholeFile): Promise<void> {
+  /**
+   * Opens the file, lets `copy` read it to its end, and checks it. On any
+   * failure the bucket's stream is cancelled before the error goes on.
+   */
+  private async copyFile<T>(
+    which: Which,
+    copy: (reader: HashingReader) => Promise<T>
+  ): Promise<T> {
     const reader = await this.open(which);
-    for (let part = 0; ; part += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- a stream is read in order
-      const bytes = await reader.read(partBytes);
-      if (bytes === null) {
-        break;
-      }
-      this.ctx.storage.sql.exec(
-        "INSERT INTO model_part (file, part, bytes) VALUES (?, ?, ?)",
-        which,
-        part,
-        bytes
-      );
+    try {
+      const result = await copy(reader);
+      await this.check(which, this.model[which], reader);
+      return result;
+    } catch (error) {
+      await reader.cancel();
+      throw error;
     }
-    await this.check(which, this.model[which], reader);
+  }
+
+  private async copyWhole(which: WholeFile): Promise<void> {
+    await this.copyFile(which, async (reader) => {
+      for (let part = 0; ; part += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a stream is read in order
+        const bytes = await reader.read(partBytes);
+        if (bytes === null) {
+          break;
+        }
+        this.ctx.storage.sql.exec(
+          "INSERT INTO model_part (file, part, bytes) VALUES (?, ?, ?)",
+          which,
+          part,
+          bytes
+        );
+      }
+    });
   }
 
   private async copyTokens(): Promise<RowFormat> {
-    const reader = await this.open("tokens");
+    const format = await this.copyFile("tokens", async (reader) => {
+      const read = await this.copyRows(reader);
+      return read;
+    });
+    return format;
+  }
+
+  private async copyRows(reader: HashingReader): Promise<RowFormat> {
     const header = readTokensHeader(
       (await reader.read(tokensHeaderBytes)) ?? new Uint8Array()
     );
@@ -271,7 +297,6 @@ export class Embedder extends DurableObject<EmbedderEnv> {
         }
       });
     }
-    await this.check("tokens", this.model.tokens, reader);
     return header.format;
   }
 
@@ -305,9 +330,3 @@ export class Embedder extends DurableObject<EmbedderEnv> {
 export const questionEmbedder = (
   namespace: DurableObjectNamespace<Embedder>
 ): DurableObjectStub<Embedder> => namespace.getByName("questions");
-
-/** Bulk embedder `n` (0 and up): how many there are, and which takes what, is the caller's. */
-export const bulkEmbedder = (
-  namespace: DurableObjectNamespace<Embedder>,
-  n: number
-): DurableObjectStub<Embedder> => namespace.getByName(`bulk-${n}`);

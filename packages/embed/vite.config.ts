@@ -23,6 +23,7 @@ export default defineProject({
           INT8: { className: "Int8Embedder", useSQLite: true },
           DOT: { className: "DotEmbedder", useSQLite: true },
           PAIRS: { className: "PairsEmbedder", useSQLite: true },
+          CUSTOM: { className: "CustomEmbedder", useSQLite: true },
         },
       },
     }),

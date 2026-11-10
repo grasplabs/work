@@ -3,9 +3,9 @@ into the embedder's model files, with the reference outputs the tests compare ag
 committed.
 
 The model: a Gemma-style BPE tokenizer trained on texts.json (a few hundred pieces, every byte as a fallback token,
-added tokens with and without lstrip), and a ModernBERT encoder of width 64, one head, 3 layers (global, local,
-global, each kind with its own rotary base), a window of +-8 tokens and at most 128 tokens, so the texts are longer
-than the window and the longest is cut. The references come from Hugging Face tokenizers and transformers, in
+added tokens with and without lstrip), and a ModernBERT encoder of width 128, two heads, 2 layers (global, then
+local, each with its own rotary base), a feed-forward width of 64, a window of +-8 tokens and at most 128 tokens,
+so the texts are longer than the window and the longest is cut. The references come from Hugging Face tokenizers and transformers, in
 float32 with eager attention: token IDs for texts.json and tricky-strings.json (strings from the tokenizer fuzz
 sets), and each text's mean-pooled, L2-normalised embedding.
 
@@ -59,12 +59,12 @@ def main() -> None:
     vocab = tk.get_vocab()
     cfg = ModernBertConfig(
         vocab_size=len(vocab),
-        hidden_size=64,
-        intermediate_size=96,
-        num_hidden_layers=3,
-        num_attention_heads=1,
+        hidden_size=128,
+        intermediate_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=2,
         max_position_embeddings=MAX_TOKENS,
-        layer_types=["full_attention", "sliding_attention", "full_attention"],
+        layer_types=["full_attention", "sliding_attention"],
         local_attention=16,
         rope_parameters={"full_attention": {"rope_type": "default", "rope_theta": 160000.0}, "sliding_attention": {"rope_type": "default", "rope_theta": 10000.0}},
         pad_token_id=vocab["<pad>"],

@@ -3,7 +3,7 @@
 //! starting at each '▁'), then BPE with ranked merges and byte fallback; `<bos>` in front and `<eos>` behind,
 //! truncated as its truncation with the template post-processor truncates.
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 
 const MAGIC_TOK: [u8; 4] = *b"GTOK";
 const VERSION: u32 = 1;
@@ -16,8 +16,13 @@ pub struct Tok {
     mrank: &'static [u32],
     mlen: &'static [u8],
     byte_id: &'static [u32],
-    added: Vec<(&'static [u8], u32, bool)>,
+    /// Added tokens by their text: their ID and whether they take the whitespace before them.
+    added: HashMap<&'static [u8], (u32, bool)>,
+    /// The added tokens' distinct lengths, longest first.
+    added_lens: Vec<usize>,
     first: [bool; 256],
+    /// The longest piece in the vocabulary, in bytes.
+    longest: usize,
     table: Vec<u32>,
     mask: usize,
     bos: u32,
@@ -56,22 +61,25 @@ impl Tok {
             o += k * 4;
             Some(s)
         };
-        let offs = arr(n + 1)?;
-        let moffs = arr(n + 1)?;
+        let offs = arr(n.checked_add(1)?)?;
+        let moffs = arr(n.checked_add(1)?)?;
         let mrank = arr(m)?;
         let byte_id = arr(256)?;
-        let mlen = blob.get(o..o + m)?;
+        let mlen = blob.get(o..o.checked_add(m)?)?;
         o = (o + m + 3) & !3;
-        let mut added = Vec::with_capacity(nadd);
+        let mut added = HashMap::with_capacity(nadd);
         let mut first = [false; 256];
         for _ in 0..nadd {
             let id = words(blob, o, 3)?;
             let l = id[2] as usize;
-            let b = blob.get(o + 12..o + 12 + l)?;
+            let b = blob.get(o + 12..o.checked_add(12 + l)?)?;
             first[*b.first()? as usize] = true;
-            added.push((b, id[0], id[1] != 0));
+            added.entry(b).or_insert((id[0], id[1] != 0));
             o = (o + 12 + l + 3) & !3;
         }
+        let mut added_lens: Vec<usize> = added.keys().map(|b| b.len()).collect();
+        added_lens.sort_unstable_by(|a, b| b.cmp(a));
+        added_lens.dedup();
         let pieces = blob.get(o..)?;
         let ids_ok = |s: &[u32], lim: usize| s.iter().all(|&x| (x as usize) < lim);
         let sorted = |s: &[u32]| s.windows(2).all(|p| p[0] <= p[1]);
@@ -80,7 +88,7 @@ impl Tok {
             && sorted(moffs)
             && moffs[n] as usize == m
             && ids_ok(byte_id, n)
-            && added.iter().all(|a| (a.1 as usize) < n)
+            && added.values().all(|a| (a.0 as usize) < n)
             && (bos as usize) < n
             && (eos as usize) < n;
         if !consistent {
@@ -97,7 +105,8 @@ impl Tok {
             }
             table[h] = id as u32;
         }
-        Some(Tok { offs, pieces, moffs, mrank, mlen, byte_id, added, first, table, mask, bos, eos })
+        let longest = offs.windows(2).map(|p| (p[1] - p[0]) as usize).max().unwrap_or(1).max(1);
+        Some(Tok { offs, pieces, moffs, mrank, mlen, byte_id, added, added_lens, first, longest, table, mask, bos, eos })
     }
 
     pub fn vocab_size(&self) -> usize {
@@ -233,7 +242,18 @@ impl Tok {
         let mut k = 3;
         while k <= m.len() {
             if k == m.len() || m[k..].starts_with(&META) {
-                self.bpe(&m[st..k], ids, buf);
+                // No token covers more than `longest` bytes of a word, so a word longer than twice the room left
+                // times that certainly fills it: only its start is encoded (cut at a character), which bounds the
+                // work on a long text without spaces. A text within the limit never gets here.
+                let room = (max - ids.len()).saturating_mul(self.longest).saturating_mul(2);
+                let mut end = k;
+                if end - st > room {
+                    end = st + room;
+                    while end > st && m[end] & 0xC0 == 0x80 {
+                        end -= 1;
+                    }
+                }
+                self.bpe(&m[st..end], ids, buf);
                 if ids.len() >= max {
                     return;
                 }
@@ -247,16 +267,17 @@ impl Tok {
             }
         }
     }
+    /// The longest added token `s` starts with: one hash lookup per distinct added-token length, longest first.
     fn match_added(&self, s: &[u8]) -> Option<(usize, u32, bool)> {
-        let mut best: Option<(usize, u32, bool)> = None;
-        for &(b, id, ls) in &self.added {
-            if s.starts_with(b) && best.is_none_or(|x| b.len() > x.0) {
-                best = Some((b.len(), id, ls));
-            }
-        }
-        best
+        self.added_lens.iter().find_map(|&len| {
+            let &(id, lstrip) = self.added.get(s.get(..len)?)?;
+            Some((len, id, lstrip))
+        })
     }
     /// `<bos>` + ids + `<eos>`, at most `max` (>= 2) tokens in all. `s` is UTF-8.
+    ///
+    /// An added token's text in the input (`<eos>`, `<mask>`, `<b>`) becomes that token, deliberately: the reference
+    /// tokenizer does the same with raw text.
     pub fn encode(&self, s: &[u8], max: usize) -> Vec<u32> {
         let lim = max - 1;
         let mut ids = vec![self.bos];

@@ -4,19 +4,19 @@
     "size": 8741
   },
   "encoder-float.bin": {
-    "sha256": "07a42c4cc256d754ef451e82241d23817e814d082e0ebb9e3e66ac5ed4ac5e7e",
-    "size": 485488
+    "sha256": "c0a428a8e6033966537abf6812d866e6338c1454c685c80ff19c24b362404e9d",
+    "size": 789584
   },
   "tokens-float.bin": {
-    "sha256": "f81a1c6331ad7a4d48b851858b988cf39e3d7923f39c4fb9d5bcd0c1324cf66d",
-    "size": 133920
+    "sha256": "d62ecb7423e3a01241e7e1d59b369927bd4ff3e9d89b02d4fa456338506bd36d",
+    "size": 267808
   },
   "encoder-int8.bin": {
-    "sha256": "34930212dc99ec9594a523e69397ea7236515a0049c79ce4f5b24c4b70d435bf",
-    "size": 187504
+    "sha256": "4946b0295db6d1ccb07866bba10721d0548814800edae4ac44c937e6b55cd525",
+    "size": 267344
   },
   "tokens-int8.bin": {
-    "sha256": "f83630a0f5b1a4b65c4c0edbcff075f796577ec9af1acaf59518368350df61aa",
-    "size": 35596
+    "sha256": "961e61f5be8051cdfcd3017b525f493e96631b4dcdbe65e795a474ec0cd555e9",
+    "size": 69068
   }
 }

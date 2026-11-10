@@ -1,4 +1,5 @@
 import type {
+  CustomEmbedder,
   DotEmbedder,
   FloatEmbedder,
   Int8Embedder,
@@ -13,6 +14,7 @@ declare global {
       INT8: DurableObjectNamespace<Int8Embedder>;
       DOT: DurableObjectNamespace<DotEmbedder>;
       PAIRS: DurableObjectNamespace<PairsEmbedder>;
+      CUSTOM: DurableObjectNamespace<CustomEmbedder>;
     }
   }
 }
