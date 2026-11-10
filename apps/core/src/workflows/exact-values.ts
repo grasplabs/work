@@ -1,4 +1,4 @@
-import type { ValueSchema } from "@grasp-os/runtime";
+import type { ValueSchema } from "@grasp-os/runtime/app";
 import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { z } from "zod";

@@ -5,8 +5,8 @@ import { banner } from "./codegen-render.ts";
  * `schema.ts` alone. The same for every App, so inspection can load it
  * before anything is generated from the App's manifest.
  */
-export const dataModelSource = `${banner}import type { Id as SdkId } from "@grasp-os/runtime";
-import type { Doc as SdkDoc } from "@grasp-os/runtime/server";
+export const dataModelSource = `${banner}import type { Id as SdkId } from "@grasp-os/sdk";
+import type { Doc as SdkDoc } from "@grasp-os/sdk/server";
 
 import type schema from "../schema.ts";
 
@@ -28,18 +28,18 @@ export type Doc<Table extends TableName> = SdkDoc<Tables[Table], Table>;
  * The same for every App, so inspection can load it before anything is
  * generated from the App's manifest.
  */
-export const serverModuleSource = `${banner}import { serverModule } from "@grasp-os/runtime/server";
+export const serverModuleSource = `${banner}import { serverModule } from "@grasp-os/sdk/server";
 import type {
   ActionCtx as SdkActionCtx,
   MutationCtx as SdkMutationCtx,
   QueryCtx as SdkQueryCtx,
-} from "@grasp-os/runtime/server";
+} from "@grasp-os/sdk/server";
 
 import config from "../../grasp.config.ts";
 import schema from "../schema.ts";
 import type { DataModel } from "./dataModel.ts";
 
-export type { CallerCtx } from "@grasp-os/runtime/server";
+export type { CallerCtx } from "@grasp-os/sdk/server";
 export type { Doc, Id, TableName } from "./dataModel.ts";
 
 const server = serverModule(schema, config);

@@ -16,7 +16,7 @@ An App declares each workflow it starts as a permission in its definition, with 
 Grasp generates the permission into `grasp.config.ts`, which exports it as `permissions.<alias>`:
 
 ```ts grasp.config.ts
-import { defineApp, permission, v } from "@grasp-os/runtime";
+import { defineApp, permission, v } from "@grasp-os/sdk";
 
 export const permissions = {
   review: permission.workflow("review", {
@@ -34,7 +34,7 @@ export default defineApp({
 Then any of the App's actions and mutations can start it:
 
 ```ts server/reviews.ts
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
 
 export const finish = mutation({
@@ -73,7 +73,7 @@ Grasp checks every start's args against the workflow's, so a start the workflow 
 `useWorkflow` starts and follows a run from a Page. It shows the run of its latest start, or the run you give it by ID, and updates as the run goes on:
 
 ```tsx src/routes/index.tsx
-import { useQuery, useWorkflow } from "@grasp-os/runtime/react";
+import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { api, workflows } from "@server/_generated/api";

@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";

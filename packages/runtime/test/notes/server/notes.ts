@@ -3,7 +3,7 @@ import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/runtime";
+} from "@grasp-os/sdk";
 
 import { internal } from "./_generated/internal.ts";
 import {

@@ -1,7 +1,7 @@
 {
   "name": "@grasp-os/runtime",
   "private": true,
-  "description": "Apps and workflows SDK: values, server functions and React hooks",
+  "description": "The platform's runtime of Apps and workflows: what @grasp-os/sdk re-exports, and the hosts, pages and checks only the platform imports",
   "license": "AGPL-3.0-only",
   "type": "module",
   "sideEffects": [
@@ -15,23 +15,16 @@
     }
   },
   "exports": {
-    ".": "./src/index.ts",
+    "./app": "./src/index.ts",
+    "./server": "./src/server.ts",
+    "./react": "./src/react.ts",
+    "./workflow": "./src/workflow.ts",
+    "./testing": "./src/testing.ts",
     "./host": "./src/host.ts",
     "./definition": "./src/definition-entry.ts",
-    "./server": "./src/server.ts",
-    "./runner": "./src/runner.ts",
-    "./workflow": "./src/workflow.ts",
-    "./workflow-generated": "./src/workflow-generated.ts",
-    "./expression-check": "./src/expression-check.ts",
-    "./oxc-parse": "./src/oxc-parse.ts",
-    "./brain": "./src/brain.ts",
-    "./testing": "./src/testing.ts",
-    "./client": "./src/client.ts",
-    "./form-binding": "./src/form-binding.ts",
-    "./react": "./src/react.ts",
-    "./page-runtime": "./src/page-runtime.ts",
-    "./preview-refresh": "./src/preview-refresh.ts",
-    "./preview-runtime": "./src/preview-runtime.ts"
+    "./page": "./src/page.ts",
+    "./check": "./src/check.ts",
+    "./forms": "./src/forms.ts"
   },
   "dependencies": {
     "@grasp-os/brain": "workspace:*",

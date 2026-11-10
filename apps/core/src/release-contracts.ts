@@ -1,5 +1,5 @@
-import { v } from "@grasp-os/runtime";
-import type { ValueSchema } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
+import type { ValueSchema } from "@grasp-os/runtime/app";
 import { httpActionSchemas } from "@grasp-os/shared/http-connections";
 import type { CatalogContractDefinition } from "@grasp-os/shared/workflow-resources";
 

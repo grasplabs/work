@@ -36,7 +36,7 @@ From the definition, Grasp generates two files you read but never edit: `grasp.c
 `server/schema.ts` declares the App's tables, generated from the definition. Every field has a type, from `v`, and each table says who may read and write it:
 
 ```ts server/schema.ts
-import { defineSchema, defineTable, v } from "@grasp-os/runtime";
+import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
   tasks: defineTable({
@@ -55,7 +55,7 @@ export default defineSchema({
 `grasp.config.ts` is the App's name and the permissions it needs, generated from the definition too:
 
 ```ts grasp.config.ts
-import { defineApp } from "@grasp-os/runtime";
+import { defineApp } from "@grasp-os/sdk";
 
 export default defineApp({
   name: "Tasks",
@@ -67,7 +67,7 @@ export default defineApp({
 Every module under `server/` exports server functions. Each one declares its arguments and what it returns, and Grasp checks both on every call:
 
 ```ts server/tasks.ts
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 
 export const list = query({
@@ -105,7 +105,7 @@ A function's name is its module and export: these are `tasks.list`, `tasks.add` 
 A Page is a file in `src/routes/`, a [TanStack Router](https://tanstack.com/router) file route: `index.tsx` is the App's first Page, at `/`. It calls server functions through `api`, which Grasp generates from them:
 
 ```tsx src/routes/index.tsx
-import { useMutation, useQuery } from "@grasp-os/runtime/react";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   PageHeader,

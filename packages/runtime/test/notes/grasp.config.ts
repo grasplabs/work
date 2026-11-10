@@ -1,4 +1,4 @@
-import { defineApp, permission, v } from "@grasp-os/runtime";
+import { defineApp, permission, v } from "@grasp-os/sdk";
 
 export const files = permission.files({
   operations: ["upload", "read", "attach"],

@@ -1,7 +1,4 @@
-import type {
-  PreviewApplied,
-  PreviewLoad,
-} from "@grasp-os/runtime/page-runtime";
+import type { PreviewApplied, PreviewLoad } from "@grasp-os/runtime/page";
 import { shownAt } from "@grasp-os/shared/chat";
 import type {
   PreviewAt,

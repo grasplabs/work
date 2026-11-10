@@ -96,7 +96,7 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 // and a failing test refuses it (`requireAppTestsPass`, called by
 // app-publish.ts); a rollback to a version published already runs none
 // again. The suites are
-// App code, written with `appTest` (`@grasp-os/runtime/testing`); the host
+// App code, written with `appTest` (`@grasp-os/sdk/testing`); the host
 // they call is core's, and real. Threat model, and how each is closed:
 //
 // - Test code reaches what it shouldn't: it runs in a Loader isolate with

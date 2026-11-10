@@ -60,7 +60,7 @@ export const sampleApp = ({ ai }: { ai?: number } = {}): TestApp =>
       ],
     },
     {
-      "server/counter.ts": `import { v } from "@grasp-os/runtime";
+      "server/counter.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 export const hits = query({
@@ -91,7 +91,7 @@ export const hit = action({
 });
 
 `,
-      "server/ledger.ts": `import { v } from "@grasp-os/runtime";
+      "server/ledger.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const purchaseOrder = query({
@@ -125,7 +125,7 @@ export const outcome = async (work: () => Promise<unknown>): Promise<unknown> =>
   }
 };
 `,
-      "server/mail.ts": `import { v } from "@grasp-os/runtime";
+      "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
 import { invoice, outcome, send } from "./effects.ts";

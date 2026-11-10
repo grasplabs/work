@@ -34,7 +34,7 @@ export const deepFiles: TestApp = testApp(
     },
   },
   {
-    "server/deep.ts": `import { v } from "@grasp-os/runtime";
+    "server/deep.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 const nested = (): unknown => {

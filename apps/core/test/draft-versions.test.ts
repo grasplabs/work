@@ -59,7 +59,7 @@ const codeOf = async (framed: Framed): Promise<string> => {
 const desk = (
   marker: string
 ): string => `import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@grasp-os/runtime/react";
+import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
 const Desk = () => {
@@ -83,7 +83,7 @@ const deskFiles = (marker: string): TestApp =>
       },
     },
     {
-      "server/notes.ts": `import { v } from "@grasp-os/runtime";
+      "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const titles = query({

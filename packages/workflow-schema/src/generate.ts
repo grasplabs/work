@@ -1,6 +1,6 @@
-import type { ValueDescriptor } from "@grasp-os/runtime";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import { runtimeNames } from "@grasp-os/runtime/check";
 import { validatorSource } from "@grasp-os/runtime/definition";
-import { runtimeNames } from "@grasp-os/runtime/expression-check";
 import { z } from "zod";
 
 import type { CheckedWorkflow } from "./check.ts";
@@ -29,7 +29,7 @@ import type {
 } from "./sealed.ts";
 
 // The generator: a checked grasp-workflow/2 document (check.ts) translated
-// straight into TypeScript on `@grasp-os/runtime/workflow` that reads as an
+// straight into TypeScript on `@grasp-os/sdk/workflow` that reads as an
 // App's code does, and into the sealed table the run host holds that code
 // to (core's workflows/sealed-run.ts): each task's steps, the call its
 // step makes with the template its arguments must match, its catch, its
@@ -77,7 +77,7 @@ import type {
 //   string, so it is a key, never the prototype), a quoted string
 //   otherwise. The only comment is a fixed header. Expressions come as
 //   code printed from their checked syntax tree
-//   (`@grasp-os/runtime/expression-check`), never as their source.
+//   (`@grasp-os/runtime/check`), never as their source.
 // - IDs becoming names. A step's ID is a `const` of the handler: the
 //   format holds it to an identifier that is no reserved word and none of
 //   the names the code binds (`reservedStepIds`), so it shadows nothing.
@@ -101,8 +101,8 @@ import type {
 //   `forEach`'s `for … of` over its items (`itemsOf`: a list of at most
 //   the platform's 1,000), each item's steps one at a time and every one
 //   counted against the run's step ceiling. The module imports
-//   `@grasp-os/runtime/workflow` and its helpers for generated code
-//   (`@grasp-os/runtime/workflow-generated`) and nothing else (the compiler
+//   `@grasp-os/sdk/workflow` and its helpers for generated code
+//   (`@grasp-os/runtime/workflow`) and nothing else (the compiler
 //   refuses any other import of generated code all the same).
 // - A sensitive value reaching the run's code. A sensitive parameter is
 //   only ever `sensitiveParam(<name>)` in a connection call's arguments,
@@ -155,13 +155,13 @@ import type {
 //   segment a member after a dot; the IDs are literals.
 
 /** The SDK the generated module imports. */
-export const generatedImport = "@grasp-os/runtime/workflow";
+export const generatedImport = "@grasp-os/sdk/workflow";
 
 /**
  * The helpers only generated code calls (`own`, `caughtError`, `itemsOf`),
  * which the module imports besides, and nothing else: not the SDK's API.
  */
-export const generatedHelpersImport = "@grasp-os/runtime/workflow-generated";
+export const generatedHelpersImport = "@grasp-os/runtime/workflow";
 
 /**
  * The generator, as a build names what made it. A build seals the SDK its

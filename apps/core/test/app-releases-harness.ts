@@ -39,14 +39,14 @@ export const notesSpec = (label = "Notes"): AppSpec => ({
 
 export const notesFiles = (label = "Notes"): TestApp =>
   testApp(notesSpec(label), {
-    "values.ts": `import { v } from "@grasp-os/runtime";
+    "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
 };
 `,
-    "server/notes.ts": `import { v } from "@grasp-os/runtime";
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { internal } from "@server/_generated/internal";
 import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../values.ts";
@@ -114,7 +114,7 @@ export const tablelessFiles = (): TestApp =>
   testApp(
     { name: "Hello", tables: {} },
     {
-      "server/hello.ts": `import { v } from "@grasp-os/runtime";
+      "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
 `,
@@ -352,11 +352,25 @@ export const withOperation = (source: string): TestApp =>
     "server/extra.ts": source,
   });
 
-/** The modules only the platform's bootstrap imports (spec 10.7.1). */
-export const bootstrapModules = [
-  "@grasp-os/runtime/client",
+/**
+ * Modules App code never imports: every entry of the platform's runtime,
+ * and paths of the SDK that aren't its entries, including the platform
+ * entries the SDK had before the runtime held them.
+ */
+export const platformModules = [
+  "@grasp-os/runtime/app",
+  "@grasp-os/runtime/server",
+  "@grasp-os/runtime/react",
+  "@grasp-os/runtime/workflow",
+  "@grasp-os/runtime/testing",
   "@grasp-os/runtime/host",
-  "@grasp-os/runtime/page-runtime",
+  "@grasp-os/runtime/definition",
+  "@grasp-os/runtime/page",
+  "@grasp-os/runtime/check",
+  "@grasp-os/runtime/forms",
+  "@grasp-os/sdk/client",
+  "@grasp-os/sdk/host",
+  "@grasp-os/sdk/src/index.ts",
 ] as const;
 
 /** How a file names a module: for its values, or for its types alone. */
@@ -373,11 +387,11 @@ export const importForms = {
     `import type D${index} = require("${module}");\nexport type E${index} = typeof D${index};`,
 } as const;
 
-/** A file that names every bootstrap module as `form` writes one. */
+/** A file that names every platform module as `form` writes one. */
 export const namingAll = (
   form: (module: string, index: number) => string
 ): string =>
-  bootstrapModules.map((module, index) => form(module, index)).join("\n");
+  platformModules.map((module, index) => form(module, index)).join("\n");
 
 /** What a build said, whatever it built. */
 export const saidSchema = z.object({
@@ -399,7 +413,7 @@ export const refusedIn = (built: object, file: string): string[] =>
     .parse(built)
     .diagnostics.filter((diagnostic) => diagnostic.file === file)
     .flatMap(({ message }) =>
-      bootstrapModules.filter((module) => message.includes(`"${module}"`))
+      platformModules.filter((module) => message.includes(`"${module}"`))
     )
     .toSorted();
 
@@ -412,11 +426,11 @@ export const errorsOf = (built: object): string[] =>
 
 /** Types a page may name that its values may not: only `{ v }` is the SDK root's. */
 export const pageTypes =
-  'import type { FunctionReturn } from "@grasp-os/runtime";\nimport type { ReactNode } from "react";\nexport type Shown = FunctionReturn<never> | ReactNode;';
+  'import type { FunctionReturn } from "@grasp-os/sdk";\nimport type { ReactNode } from "react";\nexport type Shown = FunctionReturn<never> | ReactNode;';
 
 /** Types other App code may name from a module its values may not reach. */
 export const codeTypes =
-  'import type { Doc } from "@grasp-os/runtime/server";\nexport type Stored = Doc<never>;';
+  'import type { Doc } from "@grasp-os/sdk/server";\nexport type Stored = Doc<never>;';
 
 /** Each kind of App file, the build that reads it, and what it holds besides. */
 export const targets = {

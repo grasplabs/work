@@ -102,7 +102,7 @@ import { pageFramePolicy } from "./security-headers.ts";
 export interface FrameCode {
   /** The module to render: its default export is the page. */
   entry: string;
-  /** The kit module that renders it (@grasp-os/runtime/page-runtime). */
+  /** The kit module that renders it (@grasp-os/runtime/page). */
   runtime: string;
   /**
    * The App's modules, by flat name, each importing the others by address

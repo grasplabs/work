@@ -1,5 +1,5 @@
 import { kitModuleName } from "@grasp-os/compiler";
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/runtime/host";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
@@ -405,7 +405,7 @@ export const sealedRunOf = async (runId: string): Promise<HostedSealedRun> => {
 
 /** The workflow SDK, by the flat name the sealed build has it. */
 export const sdkWorkflow = JSON.stringify(
-  kitModuleName("@grasp-os/runtime/workflow")
+  kitModuleName("@grasp-os/sdk/workflow")
 );
 
 /**

@@ -80,7 +80,7 @@ const files = ({
       ],
     },
     {
-      "server/review.ts": `import { v } from "@grasp-os/runtime";
+      "server/review.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

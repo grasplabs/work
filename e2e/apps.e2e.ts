@@ -19,7 +19,7 @@ import { origin } from "./stack.ts";
 // workflows and who opens it are in its settings. Only the people core
 // opens Apps to see them.
 
-const operations = `import { v } from "@grasp-os/runtime";
+const operations = `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const count = query({
@@ -36,7 +36,7 @@ export const addOne = mutation({
 `;
 
 const appPage = `import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@grasp-os/runtime/react";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 

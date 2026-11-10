@@ -1,5 +1,5 @@
-import { useWorkflow } from "@grasp-os/runtime/react";
-import type { WorkflowViewOf } from "@grasp-os/runtime/react";
+import { useWorkflow } from "@grasp-os/sdk/react";
+import type { WorkflowViewOf } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { workflows } from "@server/_generated/api";
 

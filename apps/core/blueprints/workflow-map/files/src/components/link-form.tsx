@@ -1,4 +1,4 @@
-import { useMutation } from "@grasp-os/runtime/react";
+import { useMutation } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {

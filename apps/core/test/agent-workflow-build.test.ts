@@ -1,4 +1,4 @@
-import { checkExpression } from "@grasp-os/runtime/expression-check";
+import { checkExpression } from "@grasp-os/runtime/check";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";

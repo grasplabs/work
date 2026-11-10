@@ -8,8 +8,8 @@
 // error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { GraspClient } from "../src/client.ts";
 import type { Id, FunctionReference } from "../src/index.ts";
+import type { GraspClient } from "../src/page.ts";
 import {
   useAction,
   useClient,

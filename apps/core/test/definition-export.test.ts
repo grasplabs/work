@@ -59,7 +59,7 @@ const files = (): TestApp =>
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/runtime";
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

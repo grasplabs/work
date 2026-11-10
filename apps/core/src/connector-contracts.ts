@@ -1,4 +1,4 @@
-import type { ValueSchema } from "@grasp-os/runtime";
+import type { ValueSchema } from "@grasp-os/runtime/app";
 import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";

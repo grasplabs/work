@@ -3,7 +3,7 @@ title: Introduction
 description: Build Apps and workflows that run inside your company's Grasp.
 ---
 
-Grasp runs your company's Apps and workflows in its own deployment. You write an App as a small TypeScript project on `@grasp-os/runtime`, and Grasp hosts it: it stores the App's data, runs its server code, renders its Pages and checks every call against the access you declared.
+Grasp runs your company's Apps and workflows in its own deployment. You write an App as a small TypeScript project on `@grasp-os/sdk`, and Grasp hosts it: it stores the App's data, runs its server code, renders its Pages and checks every call against the access you declared.
 
 An App has four parts:
 

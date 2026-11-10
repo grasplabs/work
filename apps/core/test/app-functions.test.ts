@@ -56,7 +56,7 @@ const notesFiles = (label = "Notes"): TestApp =>
       },
     },
     {
-      "values.ts": `import { v } from "@grasp-os/runtime";
+      "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
@@ -68,7 +68,7 @@ export const noteFields = {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/runtime";
+} from "@grasp-os/sdk";
 import { internal } from "@server/_generated/internal";
 import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../values.ts";
@@ -867,7 +867,7 @@ const undeclaredReturnFiles: TestApp = testApp(
     },
   },
   {
-    "server/notes.ts": `import { v } from "@grasp-os/runtime";
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 export const greet = query({
@@ -919,7 +919,7 @@ const diceFiles: TestApp = testApp(
     },
   },
   {
-    "server/dice.ts": `import { AppError, v } from "@grasp-os/runtime";
+    "server/dice.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 const heldRandom = Math.random;
@@ -1401,10 +1401,11 @@ describe("the SDK a release runs with", { timeout: 120_000 }, () => {
 
   it("needs nothing of its runner but what its protocol pins", async () => {
     const notes = await sealedNotes();
-    // A runner exporting only what the host's modules import of it
-    // (runFunction, installMutationRuntime, manifestOfApp) and what an
-    // App's entry does (registerApp): the host brings the rest itself.
-    await rewriteSdk(notes, "sdk/@grasp-os~sdk~runner.js", (text) => {
+    // The runtime's host module exporting only what the host's modules
+    // import of it (runFunction, installMutationRuntime, manifestOfApp)
+    // and what an App's entry does (registerApp): the host brings the
+    // rest itself.
+    await rewriteSdk(notes, "sdk/@grasp-os~runtime~host.js", (text) => {
       const pinned = exportsOnly(text, [
         "runFunction",
         "installMutationRuntime",

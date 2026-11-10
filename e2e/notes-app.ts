@@ -4,7 +4,7 @@ import type { AppSpec, TestApp } from "../apps/core/test/app-definitions.ts";
 /**
  * The Notes App of spec 8 and 9.4, as a builder writes it: a schema, its
  * operations and registration, and a page on the React SDK
- * (`@grasp-os/runtime/react`) that reaches them only through the references
+ * (`@grasp-os/sdk/react`) that reaches them only through the references
  * the host generates (`@server/_generated/api`).
  */
 
@@ -27,7 +27,7 @@ const notesSpec = {
   ],
 } satisfies AppSpec;
 
-const operations = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/runtime";
+const operations = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, internalMutation, mutation, query } from "@server/_generated/server";
 import { internal } from "@server/_generated/internal";
 import { noteFields } from "../values.ts";
@@ -134,8 +134,8 @@ export const detachFile = mutation({
 });
 `;
 
-const attachmentsList = `import { GraspError, useClient, useFile, useMutation, useUpload } from "@grasp-os/runtime/react";
-import type { FileRef } from "@grasp-os/runtime/react";
+const attachmentsList = `import { GraspError, useClient, useFile, useMutation, useUpload } from "@grasp-os/sdk/react";
+import type { FileRef } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { Label } from "@grasp-os/ui/components/label";
@@ -251,7 +251,7 @@ export function Attachments({ note }: { note: Note }) {
 }
 `;
 
-const createNote = `import { useForm } from "@grasp-os/runtime/react";
+const createNote = `import { useForm } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 
@@ -272,8 +272,8 @@ export function CreateNote() {
 }
 `;
 
-const noteEditor = `import type { FunctionReturn } from "@grasp-os/runtime";
-import { useForm } from "@grasp-os/runtime/react";
+const noteEditor = `import type { FunctionReturn } from "@grasp-os/sdk";
+import { useForm } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 
@@ -307,8 +307,8 @@ export function NoteEditor({
 `;
 
 const appPage = `import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, usePaginatedQuery, useQuery } from "@grasp-os/runtime/react";
-import type { Id } from "@grasp-os/runtime";
+import { useMutation, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
+import type { Id } from "@grasp-os/sdk";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { api } from "@server/_generated/api";
@@ -401,7 +401,7 @@ function Notes() {
 export const Route = createFileRoute("/")({ component: Notes });
 `;
 
-const importNote = `import { GraspError, useAction } from "@grasp-os/runtime/react";
+const importNote = `import { GraspError, useAction } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { api } from "@server/_generated/api";
@@ -432,7 +432,7 @@ export function ImportNote() {
 /** The Notes App's files. */
 export const notesAppFiles = (): TestApp =>
   testApp(notesSpec, {
-    "values.ts": `import { v } from "@grasp-os/runtime";
+    "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
@@ -449,7 +449,7 @@ export const noteFields = {
   });
 
 const unaskedPage = `import { createFileRoute } from "@tanstack/react-router";
-import { GraspError, useClient } from "@grasp-os/runtime/react";
+import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
 import { permissions } from "@server/_generated/api";
@@ -492,8 +492,8 @@ export const Route = createFileRoute("/")({ component: Notes });
 `;
 
 const fileViewPage = `import { createFileRoute } from "@tanstack/react-router";
-import { useClient, useFile, useUpload } from "@grasp-os/runtime/react";
-import type { FileRef } from "@grasp-os/runtime/react";
+import { useClient, useFile, useUpload } from "@grasp-os/sdk/react";
+import type { FileRef } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { Label } from "@grasp-os/ui/components/label";
@@ -613,7 +613,7 @@ export const unaskedDownloadFiles = (): TestApp =>
   });
 
 const linksPage = `import { createFileRoute } from "@tanstack/react-router";
-import { GraspError, useClient } from "@grasp-os/runtime/react";
+import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { permissions } from "@server/_generated/api";
@@ -695,7 +695,7 @@ function Start() {
 export const Route = createFileRoute("/start")({ component: Start });
 `,
     "src/routes/notes.$id.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
-import { useForm } from "@grasp-os/runtime/react";
+import { useForm } from "@grasp-os/sdk/react";
 import { Form, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 

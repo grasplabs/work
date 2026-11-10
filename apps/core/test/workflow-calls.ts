@@ -4,7 +4,7 @@
  * permissions and published workflows of their own, their runs, and what
  * those runs' calls left behind.
  */
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/runtime/host";
 import type {
   ConnectorContract,

@@ -86,7 +86,7 @@ export const Route = createFileRoute("/")({ component: Notes });
         'import type { Props } from "../components/types";',
         'import type { Props } from "../components/named.js";',
         // A folder whose index would be the kit's, never an App file.
-        'import type { Props } from "../node_modules/@grasp-os/runtime/src";',
+        'import type { Props } from "../node_modules/@grasp-os/sdk/src";',
       ].map(
         async (line) =>
           await buildPages(
@@ -107,7 +107,7 @@ export const Route = createFileRoute("/")({ component: Notes });
       folder: [],
       extension: [],
       outside: [
-        '"../node_modules/@grasp-os/runtime/src" is not a file of this App\'s pages.',
+        '"../node_modules/@grasp-os/sdk/src" is not a file of this App\'s pages.',
       ],
     });
   });
@@ -125,7 +125,7 @@ function Notes() {
 export const Route = createFileRoute("/")({ component: Notes });
 `,
       "probe.d.ts":
-        'declare namespace Probe {\n  type Server = typeof import("@grasp-os/runtime/server");\n}\n',
+        'declare namespace Probe {\n  type Server = typeof import("@grasp-os/sdk/server");\n}\n',
     });
     const built = await buildPages(env, files.files, "app-test");
     expect(
@@ -139,17 +139,17 @@ export const Route = createFileRoute("/")({ component: Notes });
     [
       "imports inside it, in a declaration file",
       "leak.d.ts",
-      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/runtime/page-runtime";\n  import type { serverModule } from "@grasp-os/runtime/server";\n  global {\n    type Leak = [typeof runPage, typeof serverModule];\n  }\n}\n',
+      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/runtime/page";\n  import type { serverModule } from "@grasp-os/sdk/server";\n  global {\n    type Leak = [typeof runPage, typeof serverModule];\n  }\n}\n',
     ],
     [
       "imports inside it, in a component's declarations",
       "src/components/leak.d.ts",
-      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/runtime/page-runtime";\n  global {\n    type Leak = [typeof runPage];\n  }\n}\n',
+      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/runtime/page";\n  global {\n    type Leak = [typeof runPage];\n  }\n}\n',
     ],
     [
       "one that shadows a kit module",
       "shadow.d.ts",
-      'declare module "@grasp-os/runtime/react" {\n  export const useQuery: (reference: unknown) => unknown;\n}\n',
+      'declare module "@grasp-os/sdk/react" {\n  export const useQuery: (reference: unknown) => unknown;\n}\n',
     ],
   ])("never declare a module by name: %s", async (_case, file, source) => {
     const built = await buildPages(
@@ -245,7 +245,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     "never name the kit's own files for their types in %s, by any path",
     async (_case, file, up) => {
       const lines = [
-        `/// <reference path="${up}node_modules/@grasp-os/runtime/src/client.ts" />`,
+        `/// <reference path="${up}node_modules/@grasp-os/runtime/src/page.ts" />`,
         '/// <reference types="node" />',
         `export type R = typeof import("${up}node_modules/@grasp-os/runtime/src/page-runtime.ts");`,
         'import type * as C from "/node_modules/@grasp-os/runtime/src/client-core.ts";',
@@ -366,7 +366,7 @@ export const Route = createFileRoute("/")({ component: Notes });
       "a migration in a dotted folder",
       'import derive from "../../server/migrations/v1.0/derive.ts";',
     ],
-    ["the host's SDK", 'import { inspectApp } from "@grasp-os/runtime/host";'],
+    ["the SDK's server side", 'import { query } from "@grasp-os/sdk/server";'],
   ])(
     "never import %s: the build fails before it starts",
     async (_case, line) => {

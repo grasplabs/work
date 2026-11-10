@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
 import { describe, expect, it } from "vite-plus/test";
 
 import { shownCell } from "../src/internal/data-grid-cells.ts";

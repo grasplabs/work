@@ -10,7 +10,7 @@ import type {
 } from "./app-test-types.ts";
 import { refuser } from "./declaration.ts";
 
-// App tests, as `@grasp-os/runtime/testing` exports them.
+// App tests, as `@grasp-os/sdk/testing` exports them.
 //
 // `appTest` describes a suite and runs nothing itself. Core's trusted test
 // runner loads an App's `tests/*.test.ts` in a sandboxed isolate, with the
@@ -100,7 +100,7 @@ export const readSuite = <Test extends AppTestFunction | WorkflowTestFunction>(
  * refused while any of its tests fails.
  *
  * ```ts
- * import { appTest } from "@grasp-os/runtime/testing";
+ * import { appTest } from "@grasp-os/sdk/testing";
  * import { api } from "@server/_generated/api";
  *
  * export default appTest({
@@ -129,7 +129,7 @@ export const appTest = (definition: AppTestDefinition): AppTestSuite => {
  * and refuse a failing version, as `appTest`'s do.
  *
  * ```ts
- * import { workflowTest } from "@grasp-os/runtime/testing";
+ * import { workflowTest } from "@grasp-os/sdk/testing";
  * import { workflows } from "@server/_generated/api";
  *
  * export default workflowTest({

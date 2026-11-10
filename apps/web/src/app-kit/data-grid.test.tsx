@@ -3,8 +3,8 @@ import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/runtime";
-import type { Id } from "@grasp-os/runtime";
+} from "@grasp-os/runtime/app";
+import type { Id } from "@grasp-os/runtime/app";
 import { useMutation } from "@grasp-os/runtime/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
 import type { DataGridState } from "@grasp-os/ui/components/data-grid";

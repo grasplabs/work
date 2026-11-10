@@ -184,7 +184,7 @@ catalog:
   "@dnd-kit/utilities": 3.2.2
   "@tailwindcss/vite": 4.3.3
   # The state, subscriptions and lifecycle under the SDK's forms (useForm,
-  # @grasp-os/runtime/react) and their fields (@grasp-os/ui/form).
+  # @grasp-os/sdk/react) and their fields (@grasp-os/ui/form).
   "@tanstack/react-form": 1.33.5
   "@tanstack/react-router": 1.170.46
   # The columns and rows under the kit's RecordGrid.

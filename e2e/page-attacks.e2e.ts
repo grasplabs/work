@@ -193,7 +193,7 @@ test("a page reaches nothing but its own App's functions", async ({
   const bridge: unknown = await frame?.evaluate(
     async ({ runtime, valid }) => {
       // SAFETY: the runtime's own module, whose `bridge` is the page's
-      // bridge as the frame holds it (@grasp-os/runtime/page-runtime).
+      // bridge as the frame holds it (@grasp-os/runtime/page).
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       const { bridge: connected } = (await import(runtime)) as {
         bridge: () => PageBridge;
@@ -251,7 +251,7 @@ test("a page reaches nothing but its own App's functions", async ({
         ),
       };
     },
-    { runtime: "@grasp-os~sdk~page-runtime.js", valid: validRequest }
+    { runtime: "@grasp-os~runtime~page.js", valid: validRequest }
   );
   expect(bridge).toStrictEqual({
     serverCall: "refused",

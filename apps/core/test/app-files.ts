@@ -1,7 +1,7 @@
-import type { FilesReference, Id } from "@grasp-os/runtime";
-import { GraspError } from "@grasp-os/runtime/client";
+import type { FilesReference, Id } from "@grasp-os/runtime/app";
 import { fileChannel, GraspClient } from "@grasp-os/runtime/host";
 import type { FileChannel, FileTransport } from "@grasp-os/runtime/host";
+import { GraspError } from "@grasp-os/runtime/page";
 import {
   appFilesPath,
   fileChunkHashHeader,
@@ -57,7 +57,7 @@ export const files: TestApp = testApp(
     ],
   },
   {
-    "server/notes.ts": `import { AppError, v } from "@grasp-os/runtime";
+    "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 
 export const get = query({
@@ -178,7 +178,7 @@ export const unpin = mutation({
 `,
 
     "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { useFile, useUpload } from "@grasp-os/runtime/react";
+import { useFile, useUpload } from "@grasp-os/sdk/react";
 import { permissions } from "@server/_generated/api";
 
 function Notes() {

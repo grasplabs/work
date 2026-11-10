@@ -55,7 +55,7 @@ const billingFiles = (): TestApp =>
       ],
     },
     {
-      "server/billing.ts": `import { v } from "@grasp-os/runtime";
+      "server/billing.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

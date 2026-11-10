@@ -4,7 +4,7 @@
  * actions through the references the host generated for it (`@server/_generated/api`).
  *
  * ```tsx
- * import { useMutation, useQuery } from "@grasp-os/runtime/react";
+ * import { useMutation, useQuery } from "@grasp-os/sdk/react";
  * import { api } from "@server/_generated/api";
  *
  * const Notes = () => {

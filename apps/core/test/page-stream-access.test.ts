@@ -1,4 +1,4 @@
-import { GraspError } from "@grasp-os/runtime/client";
+import { GraspError } from "@grasp-os/runtime/page";
 import { abortAllDurableObjects } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 

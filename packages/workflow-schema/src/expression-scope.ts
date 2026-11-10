@@ -1,4 +1,4 @@
-import type { ValueDescriptor } from "@grasp-os/runtime";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import { valueTypeOf } from "@grasp-os/runtime/host";
 
 import type { CheckedWorkflow } from "./check.ts";

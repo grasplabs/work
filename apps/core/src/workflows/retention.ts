@@ -162,7 +162,7 @@ export const removedText = `The details of this run were removed: they are kept 
 
 /**
  * A step's name without its key: `name:key` is how a keyed step is named
- * (the SDK's, `@grasp-os/runtime/workflow`), and the key is the run's data.
+ * (the SDK's, `@grasp-os/sdk/workflow`), and the key is the run's data.
  */
 const unkeyed = (step: SQL): SQL =>
   sql`CASE WHEN instr(${step}, ':') > 0 THEN substr(${step}, 1, instr(${step}, ':') - 1) ELSE ${step} END`;

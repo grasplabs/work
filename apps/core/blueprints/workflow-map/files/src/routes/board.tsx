@@ -1,5 +1,5 @@
-import type { Id } from "@grasp-os/runtime";
-import { useClient, usePaginatedQuery } from "@grasp-os/runtime/react";
+import type { Id } from "@grasp-os/sdk";
+import { useClient, usePaginatedQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Select,

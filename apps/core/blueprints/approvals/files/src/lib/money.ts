@@ -1,4 +1,4 @@
-import type { MoneyValue } from "@grasp-os/runtime";
+import type { MoneyValue } from "@grasp-os/sdk";
 
 export const formatMoney = ({ currency, minorUnits }: MoneyValue): string => {
   const format = new Intl.NumberFormat(undefined, {

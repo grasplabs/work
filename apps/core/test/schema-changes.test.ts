@@ -1,5 +1,5 @@
-import { defineSchema, defineTable, rows, v } from "@grasp-os/runtime";
-import type { ValueShape } from "@grasp-os/runtime";
+import { defineSchema, defineTable, rows, v } from "@grasp-os/runtime/app";
+import type { ValueShape } from "@grasp-os/runtime/app";
 import { manifestText, schemaManifest } from "@grasp-os/runtime/host";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";

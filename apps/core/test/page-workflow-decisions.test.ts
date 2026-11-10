@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
 import { declaredPermission, generatedPaths } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -105,7 +105,7 @@ const files = (page = pageOf("approval")): TestApp =>
       ],
     },
     {
-      "server/invoices.ts": `import { v } from "@grasp-os/runtime";
+      "server/invoices.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

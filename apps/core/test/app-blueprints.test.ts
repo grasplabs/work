@@ -62,7 +62,7 @@ const notesCode = testApp(
     },
   },
   {
-    "server/notes.ts": `import { v } from "@grasp-os/runtime";
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const add = mutation({
@@ -90,7 +90,7 @@ const notesOf = async (person: Person, app: string): Promise<unknown> =>
 /** A copy has every file of it but AGENTS.md, which starts as a stub. */
 const v1 = withFiles(notesCode, {
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@grasp-os/runtime/react";
+import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
 function Notes() {

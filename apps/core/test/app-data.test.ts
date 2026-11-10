@@ -82,7 +82,7 @@ const files: TestApp = testApp(
   },
   {
     "server/notes.ts": `import { mutation } from "@server/_generated/server";
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/sdk";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200), status: v.string().optional() },

@@ -1,4 +1,4 @@
-import { AppError } from "@grasp-os/runtime";
+import { AppError } from "@grasp-os/sdk";
 
 // What the map takes as text, beyond its schema's lengths: no control
 // characters in a name (a tab, a newline or a character JSON writes as six

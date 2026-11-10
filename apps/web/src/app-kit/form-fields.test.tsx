@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { v } from "@grasp-os/runtime";
-import type { FilesReference, Id, InferInput } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
+import type { FilesReference, Id, InferInput } from "@grasp-os/runtime/app";
 import { useForm } from "@grasp-os/runtime/react";
 import {
   CheckboxField,

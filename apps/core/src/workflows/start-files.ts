@@ -1,4 +1,4 @@
-import type { ValueDescriptor } from "@grasp-os/runtime";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { runFileErrors, runFileLimits } from "@grasp-os/shared/run-files";

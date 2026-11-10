@@ -9,7 +9,7 @@ import {
 } from "@grasp-os/shared/workflows";
 
 // grasp-workflow/2: a workflow as JSON, the stored form of a workflow on
-// `@grasp-os/runtime/workflow`, in the App SDK's words: what starts a run is
+// `@grasp-os/sdk/workflow`, in the App SDK's words: what starts a run is
 // its `args`, what it ends with its `returns` (and its `result`), what it
 // may reach its `permissions`, each kind by alias as an App's are. One
 // step is one `ctx` call; a step's ID is an identifier, and an expression
@@ -47,7 +47,7 @@ export interface ValueRecord {
 }
 
 /**
- * An expression (`@grasp-os/runtime/expression-check`): JavaScript a run
+ * An expression (`@grasp-os/runtime/check`): JavaScript a run
  * evaluates where it stands, reading `args`, `params`, `run`, `inbox`,
  * `state`, the results of the steps that ran before it by their IDs and,
  * in a catch, `error`; in a step's `state`, `output` too. As JSON, it is

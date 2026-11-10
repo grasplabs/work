@@ -80,9 +80,9 @@ const pageMistakes: Record<string, string> = {
   "src/components/m-prop.tsx":
     'import { Button } from "@grasp-os/ui/components/button";\n\nexport const Wrong = () => <Button nope={1}>x</Button>;\n',
   "src/components/m-hook.tsx":
-    'import { useQuery } from "@grasp-os/runtime/react";\n\nexport const wrong: number = useQuery;\n',
+    'import { useQuery } from "@grasp-os/sdk/react";\n\nexport const wrong: number = useQuery;\n',
   "src/components/m-export.tsx":
-    'import { notThere } from "@grasp-os/runtime/react";\n\nexport const wrong = notThere;\n',
+    'import { notThere } from "@grasp-os/sdk/react";\n\nexport const wrong = notThere;\n',
   "src/components/m-implicit.tsx": "export const wrong = (x) => x;\n",
   "src/components/m-undefined.tsx":
     "export const wrong = (a?: { b: number }) => a.b;\n",
@@ -93,11 +93,11 @@ const pageMistakes: Record<string, string> = {
   "src/components/m-state.tsx":
     'import { useState } from "react";\n\nexport const Wrong = () => {\n  const [value, set] = useState(0);\n  set("x");\n  return value;\n};\n',
   "src/components/m-error.tsx":
-    'import { GraspError } from "@grasp-os/runtime/react";\n\nexport const wrong: string = new GraspError("x").nope;\n',
+    'import { GraspError } from "@grasp-os/sdk/react";\n\nexport const wrong: string = new GraspError("x").nope;\n',
   "src/components/m-dom.tsx":
     'export const wrong: HTMLInputElement = document.createElement("div");\n',
   "src/components/m-api.tsx":
-    'import { useQuery } from "@grasp-os/runtime/react";\n\nimport { api } from "@server/_generated/api";\n\nexport const Wrong = () => useQuery(api, 42 as unknown as { nope: true });\n',
+    'import { useQuery } from "@grasp-os/sdk/react";\n\nimport { api } from "@server/_generated/api";\n\nexport const Wrong = () => useQuery(api, 42 as unknown as { nope: true });\n',
   "src/components/m-callback.tsx":
     'import { useCallback } from "react";\n\nexport const useWrong = () => useCallback((event) => event, []);\n',
   "src/components/m-null.tsx":
@@ -112,35 +112,35 @@ const pageMistakes: Record<string, string> = {
   "src/components/m-hidden.tsx":
     'import type { ZodType } from "zod";\n\nexport type Wrong = ZodType;\n',
   "src/components/m-hidden-path.tsx":
-    'import type { useQuery } from "../node_modules/@grasp-os/runtime/src/react";\n\nexport type Wrong = typeof useQuery;\n',
+    'import type { useQuery } from "../node_modules/@grasp-os/sdk/src/react";\n\nexport type Wrong = typeof useQuery;\n',
 };
 
 /** Mistakes in an App's server code, each a server module of its own. */
 const serverMistakes: Record<string, string> = {
   "server/m-assign.ts": 'export const wrong: number = "x";\n',
   "server/m-returns.ts":
-    'import { v } from "@grasp-os/runtime";\nimport { query } from "@server/_generated/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
+    'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
   "server/m-dom.ts": "export const wrong = (): string => document.title;\n",
   "server/m-implicit.ts": "export const wrong = (x) => x;\n",
   "server/m-undefined.ts": "export const wrong = (a?: { b: number }) => a.b;\n",
   // Modules the kit holds but doesn't give server code: a page's, a
   // library's, and the kit's files by path, relative, absolute and bare.
   "server/m-page-module.ts":
-    'import type { useQuery } from "@grasp-os/runtime/react";\n\nexport type Wrong = typeof useQuery;\n',
+    'import type { useQuery } from "@grasp-os/sdk/react";\n\nexport type Wrong = typeof useQuery;\n',
   "server/m-react.ts":
     'import type { ReactNode } from "react";\n\nexport type Wrong = ReactNode;\n',
   "server/m-library.ts":
     'import type { ZodType } from "zod";\n\nexport type Wrong = ZodType;\n',
   "server/m-kit-path.ts":
-    'import type { useQuery } from "../node_modules/@grasp-os/runtime/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
+    'import type { useQuery } from "../node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
   "server/m-kit-absolute.ts":
-    'import type { useQuery } from "/node_modules/@grasp-os/runtime/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
+    'import type { useQuery } from "/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
   "server/m-hidden-relative.ts":
-    'import type { useQuery } from "../.kit/node_modules/@grasp-os/runtime/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
+    'import type { useQuery } from "../.kit/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
   "server/m-hidden-absolute.ts":
-    'import type { useQuery } from "/.kit/node_modules/@grasp-os/runtime/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
+    'import type { useQuery } from "/.kit/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
   "server/m-hidden-bare.ts":
-    'import type { useQuery } from ".kit/node_modules/@grasp-os/runtime/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
+    'import type { useQuery } from ".kit/node_modules/@grasp-os/sdk/src/react.d.ts";\n\nexport type Wrong = typeof useQuery;\n',
 };
 
 /**
@@ -280,7 +280,7 @@ describe(
       // TypeScript reads a directive's tag and attributes in any case and
       // order, so a gate that matched one spelling let the others reach
       // the kit the check hides, or a lib the page doesn't have.
-      const kitFile = "../.kit/node_modules/@grasp-os/runtime/src/server.d.ts";
+      const kitFile = "../.kit/node_modules/@grasp-os/sdk/src/server.d.ts";
       const directives: Record<string, string> = {
         "src/components/d-upper.tsx": `/// <REFERENCE path="${kitFile}" />\nexport const a = 1;\n`,
         "src/components/d-upper-path.tsx": `/// <reference PATH="${kitFile}" />\nexport const b = 1;\n`,

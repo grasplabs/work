@@ -40,7 +40,7 @@ const cards = {
 };
 
 /** The board's operations: list the cards, add one, move one on. */
-const operations = `import { v } from "@grasp-os/runtime";
+const operations = `import { v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 
 import { columns } from "../values.ts";
@@ -76,14 +76,14 @@ export const move = mutation({
 `;
 
 /** A config written by hand, as a model that guessed would write it. */
-const handwritten = `import { defineApp } from "@grasp-os/runtime";
+const handwritten = `import { defineApp } from "@grasp-os/sdk";
 
 export default defineApp({ name: "Board" });
 `;
 
 /** The board's one page: four columns of cards. */
 const page = `import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@grasp-os/runtime/react";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
@@ -216,7 +216,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
     const [typed, fixed] = await codeResults(stub, chat.id);
     const drafts = await builder.api.chats.drafts(chat.id);
     expect({
-      docs: docs?.text.includes("# @grasp-os/runtime/server"),
+      docs: docs?.text.includes("# @grasp-os/sdk/server"),
       // The generated config is never written by hand: the refusal names
       // the tools.
       handwritten: {

@@ -5,10 +5,14 @@ import {
   defineTable,
   permission,
   v,
-} from "@grasp-os/runtime";
-import { inspectApp, manifestText, registerApp } from "@grasp-os/runtime/host";
-import { runFunction } from "@grasp-os/runtime/runner";
-import type { FunctionChannel } from "@grasp-os/runtime/runner";
+} from "@grasp-os/runtime/app";
+import {
+  inspectApp,
+  manifestText,
+  registerApp,
+  runFunction,
+} from "@grasp-os/runtime/host";
+import type { FunctionChannel } from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { streamMaxEmits } from "@grasp-os/shared/function-limits";
@@ -2485,7 +2489,7 @@ describe("evidence of a refused use", () => {
           },
         },
         {
-          "server/vault.ts": `import { v } from "@grasp-os/runtime";
+          "server/vault.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 export const peek = query({
   args: {},
@@ -2576,7 +2580,7 @@ export const stamp = mutation({
           },
         },
         {
-          "server/notes.ts": `import { v } from "@grasp-os/runtime";
+          "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, query } from "@server/_generated/server";
 export const label = query({ args: {}, returns: v.string(), handler: () => "label" });
 export const probe = action({ args: {}, returns: v.null(), handler: async () => null });

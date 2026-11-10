@@ -78,7 +78,7 @@ const tablesOf = (names: readonly string[]): string[] =>
 const valuesOf = (
   name: string,
   fields: Readonly<Record<string, string>>
-): string => `import { v } from "@grasp-os/runtime";
+): string => `import { v } from "@grasp-os/sdk";
 
 export const ${name} = {
 ${Object.entries(fields)
@@ -147,7 +147,7 @@ const migrationSource = (
     prelude = "",
     fixtures = '[{ row: { title: "Fixture" } }]',
   } = {}
-): string => `import { defineMigration, v } from "@grasp-os/runtime";
+): string => `import { defineMigration, v } from "@grasp-os/sdk";
 import { noteFields } from "../../values.ts";
 ${prelude}
 export default defineMigration({

@@ -55,7 +55,7 @@ export const modelFiles = (maxOutputTokens = 300): TestApp =>
       permissions: [`permission.ai({ maxOutputTokens: ${maxOutputTokens} })`],
     },
     {
-      "server/assist.ts": `import { v } from "@grasp-os/runtime";
+      "server/assist.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -290,7 +290,7 @@ export const knowledgeFiles = (): TestApp =>
       ],
     },
     {
-      "server/help.ts": `import { v } from "@grasp-os/runtime";
+      "server/help.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -504,7 +504,7 @@ export const deskFiles = ({
       ],
     },
     {
-      "server/desk.ts": `import { v } from "@grasp-os/runtime";
+      "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 ${withWriter || withBrain ? 'import { permissions } from "../grasp.config.ts";' : ""}
 

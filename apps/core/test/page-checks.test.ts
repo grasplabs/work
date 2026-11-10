@@ -340,7 +340,7 @@ export const Route = createFileRoute("/when")({ component: When });
       env,
       app({
         [generatedPaths.api]: symbolicModules()[generatedPaths.api] ?? "",
-        "src/routes/writer.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { useMutation, usePaginatedQuery, useQuery, useStream } from "@grasp-os/runtime/react";
+        "src/routes/writer.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { useMutation, usePaginatedQuery, useQuery, useStream } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 
 import { api } from "@server/_generated/api";
@@ -738,7 +738,7 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
     const leaking = {
       ...typicalApp,
       "src/routes/leak.tsx":
-        'import { createFileRoute } from "@tanstack/react-router"; import { createClient } from "@grasp-os/runtime/client";\n\nfunction Leak() {\n  return <p>{typeof createClient}</p>;\n}\nexport const Route = createFileRoute("/leak")({ component: Leak });\n',
+        'import { createFileRoute } from "@tanstack/react-router"; import { createClient } from "@grasp-os/runtime/page";\n\nfunction Leak() {\n  return <p>{typeof createClient}</p>;\n}\nexport const Route = createFileRoute("/leak")({ component: Leak });\n',
     };
     const built = await buildPages(env, leaking, "app-test");
     expect({

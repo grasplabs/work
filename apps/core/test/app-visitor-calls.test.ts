@@ -74,7 +74,7 @@ const portalFiles = (marker = "1"): TestApp =>
       ],
     },
     {
-      "server/portal.ts": `import { v } from "@grasp-os/runtime";
+      "server/portal.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

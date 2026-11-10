@@ -1,4 +1,4 @@
-import type { ValueSchema } from "@grasp-os/runtime";
+import type { ValueSchema } from "@grasp-os/runtime/app";
 import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 

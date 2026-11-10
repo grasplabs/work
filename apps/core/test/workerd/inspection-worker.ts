@@ -9,7 +9,7 @@ import {
   defineSchema,
   defineTable,
   v,
-} from "@grasp-os/runtime";
+} from "@grasp-os/runtime/app";
 import { inspectApp, registerApp } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 
@@ -65,7 +65,7 @@ const inspect = async (env: SandboxedEnv, app: string): Promise<Outcome> => {
     const text = await inspected(
       env,
       { [appModuleName(serverEntryPath)]: apps[app] ?? "" },
-      { [kitModuleName("@grasp-os/runtime/runner")]: runner }
+      { [kitModuleName("@grasp-os/runtime/host")]: runner }
     );
     return { status: "inspected", text };
   } catch (error) {
@@ -133,7 +133,7 @@ const notesManifest = (() => {
 const releaseOf = (source: string): TransformRelease => ({
   app: notesManifest,
   modules: { [appModuleName(serverEntryPath)]: source },
-  sdk: { [kitModuleName("@grasp-os/runtime/runner")]: migrationRunner },
+  sdk: { [kitModuleName("@grasp-os/runtime/host")]: migrationRunner },
 });
 
 /** How a transform ended. */

@@ -2,7 +2,7 @@
 /**
  * Workflow expressions as they run: the code `checkExpression` generates,
  * plain JavaScript, evaluated with the one guard
- * `@grasp-os/runtime/workflow-generated` gives it (`own`, as `$own`), over
+ * `@grasp-os/runtime/workflow` gives it (`own`, as `$own`), over
  * data as the workflow runtime hands it: JSON with no prototype, frozen.
  * Here, in Node, because workerd doesn't compile code from strings; what
  * runs is the same JavaScript.
@@ -13,8 +13,8 @@
  * call with any `this`, or hand to an implicit conversion. A read of such
  * a name gives only an own field, so no expression ever holds one.
  */
-import { checkExpression } from "@grasp-os/runtime/expression-check";
-import { own } from "@grasp-os/runtime/workflow-generated";
+import { checkExpression } from "@grasp-os/runtime/check";
+import { own } from "@grasp-os/runtime/workflow";
 import { describe, expect, it } from "vite-plus/test";
 
 const roots = ["args", "params", "run", "fetched"] as const;

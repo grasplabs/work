@@ -2,7 +2,7 @@ import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/runtime";
+} from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 import type { Doc, QueryCtx } from "@server/_generated/server";
 

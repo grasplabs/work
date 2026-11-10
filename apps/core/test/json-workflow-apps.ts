@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
 import {
   declaredWorkflows,
   GraspClient,

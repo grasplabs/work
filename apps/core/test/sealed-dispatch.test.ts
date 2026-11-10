@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -373,7 +373,7 @@ const requestsFiles = (fixture: unknown): TestApp =>
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/runtime";
+      "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

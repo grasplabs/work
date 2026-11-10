@@ -65,7 +65,7 @@ const notesSpec = (title: string, more: AppSpec["tables"] = {}): AppSpec => ({
 
 const notesFiles = (title = "Notes"): TestApp =>
   testApp(notesSpec(title), {
-    "server/notes.ts": `import { v } from "@grasp-os/runtime";
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
@@ -85,7 +85,7 @@ export const titles = query({
 const emptyFiles: TestApp = testApp(
   { name: "Hello", tables: {} },
   {
-    "server/hello.ts": `import { v } from "@grasp-os/runtime";
+    "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const hello = query({
@@ -193,7 +193,7 @@ const evolvingFiles = (
       },
     },
     {
-      "server/notes.ts": `import { v } from "@grasp-os/runtime";
+      "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 const note = v.object({ ${fields} });
@@ -793,7 +793,7 @@ const teamRenamedMigration = async (
     owner,
     app,
     withFiles(renamed, {
-      "server/migrations/title.ts": `import { defineMigration, v } from "@grasp-os/runtime";
+      "server/migrations/title.ts": `import { defineMigration, v } from "@grasp-os/sdk";
 
 ${prelude}
 
@@ -838,7 +838,7 @@ const migratedFiles = async (
 ): Promise<TestApp> => {
   const files = evolvingFiles({ category: "v.number()" });
   return withFiles(files, {
-    "server/migrations/category.ts": `import { defineMigration, v } from "@grasp-os/runtime";
+    "server/migrations/category.ts": `import { defineMigration, v } from "@grasp-os/sdk";
 
 export default defineMigration({
   name: "category",

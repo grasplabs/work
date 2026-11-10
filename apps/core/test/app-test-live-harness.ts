@@ -46,7 +46,7 @@ export const appFiles: TestApp = withFiles(
 );
 
 /** Spec 28.2's first example, word for word, but for the package's scope. */
-export const specExample = `import { appTest } from "@grasp-os/runtime/testing";
+export const specExample = `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 
 export default appTest({
@@ -76,7 +76,7 @@ export default appTest({
 /** A suite of `tests`, each `"name": async (t) => { body }`. */
 export const suiteOf = (
   tests: Record<string, string>
-): string => `import { appTest } from "@grasp-os/runtime/testing";
+): string => `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 
 const page = { pagination: { pageSize: 50 } };

@@ -1,4 +1,4 @@
-import type { ValueDescriptor } from "@grasp-os/runtime";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import { descriptorFromText, jsonSchemaOf } from "@grasp-os/runtime/host";
 import type { JsonSchema } from "@grasp-os/runtime/host";
 import { actorOf } from "@grasp-os/shared/audit";

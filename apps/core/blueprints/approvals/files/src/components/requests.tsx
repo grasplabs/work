@@ -1,8 +1,4 @@
-import {
-  useMutation,
-  usePaginatedQuery,
-  useUser,
-} from "@grasp-os/runtime/react";
+import { useMutation, usePaginatedQuery, useUser } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {

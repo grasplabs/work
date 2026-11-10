@@ -53,7 +53,7 @@ const appFiles: TestApp = testApp(
     ],
   },
   {
-    "server/notes.ts": `import { AppError, v } from "@grasp-os/runtime";
+    "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, internalQuery, mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -114,7 +114,7 @@ export const count = internalQuery({
   }
 );
 
-const passingSuite = `import { appTest } from "@grasp-os/runtime/testing";
+const passingSuite = `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 
 export default appTest({
@@ -164,7 +164,7 @@ export default appTest({
 });
 `;
 
-const failingSuite = `import { appTest } from "@grasp-os/runtime/testing";
+const failingSuite = `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 
 export default appTest({
@@ -198,7 +198,7 @@ export default appTest({
 const suiteOf = (
   body: string,
   before = ""
-): string => `import { appTest } from "@grasp-os/runtime/testing";
+): string => `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 ${before}
 export default appTest({
@@ -326,7 +326,7 @@ describe("an App's tests", { timeout: 180_000 }, () => {
           },
         },
         {
-          "server/deals.ts": `import { v } from "@grasp-os/runtime";
+          "server/deals.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const add = mutation({
@@ -349,7 +349,7 @@ export const titles = query({
               helper: { role: "user", teams: ["support"] },
             },
           }),
-          "tests/deals.test.ts": `import { appTest } from "@grasp-os/runtime/testing";
+          "tests/deals.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 
 export default appTest({
@@ -401,7 +401,7 @@ export default appTest({
   it("can't reach the App's server code, only its references", async () => {
     const built = await appWith(
       withFiles(appFiles, {
-        "tests/sneaky.test.ts": `import { appTest } from "@grasp-os/runtime/testing";
+        "tests/sneaky.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { titles } from "../server/notes.ts";
 
 export default appTest({ fixtures: "notes", tests: { "runs a handler": async () => { await titles.handler(); } } });
@@ -468,7 +468,7 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
       await new Promise(() => {});`
         ),
         // Each test within its 3 s, both together past the suite's 4 s.
-        "tests/hanging-suite.test.ts": `import { appTest } from "@grasp-os/runtime/testing";
+        "tests/hanging-suite.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
 export default appTest({
   fixtures: "notes",

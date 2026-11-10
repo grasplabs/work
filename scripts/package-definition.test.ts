@@ -98,7 +98,7 @@ describe(
         readFileSync(path.join(out, file), "utf-8");
 
       const root = packageJsonSchema.parse(JSON.parse(read("package.json")));
-      const vendored = ["brain", "runtime", "ui", "shared"].map((name) =>
+      const vendored = ["brain", "runtime", "sdk", "ui", "shared"].map((name) =>
         packageJsonSchema
           .pick({ dependencies: true })
           .parse(JSON.parse(read(`vendor/@grasp-os/${name}/package.json`)))
@@ -181,6 +181,7 @@ describe(
           "@grasp-os/brain",
           "@grasp-os/shared",
           "@grasp-os/runtime",
+          "@grasp-os/sdk",
           "@grasp-os/ui",
         ],
         notExact: [],
@@ -194,6 +195,7 @@ describe(
           ".",
           "vendor/@grasp-os/brain",
           "vendor/@grasp-os/runtime",
+          "vendor/@grasp-os/sdk",
           "vendor/@grasp-os/shared",
           "vendor/@grasp-os/ui",
         ],
@@ -271,7 +273,7 @@ describe(
         "app/server/dom.ts":
           '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
         ...Object.fromEntries(
-          steeringCases("@grasp-os/runtime/server").map(([, source], index) => [
+          steeringCases("@grasp-os/sdk/server").map(([, source], index) => [
             `app/server/steering-${index}.ts`,
             source,
           ])
@@ -434,8 +436,8 @@ describe(
       ).get("zod");
       const refused = await Promise.all(
         [
-          lockOf({ "@grasp-os/runtime": "9.9.9" }, [
-            locked("@grasp-os/runtime", "9.9.9", "MIT"),
+          lockOf({ "@grasp-os/sdk": "9.9.9" }, [
+            locked("@grasp-os/sdk", "9.9.9", "MIT"),
           ]),
           lockOf({ react: "18.0.0" }, [locked("react", "18.0.0", "MIT")]),
           lockOf({ oxlint: "1.0.0" }, [locked("oxlint", "1.0.0", "MIT")]),

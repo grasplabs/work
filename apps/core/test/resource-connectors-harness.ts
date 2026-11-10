@@ -53,7 +53,7 @@ export const mailFiles = (
   actions = `["send", "list"]`
 ): TestApp =>
   withFiles(mailerDefinition([connectionTo("mail", contract, actions)]), {
-    "server/mail.ts": `import { v } from "@grasp-os/runtime";
+    "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -157,7 +157,7 @@ export const archiveFiles = (): TestApp =>
     },
     {
       ...mailFiles().files,
-      "server/archive.ts": `import { v } from "@grasp-os/runtime";
+      "server/archive.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -181,7 +181,7 @@ export const undeclaredMailFiles = (): TestApp =>
   testApp(
     { name: "Mailer" },
     {
-      "server/mail.ts": `import { v } from "@grasp-os/runtime";
+      "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const ping = query({ args: {}, returns: v.string(), handler: () => "pong" });
@@ -510,7 +510,7 @@ export const crmFiles = (): TestApp =>
       ],
     },
     {
-      "server/crm.ts": `import { v } from "@grasp-os/runtime";
+      "server/crm.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -566,7 +566,7 @@ export const twoCrmFiles = (): TestApp =>
       ],
     },
     {
-      "server/crm.ts": `import { v } from "@grasp-os/runtime";
+      "server/crm.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

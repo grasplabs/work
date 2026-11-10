@@ -256,5 +256,5 @@ export const typeImports = (text: string, names: readonly string[]): string => {
   );
   return used.length === 0
     ? ""
-    : `import type { ${used.toSorted().join(", ")} } from "@grasp-os/runtime";\n`;
+    : `import type { ${used.toSorted().join(", ")} } from "@grasp-os/sdk";\n`;
 };

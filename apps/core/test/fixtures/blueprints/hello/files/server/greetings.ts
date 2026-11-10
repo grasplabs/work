@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/sdk";
 import { mutation } from "@server/_generated/server";
 
 /** Greets `name`, and says how many greetings this App has given. */

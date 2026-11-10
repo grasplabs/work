@@ -59,7 +59,7 @@ const isComparison = (node: Expression): boolean =>
 
 /**
  * The name the generated code calls its one guard by: a generated module
- * imports `own` from `@grasp-os/runtime/workflow-generated` under it. No root,
+ * imports `own` from `@grasp-os/runtime/workflow` under it. No root,
  * step or callback parameter can take it, as none starts with `$`.
  */
 export const runtimeNames = { own: "$own", parse: "$parse" } as const;

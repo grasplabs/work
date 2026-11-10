@@ -1,4 +1,4 @@
-import type { ValueDescriptor } from "@grasp-os/runtime";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import {
   allowsNull,
   indexBase,

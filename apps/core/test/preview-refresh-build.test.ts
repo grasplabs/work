@@ -125,7 +125,7 @@ describe("a chat's preview of its draft", { timeout: 60_000 }, () => {
       sameArtifact: preview.page.artifact === published.page.artifact,
     }).toStrictEqual({
       published: {
-        runtime: kitModuleName("@grasp-os/runtime/page-runtime"),
+        runtime: kitModuleName("@grasp-os/runtime/page"),
         refresh: [],
         previewModules: [],
         development: [],

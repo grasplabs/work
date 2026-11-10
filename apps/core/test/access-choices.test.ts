@@ -79,7 +79,7 @@ const filesWith = (access: Access): TestApp =>
     },
     {
       "server/deals.ts": `import { mutation } from "@server/_generated/server";
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/sdk";
 
 export const add = mutation({
   args: { title: v.string(), assignee: v.person().optional() },

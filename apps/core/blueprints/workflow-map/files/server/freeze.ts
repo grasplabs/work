@@ -1,5 +1,5 @@
-import { AppError } from "@grasp-os/runtime";
-import type { Infer } from "@grasp-os/runtime";
+import { AppError } from "@grasp-os/sdk";
+import type { Infer } from "@grasp-os/sdk";
 
 import { figuresMax, hoursMax, signalsMax, titleMax } from "../values.ts";
 import type { figure } from "./figures.ts";

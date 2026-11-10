@@ -16,7 +16,7 @@ import {
 } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
 import {
-  bootstrapModules,
+  platformModules,
   builds,
   errorsOf,
   importForms,
@@ -112,7 +112,7 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
     const fixture = await appWith(
       withFiles(notesFiles(), {
         "server/__proto__.ts":
-          'import { v } from "@grasp-os/runtime";\nimport { query } from "@server/_generated/server";\n\nexport const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });\n',
+          'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });\n',
       })
     );
     const refused: unknown = await seal(fixture).then(
@@ -286,7 +286,7 @@ JSON.stringify = (value, ...rest) => {
   it("seals functions at any segment a reference doesn't answer, `preferences` among them", async () => {
     const fixture = await appWith(
       withFiles(notesFiles(), {
-        "server/preferences.ts": `import { v } from "@grasp-os/runtime";
+        "server/preferences.ts": `import { v } from "@grasp-os/sdk";
 import { api } from "@server/_generated/api";
 import { action, query } from "@server/_generated/server";
 
@@ -478,7 +478,7 @@ describe("import boundaries", { timeout: 120_000 }, () => {
         .map(([form, write]) => [target, form, kind, write] as const)
     )
   )(
-    "keep the platform's bootstrap out of %s, naming it for its %s",
+    "keep the platform's runtime and the SDK's non-entries out of %s, naming them for their %s",
     async (_target, _form, kind, write) => {
       const { file, wrap, build } = kind;
       const built = await build(
@@ -489,7 +489,7 @@ describe("import boundaries", { timeout: 120_000 }, () => {
       );
       expect({ ok: built.ok, refused: refusedIn(built, file) }).toStrictEqual({
         ok: false,
-        refused: [...bootstrapModules].toSorted(),
+        refused: [...platformModules].toSorted(),
       });
     }
   );

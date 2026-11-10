@@ -1,4 +1,4 @@
-import { useForm } from "@grasp-os/runtime/react";
+import { useForm } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,

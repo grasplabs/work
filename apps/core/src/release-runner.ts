@@ -1,9 +1,10 @@
 import {
   appModuleName,
   kitModuleName,
+  serverRunner,
   serverEntryPath,
 } from "@grasp-os/compiler";
-import type { MutationStart, FunctionChannel } from "@grasp-os/runtime/runner";
+import type { MutationStart, FunctionChannel } from "@grasp-os/runtime/host";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { whenAborted } from "@grasp-os/shared/deadline";
@@ -91,7 +92,7 @@ const runModule = "grasp-function.js";
  */
 const mutationRuntimeModule = "grasp-mutation-runtime.js";
 
-const mutationRuntimeMain = `import { installMutationRuntime } from ${JSON.stringify(kitModuleName("@grasp-os/runtime/runner"))};
+const mutationRuntimeMain = `import { installMutationRuntime } from ${JSON.stringify(kitModuleName(serverRunner))};
 
 export const startMutation = installMutationRuntime();
 `;
@@ -108,7 +109,7 @@ const answerMaxLength = operationResultMaxBytes;
  */
 const runMain = `import { startMutation } from ${JSON.stringify(mutationRuntimeModule)};
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { runFunction } from ${JSON.stringify(kitModuleName("@grasp-os/runtime/runner"))};
+import { runFunction } from ${JSON.stringify(kitModuleName(serverRunner))};
 import { jsonAnswer } from ${JSON.stringify(hostJsonModule)};
 import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
 

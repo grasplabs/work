@@ -1,4 +1,4 @@
-import type { Id } from "@grasp-os/runtime";
+import type { Id } from "@grasp-os/sdk";
 
 // A workflow's fields as the map reads them, and the numbers the map
 // shows for it: how many hours a week it takes, how many people and

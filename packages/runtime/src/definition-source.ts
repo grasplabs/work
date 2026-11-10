@@ -284,9 +284,9 @@ const permissionReference = (alias: string): Code => ({
 const printed = (path: string, statements: string[]): string =>
   `${banner(path)}${statements.join("\n")}\n`;
 
-/** `import { names } from "@grasp-os/runtime";`, the names sorted. */
+/** `import { names } from "@grasp-os/sdk";`, the names sorted. */
 const sdkImport = (names: readonly string[]): string =>
-  `import { ${names.toSorted().join(", ")} } from "@grasp-os/runtime";`;
+  `import { ${names.toSorted().join(", ")} } from "@grasp-os/sdk";`;
 
 /** The kinds of permission the config lists, each a list or one. */
 const permissionKinds = [

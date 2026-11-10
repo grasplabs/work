@@ -1,11 +1,11 @@
 import { Validator } from "@cfworker/json-schema";
 import type { OutputUnit } from "@cfworker/json-schema";
-import type { ValueDescriptor, ValueSchema } from "@grasp-os/runtime";
-import { checkExpression } from "@grasp-os/runtime/expression-check";
+import type { ValueDescriptor, ValueSchema } from "@grasp-os/runtime/app";
+import { checkExpression } from "@grasp-os/runtime/check";
 import type {
   ExpressionErrorCode,
   ExpressionRead,
-} from "@grasp-os/runtime/expression-check";
+} from "@grasp-os/runtime/check";
 import {
   appErrorProblemOf,
   CompactDescriptorError,
@@ -53,7 +53,7 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 // (@cfworker/json-schema), then for what no schema says, and nothing more:
 //
 // - step IDs unique in the workflow, each step's engine names its own;
-// - every expression checked where it stands (`@grasp-os/runtime/expression-check`): it reads
+// - every expression checked where it stands (`@grasp-os/runtime/check`): it reads
 //   only the results of steps that ran before it, in its own list or a
 //   list around it (exactly what JavaScript's block scope gives the
 //   generated `const`s) and that have one (`resultStepTypes`), declared

@@ -1,4 +1,4 @@
-import { AppError, v } from "@grasp-os/runtime";
+import { AppError, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 import type { CallerCtx } from "@server/_generated/server";
 

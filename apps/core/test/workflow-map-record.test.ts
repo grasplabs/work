@@ -1,4 +1,4 @@
-import type { Id } from "@grasp-os/runtime";
+import type { Id } from "@grasp-os/runtime/app";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

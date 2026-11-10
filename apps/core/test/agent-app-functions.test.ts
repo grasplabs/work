@@ -37,7 +37,7 @@ const files: TestApp = testApp(
     },
   },
   {
-    "server/notes.ts": `import { AppError, v } from "@grasp-os/runtime";
+    "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 export const create = mutation({

@@ -1483,7 +1483,7 @@ export interface EventWaitPlan {
 }
 
 /**
- * How an event wait ended (`RunHost.listen`), as `@grasp-os/runtime/workflow`'s
+ * How an event wait ended (`RunHost.listen`), as `@grasp-os/sdk/workflow`'s
  * `EventWait` has it: the event it took, its envelope as the host minted
  * it, or that none came in time.
  */

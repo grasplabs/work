@@ -39,6 +39,7 @@
     "@commitlint/cli": "catalog:",
     "@commitlint/config-conventional": "catalog:",
     "@grasp-os/runtime": "workspace:*",
+    "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/workerflow": "workspace:*",
     "@grasp-os/workflow-schema": "workspace:*",

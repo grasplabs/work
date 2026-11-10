@@ -1,5 +1,5 @@
-import { defineSchema, defineTable, v } from "@grasp-os/runtime";
-import type { Id } from "@grasp-os/runtime";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import type { Id } from "@grasp-os/runtime/app";
 import { databaseReader, manifestText } from "@grasp-os/runtime/host";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { Commit, StoreFields } from "@grasp-os/shared/stores";

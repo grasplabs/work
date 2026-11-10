@@ -1,4 +1,4 @@
-import type { FilesOperation } from "@grasp-os/runtime";
+import type { FilesOperation } from "@grasp-os/runtime/app";
 import { declaredPermission, schemaHash } from "@grasp-os/runtime/host";
 import {
   appFilesPath,

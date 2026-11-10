@@ -63,13 +63,13 @@ export const unclosed = fixed.replace(
 
 /** A workflow a builder wrote, with its tests. */
 export const intake = {
-  "workflows/intake.ts": `import { v, workflow } from "@grasp-os/runtime/workflow";
+  "workflows/intake.ts": `import { v, workflow } from "@grasp-os/sdk/workflow";
 
 export default workflow("intake", { params: {}, input: v.object({ invoice: v.string() }) }, async (step, { input }) => {
   return await step.do("read", { description: "Read the invoice" }, async () => input.invoice);
 });
 `,
-  "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/runtime/testing";
+  "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
 
 import definition from "./intake.ts";
 

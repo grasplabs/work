@@ -1,4 +1,4 @@
-import { defineSchema, defineTable, v } from "@grasp-os/runtime";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
 import {
   databaseReader,
   manifestText,

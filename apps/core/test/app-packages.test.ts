@@ -73,7 +73,7 @@ const appFiles = (page: string, server: string): TestApp =>
       },
     },
     {
-      "server/points.ts": `import { v } from "@grasp-os/runtime";
+      "server/points.ts": `import { v } from "@grasp-os/sdk";
 import { action, query } from "@server/_generated/server";
 import { double, reach } from ${JSON.stringify(server)};
 
@@ -100,7 +100,7 @@ export const Route = createFileRoute("/")({ component: () => <Bars /> });
 /** An App whose pages alone import `page`: its server code imports none. */
 const pageOnlyFiles = (page: string): TestApp =>
   withFiles(appFiles(page, page), {
-    "server/points.ts": `import { v } from "@grasp-os/runtime";
+    "server/points.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const doubled = query({
@@ -368,7 +368,7 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
       "tests/fixtures/people.json": JSON.stringify({
         principals: { reader: { role: "user" } },
       }),
-      "tests/maths.test.ts": `import { appTest } from "@grasp-os/runtime/testing";
+      "tests/maths.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { double } from ${JSON.stringify(server)};
 
 export default appTest({

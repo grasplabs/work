@@ -1,5 +1,5 @@
-import { defineSchema, defineTable, v } from "@grasp-os/runtime";
-import type { SchemaDefinition } from "@grasp-os/runtime";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import type { SchemaDefinition } from "@grasp-os/runtime/app";
 import {
   manifestText,
   readSchemaManifest,

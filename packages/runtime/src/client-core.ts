@@ -26,7 +26,7 @@ import { Submissions } from "./submissions.ts";
 // The session client: the one object a page's
 // queries, mutations and actions go through. The platform makes one per
 // App session and mounts it (page-runtime.ts); App code reaches it
-// through `useClient()` and the hooks of `@grasp-os/runtime/react`, and gets
+// through `useClient()` and the hooks of `@grasp-os/sdk/react`, and gets
 // direct values and structured errors (client-error.ts), never a
 // transport envelope.
 //

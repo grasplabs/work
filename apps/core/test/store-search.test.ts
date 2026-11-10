@@ -1,4 +1,4 @@
-import { defineSchema, defineTable, v } from "@grasp-os/runtime";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
 import { databaseReader, manifestText } from "@grasp-os/runtime/host";
 import type { AccessMode } from "@grasp-os/runtime/host";
 import type { PaginationResult } from "@grasp-os/runtime/server";

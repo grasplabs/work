@@ -5,15 +5,15 @@ import {
   defineTable,
   permission,
   v,
-} from "@grasp-os/runtime";
+} from "@grasp-os/runtime/app";
 import {
   inspectApp,
   manifestText,
   registerApp,
   schemaHash,
+  runFunction,
 } from "@grasp-os/runtime/host";
-import { runFunction } from "@grasp-os/runtime/runner";
-import type { FunctionChannel } from "@grasp-os/runtime/runner";
+import type { FunctionChannel } from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
 import {
   releaseFormatVersion,

@@ -1,4 +1,4 @@
-import { defineSchema, defineTable, v } from "@grasp-os/runtime";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
 import { manifestText, schemaManifest } from "@grasp-os/runtime/host";
 import type { AccessMode } from "@grasp-os/runtime/host";
 import { storeMaxIndexes } from "@grasp-os/shared/store-limits";

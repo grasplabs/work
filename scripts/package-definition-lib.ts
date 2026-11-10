@@ -121,7 +121,7 @@ import {
 import type { Importer, LockfileInput } from "./package-definition-lockfile.ts";
 
 /** The workspace packages a project vendors, each with what it depends on. */
-const vendored = ["brain", "shared", "runtime", "ui"] as const;
+const vendored = ["brain", "shared", "runtime", "sdk", "ui"] as const;
 
 /** The catalog packages every project depends on itself. */
 const projectDependencies = [

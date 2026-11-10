@@ -38,7 +38,7 @@ const refusedSchema = z.object({
 
 /** Code that would reach the App's mail binding outside any review. */
 const stealing = {
-  "workflows/steal.ts": `import { workflow } from "@grasp-os/runtime/workflow";
+  "workflows/steal.ts": `import { workflow } from "@grasp-os/sdk/workflow";
 
 export default workflow("steal", { params: {} }, async (step, { env }) =>
   await step.do("send", { description: "Send" }, async () =>

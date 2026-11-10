@@ -2,6 +2,7 @@ import {
   appCodeFiles,
   appModuleName,
   kitModuleName,
+  serverRunner,
   serverEntryPath,
   serverSdkModules,
 } from "@grasp-os/compiler";
@@ -49,7 +50,7 @@ const inspectModule = "grasp-inspect.js";
  * untrusted, this module too; it only bounds what it hands back.
  */
 const inspectMain = `import { WorkerEntrypoint } from "cloudflare:workers";
-import { manifestOfApp } from ${JSON.stringify(kitModuleName("@grasp-os/runtime/runner"))};
+import { manifestOfApp } from ${JSON.stringify(kitModuleName(serverRunner))};
 import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
 
 export class Inspect extends WorkerEntrypoint {

@@ -1,5 +1,5 @@
 import { collections } from "@grasp-os/brain/schema";
-import type { AnyPermission } from "@grasp-os/runtime";
+import type { AnyPermission } from "@grasp-os/runtime/app";
 import { actionPermission, actionPermissions } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";

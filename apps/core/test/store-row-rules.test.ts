@@ -4,15 +4,15 @@ import {
   defineTable,
   rows,
   v,
-} from "@grasp-os/runtime";
-import type { Id, SchemaDefinition } from "@grasp-os/runtime";
+} from "@grasp-os/runtime/app";
+import type { Id, SchemaDefinition } from "@grasp-os/runtime/app";
 import {
   inspectApp,
   manifestText,
   registerApp,
   schemaManifest,
+  runFunction,
 } from "@grasp-os/runtime/host";
-import { runFunction } from "@grasp-os/runtime/runner";
 import { serverModule } from "@grasp-os/runtime/server";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -1162,7 +1162,7 @@ describe("an App's data page", () => {
     },
     {
       "server/requests.ts": `import { mutation } from "@server/_generated/server";
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/sdk";
 
 export const add = mutation({
   args: { title: v.string(), team: v.string() },

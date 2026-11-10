@@ -2,7 +2,7 @@
 import type { RunId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 
-/** An answer to a decision, as a test gives it (`@grasp-os/runtime/testing`). */
+/** An answer to a decision, as a test gives it (`@grasp-os/sdk/testing`). */
 export interface DecisionAnswer {
   approved: boolean;
   /** The person who answered. */
@@ -65,7 +65,7 @@ interface EngineStepOptions {
 
 /**
  * What a durable runtime implements to run workflows written with
- * `@grasp-os/runtime/workflow`. Workflow code never sees it, so the engine
+ * `@grasp-os/sdk/workflow`. Workflow code never sees it, so the engine
  * underneath (the cloud runtime, or an on-prem one) can change without
  * touching a single workflow. It stays close to the common durable-execution
  * primitives (a named step whose result is recorded, a durable sleep, a

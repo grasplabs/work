@@ -41,7 +41,7 @@ const idp = mockIdp();
 /** The Notes App's functions, as code exports them. */
 const notesCode = (
   create = "create"
-): string => `import { v } from "@grasp-os/runtime";
+): string => `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const ${create} = mutation({

@@ -66,7 +66,7 @@ const files = (label: string): TestApp =>
       },
     },
     {
-      "server/notes.ts": `import { v } from "@grasp-os/runtime";
+      "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 export const label = query({
   args: {},

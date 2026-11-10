@@ -65,7 +65,7 @@ const files: TestApp = testApp(
     },
   },
   {
-    "server/pay.ts": `import { AppError, v } from "@grasp-os/runtime";
+    "server/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const pay = mutation({

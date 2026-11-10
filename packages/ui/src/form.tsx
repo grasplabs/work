@@ -3,9 +3,9 @@ import type {
   FilesReference,
   FunctionReference,
   FunctionReturn,
-} from "@grasp-os/runtime";
-import { bindingOf } from "@grasp-os/runtime/form-binding";
-import type { ValueDescriptor } from "@grasp-os/runtime/form-binding";
+} from "@grasp-os/runtime/app";
+import { bindingOf } from "@grasp-os/runtime/forms";
+import type { ValueDescriptor } from "@grasp-os/runtime/forms";
 import { useQuery, useRetryFailed, useUpload } from "@grasp-os/runtime/react";
 import type {
   Declaring,

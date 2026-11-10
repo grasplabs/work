@@ -1,5 +1,5 @@
-import { defineSchema, defineTable, v } from "@grasp-os/runtime";
-import type { Id } from "@grasp-os/runtime";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import type { Id } from "@grasp-os/runtime/app";
 import { databaseReader, manifestText } from "@grasp-os/runtime/host";
 import type { AccessMode } from "@grasp-os/runtime/host";
 import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";

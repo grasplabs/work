@@ -1,5 +1,5 @@
-import type { FunctionReference, ValueSchema } from "@grasp-os/runtime";
-import { GraspClient } from "@grasp-os/runtime/client";
+import type { FunctionReference, ValueSchema } from "@grasp-os/runtime/app";
+import { GraspClient } from "@grasp-os/runtime/page";
 import { GraspProvider } from "@grasp-os/runtime/react";
 import { isRecord } from "@grasp-os/shared/json";
 import { act } from "react";

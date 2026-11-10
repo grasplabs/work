@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/runtime";
+import { v } from "@grasp-os/runtime/app";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";

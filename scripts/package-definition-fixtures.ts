@@ -535,6 +535,10 @@ export const appDefinition = async (
   mkdirSync(path.join(dir, "node_modules/@grasp-os"), { recursive: true });
   mkdirSync(path.join(dir, "node_modules/@server"), { recursive: true });
   symlinkSync(
+    path.join(ROOT, "packages/sdk"),
+    path.join(dir, "node_modules/@grasp-os/sdk")
+  );
+  symlinkSync(
     path.join(ROOT, "packages/runtime"),
     path.join(dir, "node_modules/@grasp-os/runtime")
   );

@@ -119,7 +119,7 @@ export const typesModule = "types.json";
  * The React SDK pages use (spec 10.1, 10.7.1): the platform's session
  * client and the App's queries, mutations and actions through `@server/_generated/api`.
  */
-export const pageSdk = "@grasp-os/runtime/react";
+export const pageSdk = "@grasp-os/sdk/react";
 
 /**
  * The SDK's root module: its types, which the generated `@server/_generated/api`
@@ -127,7 +127,7 @@ export const pageSdk = "@grasp-os/runtime/react";
  * values (`v`), which a page's local form validates with (spec 10.2.4).
  * Nothing else of it: the rest is server code (`pageRootNames`).
  */
-export const sdkRoot = "@grasp-os/runtime";
+export const sdkRoot = "@grasp-os/sdk";
 
 /** What pages may import of the SDK's root module, besides its types. */
 export const pageRootNames: ReadonlySet<string> = new Set(["v"]);
@@ -162,21 +162,34 @@ export const pageDataModel = {
  * What renders a page in its frame. App code doesn't import it, but every
  * page needs it (`PageClosure.kitModules`).
  */
-export const pageRuntime = "@grasp-os/runtime/page-runtime";
+export const pageRuntime = "@grasp-os/runtime/page";
 
 /**
  * What runs a chat's preview in its frame in place of `pageRuntime`:
  * the page runtime with React Fast Refresh (spec 22.7). Only the
- * preview kit has it.
+ * preview kit has it, built from the runtime's file (no package exports
+ * it).
  */
 export const previewRuntime = "@grasp-os/runtime/preview-runtime";
 
 /**
  * Where a preview build's modules register their components with React
  * Fast Refresh: only the preview kit has it, and App code never imports it
- * itself (the compiler adds the import).
+ * itself (the compiler adds the import). Built from the runtime's file too.
  */
 export const previewRefresh = "@grasp-os/runtime/preview-refresh";
+
+/**
+ * What an App's server isolate runs it with: the runner core's main
+ * modules call (`runFunction`, `installMutationRuntime`, `manifestOfApp`,
+ * `runMigration`) and the generated entry registers the App with
+ * (`registerApp`), all `@grasp-os/runtime/host`'s. The kit's module of that
+ * name is built from the runner's file alone (runner.ts), its types
+ * too: never the rest of the host (its code generators, its schema
+ * tools), which no isolate runs. Outside the kit (a packaged App
+ * project) the name is the whole host, which gives the same.
+ */
+export const serverRunner = "@grasp-os/runtime/host";
 
 /**
  * TanStack Router, which an App's pages route with: its file routes'

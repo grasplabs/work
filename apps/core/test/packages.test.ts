@@ -182,7 +182,7 @@ describe("asking for packages", () => {
       { a: "github:acme/a" },
       { a: "latest" },
       { a: "npm:other@1" },
-      { "@grasp-os/runtime": "^1.0.0" },
+      { "@grasp-os/sdk": "^1.0.0" },
     ];
     const codes = await Promise.all(
       sources.map(async (dependencies) => {

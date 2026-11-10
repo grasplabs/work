@@ -483,7 +483,7 @@ export const Route = createFileRoute("/")({ component: Page });
     await apps.files.commit(
       app.id,
       {
-        "server/extra.ts": `import { v } from "@grasp-os/runtime";
+        "server/extra.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });

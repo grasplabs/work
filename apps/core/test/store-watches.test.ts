@@ -1,4 +1,4 @@
-import { defineSchema, defineTable } from "@grasp-os/runtime";
+import { defineSchema, defineTable } from "@grasp-os/runtime/app";
 import { manifestText, schemaManifest } from "@grasp-os/runtime/host";
 import { querySubscriptionLimits } from "@grasp-os/shared/pages";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";

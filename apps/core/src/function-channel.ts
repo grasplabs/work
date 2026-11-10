@@ -1,4 +1,4 @@
-import type { FunctionChannel } from "@grasp-os/runtime/runner";
+import type { FunctionChannel } from "@grasp-os/runtime/host";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
 import { isAppErrorCode } from "@grasp-os/shared/function-limits";

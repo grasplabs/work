@@ -2,7 +2,7 @@
 // before it sends a draft: the same bounds as the schema's (values.ts),
 // which the App's functions check again (server/drafts.ts).
 
-import type { Id } from "@grasp-os/runtime";
+import type { Id } from "@grasp-os/sdk";
 
 /** What a statement can be about, and how the page names each. */
 export const tagLabels = {

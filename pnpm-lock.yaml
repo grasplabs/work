@@ -422,6 +422,9 @@ importers:
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:packages/runtime
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:packages/sdk
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:packages/shared
@@ -685,6 +688,9 @@ importers:
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -809,6 +815,9 @@ importers:
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -1051,6 +1060,9 @@ importers:
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
@@ -1216,6 +1228,18 @@ importers:
         version: 19.3.0
       react-dom:
         specifier: 'catalog:'
+        version: 19.3.0(react@19.3.0)
+
+  packages/sdk:
+    dependencies:
+      '@grasp-os/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      react:
+        specifier: ^19.2.0
+        version: 19.3.0
+      react-dom:
+        specifier: ^19.2.0
         version: 19.3.0(react@19.3.0)
 
   packages/shared:

@@ -3,7 +3,7 @@ import {
   kitModuleName,
   serverEntryPath,
 } from "@grasp-os/compiler";
-import { defineApp, defineSchema, defineTable, v } from "@grasp-os/runtime";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/runtime/app";
 import { inspectApp, registerApp } from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
 
@@ -194,7 +194,7 @@ export default {
       { ...env, SANDBOX_HOST: host },
       {
         modules: { [appModuleName(serverEntryPath)]: appModule },
-        sdk: { [kitModuleName("@grasp-os/runtime/runner")]: runner },
+        sdk: { [kitModuleName("@grasp-os/runtime/host")]: runner },
       },
       searchParams.get("owner") ?? "app-stand-in"
     );

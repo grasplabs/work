@@ -63,7 +63,7 @@ import type {
  *   on a first run and on a replay alike: a field nobody wrote, `__proto__`
  *   and `constructor` included, is `undefined` or an own field holding
  *   data, never something inherited, and nothing changes it. The check of
- *   expressions (`@grasp-os/runtime/expression-check`) is the first layer, the
+ *   expressions (`@grasp-os/runtime/check`) is the first layer, the
  *   isolate's frozen intrinsics the third.
  * - Members exposing undeclared names. `ctx.connections`, `ctx.apps`,
  *   `ctx.decisions`, `ctx.events` and `ctx.ai` are built only from
@@ -98,6 +98,10 @@ export { v } from "./values.ts";
 export { AppError } from "./app-error.ts";
 export { WorkflowError } from "./workflow-error.ts";
 export { sensitiveParam } from "./workflow-params.ts";
+// What only the code generated from a grasp-workflow/2 document calls
+// (workflow-generated.ts): never the SDK's, as no workflow is written
+// against them.
+export { caughtError, itemsOf, own, parse } from "./workflow-generated.ts";
 export type { Json } from "@grasp-os/shared/json";
 export type { Param, ParamMetadata } from "./workflow-params.ts";
 export type {

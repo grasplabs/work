@@ -11,7 +11,7 @@ import type { TestApp } from "../apps/core/test/app-definitions.ts";
 export const tallyPage = (
   button: string
 ): string => `import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@grasp-os/runtime/react";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 
@@ -39,7 +39,7 @@ export const Route = createFileRoute("/")({ component: Tally });
 export const tallyServer = (
   label: string,
   { builds = true }: { readonly builds?: boolean } = {}
-): string => `import { v } from "@grasp-os/runtime";
+): string => `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const count = query({

@@ -77,7 +77,7 @@ const notesFiles: TestApp = testApp(
     },
   },
   {
-    "server/notes.ts": `import { v } from "@grasp-os/runtime";
+    "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const titles = query({

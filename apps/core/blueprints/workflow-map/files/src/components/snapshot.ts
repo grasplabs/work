@@ -2,7 +2,7 @@
 // store (server/snapshots.ts), and what each refusal means to the
 // person using it.
 
-import type { Id } from "@grasp-os/runtime";
+import type { Id } from "@grasp-os/sdk";
 
 import type { SignalFigure, SnapshotRecord, WorkflowFigures } from "./board";
 

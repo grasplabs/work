@@ -1,6 +1,10 @@
-import { defineApp, defineSchema, defineTable, v } from "@grasp-os/runtime";
-import { inspectApp, manifestText, registerApp } from "@grasp-os/runtime/host";
-import { runFunction } from "@grasp-os/runtime/runner";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import {
+  inspectApp,
+  manifestText,
+  registerApp,
+  runFunction,
+} from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";

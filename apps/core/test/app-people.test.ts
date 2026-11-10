@@ -52,7 +52,7 @@ const peopleFiles = (people = true): TestApp =>
       permissions: people ? ["people"] : [],
     },
     {
-      "server/dir.ts": `import { v } from "@grasp-os/runtime";
+      "server/dir.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 /** Who calls, as the function sees it. */
