@@ -24,6 +24,7 @@ const requestSchema = z.strictObject({
   files: z.record(z.string(), z.string()),
   options: z.record(z.string(), z.unknown()),
   allowed: z.array(z.string()).optional(),
+  unreported: z.array(z.string()).optional(),
 });
 
 export default class TypeChecker extends WorkerEntrypoint {

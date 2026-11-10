@@ -34,6 +34,9 @@ import { workflowReferenceLimits } from "../src/workflow-references.ts";
 import { notesWorkflows } from "./notes-workflows.ts";
 import notes from "./notes/.grasp/app.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
+// oxlint-disable-next-line import/default -- a ?raw import is the file's text
+import functionsText from "./notes/.grasp/functions.ts?raw";
+import { functions as releaseFunctions } from "./notes/.grasp/functions.ts";
 import { archiveNotes, summarizeNote } from "./notes/grasp.config.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import referencesText from "./notes/server/_generated/api.ts?raw";
@@ -130,6 +133,7 @@ describe("generated modules", () => {
       "server/_generated/internal.ts": serverReferencesText,
       "server/_generated/api.ts": referencesText,
       ".grasp/contracts.json": contractsText,
+      ".grasp/functions.ts": functionsText,
     });
   });
 
@@ -168,52 +172,59 @@ describe("generated modules", () => {
     }
   });
 
-  test("hold what a page calls and checks a function by, nothing of the release, frozen all the way down", () => {
-    const { operations } = notesManifest();
-    const references = [api.notes.create, api.notes.exportAll, api.notes.list];
-    expect({
-      // A mutation's and an action's (a streaming one's too: core knows
-      // it streams): the kind `useForm` sends by, and the arguments it
-      // checks a form with.
-      create: api.notes.create,
-      exportAll: {
-        kind: api.notes.exportAll.kind,
-        args: api.notes.exportAll.args,
-      },
-      // A query's: what it answers, which a grid reads its columns from,
-      // and no kind, which its hook says.
-      list: {
-        returns: api.notes.list.returns,
-        kind: Reflect.has(api.notes.list, "kind"),
-      },
-      // Nothing that changes from one release to the next.
-      ofRelease: references.flatMap((reference) =>
-        ["resourceId", "resourceVersion", "contractId", "fingerprint"].filter(
-          (key) => Reflect.has(reference, key)
-        )
-      ),
-    }).toStrictEqual({
-      create: {
-        name: "notes.create",
-        kind: "mutation",
-        args: operations["notes.create"]?.args,
-      },
-      exportAll: { kind: "action", args: operations["notes.exportAll"]?.args },
-      list: { returns: operations["notes.list"]?.returns, kind: false },
-      ofRelease: [],
-    });
+  test("are each function's name alone, frozen all the way down", () => {
+    const references = [
+      api.notes.create,
+      api.notes.exportAll,
+      api.notes.list,
+      api.notes.titles,
+      internal.notes.count,
+    ];
+    expect(references).toStrictEqual([
+      { name: "notes.create" },
+      { name: "notes.exportAll" },
+      { name: "notes.list" },
+      { name: "notes.titles" },
+      { name: "notes.count" },
+    ]);
     // The phantom types exist in types only.
     expect(Object.getOwnPropertySymbols(api.notes.create)).toStrictEqual([]);
     expect([
       Object.isFrozen(api),
       Object.isFrozen(api.notes),
       Object.isFrozen(api.notes.create),
+      Object.isFrozen(internal.notes.count),
       Object.isFrozen(permissions.files.operations),
       Reflect.set(api.notes.create, "name", "notes.remove"),
-    ]).toStrictEqual([true, true, true, true, false]);
+    ]).toStrictEqual([true, true, true, true, true, false]);
   });
 
-  test("name functions the same whatever release or version they are generated for", async () => {
+  test("give a page the release's public functions by name, its workflows' too, as data a client reads them from", () => {
+    const workflowsBound = declaredWorkflows(notesManifest(), notesWorkflows);
+    const published = [
+      ...Object.values(notesManifest().operations),
+      ...workflowsBound.flatMap((workflow) => {
+        const { queries, mutations } = workflowFunctions(workflow);
+        return [...Object.values(queries), ...Object.values(mutations)];
+      }),
+    ].filter((fn) => fn !== undefined && fn.visibility === "public");
+    expect(releaseFunctions).toStrictEqual(
+      Object.fromEntries(
+        published.map((fn) => [
+          fn.path,
+          { kind: fn.kind, args: fn.args, returns: fn.returns },
+        ])
+      )
+    );
+    // Never an internal function's, and a query without `returns` says so.
+    expect({
+      internal: Object.hasOwn(releaseFunctions, "notes.count"),
+      titles: releaseFunctions["notes.titles"].returns,
+      start: releaseFunctions["workflows.summarizeNote.mutations.start"].kind,
+    }).toStrictEqual({ internal: false, titles: null, start: "mutation" });
+  });
+
+  test("name functions the same whatever release, version or contract they are generated for", async () => {
     // Without workflows, whose references still carry the release they
     // were bound in: every reference here is a name.
     const fixture = notesManifest();
@@ -225,9 +236,26 @@ describe("generated modules", () => {
         )
       ),
     };
+    // Another version, whose functions take and answer other values: the
+    // references are the code's names, and their types the code's own.
+    const create = manifest.operations["notes.create"];
+    if (create === undefined) {
+      throw new Error("No notes.create");
+    }
+    const changedContracts = {
+      ...manifest,
+      operations: {
+        ...manifest.operations,
+        "notes.create": {
+          ...create,
+          args: v.object({ heading: v.string() }).descriptor,
+          returns: null,
+        },
+      },
+    };
     const [one, other] = await Promise.all([
       generateModules(manifest, identity),
-      generateModules(manifest, {
+      generateModules(changedContracts, {
         resourceId: "app_00000000000000000000000other",
         resourceVersion: 7,
       }),
@@ -249,24 +277,13 @@ describe("generated modules", () => {
       "list",
       "remove",
       "setSummary",
+      "tallied",
       "tally",
+      "titles",
       "update",
     ]);
     expect(internal.notes.count).toMatchObject({ name: "notes.count" });
     expect(referencesText).not.toContain("notes.count");
-  });
-
-  test("keep handlers, schemas and server modules out of what a browser imports", () => {
-    for (const forbidden of [
-      "handler",
-      "schema.ts",
-      "@grasp-os/sdk/server",
-      "serverModule",
-      "server/",
-      "internal",
-    ]) {
-      expect(referencesText).not.toContain(forbidden);
-    }
   });
 
   test("expose the pages' permissions with their literal operations and origins, and only those", () => {
@@ -1021,6 +1038,7 @@ describe("symbolic references", () => {
   test("resolve against the registration by path, and never survive into generated modules", () => {
     const modules = symbolicModules();
     expect(Object.keys(modules).toSorted()).toStrictEqual([
+      ".grasp/functions.ts",
       "server/_generated/api.ts",
       "server/_generated/internal.ts",
     ]);

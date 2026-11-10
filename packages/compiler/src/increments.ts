@@ -7,6 +7,7 @@ import {
   bundledPackagesOf,
   packageModulesByName,
   packageModulesFile,
+  pageFunctions,
   pageReferences,
 } from "./kit.ts";
 
@@ -128,7 +129,12 @@ export const pageSources = (
   typeFiles: string[];
 } => {
   const sources = Object.entries(app)
-    .filter(([path]) => sourceCode.isFile(path) || path === pageReferences.path)
+    .filter(
+      ([path]) =>
+        sourceCode.isFile(path) ||
+        path === pageReferences.path ||
+        path === pageFunctions.path
+    )
     .filter(([path]) => !declarationFile.test(path));
   const approved = [...packages];
   return {

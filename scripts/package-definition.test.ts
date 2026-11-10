@@ -153,6 +153,7 @@ describe(
       }).toStrictEqual({
         app: [
           "app/.grasp/contracts.json",
+          "app/.grasp/functions.ts",
           "app/grasp.config.ts",
           "app/server/_generated/api.ts",
           "app/server/_generated/dataModel.ts",

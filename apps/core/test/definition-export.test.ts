@@ -185,6 +185,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       ],
       generated: [
         ".grasp/contracts.json",
+        ".grasp/functions.ts",
         "server/_generated/api.ts",
         "server/_generated/dataModel.ts",
         "server/_generated/internal.ts",

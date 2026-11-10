@@ -181,14 +181,32 @@ const routeTreeOf = (module: unknown): AnyRoute | undefined => {
 };
 
 /**
+ * The release's functions a route tree's module hands on beside its
+ * routes (the compiler's `withFunctions`), as data the client reads; none
+ * for a build without references.
+ */
+const functionsOf = (module: unknown): unknown =>
+  typeof module === "object" && module !== null
+    ? Reflect.get(module, "functions")
+    : undefined;
+
+/** The client each router's pages read through (`runPage`). */
+const clients = new WeakMap<AnyRouter, GraspClient>();
+
+/**
  * Routes `router` by the route tree `module` exports, as TanStack's own
  * hot updates do: its routes are rebuilt, and what is shown is matched
- * again. False for a module with no route tree.
+ * again, its client given the functions the module hands on. False for a
+ * module with no route tree.
  */
 export const routeBy = (router: AnyRouter, module: unknown): boolean => {
   const routeTree = routeTreeOf(module);
   if (routeTree === undefined) {
     return false;
+  }
+  const client = clients.get(router);
+  if (client !== undefined) {
+    clientInternals(client).useFunctions(functionsOf(module));
   }
   router.update({ ...router.options, routeTree });
   void router.invalidate();
@@ -569,7 +587,8 @@ export const runPage = async (
     // Where the page's address says the App is: asked for before the
     // routes load, so the first render is of that route.
     const location = await page.location();
-    const routeTree = routeTreeOf(await import(entry));
+    const module: unknown = await import(entry);
+    const routeTree = routeTreeOf(module);
     if (routeTree === undefined) {
       throw new Error(`${entry} has no route tree to route by.`);
     }
@@ -577,11 +596,14 @@ export const runPage = async (
     // One client for the App session this frame runs, over the page's
     // bridge: every page in it reads through the same queries and
     // submissions, and none makes its own.
-    const client = new GraspClient({
-      ...bridgeTransport(bridge),
-      files: portFileTransport(filePort),
-      links: portLinkTransport(linkPort),
-    });
+    const client = new GraspClient(
+      {
+        ...bridgeTransport(bridge),
+        files: portFileTransport(filePort),
+        links: portLinkTransport(linkPort),
+      },
+      functionsOf(module)
+    );
     const retry = (): void => {
       clientInternals(client).retryFailed();
     };
@@ -598,6 +620,7 @@ export const runPage = async (
           reset();
         }),
     });
+    clients.set(router, client);
     await syncLocation(history, page);
     await router.load();
     const { mounted } = hooks;

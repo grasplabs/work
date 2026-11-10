@@ -1,4 +1,4 @@
-import { dataModelSource } from "@grasp-os/runtime/host";
+import { dataModelSource, serverModuleSource } from "@grasp-os/runtime/host";
 /**
  * What a build reads of an App's files, and how much of it a build takes.
  * Core uses these before it hashes and sends the files; the compiler again
@@ -11,7 +11,7 @@ import {
 } from "@grasp-os/shared/app-limits";
 
 import type { Diagnostic } from "./diagnostic.ts";
-import { pageDataModel, pageReferences } from "./kit.ts";
+import { pageDataModel, pageFunctions, pageReferences } from "./kit.ts";
 
 /**
  * Where an App's front end is, as an ordinary Vite React app's: its
@@ -132,14 +132,53 @@ const defaultRoot = `import { createRootRoute } from "@tanstack/react-router";
 export const Route = createRootRoute();
 `;
 
+/** Where the generated modules App code imports are, as Convex has them. */
+export const generatedServerFolder = "server/_generated/";
+
+/** Where the generated module of the server constructors is (`@server/_generated/server`). */
+const serverModulePath = "server/_generated/server.ts";
+
+/**
+ * Whether `path` is App server code the references' types read
+ * (`typeof import("../tasks.ts").list`): its config, values, schema and
+ * server modules, and the `internal` tree they import; never its
+ * migrations or tests. Read by the pages' type check for their types
+ * alone, never compiled into a page, and reported by the server's own
+ * check (`isTypeOnlyFile`).
+ */
+export const isServerTypeFile = (path: string): boolean =>
+  path === "grasp.config.ts" ||
+  path === "values.ts" ||
+  path === "server/_generated/internal.ts" ||
+  (path.startsWith("server/") &&
+    !path.startsWith(generatedServerFolder) &&
+    !path.startsWith("server/migrations/") &&
+    path.endsWith(".ts") &&
+    !path.endsWith(".d.ts") &&
+    !path.endsWith(".test.ts") &&
+    hasAppPathSegments(path));
+
+/**
+ * Whether `path`, one of a pages build's files (`buildFiles`), is there
+ * for its types alone: the App's server code and the modules the host
+ * generates for it, whose problems the server's own check reports.
+ */
+export const isTypeOnlyFile = (path: string): boolean =>
+  isServerTypeFile(path) ||
+  path === serverModulePath ||
+  path === pageDataModel.path;
+
 /**
  * The files a build reads: the App's front end and declarations, the
  * references the host generated for the App's server code, which pages
- * import as `@server/_generated/api`, and, for a front end beside a schema, its
- * data model's types (`pageDataModel`), generated here from it as the
- * host generates them, with the default root route (`defaultRoot`) when
- * the App's pages have none. Never a route tree of the App's own: the
- * build writes the one its pages make (route-tree.ts).
+ * import as `@server/_generated/api`, with the release's functions
+ * (`pageFunctions`) and, for their types, the server code they name
+ * (`isServerTypeFile`) and the server constructors' module; and, for a
+ * front end beside a schema, its data model's types (`pageDataModel`),
+ * generated here from it as the host generates them, with the default
+ * root route (`defaultRoot`) when the App's pages have none. Never a
+ * route tree of the App's own: the build writes the one its pages make
+ * (route-tree.ts).
  */
 export const buildFiles = (
   files: Record<string, string>
@@ -150,7 +189,8 @@ export const buildFiles = (
         path !== routeTreePath &&
         (path.startsWith(sourceFolder) ||
           declarationFile.test(path) ||
-          path === pageReferences.path)
+          path === pageReferences.path ||
+          path === pageFunctions.path)
     )
   );
   // Only for a front end: an App of server code alone has no pages to build.
@@ -170,10 +210,21 @@ export const buildFiles = (
           [pageDataModel.path]: dataModelSource,
         }
       : read;
-  const routed = Object.keys(typed).some((path) => isPageFile(path));
-  return routed && !Object.hasOwn(typed, rootPage)
-    ? { ...typed, [rootPage]: defaultRoot }
-    : typed;
+  const referenced =
+    frontEnd && Object.hasOwn(read, pageReferences.path)
+      ? {
+          ...typed,
+          ...Object.fromEntries(
+            Object.entries(files).filter(([path]) => isServerTypeFile(path))
+          ),
+          [serverModulePath]: serverModuleSource,
+          [pageDataModel.path]: dataModelSource,
+        }
+      : typed;
+  const routed = Object.keys(referenced).some((path) => isPageFile(path));
+  return routed && !Object.hasOwn(referenced, rootPage)
+    ? { ...referenced, [rootPage]: defaultRoot }
+    : referenced;
 };
 
 /**
@@ -277,9 +328,6 @@ const generatedLimits = {
   fileLength: 4 * appManifestMaxBytes,
   totalLength: 8 * appManifestMaxBytes,
 } as const;
-
-/** Where the generated modules App code imports are, as Convex has them. */
-export const generatedServerFolder = "server/_generated/";
 
 /** Where the host's own generated files are, which App code never imports. */
 export const hostGeneratedFolder = ".grasp/";

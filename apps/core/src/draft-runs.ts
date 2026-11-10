@@ -2,7 +2,6 @@ import { definitionText } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
 import {
   declaredPermission,
-  generatedPaths,
   generateModules,
   manifestText,
 } from "@grasp-os/runtime/host";
@@ -48,6 +47,8 @@ import {
 import { memberRole } from "./auth/identity.ts";
 import { holdThrowawayStore, throwawayStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
+import { pageModulesOf } from "./draft-references.ts";
+import type { PageModules } from "./draft-references.ts";
 import { workspace } from "./durable-objects.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation, ProgressSink } from "./operations.ts";
@@ -216,8 +217,9 @@ const sealed = async (
 };
 
 /**
- * The `@server/_generated/api` references the pages of `draft`, a draft
- * of `app` (now, or a kept version of it), import: generated from the
+ * The page modules (`PageModules`: the `@server/_generated/api`
+ * references and the release's functions) the pages of `draft`, a draft
+ * of `app` (now, or a kept version of it), build with: generated from the
  * release the draft seals to (`sealed`), the very one its calls run on.
  * Null when it generates none; throws as the seal does.
  */
@@ -225,7 +227,7 @@ export const draftReferences = async (
   env: Env,
   app: AppId,
   draft: Draft
-): Promise<string | null> => {
+): Promise<PageModules | null> => {
   const version = (draft.base ?? 0) + 1;
   const source = await draftSource(env, app, draft);
   if (source === null) {
@@ -236,7 +238,7 @@ export const draftReferences = async (
     resourceId: app,
     resourceVersion: version,
   });
-  return generated[generatedPaths.api] ?? null;
+  return pageModulesOf(generated) ?? null;
 };
 
 /**

@@ -190,30 +190,32 @@ export const dataOf = (value: unknown, depth: number): string => {
 };
 
 /**
- * A function reference, as the data a generated module holds, built with
- * the server code: its name, and a mutation's or an action's kind and
- * argument descriptor (`useForm` sends and checks a form with them), or a query's declared return
- * (`DataGrid` reads its columns from it). Nothing that changes
- * from one release to the next: core resolves the name in the release
- * that answers the call, and checks the call with the function's own
- * validator.
+ * The reference to the App's function at `path` (`tasks.list`), as the
+ * data a generated module holds: its name, nothing else. Core resolves
+ * the name in the release that answers the call, and checks the call with
+ * the function's own validator.
  */
-export const referenceOf = (fn: FunctionManifest) => {
-  if (fn.kind !== "query") {
-    return { name: fn.path, kind: fn.kind, args: fn.args };
-  }
-  return fn.returns === null
-    ? { name: fn.path }
-    : { name: fn.path, returns: fn.returns };
+export const referenceOf = (path: string) => ({ name: path });
+
+/**
+ * The type of the reference to the App's function at `path`: the
+ * function's own, from the module that exports it (`tasks.list` is
+ * `server/tasks.ts`'s `list`), as seen from `server/_generated/`. It
+ * depends on the path alone, so it is the same for every release.
+ */
+export const referenceTypeOf = (path: string): string => {
+  const segments = path.split(".");
+  const name = segments.pop() ?? path;
+  return `FunctionReferenceFromExport<typeof import(${JSON.stringify(`../${segments.join("/")}.ts`)}).${name}>`;
 };
 
 /**
- * A function reference's type, from its descriptors: what it takes, what
- * it answers (`unknown` where it declares no `returns`) and, for a
- * streaming action, what it streams. The same for every release that
- * declares the function alike.
+ * The type of the reference to a function the host makes itself, which
+ * no App module exports (a workflow reference's queries and mutations,
+ * workflow-functions.ts): from its descriptors, `unknown` where it
+ * declares no `returns`.
  */
-export const referenceTypeOf = (fn: FunctionManifest): string => {
+export const descriptorReferenceTypeOf = (fn: FunctionManifest): string => {
   const parts = [
     JSON.stringify(fn.kind),
     JSON.stringify(fn.visibility),

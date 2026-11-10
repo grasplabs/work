@@ -43,6 +43,7 @@ import {
   generatedServerFolder,
   hasAppPathSegments,
   hostGeneratedFolder,
+  routeTreePath,
 } from "./inputs.ts";
 import type { CodeFolder } from "./inputs.ts";
 import {
@@ -514,6 +515,12 @@ export const appCodeImport = (
 /** The data model's types, which a page imports with `import type` alone. */
 const dataModelSpecifier = "@server/_generated/dataModel";
 
+/** The references the host generates, which pages import as `@server/_generated/api`. */
+const referencesFile = "server/_generated/api.ts";
+
+/** The release's functions the host generates, as `serverPath` names them. */
+const pageFunctionsModule = ".grasp/functions";
+
 /** The imports pages can never make, and why: the App's server. */
 const serverSpecifiers: ReadonlySet<string> = new Set([
   "@server/_generated/server",
@@ -536,7 +543,8 @@ const serverPath = (
     }
   }
   const path = parts.join("/").replace(/\.tsx?$/u, "");
-  return ["values", "grasp.config"].includes(path) ||
+  // A folder's own name too: `../server` may resolve to its index.
+  return ["values", "grasp.config", "server", ".grasp"].includes(path) ||
     path.startsWith("server/") ||
     path.startsWith(".grasp/")
     ? path
@@ -568,6 +576,11 @@ export const pageImportError = (
   } else if (serverSpecifiers.has(specifier)) {
     reached = specifier;
   }
+  // The release's functions, as data: what the route tree the host
+  // generates hands the page runtime (worker.ts `withFunctions`).
+  if (reached === pageFunctionsModule && file === routeTreePath) {
+    return undefined;
+  }
   if (reached === dataModelSpecifier) {
     return `"${specifier}" holds the types of the App's tables alone: import them with import type.`;
   }
@@ -595,8 +608,13 @@ export const typeImportError = (
   }
   if (page) {
     // The data model's types, erased as the page compiles: what a page
-    // imports for its types, as Convex's do.
-    return specifier === dataModelSpecifier
+    // imports for its types, as Convex's do. The references the host
+    // generates type each one as its function's export, erased too.
+    const referenced =
+      file === referencesFile &&
+      isRelative(specifier) &&
+      isServerModule(`${serverPath(file, specifier) ?? ""}.ts`);
+    return specifier === dataModelSpecifier || referenced
       ? undefined
       : pageImportError(file, specifier);
   }

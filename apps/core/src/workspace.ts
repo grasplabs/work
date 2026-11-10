@@ -178,6 +178,8 @@ import {
   dashboards,
   previewStores,
 } from "./db/workspace/schema.ts";
+import { isPageModules } from "./draft-references.ts";
+import type { PageModules } from "./draft-references.ts";
 import { DraftVersions } from "./draft-versions.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
@@ -4306,15 +4308,16 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Keeps `references`, the `@server/_generated/api` references the draft
-   * of App `appId` in `personId`'s own chat last generated, for its pages
-   * to build against while its server code doesn't (chats-rpc.ts).
+   * Keeps `references`, the page modules (draft-references.ts
+   * `PageModules`) the draft of App `appId` in `personId`'s own chat last
+   * generated, for its pages to build against while its server code
+   * doesn't (chats-rpc.ts).
    */
   keepPreviewReferences(
     chatId: unknown,
     personId: string,
     appId: string,
-    references: string | null
+    references: PageModules | null
   ): void {
     const { id } = this.#ownChat(chatId, personId);
     this.ctx.storage.kv.put(previewReferencesKey(id, appId), references);
@@ -4325,11 +4328,11 @@ export class Workspace extends DurableObject<Env> {
     chatId: unknown,
     personId: string,
     appId: string
-  ): string | null | undefined {
+  ): PageModules | null | undefined {
     const { id } = this.#ownChat(chatId, personId);
-    return this.ctx.storage.kv.get<string | null>(
-      previewReferencesKey(id, appId)
-    );
+    const kept = this.ctx.storage.kv.get(previewReferencesKey(id, appId));
+    // Anything but page modules is as good as none.
+    return kept === null || isPageModules(kept) ? kept : undefined;
   }
 
   /**

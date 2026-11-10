@@ -21,6 +21,7 @@ export const generatedPaths = {
   server: "server/_generated/server.ts",
   dataModel: "server/_generated/dataModel.ts",
   contracts: ".grasp/contracts.json",
+  functions: ".grasp/functions.ts",
 } as const;
 
 /**

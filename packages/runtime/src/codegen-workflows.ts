@@ -16,7 +16,7 @@ import {
   indent,
   key,
   referenceOf,
-  referenceTypeOf,
+  descriptorReferenceTypeOf,
   valueTypeOf,
 } from "./codegen-render.ts";
 import { workflowFunctions } from "./workflow-functions.ts";
@@ -108,10 +108,10 @@ const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
       : valueTypeOf(decision.value, "input");
   };
   return typesOf<WorkflowQueryName>(operations, {
-    run: referenceTypeOf,
-    canStart: referenceTypeOf,
-    runs: referenceTypeOf,
-    history: referenceTypeOf,
+    run: descriptorReferenceTypeOf,
+    canStart: descriptorReferenceTypeOf,
+    runs: descriptorReferenceTypeOf,
+    history: descriptorReferenceTypeOf,
     decisions: (fn) => {
       const items = keys
         .map(
@@ -134,11 +134,11 @@ const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
 /** The types of `workflow`'s mutation references, from their descriptors. */
 const mutationTypesOf = (workflow: BoundWorkflow): [string, string][] =>
   typesOf<WorkflowMutationName>(workflowFunctions(workflow).mutations, {
-    start: referenceTypeOf,
-    pause: referenceTypeOf,
-    resume: referenceTypeOf,
-    cancel: referenceTypeOf,
-    send: referenceTypeOf,
+    start: descriptorReferenceTypeOf,
+    pause: descriptorReferenceTypeOf,
+    resume: descriptorReferenceTypeOf,
+    cancel: descriptorReferenceTypeOf,
+    send: descriptorReferenceTypeOf,
   });
 
 const recordType = (members: readonly string[]): string =>
@@ -157,7 +157,7 @@ const referencesOf = (
   const references: Record<string, unknown> = {};
   for (const [name, fn] of Object.entries(manifests)) {
     if (fn !== undefined) {
-      references[name] = referenceOf(fn);
+      references[name] = referenceOf(fn.path);
     }
   }
   return references;

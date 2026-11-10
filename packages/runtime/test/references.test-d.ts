@@ -1,7 +1,7 @@
 // Compile-time guarantees of the references the host generates (spec 7.3,
 // 8, 32.1), checked against the Notes fixture's generated modules: what a
 // browser calls with them infers each function's arguments, return,
-// kind, visibility and progress from its descriptors alone, without a
+// kind, visibility and progress from its function's own code, without a
 // cast or a generic argument, and to exactly the types the server's own
 // definitions infer. This file is type-checked by `vp check` and never
 // run: every `@ts-expect-error` below must stay an error.
@@ -15,7 +15,6 @@ import type {
   ProgressOf,
   FunctionReturn,
 } from "../src/index.ts";
-import type { ValueDescriptor } from "../src/value-descriptor.ts";
 import type { workflows } from "./notes/server/_generated/api.ts";
 import { api, permissions } from "./notes/server/_generated/api.ts";
 import { internal } from "./notes/server/_generated/internal.ts";
@@ -80,15 +79,14 @@ expectTypeOf<FunctionArgs<typeof api.notes.exportAll>>().toEqualTypeOf<
   FunctionArgs<typeof exportAll>
 >();
 
-// A mutation's and an action's reference always holds its kind, which
-// `useForm` sends by, and its arguments' descriptor; a query's holds neither.
-expectTypeOf(api.notes.create.kind).toEqualTypeOf<"mutation">();
-expectTypeOf(api.notes.tally.kind).toEqualTypeOf<"action">();
-expectTypeOf(api.notes.create.args).toEqualTypeOf<ValueDescriptor>();
-// @ts-expect-error a query's reference holds no kind
-void api.notes.get.kind;
+// A reference holds its name alone: no kind, which its hook says, nor
+// descriptors, which the page's build brings.
+// @ts-expect-error a reference holds no kind
+void api.notes.create.kind;
 // @ts-expect-error nor its arguments
-void api.notes.get.args;
+void api.notes.create.args;
+// @ts-expect-error nor its return
+void api.notes.get.returns;
 
 // A streaming reference carries its progress type; any other none.
 expectTypeOf<ProgressOf<typeof api.notes.exportAll>>().toEqualTypeOf<{
@@ -100,12 +98,17 @@ single(api.notes.tally);
 single(api.notes.exportAll);
 
 // The phantom members are no names an editor offers or JSON holds.
-expectTypeOf<Extract<keyof typeof api.notes.create, string>>().toEqualTypeOf<
-  "name" | "kind" | "args"
->();
-expectTypeOf<Extract<keyof typeof api.notes.get, string>>().toEqualTypeOf<
-  "name" | "returns"
->();
+expectTypeOf<
+  Extract<keyof typeof api.notes.create, string>
+>().toEqualTypeOf<"name">();
+expectTypeOf<
+  Extract<keyof typeof api.notes.get, string>
+>().toEqualTypeOf<"name">();
+
+// A function that declares no `returns` answers what its handler does.
+expectTypeOf(query(api.notes.titles, {})).resolves.toEqualTypeOf<string[]>();
+// Through the internal tree the App's own module is typed from, too.
+expectTypeOf(action(api.notes.tallied, {})).resolves.toEqualTypeOf<number>();
 
 // Calls infer from the reference alone: no cast, no generic argument.
 expectTypeOf(

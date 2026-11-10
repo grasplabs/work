@@ -16,13 +16,14 @@ import { boundWorkflowsOf } from "./bound-workflows.ts";
 import type { BuildOptions } from "./pages.ts";
 
 // What an App's pages import as `@server/_generated/api` (spec 8, 10.1): the public
-// references the host generates from its server code. They are data (each
-// function's name, and a mutation's or an action's kind and argument
-// descriptors) and grant nothing: core resolves every call by name in the
-// release that answers it, the App's current one, refuses a name it
-// doesn't hold or a function of another kind, and checks the arguments
-// with that function's own validator (app-functions.ts,
-// `publicOperationOf`).
+// references the host generates from its server code, each function's
+// name alone; and beside them `.grasp/functions.ts`, the release's public
+// functions as data, which the page runtime gives its client for forms
+// and grids (page-functions.ts). Both grant nothing: core resolves every
+// call by name in the release that answers it, the App's current one,
+// refuses a name it doesn't hold or a function of another kind, and
+// checks the arguments with that function's own validator
+// (app-functions.ts, `publicOperationOf`).
 //
 // Generation is deterministic: the same manifest and identity always make
 // the same bytes. This module makes them from files as they are, which is
@@ -38,21 +39,64 @@ const mentionsReferences = (files: Readonly<Record<string, string>>): boolean =>
   );
 
 /**
- * `files` with the references their pages import as `@server/_generated/api`, as
- * `referencesOf` answers them: unchanged when no page names them, when
- * the files aren't of spec 8's layout, or when there are none (their
- * server code doesn't build or inspect: an expected error). A page that
- * imports them then fails its build and says so, and the server build
- * says why.
+ * The modules of what the host generates that a page's build holds, by
+ * path: the references (`@server/_generated/api`), the `internal` tree
+ * the server code their types read imports, and the release's functions
+ * (`.grasp/functions.ts`).
+ */
+export type PageModules = Readonly<Record<string, string>>;
+
+const pageModulePaths: readonly string[] = [
+  generatedPaths.api,
+  generatedPaths.internal,
+  generatedPaths.functions,
+];
+
+/** Whether `value` is page modules, as `pageModulesOf` makes them. */
+export const isPageModules = (value: unknown): value is PageModules => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const entries = Object.entries(value);
+  return (
+    entries.length === pageModulePaths.length &&
+    entries.every(
+      ([path, text]) =>
+        pageModulePaths.includes(path) && typeof text === "string"
+    )
+  );
+};
+
+/** `generated`'s page modules, or undefined when it has no references. */
+export const pageModulesOf = (
+  generated: Readonly<Record<string, string>>
+): PageModules | undefined => {
+  const modules: Record<string, string> = {};
+  for (const path of pageModulePaths) {
+    const text = Object.hasOwn(generated, path) ? generated[path] : undefined;
+    if (text === undefined) {
+      return undefined;
+    }
+    modules[path] = text;
+  }
+  return modules;
+};
+
+/**
+ * `files` with the page modules (`PageModules`) as `referencesOf`
+ * answers them: unchanged when no page names the references, when the
+ * files aren't of spec 8's layout, or when there are none (their server
+ * code doesn't build or inspect: an expected error). A page that imports
+ * them then fails its build and says so, and the server build says why.
  */
 export const withReferencesText = async (
   files: Record<string, string>,
-  referencesOf: () => Promise<string | undefined>
+  referencesOf: () => Promise<PageModules | undefined>
 ): Promise<Record<string, string>> => {
   if (!(mentionsReferences(files) && isAppLayout(files))) {
     return files;
   }
-  let references: string | undefined;
+  let references: PageModules | undefined;
   try {
     references = await referencesOf();
   } catch (error) {
@@ -61,9 +105,7 @@ export const withReferencesText = async (
     }
     throw error;
   }
-  return references === undefined
-    ? files
-    : { ...files, [generatedPaths.api]: references };
+  return references === undefined ? files : { ...files, ...references };
 };
 
 /** What references are generated from: a manifest, and its bound workflows. */
@@ -77,19 +119,16 @@ const referencesOf = async (
   app: AppId,
   version: number,
   source: ReferenceSource | undefined
-): Promise<string | undefined> => {
-  const generated =
-    source === undefined
-      ? {}
-      : await generateModules(
+): Promise<PageModules | undefined> =>
+  source === undefined
+    ? undefined
+    : pageModulesOf(
+        await generateModules(
           source.manifest,
           { resourceId: app, resourceVersion: version },
           source.workflows
-        );
-  return Object.hasOwn(generated, generatedPaths.api)
-    ? generated[generatedPaths.api]
-    : undefined;
-};
+        )
+      );
 
 /**
  * `files` with the references their pages import as `@server/_generated/api`, generated
@@ -196,7 +235,7 @@ export const withDraftReferences = async (
       }
     }
     standIn = true;
-    return symbolicModules()[generatedPaths.api];
+    return pageModulesOf(symbolicModules());
   });
   return { files: withReferences, standIn };
 };

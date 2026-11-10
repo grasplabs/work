@@ -32,6 +32,15 @@ export const get = query({
   handler: async (ctx, args) => await ctx.db.get("notes", args.id),
 });
 
+/** The titles of the caller's latest notes: no `returns`, so it answers what its handler does. */
+export const titles = query({
+  args: {},
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(20);
+    return notes.map((note) => note.title);
+  },
+});
+
 export const create = mutation({
   args: { title: noteFields.title, body: noteFields.body },
   returns: v.id("notes"),
@@ -91,6 +100,15 @@ export const setSummary = mutation({
 export const tally = action({
   args: {},
   returns: v.number().integer().min(0),
+  handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
+});
+
+/**
+ * Counts the caller's notes as `tally` does, declaring no `returns`: it
+ * answers what the internal query it calls does.
+ */
+export const tallied = action({
+  args: {},
   handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
 });
 

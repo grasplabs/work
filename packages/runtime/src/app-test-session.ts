@@ -128,13 +128,9 @@ export const requestFor = (
   kind: ReferenceKind,
   args: unknown
 ): string => {
-  // A reference names its function; a mutation's or an action's also says
-  // its kind, which must be the call's.
-  if (
-    !isRecord(reference) ||
-    typeof reference.name !== "string" ||
-    (reference.kind !== undefined && reference.kind !== kind)
-  ) {
+  // A reference names its function, nothing more: the call says its kind,
+  // and the host refuses a function of another.
+  if (!isRecord(reference) || typeof reference.name !== "string") {
     throw new TestAssertionError(
       `expected a reference to one of the App's ${kind === "query" ? "queries" : `${kind}s`}, from @server/_generated/api`
     );

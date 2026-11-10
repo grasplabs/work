@@ -55,6 +55,7 @@ export type {
   FileValue,
   FunctionArgs,
   FunctionReference,
+  FunctionReferenceFromExport,
   FunctionReturn,
   GraspFunctions,
   GraspPermission,

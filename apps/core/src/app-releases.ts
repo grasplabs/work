@@ -76,7 +76,7 @@ import {
   sdkResourceBindings,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
-import { withReferencesText } from "./draft-references.ts";
+import { pageModulesOf, withReferencesText } from "./draft-references.ts";
 import { hostModules } from "./host-modules.ts";
 import {
   evidenceFits,
@@ -1120,7 +1120,7 @@ const builtPages = async (
   }
   const withReferences = await withReferencesText(
     { ...files },
-    async () => await Promise.resolve(generated[generatedPaths.api])
+    async () => await Promise.resolve(pageModulesOf(generated))
   );
   return await versionPages(
     env,

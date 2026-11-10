@@ -97,6 +97,12 @@ const resultOf = (answer: Exclude<Answer, "pending">) =>
 export const uploadedFileId = "01890000-0000-7000-8000-0000000000f1";
 
 /**
+ * The functions `reference` declared, by name, as a page's build hands
+ * them its client (`.grasp/functions.ts`).
+ */
+const declared = new Map<string, unknown>();
+
+/**
  * A session client whose host answers each read and call with `answer`,
  * and every read and call it was sent, in order.
  */
@@ -174,7 +180,13 @@ export const testHost = (
       },
     },
   };
-  return { client: new GraspClient(transport), reads, calls, uploads, links };
+  return {
+    client: new GraspClient(transport, Object.fromEntries(declared)),
+    reads,
+    calls,
+    uploads,
+    links,
+  };
 };
 
 /**
@@ -206,26 +218,24 @@ export const pageOf = (records: readonly unknown[], asked?: PageAsked) => {
       };
 };
 
-/** A public reference of an App's function, as the host generates one. */
+/**
+ * A public reference of an App's function, as the host generates one
+ * (its name), the function declared among the release's functions the
+ * client is given.
+ */
 export const reference = <Args, Return, Kind extends "query" | "mutation">(
   kind: Kind,
   name: string,
   args: ValueSchema<Args, unknown>,
   returns: ValueSchema<Return, unknown>
-): FunctionReference<Kind, "public", Args, Return> =>
-  // What `_generated` builds for a function of `kind`: a query's declared
-  // return, a mutation's kind and arguments.
-  // SAFETY: the reference type follows `Kind`, which `kind` is; a generic
-  // conditional type isn't narrowed by checking it.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  (kind === "query"
-    ? { name, returns: returns.descriptor }
-    : { name, kind, args: args.descriptor }) as FunctionReference<
-    Kind,
-    "public",
-    Args,
-    Return
-  >;
+): FunctionReference<Kind, "public", Args, Return> => {
+  declared.set(name, {
+    kind,
+    args: args.descriptor,
+    returns: returns.descriptor,
+  });
+  return { name };
+};
 
 /** Lets queued work and the renders it causes land. */
 export const settle = async (ms = 0): Promise<void> => {

@@ -160,7 +160,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
     const text = (await references?.text()) ?? "";
     // Names, the same for every release: no App or version in them.
     expect(text).not.toContain(fixture.app);
-    expect(text).toContain('"name": "notes.create"');
+    expect(text).toContain('{ name: "notes.create" }');
     expect(text).not.toContain("notes.count");
   });
 

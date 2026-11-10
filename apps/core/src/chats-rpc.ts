@@ -75,6 +75,7 @@ import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { personOf } from "./connections.ts";
 import { withReferencesText } from "./draft-references.ts";
+import type { PageModules } from "./draft-references.ts";
 import { draftReferences } from "./draft-runs.ts";
 import { workspace } from "./durable-objects.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
@@ -189,7 +190,7 @@ interface Previewed {
  * pages still reaches the frame, whose calls answer why.
  */
 interface PreviewReferences {
-  references: string | null;
+  references: PageModules | null;
   serverUnbuilt: boolean;
 }
 

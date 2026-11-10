@@ -5,7 +5,6 @@ import { clientError } from "./client-error.ts";
 import { namePattern, sha256Pattern } from "./declaration.ts";
 import type { FunctionReference } from "./function-references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import type { WorkflowDecisionReference } from "./workflow-decisions.ts";
 import type { WorkflowEventReference } from "./workflow-events.ts";
@@ -249,18 +248,17 @@ const readEvents = (
 };
 
 /**
- * The function `name` of `group` in a workflow reference's functions
- * (`value`), read: it must be the one under the workflow's own path
+ * The name of function `name` of `group` in a workflow reference's
+ * functions (`value`): it must be the one under the workflow's own path
  * (`<contractId>.<group>.<name>`), so a forged reference never sends a
- * call of the App's own functions in its place; a mutation's arguments a
- * descriptor that reads.
+ * call of the App's own functions in its place.
  */
 const functionIn = (
   value: unknown,
   contractId: string,
   group: "queries" | "mutations",
   name: string
-): { readonly name: string; readonly args: ValueDescriptor | undefined } => {
+): { readonly name: string } => {
   const fn =
     isPlainObject(value) && Object.hasOwn(value, name)
       ? value[name]
@@ -269,14 +267,7 @@ const functionIn = (
   if (!isPlainObject(fn) || fn.name !== path) {
     throw clientError("contract.invalid_request");
   }
-  if (group === "queries") {
-    return { name: path, args: undefined };
-  }
-  try {
-    return { name: path, args: readDescriptor(fn.args, 1, { nodes: 0 }) };
-  } catch {
-    throw clientError("contract.invalid_request");
-  }
+  return { name: path };
 };
 
 /**
@@ -287,17 +278,8 @@ const mutationIn = <Args, Return>(
   value: unknown,
   contractId: string,
   name: string
-): WorkflowMutation<Args, Return> => {
-  const { args } = functionIn(value, contractId, "mutations", name);
-  if (args === undefined) {
-    throw clientError("contract.invalid_request");
-  }
-  return {
-    name: `${contractId}.mutations.${name}`,
-    kind: "mutation",
-    args,
-  };
-};
+): WorkflowMutation<Args, Return> =>
+  functionIn(value, contractId, "mutations", name);
 
 /**
  * `value` as a public workflow reference, read as data, its events and

@@ -46,7 +46,16 @@ const listPeople: FunctionReference<
   "public",
   InferInput<typeof args>,
   Infer<typeof page>
-> = { name: "people.list", returns: page.descriptor };
+> = { name: "people.list" };
+
+/** The demo's functions, as a page's build hands them its client. */
+const functions = {
+  "people.list": {
+    kind: "query",
+    args: args.descriptor,
+    returns: page.descriptor,
+  },
+};
 
 const people = [
   "Ada",
@@ -90,21 +99,24 @@ const pageFor = (body: string) => {
 };
 
 const demoClient = (): GraspClient =>
-  new GraspClient({
-    call: async () => {
-      await Promise.resolve();
-      throw new Error("The demo saves nothing.");
+  new GraspClient(
+    {
+      call: async () => {
+        await Promise.resolve();
+        throw new Error("The demo saves nothing.");
+      },
+      watch: async (body, onSnapshot) => {
+        await Promise.resolve();
+        onSnapshot({ revision: 1, result: { ok: true, value: pageFor(body) } });
+        return {
+          release: () => {
+            // Nothing to let go of: the demo pushes once.
+          },
+        };
+      },
     },
-    watch: async (body, onSnapshot) => {
-      await Promise.resolve();
-      onSnapshot({ revision: 1, result: { ok: true, value: pageFor(body) } });
-      return {
-        release: () => {
-          // Nothing to let go of: the demo pushes once.
-        },
-      };
-    },
-  });
+    functions
+  );
 
 const noChange = (): (() => void) => () => {
   // Whether this is a browser never changes.

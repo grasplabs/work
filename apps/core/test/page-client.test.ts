@@ -750,7 +750,10 @@ describe("a page's build", { timeout: 120_000 }, () => {
       throw new Error("The page didn't build");
     }
     const { closure } = build;
+    // The references, the release's functions the client checks a form
+    // and a grid by, and the pages: never a module of the App's server.
     expect(closure.modules).toStrictEqual([
+      "app~.grasp~functions.js",
       "app~server~_generated~api.js",
       "app~src~routeTree.gen.js",
       "app~src~routes~__root.js",
@@ -773,6 +776,37 @@ describe("a page's build", { timeout: 120_000 }, () => {
       expect.stringContaining("noteId"),
       expect.stringContaining("Expected 1-2 arguments, but got 0"),
     ]);
+  });
+
+  it("types a reference from its function's code, a query without returns by what its handler answers", async () => {
+    const operations = `${files.files["server/notes.ts"] ?? ""}
+export const titles = query({
+  args: {},
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(20);
+    return notes.map((note) => note.title);
+  },
+});
+`;
+    const typed = withFiles(files, { "server/notes.ts": operations });
+    await expect(
+      diagnosticsOf(
+        withFiles(typed, {
+          "src/routes/index.tsx":
+            page(`  const titles: readonly string[] | undefined = useQuery(api.notes.titles, {});
+  void titles;`),
+        })
+      )
+    ).resolves.toStrictEqual([]);
+    await expect(
+      diagnosticsOf(
+        withFiles(typed, {
+          "src/routes/index.tsx":
+            page(`  const titles: number | undefined = useQuery(api.notes.titles, {});
+  void titles;`),
+        })
+      )
+    ).resolves.toStrictEqual([expect.stringContaining("number")]);
   });
 
   it("refuses a page that makes its own client", async () => {

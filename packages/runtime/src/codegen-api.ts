@@ -6,7 +6,6 @@ import {
   dataOf,
   freezer,
   key,
-  referenceOf,
   referenceTypeOf,
   renderTree,
   treeOf,
@@ -15,6 +14,8 @@ import {
 } from "./codegen-render.ts";
 import { workflowsExport } from "./codegen-workflows.ts";
 import { declaredPermissions } from "./manifest-permissions.ts";
+import { pageFunctionsOf } from "./page-functions.ts";
+import { workflowFunctions } from "./workflow-functions.ts";
 
 /** A tree of function references as a module's typed, frozen export. */
 const referenceExport = (
@@ -22,7 +23,7 @@ const referenceExport = (
   operations: readonly FunctionManifest[]
 ): string => {
   const tree = treeOf(
-    operations.map((operation) => [operation.path, operation])
+    operations.map((operation) => [operation.path, operation.path])
   );
   const type = renderTree(
     tree,
@@ -34,7 +35,7 @@ const referenceExport = (
   );
   const value = renderTree(
     tree,
-    (operation, depth) => dataOf(referenceOf(operation), depth),
+    (path) => `{ name: ${JSON.stringify(path)} }`,
     key,
     ",",
     0
@@ -54,7 +55,31 @@ const operationsOf = (
 /** `@server/_generated/internal`: the internal tree. */
 export const serverReferencesText = (manifest: AppManifest): string => {
   const body = referenceExport("internal", operationsOf(manifest, "internal"));
-  return `${banner}${typeImports(body, ["FunctionReference", ...valueTypes])}\n${freezer}\n${body}`;
+  return `${banner}${typeImports(body, ["FunctionReferenceFromExport"])}\n${freezer}\n${body}`;
+};
+
+/**
+ * `.grasp/functions.ts`: the release's public functions by name, as data
+ * (page-functions.ts), built into its pages beside their route tree: the
+ * App's own, and the queries and mutations of each workflow it binds
+ * (workflow-functions.ts), which forms and grids take as any other.
+ */
+export const pageFunctionsText = (
+  manifest: AppManifest,
+  workflows: readonly BoundWorkflow[]
+): string => {
+  const operations: Record<string, FunctionManifest> = {
+    ...manifest.operations,
+  };
+  for (const workflow of workflows) {
+    const { queries, mutations } = workflowFunctions(workflow);
+    for (const fn of [...Object.values(queries), ...Object.values(mutations)]) {
+      if (fn !== undefined) {
+        operations[fn.path] = fn;
+      }
+    }
+  }
+  return `${banner}export const functions = ${dataOf(pageFunctionsOf(operations), 0)};\n`;
 };
 /** `@server/_generated/api`: the public api and everything else a browser may hold. */
 export const referencesText = async (
@@ -107,6 +132,7 @@ export const referencesText = async (
     "FilesReference",
     "LinksReference",
     "FunctionReference",
+    "FunctionReferenceFromExport",
     "WorkflowDecisionDetail",
     "WorkflowDecisionInboxItem",
     "WorkflowDecisionReference",
