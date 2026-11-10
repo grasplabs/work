@@ -64,6 +64,8 @@ const typeWrappers: ReadonlySet<string> = new Set([
   "TSAsExpression",
   "TSSatisfiesExpression",
   "TSNonNullExpression",
+  "TSTypeAssertion",
+  "ParenthesizedExpression",
 ]);
 
 /** `node` without the type wrappers around it (`query(…) satisfies T`). */

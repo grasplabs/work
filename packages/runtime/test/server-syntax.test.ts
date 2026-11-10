@@ -21,6 +21,7 @@ export const add = mutation({ args: { title: v.string() }, handler: async () => 
 export const sync = action({ args: {}, handler: async () => null });
 export const count = internalQuery({ args: {}, handler: async () => 0 });
 export const purge = internalMutation({ args: {}, handler: async () => null }) satisfies object;
+export const archive = (<object>internalMutation({ args: {}, handler: async () => null }));
 `;
 
 /** A query of a few lines, numbered `index`. */
@@ -37,11 +38,13 @@ describe("the functions a server module's syntax declares", () => {
   test("are each `export const` of a builder, public or internal by its builder", () => {
     expect(serverFunctionsOf({ tasks, "crm/deals": tasks })).toStrictEqual({
       "tasks.add": "public",
+      "tasks.archive": "internal",
       "tasks.count": "internal",
       "tasks.list": "public",
       "tasks.purge": "internal",
       "tasks.sync": "public",
       "crm.deals.add": "public",
+      "crm.deals.archive": "internal",
       "crm.deals.count": "internal",
       "crm.deals.list": "public",
       "crm.deals.purge": "internal",
