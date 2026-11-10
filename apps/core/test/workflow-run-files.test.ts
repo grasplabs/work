@@ -145,27 +145,112 @@ const callerOf = (
   };
 };
 
-/** An attempt's lease check that fails from its `nth` check on: it went stale. */
-const staleFrom = (nth: number): (() => void) => {
-  let checks = 0;
-  return () => {
-    checks += 1;
-    if (checks >= nth) {
-      throw new Error("The attempt went stale");
-    }
+/** An attempt whose lease was lost before it began. */
+const lostLease = (): void => {
+  throw new Error("The attempt went stale");
+};
+
+/** An attempt's lease, held until `lose` is called: then it went stale. */
+const leaseOf = () => {
+  let held = true;
+  return {
+    requireHolds: (): void => {
+      if (!held) {
+        throw new Error("The attempt went stale");
+      }
+    },
+    lose: (): void => {
+      held = false;
+    },
   };
 };
 
 /**
- * Lease checks `keepFile` makes of `pieces` pieces before it seals: one
- * as it opens, three a piece (before it reserves, again as it reserves,
- * again before its put), one as it finishes; the next is the one before
- * its seal.
+ * The deployment's bucket, losing a lease once its `nth` `method` call
+ * is answered: the attempt went stale right after it.
  */
-const checksBefore = {
-  piece: (n: number): number => 2 + 3 * n,
-  finish: (pieces: number): number => 2 + 3 * pieces,
-  seal: (pieces: number): number => 3 + 3 * pieces,
+const bucketLosingAfter = (
+  method: "put" | "get",
+  nth: number,
+  lose: () => void
+): R2Bucket => {
+  let calls = 0;
+  return new Proxy(env.FILES, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return property === method
+        ? async (...args: unknown[]) => {
+            const result: unknown = await Reflect.apply(value, target, args);
+            calls += 1;
+            if (calls === nth) {
+              lose();
+            }
+            return result;
+          }
+        : (...args: unknown[]): unknown => Reflect.apply(value, target, args);
+    },
+  });
+};
+
+/**
+ * The deployment's database, losing a lease as a statement `pattern`
+ * matches is prepared: the attempt went stale as it was made.
+ */
+const databaseLosingAt = (pattern: RegExp, lose: () => void): D1Database =>
+  new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return property === "prepare"
+        ? (query: string): unknown => {
+            if (pattern.test(query)) {
+              lose();
+            }
+            return Reflect.apply(value, target, [query]);
+          }
+        : (...args: unknown[]): unknown => Reflect.apply(value, target, args);
+    },
+  });
+
+/** A write's lookup of the piece its call may have reserved before. */
+const pieceLookup = /select[\s\S]*"append_key" = \?/u;
+/** A write's reservation of a piece's bytes. */
+const pieceReserved = /INSERT INTO workflow_run_file_chunks/u;
+/** A lookup of one of a run's files. */
+const fileLookup = /select[\s\S]*from "workflow_run_files"/u;
+
+/**
+ * `caller`'s next call, and the deployment it runs on, its lease lost
+ * once its `nth` `method` call to R2 is answered (its first put, unless
+ * said otherwise).
+ */
+const staleAfter = (
+  caller: ReturnType<typeof callerOf>,
+  nth = 1,
+  method: "put" | "get" = "put"
+) => {
+  const lease = leaseOf();
+  return {
+    caller: caller.next(lease.requireHolds),
+    on: { ...env, FILES: bucketLosingAfter(method, nth, lease.lose) },
+  };
+};
+
+/**
+ * `caller`'s next call, and the deployment it runs on, its lease lost as
+ * a statement `pattern` matches is prepared.
+ */
+const staleAt = (caller: ReturnType<typeof callerOf>, pattern: RegExp) => {
+  const lease = leaseOf();
+  return {
+    caller: caller.next(lease.requireHolds),
+    on: { ...env, DB: databaseLosingAt(pattern, lease.lose) },
+  };
 };
 
 /**
@@ -318,13 +403,14 @@ describe("a workflow run's own files", () => {
     const otherText = await outcome(
       callFiles(env, writing, "write", { ...note, text: "# Other" })
     );
-    // The lease lost once the file is open, before its text is added: the
-    // next attempt writes the file the first opened.
-    const lost = caller.next(staleFrom(3));
-    const died = await outcome(callFiles(env, lost, "write", note));
+    // The lease lost once its text is stored, before it is sealed: the
+    // next attempt finishes the file the first opened.
+    const lost = staleAfter(caller);
+    const died = await outcome(callFiles(lost.on, lost.caller, "write", note));
+    const opened = await writingIdOf(caller.run);
     const retried = await callFiles(
       env,
-      { ...lost, requireHolds: holds },
+      { ...lost.caller, requireHolds: holds },
       "write",
       note
     );
@@ -335,7 +421,7 @@ describe("a workflow run's own files", () => {
       otherName,
       otherText,
       died,
-      retried: fieldOf(retried.output, "file") !== file,
+      retried: fieldOf(retried.output, "file"),
       rows: await rowsOf(caller.run),
       objects: await objectsOf(caller.run),
     }).toStrictEqual({
@@ -345,7 +431,7 @@ describe("a workflow run's own files", () => {
       otherName: "workflow.call_invalid",
       otherText: "workflow.call_invalid",
       died: "Error: The attempt went stale",
-      retried: true,
+      retried: opened,
       rows: ["done", "done"],
       objects: 2,
     });
@@ -415,17 +501,13 @@ describe("a workflow run's own files", () => {
     const caller = callerOf();
     const done = await written(caller, "kept");
     // A file whose write went stale before it was sealed.
+    const stale = staleAfter(caller);
     await outcome(
-      callFiles(
-        env,
-        caller.next(staleFrom(checksBefore.seal(1) + 1)),
-        "write",
-        {
-          name: "draft.txt",
-          type: "text/plain",
-          text: "draft",
-        }
-      )
+      callFiles(stale.on, stale.caller, "write", {
+        name: "draft.txt",
+        type: "text/plain",
+        text: "draft",
+      })
     );
     const draft = await writingOf(caller.run);
     expect({
@@ -466,7 +548,24 @@ describe("a workflow run's own files", () => {
         })
       );
     };
+    // A finished file whose stored bytes changed, or went, since.
+    const changedOf = async (change: (key: string) => Promise<unknown>) => {
+      const { file } = await written(caller, "sealed");
+      const chunk = await env.DB.prepare(
+        "SELECT key FROM workflow_run_file_chunks WHERE file_id = ?"
+      )
+        .bind(file)
+        .first<{ key: string }>();
+      await change(chunk?.key ?? "");
+      return await outcome(callFiles(env, caller.next(), "read", { file }));
+    };
     expect({
+      changed: await changedOf(
+        async (key) => await env.FILES.put(key, "SEALED")
+      ),
+      gone: await changedOf(async (key) => {
+        await env.FILES.delete(key);
+      }),
       plain: await readOf(utf8.encode("a".repeat(256 * 1024))),
       // Within one call's bytes, but six times as long as JSON escapes it.
       escaped: await readOf(utf8.encode("\u0001".repeat(256 * 1024))),
@@ -476,6 +575,8 @@ describe("a workflow run's own files", () => {
         "image/png"
       ),
     }).toStrictEqual({
+      changed: "file.incomplete",
+      gone: "file.incomplete",
       plain: "ok",
       escaped: "file.not_readable",
       pastCall: "file.not_readable",
@@ -488,39 +589,36 @@ describe("a workflow run's own files", () => {
     // Stale from its first check: refused before anything is decided.
     const atCall = callerOf();
     const staleCall = await outcome(
-      callFiles(env, atCall.next(staleFrom(1)), "write", write)
+      callFiles(env, atCall.next(lostLease), "write", write)
     );
-    // Stale by the time it would reserve its bytes: nothing reserved.
+    // Stale as it looks up its piece, by the time it would reserve its
+    // bytes: nothing reserved.
     const atReserve = callerOf();
+    const reserving = staleAt(atReserve, pieceLookup);
     const staleReserve = await outcome(
-      callFiles(
-        env,
-        atReserve.next(staleFrom(checksBefore.piece(0) + 2)),
-        "write",
-        write
-      )
+      callFiles(reserving.on, reserving.caller, "write", write)
     );
-    // Stale by the time its bytes would go to R2: reserved, never stored.
+    // Stale as its bytes are reserved, by the time they would go to R2:
+    // reserved, never stored.
     const atPut = callerOf();
+    const putting = staleAt(atPut, pieceReserved);
     const stalePut = await outcome(
-      callFiles(
-        env,
-        atPut.next(staleFrom(checksBefore.piece(0) + 3)),
-        "write",
-        write
-      )
+      callFiles(putting.on, putting.caller, "write", write)
     );
-    // Stale by the time it would mark a file deleted: still there.
+    // Stale as it looks the file up, by the time it would mark it
+    // deleted: still there.
     const atDelete = callerOf();
     const { file } = await written(atDelete, "kept");
+    const deleting = staleAt(atDelete, fileLookup);
     const staleDelete = await outcome(
-      callFiles(env, atDelete.next(staleFrom(2)), "delete", { file })
+      callFiles(deleting.on, deleting.caller, "delete", { file })
     );
-    // Stale by the time a file not of its type would be deleted, after
-    // hashing it: refused, the file left as it was.
+    // Stale while a file not of its type is read back to be hashed, by the
+    // time it would be deleted: refused, the file left as it was.
     const atMismatch = callerOf();
+    const hashing = staleAfter(atMismatch, 1, "get");
     const staleMismatch = await outcome(
-      keepFile(env, atMismatch.next(staleFrom(checksBefore.seal(1))), {
+      keepFile(hashing.on, hashing.caller, {
         name: "w.txt",
         type: "text/plain",
         bytes: Uint8Array.of(0x61, 0xff),
@@ -814,6 +912,8 @@ describe("a workflow run's own files", () => {
       none: await kept("letter", docx),
       onlyExtension: await kept(".xlsm", xlsx),
       upperCase: await kept("LETTER.DOCX", docx),
+      // A Kelvin sign is no K: not the extension, so renamed.
+      kelvin: await kept("letter.doc\u212Ax", docx),
       fits: await kept("Sheet.XLSX", xlsx),
     }).toStrictEqual({
       docm: "letter.docx",
@@ -821,6 +921,7 @@ describe("a workflow run's own files", () => {
       none: "letter.docx",
       onlyExtension: "document.xlsx",
       upperCase: "LETTER.DOCX",
+      kelvin: "letter.docx",
       fits: "Sheet.XLSX",
     });
   });
@@ -833,12 +934,14 @@ describe("a workflow run's own files", () => {
     // A first attempt that wrote all its pieces, then lost its lease before
     // sealing: the retry's own pieces replay, the first attempt's third stays.
     const unsealed = callerOf();
-    const first = unsealed.next(staleFrom(checksBefore.finish(3)));
-    const lost = await outcome(keepFile(env, first, { ...csv, bytes: longer }));
+    const first = staleAfter(unsealed, 3);
+    const lost = await outcome(
+      keepFile(first.on, first.caller, { ...csv, bytes: longer })
+    );
     const retried = await outcome(
       keepFile(
         env,
-        { ...first, requireHolds: holds },
+        { ...first.caller, requireHolds: holds },
         { ...csv, bytes: shorter }
       )
     );
@@ -868,16 +971,14 @@ describe("a workflow run's own files", () => {
     // Stale before the answer is kept: no file, no reserved byte.
     const expired = callerOf();
     const before = await outcome(
-      keepFile(env, expired.next(staleFrom(1)), { ...csv, bytes })
+      keepFile(env, expired.next(lostLease), { ...csv, bytes })
     );
     // Stale after its pieces are written and hashed, just before it is
     // sealed: never sealed, swept as unfinished.
     const late = callerOf();
+    const hashed = staleAfter(late, 2, "get");
     const midway = await outcome(
-      keepFile(env, late.next(staleFrom(checksBefore.seal(2))), {
-        ...csv,
-        bytes,
-      })
+      keepFile(hashed.on, hashed.caller, { ...csv, bytes })
     );
     // No row, so none of the run's limits (summed from its rows) moved.
     expect({
@@ -899,12 +1000,13 @@ describe("a workflow run's own files", () => {
     // Being written at once: the ninth is refused.
     const opener = callerOf();
     for (let at = 0; at < runFileLimits.openWrites; at += 1) {
+      const stale = staleAfter(opener);
       // oxlint-disable-next-line no-await-in-loop -- one after another
       await outcome(
-        keepFile(env, opener.next(staleFrom(checksBefore.finish(0))), {
-          name: `f${String(at)}`,
+        keepFile(stale.on, stale.caller, {
+          name: `f${String(at)}.txt`,
           type: "text/plain",
-          bytes: new Uint8Array(),
+          bytes: utf8.encode("x"),
         })
       );
     }
@@ -923,17 +1025,20 @@ describe("a workflow run's own files", () => {
     // A file near its limit: its first piece kept, then it went stale; the
     // retry's next piece passes the limit.
     const big = callerOf();
-    const bigWrite = big.next(staleFrom(checksBefore.piece(1)));
+    const bigWrite = staleAfter(big);
     const bigBytes = utf8.encode(bodyOf(runFileLimits.callBytes + 2));
     await outcome(
-      keepFile(env, bigWrite, { ...csvOf("big.csv"), bytes: bigBytes })
+      keepFile(bigWrite.on, bigWrite.caller, {
+        ...csvOf("big.csv"),
+        bytes: bigBytes,
+      })
     );
     const bigFile = await writingOf(big.run);
     await grow(runFileLimits.fileBytes - bigFile.size - 1, bigFile.id);
     const pastFile = await outcome(
       keepFile(
         env,
-        { ...bigWrite, requireHolds: holds },
+        { ...bigWrite.caller, requireHolds: holds },
         { ...csvOf("big.csv"), bytes: bigBytes }
       )
     );
@@ -1015,13 +1120,13 @@ describe("a workflow run's own files", () => {
     };
     // One opened, added to, and never finished: its write went stale.
     const orphan = callerOf();
+    const left = staleAfter(orphan);
     await outcome(
-      callFiles(
-        env,
-        orphan.next(staleFrom(checksBefore.finish(1) + 1)),
-        "write",
-        { name: "left.txt", type: "text/plain", text: "left" }
-      )
+      callFiles(left.on, left.caller, "write", {
+        name: "left.txt",
+        type: "text/plain",
+        text: "left",
+      })
     );
     await sweepRunFiles(env, new Date(Date.now() + runFileLimits.orphanMs / 2));
     const halfDay = {

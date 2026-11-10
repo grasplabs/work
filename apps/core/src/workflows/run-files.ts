@@ -74,10 +74,13 @@ import { inList } from "../db/d1.ts";
 //   start, so data a restricted run read and wrote to a file stays there.
 // - Two writers of one file, or a write mixed into another task's: a file
 //   is opened, written and finished by one `keepFile` alone, each piece
-//   under a key of its call's (`openedBy`); every other key is refused
-//   (`file.not_writable`).
+//   under a key of its call's; the file records the step that opened it
+//   (`openedBy`), and a piece or finish under any other step's key is
+//   refused (`file.not_writable`), a defence kept although no caller
+//   names another's file to write.
 // - A replay or retry writing twice: `keepFile` opens, adds and finishes
-//   under keys of the call's effect key (`<step key>:<ordinal>`), so the
+//   under keys of the call's effect key (its step's key and the call's
+//   ordinal in it), so the
 //   same call again answers the same file, and its bytes must be the
 //   same, all of them: never a prefix of them. A chunk reserved but not
 //   stored (its put failed, or the attempt died) is stored by the same
@@ -146,7 +149,7 @@ const argumentSchemas = {
 export interface FilesCaller {
   readonly runId: string;
   readonly workflowId: string;
-  /** The call's effect key: `<step key>:<ordinal>` for an action's. */
+  /** The call's effect key: its step's key and the call's ordinal in it. */
   readonly effectKey: string;
   /** Throws unless the call's attempt still holds its lease. */
   readonly requireHolds: () => void;
@@ -226,7 +229,11 @@ const fileOf = async (
   return row ?? undefined;
 };
 
-/** Refuses `row` unless `caller`'s task opened it and still writes it. */
+/**
+ * Refuses `row` unless `caller`'s step opened it and still writes it: only
+ * `keepFile` writes, under its own call's keys, so this never refuses it;
+ * kept as a defence, should anything name another's file to write.
+ */
 const requireWriter = (row: FileRow, caller: FilesCaller): void => {
   if (row.state !== "writing" || row.openedBy !== stepOf(caller.effectKey)) {
     throw runFileErrors.create("file.not_writable");
@@ -649,9 +656,10 @@ const wholeFile = async (
 
 /**
  * A finished text file of the run, read whole: its reference and its
- * text. Any other file (binary, larger than one call's bytes) is
- * `file.not_readable`; one still being written, `file.not_finished`; one
- * that isn't the run's, `file.not_found`.
+ * text. One still being written is `file.not_finished`; any other file
+ * (binary, larger than one call's bytes) is `file.not_readable`; one that
+ * isn't the run's, `file.not_found`; one whose stored bytes are no longer
+ * what it was finished with, `file.incomplete`.
  */
 const read = async (
   env: Env,
@@ -662,6 +670,9 @@ const read = async (
   if (row === undefined) {
     throw notFound();
   }
+  if (row.state !== "done") {
+    throw runFileErrors.create("file.not_finished");
+  }
   const type = runFileTypeSchema.safeParse(row.type);
   if (
     !type.success ||
@@ -669,9 +680,6 @@ const read = async (
     row.size > runFileLimits.callBytes
   ) {
     throw runFileErrors.create("file.not_readable");
-  }
-  if (row.state !== "done") {
-    throw runFileErrors.create("file.not_finished");
   }
   const text = new TextDecoder("utf-8", {
     fatal: true,
@@ -757,6 +765,11 @@ export const requireFilesArguments = (
   operation: FilesCallOperation,
   args: Json
 ): void => {
+  // Only the operations' own keys: never one an object has of its own
+  // (`constructor`, say), whatever a caller's type said it was.
+  if (!Object.hasOwn(argumentSchemas, operation)) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
   parsed(argumentSchemas[operation], args);
 };
 
@@ -775,14 +788,16 @@ export const keepFile = async (
   caller: FilesCaller,
   file: { name: string; type: RunFileType; bytes: Uint8Array }
 ): Promise<FilesAnswer> => {
-  // Keys of the call's own step: `<step key>:<ordinal>#…`, so the task
-  // that opens the file is the one that writes and finishes it. The lease
-  // is checked before each, so an attempt that went stale while Connect
-  // was answering opens, reserves and seals nothing.
-  const as = (suffix: string): FilesCaller => {
-    caller.requireHolds();
-    return { ...caller, effectKey: `${caller.effectKey}#${suffix}` };
-  };
+  // Keys of the call's own: its effect key and a suffix, so the step that
+  // opens the file is the one that writes and finishes it.
+  const as = (suffix: string): FilesCaller => ({
+    ...caller,
+    effectKey: `${caller.effectKey}#${suffix}`,
+  });
+  // The lease checked before each open, piece and finish, so an attempt
+  // that went stale while Connect was answering opens, reserves and seals
+  // nothing.
+  caller.requireHolds();
   // Named with its type's extension: a document typed docx is never
   // kept as `.docm`.
   const opened = await open(
@@ -801,6 +816,7 @@ export const keepFile = async (
     at < file.bytes.length;
     at += runFileLimits.callBytes, piece += 1
   ) {
+    caller.requireHolds();
     // oxlint-disable-next-line no-await-in-loop -- in order: each piece follows the last
     await append(env, as(`piece${String(piece)}`), {
       file: id,
@@ -815,6 +831,7 @@ export const keepFile = async (
   if (written?.state === "writing" && written.size !== file.bytes.length) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
+  caller.requireHolds();
   const finished = await finish(env, as("finish"), { file: id });
   const sealed = z.object({ sha256: z.string() }).parse(finished.output);
   if (sealed.sha256 !== (await sha256HexOfBytes(file.bytes))) {
@@ -857,7 +874,9 @@ export const callFiles = async (
       return await remove(env, caller, parsed(argumentSchemas.delete, args));
     }
     default: {
-      return operation satisfies never;
+      // Never, by its type; an operation of no step is refused all the same.
+      operation satisfies never;
+      throw workflowResourceErrors.create("workflow.call_invalid");
     }
   }
 };

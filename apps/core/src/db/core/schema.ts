@@ -4412,8 +4412,8 @@ export const resourceRunMailCalls = sqliteTable(
 
 /**
  * A workflow run's own files (GRA-724, workflows/run-files.ts): what its
- * actions write through a `files` binding and read back in later steps of
- * the same run. Its bytes are in R2 (`FILES`, EU), one object per chunk;
+ * steps write through a files permission, and connector reads keep, to
+ * read back in later steps of the same run. Its bytes are in R2 (`FILES`, EU), one object per chunk;
  * a file is its run's alone, found only with the run's ID, and goes with
  * the run's details (`sweepWorkflowStartDetails` marks it deleted, then
  * `sweepRunFiles` deletes its chunks and its row). No name or content of
