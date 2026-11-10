@@ -120,12 +120,13 @@ describe(
         ),
         sameSource:
           read("app/grasp.config.ts") === notesFiles()["grasp.config.ts"],
-        sealedContracts: read("app/server/_generated/api.ts").includes(
-          "notes.archive.confirmed"
+        // Typed from the App's own declaration, naming no release.
+        declaredContracts: read("app/server/_generated/api.ts").includes(
+          'WorkflowEventReference<"workflows.archiveNotes", "confirmed"'
         ),
-        localIdentity:
-          read("app/server/_generated/api.ts").includes('"local"') &&
-          !read("app/server/_generated/api.ts").includes("app_0000"),
+        namesNoRelease: !read("app/server/_generated/api.ts").includes(
+          "app_0000"
+        ),
         grasp: Object.keys(root.dependencies).filter((name) =>
           name.startsWith("@grasp-os/")
         ),
@@ -176,8 +177,8 @@ describe(
         ],
         vendorTests: [],
         sameSource: true,
-        sealedContracts: true,
-        localIdentity: true,
+        declaredContracts: true,
+        namesNoRelease: true,
         grasp: [
           "@grasp-os/brain",
           "@grasp-os/shared",
