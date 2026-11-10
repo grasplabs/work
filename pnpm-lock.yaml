@@ -679,6 +679,9 @@ importers:
       '@grasp-os/brain':
         specifier: workspace:*
         version: link:../../packages/brain
+      '@grasp-os/brain-next':
+        specifier: workspace:*
+        version: link:../../packages/brain-next
       '@grasp-os/chat':
         specifier: workspace:*
         version: link:../../packages/chat
@@ -1026,6 +1029,22 @@ importers:
       '@cloudflare/vitest-pool-workers':
         specifier: 'catalog:'
         version: 0.22.0(patch_hash=187b71e76c9b81a1c4c5e9bdd00018696f2860ae4ce8a9cba98bf6f482cd5ecd)(@cloudflare/workers-types@5.20261023.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20261023.1
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.11
+
+  packages/brain-next:
+    dependencies:
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.3(@cloudflare/workers-types@5.20261023.1)(@opentelemetry/api@1.9.1)(kysely@0.29.6)
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
+    devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261023.1

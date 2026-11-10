@@ -133,6 +133,9 @@
       // One object per chat: its agent's turns on pi-durable, and its
       // transcript as the model reads it (src/chat-session.ts).
       { "name": "CHAT_SESSIONS", "class_name": "ChatSession" },
+      // The Brain's one store (@grasp-os/brain-next), reached only through
+      // its contract (src/brain-next.ts).
+      { "name": "BRAIN_STORE", "class_name": "BrainStore" },
     ],
   },
   "migrations": [
@@ -149,6 +152,7 @@
     // The model ledger, and its storage: spend is recorded after each
     // response, in D1 (src/model-usage.ts).
     { "tag": "v11", "deleted_classes": ["ModelLedger"] },
+    { "tag": "v12", "new_sqlite_classes": ["BrainStore"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],
