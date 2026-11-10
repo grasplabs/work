@@ -2,15 +2,10 @@ import path from "node:path";
 
 import { defineConfig, devices } from "@playwright/test";
 
-import { corePort } from "./e2e/stack.ts";
+import { adminPort } from "./e2e/stack.ts";
 
 const ci = process.env.CI === "true";
 
-/**
- * The admin's port: this checkout's core port (e2e/stack.ts) moved
- * 10000 up, past every checkout's core and IdP pair.
- */
-const adminPort = corePort + 10_000;
 const adminOrigin = `http://localhost:${adminPort}`;
 
 /**
