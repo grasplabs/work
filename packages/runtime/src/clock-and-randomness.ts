@@ -22,12 +22,19 @@
 //   are replaced there as well as on the global.
 // - A file the platform makes itself, of the time it runs: `FormData`'s
 //   `append` or `set` given a blob, and reading a body as a form
-//   (`formData()`), which makes one of each file in it. Both refused.
+//   (`formData()`), which makes one of each file in it. Both refused,
+//   deliberately broadly: also a file given with no name (which the
+//   platform keeps as it is) and a urlencoded body (which holds no
+//   files), as neither is of use without a network, and one rule is
+//   simpler to hold than telling them apart.
 // - A form's body: a `Response` or `Request` made with a `FormData` body
 //   gets a multipart boundary of the platform's randomness, in its
-//   `content-type` and its bytes, so is refused. A request's `init` is
-//   read once and passed on as read, so a `body` getter can't answer the
-//   check one thing and the platform another.
+//   `content-type` and its bytes, so is refused. A request's `body` is
+//   read once and passed on as read, held for good on a copy of `init`,
+//   so neither a `body` getter answering the check one thing and the
+//   platform another, nor a getter or proxy trap of `init`'s writing to
+//   the copy it is handed as receiver, changes what the platform reads.
+//   An algorithm's name below is held the same way.
 // - Keys and randomized cryptography: `generateKey` is refused, and so is
 //   `sign`, `encrypt` or `wrapKey` with an algorithm that draws a nonce,
 //   salt or padding (ECDSA, RSA-PSS, RSA-OAEP): only the algorithms that
@@ -321,12 +328,24 @@ const argumentsWith = (
  * `object` with `key` as read once (`value`): an object that inherits the
  * rest of `object`'s fields, and holds `key` as its own, so a getter of
  * `object`'s that answers one thing to a check and another to the
- * platform is never read again.
+ * platform is never read again. Held for good, neither writable nor
+ * configurable: the platform reads the inherited fields with the copy as
+ * receiver, so a getter of `object`'s (or a proxy's trap) is handed the
+ * copy, and must not be able to put another value in place of `key`
+ * before the platform reads it.
  */
 const withOwn = (object: object, key: string, value: unknown): object => {
   const copy = {};
   setPrototypeOf(copy, object);
-  defineProperty(copy, key, dataField(value));
+  // SAFETY: a data descriptor's fields; `__proto__: null` only sets its
+  // prototype, so no `get` or `set` of App code's is read as one.
+  defineProperty(copy, key, {
+    __proto__: null,
+    value,
+    writable: false,
+    enumerable: true,
+    configurable: false,
+  } as PropertyDescriptor);
   return copy;
 };
 

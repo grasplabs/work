@@ -292,6 +292,10 @@ const wrappedKey = await crypto.subtle.importKey(
 );
 const signed = new Uint8Array([1, 2, 3]);
 
+/** The content type of a request made with `init`. */
+const contentTypeOf = (init: RequestInit): string =>
+  new Request("https://example.test", init).headers.get("content-type") ?? "";
+
 // The cases below that answer a promise only start it: a handler answers
 // its row, so never sees one settle, but the runner refuses the call.
 
@@ -651,6 +655,51 @@ describe("the runner", () => {
     ).toMatchObject({
       ok: true,
       rows: [{ title: "Plan", category: "true:text/plain;charset=UTF-8" }],
+    });
+  });
+
+  test("gives the platform a request's body as checked, whatever its init writes to the receiver", () => {
+    // Read before `body`: each puts a form on whatever it is read on.
+    const byGetter: RequestInit = {
+      body: "plain",
+      get method(): string {
+        Reflect.set(this, "body", new FormData());
+        return "POST";
+      },
+    };
+    const byTrap = new Proxy<RequestInit>(
+      { body: "plain", method: "POST" },
+      {
+        get: (target, key, receiver): unknown => {
+          if (key !== "body") {
+            Reflect.set(receiver, "body", new FormData());
+          }
+          const value: unknown = Reflect.get(target, key);
+          return value;
+        },
+      }
+    );
+    const sneaky = looseMigration({
+      ...declaration,
+      name: "sneaky",
+      handler: (_ctx: unknown, row: object) => ({
+        ...row,
+        category: `${contentTypeOf(byGetter)}|${contentTypeOf(byTrap)}`,
+      }),
+    });
+    expect(
+      runMigration(notes([sneaky]), {
+        name: "sneaky",
+        rows: [{ id: "n1", fields: { title: "Plan" } }],
+      })
+    ).toMatchObject({
+      ok: true,
+      rows: [
+        {
+          title: "Plan",
+          category: "text/plain;charset=UTF-8|text/plain;charset=UTF-8",
+        },
+      ],
     });
   });
 

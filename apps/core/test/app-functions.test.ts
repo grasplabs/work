@@ -1040,6 +1040,27 @@ const unseeded = async () => {
       return nameReads === 1 ? "HMAC" : "ECDSA";
     },
   };
+  // Read before \`body\`: each puts a form on whatever it is read on.
+  const byGetter = {
+    body: "plain",
+    get method() {
+      Reflect.set(this, "body", new FormData());
+      return "POST";
+    },
+  };
+  const byTrap = new Proxy(
+    { body: "plain", method: "POST" },
+    {
+      get: (target, key, receiver) => {
+        if (key !== "body") {
+          Reflect.set(receiver, "body", new FormData());
+        }
+        return Reflect.get(target, key);
+      },
+    }
+  );
+  const contentTypeOf = (init: RequestInit) =>
+    new Request("https://example.test", init).headers.get("content-type");
   const toWrap = await crypto.subtle.importKey("raw", new Uint8Array(16), "AES-GCM", true, ["encrypt"]);
   const hmacKey = await crypto.subtle.importKey("raw", new Uint8Array(32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return {
@@ -1048,6 +1069,8 @@ const unseeded = async () => {
     formRequest: await outcome(() =>
       new Request("https://example.test", { method: "POST", body: new FormData() }).headers.get("content-type")
     ),
+    formRequestByGetter: contentTypeOf(byGetter),
+    formRequestByTrap: contentTypeOf(byTrap),
     formFile: await outcome(() => new FormData().append("f", new Blob(["x"]), "n")),
     formRead: await outcome(() =>
       new Response("a=b", { headers: { "content-type": "application/x-www-form-urlencoded" } }).formData()
@@ -1133,6 +1156,8 @@ const unseededSchema = z.strictObject({
   key: outcomeSchema,
   formBody: outcomeSchema,
   formRequest: outcomeSchema,
+  formRequestByGetter: z.string().nullable(),
+  formRequestByTrap: z.string().nullable(),
   formFile: outcomeSchema,
   formRead: outcomeSchema,
   ecdsa: outcomeSchema,
@@ -1249,6 +1274,9 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
         key: "refused",
         formBody: "refused",
         formRequest: "refused",
+        // The body as checked, whatever the init's getters write.
+        formRequestByGetter: "text/plain;charset=UTF-8",
+        formRequestByTrap: "text/plain;charset=UTF-8",
         formFile: "refused",
         formRead: "refused",
         ecdsa: "refused",
@@ -1313,6 +1341,8 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
         key: "ran",
         formBody: "ran",
         formRequest: "ran",
+        formRequestByGetter: "text/plain;charset=UTF-8",
+        formRequestByTrap: "text/plain;charset=UTF-8",
         formFile: "ran",
         formRead: "ran",
         ecdsa: "ran",
