@@ -323,6 +323,48 @@ export const Route = createFileRoute("/")({ component: Desk });
       });
     });
 
+    it("binds a version of the same contract a draft bound, carried into a later version before either was current, as its release seals it", async () => {
+      const [admin, builder] = await Promise.all([
+        signedIn("admin"),
+        signedIn("builder"),
+      ]);
+      const flow = await threeVersions(admin, builder);
+      const { app, second } = await proposedRebind(builder, flow);
+      await builder.api.apps.versions.setCurrent(app, second);
+      // Version 3 of the workflow, of version 2's contract, bound from a
+      // draft proposed but never made current.
+      const chatId = await appChat(builder, app);
+      await builder.api.chats.defineDraft(chatId, app, {
+        op: "bindWorkflow",
+        alias: "review",
+        workflow: flow,
+        version: 3,
+      });
+      await builder.api.chats.proposeDraft(chatId, app, "Bind version 3");
+      // A page change over it, carrying that binding.
+      const { version: later } = await builder.api.apps.files.commit(
+        app,
+        {
+          "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+const Desk = () => <main>Open requests</main>;
+
+export const Route = createFileRoute("/")({ component: Desk });
+`,
+        },
+        "Rename the page"
+      );
+      await builder.api.apps.versions.setCurrent(app, later);
+
+      expect({
+        bound: await boundOf(builder, app),
+        sealed: await sealedOf(app, later),
+      }).toStrictEqual({
+        bound: { review: { workflowId: flow, version: 3 } },
+        sealed: { review: { workflowId: flow, version: 3 } },
+      });
+    });
+
     it("holds a version's author only to the bindings it records of its own, never those it carries over from its parent", async () => {
       const [admin, builder, pagesOnly] = await Promise.all([
         signedIn("admin"),

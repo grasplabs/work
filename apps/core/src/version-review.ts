@@ -39,7 +39,10 @@ import {
 import type { VersionRow } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
 import { sealedWorkflowPins } from "./bound-workflows.ts";
-import { workflowResourceVersions } from "./db/core/schema.ts";
+import {
+  appWorkflowBindings,
+  workflowResourceVersions,
+} from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
@@ -59,10 +62,11 @@ import { takesFile } from "./workflows/start-files.ts";
 const boundContractSchema = z.object({ input: z.json() });
 
 /**
- * Whether any workflow version `proposed` of App `app` binds once current
- * takes a file in its input, as that version's contract says: what its
- * release seals, sealed or not (bound-workflows.ts, `sealedWorkflowPins`),
- * so a binding the version records counts as it will bind.
+ * Whether any workflow version `proposed` of App `app` may bind once
+ * current takes a file in its input, as that version's contract says:
+ * what its release seals, sealed or not (bound-workflows.ts,
+ * `sealedWorkflowPins`), so a binding the version records counts as it
+ * will bind, and what the App binds now.
  */
 const boundTakesFile = async (
   env: Env,
@@ -79,7 +83,30 @@ const boundTakesFile = async (
     );
     pins = await sealedWorkflowPins(env, app, manifest, definition);
   }
-  for (const { pinned } of pins) {
+  // And what the App binds now under each alias the version declares: a
+  // binding of the same contract made since its seal stays bound
+  // (app-workflow-bindings.ts, `versionBindingChanges`).
+  const declared = new Set(
+    declaredPermissions(manifest, "workflows").map(({ alias }) => alias)
+  );
+  const active = await drizzle(env.DB)
+    .select({
+      alias: appWorkflowBindings.alias,
+      workflowId: appWorkflowBindings.workflowResourceId,
+      version: appWorkflowBindings.workflowResourceVersion,
+    })
+    .from(appWorkflowBindings)
+    .where(
+      and(
+        eq(appWorkflowBindings.appId, app),
+        eq(appWorkflowBindings.status, "active")
+      )
+    );
+  const bound = [
+    ...pins.map(({ pinned }) => pinned),
+    ...active.filter(({ alias }) => declared.has(alias)),
+  ];
+  for (const pinned of bound) {
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
     const row = await drizzle(env.DB)
       .select({ contract: workflowResourceVersions.contract })

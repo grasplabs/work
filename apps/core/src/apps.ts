@@ -1711,12 +1711,22 @@ export const makeCurrent = async (
     defined,
     parentDefinition?.definition ?? null
   );
+  // What it binds unlike the version current now, as its seal took them
+  // (bound-workflows.ts, `sealedWorkflowPins`): bound, never kept over.
+  const currentDefinition =
+    previous === null
+      ? null
+      : await readStored(await findVersion(env, appId, previous));
+  const chosen = ownWorkflowBindings(
+    defined,
+    currentDefinition?.definition ?? null
+  );
   const bindingsOf = async () =>
     await versionBindingChanges(
       env,
       by,
       appId,
-      { author: row.authorId, recorded },
+      { author: row.authorId, recorded, chosen },
       release
     );
   // Refused here before the store changes; checked again once it has
@@ -1798,7 +1808,7 @@ export const makeCurrent = async (
           ...bindingChangeStatements(
             env,
             by,
-            { app: appId, appVersion: number },
+            { app: appId, appVersion: number, switchId: event.id },
             rebinding.changes,
             storedEvent(event.id)
           ),

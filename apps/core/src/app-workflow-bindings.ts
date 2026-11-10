@@ -417,8 +417,7 @@ export interface BindingSwitch {
  * binds another now. Each it binds must be one `by` may bind, and, for one
  * the version recorded (`recorded`, from its definition), one its author
  * (`author`) still may (`workflow.app_version_binding_unavailable`
- * otherwise); Grasp staff bind none (`role.forbidden`). Checked first, so
- * a contract is compared only for a workflow they may read. Then what
+ * otherwise); Grasp staff bind none (`role.forbidden`). Then what
  * every alias it declares binds once it is current, sealed or bound now,
  * must have the contract it declares
  * (`workflow.app_binding_contract_changed` otherwise).
@@ -430,9 +429,13 @@ export const versionBindingChanges = async (
   {
     author,
     recorded,
+    chosen,
   }: {
     readonly author: string;
+    /** What it records unlike its parent: what its author answers for. */
     readonly recorded: readonly DefinedWorkflowBinding[];
+    /** What it records unlike the version current now: never kept over. */
+    readonly chosen: readonly DefinedWorkflowBinding[];
   },
   release: Pick<Release, "app" | "workflows">
 ): Promise<BindingSwitch> => {
@@ -477,18 +480,15 @@ export const versionBindingChanges = async (
     ) {
       continue;
     }
-    const recordedBy = recorded.some(
-      (bound) =>
-        bound.alias === alias &&
-        bound.workflowId === pinned.workflowId &&
-        bound.version === pinned.version
-    )
-      ? author
-      : undefined;
+    const names = (bound: DefinedWorkflowBinding) =>
+      bound.alias === alias &&
+      bound.workflowId === pinned.workflowId &&
+      bound.version === pinned.version;
+    const recordedBy = recorded.some(names) ? author : undefined;
     // A pin the version only took from the App's binding as it was
     // sealed: a direct rebind of the same contract since stays.
     const kept =
-      recordedBy === undefined &&
+      !chosen.some(names) &&
       held !== undefined &&
       // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
       (await fits(alias, held));
@@ -595,14 +595,25 @@ export const bindableSql = (app: AppId, checked: BindingSwitch): SQL => {
 export const bindingChangeStatements = (
   env: Env,
   by: Acting,
-  { app, appVersion }: { readonly app: AppId; readonly appVersion: number },
+  {
+    app,
+    appVersion,
+    switchId,
+  }: {
+    readonly app: AppId;
+    readonly appVersion: number;
+    /** The switch's event: one binding per alias and switch, ever. */
+    readonly switchId: string;
+  },
   changes: readonly BindingChange[],
   landed: SQL
 ): BatchItem<"sqlite">[] => {
   const db = drizzle(env.DB);
   const now = new Date();
   return changes.flatMap((change) => {
-    const id = crypto.randomUUID();
+    // The same on every try of the batch, so a try after one that landed
+    // binds nothing, whatever changed in between.
+    const id = `${switchId}:${change.alias}`;
     const replacing = change.replacing?.id;
     return [
       db
@@ -619,7 +630,8 @@ export const bindingChangeStatements = (
       // against removed just above, or none there to begin with.
       db.insert(appWorkflowBindings).select(
         sql`SELECT ${id}, ${app}, ${change.alias}, ${change.workflowId}, ${change.version}, 'active', ${by.userId}, ${now.getTime()}, NULL, NULL
-            WHERE ${landed} AND ${heldSql(app, change.alias)}`
+            WHERE ${landed} AND ${heldSql(app, change.alias)}
+              AND NOT EXISTS (SELECT 1 FROM app_workflow_bindings WHERE id = ${id})`
       ),
       outboxedWhere(
         db,
