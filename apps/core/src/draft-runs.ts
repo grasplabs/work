@@ -23,7 +23,7 @@ import type { WriterRoles } from "@grasp-os/shared/stores";
 import { exports } from "cloudflare:workers";
 
 import { operationRoles } from "./app-access.ts";
-import { schemaIdsOf } from "./app-definition.ts";
+import { schemaIdsOf, serverFunctionsIn } from "./app-definition.ts";
 import {
   publicOperationOf,
   readFunctionRequest,
@@ -234,7 +234,10 @@ export const draftReferences = async (
     return null;
   }
   const release = await sealed(env, app, version, source);
-  const generated = await generateModules(release.app);
+  const generated = await generateModules(
+    release.app,
+    serverFunctionsIn(source.files)
+  );
   return pageModulesOf(generated) ?? null;
 };
 

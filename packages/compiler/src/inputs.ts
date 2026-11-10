@@ -183,21 +183,31 @@ export const isTypeOnlyFile = (path: string): boolean =>
 export const buildFiles = (
   files: Record<string, string>
 ): Record<string, string> => {
-  const read = Object.fromEntries(
+  const own = Object.fromEntries(
     Object.entries(files).filter(
       ([path]) =>
         path !== routeTreePath &&
-        (path.startsWith(sourceFolder) ||
-          declarationFile.test(path) ||
-          path === pageReferences.path ||
-          path === pageFunctions.path)
+        (path.startsWith(sourceFolder) || declarationFile.test(path))
     )
   );
-  // Only for a front end: an App of server code alone has no pages to build.
+  // Only for a front end: an App of server code alone has no pages to
+  // build, though its files always hold the references Grasp generates
+  // (`server/_generated/api.ts`).
   const [schema] = pageDataModel.reads;
-  const frontEnd = Object.keys(read).some((path) =>
+  const frontEnd = Object.keys(own).some((path) =>
     path.startsWith(sourceFolder)
   );
+  const read = frontEnd
+    ? {
+        ...own,
+        ...Object.fromEntries(
+          [pageReferences.path, pageFunctions.path].flatMap((path) => {
+            const source = Object.hasOwn(files, path) ? files[path] : undefined;
+            return source === undefined ? [] : [[path, source]];
+          })
+        ),
+      }
+    : own;
   const typed =
     frontEnd && Object.hasOwn(files, schema)
       ? {
@@ -318,7 +328,8 @@ export const limitErrors = (files: Record<string, string>): Diagnostic[] => {
  * (`server/_generated/`, `.grasp/`), apart from the App's own files, so an App at its limits
  * still builds. The host writes them, never the App: each is derived from
  * the App's manifest, which the host has already read and bounded
- * (`appManifestMaxBytes`, whatever the size of the App's source), and
+ * (`appManifestMaxBytes`, whatever the size of the App's source), or
+ * from its definition and the names of the functions it registers, and
  * restates its descriptors at most a few times over (as types and as
  * values). So these bounds admit every manifest the platform accepts,
  * and still cap what one build hands the compiler.
@@ -334,8 +345,9 @@ export const hostGeneratedFolder = ".grasp/";
 
 /**
  * Whether `path` is one the host generates (`server/_generated/`,
- * `.grasp/`, the route tree): never an App's own file, so an App's files
- * never hold one.
+ * `.grasp/`, the route tree): never an App's own file. Its files hold
+ * `server/_generated/` as Grasp writes it on every save, and nothing else
+ * of them; a build generates its own.
  */
 export const isGeneratedPath = (path: string): boolean =>
   path.startsWith(generatedServerFolder) ||

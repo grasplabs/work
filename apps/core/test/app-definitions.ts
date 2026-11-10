@@ -4,6 +4,7 @@ import {
   definitionText,
   emptyDefinition,
   generatedFiles,
+  generatedServerSources,
 } from "@grasp-os/runtime/definition";
 import type {
   AppDefinition,
@@ -12,12 +13,33 @@ import type {
 } from "@grasp-os/runtime/definition";
 import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 
-// An App's definition as a test writes it, and the config and schema
-// generated from it, exactly as Grasp's definition tools make them. Every
-// App's version holds its definition beside its files and its config and
-// schema as the definition generates them (core's apps.ts), the tests'
-// Apps (core's and e2e/'s) too: a test commits its files with the
-// definition (`TestApp`, `commitApp`).
+// An App's definition as a test writes it, and the code generated from
+// it, exactly as Grasp's definition tools make it. Every App's version
+// holds its definition beside its files, and its config, schema and
+// `server/_generated/` as the definition and its code generate them
+// (core's apps.ts, app-definition.ts), the tests' Apps (core's and e2e/'s)
+// too: a test commits its files with the definition (`TestApp`,
+// `commitApp`), never what is generated, which no write may name.
+
+/** Where Grasp generates the references, among an App's files. */
+const generatedFolder = "server/_generated/";
+
+/** Whether `path` is one of the App's server modules, as Grasp reads them. */
+const isServerModule = (path: string): boolean =>
+  path.startsWith("server/") &&
+  path !== generatedFiles.schema &&
+  !path.startsWith(generatedFolder) &&
+  !path.startsWith("server/migrations/") &&
+  path.endsWith(".ts") &&
+  !path.endsWith(".d.ts");
+
+/** `files` without what Grasp generates under `server/_generated/`. */
+const withoutGenerated = <Content>(
+  files: Readonly<Record<string, Content>>
+): Record<string, Content> =>
+  Object.fromEntries(
+    Object.entries(files).filter(([path]) => !path.startsWith(generatedFolder))
+  );
 
 /** A row rule, as `setAccess` takes it. */
 type Rule =
@@ -194,12 +216,24 @@ export interface TestApp extends TestChanges {
 export const appOf = (
   definition: AppDefinition,
   files: Readonly<Record<string, string>> = {}
-): TestApp => ({
-  [defined]: true,
-  // The config and schema always the definition's, as a commit makes them.
-  files: { ...files, ...definitionSources(definition) },
-  definition,
-});
+): TestApp => {
+  // The config, schema and `server/_generated/` always the definition's
+  // and the code's, as a commit makes them.
+  const own = { ...withoutGenerated(files), ...definitionSources(definition) };
+  const modules = Object.fromEntries(
+    Object.entries(own)
+      .filter(([path]) => isServerModule(path))
+      .map(([path, source]) => [
+        path.slice("server/".length, -".ts".length),
+        source,
+      ])
+  );
+  return {
+    [defined]: true,
+    files: { ...own, ...generatedServerSources(modules, definition) },
+    definition,
+  };
+};
 
 /** The App `spec` describes, with `files` beside its config and schema. */
 export const testApp = (
@@ -220,7 +254,7 @@ export const withFiles = (
       changed[path] = content;
     }
   }
-  return { [defined]: true, files: changed, definition: app.definition };
+  return appOf(app.definition, changed);
 };
 
 /**
@@ -249,7 +283,10 @@ export const sourceParts = (
 ): {
   files: Readonly<Record<string, string | null>>;
   definition: AppDefinition | undefined;
-} => (defined in source ? source : { files: source, definition: undefined });
+} =>
+  defined in source
+    ? { files: withoutGenerated(source.files), definition: source.definition }
+    : { files: source, definition: undefined };
 
 /**
  * `definition` as a commit takes it: the JSON of its text, every
@@ -308,12 +345,12 @@ export const definedWith = (
   });
 
 /**
- * `app`'s files without the code generated from its definition: what the
- * agent writes with `writeFile`, which refuses both.
+ * `app`'s files without the code generated among them: what the agent
+ * writes with `writeFile`, which refuses it.
  */
 export const withoutDefinition = (app: TestApp): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(app.files).filter(
+    Object.entries(withoutGenerated(app.files)).filter(
       ([path]) =>
         path !== generatedFiles.config && path !== generatedFiles.schema
     )

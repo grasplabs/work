@@ -8,6 +8,7 @@ import type { AppManifest } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 
+import { serverFunctionsIn } from "./app-definition.ts";
 import { filesManifest } from "./app-inspection.ts";
 import type { BuildOptions } from "./pages.ts";
 
@@ -21,12 +22,15 @@ import type { BuildOptions } from "./pages.ts";
 // checks the arguments with that function's own validator
 // (app-functions.ts, `publicOperationOf`).
 //
-// Generation is deterministic: the same manifest always makes the same
-// bytes, whatever the App binds: a binding's pin is sealed only in
-// `.grasp/contracts.json`, which no page imports. This module makes them from files as they are, which is
-// what a save and a draft's check build (save-builds.ts): nothing of them
-// is sealed. A running version's pages get them from its release
-// (page-references.ts).
+// Generation is deterministic: the same files make the same references
+// (from the functions their syntax declares, as every save writes them
+// into `server/_generated/`, app-definition.ts), and the same manifest the
+// same functions, whatever the App binds: a binding's pin is sealed only
+// in `.grasp/contracts.json`, which no page imports. This module makes
+// them from files as they are, never from their copy of
+// `server/_generated/`, which is what a save and a draft's check build
+// (save-builds.ts): nothing of them is sealed. A running version's pages
+// get them from its release (page-references.ts).
 
 /** Whether any of `files` names the references, so a build could import them. */
 const mentionsReferences = (files: Readonly<Record<string, string>>): boolean =>
@@ -105,11 +109,16 @@ export const withReferencesText = async (
   return references === undefined ? files : { ...files, ...references };
 };
 
-/** The page modules `manifest` generates. */
+/**
+ * The page modules `manifest` and `files`, the code it was inspected
+ * from, generate: the references from the functions its syntax declares
+ * (app-definition.ts), the release's functions from the manifest.
+ */
 const referencesOf = async (
-  manifest: AppManifest
+  manifest: AppManifest,
+  files: Readonly<Record<string, string>>
 ): Promise<PageModules | undefined> =>
-  pageModulesOf(await generateModules(manifest));
+  pageModulesOf(await generateModules(manifest, serverFunctionsIn(files)));
 
 /**
  * `files` with the references their pages import as
@@ -122,7 +131,7 @@ export const withReferencesFrom = async (
 ): Promise<Record<string, string>> =>
   await withReferencesText(
     files,
-    async () => await referencesOf(await manifestOf())
+    async () => await referencesOf(await manifestOf(), files)
   );
 
 /**
@@ -189,7 +198,7 @@ export const withDraftReferences = async (
     const inspected = await inspection();
     if ("manifest" in inspected) {
       try {
-        return await referencesOf(inspected.manifest);
+        return await referencesOf(inspected.manifest, files);
       } catch (error) {
         if (!isExpectedError(error)) {
           throw error;

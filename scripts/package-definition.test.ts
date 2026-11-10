@@ -18,6 +18,7 @@ import {
   generateModules,
   readAppManifest,
 } from "../packages/runtime/src/host.ts";
+import { serverFunctionsOf } from "../packages/runtime/src/server-syntax.ts";
 import {
   ROOT,
   notesFiles,
@@ -96,7 +97,12 @@ describe(
       const fetches = vi.fn<typeof fetch>();
       vi.stubGlobal("fetch", fetches);
       const { out } = scratch();
-      const definition = definitionOf();
+      // A copy of what Grasp generates, as a version holds one: written
+      // anew, never as the package has it.
+      const definition = definitionOf({
+        ...notesFiles(),
+        "server/_generated/api.ts": "export const api = { forged: true };\n",
+      });
       const written = await packaged(definition, out);
       const read = (file: string) =>
         readFileSync(path.join(out, file), "utf-8");
@@ -116,7 +122,10 @@ describe(
       const lockedKeys = Object.keys(lockfile.packages);
       const notices = read("THIRD-PARTY-NOTICES.md");
       const regenerated = await generateModules(
-        readAppManifest(definition.app.manifest)
+        readAppManifest(definition.app.manifest),
+        serverFunctionsOf({
+          notes: definition.app.files["server/notes.ts"] ?? "",
+        })
       );
 
       expect({
@@ -371,7 +380,6 @@ describe(
         "nul\0.ts",
         "GRASP.config.ts",
         "ſerver/notes.ts",
-        "server/_generated/server.ts",
         "CON.ts",
         "server/lpt1",
         "notes.ts.",

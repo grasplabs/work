@@ -35,7 +35,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import { generatedPaths, withDefinitionCode } from "./app-definition.ts";
+import { generatedPaths, withGeneratedCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
 import {
@@ -526,7 +526,7 @@ export const createFromBlueprint = async (
   // Its code as its definition generates it, as every version's is: what
   // the blueprint holds already (its version's, or a built-in's, which
   // its build checks).
-  withDefinitionCode(files, definition);
+  withGeneratedCode(files, definition);
   // The blueprint's code, kept under the copy (`app_origins.code`): what an
   // update of the blueprint is merged over. Its AGENTS.md isn't, as it
   // isn't copied (above).
@@ -864,7 +864,7 @@ const mergeOver = (
   // Its config and schema follow it: no file conflict of their own, a
   // definition conflict being said as such, whether or not the code the
   // two generate differs (stable IDs alone change none).
-  withDefinitionCode(files, kept);
+  withGeneratedCode(files, kept);
   return {
     files,
     definition: kept,

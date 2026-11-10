@@ -1,4 +1,4 @@
-import { isPageFile } from "@grasp-os/compiler";
+import { isGeneratedPath, isPageFile } from "@grasp-os/compiler";
 import {
   definitionText,
   emptyDefinition,
@@ -57,7 +57,7 @@ import {
   generatedPaths,
   functionIdsOf,
   schemaIdsOf,
-  withDefinitionCode,
+  withGeneratedCode,
 } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { Release } from "./app-releases.ts";
@@ -110,8 +110,9 @@ import { liveStoreSql } from "./store-deletion.ts";
 //
 // - The definition and the code generated from it drift apart: every
 //   version is written through `storedVersion`, which generates its
-//   `grasp.config.ts` and `server/schema.ts` from the definition it is
-//   committed with, whatever the files held, before the tree is hashed;
+//   `grasp.config.ts`, `server/schema.ts` and `server/_generated/` from
+//   the definition it is committed with (and the last from its server
+//   modules too), whatever the files held, before the tree is hashed;
 //   nothing else writes those paths (the agent's `write` refuses them,
 //   app-definition.ts). Generation goes one way: nothing reads a
 //   definition back from code. Applying a version's schema to its store
@@ -372,12 +373,21 @@ interface Size {
   length: number;
 }
 
+/**
+ * `files`' size against an App's limits: what Grasp generates under
+ * `server/_generated/` (app-definition.ts) apart, so an App at its limits
+ * can still be written, whatever its references take.
+ */
 const sizeOf = (files: ReadonlyMap<string, string>): Size => {
+  let count = 0;
   let length = 0;
-  for (const content of files.values()) {
-    length += content.length;
+  for (const [path, content] of files) {
+    if (!isGeneratedPath(path)) {
+      count += 1;
+      length += content.length;
+    }
   }
-  return { files: files.size, length };
+  return { files: count, length };
 };
 
 /** An App's latest version, if it has one, and its files. */
@@ -744,8 +754,9 @@ const exportedFunctionsOf = async (
 
 /**
  * `files` and `definition` as a version stores them, `files` changed in
- * place to hold the config and schema `definition` generates, whatever
- * they held: every version is written through here, so its code is
+ * place to hold what is generated among them (`withGeneratedCode`: the
+ * config, the schema and `server/_generated/`), whatever they held,
+ * before the tree is hashed: every version is written through here, so its code is
  * always its definition's (see the header). `app.too_large` if they are
  * over an App's limits.
  */
@@ -757,7 +768,7 @@ export const storedVersion = async (
   /** The definitions it carries function IDs from (`carriedDefinitions`). */
   previous: readonly AppDefinition[] = []
 ): Promise<StoredVersion> => {
-  withDefinitionCode(files, definition);
+  withGeneratedCode(files, definition);
   const defined = await exportedFunctionsOf(
     env,
     app,
@@ -1028,14 +1039,15 @@ export const applyChanges = (
       files.set(path, content);
     }
   }
-  // The config and schema as the definition generates them, whatever the
-  // changes held of them, before the App's limits are checked on them.
+  // What is generated (the config, the schema and `server/_generated/`)
+  // as the definition and the changed code generate it, whatever the
+  // changes held of it, before the App's limits are checked.
   // Answered as changes too, so a draft saves the files it was checked
   // with.
   const submitted = new Map(
     [...generatedPaths].map((path) => [path, files.get(path)])
   );
-  withDefinitionCode(files, definition);
+  withGeneratedCode(files, definition);
   checkLimits(files, before);
   checkPaths(files.keys(), added);
   checkMemory(agentsBefore, files.get(appMemoryPath));
@@ -1271,7 +1283,10 @@ export const draftOverLatest = async (
       baseRow === undefined
         ? new Map<string, string>()
         : await readTree(env, app, baseRow.tree);
+    // What Grasp generates is generated again as the draft is committed
+    // (`storedVersion`): never a clash of its own.
     const clashes = Object.entries(changes).flatMap(([path, content]) =>
+      !isGeneratedPath(path) &&
       before.get(path) !== files.get(path) &&
       (content ?? undefined) !== files.get(path)
         ? [changedSince(path)]

@@ -20,6 +20,7 @@ import {
 } from "@grasp-os/runtime/host";
 import type {
   AppManifest,
+  ServerFunctions,
   WorkflowBindingExtras,
 } from "@grasp-os/runtime/host";
 import {
@@ -49,6 +50,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { generatedServerFiles, serverFunctionsIn } from "./app-definition.ts";
 import {
   builtCode,
   checkedCode,
@@ -1003,6 +1005,66 @@ interface InspectedRelease {
 }
 
 /**
+ * Refuses a release whose code registers a function its syntax doesn't
+ * declare (`functions`, app-definition.ts `serverFunctionsIn`), or
+ * declares as another visibility: one made through an alias of a builder
+ * or a wrapper, which the generated references don't name, so its pages
+ * and code could never reach it as the release has it
+ * (`version.function_undeclared`, naming each).
+ */
+const requireDeclaredFunctions = (
+  manifest: AppManifest,
+  functions: ServerFunctions
+): void => {
+  const undeclared = Object.values(manifest.operations)
+    .filter(
+      ({ path, visibility }) =>
+        !Object.hasOwn(functions, path) || functions[path] !== visibility
+    )
+    .map(({ path }) => path)
+    .toSorted();
+  if (undeclared.length > 0) {
+    throw versionErrors.create("version.function_undeclared", {
+      functions: undeclared.slice(0, 50),
+    });
+  }
+};
+
+/** Where `server/_generated/` is among an App's files, in order. */
+const serverGeneratedPaths: readonly string[] = [
+  generatedPaths.api,
+  generatedPaths.dataModel,
+  generatedPaths.internal,
+  generatedPaths.server,
+];
+
+/**
+ * Refuses sealing a version whose `server/_generated/` (`files`' copy)
+ * isn't, byte for byte, both what its code and `definition` generate
+ * (app-definition.ts, `generatedServerFiles`) and what its seal generated
+ * from what it registers (`generated`): one written by an earlier
+ * generator, changed in storage, or from another definition than the
+ * version's (`version.generated_stale`, naming each path). Its builder's
+ * editor and its pages then read the same references.
+ */
+const requireGeneratedCurrent = (
+  files: Readonly<Record<string, string>>,
+  definition: AppDefinition,
+  generated: Readonly<Record<string, string>>
+): void => {
+  const expected = generatedServerFiles(files, definition);
+  const stale = serverGeneratedPaths.filter(
+    (path) =>
+      !Object.hasOwn(files, path) ||
+      files[path] !== expected[path] ||
+      files[path] !== generated[path]
+  );
+  if (stale.length > 0) {
+    throw versionErrors.create("version.generated_stale", { paths: stale });
+  }
+};
+
+/**
  * `files`, an App's code for release `key`, built and inspected as a seal
  * does (see the header): inspected with symbolic references, then built
  * and type-checked with the modules generated from what it read and the
@@ -1036,10 +1098,14 @@ const inspectForSeal = async (
   const inspection = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(inspection);
 
-  // The real modules, then the same code built with them: the workflow
-  // versions it binds once current, sealed with it.
+  // The real modules, then the same code built with them: the references
+  // from the functions its syntax declares, each one it registers among
+  // them, and the workflow versions it binds once current, sealed with it.
+  const functions = serverFunctionsIn(files);
+  requireDeclaredFunctions(manifest, functions);
   const generated = await generateModules(
     manifest,
+    functions,
     await sealedWorkflowPins(env, key.app, manifest, definition)
   );
   // Type-checked with them, against the SDK's server side: nothing is
@@ -1312,6 +1378,7 @@ export const sealRelease = async (
     defined,
     "production"
   );
+  requireGeneratedCurrent(files, defined, built.generated);
   await requireFunctionIds(env, app, files, defined);
   const store = await boundStore(env, request, built.manifest, built.schema);
   // Every page built and sealed with the release, so none is compiled

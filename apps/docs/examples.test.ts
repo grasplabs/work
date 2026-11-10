@@ -14,6 +14,7 @@ import { startOxc } from "@grasp-os/compiler/oxc";
 import { oxcWasmModule } from "@grasp-os/compiler/oxc-wasm";
 import { pageServerImports } from "@grasp-os/compiler/page-imports";
 import { routeTree } from "@grasp-os/compiler/route-tree";
+import { serverFunctionsOf } from "@grasp-os/runtime/definition";
 import {
   dataModelSource,
   generatedPaths,
@@ -142,7 +143,8 @@ const exportsOf = (module: unknown): Record<string, unknown> =>
 /**
  * The modules Grasp generates for the App in `dir`: its server modules
  * imported, registered and inspected, as the host's inspection does, and
- * its references generated from the manifest that gives.
+ * its references generated from the manifest that gives and the
+ * functions their syntax declares.
  */
 const generated = async (dir: string, files: Files): Promise<Files> => {
   const config = exportsOf(await import(path.join(dir, "grasp.config.ts")));
@@ -170,7 +172,18 @@ const generated = async (dir: string, files: Files): Promise<Files> => {
     migrations: [],
   } as Parameters<typeof registerApp>[0];
   const { manifest } = inspectApp(registerApp(parts));
-  return await generateModules(readAppManifest(JSON.stringify(manifest)));
+  const sources = Object.fromEntries(
+    Object.entries(files)
+      .filter(([file]) => isServerModule(file))
+      .map(([file, source]) => [
+        file.slice("server/".length, -".ts".length),
+        source,
+      ])
+  );
+  return await generateModules(
+    readAppManifest(JSON.stringify(manifest)),
+    serverFunctionsOf(sources)
+  );
 };
 
 /** The repo's TypeScript: 7, tsgo (this package has 6, for TypeDoc). */

@@ -232,6 +232,10 @@ export const versionErrors = defineErrorFamily({
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",
+  "version.generated_stale":
+    "This version's server/_generated/ isn't what Grasp generates from its code and definition now. Save the App again to generate it anew, then publish that version.",
+  "version.function_undeclared":
+    "A server function of this version isn't declared as `export const name = query({ … })`, with one of the six builders of @server/_generated/server called by name, so the App's references can't name it. These details name each one: declare it that way, not through an alias of a builder or a wrapper.",
   "version.unpublished":
     "This version hasn't been published, or its release was deleted since. Publish it again.",
   "version.export_too_large":

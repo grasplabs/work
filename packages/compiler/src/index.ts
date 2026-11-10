@@ -54,6 +54,7 @@ export {
   generatedModules,
   isAppLayout,
   isAppTestSuite,
+  isServerModule,
   isUnderAppTests,
   serverEntryPath,
   serverEntrySource,

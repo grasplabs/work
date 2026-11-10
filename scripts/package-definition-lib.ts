@@ -70,6 +70,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 
+import { serverFunctionsOf } from "@grasp-os/runtime/definition";
 import { generateModules, readAppManifest } from "@grasp-os/runtime/host";
 import {
   definitionPackageFormatVersion,
@@ -85,6 +86,7 @@ import {
   oxcWasmModule,
   oxcWasmPin,
 } from "../packages/compiler/oxc-wasm/wasm.ts";
+import { isServerModule } from "../packages/compiler/src/app-code.ts";
 import {
   buildFiles,
   codeExtensions,
@@ -412,14 +414,27 @@ const readDefinition = (definition: unknown): DefinitionPackage => {
 };
 
 /**
- * The App: its source as packaged, and its references generated anew from
- * its sealed registration, which names no deployment's workflow.
+ * The App: its source as packaged, and what Grasp generates for it anew,
+ * whatever the package holds of it: its references from its sealed
+ * registration, which names no deployment's workflow, and the functions
+ * its server modules' syntax declares.
  */
 const planApp = async (
   project: Plan,
   app: DefinitionPackage["app"]
 ): Promise<void> => {
-  const generated = await generateModules(readAppManifest(app.manifest));
+  const modules = Object.fromEntries(
+    Object.entries(app.files)
+      .filter(([file]) => isServerModule(file))
+      .map(([file, source]) => [
+        file.slice("server/".length, -".ts".length),
+        source,
+      ])
+  );
+  const generated = await generateModules(
+    readAppManifest(app.manifest),
+    serverFunctionsOf(modules)
+  );
   for (const [file, text] of Object.entries(generated)) {
     project.add(`app/${safePath(file, "generated")}`, text);
   }
@@ -431,7 +446,10 @@ const planApp = async (
   startOxc(await oxcWasmModule());
   const tree = await routeTree(built);
   for (const [file, text] of Object.entries({ ...app.files, ...tree.routes })) {
-    project.add(`app/${safePath(file, "app")}`, text);
+    // What Grasp generates is written above, anew.
+    if (!isGeneratedPath(file)) {
+      project.add(`app/${safePath(file, "app")}`, text);
+    }
   }
   if (tree.source !== undefined) {
     project.add(`app/${routeTreePath}`, tree.source);

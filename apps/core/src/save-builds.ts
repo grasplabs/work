@@ -17,7 +17,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
-import { generatedPaths } from "./app-definition.ts";
+import { generatedPaths, serverFunctionsIn } from "./app-definition.ts";
 import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { keepLints, readLints } from "./build-cache.ts";
 import { inspectDraft, withDraftReferences } from "./draft-references.ts";
@@ -265,7 +265,7 @@ const checkedDraftCode = async (
         };
   }
   const { manifest } = inspected;
-  const generated = await generateModules(manifest);
+  const generated = await generateModules(manifest, serverFunctionsIn(code));
   return await checkAppCode(env, { ...code, ...generated }, app, options);
 };
 

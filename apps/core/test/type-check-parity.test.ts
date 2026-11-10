@@ -6,6 +6,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { serverFunctionsIn } from "../src/app-definition.ts";
 import { loadBuiltinRelease } from "../src/builtins.ts";
 import { inspectDraft, withDraftReferences } from "../src/draft-references.ts";
 import { buildPages, checkAppCode } from "../src/pages.ts";
@@ -48,7 +49,7 @@ const sealedServer = async (
   }
   return {
     ...files,
-    ...(await generateModules(inspected.manifest)),
+    ...(await generateModules(inspected.manifest, serverFunctionsIn(files))),
   };
 };
 

@@ -75,6 +75,7 @@ const blueprintFiles = async (
   });
   const { generateModules, inspectApp, registerApp } =
     await import("@grasp-os/runtime/host");
+  const { serverFunctionsOf } = await import("@grasp-os/runtime/definition");
   const all: z.infer<typeof blueprintsSchema> = {};
   const names = readdirSync(blueprints).filter((name) =>
     existsSync(path.join(blueprints, name, "files", configPath))
@@ -98,13 +99,15 @@ const blueprintFiles = async (
       }
     }
     const modules: Record<string, Record<string, unknown>> = {};
+    const sources: Record<string, string> = {};
     for (const file of Object.keys(files).filter(isServerModule).toSorted()) {
       // oxlint-disable-next-line no-await-in-loop -- as above
       const namespace: unknown = await import(
         pathToFileURL(path.join(dir, file)).href
       );
-      modules[file.slice("server/".length, -".ts".length)] =
-        moduleSchema.parse(namespace);
+      const module = file.slice("server/".length, -".ts".length);
+      modules[module] = moduleSchema.parse(namespace);
+      sources[module] = files[file] ?? "";
     }
     const migrations: unknown[] = [];
     for (const migrationFile of Object.keys(files)
@@ -127,7 +130,10 @@ const blueprintFiles = async (
     all[name] = {
       ...files,
       // oxlint-disable-next-line no-await-in-loop -- as above
-      ...(await generateModules(inspectApp(registerApp(parts)).manifest)),
+      ...(await generateModules(
+        inspectApp(registerApp(parts)).manifest,
+        serverFunctionsOf(sources)
+      )),
     };
   }
   return all;

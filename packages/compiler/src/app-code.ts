@@ -21,8 +21,9 @@
  *   a function. The registration imports them to register them; the host
  *   runs them in an isolate with no env and no network whatever they
  *   import;
- * - what the host generated for it (`server/_generated/**`, `.grasp/**`),
- *   which no App's version holds: the server constructors import
+ * - what the host generated for it (`server/_generated/**`, which each
+ *   version holds as every save writes it, and `.grasp/**`, which none
+ *   does): the server constructors import
  *   `@grasp-os/sdk/server` and the schema; the references import nothing
  *   at run time; the entry the host runs (`serverEntryPath`) imports the
  *   registration and every server module;

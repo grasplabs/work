@@ -1,9 +1,12 @@
+import { isServerModule } from "@grasp-os/compiler";
 import type { IndexRead } from "@grasp-os/compiler";
 import {
   canonicalDefinition,
   definitionManifest,
   definitionSources,
   generatedFiles,
+  generatedServerSources,
+  serverFunctionsOf,
   validatorSource,
 } from "@grasp-os/runtime/definition";
 import type {
@@ -14,7 +17,12 @@ import type {
   DefinitionOperation,
   ValueDescriptor,
 } from "@grasp-os/runtime/definition";
-import type { AppManifest, SchemaManifest } from "@grasp-os/runtime/host";
+import { generatedPaths as hostGeneratedPaths } from "@grasp-os/runtime/host";
+import type {
+  AppManifest,
+  SchemaManifest,
+  ServerFunctions,
+} from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type {
   DataModel,
@@ -32,20 +40,50 @@ import { catalogOf, planSchemaChange } from "./schema-changes.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 
 // An App's definition (@grasp-os/runtime's definition.ts), what the App is,
-// and the config and schema generated from it among its files. The
-// definition is no file: each version holds it as metadata (apps.ts), a
-// chat's draft its own copy (workspace.ts). Every version the App
-// commits holds its config and schema exactly as its definition generates
-// them (`withDefinitionCode`), and generation goes one way: nothing reads
-// a definition back from code. A chat's agent changes the definition
-// only with the definition tools (`define`): `write` refuses the two
-// generated files, naming the tools, so the definition and the code
-// generated from it never part.
+// and the code generated among its files. The definition is no file:
+// each version holds it as metadata (apps.ts), a chat's draft its own
+// copy (workspace.ts). Every write of an App's files, a draft's and a
+// commit's alike, writes what is generated as `withGeneratedCode`
+// generates it, whatever the files held: the config and schema from the
+// definition, and `server/_generated/` (the references, the server
+// constructors and the data model) from the definition and the server
+// modules' syntax, as Convex's `convex/_generated/` is part of the
+// project. Generation goes one way: nothing reads a definition back from
+// code. A chat's agent changes the definition only with the definition
+// tools (`define`): `write` refuses the generated files, so the
+// definition, the code and what is generated from them never part.
+//
+// Threat model of `server/_generated/` in the App's files, and how each
+// is closed:
+//
+// - A builder or the agent writes it, to reference a function the code
+//   doesn't declare, hide one, or type a page's calls as something else:
+//   no write names a path under `server/_generated/`, in any case (the
+//   path schema, shared's apps.ts; `refuseGeneratedFiles`), and every
+//   write generates it again anyway.
+// - A copy that is stale or forged in storage (a tree written another
+//   way, or by an earlier generator): sealing a version compares its
+//   copy with what the seal generates, byte for byte, and refuses it
+//   (`version.generated_stale`, app-releases.ts); a page is only ever
+//   built with what the seal generated. A draft's preview generates its
+//   own and never reads the copy.
+// - A definition change not reflected in it (a workflow's events, a
+//   files or links permission): it is generated from the very
+//   definition each write saves, and a seal holds the copy to the
+//   release's own.
+// - A function the syntax doesn't read (an alias of a builder, a
+//   wrapper): it has no reference, and a seal refuses it by name
+//   (`version.function_undeclared`), so a page never misses one a
+//   release registers.
 
-/** The files generated from the definition, which only Grasp writes. */
+/** The files Grasp generates among an App's, which only Grasp writes. */
 export const generatedPaths: ReadonlySet<string> = new Set([
   generatedFiles.config,
   generatedFiles.schema,
+  hostGeneratedPaths.api,
+  hostGeneratedPaths.internal,
+  hostGeneratedPaths.server,
+  hostGeneratedPaths.dataModel,
 ]);
 
 /**
@@ -63,15 +101,68 @@ export const refuseGeneratedFiles = (paths: Iterable<string>): void => {
 };
 
 /**
- * `files` with their config and schema as `definition` generates them,
- * changed in place, whatever they held: every write of an App's files
- * comes through here, the definition tools' and a commit's alike.
+ * The App's server modules among `files`, each one's source by its path
+ * under `server/` without `.ts` (`crm/deals`), as the generated
+ * references read them.
  */
-export const withDefinitionCode = (
+const serverModulesOf = (
+  files: ReadonlyMap<string, string>
+): Record<string, string> =>
+  Object.fromEntries(
+    [...files]
+      .filter(([path]) => isServerModule(path))
+      .map(([path, source]) => [
+        path.slice("server/".length, -".ts".length),
+        source,
+      ])
+  );
+
+/**
+ * The functions `files`' server modules declare, as their syntax does
+ * (`serverFunctionsOf`): what `server/_generated/` references, and what
+ * the host generates a release's from.
+ */
+export const serverFunctionsIn = (
+  files: ReadonlyMap<string, string> | Readonly<Record<string, string>>
+): ServerFunctions =>
+  serverFunctionsOf(
+    serverModulesOf(
+      files instanceof Map ? files : new Map(Object.entries(files))
+    )
+  );
+
+/**
+ * `server/_generated/`, by path, as `definition` and `files`' own server
+ * modules generate it: what every write puts among them
+ * (`withGeneratedCode`), and what a seal holds their copy to.
+ */
+export const generatedServerFiles = (
+  files: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
+  definition: AppDefinition
+): Record<string, string> =>
+  generatedServerSources(
+    serverModulesOf(
+      files instanceof Map ? files : new Map(Object.entries(files))
+    ),
+    definition
+  );
+
+/**
+ * `files` with what is generated among them as `definition` and their
+ * own server modules generate it, changed in place, whatever they held:
+ * every write of an App's files comes through here, the definition
+ * tools' and a commit's alike.
+ */
+export const withGeneratedCode = (
   files: Map<string, string>,
   definition: AppDefinition
 ): void => {
   for (const [path, source] of Object.entries(definitionSources(definition))) {
+    files.set(path, source);
+  }
+  for (const [path, source] of Object.entries(
+    generatedServerFiles(files, definition)
+  )) {
     files.set(path, source);
   }
 };
