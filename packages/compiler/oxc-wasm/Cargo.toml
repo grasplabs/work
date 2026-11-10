@@ -2,7 +2,7 @@
 # App code, oxlint's linter and oxfmt's formatter, for the isolate that
 # lints and formats it, and oxc's parser, for what reads App code's
 # syntax (route-tree.ts, stand-ins.ts, classes.ts) and for workflow
-# expressions (packages/sdk/src/oxc-parse.ts). Two threadless modules
+# expressions (packages/runtime/src/oxc-parse.ts). Two threadless modules
 # (build.sh): oxc.wasm, with the `tools` feature, for the compiler's
 # isolates (src/oxc.ts); oxc-parse.wasm, the parser alone, for core.
 # Built inside oxc's own workspace at the commit pin.json names (build.sh),
