@@ -11,13 +11,22 @@ import type {
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
-import type { SetupPlace } from "@grasp-os/shared/onboarding-flow";
+import { flowScreens } from "@grasp-os/shared/onboarding-flow";
+import type {
+  OnboardingFlow,
+  SetupPlace,
+} from "@grasp-os/shared/onboarding-flow";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Navigate,
+  redirect,
+  useNavigate,
+} from "@tanstack/react-router";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { DotBrain } from "../brain/dot-brain.tsx";
@@ -41,6 +50,7 @@ import {
   reachedOf,
   settledAs,
   stepIndex,
+  steps,
   stepShown,
   suitesFor,
   waysFrom,
@@ -49,6 +59,7 @@ import type {
   AiReadiness,
   Kept,
   ReviewItemId,
+  SetupPath,
   SetupStep,
 } from "../onboarding/setup.ts";
 import { wasHeard } from "../onboarding/visit.ts";
@@ -138,8 +149,12 @@ const onResize = (listener: () => void): (() => void) => {
 /** Where this browser keeps how far its admin went, the message they wrote and what they settled: a convenience of this browser alone. */
 const keptKey = (userId: string): string => `grasp.setup.${userId}`;
 
-/** Which list of steps a kept place counts in: 2 since the AI step came second. */
-const keptSteps = 2;
+/**
+ * Which list of steps a kept place counts in: 2 since the AI step came
+ * second; 3 since core keeps the place by the screens' names, and this
+ * browser's own number is only how far it went on this visit.
+ */
+const keptSteps = 3;
 
 const readKept = (userId: string): Kept => {
   try {
@@ -151,8 +166,15 @@ const readKept = (userId: string): Kept => {
     }
     const stored =
       "reached" in raw && typeof raw.reached === "number" ? raw.reached : 0;
-    // Kept before the AI step came second: every step after the welcome is one further now.
-    const reached = "steps" in raw || stored === 0 ? stored : stored + 1;
+    // A place core has by now counts for nothing here. One kept before
+    // the AI step came second counts one further: every step after the
+    // welcome moved up.
+    let reached = stored;
+    if ("steps" in raw && raw.steps === keptSteps) {
+      reached = 0;
+    } else if (!("steps" in raw) && stored > 0) {
+      reached = stored + 1;
+    }
     const message =
       "message" in raw && typeof raw.message === "string" ? raw.message : null;
     const settled =
@@ -177,18 +199,17 @@ const writeKept = (userId: string, kept: Kept): void => {
 };
 
 /**
- * Tells core the screens an admin who went as far as `reached` finished.
+ * Tells core the screens the admin `finished`.
  * Not heard this once, core hears it with the next screen: nothing is
  * lost, and nothing holds the admin up.
  */
 const notePlace = async (
   core: ReturnType<typeof useCore>,
-  reached: number
+  finished: SetupStep[]
 ): Promise<void> => {
   try {
     await core.withSession(
-      async (session) =>
-        await session.onboarding.finishSteps(finishedAt(reached))
+      async (session) => await session.onboarding.finishSteps(finished)
     );
   } catch {
     // Said again with the next screen.
@@ -203,7 +224,8 @@ const today = (): string => new Date().toISOString().slice(0, 10);
  * arrow keys go on as far as they went.
  */
 const useKept = (userId: string, index: number) => {
-  const [kept, setKept] = useState(() => readKept(userId));
+  // How far they went is counted on this company's path, from where core says they are.
+  const [kept, setKept] = useState(() => ({ ...readKept(userId), reached: 0 }));
   // The furthest step is kept as they go, so going back never lowers it.
   const now = keptAt(kept, index);
   if (now !== kept) {
@@ -229,6 +251,7 @@ const useKept = (userId: string, index: number) => {
 const useArrowKeys = (
   index: number,
   reached: number,
+  path: SetupPath,
   go: (step: SetupStep) => void
 ): void => {
   useEffect(() => {
@@ -242,7 +265,7 @@ const useArrowKeys = (
       if (typing || event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
-      const { back, on } = waysFrom(index, reached);
+      const { back, on } = waysFrom(index, reached, path);
       if (event.key === "ArrowLeft" && back !== undefined) {
         go(back);
       }
@@ -254,7 +277,7 @@ const useArrowKeys = (
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [index, reached, go]);
+  }, [index, reached, path, go]);
 };
 
 /**
@@ -378,46 +401,68 @@ const Setup = () => {
   const { step: asked } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
   const { roster, plan, progress, percent, parts, choices } = readOf(data);
+  // The screens this company's flow has, in its order; all of them where core can't say.
+  const path: SetupPath = data === null ? steps : flowScreens(data.flow);
   // How far they went: as core says, on whatever device, or as this browser kept it before core did.
-  const placed = reachedByPlace(data?.place ?? null);
-  const stored = Math.max(readKept(identity.userId).reached, placed);
+  const legacy = finishedAt(readKept(identity.userId).reached);
+  const told = reachedByPlace(data?.place ?? null, path);
+  const placed = reachedByPlace(
+    { done: [...(data?.place.done ?? []), ...legacy] },
+    path
+  );
   const ai = data?.ai ?? null;
   // Opened without a step, it goes on where they were; never past the AI step while no model is ready for calls.
-  const step = stepShown(asked, reachedOf(stored, { plan }), ai);
-  const index = stepIndex(step);
+  const step = stepShown(asked, reachedOf(placed, { plan }, path), ai, path);
+  const index = Math.max(stepIndex(step, path), 0);
   const kept = useKept(identity.userId, Math.max(index, placed));
   // Core hears of every screen they finished, so they go on from it anywhere, and Grasp sees how far they are.
   const core = useCore();
   useEffect(() => {
-    if (kept.reached > placed) {
-      void notePlace(core, kept.reached);
+    if (kept.reached > told) {
+      void notePlace(core, finishedAt(kept.reached, path));
     }
-  }, [core, kept.reached, placed]);
+  }, [core, kept.reached, told, path]);
   // How far they went, and how far they can go now.
-  const furthest = reachedOf(kept.reached, { plan });
-  const reached = heldAt(furthest, ai);
+  const furthest = reachedOf(kept.reached, { plan }, path);
+  const reached = heldAt(furthest, ai, path);
   const now = today();
   const listening = listeningOf({ roster, plan, progress }, now);
   // "How this works" tells its story in the brain's figures, so the figure follows the story there.
   const [story, setStory] = useState<BrainScene | null>(null);
-  const told = brainScene(step, {
+  const shown = brainScene(step, {
     roster,
     listening,
     known: percent,
     choices,
   });
   const { scene, revealing, clearing } = useWayIn(
-    step === "about" && story !== null ? story : told
+    step === "about" && story !== null ? story : shown
   );
   const go = (next: SetupStep) => {
     void navigate({ to: "/setup", search: { step: next } });
   };
-  useArrowKeys(index, reached, go);
+  // The screen after this one; past the last, every screen is finished and the admin is in the platform.
+  const next = path[index + 1];
+  const onward = () => {
+    if (next !== undefined) {
+      go(next);
+      return;
+    }
+    void (async () => {
+      await notePlace(core, [...path]);
+      await navigate({ to: "/" });
+    })();
+  };
+  useArrowKeys(index, reached, path, go);
   useVoiceBetweenSteps(step);
   const { body, cramped, brainSize, onMadeWay } = useBrainRoom(step);
 
   if (data === null) {
     return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
+  }
+  // A company that goes through no onboarding has no screens: home.
+  if (path.length === 0) {
+    return <Navigate replace to="/" />;
   }
   const admin = identity.name.split(" ")[0] ?? identity.name;
   const sendingDomain = data.view.mailDomain;
@@ -430,6 +475,7 @@ const Setup = () => {
         }
       }}
       onGo={go}
+      path={path}
       reached={reached}
       step={step}
     >
@@ -479,6 +525,8 @@ const Setup = () => {
             }}
             furthest={furthest}
             go={go}
+            onward={onward}
+            path={path}
             listening={listening}
             message={kept.message}
             onMadeWay={onMadeWay}
@@ -539,6 +587,8 @@ const aiReadinessOf = async (session: Session): Promise<AiReadiness | null> => {
 interface Loaded {
   /** The screens the admin finished, as core keeps them. */
   place: SetupPlace;
+  /** How much onboarding the company goes through: its screens come from it. */
+  flow: OnboardingFlow;
   view: OnboardingView;
   /** Everyone's own link to send, once it is out. */
   links: LinkToSend[];
@@ -617,6 +667,7 @@ export const Route = createFileRoute("/setup")({
         hr,
         ai,
         place,
+        flow,
       ] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.links(),
@@ -630,6 +681,7 @@ export const Route = createFileRoute("/setup")({
         session.onboarding.hrPlatform(),
         aiReadinessOf(session),
         session.onboarding.place(),
+        session.onboarding.flow(),
       ]);
       return {
         view,
@@ -644,6 +696,7 @@ export const Route = createFileRoute("/setup")({
         hr,
         ai,
         place,
+        flow,
       };
     }),
   component: Setup,

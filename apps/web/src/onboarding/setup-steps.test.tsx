@@ -19,7 +19,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { SetupFrame } from "./setup-frame.tsx";
 import { SetupStepBody } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
-import { listeningOf, stepIndex } from "./setup.ts";
+import { listeningOf, stepIndex, steps } from "./setup.ts";
 import type { AiReadiness, SetupStep } from "./setup.ts";
 import { noteHeard } from "./visit.ts";
 
@@ -192,6 +192,8 @@ const drawn = (
       data={data}
       furthest={0}
       go={() => {}}
+      onward={() => {}}
+      path={steps}
       listening={listeningOf(
         { roster: null, plan: data.view.plan, progress: null },
         today
@@ -450,6 +452,7 @@ const waysOn = (step: SetupStep, furthest: SetupStep) => {
       knowledge={{ parts: [], percent: 10, threshold: 80 }}
       onExit={() => {}}
       onGo={() => {}}
+      path={steps}
       reached={stepIndex(furthest)}
       step={step}
     >

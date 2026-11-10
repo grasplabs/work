@@ -115,11 +115,12 @@ import {
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
-import { afterAi, openItems, stepIndex, steps } from "./setup.ts";
+import { afterAi, openItems, stepIndex } from "./setup.ts";
 import type {
   AiReadiness,
   Listening,
   ReviewItemId,
+  SetupPath,
   SetupStep,
 } from "./setup.ts";
 import {
@@ -202,7 +203,11 @@ export interface StepProps {
   settled: ReviewItemId[];
   onSettle: (item: ReviewItemId, settled: boolean) => void;
   go: (step: SetupStep) => void;
-  /** The furthest step they reached before, by its place. */
+  /** Goes on to the screen after this one on the company's path; past its last, into the platform. */
+  onward: () => void;
+  /** The screens this company's admin goes through, in order. */
+  path: SetupPath;
+  /** The furthest step they reached before, by its place on the path. */
   furthest: number;
   /** "How this works" tells its story in the brain's figures: this sets the figure, or gives it back with null. */
   onStory: (scene: BrainScene | null) => void;
@@ -233,12 +238,12 @@ const downloadCsv = (content: string, filename: string): void => {
 };
 
 /** What the steps that connect read, from a step's props (connect-steps.tsx). */
-const connectProps = ({ data, go }: StepProps) => ({
+const connectProps = ({ data, onward }: StepProps) => ({
   choices: data.choices,
   signIn: data.signIn,
   named: data.view.context,
   identity: data.identity,
-  go,
+  onward,
 });
 
 /** Reads core again after a change, so every step shows what core now has. */
@@ -487,7 +492,7 @@ const Welcome = (props: StepProps) => {
       </div>
       <Primary
         onClick={() => {
-          props.go("ai");
+          props.onward();
         }}
         ready={picked}
       >
@@ -503,10 +508,16 @@ const Ai = (props: StepProps) => (
     ai={props.data.ai}
     lines={useHeadlines(props).ai}
     onConnected={() => {
-      props.go(afterAi(props.furthest));
+      // Back to where they were, for an admin sent back here; else on.
+      const next = afterAi(props.furthest, props.path);
+      if (next === undefined) {
+        props.onward();
+      } else {
+        props.go(next);
+      }
     }}
     onDone={() => {
-      props.go("about");
+      props.onward();
     }}
   />
 );
@@ -939,7 +950,7 @@ const Company = (props: StepProps) => {
           <WaitingNote waiting={waiting} />
           <Primary
             onClick={() => {
-              props.go("sources");
+              props.onward();
             }}
           >
             {t`Continue`}
@@ -1408,7 +1419,7 @@ const Documents = (props: StepProps) => {
       <Primary
         disabled={reading.length > 0}
         onClick={() => {
-          props.go("pulse");
+          props.onward();
         }}
         ready={count > 0}
       >
@@ -1417,7 +1428,7 @@ const Documents = (props: StepProps) => {
       {count === 0 && reading.length === 0 ? (
         <Later
           onClick={() => {
-            props.go("pulse");
+            props.onward();
           }}
         >
           {t`Skip for now`}
@@ -1594,7 +1605,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
       ) : (
         <Primary
           onClick={() => {
-            props.go("team");
+            props.onward();
           }}
         >
           {t`Continue`}
@@ -1824,7 +1835,7 @@ const Team = (props: StepProps) => {
             );
             if (saved !== undefined) {
               await refresh();
-              props.go("listening");
+              props.onward();
             }
           })();
         }}
@@ -1916,7 +1927,7 @@ const ListeningStep = (props: StepProps) => {
               />
               <Primary
                 onClick={() => {
-                  props.go("review");
+                  props.onward();
                 }}
               >
                 {t`See what needs you`}
@@ -2021,7 +2032,7 @@ const Review = (props: StepProps) => {
       {open === 0 ? (
         <Primary
           onClick={() => {
-            props.go("open");
+            props.onward();
           }}
         >
           {t`Continue`}
@@ -2117,14 +2128,16 @@ export const SetupStepBody = ({
   }, []);
   // This step's line and the next one's are fetched ahead, so he starts the moment a step arrives; a step seen is not said again.
   const headlines = useHeadlines(props);
-  const [here, ahead] = [step, steps[stepIndex(step) + 1]].map((each) => {
-    const headline =
-      each === undefined || each === "about" ? undefined : headlines[each];
-    return {
-      line: stepLine(headline?.title ?? "", headline?.sentence).line,
-      voice: headline?.voice ?? evenVoice,
-    };
-  });
+  const [here, ahead] = [step, props.path[stepIndex(step, props.path) + 1]].map(
+    (each) => {
+      const headline =
+        each === undefined || each === "about" ? undefined : headlines[each];
+      return {
+        line: stepLine(headline?.title ?? "", headline?.sentence).line,
+        voice: headline?.voice ?? evenVoice,
+      };
+    }
+  );
   usePrepare(seen ? "" : (here?.line ?? ""), here?.voice);
   usePrepare(ahead?.line ?? "", ahead?.voice);
   const onExplained = () => {

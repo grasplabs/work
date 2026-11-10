@@ -42,7 +42,7 @@ import {
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
 import { documentSources, sourcesFor } from "./setup.ts";
-import type { Named, DocumentSource, SetupStep } from "./setup.ts";
+import type { Named, DocumentSource } from "./setup.ts";
 
 // The steps where the admin says what Grasp may connect (prototype
 // `Sources`, `RealPulse` and `Leads` in
@@ -69,7 +69,8 @@ export interface ConnectStepProps {
   /** What the kickoff named of where the company works: those places first, and no other suite's. */
   named: Named;
   identity: Identity;
-  go: (step: SetupStep) => void;
+  /** Goes on to the screen after this one. */
+  onward: () => void;
 }
 
 /** Keeps what the admin chose, and reads core again so every step shows it. */
@@ -238,7 +239,7 @@ export const Sources = ({
   signIn,
   named,
   identity,
-  go,
+  onward,
 }: ConnectStepProps) => {
   const { t } = useLingui();
   const { save, busy, failure } = useSaveChoices();
@@ -448,7 +449,7 @@ export const Sources = ({
       </Onward>
       <Primary
         onClick={() => {
-          go("documents");
+          onward();
         }}
         ready={count > 0 || wanted.length > 0}
       >
@@ -458,7 +459,7 @@ export const Sources = ({
         {count === 0 && wanted.length === 0 ? (
           <LaterLink
             onClick={() => {
-              go("documents");
+              onward();
             }}
           >
             {t`Skip for now`}
@@ -488,7 +489,7 @@ export const Sources = ({
  * admin says whether they want it, and Grasp sets it up with them or their
  * IT; or they skip it.
  */
-export const Pulse = ({ lines, choices, go }: ConnectStepProps) => {
+export const Pulse = ({ lines, choices, onward }: ConnectStepProps) => {
   const { t } = useLingui();
   const { save, busy, failure } = useSaveChoices();
   const wanted = choices.pulse === "wanted";
@@ -512,7 +513,7 @@ export const Pulse = ({ lines, choices, go }: ConnectStepProps) => {
         <>
           <Primary
             onClick={() => {
-              go("leads");
+              onward();
             }}
           >
             {t`Continue`}
@@ -534,7 +535,7 @@ export const Pulse = ({ lines, choices, go }: ConnectStepProps) => {
               onClick={() => {
                 void (async () => {
                   if (await save({ ...choices, pulse: "skipped" })) {
-                    go("leads");
+                    onward();
                   }
                 })();
               }}
@@ -560,7 +561,7 @@ export const HrPlatform = ({
   lines,
   choices,
   onDone,
-}: Omit<ConnectStepProps, "go" | "signIn" | "named" | "identity"> & {
+}: Omit<ConnectStepProps, "onward" | "signIn" | "named" | "identity"> & {
   onDone: () => void;
 }) => {
   const { t } = useLingui();

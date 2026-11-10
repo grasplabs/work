@@ -7,7 +7,11 @@ import type { OnboardingHrApi } from "./hr.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingContext } from "./onboarding-context.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
-import type { SetupPlace, SetupStepId } from "./onboarding-flow.ts";
+import type {
+  OnboardingFlow,
+  SetupPlace,
+  SetupStepId,
+} from "./onboarding-flow.ts";
 import type { onboardingStages } from "./onboarding-summary.ts";
 
 // The onboarding's interviews: Stephen, or Claire if the person prefers,
@@ -432,6 +436,8 @@ export interface OnboardingApi
   review: () => Promise<OnboardingReview>;
   /** Settles a piece of work told two ways: both kept, or which holds. */
   settle: (work: string, holds: SettleChoice) => Promise<OnboardingReview>;
+  /** How much onboarding the company goes through, as Grasp's staff set it: the screens the admin gets come from it. */
+  flow: () => Promise<OnboardingFlow>;
   /** Where the admin is in their onboarding: the screens they finished. */
   place: () => Promise<SetupPlace>;
   /** Notes screens the admin finished; never takes one away. */

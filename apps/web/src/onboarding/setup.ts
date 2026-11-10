@@ -28,13 +28,30 @@ import { addDays } from "./send-plan.ts";
 export const steps = setupSteps;
 export type SetupStep = (typeof steps)[number];
 
-/** The first nine steps are the wizard; after it, the bottom of the screen says where things stand in a word. */
-export const wizardSteps = 9;
+/**
+ * The screens one company's admin goes through, in order: those its flow
+ * has (`flowScreens`), all of them in `steps`' order for the whole
+ * onboarding. Every place below is a place on it, from 0.
+ */
+export type SetupPath = readonly SetupStep[];
+
+/** The screens after the wizard, where the bottom of the screen says where things stand in a word. */
+const afterWizard: ReadonlySet<SetupStep> = new Set([
+  "listening",
+  "review",
+  "open",
+]);
+
+/** The wizard's screens on `path`, which the dots stand for: every one before the team is listened to. */
+export const wizardOf = (path: SetupPath): SetupStep[] =>
+  path.filter((step) => !afterWizard.has(step));
 
 export const isStep = (value: unknown): value is SetupStep =>
   steps.some((step) => step === value);
 
-export const stepIndex = (step: SetupStep): number => steps.indexOf(step);
+/** Where `step` is on `path`, from 0; -1 for a screen the company's flow doesn't have. */
+export const stepIndex = (step: SetupStep, path: SetupPath = steps): number =>
+  path.indexOf(step);
 
 /** A place where a company keeps its documents, and the integration Grasp connects it through. */
 export interface DocumentSource {
@@ -323,26 +340,37 @@ export const readingSeconds = (line: string): number =>
 /** How far the admin went before: the furthest step, as far as core says they are. */
 export const reachedOf = (
   stored: number,
-  { plan }: { plan: Plan | null }
+  { plan }: { plan: Plan | null },
+  path: SetupPath = steps
 ): number =>
   Math.min(
-    Math.max(stored, plan === null ? 0 : stepIndex("listening")),
-    steps.length - 1
+    // A plan saved means the team is being listened to, where the flow has that.
+    Math.max(stored, plan === null ? 0 : stepIndex("listening", path), 0),
+    Math.max(path.length - 1, 0)
   );
 
 /**
  * How far core says the admin went: the screen after the furthest one
- * they finished, wherever they finished it; the first, before any.
+ * they finished, wherever they finished it; the first, before any. A
+ * screen finished that the flow no longer has counts for nothing.
  */
-export const reachedByPlace = (place: SetupPlace | null): number =>
+export const reachedByPlace = (
+  place: SetupPlace | null,
+  path: SetupPath = steps
+): number =>
   Math.min(
-    Math.max(0, ...(place?.done ?? []).map((step) => stepIndex(step) + 1)),
-    steps.length - 1
+    Math.max(
+      0,
+      ...(place?.done ?? []).map((step) => stepIndex(step, path) + 1)
+    ),
+    Math.max(path.length - 1, 0)
   );
 
 /** The screens finished by an admin who went as far as `reached`: every one before it. */
-export const finishedAt = (reached: number): SetupStep[] =>
-  steps.slice(0, Math.max(reached, 0));
+export const finishedAt = (
+  reached: number,
+  path: SetupPath = steps
+): SetupStep[] => path.slice(0, Math.max(reached, 0));
 
 /**
  * Where the admin can go from step `index`, having been as far as
@@ -350,9 +378,13 @@ export const finishedAt = (reached: number): SetupStep[] =>
  * and to any step up to there. The way back, the way on, the dots and the
  * arrow keys all go by it.
  */
-export const waysFrom = (index: number, reached: number) => ({
-  back: steps[index - 1],
-  on: index < reached ? steps[index + 1] : undefined,
+export const waysFrom = (
+  index: number,
+  reached: number,
+  path: SetupPath = steps
+) => ({
+  back: path[index - 1],
+  on: index < reached ? path[index + 1] : undefined,
   open: (at: number) => at <= reached,
 });
 
@@ -387,33 +419,46 @@ export interface AiReadiness {
  */
 export const heldAt = (
   reached: number,
-  ai: Pick<AiReadiness, "ready"> | null
-): number =>
-  ai?.ready === false ? Math.min(reached, stepIndex("ai")) : reached;
+  ai: Pick<AiReadiness, "ready"> | null,
+  path: SetupPath = steps
+): number => {
+  const at = stepIndex("ai", path);
+  // A flow without the AI step holds nobody: its admin sets it in Settings.
+  return ai?.ready === false && at !== -1 ? Math.min(reached, at) : reached;
+};
 
 /**
  * The step shown: the one `asked` for in the address, or without one
  * where they were; and the AI step instead of any step after it while no
- * model is ready for calls.
+ * model is ready for calls. A screen the company's flow doesn't have is
+ * never shown: where they were stands in for it.
  */
 export const stepShown = (
   asked: SetupStep | undefined,
   reached: number,
-  ai: Pick<AiReadiness, "ready"> | null
+  ai: Pick<AiReadiness, "ready"> | null,
+  path: SetupPath = steps
 ): SetupStep => {
-  const held = heldAt(reached, ai);
-  if (asked !== undefined && (held === reached || stepIndex(asked) <= held)) {
+  const held = heldAt(reached, ai, path);
+  const at = asked === undefined ? -1 : stepIndex(asked, path);
+  if (asked !== undefined && at !== -1 && (held === reached || at <= held)) {
     return asked;
   }
-  return steps[held] ?? "welcome";
+  return path[held] ?? path[0] ?? "welcome";
 };
 
 /**
- * Where the AI step goes on to: "How this works", or for an admin who
- * was sent back to it, the furthest step they `reached` before.
+ * Where the AI step goes on to: the screen after it, or for an admin who
+ * was sent back to it, the furthest step they `reached` before; none
+ * where it is the flow's last screen.
  */
-export const afterAi = (reached: number): SetupStep =>
-  (reached > stepIndex("about") ? steps[reached] : undefined) ?? "about";
+export const afterAi = (
+  reached: number,
+  path: SetupPath = steps
+): SetupStep | undefined => {
+  const next = stepIndex("ai", path) + 1;
+  return path[Math.max(reached, next)] ?? path[next];
+};
 
 /**
  * What still needs the admin: every item they haven't settled. Where
