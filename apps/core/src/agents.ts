@@ -1,4 +1,4 @@
-import type { ModelRole } from "@grasp-os/shared/deployment-config";
+import type { Agent } from "@grasp-os/shared/agents";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -20,27 +20,6 @@ import { agents } from "./db/core/schema.ts";
 //
 // This is the read alone. Nothing makes or changes an agent yet, and a
 // chat's turn doesn't read its agent here yet.
-
-/** One of the company's agents, as core reads it. */
-export interface Agent {
-  /** The ID its permissions, audit events and memory path name. */
-  id: string;
-  /** What people call it. */
-  name: string;
-  /** The figure it is drawn with. */
-  face: string;
-  /** One line on what it is for. */
-  job: string;
-  /** What it is told on top of Grasp's own rules. */
-  instructions: string;
-  /** The role it asks the gateway for; null: the model a chat uses anyway. */
-  modelRole: ModelRole | null;
-  /** Whether it answers. */
-  state: "on" | "paused";
-  /** Who last changed it, and when; null: as Grasp ships it. */
-  changedBy: string | null;
-  changedAt: string | null;
-}
 
 /**
  * The first agent's ID: the organization's, which every chat's agent has

@@ -3061,19 +3061,27 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
  * chat would use anyway; `state` whether it answers. No row for the
  * first agent, the organization's: as Grasp ships it.
  */
-export const agents = sqliteTable("agents", {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  face: text().notNull(),
-  job: text().notNull(),
-  instructions: text().notNull(),
-  modelRole: text("model_role", { enum: modelRoles }),
-  state: text({ enum: ["on", "paused"] }).notNull(),
-  madeBy: text("made_by").notNull(),
-  madeAt: timestamp("made_at").notNull(),
-  changedBy: text("changed_by").notNull(),
-  changedAt: timestamp("changed_at").notNull(),
-});
+export const agents = sqliteTable(
+  "agents",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    face: text().notNull(),
+    job: text().notNull(),
+    instructions: text().notNull(),
+    modelRole: text("model_role", { enum: modelRoles }),
+    state: text({ enum: ["on", "paused"] }).notNull(),
+    madeBy: text("made_by").notNull(),
+    madeAt: timestamp("made_at").notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [
+    // No two agents answer to one name, however it is capitalised: people
+    // say which agent they mean by it.
+    uniqueIndex("agents_name_idx").on(sql`lower(${table.name})`),
+  ]
+);
 
 /**
  * Whether one of the company's agents answers at all, and for whom

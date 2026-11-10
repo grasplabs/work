@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `agents_name_idx` ON `agents` (lower("name"));

@@ -10,6 +10,12 @@ export const agentErrors = defineErrorFamily({
   "agent.chat_not_found": "There's no such chat.",
   "agent.not_for_you":
     "This agent isn't set up to answer you here. An admin decides who may use it, and where.",
+  // Making and changing the company's agents (agents.ts).
+  "agent.record_invalid": "That isn't an agent's name, job or instructions.",
+  "agent.unknown": "The company has no such agent.",
+  "agent.name_taken": "Another agent already has that name.",
+  "agent.settings_elsewhere":
+    "Who reaches the company's first agent, and what it may do, is set in Settings › Stephen.",
   "agent.busy":
     "The agent is still working in this chat. Wait for it, or stop it.",
   "agent.invalid_question": "That isn't a question the agent can take.",

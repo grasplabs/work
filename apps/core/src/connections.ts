@@ -1,3 +1,4 @@
+import type { Agent } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   catalogLogoPath,
@@ -43,6 +44,14 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import {
+  changeAgent,
+  listAgents,
+  makeAgent,
+  setAgentPaused,
+  setAgentReach,
+  setAgentToolClass,
+} from "./agent-builder.ts";
 import { pointApp, readAppPointers } from "./app-pointers.ts";
 import {
   auditedBatch,
@@ -716,6 +725,58 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   ): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setAppToolClass(this.#env, identity, app, toolClass, audience);
+    });
+  }
+
+  async agents(): Promise<Agent[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await listAgents(this.#env);
+    });
+  }
+
+  async makeAgent(input: unknown): Promise<Agent> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await makeAgent(this.#env, identity, input)
+    );
+  }
+
+  async changeAgent(agentId: unknown, input: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await changeAgent(this.#env, identity, agentId, input);
+    });
+  }
+
+  async setAgentPaused(agentId: unknown, paused: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentPaused(this.#env, identity, agentId, paused);
+    });
+  }
+
+  async setAgentReach(
+    agentId: unknown,
+    on: unknown,
+    audience: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentReach(this.#env, identity, agentId, on, audience);
+    });
+  }
+
+  async setAgentToolClass(
+    agentId: unknown,
+    toolClass: unknown,
+    audience: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentToolClass(
+        this.#env,
+        identity,
+        agentId,
+        toolClass,
+        audience
+      );
     });
   }
 
