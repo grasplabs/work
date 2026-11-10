@@ -106,6 +106,7 @@ import type {
 } from "./agent-scope.ts";
 import { inOwnWords } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
+import { turnAgent } from "./agents.ts";
 import { changesAnything, latestVersion } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
@@ -1948,6 +1949,9 @@ export class Workspace extends DurableObject<Env> {
     work: Extract<WorkContext, { type: "chat" }>,
     shared: boolean
   ): Promise<TurnContext> {
+    // The chat's agent as the company has it now: a paused one takes no
+    // turn, and nothing is read for it.
+    const agent = await turnAgent(this.env, scope.agentId);
     // Never the person's own USER.md where others read the answer.
     const memory = await forContext(
       this.env,
@@ -2001,6 +2005,10 @@ export class Workspace extends DurableObject<Env> {
       skills,
       channel,
       builds,
+      // The first agent as Grasp ships it is told nothing more.
+      ...(agent === undefined || agent.changedAt === null
+        ? {}
+        : { agent: { name: agent.name, instructions: agent.instructions } }),
       ...(app === null ? {} : { app }),
     };
   }

@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { readAgent } from "../src/agents.ts";
+import { readAgent, turnAgent } from "../src/agents.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
+import { outcome } from "./sign-in.ts";
 
 // The company's agents as core reads them. These start from the ways the
 // move from one unnamed agent to records can fail: a deployment that had
@@ -81,5 +82,19 @@ describe("the company's agents", () => {
     await keepAgent("../organization", { name: "Mallory", state: "on" });
     await expect(readAgent(env, "../organization")).resolves.toBeUndefined();
     await expect(readAgent(env, "")).resolves.toBeUndefined();
+  });
+
+  it("lets a turn run as an agent that is on, and as none that is paused", async () => {
+    await keepAgent("invoice-chaser", { name: "Claire", state: "on" });
+    await keepAgent("payroll", { name: "Pat", state: "paused" });
+    await expect(turnAgent(env, chatAgentId)).resolves.toMatchObject({
+      name: "Stephen",
+    });
+    await expect(turnAgent(env, "invoice-chaser")).resolves.toMatchObject({
+      name: "Claire",
+    });
+    await expect(outcome(turnAgent(env, "payroll"))).resolves.toBe(
+      "agent.paused"
+    );
   });
 });

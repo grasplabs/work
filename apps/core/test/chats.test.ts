@@ -73,6 +73,25 @@ const answering = async (
   return provider;
 };
 
+/** Keeps every chat's agent as an admin would have changed it. */
+const keepAgent = async ({
+  name,
+  instructions,
+  state,
+}: {
+  name: string;
+  instructions: string;
+  state: "on" | "paused";
+}): Promise<void> => {
+  await env.DB.prepare(
+    `INSERT INTO agents
+       (id, name, face, job, instructions, model_role, state, made_by, made_at, changed_by, changed_at)
+     VALUES (?, ?, 'stephen', 'Helps.', ?, NULL, ?, 'admin', ?, 'admin', ?)`
+  )
+    .bind(chatAgentId, name, instructions, state, Date.now(), Date.now())
+    .run();
+};
+
 /** A Workspace object's env, to point it elsewhere. */
 const envOf = (instance: object): object => {
   const objectEnv: unknown = Reflect.get(instance, "env");
@@ -1072,6 +1091,56 @@ describe("chats", () => {
       { timeout: 10_000 }
     );
     expect(follower.messages()).toStrictEqual([]);
+  });
+
+  it("take no turn for an agent an admin paused, and take turns again once it is back on", async () => {
+    const ann = await person();
+    const gateway = await answering(ann, says("Back."));
+    const chat = await ann.chats.create("Paused");
+    await keepAgent({ name: "Stephen", instructions: "", state: "paused" });
+    try {
+      await expect(
+        outcome(ann.chats.send(chat.id, { text: "Hi.", model }))
+      ).resolves.toBe("agent.paused");
+      // Nothing was read for it, and the model never asked.
+      expect(gateway.requests).toHaveLength(0);
+      await env.DB.prepare("DELETE FROM agents").run();
+      const follower = await follow(ann.chats, chat.id);
+      await ann.chats.send(chat.id, { text: "Hi.", model });
+      await settled(follower);
+      expect(gateway.requests).toHaveLength(1);
+    } finally {
+      await env.DB.prepare("DELETE FROM agents").run();
+    }
+  });
+
+  it("tell an agent its name and what an admin told it, between Grasp's own rules, and the first agent as shipped nothing more", async () => {
+    const ann = await person();
+    const gateway = await answering(ann, says("Hello."), says("Hello."));
+    const shipped = await ann.chats.create("As shipped");
+    const first = await follow(ann.chats, shipped.id);
+    await ann.chats.send(shipped.id, { text: "Hi.", model });
+    await settled(first);
+    expect(JSON.stringify(gateway.requests[0]?.body)).not.toContain("<agent>");
+
+    await keepAgent({
+      name: "Claire",
+      instructions: "Answer only about unpaid invoices.",
+      state: "on",
+    });
+    try {
+      const changed = await ann.chats.create("As changed");
+      const second = await follow(ann.chats, changed.id);
+      await ann.chats.send(changed.id, { text: "Hi.", model });
+      await settled(second);
+      const asked = JSON.stringify(gateway.requests[1]?.body);
+      expect(asked).toContain("You answer here as Claire");
+      expect(asked).toContain("Answer only about unpaid invoices.");
+      // Told that Grasp's rules hold over it.
+      expect(asked).toContain("lifts none of them");
+    } finally {
+      await env.DB.prepare("DELETE FROM agents").run();
+    }
   });
 
   it("ask the model to think as hard as the question says, stream its thinking, and keep it with the answer and how long it took", async () => {
