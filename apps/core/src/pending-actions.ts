@@ -26,7 +26,7 @@ import { z } from "zod";
 import { personOf } from "./connections.ts";
 import { workflowResourceRuns, workflowRuns } from "./db/core/schema.ts";
 import { reauthorizedCapability, refusedForBinding } from "./decided-calls.ts";
-import { workspace } from "./durable-objects.ts";
+import { callObject, workspace } from "./durable-objects.ts";
 import { isProviderUnreachable } from "./resource-adapter.ts";
 import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -268,12 +268,16 @@ const tellChat = async (
   }
   const { workspaceId, chatId } = held.context;
   try {
-    await workspace(env, workspaceId).heldDecided(
-      chatId,
-      userId,
-      { id: held.id, action: held.action },
-      outcome
-    );
+    // Again should the object reset under the call (`callObject`): a
+    // second notice of the same outcome tells the agent nothing new.
+    await callObject(async () => {
+      await workspace(env, workspaceId).heldDecided(
+        chatId,
+        userId,
+        { id: held.id, action: held.action },
+        outcome
+      );
+    });
   } catch (error) {
     log.warn("chat.held_outcome_failed", { chatId, ...errorFields(error) });
   }

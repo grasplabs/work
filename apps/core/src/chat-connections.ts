@@ -39,7 +39,7 @@ import {
 } from "./connections.ts";
 import { permissions, users } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
-import { workspace } from "./durable-objects.ts";
+import { callObject, workspace } from "./durable-objects.ts";
 import {
   changeEntry,
   findRow,
@@ -211,7 +211,9 @@ const scopePerson = async (
  */
 const waitingChanged = async (env: Env, scope: AgentScope): Promise<void> => {
   try {
-    await workspace(env, scope.workspaceId).heldChanged(scope.chatId);
+    await callObject(async () => {
+      await workspace(env, scope.workspaceId).heldChanged(scope.chatId);
+    });
   } catch (error) {
     log.warn("chat.held_push_failed", {
       chatId: scope.chatId,

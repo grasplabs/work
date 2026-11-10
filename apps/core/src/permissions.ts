@@ -86,7 +86,7 @@ import {
   workflowResources,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
-import { appHost, workspace } from "./durable-objects.ts";
+import { appHost, callObject, workspace } from "./durable-objects.ts";
 
 // Permission records and the one check every server path runs. A person
 // asks for a permission (it allows nothing yet), an admin grants it, their
@@ -1243,12 +1243,15 @@ export const tellChat = async (
     return;
   }
   try {
-    await workspace(
-      env,
-      workspaceIdSchema.parse(requestedVia.workspaceId)
-    ).connectionDecided(chatId, permission.requestedBy, {
-      binding: permission.binding,
-      decision,
+    const workspaceId = workspaceIdSchema.parse(requestedVia.workspaceId);
+    // Again on a stub of its own should the object reset under the call: a
+    // second notice of the same decision tells the agent nothing new.
+    await callObject(async () => {
+      await workspace(env, workspaceId).connectionDecided(
+        chatId,
+        permission.requestedBy,
+        { binding: permission.binding, decision }
+      );
     });
   } catch (error) {
     log.warn("chat.connection_decided_failed", {

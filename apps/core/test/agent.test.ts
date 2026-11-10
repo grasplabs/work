@@ -644,9 +644,9 @@ describe("chat agent after a restart", () => {
     });
   });
 
-  it("goes on from a turn a restart of both objects cut short once a note is the first call to reach its ChatSession", async () => {
+  it("goes on from a turn a restart of both objects cut short once a note is the first call to reach its ChatSession, the note told though that call is reset too", async () => {
     const answer = pausedReply(says("42."), 1);
-    const { id, stub, chat, personId, ask } = await newChat(
+    const { id, stub, chat, personId, provider, ask } = await newChat(
       codeStep(
         "export default async () => { await scheduler.wait(2_000); return 6 * 7; };"
       ),
@@ -668,6 +668,22 @@ describe("chat agent after a restart", () => {
     }).catch(() => {
       // Aborting fails the call that aborted: that is the restart.
     });
+    // The chat's object resets under the note's own call too, as one that
+    // opens cold under load can: the note is made again, and told.
+    await runInDurableObject(
+      chatSession(env, id, chat.id),
+      (instance, state) => {
+        // On the class, as a call reaches its methods there, and only once:
+        // the object that starts again has the method as it is.
+        const methods = Reflect.getPrototypeOf(instance) ?? instance;
+        const note: unknown = Reflect.get(methods, "note");
+        Reflect.set(methods, "note", async () => {
+          Reflect.set(methods, "note", note);
+          state.abort("Reset under the note by the test");
+          await Promise.resolve();
+        });
+      }
+    );
     // A connection decided meanwhile: its note wakes the chat's object.
     await woken.connectionDecided(chat.id, personId, {
       binding: "MAIL",
@@ -686,6 +702,13 @@ describe("chat agent after a restart", () => {
       role: "assistant",
       content: [{ type: "text", text: "42." }],
     });
+    expect(
+      provider.requests.some(({ body }) =>
+        JSON.stringify(body).includes(
+          'The connection you asked for as \\"MAIL\\" was denied'
+        )
+      )
+    ).toBeTruthy();
   });
 });
 
