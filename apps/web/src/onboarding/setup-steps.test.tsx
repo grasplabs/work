@@ -181,6 +181,7 @@ const drawn = (
     <SetupStepBody
       cramped={false}
       data={data}
+      furthest={0}
       go={() => {}}
       listening={listeningOf(
         { roster: null, plan: data.view.plan, progress: null },

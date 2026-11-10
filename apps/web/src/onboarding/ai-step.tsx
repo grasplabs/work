@@ -40,7 +40,7 @@ import type { AiReadiness } from "./setup.ts";
 // one key, one model: the admin picks them, and going on saves the key
 // (core hands it to connect, which seals it), asks the model one tiny
 // question, and chooses the model only once it answered. A key that
-// doesn't work says why and stays here. Fallback models and a second
+// doesn't work is removed again, says why and stays here. Fallback models and a second
 // provider are for Settings › AI providers, which reads the same listing.
 
 /** The prefix of an OpenAI-compatible endpoint's models, which the organization names. */
@@ -74,8 +74,9 @@ interface Given {
 
 /**
  * Saves the key, asks the model one tiny question, and chooses the model
- * once it answered: how the question went. The key stays saved when it
- * didn't, so the next try replaces it.
+ * once it answered: how the question went. A key whose model didn't
+ * answer is removed again, so no provider stays connected that can't be
+ * called, whichever provider the admin tries next.
  */
 const connect = async (
   session: Session,
@@ -85,9 +86,9 @@ const connect = async (
     ? session.aiProviders.add({ provider, key, baseUrl })
     : session.aiProviders.add({ provider, key }));
   const tested = await session.aiProviders.test(provider, model);
-  if (tested.ok) {
-    await session.aiProviders.setModels({ defaultModel: model });
-  }
+  await (tested.ok
+    ? session.aiProviders.setModels({ defaultModel: model })
+    : session.aiProviders.remove(provider));
   return tested;
 };
 
@@ -192,15 +193,7 @@ const ConnectForm = ({
   return (
     <>
       <Onward>
-        <form
-          className="w-full max-w-sm text-left"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (ready && !busy) {
-              void submit();
-            }
-          }}
-        >
+        <div className="w-full max-w-sm text-left">
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor={`${ids}-provider`}>{t`Provider`}</FieldLabel>
@@ -305,7 +298,7 @@ const ConnectForm = ({
               </Field>
             )}
           </FieldGroup>
-        </form>
+        </div>
         <ErrorText>{refused ?? failure}</ErrorText>
       </Onward>
       <Primary

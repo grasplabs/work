@@ -375,18 +375,41 @@ export interface AiReadiness {
 }
 
 /**
- * The step an admin who comes back is on: the furthest they reached, or
- * the AI step again while no model is ready for calls, since every step
+ * How far an admin can be, having been as far as `reached`: no further
+ * than the AI step while no model is ready for calls, since every step
  * after it has Grasp's AI read or talk (`ai`; null when core can't say,
- * which holds nothing up).
+ * which holds nothing up). The dots, the arrow keys and the address all
+ * go by it, so the step can't be passed without a model.
  */
-export const resumeStep = (
+export const heldAt = (
   reached: number,
   ai: Pick<AiReadiness, "ready"> | null
-): SetupStep =>
-  ai?.ready === false && reached > stepIndex("ai")
-    ? "ai"
-    : (steps[reached] ?? "welcome");
+): number =>
+  ai?.ready === false ? Math.min(reached, stepIndex("ai")) : reached;
+
+/**
+ * The step shown: the one `asked` for in the address, or without one
+ * where they were; and the AI step instead of any step after it while no
+ * model is ready for calls.
+ */
+export const stepShown = (
+  asked: SetupStep | undefined,
+  reached: number,
+  ai: Pick<AiReadiness, "ready"> | null
+): SetupStep => {
+  const held = heldAt(reached, ai);
+  if (asked !== undefined && (held === reached || stepIndex(asked) <= held)) {
+    return asked;
+  }
+  return steps[held] ?? "welcome";
+};
+
+/**
+ * Where the AI step goes on to: "How this works", or for an admin who
+ * was sent back to it, the furthest step they `reached` before.
+ */
+export const afterAi = (reached: number): SetupStep =>
+  (reached > stepIndex("about") ? steps[reached] : undefined) ?? "about";
 
 /**
  * What still needs the admin: every item they haven't settled. Where

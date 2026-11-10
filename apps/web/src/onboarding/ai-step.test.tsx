@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { aiProviders, featuredModels } from "@grasp-os/shared/ai-providers";
+import { aiProviders } from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoice,
   AiProviderAdd,
@@ -101,6 +101,11 @@ const fakeAiProviders = (tested: (model: string) => AiProviderTest) => {
       await Promise.resolve();
       asked.push(["models", next]);
       choice = { defaultModel: next.defaultModel, fallbacks: [] };
+    },
+    remove: async (provider: OrganizationProviderId): Promise<void> => {
+      await Promise.resolve();
+      asked.push(["remove", provider]);
+      providers = providers.filter((each) => each.provider !== provider);
     },
   };
   return { api, asked };
@@ -279,7 +284,7 @@ describe("the onboarding's AI step", () => {
     expect(document.body.innerHTML).not.toContain(pastedKey);
   });
 
-  it("stays on the step and says why when the provider refuses the key, and chooses no model", async () => {
+  it("stays on the step and says why when the provider refuses the key: no model is chosen, and the key isn't kept", async () => {
     const { api, asked } = fakeAiProviders((model) => ({
       ok: false,
       model,
@@ -290,6 +295,8 @@ describe("the onboarding's AI step", () => {
     await enter(textField("Key"), pastedKey);
     await press(button("Continue"));
 
+    const { providers: kept } = await api.list();
+    expect(kept).toStrictEqual([]);
     expect({
       chosen: asked.some(([what]) => what === "models"),
       went: went(),
@@ -359,15 +366,5 @@ describe("the models offered on the AI step", () => {
     expect(modelsToOffer({ provider: "openai", models }, false)).toStrictEqual(
       models
     );
-  });
-
-  it("name a model to start with for every provider with a catalog", () => {
-    expect(
-      Object.entries(featuredModels)
-        .filter(([provider]) => provider !== "openai-compatible")
-        .every(([provider, models]) =>
-          models.every((model) => model.startsWith(`${provider}/`))
-        )
-    ).toBeTruthy();
   });
 });

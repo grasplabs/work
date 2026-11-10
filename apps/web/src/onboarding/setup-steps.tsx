@@ -115,7 +115,7 @@ import {
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
-import { openItems, stepIndex, steps } from "./setup.ts";
+import { afterAi, openItems, stepIndex, steps } from "./setup.ts";
 import type {
   AiReadiness,
   Listening,
@@ -202,6 +202,8 @@ export interface StepProps {
   settled: ReviewItemId[];
   onSettle: (item: ReviewItemId, settled: boolean) => void;
   go: (step: SetupStep) => void;
+  /** The furthest step they reached before, by its place. */
+  furthest: number;
   /** "How this works" tells its story in the brain's figures: this sets the figure, or gives it back with null. */
   onStory: (scene: BrainScene | null) => void;
 }
@@ -501,7 +503,7 @@ const Ai = (props: StepProps) => (
     ai={props.data.ai}
     lines={useHeadlines(props).ai}
     onDone={() => {
-      props.go("about");
+      props.go(afterAi(props.furthest));
     }}
   />
 );

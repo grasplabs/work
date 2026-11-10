@@ -126,6 +126,10 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   ).toBeVisible();
   await expect(page.getByText(/^Connected: /u)).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
+  // How this works, before its own way on is pressed.
+  await expect(
+    page.getByText(/^Your people, documents and tools first\./u)
+  ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
   // The staff list: four people in three teams, Lea leading Sales.

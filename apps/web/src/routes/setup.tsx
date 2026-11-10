@@ -32,12 +32,13 @@ import {
   brainScene,
   isReviewItem,
   isStep,
+  heldAt,
   keptAt,
   listeningOf,
   reachedOf,
-  resumeStep,
   settledAs,
   stepIndex,
+  stepShown,
   suitesFor,
   waysFrom,
 } from "../onboarding/setup.ts";
@@ -133,6 +134,9 @@ const onResize = (listener: () => void): (() => void) => {
 /** Where this browser keeps how far its admin went, the message they wrote and what they settled: a convenience of this browser alone. */
 const keptKey = (userId: string): string => `grasp.setup.${userId}`;
 
+/** Which list of steps a kept place counts in: 2 since the AI step came second. */
+const keptSteps = 2;
+
 const readKept = (userId: string): Kept => {
   try {
     const raw: unknown = JSON.parse(
@@ -141,8 +145,10 @@ const readKept = (userId: string): Kept => {
     if (typeof raw !== "object" || raw === null) {
       return { reached: 0, message: null, settled: [] };
     }
-    const reached =
+    const stored =
       "reached" in raw && typeof raw.reached === "number" ? raw.reached : 0;
+    // Kept before the AI step came second: every step after the welcome is one further now.
+    const reached = "steps" in raw || stored === 0 ? stored : stored + 1;
     const message =
       "message" in raw && typeof raw.message === "string" ? raw.message : null;
     const settled =
@@ -157,7 +163,10 @@ const readKept = (userId: string): Kept => {
 
 const writeKept = (userId: string, kept: Kept): void => {
   try {
-    localStorage.setItem(keptKey(userId), JSON.stringify(kept));
+    localStorage.setItem(
+      keptKey(userId),
+      JSON.stringify({ ...kept, steps: keptSteps })
+    );
   } catch {
     // Kept only while the page is open.
   }
@@ -347,12 +356,14 @@ const Setup = () => {
   const data = loaded.state === "ready" ? loaded.data : null;
   const { roster, plan, progress, percent, parts, choices } = readOf(data);
   const stored = readKept(identity.userId).reached;
-  // Opened without a step, it goes on where they were; or on the AI step, while no model is ready for calls.
-  const step: SetupStep =
-    asked ?? resumeStep(reachedOf(stored, { plan }), data?.ai ?? null);
+  const ai = data?.ai ?? null;
+  // Opened without a step, it goes on where they were; never past the AI step while no model is ready for calls.
+  const step = stepShown(asked, reachedOf(stored, { plan }), ai);
   const index = stepIndex(step);
   const kept = useKept(identity.userId, index);
-  const reached = reachedOf(kept.reached, { plan });
+  // How far they went, and how far they can go now.
+  const furthest = reachedOf(kept.reached, { plan });
+  const reached = heldAt(furthest, ai);
   const now = today();
   const listening = listeningOf({ roster, plan, progress }, now);
   // "How this works" tells its story in the brain's figures, so the figure follows the story there.
@@ -434,6 +445,7 @@ const Setup = () => {
               suites: suitesFor(suites, data.view.context),
               identity,
             }}
+            furthest={furthest}
             go={go}
             listening={listening}
             message={kept.message}
