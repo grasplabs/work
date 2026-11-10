@@ -187,11 +187,13 @@ assertReleaseDir(out);
 // The Workers build at once, each on its own CPUs: one after another, with
 // the frontend, they took 80 to 100 s of the release job (November 2026).
 // Only core waits, for the frontend it serves: its build adds the compiled
-// page runtime to the frontend's output.
+// page runtime to the frontend's output. Every build ends before the
+// bundles go and the first failure is thrown: none is left running, still
+// writing into them or printing, behind a failed one.
 const buildWorkers = async (): Promise<WorkerBuild[]> => {
   const bundleDir = mkdtempSync(path.join(tmpdir(), "grasp-os-release-"));
   try {
-    return await Promise.all(
+    const builds = await Promise.allSettled(
       RELEASED_APPS.map(async (app) => {
         if (app === "core") {
           await runBeside(FRONTEND, "vp", [
@@ -203,6 +205,13 @@ const buildWorkers = async (): Promise<WorkerBuild[]> => {
         }
         return await buildWorker(app, bundleDir);
       })
+    );
+    const failed = builds.find((build) => build.status === "rejected");
+    if (failed !== undefined) {
+      throw failed.reason;
+    }
+    return builds.flatMap((build) =>
+      build.status === "fulfilled" ? [build.value] : []
     );
   } finally {
     rmSync(bundleDir, { force: true, recursive: true });
