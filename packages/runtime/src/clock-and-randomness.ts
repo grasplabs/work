@@ -48,7 +48,13 @@
 // don't clone), `URL.createObjectURL` (not implemented); `scheduler.wait`
 // and timers answer no time. Not a value code reads, so not on the list:
 // when a weak reference is cleared, which only the garbage collector
-// decides.
+// decides; and `fetch`, a sink, not a source: an App's isolate has no
+// network (`globalOutbound: null`), and the boundary of a form it would
+// send never comes back to App code.
+// Not stopped, and not a boundary: a value computed while App modules
+// load, before a mutation starts or a transform runs, comes from the
+// platform's own clock and randomness, as determinism.ts says for a
+// transform.
 
 /**
  * The intrinsics the replacements call, and the platform's functions they
