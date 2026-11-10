@@ -1,40 +1,18 @@
 import type { argsType, returnType } from "./function-references.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { WorkflowDecisionWait } from "./workflow-runs.ts";
 
 declare const outputType: unique symbol;
 
 /**
- * A value schema as a generated module holds it: a browser
- * descriptor and nothing callable, with the types of what a person
- * answers and what it normalizes to in phantom members. `v.object` takes
- * it as a field, so a form's schema is built from it.
- */
-export interface DescriptorSchema<Input = unknown, Output = unknown> {
-  readonly kind: "descriptor";
-  readonly descriptor: ValueDescriptor;
-  /** Types only: never set. */
-  readonly [argsType]?: Input;
-  /** Types only: never set. */
-  readonly [outputType]?: Output;
-}
-
-/** What a person passes for `Schema`. */
-export type DescriptorInputOf<Schema> =
-  Schema extends DescriptorSchema<infer Input> ? Input : never;
-
-/** What `Schema`'s values normalize to. */
-export type DescriptorOutputOf<Schema> =
-  Schema extends DescriptorSchema<unknown, infer Output> ? Output : never;
-
-/**
- * A generated reference to one decision a workflow the App binds declares:
- * `workflows.<workflow>.decisions.<key>`, read-only
- * schema metadata. It names the workflow binding and pinned contract it
- * belongs to and the decision binding's `key`, and holds the schema of
- * the value a response carries (`valueSchema`) and the descriptor of the
- * context a person reviews. It answers, gets and grants nothing: the host
- * checks every response against the decision, the run and the person.
+ * A generated reference to one decision a workflow the App declares:
+ * `workflows.<workflow>.decisions.<key>`. Its name, and nothing else at
+ * run time; the types of the value a response carries (as a person
+ * passes it, and as it normalizes) and of the context a person reviews
+ * live in phantom members, from the App's own declaration
+ * (`permission.workflow`). It answers, gets and grants nothing:
+ * `useForm` takes it for an answer's form, its schema from the page's
+ * build, and the host checks every response against the decision, the
+ * run and the person.
  */
 export interface WorkflowDecisionReference<
   Workflow extends string = string,
@@ -43,24 +21,27 @@ export interface WorkflowDecisionReference<
   ValueOutput = unknown,
   Context = unknown,
 > {
-  readonly kind: "workflowDecision";
-  readonly resourceId: string;
-  readonly resourceVersion: number;
-  /** The workflow binding's contract ID, e.g. `workflows.reviewInvoice`. */
-  readonly workflow: Workflow;
-  /** The fingerprint of the workflow contract it belongs to. */
-  readonly workflowFingerprint: string;
-  /** The decision binding's alias in the workflow. */
-  readonly key: Key;
-  /** The SHA-256 of its value and context contract, in hex. */
-  readonly fingerprint: string;
-  /** What a response's `value` is checked by: data, never a function. */
-  readonly valueSchema: DescriptorSchema<ValueInput, ValueOutput>;
-  /** The descriptor of the context a person reviews before answering. */
-  readonly context: ValueDescriptor;
+  /** Its name: `workflows.<workflow>.decisions.<key>`. */
+  readonly name: `${Workflow}.decisions.${Key}`;
+  /** Types only: never set. */
+  readonly [argsType]?: ValueInput;
+  /** Types only: never set. */
+  readonly [outputType]?: ValueOutput;
   /** Types only: never set. */
   readonly [returnType]?: Context;
 }
+
+/** Any decision reference, whatever its value and context. */
+export type AnyWorkflowDecisionReference = WorkflowDecisionReference<
+  string,
+  string,
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `DecisionValueOf`
+  any,
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `DecisionOutputOf`
+  any,
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `DecisionContextOf`
+  any
+>;
 
 /** The value a response to `Reference` carries, as a person passes it. */
 export type DecisionValueOf<Reference> =
@@ -69,6 +50,17 @@ export type DecisionValueOf<Reference> =
     : Reference extends WorkflowDecisionWait<string, infer Value>
       ? Value
       : never;
+
+/** What a response's value to `Reference` normalizes to. */
+export type DecisionOutputOf<Reference> =
+  Reference extends WorkflowDecisionReference<
+    string,
+    string,
+    unknown,
+    infer Output
+  >
+    ? Output
+    : never;
 
 /** The context a person reviews for `Reference`. */
 export type DecisionContextOf<Reference> =
@@ -81,3 +73,22 @@ export type DecisionContextOf<Reference> =
   >
     ? Context
     : never;
+
+const decisionNamePattern =
+  /^workflows\.(?<workflow>[A-Za-z][A-Za-z0-9_]{0,63})\.decisions\.(?<key>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
+
+/**
+ * The workflow alias and decision key `name` names
+ * (`workflows.<workflow>.decisions.<key>`), or undefined for none.
+ */
+export const decisionName = (
+  name: unknown
+): { readonly workflow: string; readonly key: string } | undefined => {
+  if (typeof name !== "string") {
+    return undefined;
+  }
+  const groups = decisionNamePattern.exec(name)?.groups;
+  return groups?.workflow === undefined || groups.key === undefined
+    ? undefined
+    : { workflow: groups.workflow, key: groups.key };
+};

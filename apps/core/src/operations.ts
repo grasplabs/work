@@ -105,10 +105,7 @@ import { sandboxVerdictOf } from "./sandbox-session.ts";
 import { SandboxUnavailableError } from "./sandboxed.ts";
 import { readConsistently, StoreReader } from "./store-reader.ts";
 import { valueFiles } from "./store-references.ts";
-import type {
-  ListedEvent,
-  WorkflowNotifications,
-} from "./workflow-notifications.ts";
+import type { WorkflowNotifications } from "./workflow-notifications.ts";
 
 // Core's operation host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
 // App's server functions for one caller, through the trusted host, and
@@ -2397,18 +2394,18 @@ const notifyPeopleCall = async (
 
 /**
  * The notification `fn`, a mutation, asks for under workflow
- * `alias` with `args` (`[event, runId, data, type, fingerprint]`, the
- * runner's `ctx.sendEvent` with the generated reference it names), if the
- * App declares the workflow: the event as the reference names it (which
- * core resolves against the release it runs, and refuses unless it is
- * exactly that event of the bound workflow), the run and the data.
- * `resource.not_allowed` for anything else.
+ * `alias` with `args` (`[event, runId, data]`, the runner's
+ * `ctx.sendEvent` with the alias of the event its generated reference
+ * names), if the App declares the workflow: the event's alias (which
+ * core resolves in the release it runs, and refuses unless that release
+ * declares it), the run and the data. `resource.not_allowed` for
+ * anything else.
  */
 const workflowNotification = (
   run: Run,
   fn: FunctionManifest,
   request: { alias: unknown; args: unknown }
-): { workflow: string; event: ListedEvent; runId: Json; data: Json } => {
+): { workflow: string; event: string; runId: Json; data: Json } => {
   const args = jsonOf(request.args);
   const declared =
     fn.kind === "mutation"
@@ -2422,15 +2419,13 @@ const workflowNotification = (
       reason: "use_undeclared",
     });
   }
-  const [eventAlias, runId, data, type, fingerprint] =
+  const [eventAlias, runId, data] =
     args !== undefined && isJsonArray(args) ? args : [];
   if (
     args === undefined ||
     !isJsonArray(args) ||
-    args.length !== 5 ||
-    typeof eventAlias !== "string" ||
-    typeof type !== "string" ||
-    typeof fingerprint !== "string"
+    args.length !== 3 ||
+    typeof eventAlias !== "string"
   ) {
     throw refusingUse(operationErrors.create("resource.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
@@ -2439,7 +2434,7 @@ const workflowNotification = (
   }
   return {
     workflow: declared.alias,
-    event: { alias: eventAlias, type, fingerprint },
+    event: eventAlias,
     runId: runId ?? null,
     data: data ?? null,
   };

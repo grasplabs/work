@@ -7,11 +7,12 @@ import type {
   AppManifest,
   BoundWorkflowDecision,
   WorkflowBindingExtras,
+  WorkflowEventContract,
 } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -26,20 +27,25 @@ import { inList } from "./db/d1.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import type { ResolvedCatalogContract } from "./workflow-catalog.ts";
 
-// What the host resolves of the workflows an App declares, for the
-// references it generates (`generateModules`, `WorkflowBindingExtras`):
-// each declared alias's active binding (app-workflow-bindings.ts), the
-// exact workflow version it pins, and that version's decision bindings,
-// each read from the catalog contract the version pinned by fingerprint
-// (workflow-catalog.ts), and its event bindings and listen tasks the same
-// way, as browser references (bound-workflow-events.ts).
+// What the host resolves of the workflows an App declares. A release
+// seals the exact workflow version each declared alias's active binding
+// pins (`boundWorkflowsOf`, app-workflow-bindings.ts): what its pages'
+// reads of a run's history and decisions are held to. The events, listen
+// tasks and decisions the App's references name are the App's own
+// declaration (`permission.workflow`), never resolved from the binding.
+//
+// What a version has of them (`versionEventContract`) is read for binding
+// it: each decision binding read from the catalog contract the version
+// pinned by fingerprint (workflow-catalog.ts), and its event bindings and
+// listen tasks the same way, as browser references
+// (bound-workflow-events.ts). Binding a version whose contract isn't what
+// the App declares is refused (app-workflow-bindings.ts), so what a page
+// names and what a run takes stay the same.
 //
 // Only the builders' view counts: a binding is written by a builder of
 // the App with a role in the workflow, a version's bindings at its
 // publication, a catalog contract by an admin, and never anything App
-// code says. A seal resolves them once and seals what it resolved in the
-// release's contracts (app-releases.ts), so a binding changed after the
-// seal changes no sealed release; a draft resolves them as they are now.
+// code says.
 
 /** What the App's generated references name: plain identifiers. */
 const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
@@ -127,11 +133,119 @@ const eventBindingOf = (
     : { alias, events: contract.contract.events };
 
 /**
- * What the host resolves of each workflow `manifest` declares that `app`
- * binds now: its alias, and its pinned version's decisions and the events
- * a page sends, by their binding's alias, with the listen tasks waiting
- * on those events. A declared alias with no active binding, and a binding
- * the App's code doesn't declare, resolve to nothing.
+ * What `versionEventContract` read of a version: its contract, and
+ * whether all of it read (`complete`).
+ */
+export interface VersionEventContract extends WorkflowEventContract {
+  readonly complete: boolean;
+}
+
+/**
+ * The events, listen tasks and decisions version `version` of workflow
+ * `workflow` has, as a page may send and answer them: its decisions and
+ * its browser-callable events by their binding's alias, with the listen
+ * tasks waiting on those events. One its pinned catalog contract no
+ * longer resolves is left out, logged; corrupt data (a contract the
+ * catalog refuses, a stored contract that no longer hashes) leaves its
+ * events out, logged too, so it differs from any declaration naming them.
+ * Either makes it not `complete`.
+ */
+export const versionEventContract = async (
+  env: Env,
+  workflow: string,
+  version: number
+): Promise<VersionEventContract> => {
+  const pinned = await drizzle(env.DB)
+    .select({
+      alias: sdkResourceBindings.alias,
+      kind: sdkResourceBindings.kind,
+      contractId: sdkResourceBindings.contractId,
+      fingerprint: sdkResourceBindings.schemaHash,
+    })
+    .from(sdkResourceBindings)
+    .where(
+      and(
+        eq(sdkResourceBindings.resourceId, workflow),
+        eq(sdkResourceBindings.resourceVersion, version),
+        inList(sdkResourceBindings.kind, ["decision", "event"])
+      )
+    )
+    .orderBy(asc(sdkResourceBindings.alias));
+  const contracts = await resolveCatalogKeys(env, [
+    ...new Set(pinned.flatMap(({ contractId }) => contractId ?? [])),
+  ]);
+  const decisions: Record<string, BoundWorkflowDecision> = {};
+  const eventBindings: PinnedEventBinding[] = [];
+  let complete = true;
+  for (const row of pinned) {
+    if (!aliasPattern.test(row.alias)) {
+      // No reference can name it: the App can't declare it.
+      complete = false;
+      continue;
+    }
+    const contract = contracts.get(row.contractId ?? "");
+    if (row.kind === "event") {
+      const bound = eventBindingOf(row.alias, contract, row.fingerprint);
+      if (bound === undefined) {
+        complete = false;
+        log.warn("app.workflow_event_unresolved", {
+          workflowId: workflow,
+          version,
+          event: row.alias,
+        });
+      } else {
+        eventBindings.push(bound);
+      }
+      continue;
+    }
+    try {
+      const decision = decisionOf(contract, row.fingerprint);
+      if (decision === undefined) {
+        complete = false;
+        log.warn("app.workflow_decision_unresolved", {
+          workflowId: workflow,
+          version,
+          decision: row.alias,
+        });
+      } else {
+        decisions[row.alias] = decision;
+      }
+    } catch (error) {
+      // Published through the catalog's own reader, so a descriptor it
+      // took and this one refuses is the platform's error, never the App's.
+      complete = false;
+      log.error("app.workflow_decision_unreadable", {
+        workflowId: workflow,
+        version,
+        decision: row.alias,
+        ...errorFields(error),
+      });
+    }
+  }
+  if (eventBindings.length === 0) {
+    return { events: {}, listens: {}, decisions, complete };
+  }
+  try {
+    const { events, listens } = boundEventsOf(
+      eventBindings,
+      await recordedListens(env, workflow, version)
+    );
+    return { events, listens, decisions, complete };
+  } catch (error) {
+    log.error("app.workflow_events_unreadable", {
+      workflowId: workflow,
+      version,
+      ...errorFields(error),
+    });
+    return { events: {}, listens: {}, decisions, complete: false };
+  }
+};
+
+/**
+ * The exact workflow version each workflow `manifest` declares that `app`
+ * binds now pins, by alias, for a seal or a draft. A declared alias with
+ * no active binding, and a binding the App's code doesn't declare,
+ * resolve to nothing.
  */
 export const boundWorkflowsOf = async (
   env: Env,
@@ -141,8 +255,7 @@ export const boundWorkflowsOf = async (
   if (declaredPermissions(manifest, "workflows").length === 0) {
     return [];
   }
-  const db = drizzle(env.DB);
-  const active = await db
+  const active = await drizzle(env.DB)
     .select({
       alias: appWorkflowBindings.alias,
       workflow: appWorkflowBindings.workflowResourceId,
@@ -156,109 +269,13 @@ export const boundWorkflowsOf = async (
       )
     )
     .orderBy(asc(appWorkflowBindings.alias));
-  const bindings = active.filter(
-    ({ alias }) =>
-      declaredPermission(manifest, alias, "workflows") !== undefined
-  );
-  if (bindings.length === 0) {
-    return [];
-  }
-  const pinned = await db
-    .select({
-      workflow: sdkResourceBindings.resourceId,
-      version: sdkResourceBindings.resourceVersion,
-      alias: sdkResourceBindings.alias,
-      kind: sdkResourceBindings.kind,
-      contractId: sdkResourceBindings.contractId,
-      fingerprint: sdkResourceBindings.schemaHash,
-    })
-    .from(sdkResourceBindings)
-    .where(
-      and(
-        inList(sdkResourceBindings.kind, ["decision", "event"]),
-        // Every pinned version as one bound parameter: D1 binds at most 100
-        // to a statement, and an App may bind more workflows than that.
-        sql`EXISTS (SELECT 1 FROM json_each(${JSON.stringify(
-          bindings.map(({ workflow, version }) => [workflow, version])
-        )}) AS pin
-          WHERE json_extract(pin.value, '$[0]') = ${sdkResourceBindings.resourceId}
-            AND json_extract(pin.value, '$[1]') = ${sdkResourceBindings.resourceVersion})`
-      )
+  return active
+    .filter(
+      ({ alias }) =>
+        declaredPermission(manifest, alias, "workflows") !== undefined
     )
-    .orderBy(asc(sdkResourceBindings.alias));
-  const contracts = await resolveCatalogKeys(env, [
-    ...new Set(pinned.flatMap(({ contractId }) => contractId ?? [])),
-  ]);
-  return await Promise.all(
-    bindings.map(async ({ alias, workflow, version }) => {
-      const decisions: Record<string, BoundWorkflowDecision> = {};
-      const eventBindings: PinnedEventBinding[] = [];
-      for (const row of pinned) {
-        if (
-          row.workflow !== workflow ||
-          row.version !== version ||
-          !aliasPattern.test(row.alias)
-        ) {
-          continue;
-        }
-        const contract = contracts.get(row.contractId ?? "");
-        if (row.kind === "event") {
-          const bound = eventBindingOf(row.alias, contract, row.fingerprint);
-          if (bound === undefined) {
-            log.warn("app.workflow_event_unresolved", {
-              appId: app,
-              alias,
-              event: row.alias,
-            });
-          } else {
-            eventBindings.push(bound);
-          }
-          continue;
-        }
-        try {
-          const decision = decisionOf(contract, row.fingerprint);
-          if (decision === undefined) {
-            log.warn("app.workflow_decision_unresolved", {
-              appId: app,
-              alias,
-              decision: row.alias,
-            });
-          } else {
-            decisions[row.alias] = decision;
-          }
-        } catch (error) {
-          // Published through the catalog's own reader, so a descriptor it
-          // took and this one refuses is the platform's error, never the
-          // App's.
-          log.error("app.workflow_decision_unreadable", {
-            appId: app,
-            alias,
-            decision: row.alias,
-            ...errorFields(error),
-          });
-        }
-      }
-      // The exact version all of this was resolved from, for the seal.
-      const pin = { workflowId: workflow, version };
-      if (eventBindings.length === 0) {
-        return { alias, events: {}, listens: {}, decisions, pinned: pin };
-      }
-      try {
-        const { events, listens } = boundEventsOf(
-          eventBindings,
-          await recordedListens(env, workflow, version)
-        );
-        return { alias, events, listens, decisions, pinned: pin };
-      } catch (error) {
-        // Corrupt data (a contract the catalog refuses, a version whose
-        // stored contract no longer hashes): no events rather than no seal.
-        log.error("app.workflow_events_unreadable", {
-          appId: app,
-          alias,
-          ...errorFields(error),
-        });
-        return { alias, events: {}, listens: {}, decisions, pinned: pin };
-      }
-    })
-  );
+    .map(({ alias, workflow, version }) => ({
+      alias,
+      pinned: { workflowId: workflow, version },
+    }));
 };

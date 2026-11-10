@@ -1,7 +1,14 @@
+import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+
+import type {
+  BoundWorkflowDecision,
+  BoundWorkflowEvent,
+} from "./bound-workflows.ts";
 import type {
   ConnectorAction,
   ConnectorContract,
 } from "./connector-contracts.ts";
+import { namePattern } from "./declaration.ts";
 import type { FilesOperation } from "./file-link-references.ts";
 import { graspFunctions } from "./grasp-functions.ts";
 import {
@@ -38,9 +45,11 @@ import type {
   WorkflowPermission,
 } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
+import { isPlainObject } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";
+import { workflowReferenceLimits } from "./workflow-references.ts";
 
 // `permission`: how an App says what it can reach outside itself,
 // as an admin thinks of it. Eight permissions, each listed under
@@ -73,6 +82,106 @@ import { v } from "./values.ts";
 // (server.ts), and the host checks every call against them. Only an
 // action reaches the network; a mutation stages starts of the App's
 // workflows for after it commits; a query reaches nothing.
+
+/** `record`, a workflow permission's `what`: an object of at most `max`. */
+const checkedRecord = (
+  record: unknown,
+  what: string,
+  max: number
+): [string, unknown][] => {
+  if (record === undefined) {
+    return [];
+  }
+  if (!isPlainObject(record)) {
+    return refuse(`A workflow's \`${what}\` is an object.`);
+  }
+  const entries = Object.entries(record);
+  if (entries.length > max) {
+    return refuse(`A workflow declares at most ${max} ${what}.`);
+  }
+  return entries;
+};
+
+/** An event's or a decision's alias in its workflow: a plain name. */
+const checkedName = (name: string): string =>
+  namePattern.test(name)
+    ? name
+    : refuse(
+        `\`${name}\` isn't an event's or a decision's alias: a letter, then letters, digits or underscores, at most 64.`
+      );
+
+/** A workflow permission's `events`, as data. */
+const checkedEvents = (events: unknown): Record<string, BoundWorkflowEvent> =>
+  Object.fromEntries(
+    checkedRecord(events, "events", workflowReferenceLimits.events).map(
+      ([alias, event]) => {
+        const config = checkedConfig(event, ["type", "data"]);
+        const { type } = config;
+        if (typeof type !== "string" || !isEventType(type)) {
+          return refuse(
+            `Event \`${alias}\`'s type is 1 to ${sealedBuildLimits.eventTypeLength} characters on one line, with no control character and no space at either end.`
+          );
+        }
+        return [
+          checkedName(alias),
+          { type, data: structuredClone(descriptorOf(config.data)) },
+        ];
+      }
+    )
+  );
+
+/** A workflow permission's `decisions`, as data. */
+const checkedDecisions = (
+  decisions: unknown
+): Record<string, BoundWorkflowDecision> =>
+  Object.fromEntries(
+    checkedRecord(
+      decisions,
+      "decisions",
+      workflowReferenceLimits.decisions
+    ).map(([alias, decision]) => {
+      const config = checkedConfig(decision, ["value", "context"]);
+      return [
+        checkedName(alias),
+        {
+          value: structuredClone(descriptorOf(config.value)),
+          context: structuredClone(descriptorOf(config.context)),
+        },
+      ];
+    })
+  );
+
+/**
+ * A workflow permission's `listens`, as data: each task's path with the
+ * events of `events` it listens for, each once, in name order.
+ */
+const checkedListens = (
+  listens: unknown,
+  events: Readonly<Record<string, BoundWorkflowEvent>>
+): Record<string, string[]> =>
+  Object.fromEntries(
+    checkedRecord(listens, "listen tasks", workflowReferenceLimits.listens).map(
+      ([task, aliases]) => {
+        if (
+          task.length === 0 ||
+          task.length > workflowReferenceLimits.taskPathLength ||
+          !Array.isArray(aliases) ||
+          aliases.length === 0 ||
+          aliases.some(
+            (alias) =>
+              typeof alias !== "string" || !Object.hasOwn(events, alias)
+          ) ||
+          new Set(aliases).size !== aliases.length
+        ) {
+          return refuse(
+            `Listen task \`${task.slice(0, 64)}\` listens for events the workflow declares, each once.`
+          );
+        }
+        const listed: readonly string[] = aliases;
+        return [task, listed.toSorted()];
+      }
+    )
+  );
 
 /**
  * Permission declarations. Each answers a frozen declaration
@@ -162,7 +271,13 @@ export const permission = Object.freeze({
     alias: Alias,
     config: WorkflowConfig<Args, Returns>
   ): WorkflowPermission<Alias, InferInput<Args>, Infer<Returns>> => {
-    const checked = checkedConfig(config, ["args", "returns"]);
+    const checked = checkedConfig(config, [
+      "args",
+      "returns",
+      "events",
+      "listens",
+      "decisions",
+    ]);
     const args = descriptorOf(checked.args);
     const returns = descriptorOf(checked.returns);
     // A start left without args takes the schema's default; args that may
@@ -172,6 +287,7 @@ export const permission = Object.freeze({
         "A workflow's args are required or have a default, never only optional."
       );
     }
+    const events = checkedEvents(checked.events);
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: the alias given and the schemas' descriptors.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -181,6 +297,9 @@ export const permission = Object.freeze({
       // The descriptors, as data: what the host checks a start against.
       args: structuredClone(args),
       returns: structuredClone(returns),
+      events,
+      listens: checkedListens(checked.listens, events),
+      decisions: checkedDecisions(checked.decisions),
     }) as WorkflowPermission<Alias, InferInput<Args>, Infer<Returns>>;
   },
   /**

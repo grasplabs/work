@@ -415,18 +415,6 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
         contracts.fingerprints = { "notes.get": "0".repeat(64) };
       },
     ],
-    [
-      "another version",
-      (contracts: Record<string, Json>) => {
-        contracts.resourceVersion = 2;
-      },
-    ],
-    [
-      "another App",
-      (contracts: Record<string, Json>) => {
-        contracts.resourceId = "app_other";
-      },
-    ],
   ])(
     "is refused when its contracts name %s, every hash rewritten",
     async (_case, change) => {

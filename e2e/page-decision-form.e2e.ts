@@ -85,6 +85,19 @@ const appFiles = (admin: string, colleague: string): TestApp =>
       permissions: [
         'permission.workflow("followUp", {\n  args: v.object({ who: v.string().trim().min(1), reviewer: v.string() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
+      // Its decision, as the version bound asks it.
+      contracts: {
+        followUp: {
+          events: {},
+          listens: {},
+          decisions: {
+            approval: {
+              value: stringsDescriptor(["comment"]),
+              context: stringsDescriptor(["who"]),
+            },
+          },
+        },
+      },
     },
     {
       "server/requests.ts": `import { v } from "@grasp-os/sdk";
@@ -93,17 +106,10 @@ import { permissions } from "../grasp.config.ts";
 export const followUp = permissions.followUp;
 `,
 
-      "src/components/review.tsx": `import { v } from "@grasp-os/sdk";
-import type { WorkflowDecisionInboxItem } from "@grasp-os/sdk";
+      "src/components/review.tsx": `import type { WorkflowDecisionInboxItem } from "@grasp-os/sdk";
 import { useForm, useWorkflow } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextField } from "@grasp-os/ui/form";
 import { workflows } from "@server/_generated/api";
-
-const decision = workflows.followUp.decisions.approval;
-const responseSchema = v.object({
-  approved: v.boolean(),
-  value: decision.valueSchema,
-});
 
 /** One waiting decision, answered through its own form, mounted per item. */
 export function Review({
@@ -112,7 +118,7 @@ export function Review({
   item: WorkflowDecisionInboxItem<"approval", { comment: string }>;
 }) {
   const workflow = useWorkflow(workflows.followUp, { runId: item.run.runId });
-  const form = useForm(responseSchema, {
+  const form = useForm(workflows.followUp.decisions.approval, {
     defaultValues: { approved: false, value: { comment: "" } },
     onSubmit: async (response) => await workflow.respond(item.wait, response),
   });

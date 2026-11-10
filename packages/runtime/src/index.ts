@@ -74,9 +74,8 @@ export type {
 export type {
   DecisionContextOf,
   DecisionValueOf,
-  DescriptorInputOf,
-  DescriptorOutputOf,
-  DescriptorSchema,
+  AnyWorkflowDecisionReference,
+  DecisionOutputOf,
   WorkflowDecisionReference,
 } from "./workflow-decisions.ts";
 export type { EventDataOf, WorkflowEventReference } from "./workflow-events.ts";

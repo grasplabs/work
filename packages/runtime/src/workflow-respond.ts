@@ -82,10 +82,7 @@ export const respondToDecision = async (
   if (!isPlainObject(response) || typeof response.approved !== "boolean") {
     throw clientError("contract.invalid_args");
   }
-  const accepted = validateValue(
-    decision.valueSchema.descriptor,
-    response.value
-  );
+  const accepted = validateValue(decision.value, response.value);
   if (accepted.issues !== undefined) {
     throw clientError("contract.invalid_args", {
       issues: issueDetails(accepted.issues),

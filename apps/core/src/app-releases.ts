@@ -222,14 +222,12 @@ export interface Release {
 }
 
 /** `contracts.json` as the host reads it back. */
+// It names no release: the release's manifest names it by its hash.
 const contractsSchema = z.strictObject({
   formatVersion: z.literal(contractsFormatVersion),
-  resourceId: z.string(),
-  resourceVersion: z.int(),
   manifest: z.unknown(),
   fingerprints: z.record(z.string(), z.string()),
   workflows: z.record(z.string(), z.unknown()),
-  workflowFingerprints: z.record(z.string(), z.string()),
 });
 
 /** What `contracts` (a release's `contracts.json`) seal of its workflows. */
@@ -412,8 +410,6 @@ const verifiedRelease = async (
     ({ fingerprints } = contracts);
     workflows = readSealedWorkflows(contracts.workflows);
     if (
-      contracts.resourceId !== manifest.resourceId ||
-      contracts.resourceVersion !== manifest.resourceVersion ||
       canonicalText(await contractFingerprints(app)) !==
         canonicalText(fingerprints) ||
       (await schemaHash(app.schema)) !== manifest.schemaHash ||
@@ -862,30 +858,6 @@ export const versionManifest = async (
 };
 
 /**
- * What `version` of `app`'s references are generated from: its sealed
- * release's manifest and what its seal resolved of its workflows when it
- * has one, so its pages get the very bytes the release sealed; otherwise
- * its inspected manifest and the workflows as the App binds them now, as a
- * seal would. Throws as {@link versionManifest} does.
- */
-export const versionReferenceSource = async (
-  env: Env,
-  app: AppId,
-  version: number,
-  files: Readonly<Record<string, string>>
-): Promise<{
-  manifest: AppManifest;
-  workflows: readonly WorkflowBindingExtras[];
-}> => {
-  if (await isSealed(env, app, version)) {
-    const release = await loadRelease(env, app, version);
-    return { manifest: release.app, workflows: release.workflows };
-  }
-  const manifest = await filesManifest(env, files, app);
-  return { manifest, workflows: await boundWorkflowsOf(env, app, manifest) };
-};
-
-/**
  * A sealed release's App manifest alone: its release manifest checked
  * against its hash, and its contracts artifact read and checked against
  * the release's hash of it, its other artifacts not read. Refused as
@@ -1066,7 +1038,6 @@ const inspectForSeal = async (
   // it declares as the App binds them now, sealed with it.
   const generated = await generateModules(
     manifest,
-    { resourceId: key.app, resourceVersion: key.version },
     await boundWorkflowsOf(env, key.app, manifest)
   );
   // Type-checked with them, against the SDK's server side: nothing is

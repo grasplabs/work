@@ -138,16 +138,8 @@ const refusal = (register: () => unknown): string => {
 /** The reference `@server/_generated/api` generates for `workflow`'s `edited` event. */
 const eventOf = <Workflow extends string>(
   workflow: Workflow
-): WorkflowEventReference<Workflow> => ({
-  kind: "workflowEvent",
-  resourceId: "app",
-  resourceVersion: 1,
-  workflow,
-  workflowFingerprint: "0".repeat(64),
-  alias: "edited",
-  type: "notes.note.edited",
-  fingerprint: "f".repeat(64),
-  data: v.object({ title: v.string() }).descriptor,
+): WorkflowEventReference<Workflow, "edited", { title: string }> => ({
+  name: `${workflow}.events.edited`,
 });
 
 describe("what a function may use", () => {
@@ -740,7 +732,7 @@ describe("the App's permissions in a function's context", () => {
     expect(calls).toStrictEqual([]);
   });
 
-  test("a mutation notifies with a generated event reference, its contract pinned for the host to check", async () => {
+  test("a mutation notifies with a generated event reference, by the aliases its name holds, for the host to resolve", async () => {
     const edited = eventOf("workflows.followUp");
     // Typed by the config, as the generated `server/_generated/server` is.
     const granted = serverModule(
@@ -755,34 +747,98 @@ describe("the App's permissions in a function's context", () => {
         return null;
       },
     });
+    // Whatever else a reference carries is never read, nor sent.
+    const carrying = {
+      ...edited,
+      kind: "workflowEvent",
+      workflow: "workflows.other",
+      alias: "deleted",
+      type: "notes.note.deleted",
+    };
+    const forgedEvents: unknown[] = [
+      // Names that aren't an event's.
+      { name: "workflows.followUp" },
+      { name: "workflows.followUp.mutations.send" },
+      { name: "notes.create" },
+      { name: "workflows.followUp.events" },
+      { name: "workflows.followUp.events.edited.more" },
+      { name: "workflows.followUp.events.edited " },
+      // Aliases that aren't plain names.
+      { name: "workflows.__proto__.events.edited" },
+      { name: "workflows.followUp.events.__proto__" },
+      { name: "workflows.follow-up.events.edited" },
+      { name: `workflows.followUp.events.${"e".repeat(65)}` },
+      // Forged objects: the old shape, an inherited name, a name not text.
+      {
+        kind: "workflowEvent",
+        workflow: "workflows.followUp",
+        alias: "edited",
+        type: "notes.note.edited",
+      },
+      Object.create(edited),
+      { name: ["workflows.followUp.events.edited"] },
+      "workflows.followUp.events.edited",
+      null,
+    ];
     const forged = server.mutation({
+      args: { which: v.number().integer() },
+      returns: v.null(),
+      handler: (ctx, { which }) => {
+        // One the host would take first: nothing is sent unless all are.
+        Reflect.apply(ctx.sendEvent, ctx, [
+          edited,
+          { runId: "run1", data: { title: "a" } },
+        ]);
+        Reflect.apply(ctx.sendEvent, ctx, [
+          forgedEvents[which],
+          { runId: "run1", data: {} },
+        ]);
+        return null;
+      },
+    });
+    const carried = server.mutation({
       args: {},
       returns: v.null(),
       handler: (ctx) => {
         Reflect.apply(ctx.sendEvent, ctx, [
-          { ...edited, fingerprint: "not a fingerprint" },
-          { runId: "run1", data: {} },
+          carrying,
+          { runId: "run1", data: { title: "b" } },
         ]);
         return null;
       },
     });
     const registered = notes(
       { permissions: { workflows: [followUp] } },
-      { notes: { notify, forged } }
+      { notes: { notify, forged, carried } }
     );
     const { calls, channel } = recordingChannel();
     await runFunction(registered, "notes.notify", {}, channel);
+    await runFunction(registered, "notes.carried", {}, channel);
     expect(calls).toStrictEqual([
-      [
-        "resource",
-        "followUp",
-        "notify",
-        ["edited", "run1", { title: "a" }, "notes.note.edited", "f".repeat(64)],
-      ],
+      ["resource", "followUp", "notify", ["edited", "run1", { title: "a" }]],
+      ["resource", "followUp", "notify", ["edited", "run1", { title: "b" }]],
     ]);
-    await expect(
-      runFunction(registered, "notes.forged", {}, recordingChannel().channel)
-    ).rejects.toMatchObject({ code: "function.not_found" });
+    const refused = await Promise.all(
+      forgedEvents.map(async (_event, which) => {
+        const recording = recordingChannel();
+        try {
+          await runFunction(
+            registered,
+            "notes.forged",
+            { which },
+            recording.channel
+          );
+        } catch (error) {
+          const code: unknown =
+            error instanceof Error ? Reflect.get(error, "code") : undefined;
+          return { code, calls: recording.calls };
+        }
+        return { code: "accepted", calls: recording.calls };
+      })
+    );
+    expect(refused).toStrictEqual(
+      forgedEvents.map(() => ({ code: "function.not_found", calls: [] }))
+    );
   });
 
   test("a contract is short enough to name in an audit event", () => {

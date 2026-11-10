@@ -1,4 +1,5 @@
 import { v } from "@grasp-os/runtime/app";
+import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -27,6 +28,7 @@ import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
+import { approvalDeclared } from "./json-workflow-apps.ts";
 import { appWith, queryReference, seal } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
@@ -41,7 +43,11 @@ import { signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = (): TestApp =>
+/**
+ * The Requests App, declaring `declares` of `followUp` besides its args
+ * and returns: the `approval` decision `decidingDefinitionOf` asks, say.
+ */
+const files = (declares?: WorkflowEventContract): TestApp =>
   testApp(
     {
       name: "Requests",
@@ -54,6 +60,7 @@ const files = (): TestApp =>
       permissions: [
         'permission.workflow("followUp", {\n  args: v.object({ who: v.string().trim().min(1) }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
+      ...(declares === undefined ? {} : { contracts: { followUp: declares } }),
     },
     {
       "server/requests.ts": `import { v } from "@grasp-os/sdk";
@@ -429,7 +436,11 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       definition: decidingDefinitionOf(key),
       basedOn: null,
     });
-    const fixture = await appWith(files(), "Requests", builder.acting);
+    const fixture = await appWith(
+      files(approvalDeclared),
+      "Requests",
+      builder.acting
+    );
     await bindWorkflowToApp(env, builder.acting, workflow.id, {
       app: fixture.app,
       alias: "followUp",
@@ -535,7 +546,11 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       definition: decidingDefinitionOf(key),
       basedOn: null,
     });
-    const fixture = await appWith(files(), "Requests", builder.acting);
+    const fixture = await appWith(
+      files(approvalDeclared),
+      "Requests",
+      builder.acting
+    );
     await bindWorkflowToApp(env, builder.acting, workflow.id, {
       app: fixture.app,
       alias: "followUp",

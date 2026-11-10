@@ -1,11 +1,9 @@
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { describe, expect, test } from "vite-plus/test";
 
-import { decisionFingerprint } from "../src/codegen-contracts.ts";
 import {
   contractFingerprint,
   declaredWorkflows,
-  eventFingerprint,
   generateModules,
   inspectApp,
   readAppManifest,
@@ -23,16 +21,15 @@ import type {
 } from "../src/host.ts";
 import type { AnyFunctionReference } from "../src/index.ts";
 import { defineApp, permission, v } from "../src/index.ts";
-import { readPageFunctions } from "../src/page-functions.ts";
+import { readPageBuild } from "../src/page-functions.ts";
 import { runFunction } from "../src/runner.ts";
 import type { FunctionChannel } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
-import { valueLimits } from "../src/value-descriptor.ts";
+import { isPlainObject, valueLimits } from "../src/value-descriptor.ts";
 import { schemaOf } from "../src/value-schema.ts";
 import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable } from "../src/values.ts";
 import { workflowReferenceLimits } from "../src/workflow-references.ts";
-import { notesWorkflows } from "./notes-workflows.ts";
 import notes from "./notes/.grasp/app.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
@@ -57,11 +54,6 @@ import serverText from "./notes/server/_generated/server.ts?raw";
 // it: the first test fails whenever the generator or the fixture changes
 // without the other.
 // Sealing and running through the real sandbox are core's tests.
-
-const identity = {
-  resourceId: "app_0000000000000000000000notes",
-  resourceVersion: 1,
-};
 
 /** The fixture's manifest, as inspection makes it. */
 const notesManifest = (): AppManifest => inspectApp(notes).manifest;
@@ -124,9 +116,7 @@ const changed = (change: (data: unknown) => void): string => {
 describe("generated modules", () => {
   test("are what the host generates for the fixture, byte for byte", async () => {
     const files = await generateModules(
-      readAppManifest(textOf(notesManifest())),
-      identity,
-      notesWorkflows
+      readAppManifest(textOf(notesManifest()))
     );
     expect(files).toStrictEqual({
       "server/_generated/server.ts": serverText,
@@ -148,8 +138,8 @@ describe("generated modules", () => {
           : value
     );
     await expect(
-      generateModules(readAppManifest(textOf(reversed)), identity)
-    ).resolves.toStrictEqual(await generateModules(manifest, identity));
+      generateModules(readAppManifest(textOf(reversed)))
+    ).resolves.toStrictEqual(await generateModules(manifest));
   });
 
   test("change the contract fingerprint a binding pins with any change to a function", async () => {
@@ -203,7 +193,8 @@ describe("generated modules", () => {
   test("give a page the release's public functions by name, its workflows' too, as data a client reads them from", () => {
     const { operations } = notesManifest();
     const create = operations["notes.create"];
-    const releaseFunctions = readPageFunctions(builtFunctions);
+    const build = readPageBuild(builtFunctions);
+    const releaseFunctions = build.functions;
     expect(releaseFunctions.get("notes.create")).toStrictEqual({
       kind: "mutation",
       args: create?.args,
@@ -216,22 +207,31 @@ describe("generated modules", () => {
       start: releaseFunctions.get("workflows.summarizeNote.mutations.start")
         ?.kind,
     }).toStrictEqual({ internal: false, titles: null, start: "mutation" });
+    // Each workflow as the App declares it, by alias.
+    const summarize = build.workflows.get("summarizeNote");
+    expect({
+      workflows: [...build.workflows.keys()].toSorted(),
+      events: Object.fromEntries(summarize?.events ?? []),
+      listens: Object.fromEntries(
+        [...(summarize?.listens ?? [])].map(([task, events]) => [
+          task,
+          [...events],
+        ])
+      ),
+      decisions: Object.fromEntries(summarize?.decisions ?? []),
+    }).toStrictEqual({
+      workflows: ["archiveNotes", "summarizeNote"],
+      events: summarizeNote.events,
+      listens: summarizeNote.listens,
+      decisions: summarizeNote.decisions,
+    });
   });
 
-  test("name functions the same whatever release, version or contract they are generated for", async () => {
-    // Without workflows, whose references still carry the release they
-    // were bound in: every reference here is a name.
-    const fixture = notesManifest();
-    const manifest = {
-      ...fixture,
-      permissions: Object.fromEntries(
-        Object.entries(fixture.permissions).filter(
-          ([, declared]) => declared["~permission"] !== "workflows"
-        )
-      ),
-    };
-    // Another version, whose functions take and answer other values: the
-    // references are the code's names, and their types the code's own.
+  test("name functions the same whatever version, contract or pin they are generated for", async () => {
+    const manifest = notesManifest();
+    // Another version, whose functions take and answer other values, and
+    // whose workflows were bound to other versions: the references are
+    // the code's names, and their types the code's own.
     const create = manifest.operations["notes.create"];
     if (create === undefined) {
       throw new Error("No notes.create");
@@ -248,11 +248,13 @@ describe("generated modules", () => {
       },
     };
     const [one, other] = await Promise.all([
-      generateModules(manifest, identity),
-      generateModules(changedContracts, {
-        resourceId: "app_00000000000000000000000other",
-        resourceVersion: 7,
-      }),
+      generateModules(manifest),
+      generateModules(changedContracts, [
+        {
+          alias: "summarizeNote",
+          pinned: { workflowId: "workflow-7", version: 7 },
+        },
+      ]),
     ]);
     expect({
       api:
@@ -297,17 +299,14 @@ describe("generated modules", () => {
 
   test("export no workflows for an App that declares none", async () => {
     const manifest = notesManifest();
-    const files = await generateModules(
-      {
-        ...manifest,
-        permissions: Object.fromEntries(
-          Object.entries(manifest.permissions).filter(
-            ([, declared]) => declared["~permission"] !== "workflows"
-          )
-        ),
-      },
-      identity
-    );
+    const files = await generateModules({
+      ...manifest,
+      permissions: Object.fromEntries(
+        Object.entries(manifest.permissions).filter(
+          ([, declared]) => declared["~permission"] !== "workflows"
+        )
+      ),
+    });
     expect(files["server/_generated/api.ts"]).toContain(
       "export const workflows: Readonly<Record<never, never>> = frozen({});"
     );
@@ -330,161 +329,133 @@ const pageOf = (items: unknown[]) => ({
   hasMore: false,
 });
 
-describe("workflow references", () => {
-  const [summarize] = notesWorkflows;
-  if (summarize === undefined) {
-    throw new Error("No bound workflows");
+/** What a test changes of a workflow the fixture declares. */
+type DeclaredChange = Partial<
+  Pick<BoundWorkflow, "args" | "returns" | "events" | "listens" | "decisions">
+>;
+
+const builtFunctionsPattern = /JSON\.parse\((?<text>".*")\);/u;
+
+/** The page's build in generated `files`, as a client reads it. */
+const pageBuildOf = (files: Readonly<Record<string, string>>) => {
+  const text = builtFunctionsPattern.exec(files[".grasp/functions.ts"] ?? "")
+    ?.groups?.text;
+  if (text === undefined) {
+    throw new Error("No page build");
   }
+  const json: unknown = JSON.parse(text);
+  const build: unknown = typeof json === "string" ? JSON.parse(json) : null;
+  return readPageBuild(build);
+};
+
+/** `generated` but what the release's contracts seal. */
+const unsealed = (generated: Readonly<Record<string, string>>) =>
+  Object.fromEntries(
+    Object.entries(generated).filter(
+      ([path]) => path !== ".grasp/contracts.json"
+    )
+  );
+
+describe("workflow references", () => {
+  const pinned = { workflowId: "workflow-1", version: 3 };
 
   /**
-   * The fixture's generated modules, with what the host resolved of its
-   * workflows, `bound`, and its declaration of `summarizeNote` changed by
-   * `declared`, if given.
+   * The fixture's generated modules, with the versions the host resolved
+   * its workflow bindings to, `bound`, and its declarations of
+   * `summarizeNote` and `archiveNotes` changed by `declared`, if given.
    */
   const generatedWith = async (
     bound: readonly WorkflowBindingExtras[],
-    declared?: Partial<Pick<BoundWorkflow, "args" | "returns">>
+    declared: {
+      readonly summarizeNote?: DeclaredChange;
+      readonly archiveNotes?: DeclaredChange;
+    } = {}
   ) => {
     const manifest = notesManifest();
     return await generateModules(
-      declared === undefined
-        ? manifest
-        : {
-            ...manifest,
-            permissions: {
-              ...manifest.permissions,
-              summarizeNote: { ...summarizeNote, ...declared },
-            },
-          },
-      identity,
+      {
+        ...manifest,
+        permissions: {
+          ...manifest.permissions,
+          summarizeNote: { ...summarizeNote, ...declared.summarizeNote },
+          archiveNotes: { ...archiveNotes, ...declared.archiveNotes },
+        },
+      },
       bound
     );
   };
 
-  test("seal the workflow version each was resolved from, never into a reference", async () => {
-    const pinned = { workflowId: "workflow-1", version: 3 };
-    const files = await generatedWith([{ ...summarize, pinned }]);
+  test("seal the workflow version each was resolved from, never into a reference or a page", async () => {
+    const [unbound, files] = await Promise.all([
+      generatedWith([]),
+      generatedWith([{ alias: "summarizeNote", pinned }]),
+    ]);
     const contracts: unknown = JSON.parse(
       files[".grasp/contracts.json"] ?? "{}"
     );
-    const sealedWorkflows: unknown =
-      typeof contracts === "object" && contracts !== null
-        ? Reflect.get(contracts, "workflows")
-        : undefined;
     expect({
-      sealed: readSealedWorkflows(sealedWorkflows)
-        .filter(({ alias }) => alias === summarize.alias)
-        .map((workflow) => workflow.pinned),
-      inReferences: (files["server/_generated/api.ts"] ?? "").includes(
-        "workflow-1"
-      ),
-    }).toStrictEqual({ sealed: [pinned], inReferences: false });
+      // `archiveNotes`, bound to nothing, seals nothing.
+      sealed: readSealedWorkflows(at(contracts, ["workflows"])),
+      // The references and the page's build are the same bytes, pinned or not.
+      rest: unsealed(files),
+    }).toStrictEqual({
+      sealed: [{ alias: "summarizeNote", pinned }],
+      rest: unsealed(unbound),
+    });
   });
 
   test.each([
+    ["no pin at all", undefined],
     ["no workflow", { version: 1 }],
     ["an empty workflow", { workflowId: "", version: 1 }],
     ["a version that isn't one", { workflowId: "workflow-1", version: 0 }],
     ["a fractional version", { workflowId: "workflow-1", version: 1.5 }],
-  ])("refuse a sealed pin with %s", (_case, pinned) => {
+  ])("refuse a sealed pin with %s", (_case, sealed) => {
     expect(() =>
       readSealedWorkflows({
-        summarizeNote: {
-          alias: "summarizeNote",
-          events: {},
-          listens: {},
-          decisions: {},
-          pinned,
-        },
+        summarizeNote: { alias: "summarizeNote", pinned: sealed },
       })
     ).toThrow(/pin/u);
   });
 
-  test("hold their contract, events and functions as data", () => {
-    for (const reference of Object.values(workflows)) {
+  test("are names alone, frozen all the way down", () => {
+    const reference = workflows.summarizeNote;
+    expect({
+      keys: Object.keys(reference).toSorted(),
+      name: reference.name,
+      events: reference.events,
+      decisions: reference.decisions,
+    }).toStrictEqual({
+      keys: ["decisions", "events", "mutations", "name", "queries"],
+      name: "workflows.summarizeNote",
+      events: {
+        noteEdited: { name: "workflows.summarizeNote.events.noteEdited" },
+        styleChosen: { name: "workflows.summarizeNote.events.styleChosen" },
+      },
+      decisions: {
+        approveSummary: {
+          name: "workflows.summarizeNote.decisions.approveSummary",
+        },
+        chooseLength: {
+          name: "workflows.summarizeNote.decisions.chooseLength",
+        },
+      },
+    });
+    for (const each of Object.values(workflows)) {
       // Data all the way down: a clone refuses a function, and keeps all.
-      expect(structuredClone(reference)).toStrictEqual(reference);
-      expect(Object.isFrozen(reference.events)).toBeTruthy();
+      expect(structuredClone(each)).toStrictEqual(each);
     }
-    expect(workflows.summarizeNote).toMatchObject({
-      kind: "workflow",
-      visibility: "public",
-      ...identity,
-      alias: "summarizeNote",
-      contractId: "workflows.summarizeNote",
-      args: summarizeNote.args,
-      returns: summarizeNote.returns,
-      listens: summarize.listens,
-    });
-  });
-
-  test("bind each event to its workflow binding, the contract it pins and its event type", async () => {
-    const reference = workflows.summarizeNote;
-    expect(reference.fingerprint).toBe(
-      await workflowFingerprint(summarizeNote)
-    );
-    const expected = await Promise.all(
-      Object.entries(summarize.events).map(async ([alias, declared]) => [
-        alias,
-        {
-          kind: "workflowEvent",
-          ...identity,
-          workflow: "workflows.summarizeNote",
-          workflowFingerprint: reference.fingerprint,
-          alias,
-          type: declared.type,
-          fingerprint: await eventFingerprint(declared),
-          data: declared.data,
-        },
-      ])
-    );
-    expect(reference.events).toStrictEqual(Object.fromEntries(expected));
-  });
-
-  test("bind each decision to its workflow binding and key, with its value schema as a descriptor", async () => {
-    const reference = workflows.summarizeNote;
-    const expected = await Promise.all(
-      Object.entries(summarize.decisions).map(async ([key, declared]) => [
-        key,
-        {
-          kind: "workflowDecision",
-          ...identity,
-          workflow: "workflows.summarizeNote",
-          workflowFingerprint: reference.fingerprint,
-          key,
-          fingerprint: await decisionFingerprint(declared),
-          valueSchema: { kind: "descriptor", descriptor: declared.value },
-          context: declared.context,
-        },
-      ])
-    );
-    expect(reference.decisions).toStrictEqual(Object.fromEntries(expected));
-    // A form's schema is built from it, and checks what the decision does.
-    const response = v.object({
-      approved: v.boolean(),
-      value: reference.decisions.approveSummary.valueSchema,
-    });
-    expect(
-      response["~standard"].validate({
-        approved: true,
-        value: { comment: "Checked.", rating: 4 },
-      }).issues
-    ).toBeUndefined();
-    expect(
-      response["~standard"].validate({
-        approved: true,
-        value: { comment: "Checked.", rating: 9 },
-      }).issues
-    ).toBeDefined();
-    // A descriptor schema is read back as any stored descriptor is.
-    const forged: unknown = JSON.parse(
-      '{"kind":"descriptor","descriptor":{"kind":"anything"}}'
-    );
-    expect(() => {
-      Reflect.apply(v.object, undefined, [{ value: forged }]);
-    }).toThrow(
-      expect.objectContaining({ code: "definition.invalid_descriptor" })
-    );
+    expect([
+      Object.isFrozen(reference),
+      Object.isFrozen(reference.events),
+      Object.isFrozen(reference.events.noteEdited),
+      Object.isFrozen(reference.decisions.approveSummary),
+      Reflect.set(
+        reference.events.noteEdited,
+        "name",
+        "workflows.archiveNotes.events.confirmed"
+      ),
+    ]).toStrictEqual([true, true, true, true, false]);
   });
 
   test("expose a run, whether one may start, runs, history, the decision inbox and a decision as queries, and starts, controls and sends as mutations, by name", async () => {
@@ -513,9 +484,9 @@ describe("workflow references", () => {
     }
     // A workflow that asks nobody has no inbox, and no decision rows; one
     // that listens for nothing takes no event.
-    const files = await generatedWith([
-      { alias: "archiveNotes", events: {}, listens: {}, decisions: {} },
-    ]);
+    const files = await generatedWith([], {
+      archiveNotes: { events: {}, listens: {}, decisions: {} },
+    });
     const text = files["server/_generated/api.ts"] ?? "";
     expect(text).toContain("workflows.archiveNotes.queries.history");
     expect(text).not.toContain("workflows.archiveNotes.queries.decision");
@@ -523,11 +494,11 @@ describe("workflow references", () => {
   });
 
   test("take only what each mutation declares: the workflow's args, a run, and an event it declares with that event's data", () => {
-    const bound = declaredWorkflows(notesManifest(), notesWorkflows).find(
+    const bound = declaredWorkflows(notesManifest(), []).find(
       ({ alias }) => alias === "summarizeNote"
     );
     if (bound === undefined) {
-      throw new Error("The fixture binds summarizeNote");
+      throw new Error("The fixture declares summarizeNote");
     }
     const { mutations } = workflowFunctions(bound);
     const noteId = "01890000-0000-7000-8000-000000000001";
@@ -583,44 +554,43 @@ describe("workflow references", () => {
     });
   });
 
-  test("hold as many decisions as a reference does, contexts nested one level short of the limit, and refuse deeper by name", async () => {
-    const many: WorkflowBindingExtras = {
-      ...summarize,
-      decisions: Object.fromEntries(
-        Array.from(
-          { length: workflowReferenceLimits.decisions },
-          (_, index) => [
-            `decision${index}`,
-            { value: v.null().descriptor, context: v.null().descriptor },
-          ]
-        )
-      ),
-    };
-    const deep = (depth: number): WorkflowBindingExtras => ({
-      ...summarize,
-      decisions: {
-        deep: { value: v.null().descriptor, context: nested(depth) },
-      },
+  test("hold as many decisions as a workflow declares, contexts nested one level short of the limit, and refuse deeper by name", async () => {
+    const many = Object.fromEntries(
+      Array.from({ length: workflowReferenceLimits.decisions }, (_, index) => [
+        `decision${index}`,
+        { value: v.null().descriptor, context: v.null().descriptor },
+      ])
+    );
+    const deep = async (depth: number) =>
+      await generatedWith([], {
+        summarizeNote: {
+          decisions: {
+            deep: { value: v.null().descriptor, context: nested(depth) },
+          },
+        },
+      });
+    const files = await generatedWith([], {
+      summarizeNote: { decisions: many },
     });
-    const files = await generatedWith([many]);
     expect(files["server/_generated/api.ts"]).toContain(
       `WorkflowDecisionDetail<"decision${workflowReferenceLimits.decisions - 1}"`
     );
-    await expect(
-      generatedWith([deep(valueLimits.depth - 1)])
-    ).resolves.toBeDefined();
-    await expect(generatedWith([deep(valueLimits.depth)])).rejects.toThrow(
+    expect(
+      pageBuildOf(files).workflows.get("summarizeNote")?.decisions.size
+    ).toBe(workflowReferenceLimits.decisions);
+    await expect(deep(valueLimits.depth - 1)).resolves.toBeDefined();
+    await expect(deep(valueLimits.depth)).rejects.toThrow(
       "summarizeNote's contracts don't fit its generated functions"
     );
   });
 
   test("answer only what each query declares: declared keys, no result, a known context", () => {
-    // What core checks each query's answer against, by the binding.
-    const bound = declaredWorkflows(notesManifest(), notesWorkflows).find(
+    // What core checks each query's answer against, by the declaration.
+    const bound = declaredWorkflows(notesManifest(), []).find(
       ({ alias }) => alias === "summarizeNote"
     );
     if (bound === undefined) {
-      throw new Error("The fixture binds summarizeNote");
+      throw new Error("The fixture declares summarizeNote");
     }
     const { queries } = workflowFunctions(bound);
     const historyRow = {
@@ -739,115 +709,104 @@ describe("workflow references", () => {
     });
   });
 
-  test("pin the workflow's args and returns, each event and decision its own contract, and the release all of it", async () => {
+  test("are covered by the release's contracts with all the App declares of them, and the version each binding pinned", async () => {
     const text = v.string().descriptor;
-    const declarationChanges = [{ args: text }, { returns: text }];
-    const workflowPrints = await Promise.all(
+    const edited = summarizeNote.events.noteEdited;
+    const approve = summarizeNote.decisions.approveSummary;
+    if (edited === undefined || approve === undefined) {
+      throw new Error("The fixture declares noteEdited and approveSummary");
+    }
+    const declarationChanges: DeclaredChange[] = [
+      { args: text },
+      { returns: text },
+      {
+        events: {
+          ...summarizeNote.events,
+          noteEdited: { ...edited, data: text },
+        },
+      },
+      {
+        events: {
+          ...summarizeNote.events,
+          noteEdited: { ...edited, type: "notes.note.changed" },
+        },
+      },
+      {
+        events: { ...summarizeNote.events, extra: { type: "x", data: text } },
+      },
+      { listens: { "do/0/chooseStyle": ["styleChosen"] } },
+      {
+        decisions: {
+          ...summarizeNote.decisions,
+          approveSummary: { ...approve, value: text },
+        },
+      },
+      {
+        decisions: {
+          ...summarizeNote.decisions,
+          approveSummary: { ...approve, context: text },
+        },
+      },
+      { decisions: {} },
+    ];
+    const generated = await Promise.all([
+      generatedWith([]),
+      generatedWith([{ alias: "summarizeNote", pinned }]),
+      generatedWith([
+        { alias: "summarizeNote", pinned: { ...pinned, version: 4 } },
+      ]),
+      ...declarationChanges.map(
+        async (change) => await generatedWith([], { summarizeNote: change })
+      ),
+    ]);
+    const contracts = generated.map((files) => files[".grasp/contracts.json"]);
+    expect(new Set(contracts).size).toBe(contracts.length);
+    // And what the host compares before a page follows a run another
+    // release started changes with each change of the declaration.
+    const prints = await Promise.all(
       [{}, ...declarationChanges].map(
         async (change) =>
           await workflowFingerprint({ ...summarizeNote, ...change })
       )
     );
-    expect(new Set(workflowPrints).size).toBe(workflowPrints.length);
+    expect(new Set(prints).size).toBe(prints.length);
+  });
 
-    const edited = summarize.events.noteEdited;
-    if (edited === undefined) {
-      throw new Error("No noteEdited");
-    }
-    const eventPrints = await Promise.all(
-      [
-        edited,
-        { ...edited, type: "notes.note.changed" },
-        { ...edited, data: text },
-      ].map(eventFingerprint)
-    );
-    expect(new Set(eventPrints).size).toBe(eventPrints.length);
-
-    const approve = summarize.decisions.approveSummary;
-    if (approve === undefined) {
-      throw new Error("No approveSummary");
-    }
-    const decisionPrints = await Promise.all(
-      [approve, { ...approve, value: text }, { ...approve, context: text }].map(
-        decisionFingerprint
-      )
-    );
-    expect(new Set(decisionPrints).size).toBe(decisionPrints.length);
-
-    const contractChanges: WorkflowBindingExtras[] = [
+  test("are the same bytes whatever order the bindings, the events and the listen tasks come in", async () => {
+    const pins: WorkflowBindingExtras[] = [
       {
-        ...summarize,
-        events: { ...summarize.events, noteEdited: { ...edited, data: text } },
+        alias: "archiveNotes",
+        pinned: { workflowId: "workflow-2", version: 1 },
       },
-      {
-        ...summarize,
-        events: { ...summarize.events, extra: { type: "x", data: text } },
-      },
-      { ...summarize, listens: { "do/0/chooseStyle": ["styleChosen"] } },
-      {
-        ...summarize,
-        decisions: {
-          ...summarize.decisions,
-          chooseLength: { value: text, context: text },
-        },
-      },
-      {
-        ...summarize,
-        decisions: {
-          ...summarize.decisions,
-          approveSummary: {
-            value: approve.value,
-            context: text,
-          },
-        },
-      },
-      { ...summarize, decisions: {} },
+      { alias: "summarizeNote", pinned },
     ];
-    const contracts = await Promise.all([
-      ...[summarize, ...contractChanges].map(async (workflow) => {
-        const files = await generatedWith([workflow]);
-        return files[".grasp/contracts.json"];
-      }),
-      ...declarationChanges.map(async (change) => {
-        const files = await generatedWith([summarize], change);
-        return files[".grasp/contracts.json"];
-      }),
-    ]);
-    expect(new Set(contracts).size).toBe(contracts.length);
-  });
-
-  test("are the same bytes whatever order the workflows, their events and their listen tasks' events come in", async () => {
-    const reversed = notesWorkflows.toReversed().map((workflow) => ({
-      ...workflow,
-      events: Object.fromEntries(Object.entries(workflow.events).toReversed()),
-      listens: Object.fromEntries(
-        Object.entries(workflow.listens)
-          .toReversed()
-          .map(([task, events]) => [task, events.toReversed()])
-      ),
-    }));
-    await expect(generatedWith(reversed)).resolves.toStrictEqual(
-      await generatedWith(notesWorkflows)
-    );
-  });
-
-  test("are covered by the contracts the release's hash covers", async () => {
-    const files = await generatedWith(notesWorkflows, {
-      returns: v.string().descriptor,
+    const reversed = changed((data) => {
+      const declared = ["permissions", "summarizeNote"];
+      const events = at(data, [...declared, "events"]);
+      setAt(
+        data,
+        [...declared, "events"],
+        Object.fromEntries(
+          Object.entries(isPlainObject(events) ? events : {}).toReversed()
+        )
+      );
+      const listens = at(data, [...declared, "listens"]);
+      setAt(
+        data,
+        [...declared, "listens"],
+        Object.fromEntries(
+          Object.entries(isPlainObject(listens) ? listens : {}).toReversed()
+        )
+      );
     });
-    expect(files[".grasp/contracts.json"]).not.toBe(contractsText);
-    expect(JSON.parse(contractsText)).toMatchObject({
-      workflowFingerprints: {
-        archiveNotes: await workflowFingerprint(archiveNotes),
-        summarizeNote: await workflowFingerprint(summarizeNote),
-      },
-    });
+    await expect(
+      generateModules(readAppManifest(reversed), pins.toReversed())
+    ).resolves.toStrictEqual(await generateModules(notesManifest(), pins));
   });
 
   test("hold exactly as many events as the client reads (workflowReferenceLimits)", async () => {
-    const files = await generatedWith([
-      {
-        ...summarize,
+    const files = await generatedWith([], {
+      summarizeNote: {
         events: Object.fromEntries(
           Array.from({ length: workflowReferenceLimits.events }, (_, index) => [
             `event${index}`,
@@ -856,175 +815,408 @@ describe("workflow references", () => {
         ),
         listens: {},
       },
-    ]);
+    });
     expect(files["server/_generated/api.ts"]).toContain(
-      `event${workflowReferenceLimits.events - 1}`
+      `workflows.summarizeNote.events.event${workflowReferenceLimits.events - 1}`
+    );
+    expect(pageBuildOf(files).workflows.get("summarizeNote")?.events.size).toBe(
+      workflowReferenceLimits.events
     );
   });
 
   test("are made for every workflow the App declares, with the contract it declares, whatever the host resolved of it", async () => {
     const files = await generatedWith([]);
-    const references = files["server/_generated/api.ts"] ?? "";
-    // Pinned to what the App declares: the same contract, and fingerprint.
-    expect(references).toContain(await workflowFingerprint(summarizeNote));
-    expect(references).toContain(await workflowFingerprint(archiveNotes));
-    expect(JSON.parse(files[".grasp/contracts.json"] ?? "")).toMatchObject({
-      workflows: {
-        archiveNotes: { events: {}, listens: {}, decisions: {} },
-        summarizeNote: { events: {}, listens: {}, decisions: {} },
-      },
+    const build = pageBuildOf(files);
+    expect({
+      references: ["archiveNotes", "summarizeNote"].map((alias) =>
+        (files["server/_generated/api.ts"] ?? "").includes(
+          `"name": "workflows.${alias}"`
+        )
+      ),
+      sealed: at(JSON.parse(files[".grasp/contracts.json"] ?? "{}"), [
+        "workflows",
+      ]),
+      events: [...(build.workflows.get("archiveNotes")?.events ?? [])],
+      decisions: [...(build.workflows.get("archiveNotes")?.decisions ?? [])],
+    }).toStrictEqual({
+      references: [true, true],
+      sealed: {},
+      events: Object.entries(archiveNotes.events),
+      decisions: Object.entries(archiveNotes.decisions),
     });
   });
 
   test.each<[string, readonly WorkflowBindingExtras[]]>([
-    ["the same alias twice", [summarize, summarize]],
+    [
+      "the same alias twice",
+      [
+        { alias: "summarizeNote", pinned },
+        { alias: "summarizeNote", pinned: { ...pinned, version: 4 } },
+      ],
+    ],
     [
       "a workflow the App doesn't declare",
-      [{ ...summarize, alias: "translateNote" }],
+      [{ alias: "translateNote", pinned }],
     ],
-    ["an alias that isn't plain", [{ ...summarize, alias: "summarize-note" }]],
+    ["an alias that isn't plain", [{ alias: "summarize-note", pinned }]],
+    ["an inherited key", [{ alias: "constructor", pinned }]],
+    ["another kind's permission", [{ alias: "files", pinned }]],
+  ])("refuse a binding of %s", async (_what, bound) => {
+    await expect(generatedWith(bound)).rejects.toThrow(TypeError);
+  });
+});
+
+/** `count` entries of `entry`, each under its own plain name. */
+const entries = (count: number, entry: unknown) =>
+  Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [`entry${index}`, entry])
+  );
+
+describe("a workflow's declaration", () => {
+  // SAFETY: a deliberately ill-typed view, for declarations the types refuse.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const looseWorkflow = permission.workflow as (
+    alias: string,
+    config: unknown
+  ) => unknown;
+  const declaredEvent = { type: "notes.note.edited", data: v.null() };
+  const declaredDecision = { value: v.null(), context: v.null() };
+
+  test("holds its events, listens and decisions as data, each listen's events in name order", () => {
+    const declared = permission.workflow("review", {
+      args: v.object({}),
+      returns: v.null(),
+      events: { edited: declaredEvent, approved: declaredEvent },
+      listens: { "do/0/wait": ["edited", "approved"] },
+      decisions: { sign: declaredDecision },
+    });
+    expect({
+      events: declared.events,
+      listens: declared.listens,
+      decisions: declared.decisions,
+    }).toStrictEqual({
+      events: {
+        edited: { type: "notes.note.edited", data: v.null().descriptor },
+        approved: { type: "notes.note.edited", data: v.null().descriptor },
+      },
+      listens: { "do/0/wait": ["approved", "edited"] },
+      decisions: {
+        sign: { value: v.null().descriptor, context: v.null().descriptor },
+      },
+    });
+  });
+
+  test.each<[string, Record<string, unknown>, string]>([
     [
-      "an event alias that isn't plain",
-      [
-        {
-          ...summarize,
-          events: { "note edited": { type: "x", data: v.null().descriptor } },
-          listens: {},
-        },
-      ],
-    ],
-    [
-      "a decision key that isn't plain",
-      [
-        {
-          ...summarize,
-          decisions: {
-            "approve summary": {
-              value: v.null().descriptor,
-              context: v.null().descriptor,
-            },
-          },
-        },
-      ],
-    ],
-    [
-      "a listen task for an event the workflow doesn't declare",
-      [{ ...summarize, listens: { "do/0/wait": ["documentUploaded"] } }],
-    ],
-    [
-      "a listen task listing the same event twice",
-      [
-        {
-          ...summarize,
-          listens: { "do/2/awaitEdit": ["noteEdited", "noteEdited"] },
-        },
-      ],
-    ],
-    [
-      "a listen task for no event at all",
-      [{ ...summarize, listens: { "do/0/wait": [] } }],
-    ],
-    [
-      "more events than a reference holds",
-      [
-        {
-          ...summarize,
-          events: Object.fromEntries(
-            Array.from(
-              { length: workflowReferenceLimits.events + 1 },
-              (_, index) => [
-                `event${index}`,
-                { type: "x", data: v.null().descriptor },
-              ]
-            )
-          ),
-          listens: {},
-        },
-      ],
-    ],
-    [
-      "an event with an empty type",
-      [
-        {
-          ...summarize,
-          events: {
-            ...summarize.events,
-            noteEdited: { type: "", data: v.null().descriptor },
-          },
-        },
-      ],
-    ],
-    [
-      "an event type longer than a reference holds",
-      [
-        {
-          ...summarize,
-          events: {
-            ...summarize.events,
-            noteEdited: {
-              type: "t".repeat(sealedBuildLimits.eventTypeLength + 1),
-              data: v.null().descriptor,
-            },
-          },
-        },
-      ],
+      "an event type that is empty",
+      { events: { edited: { ...declaredEvent, type: "" } } },
+      "type is 1 to",
     ],
     [
       "an event type with a control character inside",
-      [
-        {
-          ...summarize,
-          events: {
-            ...summarize.events,
-            noteEdited: { type: "note\tedited", data: v.null().descriptor },
-          },
-        },
-      ],
+      { events: { edited: { ...declaredEvent, type: "note\tedited" } } },
+      "type is 1 to",
     ],
     [
       "an event type with a space at its end",
-      [
-        {
-          ...summarize,
-          events: {
-            ...summarize.events,
-            noteEdited: { type: "note.edited ", data: v.null().descriptor },
-          },
-        },
-      ],
+      { events: { edited: { ...declaredEvent, type: "note.edited " } } },
+      "type is 1 to",
     ],
     [
-      "more decisions than a reference holds",
-      [
-        {
-          ...summarize,
-          decisions: Object.fromEntries(
-            Array.from(
-              { length: workflowReferenceLimits.decisions + 1 },
-              (_, index) => [
-                `decision${index}`,
-                { value: v.null().descriptor, context: v.null().descriptor },
-              ]
-            )
-          ),
-        },
-      ],
-    ],
-    [
-      "a listen task's path longer than a reference holds",
-      [
-        {
-          ...summarize,
-          listens: {
-            ["t".repeat(workflowReferenceLimits.taskPathLength + 1)]: [
-              "noteEdited",
-            ],
+      "an event type longer than a run's inbox takes",
+      {
+        events: {
+          edited: {
+            ...declaredEvent,
+            type: "t".repeat(sealedBuildLimits.eventTypeLength + 1),
           },
         },
-      ],
+      },
+      "type is 1 to",
     ],
-  ])("refuse %s", async (_what, bound) => {
-    await expect(generatedWith(bound)).rejects.toThrow(TypeError);
+    [
+      "an event type that isn't text",
+      { events: { edited: { ...declaredEvent, type: 7 } } },
+      "type is 1 to",
+    ],
+    [
+      "a listen naming an event it doesn't declare",
+      {
+        events: { edited: declaredEvent },
+        listens: { "do/0/wait": ["uploaded"] },
+      },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "a listen naming an inherited key",
+      {
+        events: { edited: declaredEvent },
+        listens: { "do/0/wait": ["constructor"] },
+      },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "a listen naming one event twice",
+      {
+        events: { edited: declaredEvent },
+        listens: { "do/0/wait": ["edited", "edited"] },
+      },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "a listen naming no event",
+      { events: { edited: declaredEvent }, listens: { "do/0/wait": [] } },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "a listen naming its event as text, not a list",
+      { events: { edited: declaredEvent }, listens: { "do/0/wait": "edited" } },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "a listen task with no path",
+      { events: { edited: declaredEvent }, listens: { "": ["edited"] } },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "a listen task's path longer than a run's waits take",
+      {
+        events: { edited: declaredEvent },
+        listens: {
+          ["t".repeat(workflowReferenceLimits.taskPathLength + 1)]: ["edited"],
+        },
+      },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "an event alias that isn't plain",
+      { events: { "note edited": declaredEvent } },
+      "isn't an event's or a decision's alias",
+    ],
+    [
+      "an event under the prototype's key",
+      { events: Object.fromEntries([["__proto__", declaredEvent]]) },
+      "isn't an event's or a decision's alias",
+    ],
+    [
+      "a decision alias that isn't plain",
+      { decisions: { "approve summary": declaredDecision } },
+      "isn't an event's or a decision's alias",
+    ],
+    [
+      "more events than a workflow holds",
+      { events: entries(workflowReferenceLimits.events + 1, declaredEvent) },
+      `at most ${workflowReferenceLimits.events} events`,
+    ],
+    [
+      "more decisions than a workflow holds",
+      {
+        decisions: entries(
+          workflowReferenceLimits.decisions + 1,
+          declaredDecision
+        ),
+      },
+      `at most ${workflowReferenceLimits.decisions} decisions`,
+    ],
+    [
+      "more listen tasks than a workflow holds",
+      {
+        events: { edited: declaredEvent },
+        listens: entries(workflowReferenceLimits.listens + 1, ["edited"]),
+      },
+      `at most ${workflowReferenceLimits.listens} listen tasks`,
+    ],
+    [
+      "events that aren't a record",
+      { events: [declaredEvent] },
+      "`events` is an object",
+    ],
+    [
+      "an event with a key it doesn't take",
+      { events: { edited: { ...declaredEvent, fingerprint: "f".repeat(64) } } },
+      "has no `fingerprint`",
+    ],
+    [
+      "a decision with a key it doesn't take",
+      {
+        decisions: {
+          sign: { ...declaredDecision, valueSchema: v.null().descriptor },
+        },
+      },
+      "has no `valueSchema`",
+    ],
+    [
+      "an event whose data is a descriptor, not a schema",
+      { events: { edited: { ...declaredEvent, data: v.null().descriptor } } },
+      "`v` schemas",
+    ],
+    [
+      "a decision without its context",
+      { decisions: { sign: { value: v.null() } } },
+      "`v` schemas",
+    ],
+  ])("refuses %s", (_case, config, message) => {
+    expect(
+      refusal(() =>
+        looseWorkflow("review", {
+          args: v.object({}),
+          returns: v.null(),
+          ...config,
+        })
+      )
+    ).toContain(message);
+  });
+
+  test.each<[string, (data: unknown) => void, string]>([
+    [
+      "an event type that isn't one",
+      (data) => {
+        setAt(
+          data,
+          ["permissions", "summarizeNote", "events", "noteEdited", "type"],
+          "note\tedited"
+        );
+      },
+      "type is 1 to",
+    ],
+    [
+      "a listen naming an event it doesn't declare",
+      (data) => {
+        setAt(
+          data,
+          ["permissions", "summarizeNote", "listens", "do/0/chooseStyle"],
+          ["confirmed"]
+        );
+      },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "a listen naming one event twice",
+      (data) => {
+        setAt(
+          data,
+          ["permissions", "summarizeNote", "listens", "do/0/chooseStyle"],
+          ["styleChosen", "styleChosen"]
+        );
+      },
+      "listens for events the workflow declares, each once",
+    ],
+    [
+      "a listen's events out of the order its declaration keeps",
+      (data) => {
+        setAt(
+          data,
+          ["permissions", "summarizeNote", "listens", "do/2/awaitEdit"],
+          ["styleChosen", "noteEdited"]
+        );
+      },
+      "isn't what its declaration makes",
+    ],
+    [
+      "an event alias that isn't plain",
+      (data) => {
+        setAt(
+          data,
+          ["permissions", "summarizeNote", "events", "note edited"],
+          at(data, ["permissions", "summarizeNote", "events", "noteEdited"])
+        );
+      },
+      "isn't an event's or a decision's alias",
+    ],
+    [
+      "more events than a workflow holds",
+      (data) => {
+        setAt(
+          data,
+          ["permissions", "summarizeNote", "events"],
+          entries(workflowReferenceLimits.events + 1, {
+            type: "x",
+            data: v.null().descriptor,
+          })
+        );
+        setAt(data, ["permissions", "summarizeNote", "listens"], {});
+      },
+      "at most 64 events",
+    ],
+    [
+      "an event's own fingerprint",
+      (data) => {
+        setAt(
+          data,
+          [
+            "permissions",
+            "summarizeNote",
+            "events",
+            "noteEdited",
+            "fingerprint",
+          ],
+          "f".repeat(64)
+        );
+      },
+      "has no `fingerprint`",
+    ],
+    [
+      "a decision's own value schema",
+      (data) => {
+        setAt(
+          data,
+          [
+            "permissions",
+            "summarizeNote",
+            "decisions",
+            "chooseLength",
+            "valueSchema",
+          ],
+          { kind: "descriptor", descriptor: v.null().descriptor }
+        );
+      },
+      "has no `valueSchema`",
+    ],
+    [
+      "a decision without its context",
+      (data) => {
+        removeAt(data, [
+          "permissions",
+          "summarizeNote",
+          "decisions",
+          "chooseLength",
+          "context",
+        ]);
+      },
+      "A descriptor is a JSON object",
+    ],
+    [
+      "an event's data of a kind there isn't",
+      (data) => {
+        setAt(
+          data,
+          [
+            "permissions",
+            "summarizeNote",
+            "events",
+            "noteEdited",
+            "data",
+            "kind",
+          ],
+          "script"
+        );
+      },
+      "kind isn't one this SDK knows",
+    ],
+    [
+      "a release's identity on the workflow",
+      (data) => {
+        setAt(
+          data,
+          ["permissions", "summarizeNote", "resourceId"],
+          "app_0000000000000000000000notes"
+        );
+      },
+      "has no `resourceId`",
+    ],
+  ])("refuses %s in a manifest read back", (_case, change, message) => {
+    const text = changed(change);
+    expect(refusal(() => readAppManifest(text))).toContain(message);
   });
 });
 

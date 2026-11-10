@@ -57,7 +57,13 @@ export const acceptedEventData = (
 export const pinnedEventDataOf = async (
   env: Env,
   binding: { contractId: string; fingerprint: string },
-  type: string
+  type: string,
+  /**
+   * Whether an App sends it (a page's `send`, a mutation's
+   * `ctx.sendEvent`): then only a type its contract lets a page send, never
+   * a webhook's, a connector's or a timeout's, whatever the App declares.
+   */
+  sentByApp = false
 ): Promise<string | undefined> => {
   const resolved = await resolveCatalogKeys(env, [binding.contractId]);
   const contract = resolved.get(binding.contractId);
@@ -70,5 +76,6 @@ export const pinnedEventDataOf = async (
   ) {
     return undefined;
   }
-  return events[type]?.data;
+  const event = events[type];
+  return sentByApp && event?.browser !== true ? undefined : event?.data;
 };

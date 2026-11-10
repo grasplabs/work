@@ -1,15 +1,13 @@
-import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+import { canonicalText } from "@grasp-os/shared/json";
 
 import type { AppManifest } from "./app-types.ts";
-import { namePattern } from "./declaration.ts";
 import {
   declaredPermission,
   declaredPermissions,
 } from "./manifest-permissions.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
-import { workflowReferenceLimits } from "./workflow-references.ts";
 
-/** One event a bound workflow declares, as the host resolved it. */
+/** One event a workflow declares: the type it admits and its data. */
 export interface BoundWorkflowEvent {
   /** The CloudEvents type its binding admits. */
   readonly type: string;
@@ -17,7 +15,7 @@ export interface BoundWorkflowEvent {
   readonly data: ValueDescriptor;
 }
 
-/** One decision a bound workflow declares, as the host resolved it. */
+/** One decision a workflow declares. */
 export interface BoundWorkflowDecision {
   /** The descriptor of the value a response carries. */
   readonly value: ValueDescriptor;
@@ -26,13 +24,11 @@ export interface BoundWorkflowDecision {
 }
 
 /**
- * A workflow the App declares, as its
- * reference is generated: the App's alias for it and the args and returns
- * the App declared (`permission.workflow`), the contract its reference pins;
- * and, as the host resolved the App's binding against the approved
- * records, the events it declares by their binding's alias, its listen
- * tasks, by path, with the aliases of the events each listens for, and its
- * decisions by their binding's alias.
+ * A workflow the App declares, as its reference is generated and the host
+ * resolves what a page or a mutation names of it: the App's alias for it
+ * and the contract the App declares (`permission.workflow`): its args and
+ * returns, its events by alias, its listen tasks, by path, with the
+ * aliases of the events each listens for, and its decisions by alias.
  */
 export interface BoundWorkflow {
   readonly alias: string;
@@ -42,12 +38,12 @@ export interface BoundWorkflow {
   readonly listens: Readonly<Record<string, readonly string[]>>;
   readonly decisions: Readonly<Record<string, BoundWorkflowDecision>>;
   /**
-   * The workflow version the host resolved all of the above from: the
-   * binding's, as a seal records it. The host reads a run's history or
-   * decisions through the reference only for a run of exactly this version,
-   * so a rebind never reads one version's journal against another's
-   * contract. None for an alias nothing was resolved for. Never part of a
-   * generated reference.
+   * The workflow version the host resolved the App's binding to, as a
+   * seal records it. The host reads a run's history or decisions through
+   * the reference only for a run of exactly this version, so a rebind
+   * never reads one version's journal against another's contract. None
+   * for an alias nothing was bound to. Never part of a generated
+   * reference.
    */
   readonly pinned?: WorkflowPin;
 }
@@ -57,23 +53,58 @@ export interface WorkflowPin {
   readonly workflowId: string;
   readonly version: number;
 }
+
 /**
  * What the host resolved of a workflow the App declares, beside the
- * contract the declaration gives (`BoundWorkflow`): never from App code.
+ * contract the declaration gives (`BoundWorkflow`): the version its
+ * binding pins. Never from App code.
  */
-export type WorkflowBindingExtras = Omit<BoundWorkflow, "args" | "returns">;
+export interface WorkflowBindingExtras {
+  readonly alias: string;
+  readonly pinned: WorkflowPin;
+}
+
+/** A workflow's events, listen tasks and decisions: what an App relies on. */
+export type WorkflowEventContract = Pick<
+  BoundWorkflow,
+  "events" | "listens" | "decisions"
+>;
+
+/** `contract`, canonically: each listen task's events in name order. */
+const canonicalContract = (contract: WorkflowEventContract): string =>
+  canonicalText({
+    events: contract.events,
+    decisions: contract.decisions,
+    listens: Object.fromEntries(
+      Object.entries(contract.listens).map(([task, events]) => [
+        task,
+        events.toSorted(),
+      ])
+    ),
+  });
+
+/**
+ * Whether `declared`, what the App declares of a workflow, and `bound`,
+ * what a version of it has, are the same events (each's type and data),
+ * listen tasks (each's events, in any order) and decisions (each's value
+ * and context): what binding a version must keep.
+ */
+export const sameEventContract = (
+  declared: WorkflowEventContract,
+  bound: WorkflowEventContract
+): boolean => canonicalContract(declared) === canonicalContract(bound);
+
 /**
  * The workflows the App declares, in alias order, each with the contract
- * its declaration gives and what the host resolved of it in `bound`; an
- * alias without a resolution has none of its own (no events, listen
- * tasks or decisions). A resolution for a workflow the App doesn't
- * declare throws: a reference is made only for a declaration.
+ * its declaration gives and the version the host resolved its binding to
+ * in `bound`, if any. A resolution for a workflow the App doesn't declare
+ * throws: a reference is made only for a declaration.
  */
 export const declaredWorkflows = (
   manifest: AppManifest,
   bound: readonly WorkflowBindingExtras[]
 ): BoundWorkflow[] => {
-  const extras = new Map<string, WorkflowBindingExtras>();
+  const pins = new Map<string, WorkflowPin>();
   for (const resolved of bound) {
     if (
       declaredPermission(manifest, resolved.alias, "workflows") === undefined
@@ -82,88 +113,23 @@ export const declaredWorkflows = (
         `${JSON.stringify(resolved.alias)} isn't a workflow the App declares.`
       );
     }
-    if (extras.has(resolved.alias)) {
+    if (pins.has(resolved.alias)) {
       throw new TypeError(
-        `A bound workflow's alias is unique and plain: ${JSON.stringify(resolved.alias)}`
+        `A bound workflow's alias is unique: ${JSON.stringify(resolved.alias)}`
       );
     }
-    extras.set(resolved.alias, resolved);
+    pins.set(resolved.alias, resolved.pinned);
   }
-  return declaredPermissions(manifest, "workflows").map((declared) => ({
-    events: {},
-    listens: {},
-    decisions: {},
-    ...extras.get(declared.alias),
-    alias: declared.alias,
-    args: declared.args,
-    returns: declared.returns,
-  }));
-};
-/**
- * `listens` with each task's events in name order: which events a task
- * listens for is a set, so the order the host listed them in changes no
- * fingerprint and no byte.
- */
-export const sortedListens = (
-  listens: Readonly<Record<string, readonly string[]>>
-): Record<string, string[]> =>
-  Object.fromEntries(
-    Object.entries(listens).map(([task, events]) => [task, events.toSorted()])
-  );
-/**
- * `workflows`, checked: unique aliases, and listen tasks that listen only
- * for events the workflow declares. The host resolved them, so a failure
- * is the host's own error, never the App's.
- */
-export const checkBoundWorkflows = (
-  workflows: readonly BoundWorkflow[]
-): void => {
-  const aliases = new Set<string>();
-  for (const workflow of workflows) {
-    if (!namePattern.test(workflow.alias) || aliases.has(workflow.alias)) {
-      throw new TypeError(
-        `A bound workflow's alias is unique and plain: ${JSON.stringify(workflow.alias)}`
-      );
-    }
-    aliases.add(workflow.alias);
-    if (
-      Object.keys(workflow.events).length > workflowReferenceLimits.events ||
-      Object.keys(workflow.listens).length > workflowReferenceLimits.listens ||
-      Object.keys(workflow.decisions).length > workflowReferenceLimits.decisions
-    ) {
-      throw new TypeError(
-        `${workflow.alias} declares more events, listen tasks or decisions than a reference holds.`
-      );
-    }
-    for (const alias of [
-      ...Object.keys(workflow.events),
-      ...Object.keys(workflow.decisions),
-    ]) {
-      if (!namePattern.test(alias)) {
-        throw new TypeError(
-          `An event's or a decision's alias is plain: ${JSON.stringify(alias)}`
-        );
-      }
-    }
-    for (const event of Object.values(workflow.events)) {
-      if (!isEventType(event.type)) {
-        throw new TypeError(
-          `An event's type is 1 to ${sealedBuildLimits.eventTypeLength} characters on one line, with no control character and no space at either end: ${JSON.stringify(event.type.slice(0, 64))}`
-        );
-      }
-    }
-    for (const [task, listened] of Object.entries(workflow.listens)) {
-      if (
-        task.length === 0 ||
-        task.length > workflowReferenceLimits.taskPathLength ||
-        listened.length === 0 ||
-        new Set(listened).size !== listened.length ||
-        listened.some((alias) => !Object.hasOwn(workflow.events, alias))
-      ) {
-        throw new TypeError(
-          `Listen task ${JSON.stringify(task)} of ${workflow.alias} listens for events the workflow declares, each once.`
-        );
-      }
-    }
-  }
+  return declaredPermissions(manifest, "workflows").map((declared) => {
+    const workflow: BoundWorkflow = {
+      alias: declared.alias,
+      args: declared.args,
+      returns: declared.returns,
+      events: declared.events,
+      listens: declared.listens,
+      decisions: declared.decisions,
+    };
+    const pinned = pins.get(declared.alias);
+    return pinned === undefined ? workflow : { ...workflow, pinned };
+  });
 };

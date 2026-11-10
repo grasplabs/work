@@ -181,7 +181,10 @@ export const testHost = (
     },
   };
   return {
-    client: new GraspClient(transport, Object.fromEntries(declared)),
+    client: new GraspClient(transport, {
+      functions: Object.fromEntries(declared),
+      workflows: {},
+    }),
     reads,
     calls,
     uploads,

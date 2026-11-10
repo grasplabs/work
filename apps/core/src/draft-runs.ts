@@ -234,10 +234,7 @@ export const draftReferences = async (
     return null;
   }
   const release = await sealed(env, app, version, source);
-  const generated = await generateModules(release.app, {
-    resourceId: app,
-    resourceVersion: version,
-  });
+  const generated = await generateModules(release.app);
   return pageModulesOf(generated) ?? null;
 };
 

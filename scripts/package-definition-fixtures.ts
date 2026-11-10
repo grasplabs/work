@@ -20,10 +20,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { inspectApp, symbolicModules } from "@grasp-os/runtime/host";
-import {
-  definitionPackageFormatVersion,
-  definitionPackageSchema,
-} from "@grasp-os/shared/definition-packages";
+import { definitionPackageFormatVersion } from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { canonicalText } from "@grasp-os/shared/json";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
@@ -44,7 +41,6 @@ import {
 import { pageRuleNames } from "../packages/compiler/src/page-rules.ts";
 import { ultraciteOf } from "../packages/compiler/src/ultracite.ts";
 import { ultraciteConfig } from "../packages/compiler/ultracite-config.ts";
-import { notesWorkflows } from "../packages/runtime/test/notes-workflows.ts";
 import notes from "../packages/runtime/test/notes/.grasp/app.ts";
 import { packageProject, PackagingError } from "./package-definition-lib.ts";
 
@@ -132,18 +128,6 @@ export const definitionOf = (
       archiveNotes: "workspace/greet/1.0.0",
       summarizeNote: "workspace/greet/1.0.0",
     },
-    // As core packages them: plain JSON, read back by the package schema.
-    workflowContracts:
-      definitionPackageSchema.shape.app.shape.workflowContracts.parse(
-        structuredClone(
-          Object.fromEntries(
-            notesWorkflows.map(({ alias, events, listens, decisions }) => [
-              alias,
-              { events, listens, decisions },
-            ])
-          )
-        )
-      ),
   },
   workflows: {
     "workspace/greet/1.0.0": {
@@ -556,7 +540,6 @@ export const appDefinition = async (
       ...definitionOf(files).app,
       manifest: canonicalText(inspectApp(registered).manifest),
       workflows: {},
-      workflowContracts: {},
     },
   };
 };

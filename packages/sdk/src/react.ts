@@ -22,6 +22,8 @@ export {
 export type {
   AppErrorPayload,
   Declaring,
+  DecisionAnswer,
+  DecisionFormOptions,
   DeleteOptions,
   DownloadOptions,
   ErrorCategory,

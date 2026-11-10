@@ -396,7 +396,7 @@ describe("the built-in blueprints", () => {
         )
       ) {
         // oxlint-disable-next-line no-await-in-loop -- as above
-        const { files } = await withDraftReferences(env, created.app.id, 1, {
+        const { files } = await withDraftReferences(env, created.app.id, {
           ...blueprint.files,
         });
         // oxlint-disable-next-line no-await-in-loop -- as above

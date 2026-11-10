@@ -1532,7 +1532,7 @@ const sent = async (
       // into a run that isn't restricted itself (restricted.ts).
       admitted = await refuse(permissionErrors.create("permission.restricted"));
     } else {
-      admitted = await admitRunEvent(env, delivery);
+      admitted = await admitRunEvent(env, delivery, true);
     }
   } catch (error) {
     // Every send refused, the grant's, restricted mode's or the run's

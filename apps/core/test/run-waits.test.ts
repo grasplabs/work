@@ -33,7 +33,7 @@ const context: WaitContext = {
   ]),
   decisionKeys: new Set(["approval"]),
   listens: { awaitJob: ["jobEvents"] },
-  events: new Map([["jobEvents", "f".repeat(64)]]),
+  events: new Set(["jobEvents"]),
   canSend: true,
 };
 

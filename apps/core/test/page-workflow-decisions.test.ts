@@ -1,5 +1,9 @@
 import { v } from "@grasp-os/runtime/app";
-import { declaredPermission, generatedPaths } from "@grasp-os/runtime/host";
+import {
+  declaredPermission,
+  declaredWorkflows,
+  generatedPaths,
+} from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -46,6 +50,7 @@ import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
+  contractOf,
   controlCommand,
   queryCall,
   startCommand,
@@ -67,11 +72,10 @@ import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
 // The decisions of the workflows an App binds, in the references its
-// pages import (bound-workflows.ts): each of the bound version's
-// decision bindings, read from the catalog contract it pinned, typed in
-// `workflows.<alias>.decisions`. Sealed with the release, so a binding
-// changed later changes no sealed version's pages; a draft's references
-// follow the App's bindings as they are.
+// pages import: each decision the App declares for the workflow
+// (`permission.workflow`), as the bound version has it, typed in
+// `workflows.<alias>.decisions`. A binding changed later changes no
+// version's pages: they are typed from the App's own code.
 
 /** A page reading `key` of the `review` workflow's decisions. */
 const pageOf = (
@@ -80,17 +84,39 @@ const pageOf = (
 import { workflows } from "@server/_generated/api";
 
 const decision = workflows.review.decisions.${key};
-export const valueSchema = decision.valueSchema;
-export const context = decision.context;
 
 function Desk() {
-  return <p>{decision.key}</p>;
+  return <p>{decision.name}</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-const files = (page = pageOf("approval")): TestApp =>
+/** The `review` workflow's decision, as the App declares it. */
+const declaresDecision = contractOf({
+  decisions: {
+    approval: {
+      value: v.object({ comment: v.string() }).descriptor,
+      context: v.object({ amount: v.number() }).nullable().descriptor,
+    },
+  },
+});
+
+/** The `review` workflow's event and the task waiting on it, as the App declares them. */
+const declaresEvent = contractOf({
+  events: {
+    jobEvents: {
+      type: "grasp.job.completed",
+      data: v.object({ jobId: v.string() }).descriptor,
+    },
+  },
+  listens: { awaitJob: ["jobEvents"] },
+});
+
+const files = (
+  page = pageOf("approval"),
+  declares = declaresDecision
+): TestApp =>
   testApp(
     {
       name: "Invoices",
@@ -103,6 +129,7 @@ const files = (page = pageOf("approval")): TestApp =>
       permissions: [
         'permission.workflow("review", {\n  args: v.object({ amount: v.number() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
+      contracts: { review: declares },
     },
     {
       "server/invoices.ts": `import { v } from "@grasp-os/sdk";
@@ -198,16 +225,15 @@ const boundApp = async (
   return { fixture, binding: id, workflowId: workflow.id };
 };
 
-/** A page sending the `review` workflow's `jobEvents`, its type literal. */
+/** A page naming the `review` workflow's `jobEvents`, its name literal. */
 const eventPage = `import { createFileRoute } from "@tanstack/react-router";
 import { workflows } from "@server/_generated/api";
 
 const event = workflows.review.events.jobEvents;
-export const type: "grasp.job.completed" = event.type;
-export const data = event.data;
+export const name: "workflows.review.events.jobEvents" = event.name;
 
 function Desk() {
-  return <p>{event.alias}</p>;
+  return <p>{event.name}</p>;
 }
 
 export const Route = createFileRoute("/")({ component: Desk });
@@ -247,7 +273,7 @@ const eventDefinitionOf = (contract: string): string =>
 /** An App bound, as `review`, to a workflow version waiting for a page's event. */
 const eventApp = async (): Promise<Fixture> => {
   const admin = await person("admin");
-  const fixture = await appWith(files(eventPage), "Invoices");
+  const fixture = await appWith(files(eventPage, declaresEvent), "Invoices");
   const key = `job-events-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
@@ -556,7 +582,7 @@ describe(
   "the decisions of an App's bound workflows",
   { timeout: 180_000 },
   () => {
-    it("are sealed into the release's references, typed for its pages, and stay as sealed when the binding goes", async () => {
+    it("are the release's declared ones in its references, typed for its pages, and stay so when the binding goes", async () => {
       const { fixture, binding } = await boundApp();
       const release = await seal(fixture);
       const references = await sealedText(release, generatedPaths.api);
@@ -571,8 +597,9 @@ describe(
       await unbindWorkflowFromApp(env, fixture.owner, binding);
 
       expect({
-        sealed: release.workflows.find(({ alias }) => alias === "review")
-          ?.decisions,
+        sealed: declaredWorkflows(release.app, release.workflows).find(
+          ({ alias }) => alias === "review"
+        )?.decisions,
         referencesNameIt:
           references.includes("approval") && references.includes("comment"),
         typedBefore,
@@ -1201,7 +1228,7 @@ describe(
       const { fixture, opened, reviewer, starter, outsider, runAsking } =
         await decisionInbox();
       const { app } = fixture;
-      const workflow = { contractId: "workflows.review" };
+      const workflow = { name: "workflows.review" };
       /**
        * `who`'s snapshot of run `runId` through the reference's `run`
        * query, as `useWorkflow` reads it (null for a run they may not
@@ -1375,7 +1402,7 @@ describe(
         owner,
         app,
         startCommand(
-          { contractId: "workflows.review" },
+          { name: "workflows.review" },
           { amount: 5 },
           "1".repeat(32)
         ),
@@ -1615,13 +1642,12 @@ describe(
       });
     });
 
-    it("follow the App's bindings in a draft, and fail a page's type check on a decision the workflow doesn't have", async () => {
+    it("type a draft's pages from the App's own declaration, bound or not, and fail a page's type check on a decision it doesn't declare", async () => {
       const { fixture, binding } = await boundApp();
       const draftErrors = async (key: string) => {
         const drafted = await withDraftReferences(
           env,
           fixture.app,
-          1,
           files(pageOf(key)).files
         );
         return await pageErrors(fixture, drafted.files);
@@ -1634,8 +1660,8 @@ describe(
       expect({
         bound,
         missing: missing.some((message) => message.includes("missing")),
-        unbound: unbound.some((message) => message.includes("approval")),
-      }).toStrictEqual({ bound: [], missing: true, unbound: true });
+        unbound,
+      }).toStrictEqual({ bound: [], missing: true, unbound: [] });
     });
 
     it("resolve every workflow an App declares and binds, more of them than one statement binds values", async () => {
@@ -1677,23 +1703,26 @@ describe(
 
       expect({
         count: bound.length,
-        eachDecides: bound.every(({ decisions }) =>
-          Object.hasOwn(decisions, "approval")
+        eachPinned: bound.every(
+          ({ pinned }) =>
+            pinned?.workflowId === workflowId && pinned.version === 1
         ),
-      }).toStrictEqual({ count: 61, eachDecides: true });
+      }).toStrictEqual({ count: 61, eachPinned: true });
     });
 
     it("seal the events a page sends, and the event waits on them as typed waits", async () => {
       const fixture = await eventApp();
       const release = await seal(fixture);
       const references = await sealedText(release, generatedPaths.api);
-      const sealed = release.workflows.find(({ alias }) => alias === "review");
+      const sealed = declaredWorkflows(release.app, release.workflows).find(
+        ({ alias }) => alias === "review"
+      );
 
       expect({
         events: sealed?.events,
         listens: sealed?.listens,
         typedWait: references.includes(
-          'WorkflowEventWait<"awaitJob", WorkflowEventReference<"workflows.review", "jobEvents", "grasp.job.completed"'
+          'WorkflowEventWait<"awaitJob", WorkflowEventReference<"workflows.review", "jobEvents", { jobId: string }>>'
         ),
         page: await pageErrors(
           fixture,

@@ -3,7 +3,7 @@ import type { GraspClient } from "./client-core.ts";
 import { clientError } from "./client-error.ts";
 import type { QueryEntry } from "./client-query-entry.ts";
 import { deepFreeze } from "./declaration.ts";
-import { isPlainObject } from "./value-descriptor.ts";
+import { eventReferenceName } from "./workflow-events.ts";
 import type { ReadWorkflow } from "./workflow-reference-read.ts";
 import { respondToDecision } from "./workflow-respond.ts";
 import type { RunHandle } from "./workflow-runs.ts";
@@ -218,30 +218,23 @@ export class WorkflowCalls {
     });
   }
 
-  /** Sends run `runId` the event `event` refers to, with `data`. */
+  /**
+   * Sends run `runId` the event `event` names, with `data`: one of this
+   * very workflow's own, named under its name, which the release
+   * declares; the host checks the data with its descriptor again.
+   */
   async #send(runId: string, event: unknown, data: unknown): Promise<void> {
-    const alias =
-      isPlainObject(event) && typeof event.alias === "string"
-        ? event.alias
-        : undefined;
-    const known =
-      alias === undefined ? undefined : this.#read.events.get(alias);
+    const named = eventReferenceName(event);
     const { send } = this.#read.functions;
     if (
-      known === undefined ||
-      send === undefined ||
-      !isPlainObject(event) ||
-      event.kind !== known.kind ||
-      event.workflow !== known.workflow ||
-      event.workflowFingerprint !== known.workflowFingerprint ||
-      event.resourceId !== known.resourceId ||
-      event.resourceVersion !== known.resourceVersion ||
-      event.type !== known.type ||
-      event.fingerprint !== known.fingerprint
+      named === undefined ||
+      named.workflow !== this.#read.alias ||
+      !this.#read.events.has(named.alias) ||
+      send === undefined
     ) {
       throw clientError("contract.invalid_request");
     }
-    await this.#client.mutation(send, { runId, event: known.alias, data });
+    await this.#client.mutation(send, { runId, event: named.alias, data });
   }
 
   #set(change: Partial<LocalCalls>): void {

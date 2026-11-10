@@ -684,29 +684,38 @@ const refusedWith = async (promise: Promise<unknown>): Promise<string> => {
 };
 
 /**
- * A decision form (spec 10.7.2) as an App composes one: a local form of an
- * explicit approval and the decision's own value schema, whose submit
- * answers the exact wait as `useWorkflow`'s `respond` does; and what the
- * page's trusted decision UI was asked, each answer in order.
+ * A decision form (spec 10.7.2) as an App composes one: the form of an
+ * answer to `decision` (`useForm(workflows.<wf>.decisions.<key>)`), an
+ * explicit approval and the value the page's build declares for it, whose
+ * submit answers the exact wait as `useWorkflow`'s `respond` does; and
+ * what the page's trusted decision UI was asked, each answer in order.
  */
 const decisionForm = (
   page: (answer: unknown) => Promise<unknown>,
   onSubmitted: () => void = () => {
     // Counted where a test asks.
-  }
+  },
+  decision: unknown = workflows.summarizeNote.decisions.approveSummary
 ) => {
   const asked: unknown[] = [];
-  const client = new GraspClient({
-    call: async () => await Promise.reject(new Error("Nothing is called.")),
-    watch: async () => await Promise.reject(new Error("Nothing is followed.")),
-    decisions: {
-      respond: async (run, decision, answer) => {
-        asked.push({ run, decision, answer });
-        return await page(answer);
+  const client = new GraspClient(
+    {
+      call: async () => await Promise.reject(new Error("Nothing is called.")),
+      watch: async () =>
+        await Promise.reject(new Error("Nothing is followed.")),
+      decisions: {
+        respond: async (run, decided, answer) => {
+          asked.push({ run, decision: decided, answer });
+          return await page(answer);
+        },
       },
     },
-  });
-  const read = readWorkflowReference(workflows.summarizeNote);
+    functions
+  );
+  const read = readWorkflowReference(
+    clientInternals(client),
+    workflows.summarizeNote
+  );
   const wait = {
     kind: "decision",
     id: "decision-1",
@@ -717,11 +726,7 @@ const decisionForm = (
     deadline: null,
     canRespond: true,
   };
-  const responseSchema = v.object({
-    approved: v.boolean(),
-    value: workflows.summarizeNote.decisions.approveSummary.valueSchema,
-  });
-  const { binding, form } = formOf(client, responseSchema, {
+  const { binding, form } = formOf(client, decision, {
     defaultValues: { approved: false, value: { comment: "" } },
     onSubmit: async (response: unknown) => {
       onSubmitted();
@@ -840,6 +845,81 @@ describe("a decision form", () => {
       draft: { approved: true, value: { comment: "Fine" } },
       asked: 1,
     });
+  });
+
+  it("checks the value with the decision's descriptor in the page's build, whatever the reference carries", async () => {
+    const answered = async (decision: unknown) => {
+      const { binding, form, asked } = decisionForm(
+        async () => await Promise.resolve({ status: "approved" }),
+        undefined,
+        decision
+      );
+      form.setFieldValue("approved", true);
+      // Longer than the 500 characters `approveSummary`'s comment takes.
+      form.setFieldValue("value", { comment: "x".repeat(501) });
+      return {
+        submitted: await settle(binding.submit()),
+        comment: binding.fieldDescriptor("value.comment"),
+        asked: asked.length,
+      };
+    };
+    // A forged one that brings a value schema of its own changes nothing:
+    // only its name is read.
+    const looseValue = v.object({ comment: v.string() });
+    const loose = looseValue.descriptor;
+    const forged = {
+      name: "workflows.summarizeNote.decisions.approveSummary",
+      kind: "mutation",
+      args: v.object({ approved: v.boolean(), value: looseValue }).descriptor,
+      valueSchema: { kind: "descriptor", descriptor: loose },
+      value: loose,
+    };
+    const [genuine, read] = await Promise.all([
+      answered(workflows.summarizeNote.decisions.approveSummary),
+      answered(forged),
+    ]);
+    expect(genuine).toMatchObject({
+      submitted: {
+        rejected: {
+          code: "contract.invalid_args",
+          details: { issues: [{ path: ["value", "comment"] }] },
+        },
+      },
+      comment: { kind: "string", max: 500 },
+      asked: 0,
+    });
+    expect(read).toStrictEqual(genuine);
+  });
+
+  it.each([
+    [
+      "a decision the workflow doesn't declare",
+      "workflows.summarizeNote.decisions.approveDraft",
+    ],
+    [
+      "another workflow's decision under this one's name",
+      "workflows.summarizeNote.decisions.confirmArchive",
+    ],
+    [
+      "a workflow the release doesn't declare",
+      "workflows.translateNote.decisions.approveSummary",
+    ],
+    ["an inherited key", "workflows.summarizeNote.decisions.constructor"],
+    ["an inherited workflow", "workflows.constructor.decisions.approveSummary"],
+    ["the prototype's key", "workflows.__proto__.decisions.approveSummary"],
+  ])("makes no form of %s, which no function is either", (_case, name) => {
+    const { client, sent } = host(() => ({ value: null }));
+    expect(() =>
+      bindForm(
+        client,
+        { name },
+        {
+          defaultValues: { approved: true, value: null },
+          onSubmit: () => null,
+        }
+      )
+    ).toThrow(expect.objectContaining({ code: "contract.invalid_request" }));
+    expect(sent).toHaveLength(0);
   });
 });
 

@@ -1,5 +1,6 @@
 import { useInsertionEffect, useState, useSyncExternalStore } from "react";
 
+import { clientInternals } from "../client-core.ts";
 import { WorkflowCalls } from "../workflow-calls.ts";
 import { readWorkflowReference } from "../workflow-reference-read.ts";
 import type {
@@ -61,7 +62,7 @@ export const useWorkflow = <Reference extends AnyWorkflowReference>(
   options?: { readonly runId: string }
 ): WorkflowViewOf<Reference> => {
   const client = useClient();
-  const read = readWorkflowReference(reference);
+  const read = readWorkflowReference(clientInternals(client), reference);
   if (
     options !== undefined &&
     (typeof options.runId !== "string" ||
@@ -70,17 +71,18 @@ export const useWorkflow = <Reference extends AnyWorkflowReference>(
   ) {
     throw new TypeError("useWorkflow takes { runId }, a run's ID.");
   }
-  // One hook's calls per client and workflow contract: another of either
-  // starts afresh, and the last one's starts and controls show nothing
-  // here (its admitted starts still answer their callers).
+  // One hook's calls per client and workflow as the page's build reads
+  // it: another of either starts afresh, and the last one's starts and
+  // controls show nothing here (its admitted starts still answer their
+  // callers).
   const [bound, setBound] = useState(() => ({
     client,
-    key: read.key,
+    read,
     calls: new WorkflowCalls(client, read),
   }));
   let current = bound;
-  if (bound.client !== client || bound.key !== read.key) {
-    current = { client, key: read.key, calls: new WorkflowCalls(client, read) };
+  if (bound.client !== client || bound.read !== read) {
+    current = { client, read, calls: new WorkflowCalls(client, read) };
     setBound(current);
   }
   const { calls } = current;
@@ -113,7 +115,8 @@ export const useWorkflow = <Reference extends AnyWorkflowReference>(
     commands: calls.commands,
   });
   // SAFETY: the view holds what the host sent, checked against the
-  // reference's own descriptors, which `Reference` carries as its types.
+  // workflow's descriptors in the page's build, which `Reference`'s types
+  // are printed from.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return view as WorkflowViewOf<Reference>;
 };

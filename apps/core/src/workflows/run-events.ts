@@ -224,6 +224,28 @@ export const unlessAccepted = async (
 };
 
 /**
+ * The binding of `run` `event` names, and the descriptor of the data its
+ * pinned contract takes for the event's type (`pinnedEventDataOf`);
+ * `workflow.event_invalid` for none.
+ */
+const eventBindingOf = async (
+  env: Env,
+  run: NonNullable<Awaited<ReturnType<typeof callingRunOf>>>,
+  event: { readonly binding: string; readonly type: string },
+  sentByApp: boolean
+) => {
+  const binding = run.bindings.get(event.binding);
+  const descriptor =
+    binding?.kind === "event"
+      ? await pinnedEventDataOf(env, binding, event.type, sentByApp)
+      : undefined;
+  if (binding === undefined || descriptor === undefined) {
+    throw workflowResourceErrors.create("workflow.event_invalid");
+  }
+  return { binding, descriptor };
+};
+
+/**
  * Admits `delivery` to its run's inbox, as the header says: its ID, and
  * whether this delivery was the first of it. Refused before anything is
  * accepted: `workflow.run_unavailable` for no such run of the workflow,
@@ -236,7 +258,13 @@ export const unlessAccepted = async (
  */
 export const admitRunEvent = async (
   env: Env,
-  delivery: RunEventDelivery
+  delivery: RunEventDelivery,
+  /**
+   * Whether an App sends it (a page's `send`, a mutation's
+   * `ctx.sendEvent`): then only a type its binding's contract lets a page
+   * send (`pinnedEventDataOf`), whatever the App's release declares.
+   */
+  sentByApp = false
 ): Promise<AdmittedEvent> => {
   const parsed = deliverySchema.safeParse(delivery);
   if (!parsed.success) {
@@ -255,14 +283,12 @@ export const admitRunEvent = async (
       workflowResourceErrors.create("workflow.run_ended")
     );
   }
-  const binding = run.bindings.get(event.binding);
-  const descriptor =
-    binding?.kind === "event"
-      ? await pinnedEventDataOf(env, binding, event.type)
-      : undefined;
-  if (binding === undefined || descriptor === undefined) {
-    throw workflowResourceErrors.create("workflow.event_invalid");
-  }
+  const { binding, descriptor } = await eventBindingOf(
+    env,
+    run,
+    event,
+    sentByApp
+  );
   try {
     await requireCallAuthority(env, run, binding);
   } catch (error) {

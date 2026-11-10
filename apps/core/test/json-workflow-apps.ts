@@ -4,7 +4,10 @@ import {
   GraspClient,
   workflowReferenceOf,
 } from "@grasp-os/runtime/host";
-import type { ClientTransport } from "@grasp-os/runtime/host";
+import type {
+  ClientTransport,
+  WorkflowEventContract,
+} from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -212,6 +215,116 @@ export const decisionTasks = (
   },
 ];
 
+const completedJob = "grasp.job.completed";
+
+/**
+ * An event contract `admin` published through their session: a job's
+ * completion, which a page sends, and its timeout, which it doesn't, each
+ * of `{ jobId }`. Its key.
+ */
+export const jobEventsContract = async (
+  admin: Pick<Person, "api">
+): Promise<string> => {
+  const key = `job-events-${unique()}`;
+  const data = JSON.stringify(v.object({ jobId: v.string() }).descriptor);
+  await admin.api.workflowResources.publishContract({
+    key,
+    kind: "event",
+    events: {
+      [completedJob]: { data, browser: true },
+      "grasp.job.timeout": { data, browser: false },
+    },
+  });
+  return key;
+};
+
+/**
+ * A greeting workflow's definition that waits, in task `task`, for a
+ * job's completion through its `jobEvents` binding to event contract
+ * `contract`; and in a task of each of `more`'s names, through a binding
+ * of that name to the same contract; asking its `approval` (decision
+ * contract `decision`) first, when given. `label` titles its greeting, so
+ * one version's document differs from another's.
+ */
+export const jobWaitingOf = (
+  contract: string,
+  {
+    task = "job",
+    more = [],
+    decision,
+    label,
+  }: {
+    task?: string;
+    more?: readonly string[];
+    decision?: string;
+    label?: string;
+  } = {}
+): string =>
+  definitionOf(
+    [
+      ...(decision === undefined ? [] : decisionTasks("role:admin")),
+      ...[["jobEvents", task], ...more.map((alias) => [alias, alias])].map(
+        ([events, id]) => ({
+          id,
+          type: "waitForEvent",
+          events,
+          eventType: completedJob,
+          timeout: "1 hour",
+        })
+      ),
+      passing("greet", label),
+    ],
+    {
+      permissions: {
+        events: Object.fromEntries(
+          ["jobEvents", ...more].map((alias) => [alias, { contract }])
+        ),
+        ...(decision === undefined
+          ? {}
+          : { decisions: { approval: { contract: decision } } }),
+      },
+    }
+  );
+
+/** A workflow's contract of `parts`, none of the rest. */
+export const contractOf = (
+  parts: Partial<WorkflowEventContract>
+): WorkflowEventContract => ({
+  events: {},
+  listens: {},
+  decisions: {},
+  ...parts,
+});
+
+/**
+ * The contract of a workflow asking its `approval` decision of a comment
+ * on who to greet (`decisionTasks`, its contract's input `{ who }` and
+ * response `{ comment }`), as an App binding it declares it.
+ */
+export const approvalDeclared = contractOf({
+  decisions: {
+    approval: {
+      value: v.object({ comment: v.string() }).descriptor,
+      context: v.object({ who: v.string() }).descriptor,
+    },
+  },
+});
+
+/**
+ * The contract of a workflow `jobWaitingOf` makes with its defaults, as
+ * an App binding it declares it: its `jobEvents`, and the task `job`
+ * waiting on it.
+ */
+export const jobEventsDeclared = contractOf({
+  events: {
+    jobEvents: {
+      type: completedJob,
+      data: v.object({ jobId: v.string() }).descriptor,
+    },
+  },
+  listens: { job: ["jobEvents"] },
+});
+
 /**
  * What a decision workflow ends with: how it was answered and by whom,
  * with the comment the answer carried, if any.
@@ -315,8 +428,15 @@ export const endLiveResourceRuns = async (): Promise<void> => {
   );
 };
 
-/** The App every bound workflow here is bound to: one page, one alias. */
-const boundAppFiles = (alias: string): TestApp =>
+/**
+ * The App every bound workflow here is bound to: one page, one alias,
+ * declaring `declares` of the workflow besides its args and returns (its
+ * events, listen tasks and decisions, as the version bound has them).
+ */
+export const requestsApp = (
+  alias: string,
+  declares?: WorkflowEventContract
+): TestApp =>
   testApp(
     {
       name: "Requests",
@@ -329,16 +449,17 @@ const boundAppFiles = (alias: string): TestApp =>
       permissions: [
         `permission.workflow(${JSON.stringify(alias)}, { args: v.object({ who: v.string().trim().min(1) }), returns: v.object({ status: v.string() }) })`,
       ],
+      ...(declares === undefined ? {} : { contracts: { [alias]: declares } }),
     },
     {
       "server/requests.ts": `import { permissions } from "../grasp.config.ts";
 
-export const ${alias} = permissions.${alias};
+export const { ${alias} } = permissions;
 `,
+      // As the draft's lint takes it: a draft of it is proposed as it is.
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-function Desk() {
-  return <main>Requests</main>;
-}
+
+const Desk = () => <main>Requests</main>;
 
 export const Route = createFileRoute("/")({ component: Desk });
 `,
@@ -358,13 +479,7 @@ const workflowReference = async (app: string, alias: string) => {
   if (declared === undefined) {
     throw new Error(`No workflow ${alias}`);
   }
-  return await workflowReferenceOf(
-    {
-      resourceId: sealed.manifest.resourceId,
-      resourceVersion: sealed.manifest.resourceVersion,
-    },
-    declared
-  );
+  return workflowReferenceOf(declared);
 };
 
 /** A workflow reference, as `@server/_generated/api` generates it for a page. */
@@ -373,9 +488,9 @@ export type WorkflowReference = Awaited<ReturnType<typeof workflowReference>>;
 /** A fresh command key, as the SDK makes one. */
 export const keyOf = (): string => crypto.randomUUID().replaceAll("-", "");
 
-/** What names a workflow reference's functions: its path. */
+/** What names a workflow reference's functions: its name. */
 interface Named {
-  readonly contractId: string;
+  readonly name: string;
 }
 
 /**
@@ -390,7 +505,7 @@ export const mutationCall = (
 ): string =>
   JSON.stringify({
     reference: {
-      name: `${reference.contractId}.mutations.${name}`,
+      name: `${reference.name}.mutations.${name}`,
       kind: "mutation",
     },
     args,
@@ -408,7 +523,7 @@ export const workflowQuery = (
   args: unknown
 ) => ({
   reference: {
-    name: `${reference.contractId}.queries.${name}`,
+    name: `${reference.name}.queries.${name}`,
     kind: "query",
   },
   args,
@@ -492,12 +607,15 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
    * version 1 of a workflow and the App's `start` grant on it: a greeting
    * that waits `hold` first, or the definition `definition` makes of its
    * name; or, `sharing` another fixture's people and workflow, that one.
+   * The App declares `declares` of it besides its args and returns: the
+   * events, listen tasks and decisions the bound version has.
    */
   const boundApp = async ({
     hold,
     sharing,
     definition,
     alias = "followUp",
+    declares,
   }: {
     hold?: string;
     sharing?: {
@@ -507,6 +625,7 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
     };
     definition?: (name: string) => string;
     alias?: string;
+    declares?: WorkflowEventContract;
   } = {}) => {
     const admin = sharing?.admin ?? (await signedIn("admin"));
     const builder = sharing?.builder ?? (await signedIn("builder"));
@@ -523,7 +642,7 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
       version: 1,
     });
     // Committed, sealed as it is made current, and published.
-    await release(builder, app, boundAppFiles(alias));
+    await release(builder, app, requestsApp(alias, declares));
     const { id: grant } = await builder.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },

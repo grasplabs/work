@@ -15,6 +15,10 @@ import { z } from "zod";
 import { steeringCases } from "../apps/core/test/steering-cases.ts";
 import { oxcWasmPin } from "../packages/compiler/oxc-wasm/wasm.ts";
 import {
+  generateModules,
+  readAppManifest,
+} from "../packages/runtime/src/host.ts";
+import {
   ROOT,
   notesFiles,
   definitionOf,
@@ -111,6 +115,9 @@ describe(
       const lockfile = lockfileOf(out);
       const lockedKeys = Object.keys(lockfile.packages);
       const notices = read("THIRD-PARTY-NOTICES.md");
+      const regenerated = await generateModules(
+        readAppManifest(definition.app.manifest)
+      );
 
       expect({
         app: written.filter((file) => file.startsWith("app/")),
@@ -120,12 +127,10 @@ describe(
         ),
         sameSource:
           read("app/grasp.config.ts") === notesFiles()["grasp.config.ts"],
-        sealedContracts: read("app/server/_generated/api.ts").includes(
-          "notes.archive.confirmed"
-        ),
-        localIdentity:
-          read("app/server/_generated/api.ts").includes('"local"') &&
-          !read("app/server/_generated/api.ts").includes("app_0000"),
+        // Generated anew from the App's manifest alone, its declaration.
+        generatedAnew:
+          read("app/server/_generated/api.ts") ===
+          regenerated["server/_generated/api.ts"],
         grasp: Object.keys(root.dependencies).filter((name) =>
           name.startsWith("@grasp-os/")
         ),
@@ -176,8 +181,7 @@ describe(
         ],
         vendorTests: [],
         sameSource: true,
-        sealedContracts: true,
-        localIdentity: true,
+        generatedAnew: true,
         grasp: [
           "@grasp-os/brain",
           "@grasp-os/shared",

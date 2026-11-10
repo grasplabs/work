@@ -1,11 +1,7 @@
 import { canonicalText } from "@grasp-os/shared/json";
 
 import type { AppManifest } from "./app-types.ts";
-import {
-  checkBoundWorkflows,
-  declaredWorkflows,
-  sortedListens,
-} from "./bound-workflows.ts";
+import { declaredWorkflows } from "./bound-workflows.ts";
 import type { WorkflowBindingExtras } from "./bound-workflows.ts";
 import {
   pageFunctionsText,
@@ -16,9 +12,7 @@ import {
   contractFingerprints,
   contractsFormatVersion,
   generatedPaths,
-  workflowFingerprint,
 } from "./codegen-contracts.ts";
-import type { ReleaseIdentity } from "./codegen-contracts.ts";
 import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 
 // The modules the host generates for an App, as Convex
@@ -42,58 +36,46 @@ import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 //   `api` and `internal` hold each function's name alone, typed from the
 //   function's own code (`typeof import("../tasks.ts").list`, imported
 //   for its type only), so they depend on the server files' paths and
-//   exports' names and nothing of a release. `workflows` is still what
-//   the host resolved of each workflow the App binds, in the release.
+//   exports' names and nothing of a release. `workflows` holds each
+//   workflow's names, typed as the App declares it (`permission.workflow`
+//   in `grasp.config.ts`): printed from the declaration, since a run's,
+//   history's and inbox's types are built from its schemas
+//   (workflow-functions.ts), which a type-level copy would repeat.
 // - `.grasp/functions.ts`: the release's public functions by name, as
 //   data (page-functions.ts), built into the pages beside their route
 //   tree: what a form checks a submission with and a grid reads its
 //   columns from.
 // - `.grasp/contracts.json`: the App's manifest, each function's
-//   fingerprint and the workflows it binds with theirs, canonical: what
-//   the release's contract hash covers.
+//   fingerprint and the workflow version each binding pinned, canonical:
+//   what the release's contract hash covers.
 //
-// Generation is deterministic: the same manifest and identity always
-// make the same bytes, so a release's artifacts can be compared and
-// reused by their hashes.
+// Generation is deterministic: the same manifest (and, for
+// `contracts.json`, the same pins) always make the same bytes, so a
+// release's artifacts can be compared and reused by their hashes.
 /**
  * Every module the host generates for an App, by path (`generatedPaths`),
- * for the release `identity`, from its `manifest` as the host read it
- * (`readAppManifest`) and what the host resolved of the workflows it
- * declares, `bound` (`WorkflowBindingExtras`).
+ * from its `manifest` as the host read it (`readAppManifest`) and the
+ * versions the host resolved its workflow bindings to, `bound`
+ * (`WorkflowBindingExtras`), which only `contracts.json` seals.
  */
 export const generateModules = async (
   manifest: AppManifest,
-  identity: ReleaseIdentity,
   bound: readonly WorkflowBindingExtras[] = []
 ): Promise<Record<string, string>> => {
-  const declared = declaredWorkflows(manifest, bound);
-  checkBoundWorkflows(declared);
-  const workflows = declared.map((workflow) => ({
-    ...workflow,
-    listens: sortedListens(workflow.listens),
-  }));
-  const fingerprints = await contractFingerprints(manifest);
-  const workflowFingerprints: Record<string, string> = {};
-  for (const workflow of workflows) {
-    // oxlint-disable-next-line no-await-in-loop -- one digest at a time, as above
-    workflowFingerprints[workflow.alias] = await workflowFingerprint(workflow);
-  }
+  const workflows = declaredWorkflows(manifest, bound);
   const contracts = canonicalText({
     formatVersion: contractsFormatVersion,
-    resourceId: identity.resourceId,
-    resourceVersion: identity.resourceVersion,
     manifest,
-    fingerprints,
+    fingerprints: await contractFingerprints(manifest),
     workflows: Object.fromEntries(
-      workflows.map((workflow) => [workflow.alias, workflow])
+      bound.map(({ alias, pinned }) => [alias, { alias, pinned }])
     ),
-    workflowFingerprints,
   });
   return {
     [generatedPaths.server]: serverModuleSource,
     [generatedPaths.dataModel]: dataModelSource,
     [generatedPaths.internal]: serverReferencesText(manifest),
-    [generatedPaths.api]: await referencesText(manifest, identity, workflows),
+    [generatedPaths.api]: referencesText(manifest, workflows),
     [generatedPaths.contracts]: `${contracts}\n`,
     [generatedPaths.functions]: pageFunctionsText(manifest, workflows),
   };

@@ -2,17 +2,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 
 import type { AppManifest, FunctionManifest } from "./app-types.ts";
-import type {
-  BoundWorkflow,
-  BoundWorkflowDecision,
-  BoundWorkflowEvent,
-} from "./bound-workflows.ts";
-
-/** The release a reference belongs to. */
-export interface ReleaseIdentity {
-  readonly resourceId: string;
-  readonly resourceVersion: number;
-}
+import type { BoundWorkflow } from "./bound-workflows.ts";
 
 /** Where each generated module is, among the App's files. */
 export const generatedPaths = {
@@ -25,12 +15,12 @@ export const generatedPaths = {
 } as const;
 
 /**
- * The format of `contracts.json`: 4 since its manifest carries no pages
- * or surfaces, which are the App's file routes'. A release whose
- * contracts are of another format doesn't load: a new version replaces
- * it.
+ * The format of `contracts.json`: 5 since it names no release and seals
+ * only the version each workflow binding pinned, the App's declaration
+ * being the workflow's contract. A release whose contracts are of
+ * another format doesn't load: a new version replaces it.
  */
-export const contractsFormatVersion = 4;
+export const contractsFormatVersion = 5;
 
 /**
  * The fingerprint of `operation`'s exact contract: the SHA-256, in hex, of
@@ -63,32 +53,25 @@ export const contractFingerprints = async (
   return fingerprints;
 };
 /**
- * The fingerprint of a decision's exact contract: the SHA-256, in hex, of
- * its value and context descriptors, canonically.
- */
-export const decisionFingerprint = async (
-  decision: BoundWorkflowDecision
-): Promise<string> =>
-  await sha256Hex(
-    canonicalText({ value: decision.value, context: decision.context })
-  );
-/**
- * The fingerprint of an event's exact contract: the SHA-256, in hex, of
- * its type and data descriptor, canonically.
- */
-export const eventFingerprint = async (
-  event: BoundWorkflowEvent
-): Promise<string> =>
-  await sha256Hex(canonicalText({ type: event.type, data: event.data }));
-/**
- * The fingerprint of a bound workflow's contract: the SHA-256, in hex, of
- * its args and returns descriptors, canonically. What a run pins and the
- * host checks at start and watch; its events carry their own fingerprints,
- * and the release's contracts cover all of it.
+ * The fingerprint of a workflow's contract as the App declares it: the
+ * SHA-256, in hex, of its args, returns, events, listen tasks and
+ * decisions, canonically. What the host compares across an App's
+ * releases before a page follows a run another release started, so a
+ * page never reads a run's result, waits or events by a contract it
+ * wasn't started under.
  */
 export const workflowFingerprint = async (
-  workflow: Pick<BoundWorkflow, "args" | "returns">
+  workflow: Pick<
+    BoundWorkflow,
+    "args" | "returns" | "events" | "listens" | "decisions"
+  >
 ): Promise<string> =>
   await sha256Hex(
-    canonicalText({ args: workflow.args, returns: workflow.returns })
+    canonicalText({
+      args: workflow.args,
+      returns: workflow.returns,
+      events: workflow.events,
+      listens: workflow.listens,
+      decisions: workflow.decisions,
+    })
   );

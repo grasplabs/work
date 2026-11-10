@@ -1,6 +1,5 @@
 import {
   declaredWorkflows,
-  eventFingerprint,
   schemaFromDescriptor,
 } from "@grasp-os/runtime/host";
 import { delegateActorOf } from "@grasp-os/shared/audit";
@@ -56,10 +55,12 @@ import type { RunEventDelivery } from "./workflows/run-events.ts";
 //   refused (`unlessAccepted`).
 // - An event the App doesn't send, or to a run that isn't one of the
 //   App's. The App must declare the workflow in its sealed permissions,
-//   and the release the call runs must resolve exactly the event the
-//   function's generated reference names, by its alias, its type and its
-//   fingerprint, for that workflow (`resource.not_allowed` otherwise); its data must be what the
-//   event's declared contract takes (`contract.invalid_args`); the run
+//   and the event the function's generated reference names, by its alias,
+//   among that workflow's declared events (`resource.not_allowed`
+//   otherwise: an alias the release doesn't declare, another workflow's,
+//   or a key every object inherits, which an own-key lookup never finds);
+//   its data must be what that event's declared data takes
+//   (`contract.invalid_args`), its type the declared one; the run
 //   must be one the App started through its binding of the workflow, of
 //   the version the binding names now, not yet ended. The App needs its
 //   own `send` grant on the workflow, for the person the call acts for,
@@ -110,26 +111,17 @@ const notifyIntentSchema = z.strictObject({
 });
 type NotifyIntent = z.infer<typeof notifyIntentSchema>;
 
-/**
- * The event a mutation's generated reference names (`ctx.sendEvent`): what
- * App code sent, which counts only as the release resolves exactly it.
- */
-export interface ListedEvent {
-  readonly alias: string;
-  readonly type: string;
-  readonly fingerprint: string;
-}
-
 /** How core stages a mutation's notifications, for one invocation. */
 export interface WorkflowNotifications {
   /**
    * The intent a commit stages to notify run `runId` of the workflow the
-   * App binds under `workflow` with `event` (as the function's reference
-   * names it) and `data`, checked as the header says; refused otherwise.
+   * App binds under `workflow` with the event its release declares under
+   * the alias `event` (as the function's reference names it) and `data`,
+   * checked as the header says; refused otherwise.
    */
   readonly intent: (
     workflow: string,
-    event: ListedEvent,
+    event: string,
     runId: unknown,
     data: unknown
   ) => Promise<Json>;
@@ -220,15 +212,10 @@ export const appWorkflowNotifications = (
       (each) => each.alias === workflow
     );
     const resolved =
-      declared !== undefined && Object.hasOwn(declared.events, event.alias)
-        ? declared.events[event.alias]
+      declared !== undefined && Object.hasOwn(declared.events, event)
+        ? declared.events[event]
         : undefined;
-    if (
-      declared === undefined ||
-      resolved === undefined ||
-      resolved.type !== event.type ||
-      (await eventFingerprint(resolved)) !== event.fingerprint
-    ) {
+    if (declared === undefined || resolved === undefined) {
       throw operationErrors.create("resource.not_allowed");
     }
     const checked = schemaFromDescriptor(JSON.stringify(resolved.data))[
@@ -282,8 +269,8 @@ export const appWorkflowNotifications = (
       workflow,
       workflowId: workflowResourceIdSchema.parse(pin.workflowId),
       version: pin.version,
-      event: event.alias,
-      type: event.type,
+      event,
+      type: resolved.type,
       runId,
       data: accepted,
       agent:
@@ -411,7 +398,7 @@ export const dispatchNotifyIntent = async (
       admitted = await unlessAccepted(env, delivery, refusal);
     }
     requireLive(entry.signal);
-    admitted ??= await admitRunEvent(env, delivery);
+    admitted ??= await admitRunEvent(env, delivery, true);
     requireLive(entry.signal);
     await audited(env, actor, "workflow.event.sent", target, {
       ...detail,

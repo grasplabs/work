@@ -95,6 +95,8 @@ export type {
 } from "./people.ts";
 export type { UploadView } from "./upload-transfer.ts";
 export type {
+  DecisionAnswer,
+  DecisionFormOptions,
   FormFailure,
   FormStatus,
   GraspForm,

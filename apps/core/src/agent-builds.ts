@@ -4,7 +4,10 @@ import {
   emptyDefinition,
   tryOperation,
 } from "@grasp-os/runtime/definition";
-import type { AppDefinition } from "@grasp-os/runtime/definition";
+import type {
+  AppDefinition,
+  DefinitionOperation,
+} from "@grasp-os/runtime/definition";
 import { appErrors, fileChangesSchema } from "@grasp-os/shared/apps";
 import type {
   App,
@@ -44,6 +47,7 @@ import {
 } from "./app-definition.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
+import { bindableContract } from "./app-workflow-bindings.ts";
 import {
   appFor,
   applyChanges,
@@ -970,6 +974,7 @@ export const draftDefinitions = async (
  */
 export const defineInDraft = async <Saved>(
   env: Env,
+  by: Acting,
   scope: Pick<AgentScope, "workspaceId" | "chatId">,
   app: Pick<App, "id" | "name" | "currentVersion">,
   operation: unknown,
@@ -1002,7 +1007,24 @@ export const defineInDraft = async <Saved>(
   // definition checked after each, and saved once or not at all.
   let result: { definition: AppDefinition } = { definition: held.own };
   for (const each of Array.isArray(parsed) ? parsed : [parsed]) {
-    const next = tryOperation(result.definition, each);
+    // A workflow's contract is what the version bound has, read for the
+    // person binding it; the tools never take one written by hand.
+    const applied: DefinitionOperation =
+      each.op === "bindWorkflow"
+        ? {
+            op: "setWorkflowContract",
+            alias: each.alias,
+            // One after the other: each operation applies to the last.
+            // oxlint-disable-next-line no-await-in-loop -- see above
+            contract: await bindableContract(
+              env,
+              by,
+              each.workflow,
+              each.version
+            ),
+          }
+        : each;
+    const next = tryOperation(result.definition, applied);
     if ("problem" in next) {
       return { ok: false, problem: next.problem };
     }
@@ -1383,6 +1405,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         const found = await editableApp(this.env, by, app);
         const defined = await defineInDraft(
           this.env,
+          by,
           this.ctx.props,
           found,
           operation,
@@ -1924,7 +1947,7 @@ build: {
    * tools do (\`addTable\`, \`addField\`, \`changeField\`,
    * \`renameField\`, \`renameTable\`, \`setAccess\`, \`addIndex\`, \`addPermission\`,
    * \`removeTable\`, \`removeField\`, \`removeIndex\`,
-   * \`removePermission\`, \`moveField\`, \`renameFunction\`:
+   * \`removePermission\`, \`bindWorkflow\`, \`moveField\`, \`renameFunction\`:
    * \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
    * grasp.config.ts and server/schema.ts from it. \`ok: false\` with the
    * problem saves nothing; otherwise the \`plan\` of what it does to the

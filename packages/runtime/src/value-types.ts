@@ -2,7 +2,6 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
-import type { DescriptorSchema } from "./workflow-decisions.ts";
 
 // The input and output inference below (which keys of an object may be left
 // out by a caller, and which a handler can rely on) is adapted from
@@ -110,25 +109,6 @@ export interface ArraySchema<Input, Output> extends ValueSchema<Input, Output> {
 
 /** The fields of an object: a plain map, to share and spread as one. */
 export type ValueShape = Readonly<Record<string, AnySchema>>;
-
-/**
- * What `v.object` takes as its fields: schemas, and the descriptor schemas
- * a generated module holds (a decision's `valueSchema`), read back as the
- * schemas they describe.
- */
-export type ObjectFields = Readonly<
-  Record<string, AnySchema | DescriptorSchema>
->;
-
-/** `Fields` with each descriptor schema as the schema it describes. */
-export type ShapeOf<Fields extends ObjectFields> = {
-  readonly [Key in keyof Fields]: Fields[Key] extends DescriptorSchema<
-    infer Input,
-    infer Output
-  >
-    ? SimpleSchema<Input, Output>
-    : Extract<Fields[Key], AnySchema>;
-};
 
 // oxlint-disable-next-line typescript/ban-types -- `& {}` makes an editor show the object's keys instead of this alias
 type Simplify<Value> = { [Key in keyof Value]: Value[Key] } & {};

@@ -1,16 +1,9 @@
 import type { FunctionManifest } from "./app-types.ts";
-import { sortedListens } from "./bound-workflows.ts";
 import type {
   BoundWorkflow,
   BoundWorkflowDecision,
   BoundWorkflowEvent,
 } from "./bound-workflows.ts";
-import {
-  decisionFingerprint,
-  eventFingerprint,
-  workflowFingerprint,
-} from "./codegen-contracts.ts";
-import type { ReleaseIdentity } from "./codegen-contracts.ts";
 import {
   dataOf,
   indent,
@@ -34,7 +27,7 @@ const eventTypeOf = (
   alias: string,
   event: BoundWorkflowEvent
 ): string =>
-  `WorkflowEventReference<${JSON.stringify(workflowContractId(workflow.alias))}, ${JSON.stringify(alias)}, ${JSON.stringify(event.type)}, ${valueTypeOf(event.data, "input")}>`;
+  `WorkflowEventReference<${JSON.stringify(workflowContractId(workflow.alias))}, ${JSON.stringify(alias)}, ${valueTypeOf(event.data, "input")}>`;
 
 /** The type of the reference to `decision`, declared as `name` by `workflow`. */
 const decisionTypeOf = (
@@ -193,80 +186,40 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
   return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part}`).join(",\n")}\n${indent(1)}>`;
 };
 
+/** `names`, each `{ name: <prefix>.<name> }`, by name, in name order. */
+const namesUnder = (
+  prefix: string,
+  names: readonly string[]
+): Record<string, { name: string }> =>
+  Object.fromEntries(
+    names.toSorted().map((name) => [name, { name: `${prefix}.${name}` }])
+  );
+
 /**
  * The reference to `workflow`, as the data a generated module holds: what
  * a page's `@server/_generated/api` imports under `workflows.<alias>`.
+ * Names alone, all of them under the workflow's own.
  */
-export const workflowReferenceOf = async (
-  identity: ReleaseIdentity,
-  workflow: BoundWorkflow
-) => {
-  const contractId = workflowContractId(workflow.alias);
-  const fingerprint = await workflowFingerprint(workflow);
-  const events: Record<string, unknown> = {};
-  for (const alias of sortedKeys(workflow.events)) {
-    const event = workflow.events[alias];
-    if (event !== undefined) {
-      events[alias] = {
-        kind: "workflowEvent",
-        resourceId: identity.resourceId,
-        resourceVersion: identity.resourceVersion,
-        workflow: contractId,
-        workflowFingerprint: fingerprint,
-        alias,
-        type: event.type,
-        // One after the other: a digest is quick, and the order is the map's.
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        fingerprint: await eventFingerprint(event),
-        data: event.data,
-      };
-    }
-  }
-  const decisions: Record<string, unknown> = {};
-  for (const name of sortedKeys(workflow.decisions)) {
-    const decision = workflow.decisions[name];
-    if (decision !== undefined) {
-      decisions[name] = {
-        kind: "workflowDecision",
-        resourceId: identity.resourceId,
-        resourceVersion: identity.resourceVersion,
-        workflow: contractId,
-        workflowFingerprint: fingerprint,
-        key: name,
-        // oxlint-disable-next-line no-await-in-loop -- one digest at a time, as above
-        fingerprint: await decisionFingerprint(decision),
-        valueSchema: { kind: "descriptor", descriptor: decision.value },
-        context: decision.context,
-      };
-    }
-  }
+export const workflowReferenceOf = (workflow: BoundWorkflow) => {
+  const name = workflowContractId(workflow.alias);
   const functions = workflowFunctions(workflow);
   return {
-    kind: "workflow",
-    visibility: "public",
-    resourceId: identity.resourceId,
-    resourceVersion: identity.resourceVersion,
-    alias: workflow.alias,
-    contractId,
-    fingerprint,
-    args: workflow.args,
-    returns: workflow.returns,
-    events,
-    listens: sortedListens(workflow.listens),
-    decisions,
+    name,
+    events: namesUnder(`${name}.events`, Object.keys(workflow.events)),
+    decisions: namesUnder(`${name}.decisions`, Object.keys(workflow.decisions)),
     queries: referencesOf(functions.queries),
     mutations: referencesOf(functions.mutations),
   };
 };
 
 /**
- * `workflows`: one reference per workflow the App binds, each with its
- * events, decisions and ordinary queries and mutations.
+ * `workflows`: one reference per workflow the App declares, each with its
+ * events, decisions and ordinary queries and mutations, typed from the
+ * declaration.
  */
-export const workflowsExport = async (
-  identity: ReleaseIdentity,
+export const workflowsExport = (
   workflows: readonly BoundWorkflow[]
-): Promise<string> => {
+): string => {
   const sorted = workflows.toSorted((a, b) => (a.alias < b.alias ? -1 : 1));
   if (sorted.length === 0) {
     return "export const workflows: Readonly<Record<never, never>> = frozen({});\n";
@@ -275,14 +228,9 @@ export const workflowsExport = async (
     (workflow) =>
       `  readonly ${key(workflow.alias)}: ${workflowTypeOf(workflow)};`
   );
-  const values = await Promise.all(
-    sorted.map(
-      async (workflow) =>
-        `  ${key(workflow.alias)}: ${dataOf(await workflowReferenceOf(identity, workflow), 1)},`
-    )
+  const values = sorted.map(
+    (workflow) =>
+      `  ${key(workflow.alias)}: ${dataOf(workflowReferenceOf(workflow), 1)},`
   );
-  // `as const`: the data is inferred as the literal it is, never widened
-  // into an object union whose missing keys become `?: undefined` and no
-  // longer fit a descriptor.
-  return `export const workflows: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n} as const);\n`;
+  return `export const workflows: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n});\n`;
 };

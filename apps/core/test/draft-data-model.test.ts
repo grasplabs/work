@@ -1,15 +1,24 @@
+import { declaredPermission } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
-import { chatIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { loadRelease } from "../src/app-releases.ts";
 import { published, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  jobEventsDeclared,
+  jobEventsContract,
+  jobWaitingOf,
+  requestsApp,
+} from "./json-workflow-apps.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import { calledAs } from "./sealed-apps.ts";
-import { signedInApi } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 
 // The data model of a chat's draft of an App, changed by its person from
 // the App's workspace (`chats.dataModel`, `chats.defineDraft`), with the
@@ -401,3 +410,133 @@ describe(
     });
   }
 );
+
+describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
+  it("declares the version's events and listen tasks in the draft, for an alias the App declares and a person with a role in the workflow, so the version binds once that draft is current", async () => {
+    const [admin, builder, otherBuilder] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "builder"),
+    ]);
+    const contract = await jobEventsContract(admin);
+    const flow = await builder.api.workflowResources.create(
+      `bound-${unique()}`
+    );
+    await builder.api.workflowResources.publish(flow.id, {
+      definition: jobWaitingOf(contract),
+      basedOn: null,
+    });
+    // Version 2 waits for another event too, in a task of its own.
+    await builder.api.workflowResources.publish(flow.id, {
+      definition: jobWaitingOf(contract, { more: ["laterEvents"] }),
+      basedOn: 1,
+    });
+    const { id: app } = await builder.api.apps.create({ name: "Requests" });
+    const api = builder.api.workflowResources;
+    await api.bindToApp(flow.id, { app, alias: "review", version: 1 });
+    await release(builder, app, requestsApp("review", jobEventsDeclared));
+    // Another builder of the App, with no role in the workflow.
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: otherBuilder.userId,
+      role: "builder",
+    });
+    const bindSecond = async () =>
+      await outcome(
+        api.bindToApp(flow.id, { app, alias: "review", version: 2 })
+      );
+    const chatId = await appChat(builder, app);
+    const bindInDraft = (alias: string) => ({
+      op: "bindWorkflow",
+      alias,
+      workflow: flow.id,
+      version: 2,
+    });
+
+    // The App's current version declares version 1's events.
+    const beforeDraft = await bindSecond();
+    const undeclared = await builder.api.chats.defineDraft(
+      chatId,
+      app,
+      bindInDraft("ghost")
+    );
+    const noRole = await outcome(
+      otherBuilder.api.chats.defineDraft(
+        await appChat(otherBuilder, app),
+        app,
+        bindInDraft("review")
+      )
+    );
+    // What the version has is read by core, never taken from the caller.
+    const forged = await outcome(
+      builder.api.chats.defineDraft(chatId, app, {
+        op: "setWorkflowContract",
+        alias: "review",
+        contract: { events: {}, listens: {}, decisions: {} },
+      })
+    );
+    const declared = await builder.api.chats.defineDraft(
+      chatId,
+      app,
+      bindInDraft("review")
+    );
+    // Still the current version's declaration, until the draft is current.
+    const draftOnly = await bindSecond();
+    const version = await builder.api.chats.proposeDraft(
+      chatId,
+      app,
+      "Declare version 2's events"
+    );
+    await builder.api.apps.versions.setCurrent(app, version);
+    // What the release of the draft's version declares, as its host reads it.
+    const proposed = await loadRelease(env, appIdSchema.parse(app), version);
+    const sealed = declaredPermission(proposed.app, "review", "workflows");
+    const events = await allEvents();
+    const audited = events
+      .filter(
+        ({ action, target, detail }) =>
+          action === "chat.draft_defined" &&
+          target?.id === chatId &&
+          detail.op === "bindWorkflow"
+      )
+      .map(({ detail }) => ({
+        alias: detail.alias,
+        workflow: detail.workflow,
+        version: detail.version,
+      }));
+
+    expect({
+      beforeDraft,
+      undeclared,
+      noRole,
+      forged,
+      declared: declared.ok,
+      sealed: { events: sealed?.events, listens: sealed?.listens },
+      audited,
+      draftOnly,
+      afterCurrent: await bindSecond(),
+    }).toStrictEqual({
+      beforeDraft: "workflow.app_binding_contract_changed",
+      undeclared: {
+        ok: false,
+        problem:
+          "The App declares no workflow `ghost`: add it with `addPermission` first.",
+      },
+      noRole: "workflow.resource_unavailable",
+      forged: "app.invalid",
+      declared: true,
+      // Version 2's events and listen tasks, as it has them.
+      sealed: {
+        events: {
+          jobEvents: jobEventsDeclared.events.jobEvents,
+          laterEvents: jobEventsDeclared.events.jobEvents,
+        },
+        listens: { job: ["jobEvents"], laterEvents: ["laterEvents"] },
+      },
+      // The workflow and version the declaration was read from.
+      audited: [{ alias: "review", workflow: flow.id, version: "2" }],
+      draftOnly: "workflow.app_binding_contract_changed",
+      afterCurrent: "ok",
+    });
+  });
+});

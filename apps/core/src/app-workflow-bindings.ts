@@ -1,4 +1,7 @@
+import { declaredPermission, sameEventContract } from "@grasp-os/runtime/host";
+import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -18,9 +21,11 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { loadRelease } from "./app-releases.ts";
 import { appFor, editableApp } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
+import { versionEventContract } from "./bound-workflows.ts";
 import {
   appWorkflowBindings,
   workflowResourceVersions,
@@ -57,6 +62,17 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   workflow alive by binding it.
 // - Grasp staff deciding what a client's App runs: they never bind or
 //   remove a binding (`role.forbidden`).
+// - A binding that changes what the App's pages name under it: the App
+//   declares the events it sends, the listen tasks waiting on them and
+//   the decisions it answers (`permission.workflow`), and its references
+//   name them. Binding a version whose events, decisions or listen tasks
+//   differ from what the App's current version declares is refused
+//   (`workflow.app_binding_contract_changed`): the builder binds it from
+//   the App's draft instead, which writes the version's contract into the
+//   declaration (app-definition.ts, `bindWorkflow`), and binds it once
+//   that version is current. Until then the App's current version keeps
+//   the binding it declares. A version with the same contract binds as
+//   any other.
 //
 // A binding is the App's configuration, set by its builders and an admin's
 // grant, like a workflow's parameters: not part of the App's sealed
@@ -79,6 +95,91 @@ const bindingOf = (
 
 const invalid = () =>
   workflowResourceErrors.create("workflow.app_binding_invalid");
+
+/**
+ * Workflow `id`, for `by`, who must have a role in it, which published
+ * version `version` (`workflow.app_binding_invalid` otherwise); anyone
+ * else is told the workflow doesn't exist.
+ */
+const bindableVersion = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  version: number
+): Promise<{ readonly id: string }> => {
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  const published = await drizzle(env.DB)
+    .select({ version: workflowResourceVersions.version })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflow.id),
+        eq(workflowResourceVersions.version, version)
+      )
+    )
+    .get();
+  if (published === undefined) {
+    throw invalid();
+  }
+  return workflow;
+};
+
+/**
+ * The events, listen tasks and decisions version `version` of workflow
+ * `id` has, for `by`, who may bind it (`bindableVersion`): what a draft
+ * declares when they bind it there (`bindWorkflow`, agent-builds.ts).
+ */
+export const bindableContract = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  version: number
+): Promise<WorkflowEventContract> => {
+  requireNotStaff(by);
+  const workflow = await bindableVersion(env, by, id, version);
+  const { complete, ...contract } = await versionEventContract(
+    env,
+    workflow.id,
+    version
+  );
+  // Never part of a contract: a draft declares all of it or nothing.
+  if (!complete) {
+    throw invalid();
+  }
+  return contract;
+};
+
+/**
+ * That version `version` of workflow `workflow` has the events, decisions
+ * and listen tasks App `app`'s current version declares under `alias`
+ * (`workflow.app_binding_contract_changed` otherwise). Nothing to hold to
+ * for an App with no current version, or one that doesn't declare the
+ * alias: what its draft declares is written from the version it binds.
+ */
+const requireDeclaredContract = async (
+  env: Env,
+  app: App,
+  alias: string,
+  workflow: string,
+  version: number
+): Promise<void> => {
+  if (app.currentVersion === null) {
+    return;
+  }
+  const release = await loadRelease(env, app.id, app.currentVersion);
+  const declared = declaredPermission(release.app, alias, "workflows");
+  if (declared === undefined) {
+    return;
+  }
+  // All of it, or the App could rely on part of a contract the version
+  // no longer resolves.
+  const bound = await versionEventContract(env, workflow, version);
+  if (!bound.complete || !sameEventContract(declared, bound)) {
+    throw workflowResourceErrors.create(
+      "workflow.app_binding_contract_changed"
+    );
+  }
+};
 
 /**
  * Tells App `app`'s pages following its workflows to read them again
@@ -118,20 +219,8 @@ export const bindWorkflowToApp = async (
     input
   );
   const found = await editableApp(env, by, app);
-  const workflow = await requireWorkflowRole(env, by, id, "user");
-  const published = await drizzle(env.DB)
-    .select({ version: workflowResourceVersions.version })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, workflow.id),
-        eq(workflowResourceVersions.version, version)
-      )
-    )
-    .get();
-  if (published === undefined) {
-    throw invalid();
-  }
+  const workflow = await bindableVersion(env, by, id, version);
+  await requireDeclaredContract(env, found, alias, workflow.id, version);
   const row: typeof appWorkflowBindings.$inferSelect = {
     id: crypto.randomUUID(),
     appId: found.id,
@@ -185,10 +274,13 @@ export const bindWorkflowToApp = async (
         ),
       db.insert(appWorkflowBindings).values({
         ...row,
-        // Only while the App isn't archived, as the batch runs: otherwise
-        // NULL, which fails the batch (app-status.ts).
+        // Only while the App isn't archived, as the batch runs, and its
+        // current version is still the one whose declaration the contract
+        // was checked against: otherwise NULL, which fails the batch
+        // (app-status.ts).
         appId: sql`(SELECT id FROM apps
-          WHERE id = ${found.id} AND status != 'archived')`,
+          WHERE id = ${found.id} AND status != 'archived'
+            AND current_version IS ${found.currentVersion})`,
         // Only while the workflow is live: otherwise NULL, which fails the
         // batch, so a deletion and this binding never both land.
         workflowResourceId: sql`(SELECT id FROM workflow_resources
@@ -213,7 +305,11 @@ export const bindWorkflowToApp = async (
     ]);
   } catch (error) {
     if (notNullFailed(error, "app_workflow_bindings.app_id")) {
-      throw appErrors.create("app.archived");
+      // Archived, or another version made current since the check.
+      const now = await appFor(env, by, found.id, "builder");
+      throw now.status === "archived"
+        ? appErrors.create("app.archived")
+        : workflowResourceErrors.create("workflow.binding_conflict");
     }
     if (notNullFailed(error, "app_workflow_bindings.workflow_resource_id")) {
       throw workflowResourceErrors.create("workflow.resource_unavailable");

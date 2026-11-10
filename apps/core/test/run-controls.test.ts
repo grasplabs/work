@@ -378,7 +378,7 @@ describe(
             lease,
             JSON.stringify({
               reference: {
-                name: `${reference.contractId}.mutations.restart`,
+                name: `${reference.name}.mutations.restart`,
                 kind: "mutation",
               },
               args: { runId },

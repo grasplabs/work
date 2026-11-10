@@ -14,7 +14,6 @@ export type Grant = AnyPermission | AnyWorkflow;
 type GrantedEvent<Grants extends Grant> = WorkflowEventReference<
   `workflows.${GrantedWorkflow<Grants>["alias"]}`,
   string,
-  string,
   // oxlint-disable-next-line typescript/no-explicit-any -- the data is only read, by `EventDataOf`
   any
 >;

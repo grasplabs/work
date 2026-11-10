@@ -3,7 +3,7 @@ import type { QueryEntry } from "./client-query-entry.ts";
 import type { ReadReference } from "./client-request.ts";
 import type { DecisionTransport } from "./client-transport.ts";
 import type { ReferenceKind } from "./function-references.ts";
-import type { PageFunction } from "./page-functions.ts";
+import type { PageFunction, PageWorkflow } from "./page-functions.ts";
 import type { Pager } from "./pager.ts";
 import type { StreamEvents } from "./streams.ts";
 
@@ -90,6 +90,11 @@ export interface ClientInternals {
    * describes it, found by its name alone; undefined when it names none.
    */
   functionOf: (reference: unknown) => PageFunction | undefined;
+  /**
+   * The workflow the release declares under `alias`, as the page's build
+   * describes it; undefined when it declares none.
+   */
+  workflowOf: (alias: string) => PageWorkflow | undefined;
   /** Replaces the release's functions: a preview's draft changed them. */
   useFunctions: (functions: unknown) => void;
 }

@@ -23,12 +23,20 @@ import {
   issueDetails,
   receiptLinkOf,
 } from "./client-error.ts";
+import { referenceName } from "./function-references.ts";
 import type { FunctionArgs, FunctionReturn } from "./function-references.ts";
 import { settlesSubmission } from "./refusals.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
+import { schemaOf } from "./value-schema.ts";
+import { v } from "./values.ts";
+import { decisionName } from "./workflow-decisions.ts";
+import type {
+  DecisionOutputOf,
+  DecisionValueOf,
+} from "./workflow-decisions.ts";
 
 // Forms: one `useForm`, two ways in.
 //
@@ -42,8 +50,13 @@ import { validateValue } from "./value-interpreter.ts";
 //   mutation that patches what it is sent keeps everyone else's changes
 //   to the record's other fields.
 // - `useForm(schema, { defaultValues, onSubmit })` is a local form: a
-//   native schema validates, `onSubmit` gets its normalized output (a
-//   decision's answer, which no App function takes).
+//   native schema validates, `onSubmit` gets its normalized output.
+// - `useForm(decision, { defaultValues, onSubmit })` is the local form of
+//   an answer to a workflow's decision (`workflows.<wf>.decisions.<key>`,
+//   which no App function takes): `{ approved, value }`, its value checked
+//   by that decision's value schema in the page's build, found by the
+//   reference's name alone, as a function's is. `respond` and the host
+//   check the answer again.
 //
 // TanStack Form holds the values, field state and subscriptions; the
 // native interpreter (value-interpreter.ts) is the only validator; the
@@ -201,6 +214,21 @@ export interface SchemaFormOptions<Schema extends StandardSchemaV1, Result> {
   /** Gets the schema's normalized output; owns what it does with it. */
   readonly onSubmit: (
     values: StandardSchemaV1.InferOutput<Schema>
+  ) => Result | Promise<Result>;
+}
+
+/** An answer to a decision, as its form holds it before it is checked. */
+export interface DecisionAnswer<Value> {
+  readonly approved: boolean;
+  readonly value: Value;
+}
+
+/** What the form of an answer to the decision `Decision` takes. */
+export interface DecisionFormOptions<Decision, Result> {
+  readonly defaultValues: DecisionAnswer<DecisionValueOf<Decision>>;
+  /** Gets the answer, its value normalized; owns what it does with it. */
+  readonly onSubmit: (
+    values: DecisionAnswer<DecisionOutputOf<Decision>>
   ) => Result | Promise<Result>;
 }
 
@@ -894,10 +922,35 @@ const isSchema = (value: unknown): value is StandardSchemaV1 =>
   "~standard" in value &&
   !("name" in value);
 
+/**
+ * The schema of an answer to the decision `target` names, as the page's
+ * build declares it; undefined when it names no decision the release
+ * declares.
+ */
+const decisionSchemaOf = (
+  client: GraspClient,
+  target: unknown
+): StandardSchemaV1 | undefined => {
+  const named = decisionName(referenceName(target));
+  const declared =
+    named === undefined
+      ? undefined
+      : clientInternals(client)
+          .workflowOf(named.workflow)
+          ?.decisions.get(named.key);
+  return declared === undefined
+    ? undefined
+    : v.object({ approved: v.boolean(), value: schemaOf(declared.value) });
+};
+
 /** The way `target` and `options` make the form, read once. */
 const targetOf = (client: GraspClient, target: unknown): Target => {
   if (isSchema(target)) {
     return { kind: "schema", schema: target };
+  }
+  const decision = decisionSchemaOf(client, target);
+  if (decision !== undefined) {
+    return { kind: "schema", schema: decision };
   }
   // A form binds a mutation or an action by its reference's name: its
   // kind and the arguments the form checks with are the page's release's

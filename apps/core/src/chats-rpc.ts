@@ -654,6 +654,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       };
       const defined = await defineInDraft(
         this.#env,
+        by,
         scope,
         found,
         operation,

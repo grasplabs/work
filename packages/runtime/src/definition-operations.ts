@@ -1,4 +1,5 @@
 import { AppDefinitionError } from "./app-definition-error.ts";
+import type { WorkflowEventContract } from "./bound-workflows.ts";
 import { isIdentifier } from "./code-print.ts";
 import { refuser } from "./declaration.ts";
 import {
@@ -28,6 +29,7 @@ import {
   isWorkflowPermission,
   PermissionDefinitionError,
 } from "./permission-checks.ts";
+import { readPermissionDeclaration } from "./permission-read.ts";
 import { permission } from "./permission.ts";
 import { SchemaDefinitionError } from "./schema-error.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
@@ -143,6 +145,16 @@ export type DefinitionOperation =
       readonly search?: boolean;
     }
   | { readonly op: "removePermission"; readonly alias: string }
+  | {
+      /**
+       * Sets the events, listen tasks and decisions workflow permission
+       * `alias` declares: what a version the builder binds has, as the
+       * host resolved it (app-workflow-bindings.ts in core).
+       */
+      readonly op: "setWorkflowContract";
+      readonly alias: string;
+      readonly contract: WorkflowEventContract;
+    }
   | {
       /** Renames function `function` (by its path now), keeping its ID. */
       readonly op: "renameFunction";
@@ -354,6 +366,23 @@ const permissionFrom = (
   if (!isIdentifier(declared.alias)) {
     return refuse(
       `\`${declared.alias}\` can't be a permission's alias: it is a word JavaScript keeps.`
+    );
+  }
+  // A workflow's events, listen tasks and decisions are what the version
+  // bound has, written from it (`setWorkflowContract`), never by a tool by
+  // hand: a hand-written one would type references the bound version
+  // can't take. Whatever a definition declares, binding a version holds
+  // it to the declaration (app-workflow-bindings.ts in core), and core
+  // holds every event an App sends to a type the bound version lets a
+  // page send, and every answer to its decision.
+  if (
+    isWorkflowPermission(declared) &&
+    (Object.keys(declared.events).length > 0 ||
+      Object.keys(declared.listens).length > 0 ||
+      Object.keys(declared.decisions).length > 0)
+  ) {
+    return refuse(
+      "A workflow's events, listen tasks and decisions come from the version you bind: add the workflow with its args and returns, then declare them with `bindWorkflow`."
     );
   }
   // A declaration is JSON data, which `readPermissionDeclaration` reads back.
@@ -645,6 +674,40 @@ const withTableRenamed = (
   };
 };
 
+/**
+ * `definition` with workflow permission `alias` declaring `contract`'s
+ * events, listen tasks and decisions, its args and returns as they are,
+ * checked as a declaration in code is.
+ */
+const withWorkflowContract = (
+  definition: AppDefinition,
+  alias: string,
+  contract: WorkflowEventContract
+): AppDefinition => {
+  const index = definition.permissions.findIndex(
+    (held) => held.alias === alias && held["~permission"] === "workflows"
+  );
+  const held = definition.permissions[index];
+  if (held === undefined) {
+    return refuse(
+      `The App declares no workflow \`${alias}\`: add it with \`addPermission\` first.`
+    );
+  }
+  const declared = readPermissionDeclaration({
+    ...held,
+    events: contract.events,
+    listens: contract.listens,
+    decisions: contract.decisions,
+  });
+  return {
+    ...definition,
+    permissions: definition.permissions.with(
+      index,
+      permissionDataSchema.parse(structuredClone(declared))
+    ),
+  };
+};
+
 /** The definition after `operation`, before it is checked. */
 const applied = (
   definition: AppDefinition,
@@ -731,6 +794,13 @@ const applied = (
         ...definition,
         permissions: [...definition.permissions, declared.data],
       };
+    }
+    case "setWorkflowContract": {
+      return withWorkflowContract(
+        definition,
+        operation.alias,
+        operation.contract
+      );
     }
     case "removeTable":
     case "removeField":
