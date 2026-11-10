@@ -724,6 +724,14 @@ msgstr "{name} (facultatif)"
 msgid "{name} (team)"
 msgstr "{name} (équipe)"
 
+#: src/chat/agent-choice.tsx
+msgid "{name} answers in this chat"
+msgstr "{name} répond dans ce chat"
+
+#: src/chat/agent-choice.tsx
+msgid "{name} answers. Change agent"
+msgstr "{name} répond. Changer d’agent"
+
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
 msgstr "Impossible de supprimer {name}. Réessayez."
@@ -15244,6 +15252,10 @@ msgstr "Pendant que Stephen parle à votre équipe : où en sont les entretiens,
 #: src/inbox/item-detail.tsx
 msgid "Who"
 msgstr "Qui"
+
+#: src/chat/agent-choice.tsx
+msgid "Who answers"
+msgstr "Qui répond"
 
 #: src/workflows/binding-approvals.tsx
 msgid "Who answers {alias}"

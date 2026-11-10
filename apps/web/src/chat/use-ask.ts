@@ -66,6 +66,11 @@ export interface AskOptions {
   chatFor?: (session: Session) => Promise<string>;
   /** Once a question is taken, in the chat it went into. */
   onAsked?: (chatId: string) => void;
+  /**
+   * The agent a new chat named after the question is with, one of
+   * `chats.agents()`; the company's first one by default.
+   */
+  agentId?: string;
 }
 
 const noOptions: AskOptions = {};
@@ -83,7 +88,7 @@ export const useAsk = (
   opens: "page" | "here" = "page",
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
-  { chatFor, onAsked }: AskOptions = noOptions
+  { chatFor, onAsked, agentId }: AskOptions = noOptions
 ) => {
   const router = useRouter();
   const navigate = useNavigate();
@@ -164,7 +169,7 @@ export const useAsk = (
         id = await chatFor(session);
       }
       if (id === undefined) {
-        ({ id } = await session.chats.create(titleOf(question)));
+        ({ id } = await session.chats.create(titleOf(question), agentId));
         created = id;
       }
       const askedIn = id;

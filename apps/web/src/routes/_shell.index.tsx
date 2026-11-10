@@ -1,4 +1,4 @@
-import type { ChatSummary } from "@grasp-os/shared/chat";
+import type { ChatAgent, ChatSummary } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
@@ -9,6 +9,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
+import {
+  AgentName,
+  AgentPicker,
+  startingAgent,
+} from "../chat/agent-choice.tsx";
 import { AskOrCompose } from "../chat/asked-questions.tsx";
 import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatMore } from "../chat/chat-more.tsx";
@@ -59,11 +64,22 @@ interface ChatPage {
   models: string[];
   /** The efforts each of them takes (`chats.efforts()`). */
   efforts: Record<string, ModelEfforts>;
+  /** The company's agents this person may talk to, the first one first. */
+  agents: ChatAgent[];
   /** The collections' and connections' names, by ID, for provenance. */
   sourceNames: ReadonlyMap<string, SourceName>;
   /** The organization's name, when it has one and core could say it. */
   organizationName: string | undefined;
 }
+
+/**
+ * The agents the person may talk to; none when core couldn't say, and a
+ * new chat is then with the company's first one, as it always was.
+ */
+const readAgents = async (session: Session): Promise<ChatAgent[]> => {
+  const [agents] = await Promise.allSettled([session.chats.agents()]);
+  return agents.status === "fulfilled" ? agents.value : [];
+};
 
 /** The organization's name; none when it has none or core couldn't say. */
 const readOrganizationName = async (
@@ -110,11 +126,23 @@ const readSourceNames = async (
 const NewChat = ({
   models,
   efforts,
+  agents,
 }: {
   models: string[];
   efforts: Record<string, ModelEfforts>;
+  agents: ChatAgent[];
 }) => {
-  const { composer, ask } = useAsk(undefined, models, efforts, "page");
+  // The agent the new chat is with: the first one until another is picked.
+  const [picked, setPicked] = useState<string>();
+  const agentId = startingAgent(agents, picked)?.id;
+  const { composer, ask } = useAsk(
+    undefined,
+    models,
+    efforts,
+    "page",
+    undefined,
+    { agentId }
+  );
   const { identity } = Route.useRouteContext();
   // Offered the tour, his question stands in the greeting's place, and
   // nothing to start from under the box until it is answered.
@@ -144,7 +172,17 @@ const NewChat = ({
               </h1>
             )}
           </div>
-          <Composer running={false} {...composer} />
+          <Composer
+            agent={
+              <AgentPicker
+                agentId={agentId}
+                agents={agents}
+                onAgent={setPicked}
+              />
+            }
+            running={false}
+            {...composer}
+          />
           {offered ? null : (
             <StartingQuestions
               disabled={composer.busy || models.length === 0}
@@ -173,6 +211,7 @@ const OpenChat = ({
   chat,
   models,
   efforts,
+  agents,
   sourceNames,
   organizationName,
   panel,
@@ -181,6 +220,7 @@ const OpenChat = ({
   chat: ChatSummary;
   models: string[];
   efforts: Record<string, ModelEfforts>;
+  agents: ChatAgent[];
   sourceNames: ReadonlyMap<string, SourceName>;
   organizationName: string | undefined;
   panel: boolean;
@@ -263,6 +303,7 @@ const OpenChat = ({
             <BuildsFailure read={builds} />
             <ChatSources names={sourceNames} provenance={view.provenance} />
             <AskOrCompose
+              agent={<AgentName agentId={chat.agentId} agents={agents} />}
               messages={view.messages}
               onAnswer={(answers) => {
                 void ask(answers);
@@ -337,7 +378,7 @@ const Chat = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
-  const { models, efforts, sourceNames, organizationName } = page.data;
+  const { models, efforts, agents, sourceNames, organizationName } = page.data;
   return (
     <>
       <SiteHeader
@@ -401,9 +442,10 @@ const Chat = () => {
       {/* Held to the window, so a tall box at the bottom makes the thread shorter, never the page longer. */}
       <div className="flex min-h-0 flex-1 text-sm">
         {chat === undefined ? (
-          <NewChat efforts={efforts} models={models} />
+          <NewChat agents={agents} efforts={efforts} models={models} />
         ) : (
           <OpenChat
+            agents={agents}
             chat={chat}
             efforts={efforts}
             key={chat.id}
@@ -454,11 +496,12 @@ export const Route = createFileRoute("/_shell/")({
   loaderDeps: ({ search }) => ({ chat: search.chat }),
   loader: async ({ context: { core }, deps: { chat } }) =>
     await loadFromCore(core, async (session): Promise<ChatPage> => {
-      const [chats, models, efforts, sourceNames, organizationName] =
+      const [chats, models, efforts, agents, sourceNames, organizationName] =
         await Promise.all([
           session.chats.list(),
           session.chats.models(),
           session.chats.efforts(),
+          readAgents(session),
           readSourceNames(session),
           readOrganizationName(session),
         ]);
@@ -473,6 +516,7 @@ export const Route = createFileRoute("/_shell/")({
         ...(beyond === undefined ? {} : { beyond }),
         models,
         efforts,
+        agents,
         sourceNames,
         organizationName,
       };
