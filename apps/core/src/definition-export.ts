@@ -53,7 +53,9 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 // - Someone exports what they can't read: only the App's builders (its
 //   admins among them), never Grasp staff; and only workflows they build,
 //   as for a workflow's source. A workflow they don't is listed as
-//   unresolved under the alias that names it, never by its name.
+//   unresolved under the alias that names it, never by its name. Its
+//   events, listens and decisions travel with the App's declaration,
+//   which is the App's own source (`grasp.config.ts`) its builders read.
 // - An export goes unrecorded: it is in the audit log before anything is
 //   answered, or it fails.
 // - What is exported isn't what was sealed: every part is read back with
