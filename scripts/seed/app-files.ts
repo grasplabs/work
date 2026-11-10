@@ -1,7 +1,7 @@
 /**
  * The definition and files of a demo App: it
  * binds the App's independent workflows under their aliases, holds its
- * page, and tests each workflow with a `workflowTest` suite.
+ * page, and tests each workflow with an `appTest` suite.
  */
 import {
   applyOperation,

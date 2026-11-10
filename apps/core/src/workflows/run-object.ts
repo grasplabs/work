@@ -318,6 +318,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           current: () =>
             !cancelledIn(this.ctx.storage.sql) &&
             this.generation() === generation,
+          // The run's time, which only an App's test moves (`advanceClock`).
+          now: () => this.runTime(),
           // Only a run an App's test started is ever restarted
           // (fixture-runs.ts).
           ...(pin.type === "fixture"
@@ -477,6 +479,14 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    */
   async fixtureWaits(): Promise<boolean> {
     return await this.waitsNow();
+  }
+
+  /**
+   * The time now as the run measures it (workerflow's `runTime`): what an
+   * App's test's answer to its decision is timed by (fixture-decisions.ts).
+   */
+  fixtureNow(): number {
+    return this.runTime();
   }
 
   /**

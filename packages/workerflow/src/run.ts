@@ -1337,7 +1337,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /**
    * The clock an attempt's running time, and a delay function's, is
-   * measured on: this.#now(). A test stands in for it to measure code that
+   * measured on: Date.now(). A test stands in for it to measure code that
    * runs without awaiting anything.
    */
   // oxlint-disable-next-line class-methods-use-this -- the seam a subclass overrides
@@ -1348,6 +1348,15 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   /** The time now, as the run measures it (run-time.ts). */
   #now(): number {
     return runNow(this.ctx.storage);
+  }
+
+  /**
+   * The time now, as the run measures it (run-time.ts): the wall clock,
+   * unless a host's test moved the run's clock on (`advanceClock`). What a
+   * host times the run's own waits and deadlines by, as the engine does.
+   */
+  protected runTime(): number {
+    return this.#now();
   }
 
   /**

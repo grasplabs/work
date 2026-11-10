@@ -663,6 +663,37 @@ describe(
       await session.close();
     });
 
+    it("times a decision out once its test's clock passes its timeout, with no wall-clock wait, and then takes no answer", async () => {
+      const app = await invoicesApp(
+        {},
+        { steps: approvalSteps(reviewOf({ timeout: "1 day" })) }
+      );
+      const { session, run, runId } = await runningIn(app);
+      await asked(runId);
+      await expect(session.runWaits(run)).resolves.toBeTruthy();
+      const began = Date.now();
+      // Half its timeout: still asked, and still answerable.
+      await session.advanceClock(12 * 60 * 60 * 1000);
+      await expect(decisionsOf(runId)).resolves.toMatchObject([
+        { status: "open" },
+      ]);
+      // Past it.
+      await session.advanceClock(12 * 60 * 60 * 1000);
+      expect({
+        end: await endOf(session, run),
+        decisions: await decisionsOf(runId),
+        late: await respond(session, "approver", run, { approved: true }),
+      }).toStrictEqual({
+        end: { status: "failed", code: "test.unanswered" },
+        decisions: [
+          { recipients: '["approver"]', status: "timed_out", decidedBy: null },
+        ],
+        late: "decision.closed",
+      });
+      expect(Date.now() - began).toBeLessThan(30_000);
+      await session.close();
+    });
+
     it("answers the item of a loop an answer names, waiting until the run asks it", async () => {
       const app = await invoicesApp({}, { steps: loopSteps, status: "asked" });
       const { session, run, runId } = await runningIn(app);

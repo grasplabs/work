@@ -3,6 +3,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { keepsState } from "@grasp-os/workflow-schema/sealed";
 import { and, asc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -26,7 +27,7 @@ import { quotaLimits } from "./quotas.ts";
 import { runActivation } from "./resource-runs.ts";
 import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 
-// Runs an App's tests start (spec 28.2, `workflowTest`): a test principal
+// Runs an App's tests start (spec 28.2, `appTest`): a test identity
 // starts a workflow the release under test binds, and the run is real:
 // the same sealed version and build, on the same engine, in the same run
 // object and isolate, against the same host as any run of it. Only what
@@ -176,8 +177,9 @@ export const startFixtureRun = async (
   const found = await pinned(env, workflow, pin.version);
   const input = acceptedInput(found.inputDescriptor, declared);
   const params = await fixtureParams(env, workflow, pin.version, test.params);
-  // A fault after a task the version doesn't have would never fire, and
-  // its test would pass on a run that never restarted.
+  // A fault after a task the version doesn't have, or whose step isn't
+  // one that journals its result (a sleep's, a wait's), would never fire,
+  // and its test would pass on a run that never restarted.
   if (test.restartAfterStep !== undefined) {
     const build = await loadWorkflowBuild(
       env,
@@ -185,7 +187,11 @@ export const startFixtureRun = async (
       pin.version,
       found.manifestHash
     );
-    if (!build.tasks.some(({ id }) => id === test.restartAfterStep)) {
+    if (
+      !build.tasks.some(
+        (task) => task.id === test.restartAfterStep && keepsState(task)
+      )
+    ) {
       throw operationErrors.create("contract.invalid_args");
     }
   }
@@ -239,7 +245,7 @@ export const fixtureActivation = async (
   env: Env,
   pin: PinnedResourceRun,
   runId: string
-): Promise<HostedActivation> => {
+): Promise<HostedActivation & { fault: string | null }> => {
   const db = drizzle(env.DB);
   const row = await db
     .select()
@@ -308,6 +314,8 @@ export const fixtureActivation = async (
     output: JSON.stringify(contract.output),
     owner: testRunOwnerOf(row.appId),
     admission: "fixture",
+    // The fault its test gave it, unless it fired already.
+    fault: row.restartedAt === null ? row.restartAfterStep : null,
   };
 };
 
@@ -357,18 +365,17 @@ const withFault = (
   env: Env,
   runId: string,
   engineStep: RunStep,
+  fault: string | null,
   restart: (() => Promise<void>) | undefined
 ): RunStep => ({
   ...engineStep,
   do: async (name, config, fn) => {
     const value = await engineStep.do(name, config, fn);
-    const task = name.endsWith(taskStepSuffix)
-      ? name.slice(0, -taskStepSuffix.length)
-      : undefined;
     if (
       restart !== undefined &&
-      task !== undefined &&
-      (await faultFires(env, runId, task))
+      fault !== null &&
+      name === `${fault}${taskStepSuffix}` &&
+      (await faultFires(env, runId, fault))
     ) {
       await restart();
       return await never();
@@ -388,13 +395,15 @@ export const runFixtureWorkflow = async (
   runId: string,
   engineStep: RunStep,
   memory: ResourceRunMemory
-): Promise<unknown> =>
-  await runActivation(
+): Promise<unknown> => {
+  const activation = await fixtureActivation(env, pin, runId);
+  return await runActivation(
     env,
-    withFault(env, runId, engineStep, memory.restart),
+    withFault(env, runId, engineStep, activation.fault, memory.restart),
     memory,
-    await fixtureActivation(env, pin, runId)
+    activation
   );
+};
 
 /**
  * Moves the clock of test runs `ids` `ms` on (workerflow's

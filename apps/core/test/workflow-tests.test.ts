@@ -1163,7 +1163,8 @@ export default appTest(schema, {
     };
     await session.close();
     // A run of the organization's, asleep: its object refuses to move its
-    // clock, and its alarm stays where its sleep set it.
+    // clock, and its sleep stays due when it was (its wake, in its
+    // journal; its alarm may move for its outbox meanwhile).
     const { runId } = await startWorkflow(
       env,
       { type: "person", person: builder },
@@ -1174,33 +1175,30 @@ export default appTest(schema, {
       throw new Error("The start admitted no run");
     }
     await sleeping(runId, "hold");
-    const alarmOf = async (): Promise<number | null> =>
-      await runInDurableObject(
-        runObjectOf(env, runId),
-        async (_object, state) => await state.storage.getAlarm()
+    const wakeOf = async (): Promise<unknown> =>
+      await runInDurableObject(runObjectOf(env, runId), (_object, state) =>
+        state.storage.sql.exec("SELECT wake_at FROM run").one()
       );
-    const before = await alarmOf();
+    const before = await wakeOf();
     const moved = await runObjectOf(env, runId)
       .advanceFixtureClock(60 * 60 * 1000)
       .then(() => "moved")
       .catch((error: unknown) =>
         error instanceof Error ? error.message : "thrown"
       );
-    const after = await alarmOf();
+    const after = await wakeOf();
     const status = await liveStatus(runId);
     await runEngine(env).terminate(runId);
-    expect({ asked, moved, alarmKept: after === before, status }).toStrictEqual(
-      {
-        asked: {
-          negative: "contract.invalid_args",
-          fraction: "contract.invalid_args",
-          text: "contract.invalid_args",
-          tooFar: "contract.invalid_args",
-        },
-        moved: "Only a run a host's test runs moves its time or restarts.",
-        alarmKept: true,
-        status: "waiting",
-      }
-    );
+    expect({ asked, moved, wakeKept: after, status }).toStrictEqual({
+      asked: {
+        negative: "contract.invalid_args",
+        fraction: "contract.invalid_args",
+        text: "contract.invalid_args",
+        tooFar: "contract.invalid_args",
+      },
+      moved: "Only a run a host's test runs moves its time or restarts.",
+      wakeKept: before,
+      status: "waiting",
+    });
   });
 });

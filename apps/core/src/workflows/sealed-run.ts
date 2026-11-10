@@ -2645,7 +2645,8 @@ class SealedRun implements SealedRunKind {
           // its one canonical encoding (`stepNameOf`), so decoding keeps
           // one decision per step.
           decodeURIComponent(attempt.step),
-          built
+          built,
+          this.#host.now()
         );
         this.#requireHolds(attempt);
         this.#openings.set(attempt, opened);

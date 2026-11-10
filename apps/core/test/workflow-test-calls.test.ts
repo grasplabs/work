@@ -496,10 +496,13 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuse a fault after a task the workflow doesn't have, which would never fire", async () => {
+  it.each([
+    ["a task the workflow doesn't have", "summarise"],
+    ["a sleep, whose step journals no result", "hold"],
+  ])("refuse a fault after %s, which would never fire", async (_case, task) => {
     const app = await requestsApp(
-      { steps: [summarize], status: line },
-      { models: { ai: { line: "Hello" } }, restartAfterStep: "summarise" }
+      { steps: [summarize, hold("1 second")], status: line },
+      { models: { ai: { line: "Hello" } }, restartAfterStep: task }
     );
     const host = fixtureHostFor(
       env,

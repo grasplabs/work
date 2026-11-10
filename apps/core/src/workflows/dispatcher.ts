@@ -108,6 +108,11 @@ export interface RunMemory {
    * (fixture-runs.ts).
    */
   restart?: () => Promise<void>;
+  /**
+   * The run's time (workerflow's `runTime`): the wall clock unless an
+   * App's test moved its clock on. The wall clock without it.
+   */
+  now?: () => number;
 }
 
 /** Each of core's own workflows, by name. */

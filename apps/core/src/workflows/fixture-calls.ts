@@ -12,7 +12,7 @@ import { requireModelRequest, requireShape } from "./resource-calls.ts";
 import type { BuiltCall, Effect } from "./resource-calls.ts";
 
 // The model calls of a run an App's test started (fixture-runs.ts,
-// `workflowTest`): the run's host builds each as it builds a real one, holds
+// `appTest`): the run's host builds each as it builds a real one, holds
 // it to the run's limits, then hands it here in place of `makeCall`
 // (sealed-run.ts, `#madeOrServed`). A test's
 // run never reaches a real model, the organization's data or its budget.

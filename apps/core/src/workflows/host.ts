@@ -983,9 +983,16 @@ const attemptTimedOut = (): Error => {
   return error;
 };
 
-/** Waits `ms`, or until `attempt`'s timeout ends, if that comes first. */
-const waitWithin = async (attempt: StepAttempt, ms: number): Promise<void> => {
-  const timeLeft = attempt.deadline - Date.now();
+/**
+ * Waits `ms`, or until `attempt`'s timeout ends, if that comes first: its
+ * deadline in the run's time, which is `now`.
+ */
+const waitWithin = async (
+  attempt: StepAttempt,
+  ms: number,
+  now: number
+): Promise<void> => {
+  const timeLeft = attempt.deadline - now;
   await scheduler.wait(Math.max(0, Math.min(ms, timeLeft)));
 };
 
@@ -1302,6 +1309,13 @@ export interface HostHooks {
    */
   leaseOf: (key: string, attempt: number) => AttemptLease | undefined;
   /**
+   * The run's time, as the engine measures it (run-object.ts): what its
+   * waits, decisions and attempts' deadlines are timed by here too. The
+   * wall clock unless an App's test moved the run's clock on; the wall
+   * clock without it.
+   */
+  now?: () => number;
+  /**
    * Hears, once, that the run's isolate asked for what only code that
    * gets past the SDK could (a step its review doesn't show): the run
    * fails with `error`, whatever its code makes of the refusal.
@@ -1577,6 +1591,8 @@ export interface HostControls {
   ) => Promise<Settled<never> | undefined>;
   /** The attempt running now, else `attempt` (`RunHost.#live`). */
   running: (attempt: StepAttempt) => StepAttempt;
+  /** The run's time (`HostHooks.now`): what its deadlines are timed by. */
+  now: () => number;
   /** Fails `attempt` and the one running now, as tampering. */
   refuseIn: (
     attempt: StepAttempt,
@@ -1684,6 +1700,7 @@ export class RunHost extends RpcTarget {
       hostCallRefusal: async (attempt, admission, call) =>
         await this.#hostCallRefusal(attempt, admission, call),
       running: (attempt) => this.#live.at(-1) ?? attempt,
+      now: () => this.#now(),
       refuseIn: async (attempt, error, call, refused, binding) =>
         await this.#refuseIn(attempt, error, call, refused, binding),
       auditRefusal: async (refusal) => {
@@ -1693,6 +1710,11 @@ export class RunHost extends RpcTarget {
         await this.#askingOnce(attempt, request, call, stillServed),
     });
     this.#run = this.#kind.run;
+  }
+
+  /** The run's time (`HostHooks.now`), the wall clock without it. */
+  #now(): number {
+    return this.#hooks.now?.() ?? Date.now();
   }
 
   /**
@@ -1799,7 +1821,7 @@ export class RunHost extends RpcTarget {
           // still of unknown outcome is theirs to resolve, with no run
           // waiting on it, and never recovered on its own after it, so
           // one connect could recover counts as unresolved here.
-          if (deadline !== undefined && Date.now() >= deadline) {
+          if (deadline !== undefined && this.#now() >= deadline) {
             return (await this.#stillHeld(step, keys, true))
               ? "expired"
               : false;
@@ -1992,7 +2014,7 @@ export class RunHost extends RpcTarget {
             await this.#step.do(
               `${prefix}:since`,
               {},
-              async () => await Promise.resolve(Date.now())
+              async () => await Promise.resolve(this.#now())
             )
           );
       }
@@ -2717,7 +2739,7 @@ export class RunHost extends RpcTarget {
         await this.#step.do(
           `${waitStepPrefix}${await waitKeyOf(step)}:reached`,
           {},
-          async () => await Promise.resolve({ at: Date.now() })
+          async () => await Promise.resolve({ at: this.#now() })
         )
       );
       const until = reached.at + timeoutMs;
@@ -2729,7 +2751,7 @@ export class RunHost extends RpcTarget {
           {},
           async () => {
             await enter(until);
-            return { at: Date.now() };
+            return { at: this.#now() };
           }
         );
       }
@@ -2827,7 +2849,8 @@ export class RunHost extends RpcTarget {
           Math.min(
             throttledWaitMs,
             typeof wait === "number" ? wait * 1000 : throttledWaitMs
-          )
+          ),
+          this.#now()
         );
       }
       throw error;
@@ -2881,7 +2904,7 @@ export class RunHost extends RpcTarget {
    * so a call that lands late is judged as its own attempt is now.
    */
   #holds(attempt: StepAttempt): boolean {
-    if (attempt.over || Date.now() >= attempt.deadline) {
+    if (attempt.over || this.#now() >= attempt.deadline) {
       return false;
     }
     const lease = this.#hooks.leaseOf(attempt.key, attempt.number);
@@ -3142,7 +3165,7 @@ export class RunHost extends RpcTarget {
       const look = async (lookStep: string) =>
         reachedSchema.parse(
           await this.#step.do(lookStep, {}, async () => {
-            const at = Date.now();
+            const at = this.#now();
             const { answered } = await this.#decisionOutcome(decision, false);
             return { at, answered };
           })
@@ -3189,7 +3212,7 @@ export class RunHost extends RpcTarget {
         await this.#step.do(`${prefix}:outcome`, {}, async () => {
           const outcome = await this.#decisionOutcome(
             decision,
-            last || Date.now() >= deadline
+            last || this.#now() >= deadline
           );
           return (await this.#kind.decisionTaken?.(step, outcome)) ?? outcome;
         })

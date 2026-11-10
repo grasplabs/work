@@ -2,7 +2,7 @@
  * The demo company's Apps, each binding independent
  * workflows that run on the local stack as they would anywhere:
  * grasp-workflow/2 definitions, their calculations
- * in expressions, with `workflowTest` suites in the App, calling
+ * in expressions, with `appTest` suites in the App, calling
  * nothing outside Grasp, so a run needs no connection. Inputs stand in
  * for what a connection would bring (an email, an invoice from the
  * bookkeeping), so the seed starts each run with one, and a few are bad

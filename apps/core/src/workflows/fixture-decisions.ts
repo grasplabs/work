@@ -13,7 +13,7 @@ import { appTestDecisions, appTestRuns } from "../db/core/schema.ts";
 import { decisionEventType } from "../decisions/decisions.ts";
 import type { DecisionOutcome } from "../decisions/decisions.ts";
 import { bindingsOf } from "../workflow-resources.ts";
-import { runEngine } from "./engine.ts";
+import { runEngine, runObjectOf } from "./engine.ts";
 import { contractOf, requireShape } from "./resource-calls.ts";
 import {
   callDenied,
@@ -28,9 +28,9 @@ import {
 } from "./resource-decisions.ts";
 import type { BuiltDecision, DecisionAnswer } from "./resource-decisions.ts";
 
-// The decisions a run an App's test started waits for (`workflowTest`,
+// The decisions a run an App's test started waits for (`appTest`,
 // fixture-runs.ts): its `grasp.decision` calls, asked of the test's own
-// fixture principals, which answer them through `t.as(name).respond`. The
+// identities, which answer them through `identity.respond`. The
 // run waits for one as any run waits for its decision (host.ts,
 // `waitForDecision`, through `RunKind.decisionsKept`); only who is asked,
 // and where the decision is kept, are the test's. Threat model, and how
@@ -141,7 +141,9 @@ export const openFixtureDecision = async (
   run: FixtureDecisionRun,
   task: string,
   step: string,
-  call: BuiltDecision
+  call: BuiltDecision,
+  /** The run's time (its test may have moved its clock on). */
+  now: number
 ): Promise<{ decision: string; deadline: number }> => {
   const binding = await bindingOf(env, run, call.binding);
   const contract = await contractOf(env, binding);
@@ -158,7 +160,6 @@ export const openFixtureDecision = async (
   if (!recipients.every((name) => deciders.includes(name))) {
     throw callDenied();
   }
-  const now = Date.now();
   const db = drizzle(env.DB);
   await db
     .insert(appTestDecisions)
@@ -424,7 +425,8 @@ export const answerFixtureDecision = async (
   if (!goesOn(await runEngine(env).status(runId))) {
     throw decisionErrors.create("decision.closed");
   }
-  const now = new Date();
+  // Timed by the run's own clock, as its deadline was set by it.
+  const now = new Date(await runObjectOf(env, runId).fixtureNow());
   const [answered] = await drizzle(env.DB)
     .update(appTestDecisions)
     .set({
