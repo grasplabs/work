@@ -8,6 +8,7 @@ import type {
   AiProvidersListing,
   AiProviderStatus,
   AiProviderTest,
+  AiSource,
 } from "@grasp-os/shared/ai-providers";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -34,7 +35,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { failureMessage } from "../chat/failure.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, formatDollars } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import {
   SettingsBody,
@@ -804,6 +805,79 @@ const PlatformUses = ({ uses }: { uses: readonly AiPlatformUse[] }) => {
   );
 };
 
+/**
+ * Whose AI the organization runs on: Grasp's AI, paid for by use up to a
+ * month's limit, or its own provider keys; and for its own admins, the
+ * way to switch. Shown where this deployment offers Grasp's AI, or the
+ * organization is on it.
+ */
+const Source = ({
+  listing,
+  editable,
+  busy,
+  onSwitch,
+}: {
+  listing: AiProvidersListing;
+  editable: boolean;
+  busy: boolean;
+  onSwitch: (source: AiSource) => void;
+}) => {
+  const { t } = useLingui();
+  const { source, grasp, providers } = listing;
+  if (!grasp.available && source !== "grasp") {
+    return null;
+  }
+  const model = grasp.model.name;
+  const { whereItRuns } = grasp;
+  const spent = formatDollars(grasp.month.spentUsd);
+  const limit = formatDollars(grasp.month.limitUsd);
+  const onGrasp = source === "grasp";
+  return (
+    <SettingsSection
+      description={t`Your organization’s AI runs on Grasp’s AI, which you pay for by use, or on your own provider keys below.`}
+      title={t`Grasp’s AI or your own keys`}
+    >
+      <SettingsRow
+        description={
+          onGrasp
+            ? t`${model}. Runs at: ${whereItRuns}`
+            : t`The providers and models below.`
+        }
+        label={
+          onGrasp
+            ? t`Your AI runs on Grasp’s AI`
+            : t`Your AI runs on your own keys`
+        }
+      >
+        {editable ? (
+          <Button
+            disabled={busy || (!onGrasp && !grasp.available)}
+            onClick={() => {
+              onSwitch(onGrasp ? "own" : "grasp");
+            }}
+            size="sm"
+            variant="outline"
+          >
+            {onGrasp ? t`Switch to your own keys` : t`Switch to Grasp’s AI`}
+          </Button>
+        ) : null}
+      </SettingsRow>
+      {onGrasp ? (
+        <SettingsBody>
+          {grasp.month.reached ? (
+            <p className="text-status-attention">{t`This month’s limit of ${limit} is reached: AI is stopped until next month, or until you switch to your own keys.`}</p>
+          ) : (
+            <p className="text-muted-foreground">{t`This month: ${spent} of ${limit}. Once the limit is reached, AI stops until the next month.`}</p>
+          )}
+          {providers.length === 0 ? (
+            <p className="text-muted-foreground">{t`No provider of your own is connected: switching to your own keys leaves AI off until you add one.`}</p>
+          ) : null}
+        </SettingsBody>
+      ) : null}
+    </SettingsSection>
+  );
+};
+
 /** Settings › AI providers, on what core listed; `editable` for the organization's own admins. */
 export const AiProvidersSettings = ({
   listing,
@@ -839,6 +913,16 @@ export const AiProvidersSettings = ({
   );
   return (
     <>
+      <Source
+        busy={busy}
+        editable={editable}
+        listing={listing}
+        onSwitch={(source) => {
+          void change(async (session) => {
+            await session.aiProviders.setSource(source);
+          });
+        }}
+      />
       <SettingsSection
         description={t`Grasp's AI calls models with your organization's own provider keys. Keys are stored sealed: nobody can read one back, only its last four characters.`}
         title={t`AI providers`}
