@@ -87,8 +87,10 @@ import { resourceRunMailCalls, runMailStampClaims } from "../db/core/schema.ts";
 // mail a distribution list delivers to a watched mailbox (not a recipient
 // the call names), mail to an alias of a mailbox other than the
 // connection's own account's, a watched source naming another user's
-// mailbox by its ID rather than an address, and events of other things a
-// run made (files: connector events).
+// mailbox by its ID rather than an address, mail an App's function sends
+// through its own connector resource for a run that called it (only the
+// run's own calls carry its stamp), and events of other things a run made
+// (files: connector events).
 
 /** The run a stamp names: its ID, and the step key the call was made under. */
 export interface StampingRun {

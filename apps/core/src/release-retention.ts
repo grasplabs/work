@@ -40,8 +40,8 @@ import { collectArtifacts, sweepArtifacts } from "./sealed-artifacts.ts";
 //   one of the App's last `keptReleases` releases (a rollback's), for a
 //   day after its seal (a publish under way), while an open page's lease
 //   on it holds (15 minutes from the last renewal), while any pin holds
-//   it (a run, a
-//   compatible migration, a pinned trigger, an admin's legal hold), and
+//   it (a compatible migration, a pinned trigger, an admin's legal hold),
+//   and
 //   once revoked, for good. Nothing App code does shortens any of it.
 // - A release is referenced again as it goes: the statement that deletes
 //   it checks every reference again, and a pin or a lease needs the

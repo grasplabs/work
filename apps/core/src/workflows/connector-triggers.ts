@@ -71,8 +71,8 @@ import type { StartFiles } from "./start-files.ts";
 // - A workflow starting itself without end: its own mail reaching a
 //   mailbox its trigger watches, or two workflows mailing each other. A
 //   workflow's mail is stamped (mail-stamps.ts, `resource_run_mail_calls`),
-//   and a stamped event's
-//   run joins the stamping run's lineage, one level deeper, admitted
+//   and a stamped event's run joins the stamping run's lineage, one level
+//   deeper, admitted
 //   against its nesting and descendant limits (quotas.ts, `admitInLineage`),
 //   so the lineage's limits end the loop (`workflow.lineage_limit`,
 //   refused for good). Its work is charged to its workflow's own account
