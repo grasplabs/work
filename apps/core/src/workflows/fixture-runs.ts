@@ -177,8 +177,9 @@ export const startFixtureRun = async (
   const found = await pinned(env, workflow, pin.version);
   const input = acceptedInput(found.inputDescriptor, declared);
   const params = await fixtureParams(env, workflow, pin.version, test.params);
-  // A fault after a task the version doesn't have, or whose step isn't
-  // one that journals its result (a sleep's, a wait's), would never fire,
+  // A fault after a task the version doesn't have, or that no test run
+  // gets past (only its model calls are answered: fixture-calls.ts), or
+  // whose step journals no result (a sleep's, a wait's), would never fire,
   // and its test would pass on a run that never restarted.
   if (test.restartAfterStep !== undefined) {
     const build = await loadWorkflowBuild(
@@ -189,7 +190,11 @@ export const startFixtureRun = async (
     );
     if (
       !build.tasks.some(
-        (task) => task.id === test.restartAfterStep && keepsState(task)
+        (task) =>
+          task.id === test.restartAfterStep &&
+          keepsState(task) &&
+          task.kind === "call" &&
+          task.call.name === "grasp.model"
       )
     ) {
       throw operationErrors.create("contract.invalid_args");
@@ -419,7 +424,11 @@ export const advanceFixtureClocks = async (
   const engine = runEngine(env);
   await Promise.all(
     ids.map(async (id) => {
-      await engine.advanceFixtureClock(id, ms);
+      // A run the engine no longer has (removed past its retention) has
+      // no time to move.
+      if ((await engine.status(id)) !== undefined) {
+        await engine.advanceFixtureClock(id, ms);
+      }
     })
   );
 };

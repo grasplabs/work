@@ -95,8 +95,8 @@ export interface TestStartOptions {
    * A fault: once task `restartAfterStep`'s step first succeeds, its
    * result journaled, the run's activation ends there, as if its process
    * died, and the engine runs it again from its journal, a generation
-   * later. Only a task whose step keeps its result (a call: a model's, an
-   * App function's) takes one; a start naming any other is refused.
+   * later. Only a task that calls a model takes one, the call a test's
+   * run makes; a start naming any other task is refused.
    */
   readonly restartAfterStep?: string;
 }

@@ -84,7 +84,7 @@ Its calls of the App's own functions run on the test's store. Calls of connectio
 
 Tests can also break a run on purpose, and move its clock:
 
-- `restartAfterStep: "<task>"` ends the run's execution right after that task's step is journaled, as if its process died. The engine replays the run from its journal, so the step isn't run again, and its model request isn't repeated.
+- `restartAfterStep: "<task>"` ends the run's execution right after that task's model call succeeds and is journaled, as if its process died. The engine replays the run from its journal, so the step isn't run again, and its model request isn't repeated. Only a task that calls a model takes one.
 - `t.clock.advance(ms)` moves the time of the test's runs on: a sleep, a wait's timeout or a retry that comes due by then runs now, without waiting for it. A sleep counts from when the run reaches it, so wait for the run with `t.runs.untilWaiting(run)` first.
 
 ```ts tests/review.test.ts
