@@ -10,6 +10,7 @@ import { z } from "zod";
 import { definedWith, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { pastAccessRecheck } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import type { Opened, Push } from "./page-client.ts";
 import {
@@ -722,6 +723,69 @@ describe("live queries and a person's roles", { timeout: 180_000 }, () => {
         JSON.stringify(result).includes("Builders only")
       )
     ).toBeFalsy();
+  });
+
+  it("keeps the evidence of a table its query is refused once, on its first read, however often a write reads it again", async () => {
+    const secretFiles = withSecrets();
+    const opened = await openedApp(
+      withFiles(secretFiles, {
+        "server/notes.ts": `${secretFiles.files["server/notes.ts"] ?? ""}
+export const glance = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(10);
+    try {
+      return notes.length + (await ctx.db.query("secrets").take(10)).length;
+    } catch {
+      // Only its builders read the secrets.
+      return notes.length;
+    }
+  },
+});
+`,
+      })
+    );
+    const { member, lease, client } = await memberOf(opened);
+    const glance = referenceTo<Record<never, never>, number, "query">(
+      opened.release,
+      "notes.glance"
+    );
+    const api = apiOf(opened.release);
+    const follower = pageFollower();
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(glance, {}), follower.callback);
+    // Each of their notes a write their query is read again for, its
+    // secrets refused each time.
+    for (const count of [1, 2, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one write, one read again
+      await client.mutation(api.create, { title: `Note ${count}` });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result).toStrictEqual({
+          ok: true,
+          value: count,
+        });
+      });
+    }
+    const events = await allEvents();
+    const kept = events.filter(
+      (event) =>
+        event.action === "app.use.refused" && event.target?.id === opened.app
+    );
+    expect(kept.map(({ detail }) => detail)).toStrictEqual([
+      {
+        version: 1,
+        person: member.userId,
+        runId: null,
+        function: "notes.glance",
+        useKind: "table",
+        useName: "secrets",
+        reason: "request_not_allowed",
+        errorCode: "data.access_denied",
+      },
+    ]);
   });
 });
 /**

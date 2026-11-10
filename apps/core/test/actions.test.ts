@@ -2643,6 +2643,30 @@ export const rename = mutation({
     return null;
   },
 });
+export const openThenCount = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    await ctx.db.insert("accounts", { name: "Acme", team: "elsewhere" });
+    try {
+      return await ctx.db.query("accounts").count();
+    } catch {
+      return -1;
+    }
+  },
+});
+export const openThenAsk = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    await ctx.db.insert("accounts", { name: "Acme", team: "elsewhere" });
+    try {
+      return await ctx.runQuery(api.desk.accounts, {});
+    } catch {
+      return -1;
+    }
+  },
+});
 export const accounts = query({
   args: {},
   returns: v.number(),
@@ -2742,6 +2766,11 @@ export const both = action({
       hiddenRow: await run(member, "desk.rename", "mutation", {
         id: hidden.result,
       }),
+      // A refused write that surfaces in a read of the staged writes,
+      // caught: kept once, as the mutation's that staged it, read
+      // directly or by a query it runs.
+      stagedRead: await run(member, "desk.openThenCount", "mutation"),
+      stagedAsk: await run(member, "desk.openThenAsk", "mutation"),
       // Nested calls refused six times, each caught: the call's first is
       // kept, a nested mutation's commit, before the action hears of it.
       nested: await run(member, "desk.both", "action"),
@@ -2764,6 +2793,14 @@ export const both = action({
       },
       filtered: { result: 0, kept: [] },
       hiddenRow: { result: "data.conflict", kept: [] },
+      stagedRead: {
+        result: "data.write_denied",
+        kept: [kept("accounts", "data.write_denied", "desk.openThenCount")],
+      },
+      stagedAsk: {
+        result: "data.write_denied",
+        kept: [kept("accounts", "data.write_denied", "desk.openThenAsk")],
+      },
       nested: {
         result: ["book", "ledger", "book", "ledger", "book", "ledger"],
         kept: [kept("ledger", "data.write_denied", "desk.book")],

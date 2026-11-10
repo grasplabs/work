@@ -463,44 +463,30 @@ const refusingUse = <E extends Error>(error: E, refused: RefusedUse): E => {
  * mode doesn't admit (`data.access_denied`), a write the write mode
  * doesn't, or one leaving a row its rules don't (`data.write_denied`).
  * Kept as the host's own table denials are (`readFor`, `stage`), through
- * `keepEvidence`, at most once a call.
+ * `keepEvidence`, at most once a call (GRA-1652).
  *
- * Threat model (GRA-1652):
- *
- * - A loop of refused reads or writes, nested calls included, floods the
- *   log: what it adds goes through `keepEvidence`, which keeps the call's
- *   first refusal of any kind and no other (`Run.evidence`, shared by
- *   every function the call runs).
- * - App code forges or suppresses the evidence: only an error core's own
- *   store call threw is noted (`readFor`'s read, `runMutation`'s commit),
- *   by its identity in a map App code never reaches, so an error App code
- *   makes, wraps or rethrows with the same code is noted as nothing; and
- *   it is kept before App code hears of the refusal (a read's, a nested
- *   mutation's commit's), so catching it suppresses nothing.
- * - The table it names is App text: named only when it is a table of the
- *   sealed release (`Compiled.tables`), the one the store refused by its
- *   own `details`, never what App code asked for otherwise.
- * - A row the rules hide is probed: a patch, replacement or deletion of
- *   one is answered as a missing row (`data.conflict`, store-rules.ts),
- *   and isn't noted. The audit is the admins' alone, so it would leak
- *   nothing to App code; but core can't tell that conflict from a record
- *   deleted or changed meanwhile, which happens every day, so keeping it
- *   would record ordinary races as refusals.
+ * - Only an error core's own store call threw is noted (`readFor`'s read,
+ *   `runMutation`'s commit), by its identity: an error App code makes,
+ *   wraps or rethrows with the same code is noted as nothing.
+ * - The table is named only when it is one of the sealed release's
+ *   (`tables`), as the store's own `details` name it.
+ * - A row the rules hide isn't noted: a patch, replacement or deletion of
+ *   one is answered as a missing row (`data.conflict`, store-rules.ts).
+ *   It is a blind write by an ID that is stale or unguessable, App code
+ *   learns nothing by it, and it is an everyday race when a page holds
+ *   the ID of a row someone has since moved out of its person's sight.
  * - Rows a read's rules leave out, and related records of a table the
  *   caller can't read (store-queries.ts `relationsOf`), are no refusal:
  *   the read answers without them, and nothing is thrown to note.
- * - The evidence write fails or hangs: `keepEvidence` logs a failure and
- *   waits no longer than `useEvidenceWaitMs`; the refusal stands.
- * - A preview's or an App's tests' store, or a visitor's call: their
- *   invocation keeps no evidence (no `Invocation.refusedUse`), as for
- *   every other refused use.
  */
-const refusedByStore = (run: Run, error: unknown): unknown => {
+const refusedByStore = (
+  tables: Compiled["tables"],
+  error: unknown
+): unknown => {
   const code = dataErrors.codeOf(error);
   if (
     (code !== "data.access_denied" && code !== "data.write_denied") ||
-    typeof error !== "object" ||
-    error === null
+    !(error instanceof Error)
   ) {
     return error;
   }
@@ -512,10 +498,7 @@ const refusedByStore = (run: Run, error: unknown): unknown => {
   refusedUses.set(error, {
     use: {
       kind: "table",
-      name:
-        typeof table === "string" && run.compiled.tables.has(table)
-          ? table
-          : null,
+      name: typeof table === "string" && tables.has(table) ? table : null,
     },
     reason: "request_not_allowed",
   });
@@ -1384,7 +1367,7 @@ const readFor = async (
   } catch (error) {
     // What the store refuses by the table's access and row rules is kept
     // as evidence too (`refusedByStore`).
-    throw refusedByStore(run, error);
+    throw refusedByStore(run.compiled.tables, error);
   }
 };
 
@@ -3120,6 +3103,8 @@ const runHandler = async (
  */
 const stagedQuery = async (
   run: Run,
+  /** The mutation that runs it, whose staged writes it sees. */
+  mutation: FunctionManifest,
   callee: FunctionManifest,
   args: Json,
   reader: StoreReader,
@@ -3138,7 +3123,16 @@ const stagedQuery = async (
     {
       read: async (request) => {
         spend();
-        return await readFor(run, callee, reader, request);
+        try {
+          return await readFor(run, callee, reader, request);
+        } catch (error) {
+          // A write the store refuses as it shows the query the staged
+          // writes is the mutation's, which staged it: kept as its own.
+          if (dataErrors.codeOf(error) === "data.write_denied") {
+            await keepEvidence(run, mutation, error);
+          }
+          throw error;
+        }
       },
     },
     undefined,
@@ -3255,6 +3249,7 @@ const startNested = async (
     if (within.type === "mutation") {
       return await stagedQuery(
         nested,
+        fn,
         callee,
         admitted,
         within.reader,
@@ -3612,7 +3607,7 @@ const runMutation = async (
         // surfaces here, past the mutation's code: kept now, before an
         // action that called it hears of it (`refusedByStore`).
         // oxlint-disable-next-line no-await-in-loop -- it ends the loop
-        await keepEvidence(run, fn, refusedByStore(run, error));
+        await keepEvidence(run, fn, refusedByStore(run.compiled.tables, error));
         throw error;
       }
     }

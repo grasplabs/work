@@ -105,6 +105,13 @@ interface FunctionCaller {
    * it stages needs again when it is dispatched.
    */
   readonly agent?: CallingAgent;
+  /**
+   * A live query read again because a write changed what it read: keeps
+   * no evidence of a refused use (`Invocation.refusedUse`). Its first
+   * read kept it; each write to a watched table would otherwise add one
+   * more, for every person following it.
+   */
+  readonly readAgain?: boolean;
 }
 
 /** Whose call a refused use's evidence names (`keptUseRefusals`). */
@@ -190,6 +197,7 @@ export const invocationFor = async (
     stillAllowed,
     sources = invocationSources(),
     agent,
+    readAgain = false,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -257,13 +265,17 @@ export const invocationFor = async (
     deadline,
     runId: null,
     authorize,
-    refusedUse: keptUseRefusals(env, {
-      app,
-      version: release.manifest.resourceVersion,
-      principal: by.userId,
-      requestId,
-      runId: null,
-    }),
+    ...(readAgain
+      ? {}
+      : {
+          refusedUse: keptUseRefusals(env, {
+            app,
+            version: release.manifest.resourceVersion,
+            principal: by.userId,
+            requestId,
+            runId: null,
+          }),
+        }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
     // operation host admits each request through `authorize` first, as it
@@ -427,6 +439,8 @@ interface FunctionCallOptions {
   readonly agent?: CallingAgent;
   /** What a mutation's receipt is scoped by (`CallOptions.receiptScope`). */
   readonly receiptScope?: string;
+  /** A live query read again (`FunctionCaller.readAgain`). */
+  readonly readAgain?: boolean;
 }
 
 /**
@@ -705,6 +719,7 @@ const invokedCall = async (
     agent,
     tellsForm,
     receiptScope,
+    readAgain,
   } = options;
   try {
     const invocation = await invocationFor(env, release, {
@@ -713,6 +728,7 @@ const invokedCall = async (
       deadline,
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       ...(agent === undefined ? {} : { agent }),
+      ...(readAgain === undefined ? {} : { readAgain }),
       sources,
     });
     const observed = observedInvocation(invocation, release, observeReads);
@@ -1274,13 +1290,16 @@ export const evaluateAppQuery = async (
     Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: string,
-  deadline: number
+  deadline: number,
+  /** Read again because a write changed what it read (`readAgain`). */
+  readAgain = false
 ): Promise<EvaluatedQuery> => {
   let reads: EvaluatedQuery["reads"];
   const answer = await callFunction(env, by, app, request, {
     deadline,
     kind: "query",
     page: true,
+    readAgain,
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },

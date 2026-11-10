@@ -391,13 +391,17 @@ export interface LiveReads<By extends Reader> {
   /**
    * Reads the query `request` names as `by`, as `build`, by
    * `deadline`; a throw is a refusal that ends the subscription.
+   * `readAgain` when a write caused the read: it keeps no evidence of a
+   * refused use, which the subscription's first read kept
+   * (app-functions.ts, `readAgain`).
    */
   evaluate: (
     by: By,
     app: AppId,
     build: PageLease | undefined,
     request: string,
-    deadline: number
+    deadline: number,
+    readAgain: boolean
   ) => Promise<LiveRead>;
 }
 
@@ -412,7 +416,8 @@ const evaluatePage = async (
   app: AppId,
   lease: PageLease | undefined,
   request: string,
-  deadline: number
+  deadline: number,
+  readAgain: boolean
 ): Promise<EvaluatedQuery> => {
   if (lease?.kind === "draft") {
     let reads: EvaluatedQuery["reads"];
@@ -437,7 +442,8 @@ const evaluatePage = async (
     app,
     lease?.build,
     "watchQuery",
-    async () => await evaluateAppQuery(env, by, app, request, deadline)
+    async () =>
+      await evaluateAppQuery(env, by, app, request, deadline, readAgain)
   );
 };
 
@@ -460,14 +466,15 @@ export const pageReads = (
   forget: () => {
     check.forget?.();
   },
-  evaluate: async (by, app, build, request, deadline) => {
+  evaluate: async (by, app, build, request, deadline, readAgain) => {
     const { answer, reads } = await evaluatePage(
       env,
       by,
       app,
       build,
       request,
-      deadline
+      deadline,
+      readAgain
     );
     return { result: answer.result, reads };
   },
@@ -855,7 +862,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         app,
         build,
         request,
-        Date.now() + evaluationMs
+        Date.now() + evaluationMs,
+        // A read a write caused (`#changed`), not one the person asked for.
+        evaluation.charged
       );
     } catch (error) {
       await this.#end(evaluation, refusalResult(error));
