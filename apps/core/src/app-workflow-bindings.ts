@@ -131,8 +131,13 @@ import type { StartFiles } from "./workflows/start-files.ts";
 // - A later version undoing a rebind it never made: a version binds as
 //   its own only what it records differently from the version people use
 //   as it is sealed; for every other alias its release seals what the App
-//   binds then, so a direct rebind made before it is sealed stays. Made
-//   current again later, as a rollback, it binds what it sealed.
+//   binds then, so a direct rebind made before it is sealed stays. One
+//   made after it is sealed stays too, while its contract is the one the
+//   version declares: the switch binds such a pin again only where the
+//   App binds nothing there, or a version of another contract (a
+//   rollback across a contract change), so pages and starts agree on
+//   the contract, if not on the very version, as after any direct
+//   rebind. What the version records of its own is always bound.
 //
 // What an alias binds is otherwise the App's configuration, set by its
 // builders and an admin's grant, like a workflow's parameters. The
@@ -445,41 +450,66 @@ export const versionBindingChanges = async (
         eq(appWorkflowBindings.status, "active")
       )
     );
-  const changes: BindingChange[] = release.workflows.flatMap(
-    ({ alias, pinned }) => {
-      const held = active.find((binding) => binding.alias === alias);
-      if (
-        held?.workflowId === pinned.workflowId &&
-        held.version === pinned.version
-      ) {
-        return [];
-      }
-      const recordedBy = recorded.some(
-        (bound) =>
-          bound.alias === alias &&
-          bound.workflowId === pinned.workflowId &&
-          bound.version === pinned.version
-      )
-        ? author
-        : undefined;
-      return [
-        {
-          alias,
-          ...pinned,
-          ...(recordedBy === undefined ? {} : { recordedBy }),
-          ...(held === undefined
-            ? {}
-            : {
-                replacing: {
-                  id: held.id,
-                  workflowId: held.workflowId,
-                  version: held.version,
-                },
-              }),
-        },
-      ];
+  const declared = declaredPermissions(release.app, "workflows");
+  /** Whether version `bound` has the contract the App declares as `alias`. */
+  const fits = async (
+    alias: string,
+    bound: { readonly workflowId: string; readonly version: number }
+  ): Promise<boolean> => {
+    const declaration = declared.find((each) => each.alias === alias);
+    const contract = await versionEventContract(
+      env,
+      bound.workflowId,
+      bound.version
+    );
+    return (
+      declaration !== undefined &&
+      contract.complete &&
+      sameEventContract(declaration, contract)
+    );
+  };
+  const changes: BindingChange[] = [];
+  for (const { alias, pinned } of release.workflows) {
+    const held = active.find((binding) => binding.alias === alias);
+    if (
+      held?.workflowId === pinned.workflowId &&
+      held.version === pinned.version
+    ) {
+      continue;
     }
-  );
+    const recordedBy = recorded.some(
+      (bound) =>
+        bound.alias === alias &&
+        bound.workflowId === pinned.workflowId &&
+        bound.version === pinned.version
+    )
+      ? author
+      : undefined;
+    // A pin the version only took from the App's binding as it was
+    // sealed: a direct rebind of the same contract since stays.
+    const kept =
+      recordedBy === undefined &&
+      held !== undefined &&
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      (await fits(alias, held));
+    if (kept) {
+      continue;
+    }
+    changes.push({
+      alias,
+      ...pinned,
+      ...(recordedBy === undefined ? {} : { recordedBy }),
+      ...(held === undefined
+        ? {}
+        : {
+            replacing: {
+              id: held.id,
+              workflowId: held.workflowId,
+              version: held.version,
+            },
+          }),
+    });
+  }
   if (changes.length > 0) {
     requireNotStaff(by);
   }
@@ -495,23 +525,15 @@ export const versionBindingChanges = async (
       await requireMayBind(env, authorNow, change);
     }
   }
-  const declared = declaredPermissions(release.app, "workflows");
-  for (const declaration of declared) {
-    // What it binds once current: what its release sealed, otherwise
-    // what the App binds now, which the switch leaves.
+  for (const { alias } of declared) {
+    // What its release seals, which its pages read runs of, otherwise
+    // what the App binds now, which the switch leaves; one it keeps over
+    // a sealed pin fits already.
     const bound =
-      release.workflows.find(({ alias }) => alias === declaration.alias)
-        ?.pinned ?? active.find(({ alias }) => alias === declaration.alias);
-    if (bound === undefined) {
-      continue;
-    }
+      release.workflows.find((pin) => pin.alias === alias)?.pinned ??
+      active.find((binding) => binding.alias === alias);
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const contract = await versionEventContract(
-      env,
-      bound.workflowId,
-      bound.version
-    );
-    if (!contract.complete || !sameEventContract(declaration, contract)) {
+    if (bound !== undefined && !(await fits(alias, bound))) {
       throw workflowResourceErrors.create(
         "workflow.app_binding_contract_changed"
       );

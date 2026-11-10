@@ -356,14 +356,11 @@ export const Route = createFileRoute("/")({ component: Desk });
         alias: "review",
         version: 3,
       });
-      // Back to the second, then to the third, whose release sealed
-      // version 2 and which only carries it over.
+      // Back to the second, the alias unbound, then to the third, whose
+      // release sealed version 2 and which only carries it over.
       await builder.api.apps.versions.setCurrent(app, second);
-      await builder.api.workflowResources.bindToApp(flow, {
-        app,
-        alias: "review",
-        version: 3,
-      });
+      const [held] = await builder.api.workflowResources.appBindings(app);
+      await builder.api.workflowResources.unbindFromApp(held?.id ?? "");
       const again = await outcome(
         builder.api.apps.versions.setCurrent(app, third)
       );
