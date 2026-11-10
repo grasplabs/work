@@ -29,7 +29,6 @@ import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
-import { readDescriptor } from "./value-read.ts";
 
 // Forms: one `useForm`, two ways in.
 //
@@ -895,33 +894,23 @@ const isSchema = (value: unknown): value is StandardSchemaV1 =>
   "~standard" in value &&
   !("name" in value);
 
-/** A reference's argument descriptor, read as data; undefined for anything else. */
-const readArgs = (value: unknown): ValueDescriptor | undefined => {
-  try {
-    return readDescriptor(value, 1, { nodes: 0 });
-  } catch {
-    return undefined;
-  }
-};
-
 /** The way `target` and `options` make the form, read once. */
 const targetOf = (client: GraspClient, target: unknown): Target => {
   if (isSchema(target)) {
     return { kind: "schema", schema: target };
   }
-  // A form binds a mutation or an action: its reference carries its kind
-  // and the argument descriptor the form checks with, built with the App's
-  // server code. Core checks the submission again with the function's own
-  // validator, and the form shows what it refuses by the fields it names.
-  const kind = isPlainObject(target) ? target.kind : undefined;
-  if (kind !== "mutation" && kind !== "action") {
+  // A form binds a mutation or an action by its reference's name: its
+  // kind and the arguments the form checks with are the page's release's
+  // (page-functions.ts), never anything the reference itself carries.
+  // Core checks the submission again with the function's own validator,
+  // and the form shows what it refuses by the fields it names.
+  const internals = clientInternals(client);
+  const fn = internals.functionOf(target);
+  if (fn === undefined || fn.kind === "query") {
     throw clientError("contract.invalid_request");
   }
-  clientInternals(client).readReference(target, kind);
-  const args = isPlainObject(target) ? readArgs(target.args) : undefined;
-  if (args === undefined) {
-    throw clientError("contract.invalid_request");
-  }
+  const { kind, args } = fn;
+  internals.readReference(target, kind);
   if (kind === "action") {
     const send: Send = async (input, submit) =>
       // SAFETY: read as an action reference just above.

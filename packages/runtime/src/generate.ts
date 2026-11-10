@@ -7,7 +7,11 @@ import {
   sortedListens,
 } from "./bound-workflows.ts";
 import type { WorkflowBindingExtras } from "./bound-workflows.ts";
-import { referencesText, serverReferencesText } from "./codegen-api.ts";
+import {
+  pageFunctionsText,
+  referencesText,
+  serverReferencesText,
+} from "./codegen-api.ts";
 import {
   contractFingerprints,
   contractsFormatVersion,
@@ -19,7 +23,7 @@ import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 
 // The modules the host generates for an App, as Convex
 // generates `convex/_generated/`, from its manifest as the host read it
-// (app-manifest.ts), never from its code:
+// (app-manifest.ts):
 //
 // - `server/_generated/server.ts` (`@server/_generated/server`): the
 //   server constructors and `doc`, specialized to the App's schema and
@@ -32,9 +36,18 @@ import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 //   `internal` tree, for the App's own server code only.
 // - `server/_generated/api.ts` (`@server/_generated/api`): the public
 //   `api`, `workflows` and the permissions its pages use
-//   (`permissions.files`, `permissions.links`). What a browser gets: data and
-//   types, extracted from descriptors, with no handler, schema or server
-//   code in it.
+//   (`permissions.files`, `permissions.links`). What a browser gets: data,
+//   with no handler, schema or server code in it.
+//
+//   `api` and `internal` hold each function's name alone, typed from the
+//   function's own code (`typeof import("../tasks.ts").list`, imported
+//   for its type only), so they depend on the server files' paths and
+//   exports' names and nothing of a release. `workflows` is still what
+//   the host resolved of each workflow the App binds, in the release.
+// - `.grasp/functions.ts`: the release's public functions by name, as
+//   data (page-functions.ts), built into the pages beside their route
+//   tree: what a form checks a submission with and a grid reads its
+//   columns from.
 // - `.grasp/contracts.json`: the App's manifest, each function's
 //   fingerprint and the workflows it binds with theirs, canonical: what
 //   the release's contract hash covers.
@@ -82,5 +95,6 @@ export const generateModules = async (
     [generatedPaths.internal]: serverReferencesText(manifest),
     [generatedPaths.api]: await referencesText(manifest, identity, workflows),
     [generatedPaths.contracts]: `${contracts}\n`,
+    [generatedPaths.functions]: pageFunctionsText(manifest, workflows),
   };
 };

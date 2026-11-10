@@ -30,6 +30,7 @@ import {
   isServerModule,
   maxAppTestSuites,
   serverCodeFolders,
+  serverSdkImports,
   serverEntryPath,
   serverEntrySource,
   strayTestFileMessage,
@@ -79,6 +80,7 @@ import {
   limitErrors,
   generatedWorkflowErrors,
   isDesignLinted,
+  isTypeOnlyFile,
   routeTreePath,
 } from "./inputs.ts";
 import {
@@ -92,6 +94,7 @@ import {
   ownEntry,
   previewRefresh,
   previewRuntime,
+  pageFunctions,
   pageReferences,
   pageRuntime,
 } from "./kit.ts";
@@ -102,7 +105,7 @@ import oxcWasm from "./oxc.wasm";
 import { problem, pageRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
 import { routeTree } from "./route-tree.ts";
-import type { SurfaceManifest } from "./route-tree.ts";
+import type { RouteTree, SurfaceManifest } from "./route-tree.ts";
 import { callbackParameters, readsStandIns } from "./stand-ins.ts";
 import { directivesIn, referenceError } from "./steering.ts";
 import type { DirectiveSite } from "./steering.ts";
@@ -212,6 +215,13 @@ const directiveAt = (
 };
 
 /**
+ * What of `typeFiles` a page's directive may name: never the server code
+ * a build reads for the references' types alone (`isTypeOnlyFile`).
+ */
+const referable = (typeFiles: ReadonlySet<string>): ReadonlySet<string> =>
+  new Set([...typeFiles].filter((path) => !isTypeOnlyFile(path)));
+
+/**
  * What a page's or a declaration's triple-slash directives reach beyond
  * the App's files (steering.ts `referenceError`), each refused where it is.
  */
@@ -259,7 +269,7 @@ const compileFile = (
     return { errors: transformErrors(path, transformed, unparsed), calls };
   }
   const { imports, directives } = sitesOf(transformed);
-  const errors = referenceErrors(path, directives, typeFiles);
+  const errors = referenceErrors(path, directives, referable(typeFiles));
   const declarations = new Set(
     [...typeFiles].filter((typeFile) => declarationFile.test(typeFile))
   );
@@ -326,7 +336,7 @@ const declarationImportErrors = (
   }
   const { imports, directives } = sitesOf(transformed);
   return [
-    ...referenceErrors(path, directives, typeFiles),
+    ...referenceErrors(path, directives, referable(typeFiles)),
     ...imports.flatMap((site) => {
       const { line } = site;
       const message = pageTypeImportError(site, path, typeFiles, kit);
@@ -492,7 +502,9 @@ const pagesTarget = pageTarget(
     ...kit.imports,
     "lucide-react",
     "react/jsx-runtime",
-    "@grasp-os/sdk/server",
+    // The server code the references' types read imports these: types
+    // alone in a page, whose own imports of them its compile refuses.
+    ...serverSdkImports,
   ])
 );
 
@@ -542,6 +554,23 @@ const packageDeclarations = (
           .join("\n"),
       };
 
+/**
+ * `tree`, its module also handing the page runtime the release's
+ * functions (`pageFunctions`) when the build has them: the route tree is
+ * what the runtime imports first, and the functions become its client's
+ * (page-runtime.ts `runPage`).
+ */
+const withFunctions = (
+  tree: RouteTree,
+  app: Readonly<Record<string, string>>
+): RouteTree =>
+  tree.source === undefined || !Object.hasOwn(app, pageFunctions.path)
+    ? tree
+    : {
+        ...tree,
+        source: `${tree.source}\nexport { functions } from "../${pageFunctions.path}";\n`,
+      };
+
 const pagesCheck = (
   app: Record<string, string>,
   {
@@ -554,7 +583,11 @@ const pagesCheck = (
     untyped: ReadonlySet<string>;
   }
 ): TypeCheckPlan => ({
-  request: typeCheckRequest(app, pagesTarget),
+  request: typeCheckRequest(
+    app,
+    pagesTarget,
+    Object.keys(app).filter((path) => isTypeOnlyFile(path))
+  ),
   found,
   unparsed: [...unparsed],
   untyped: [...untyped],
@@ -625,7 +658,7 @@ export const buildPagesIncrementally = async (
   // as written (`moduleKey`): the generator's correction is a function of
   // the file's path and source, so the file pins down what compiles, as
   // core works the keys out (`pageIncrementKeys`).
-  const tree = await routeTree(app);
+  const tree = withFunctions(await routeTree(app), app);
   const routed = { ...app, ...tree.routes };
   // Only pages, components and the references they import are
   // compiled, whatever else is passed: what isn't is refused above, and

@@ -10,6 +10,7 @@ import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
 import { readWorkflowReference } from "../src/workflow-reference-read.ts";
 import { respondToDecision } from "../src/workflow-respond.ts";
+import { functions } from "./notes/.grasp/functions.ts";
 import { api, workflows } from "./notes/server/_generated/api.ts";
 
 // A form's submission state through the real session client, against the
@@ -127,7 +128,7 @@ const host = (answer: (sent: Sent) => Answer | Promise<Answer>) => {
       guards.push(guarded);
     },
   };
-  return { client: new GraspClient(transport), sent, guards };
+  return { client: new GraspClient(transport, functions), sent, guards };
 };
 
 /** A form of `target` through `client`, connected to a TanStack form as `useForm` does. */
@@ -839,6 +840,80 @@ describe("a decision form", () => {
       draft: { approved: true, value: { comment: "Fine" } },
       asked: 1,
     });
+  });
+});
+
+// A function's form checks what it sends with the arguments the page's
+// release declares for the function its reference names: a reference is
+// a name, so whatever else an object carries (an argument descriptor
+// that takes anything, another kind) changes nothing, and a name the
+// release has no public mutation or action at (a query, an internal
+// function, a key every object inherits) makes no form. Core checks the
+// submission again with the function's own validator in the release
+// current then.
+describe("what a function's form checks a submission with", () => {
+  it("is the release's arguments for the name, whatever else the reference carries", async () => {
+    const { client, sent } = host(() => ({ value: noteId }));
+    const forged = {
+      name: "notes.create",
+      kind: "action",
+      args: v.object({}).descriptor,
+    };
+    const { binding } = formOf(client, forged, {
+      defaultValues: { title: 5, body: "" },
+    });
+    await expect(settle(binding.submit())).resolves.toMatchObject({
+      rejected: {
+        code: "contract.invalid_args",
+        details: { issues: [{ path: ["title"] }] },
+      },
+    });
+    expect({
+      sent: sent.length,
+      title: binding.fieldDescriptor("title")?.kind,
+    }).toStrictEqual({ sent: 0, title: "string" });
+  });
+
+  it("is a bound workflow's arguments for its start, as for the App's own functions", async () => {
+    const { client, sent } = host(() => ({ value: null }));
+    const { binding } = formOf(
+      client,
+      workflows.summarizeNote.mutations.start,
+      { defaultValues: { args: { noteId: 5 } } }
+    );
+    await expect(settle(binding.submit())).resolves.toMatchObject({
+      rejected: {
+        code: "contract.invalid_args",
+        details: { issues: [{ path: ["args", "noteId"] }] },
+      },
+    });
+    expect(sent).toHaveLength(0);
+  });
+
+  it.each([
+    ["a query", "notes.get"],
+    ["an internal function", "notes.count"],
+    ["a name nothing is at", "notes.missing"],
+    ["an inherited key", "constructor"],
+    ["the prototype's key", "__proto__"],
+    ["an inherited key under a module", "notes.toString"],
+    ["a name with nothing after it", ""],
+  ])("makes no form of %s", (_case, name) => {
+    const { client } = host(() => ({ value: null }));
+    expect(() => bindForm(client, { name }, { defaultValues: {} })).toThrow(
+      expect.objectContaining({ code: "contract.invalid_request" })
+    );
+  });
+
+  it("makes no form of a function in a client given no release's functions", () => {
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("Nothing is called.")),
+      watch: async () =>
+        await Promise.reject(new Error("Nothing is followed.")),
+    });
+    expect(() =>
+      bindForm(client, api.notes.create, { defaultValues: {} })
+    ).toThrow(expect.objectContaining({ code: "contract.invalid_request" }));
   });
 });
 

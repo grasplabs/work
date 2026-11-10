@@ -18,6 +18,9 @@ import type {
   FunctionReturn,
   Streaming,
 } from "./function-references.ts";
+import { referenceName } from "./function-references.ts";
+import { readPageFunctions } from "./page-functions.ts";
+import type { PageFunctions } from "./page-functions.ts";
 import { Pagers } from "./paginated-query.ts";
 import { fences } from "./refusals.ts";
 import { Streams } from "./streams.ts";
@@ -182,6 +185,12 @@ export class GraspClient {
    * the host confirms leaving the App while any does.
    */
   readonly #leaveGuards = new Set<object>();
+  /**
+   * The release's public functions the page was built with, by name
+   * (page-functions.ts): what a form checks a submission with and a grid
+   * reads its columns from. Replaced as a preview's draft changes.
+   */
+  #functions: PageFunctions;
 
   /**
    * The App's files: downloading and deleting them through a files
@@ -218,10 +227,13 @@ export class GraspClient {
    * The client over a `ClientTransport`, for the platform only
    * (page-runtime.ts). By design, not isolation: page code shares the
    * frame and could make one, but gets nothing from it that `bridge()`
-   * doesn't already give it.
+   * doesn't already give it. `functions` is the page build's
+   * `.grasp/functions.ts` (`functions`), read as data: without it, the
+   * client's forms and grids find no function.
    */
-  constructor(transport: ClientTransport) {
+  constructor(transport: ClientTransport, functions?: unknown) {
     this.#transport = transport;
+    this.#functions = readPageFunctions(functions);
     this.#fence = new AccessFence(transport, (refusal) => {
       // Nothing of anyone's is held now: whoever comes next joins no save
       // made before.
@@ -299,6 +311,13 @@ export class GraspClient {
         };
       },
       fileDeleted: (id) => client.#deletedFiles.has(id),
+      functionOf: (reference) => {
+        const name = referenceName(reference);
+        return name === undefined ? undefined : client.#functions.get(name);
+      },
+      useFunctions: (functions) => {
+        client.#functions = readPageFunctions(functions);
+      },
     });
   }
 

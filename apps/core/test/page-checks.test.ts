@@ -231,6 +231,30 @@ export const Route = createFileRoute("/server")({ component: Server });
     });
   });
 
+  it("fails a page that names the App's server code in a reference directive, though its build reads it for types", async () => {
+    const built = await buildPages(
+      env,
+      app({
+        // References, so the build reads the server code for their types.
+        "server/_generated/api.ts": "export const api = {};\n",
+        "server/tickets.ts": `export const secret = (): string => "fictional-marker";\n`,
+        "src/routes/server.tsx": `/// <reference path="../../server/tickets.ts" />
+import { createFileRoute } from "@tanstack/react-router";
+
+function Server() {
+  return null;
+}
+export const Route = createFileRoute("/server")({ component: Server });
+`,
+      }),
+      "app-test"
+    );
+    expect({
+      ok: built.ok,
+      files: [...new Set(built.diagnostics.map(({ file }) => file))],
+    }).toStrictEqual({ ok: false, files: ["src/routes/server.tsx"] });
+  });
+
   it("fails a type error in the App's server types", async () => {
     const built = await buildPages(
       env,

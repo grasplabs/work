@@ -92,13 +92,29 @@ const generated = (file: string): boolean => file.startsWith(".grasp/");
 const routeTree = (file: string): boolean => file === "src/routeTree.gen.ts";
 
 /**
+ * The server code a pages check reads for the references' types alone
+ * (inputs.ts `isServerTypeFile`), whose errors the server check reports:
+ * everything of it but the references the pages import.
+ */
+const serverTypes = (file: string): boolean =>
+  file !== "server/_generated/api.ts" &&
+  (file === "grasp.config.ts" ||
+    file === "values.ts" ||
+    file.startsWith("server/"));
+
+/**
  * The kinds of code, as each tsconfig's `grasp.kind` names it. Server
  * code's migrations are checked for what they name, not yet for their
  * own type errors (compiler `checkAppCode`, GRA-690); and the host's
  * generated modules are its own.
  */
 const kinds: Readonly<Record<string, Kind>> = {
-  pages: { reports: every, steered: none, declares: routeTree, lenient: none },
+  pages: {
+    reports: (file) => !serverTypes(file),
+    steered: none,
+    declares: routeTree,
+    lenient: none,
+  },
   server: {
     reports: every,
     steered: (file) => !generated(file),

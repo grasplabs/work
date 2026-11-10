@@ -1,6 +1,11 @@
 import type { FunctionReference } from "@grasp-os/runtime/app";
+import { declaredReturns } from "@grasp-os/runtime/forms";
 import type { ValueDescriptor } from "@grasp-os/runtime/forms";
-import { usePaginatedQuery, useRetryFailed } from "@grasp-os/runtime/react";
+import {
+  useClient,
+  usePaginatedQuery,
+  useRetryFailed,
+} from "@grasp-os/runtime/react";
 import type { PageItemOf, PaginatedArgsOf } from "@grasp-os/runtime/react";
 import {
   Alert,
@@ -1059,7 +1064,8 @@ export const DataGrid = <Reference extends AnyQuery>({
   >[];
 
   const text: DataGridText = { ...pageText(dataGridTexts), ...ownText };
-  const fields = recordFieldsOf(query.returns ?? null);
+  const client = useClient();
+  const fields = recordFieldsOf(declaredReturns(client, query));
   const columns = specs.map((spec) => readColumn(spec, fields));
   const [typed, setTyped] = useState("");
   const search = useSettled(typed, searchSettleMs);

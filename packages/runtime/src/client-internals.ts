@@ -3,6 +3,7 @@ import type { QueryEntry } from "./client-query-entry.ts";
 import type { ReadReference } from "./client-request.ts";
 import type { DecisionTransport } from "./client-transport.ts";
 import type { ReferenceKind } from "./function-references.ts";
+import type { PageFunction } from "./page-functions.ts";
 import type { Pager } from "./pager.ts";
 import type { StreamEvents } from "./streams.ts";
 
@@ -84,4 +85,11 @@ export interface ClientInternals {
    * asked for it later shows it gone, never reading it again.
    */
   fileDeleted: (id: string) => boolean;
+  /**
+   * The release's public function `reference` names, as the page's build
+   * describes it, found by its name alone; undefined when it names none.
+   */
+  functionOf: (reference: unknown) => PageFunction | undefined;
+  /** Replaces the release's functions: a preview's draft changed them. */
+  useFunctions: (functions: unknown) => void;
 }

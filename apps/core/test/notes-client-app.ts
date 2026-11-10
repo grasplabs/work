@@ -233,9 +233,8 @@ export type Page =
 
 /**
  * The reference to `path` of `release`, as the App's
- * `@server/_generated/api` holds it: a query's name; a mutation's or an
- * action's name, kind and arguments. Typed by hand, as that module types
- * it.
+ * `@server/_generated/api` holds it: its name. Typed by hand, as that
+ * module types it.
  */
 export const referenceTo = <
   Args,
@@ -250,14 +249,9 @@ export const referenceTo = <
   if (operation === undefined) {
     throw new Error(`The release has no ${path}`);
   }
-  const data =
-    operation.kind === "query"
-      ? { name: path }
-      : { name: path, kind: operation.kind, args: operation.args };
-  // SAFETY: each caller names the kind, arguments, return and progress the
+  // Each caller names the kind, arguments, return and progress the
   // release declares.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return data as FunctionReference<Kind, "public", Args, Return, Progress>;
+  return { name: operation.path };
 };
 
 /** The App's `api`, as its pages import it from `@server/_generated/api`. */

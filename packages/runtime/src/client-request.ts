@@ -18,9 +18,9 @@ export interface ReadReference {
 }
 
 /**
- * `value`, a reference, as a call of `kind` sends it;
- * `contract.invalid_request` for anything that names no function, or a
- * mutation's or an action's reference, which says its kind, of another.
+ * `value`, a reference, as a call of `kind` sends it: its name, and
+ * nothing else it carries; `contract.invalid_request` for anything that
+ * names no function.
  */
 export const readReference = (
   value: unknown,
@@ -29,8 +29,7 @@ export const readReference = (
   if (
     !isPlainObject(value) ||
     typeof value.name !== "string" ||
-    value.name.length === 0 ||
-    (value.kind !== undefined && value.kind !== kind)
+    value.name.length === 0
   ) {
     throw clientError("contract.invalid_request");
   }

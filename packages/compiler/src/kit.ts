@@ -145,6 +145,14 @@ export const pageReferences = {
 } as const;
 
 /**
+ * The release's public functions as data (`functions`), which the host
+ * generates beside the references: built into the pages, and re-exported
+ * by their route tree for the page runtime to give its client, which a
+ * form checks a submission and a grid reads its columns with.
+ */
+export const pageFunctions = { path: ".grasp/functions.ts" } as const;
+
+/**
  * The types of an App's tables (`Doc`, `Id`, `TableName`), which its
  * pages import with `import type`, as Convex's pages import theirs, and
  * which every build of them generates from the App's schema

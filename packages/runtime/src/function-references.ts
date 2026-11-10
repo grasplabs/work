@@ -1,22 +1,23 @@
 import { isPlainObject } from "./value-descriptor.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
 
-// References: how code names one of an App's functions or
-// a browser-facing resource, without holding any of them. A
-// function's reference is its name and kind, nothing more: core resolves
-// the name in the release that answers the call (the App's current one,
-// for a page) and checks the call's arguments with that function's own
-// validator. It holds no handler and grants nothing, so a forged one
-// reaches only what its name does: a public function of the App, with
-// arguments its validator accepts.
+// References: how code names one of an App's functions, without holding
+// it. A function's reference is its name, nothing more, as Convex's:
+// the hook or context that calls it says which kind of call it makes,
+// core resolves the name in the release that answers the call (the App's
+// current one, for a page) and checks the call's arguments with that
+// function's own validator. It holds no handler and grants nothing, so a
+// forged one reaches only what its name does: a public function of the
+// App, with arguments its validator accepts.
 //
 // The generated modules hold them: `@server/_generated/api` the public
-// `api` and the browser resources;
-// `@server/_generated/internal` the `internal` tree, for the App's own
-// server code. Their types come from the functions' descriptors, through
-// the phantom members below, which exist in types only: they are keyed by
-// symbols that are declared, never created, so no reference carries them
-// at run time, JSON never holds them and an editor never offers them.
+// `api`, `@server/_generated/internal` the `internal` tree, for the App's
+// own server code. Both depend only on the server files' paths and their
+// exports' names, and their types are the functions' own, from the code
+// (`FunctionReferenceFromExport<typeof import("../tasks.ts").list>`),
+// through the phantom members below, which exist in types only: they are
+// keyed by symbols that are declared, never created, so no reference
+// carries them at run time, JSON never holds them and an editor never
+// offers them.
 
 /** The kinds of server function. */
 export type ReferenceKind = "query" | "mutation" | "action";
@@ -58,15 +59,9 @@ export interface Callable<
 }
 
 /**
- * A generated reference to one of an App's functions: its
- * name, its path (`tasks.list`), and what the page needs of it, built with
- * the App's server code (`_generated`): a mutation's or an action's kind
- * and argument descriptor, which `useForm` sends and checks a form with,
- * or a query's declared return, which a grid reads its columns from. Core
- * still checks every call with the function's own validator: a page of an
- * older release whose descriptor is stale is at most told something
- * slightly off before core answers with its issues. Its visibility, what
- * it takes, answers and streams are its types.
+ * A generated reference to one of an App's functions: its name, its path
+ * (`tasks.list`), and nothing else at run time. Its kind, visibility,
+ * what it takes, answers and streams are its types, the function's own.
  */
 export type FunctionReference<
   Kind extends ReferenceKind,
@@ -74,26 +69,28 @@ export type FunctionReference<
   Args = unknown,
   Return = unknown,
   Progress = never,
-> = Callable<Kind, Vis, Args, Return, Progress> &
-  (Kind extends "query" ? QueryFields : SubmissionFields<Kind>);
-
-/** What a query's reference holds. */
-interface QueryFields {
+> = Callable<Kind, Vis, Args, Return, Progress> & {
   /** Its name, as `api.tasks.list` names it: `tasks.list`. */
   readonly name: string;
-  /** Its declared return, where it declares one. */
-  readonly returns?: ValueDescriptor;
-}
+};
 
-/** What a mutation's or an action's reference holds. */
-interface SubmissionFields<Kind extends ReferenceKind> {
-  /** Its name, as `api.tasks.create` names it: `tasks.create`. */
-  readonly name: string;
-  /** What `useForm` sends a submission as. */
-  readonly kind: Kind;
-  /** Its arguments, as `useForm` checks them. */
-  readonly args: ValueDescriptor;
-}
+/**
+ * The reference to `Export`, a server function a module exports, typed
+ * as the function itself: what the generated modules type each reference
+ * with (`typeof import("../tasks.ts").list`), as Convex's
+ * `ApiFromModules` does. A function that declares no `returns` answers
+ * what its handler answers.
+ */
+export type FunctionReferenceFromExport<Export> =
+  Export extends Callable<
+    infer Kind,
+    infer Vis,
+    infer Args,
+    infer Return,
+    unknown
+  >
+    ? FunctionReference<Kind, Vis, Args, Return, ProgressOf<Export>>
+    : never;
 
 /**
  * A streaming action, as App code declares it (its

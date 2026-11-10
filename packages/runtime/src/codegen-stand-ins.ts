@@ -30,13 +30,11 @@ const standInImport =
  * The stand-in trees' type: at every path, a reference that takes and
  * answers `any`, so a call through one (`useQuery`, `ctx.runQuery`) types
  * its answer `any` too, never `unknown`, and nothing that uses it fails
- * for want of the real references. A reference's fields follow its kind,
- * and an `any` kind makes them a query's or a mutation's, never both, so
- * the stand-in also holds a mutation's and an action's `kind` and `args`:
- * it passes for a reference of every kind.
+ * for want of the real references: it passes for a reference of every
+ * kind.
  */
 const standInTree = `
-type StandIn = FunctionReference<any, any, any, any, any> & { readonly kind: any; readonly args: any } & { readonly [name: string]: StandIn };
+type StandIn = FunctionReference<any, any, any, any, any> & { readonly [name: string]: StandIn };
 `;
 
 export const symbolicModules = (): Record<string, string> => {
@@ -68,5 +66,8 @@ export const symbolicModules = (): Record<string, string> => {
   return {
     [generatedPaths.internal]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree} as unknown as StandIn;\n`,
     [generatedPaths.api]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\n`,
+    // No function to describe: a page built on stand-ins makes no form of
+    // one, and is never passed.
+    [generatedPaths.functions]: `${banner}export const functions = {};\n`,
   };
 };

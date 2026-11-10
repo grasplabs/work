@@ -97,8 +97,14 @@ type AppFiles = Record<string, string>;
 /** What a build of `kind` takes, as its errors past it. */
 const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
   // An App's server code carries the host's generated modules, held to
-  // their own allowance, so they never count against the App's limits.
-  if (kind === "app" || kind === "app-check" || kind === "workflow") {
+  // their own allowance, so they never count against the App's limits;
+  // so do its pages, which read them (and its server code) for types.
+  if (
+    kind === "app" ||
+    kind === "app-check" ||
+    kind === "workflow" ||
+    kind === "page"
+  ) {
     return appCodeLimitErrors;
   }
   // A JSON workflow's generated module: one file, held to its own bound.

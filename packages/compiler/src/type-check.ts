@@ -48,10 +48,18 @@ export const compilerOptions = {
   // diagnostics count, so the kit's declarations' don't (`typeCheck`).
   skipLibCheck: false,
   types: [],
-  // The App's generated references and data model, as its pages import them.
+  // The App's generated modules by their aliases: the references and
+  // data model its pages import, and the constructors and `internal` tree
+  // the server code their references' types read imports.
   paths: {
     [pageReferences.specifier]: [`./${pageReferences.path}`],
     [pageDataModel.specifier]: [`./${pageDataModel.path}`],
+    "@server/_generated/server": [
+      `./${generatedModules["@server/_generated/server"]}`,
+    ],
+    "@server/_generated/internal": [
+      `./${generatedModules["@server/_generated/internal"]}`,
+    ],
   },
 } as const satisfies CompilerOptions;
 
@@ -149,16 +157,23 @@ export interface TypeCheckRequest {
   readonly options: CompilerOptions;
   /** The modules App files may resolve by name; any, when absent. */
   readonly allowed?: readonly string[];
+  /**
+   * The files among `files` read for their types alone, whose own
+   * diagnostics another check reports: a pages check's server code.
+   */
+  readonly unreported?: readonly string[];
 }
 
 /** `target`'s check of `files`, as the checker's isolate takes it over RPC. */
 export const typeCheckRequest = (
   files: Readonly<Record<string, string>>,
-  { options, allowed }: TypeTarget = generatedTarget
+  { options, allowed }: TypeTarget = generatedTarget,
+  unreported: readonly string[] = []
 ): TypeCheckRequest => ({
   files,
   options,
   ...(allowed === undefined ? {} : { allowed: [...allowed] }),
+  ...(unreported.length === 0 ? {} : { unreported: [...unreported] }),
 });
 
 /** Where the kit's packages are, for a target that resolves any of them. */
@@ -231,7 +246,15 @@ export interface TscRun {
  */
 export const diagnosticsOfRun = (
   { exitCode, reply, stderr }: TscRun,
-  { files, root }: { files: Readonly<Record<string, string>>; root: string }
+  {
+    files,
+    root,
+    unreported = [],
+  }: {
+    files: Readonly<Record<string, string>>;
+    root: string;
+    unreported?: readonly string[];
+  }
 ): Diagnostic[] => {
   const said = stderr.trim().split("\n")[0] ?? "";
   const because = said === "" ? "" : `: ${said}`;
@@ -258,10 +281,15 @@ export const diagnosticsOfRun = (
     );
   }
   const own = new Set(Object.keys(files).map((path) => `/${path}`));
+  const others = new Set(unreported.map((path) => `/${path}`));
   return all.flatMap((diagnostic): Diagnostic[] => {
     const severity = severities[diagnostic.category];
     const { fileName } = diagnostic;
-    if (severity === undefined || fileName?.startsWith(root) === true) {
+    if (
+      severity === undefined ||
+      fileName?.startsWith(root) === true ||
+      (fileName !== undefined && others.has(fileName))
+    ) {
       return [];
     }
     const result: Diagnostic = {
@@ -298,7 +326,7 @@ export const diagnosticsOfRun = (
 export const typeCheck = (
   module: WebAssembly.Module,
   kit: KitTypes,
-  { files, options, allowed }: TypeCheckRequest
+  { files, options, allowed, unreported }: TypeCheckRequest
 ): Diagnostic[] => {
   const app = Object.keys(files);
   const strays = app.filter(
@@ -355,6 +383,6 @@ export const typeCheck = (
   );
   return diagnosticsOfRun(
     { exitCode, reply, stderr: errors.join("") },
-    { files, root }
+    { files, root, ...(unreported === undefined ? {} : { unreported }) }
   );
 };

@@ -64,7 +64,7 @@ export default defineApp({
 
 ## Server functions
 
-Every module under `server/` exports server functions. Each one declares its arguments and what it returns, and Grasp checks both on every call:
+Every module under `server/` exports server functions. Each one declares its arguments, and Grasp checks them on every call. `returns` is optional: when a function declares it, Grasp checks every answer against it, and a `DataGrid` takes each column's kind from it. Without `returns`, callers get the type of whatever the handler returns:
 
 ```ts server/tasks.ts
 import { v } from "@grasp-os/sdk";
@@ -158,5 +158,7 @@ The App's Pages aren't listed anywhere: the files in `src/routes/` are its route
 - `api`: a reference to each public function, for Pages and tests.
 - `internal`: a reference to each internal function, for server code.
 - `dataModel`: the types of your tables (`Doc`, `Id`).
+
+A reference holds only the function's name (`{ name: "tasks.list" }`). Its types come from the function's own code, as in Convex, so renaming an argument shows up in every Page that passes it.
 
 Never edit them: Grasp writes them again on every build.

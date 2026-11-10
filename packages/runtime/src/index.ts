@@ -65,6 +65,7 @@ export type {
   AnyFunctionReference,
   FunctionArgs,
   FunctionReference,
+  FunctionReferenceFromExport,
   ProgressOf,
   ReferenceKind,
   ReferenceVisibility,
