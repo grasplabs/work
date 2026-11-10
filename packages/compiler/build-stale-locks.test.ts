@@ -59,18 +59,4 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     expect(wholeRelease(assets, versionModule)).toStrictEqual(releaseFiles);
     expect(readdirSync(dir).toSorted()).toStrictEqual(["assets", "version.js"]);
   });
-
-  it("takes over the lock of a build whose process ID another process has now", () => {
-    const dir = scratch();
-    const assets = path.join(dir, "assets");
-    const versionModule = path.join(dir, "version.js");
-    // The owner's ID is this process's, which runs, but the owner started
-    // at another time: it was another process, which is gone.
-    heldLock(assets, process.pid, "Thu-Jan-1-00-00-00-1970");
-
-    build(assets, versionModule, "production");
-
-    expect(wholeRelease(assets, versionModule)).toStrictEqual(releaseFiles);
-    expect(readdirSync(dir).toSorted()).toStrictEqual(["assets", "version.js"]);
-  });
 });

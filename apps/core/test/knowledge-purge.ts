@@ -1,15 +1,16 @@
 import { rebuildSearchIndex } from "@grasp-os/brain/search-erasure";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
+import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
-import { openRpc, unique } from "./sign-in.ts";
-import type { signedInApi } from "./sign-in.ts";
+import type { Idp } from "./idp.ts";
+import { openRpc, signedInApi, unique } from "./sign-in.ts";
 
 // What the tests of purging personal data from Knowledge share
-// (knowledge-purge.test.ts, knowledge-purge-content.test.ts). Each test
-// file signs its people in through its own mocked IdP: `mockIdp()`
-// registers hooks, so it can't be called here.
+// (knowledge-purge*.test.ts). Each test file signs its people in through
+// its own mocked IdP: `mockIdp()` registers hooks, so it can't be called
+// here.
 
 /** Signing people in can be slow on CI. */
 export const setUpTime = { timeout: 60_000 };
@@ -271,4 +272,127 @@ export const watchingPurge = async (
     coreEnv: { ...env, KNOWLEDGE: knowledge },
   });
   return { api: core.authenticate(), written };
+};
+
+/** Remembers `text` as `person`, under a key of its own. */
+export const rememberAs = async (person: Person, text: string) =>
+  await person.api.knowledge.remember(
+    { kind: "fact", text },
+    { idempotencyKey: `purge-${unique()}-${unique()}` }
+  );
+
+/**
+ * `person`'s API on a platform that refuses secure deletes, as a remote
+ * one may (search-erasure.ts), on which the purge's index rebuild also
+ * fails once. The index's secure deletes are turned off first: a
+ * delete's terms then stay in the index's pages until it is rebuilt.
+ */
+export const rebuildFailingOnce = async (person: Person) => {
+  await env.KNOWLEDGE.batch([
+    env.KNOWLEDGE.prepare(
+      "INSERT INTO search_words (search_words, rank) VALUES ('secure-delete', 0)"
+    ),
+    env.KNOWLEDGE.prepare(
+      "INSERT INTO search_trigrams (search_trigrams, rank) VALUES ('secure-delete', 0)"
+    ),
+  ]);
+  let refuseNext = false;
+  let failNext = false;
+  let failed = false;
+  return await apiWith(person, {
+    prepare: (query) => {
+      if (query.includes("'secure-delete'")) {
+        refuseNext = true;
+      } else if (!failed && query.includes("VALUES ('rebuild')")) {
+        failNext = true;
+      }
+    },
+    beforeBatch: () => {
+      if (refuseNext) {
+        refuseNext = false;
+        failNext = false;
+        throw new Error("not authorized");
+      }
+      if (failNext) {
+        failNext = false;
+        failed = true;
+        throw new Error("D1 is unavailable");
+      }
+    },
+  });
+};
+
+/** The helpers that sign people in through `idp`. */
+export const purgesWith = (idp: Idp) => {
+  const personOf = async (role: Role) => await signedInApi(idp, role);
+
+  /** A person whose Personal collection holds `files`, by path. */
+  const leaverWith = async (files: Record<string, string>) => {
+    const leaver = await personOf("user");
+    const { personal } = await leaver.api.memory.collections();
+    for (const [path, text] of Object.entries(files)) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await saveOver(leaver, personal, path, text);
+    }
+    return { leaver, personal };
+  };
+
+  return { leaverWith };
+};
+
+/** The page directory's entry for `word` joined with さん, as hex. */
+export const entryOf = (word: string) => `${hexOf(`0${word}`)}E3`;
+
+/**
+ * A word whose token joined with さん heads a page of the words index, as
+ * a document holds it, with its plain twin in another document: its
+ * directory entry is the plain word and the first byte of さ, which the
+ * word's own key can't find (search-erasure.ts). `entriesLeft` counts
+ * that entry. Letters only: a word with a digit is held to a stricter
+ * check of its own.
+ */
+export const joinedWordHeadingAPage = async (admin: Person, before = "") => {
+  const handbook = await admin.api.knowledge.createCollection({
+    name: "Handbook",
+    access: "everyone",
+  });
+  const stem = `zq${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+  const words = Array.from(
+    { length: 2000 },
+    (_, at) => `${stem}${lettersOf(at, 3)}`
+  );
+  const joined = await saveOver(
+    admin,
+    handbook.id,
+    "joined.md",
+    `# Words\n${words.map((word) => `${before}${word}さん`).join(" ")}`
+  );
+  // The stem alone first: one term more before the pairs, so pages, which
+  // fill a pair at a time here, begin on a joined word.
+  await saveOver(
+    admin,
+    handbook.id,
+    "plain.md",
+    `# Words\n${stem} ${words.join(" ")}`
+  );
+  await env.KNOWLEDGE.prepare(
+    "INSERT INTO search_words (search_words) VALUES ('optimize')"
+  ).run();
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT hex(term) AS entry FROM search_words_idx WHERE hex(term) LIKE ?"
+  )
+    .bind(`${hexOf(`0${stem}`)}%E3`)
+    .all<{ entry: string }>();
+  const word = words.find((one) =>
+    results.some(({ entry }) => entry === entryOf(one))
+  );
+  const entriesLeft = async () => {
+    const left = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS n FROM search_words_idx WHERE hex(term) = ?"
+    )
+      .bind(entryOf(word ?? ""))
+      .first<{ n: number }>();
+    return left?.n;
+  };
+  return { joined, word, entriesLeft };
 };

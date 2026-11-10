@@ -84,6 +84,9 @@ const migrationsSchema = z.array(
 
 /** Empty storage, the env as configured, and the databases migrated. */
 const startEmpty = async (): Promise<void> => {
+  // Real timers first: a file that faked them and stopped mid-test would
+  // otherwise hold the reset's own timers (reset-storage.ts).
+  vi.useRealTimers();
   // Every Durable Object's storage, and with it every D1 database, R2 bucket
   // and workflow, connect's included: they are all Durable Objects locally.
   // Objects that went quiet are woken first, or the reset misses them
@@ -100,7 +103,6 @@ const startEmpty = async (): Promise<void> => {
     Reflect.set(env, name, value);
   }
 
-  vi.useRealTimers();
   vi.restoreAllMocks();
 
   await applyD1Migrations(

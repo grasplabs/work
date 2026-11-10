@@ -8,7 +8,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import {
-  querySubscriptionLimits,
+  liveReadLimitsOf,
   pageErrors,
   pageLimits,
 } from "@grasp-os/shared/pages";
@@ -116,7 +116,9 @@ export class App extends DurableObject<Env> {
    * Each person's reads of their live queries that writes caused
    * (`querySubscriptionLimits.liveReads`, query-subscriptions.ts).
    */
-  readonly #liveReads = new TokenBuckets(querySubscriptionLimits.liveReads);
+  readonly #liveReads = new TokenBuckets(
+    liveReadLimitsOf(this.env.LIVE_READ_LIMITS)
+  );
 
   /**
    * Each person's chunk requests of the App's files: a budget of their

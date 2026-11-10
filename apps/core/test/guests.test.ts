@@ -1,7 +1,5 @@
 import { guestTurnsMax } from "@grasp-os/shared/guests";
-import type { GuestView } from "@grasp-os/shared/guests";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import {
   afterEach,
@@ -13,20 +11,30 @@ import {
 } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction } from "../src/app-functions.ts";
-import { loadRelease } from "../src/app-releases.ts";
-import { sweepGuestChats } from "../src/guests.ts";
-import { testApp } from "./app-definitions.ts";
-import type { TestApp } from "./app-definitions.ts";
 import { grantReviewed, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { mockIdp } from "./idp.ts";
-import { answeringProvider, fakeProvider } from "./model-provider.ts";
-import type { FakeProvider, ProviderReply } from "./model-provider.ts";
-import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
+import {
+  answering,
+  bindGuests,
+  call,
+  codeOf,
+  connected,
+  grantGuests,
+  guest,
+  guestApp,
+  guestFiles,
+  idp,
+  invite,
+  readsMessages,
+  reply,
+  send,
+  viewOf,
+} from "./guests-harness.ts";
+import { mockIdpWith } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
 import { leave } from "./runs.ts";
 import { failure } from "./sealed-apps.ts";
-import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
+import { routed, signedInApi, unique } from "./sign-in.ts";
 
 // Guest chats (src/guests.ts) through an App's sealed functions: a guests
 // resource its actions declare (`resource.guests`), which reaches nothing
@@ -61,259 +69,7 @@ import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 // The test of a run listing, reading and revoking chats through
 // `env.APP.callFunction` went with App-owned TypeScript workflows.
 
-const idp = mockIdp();
-
-/**
- * An App whose actions use its guest chats through `guests`, declaring
- * `operations`: each answers what it got, or the error's code and
- * details, as JSON text.
- */
-const guestFiles = (
-  operations = '["invite", "list", "read", "revoke"]'
-): TestApp =>
-  testApp(
-    {
-      name: "Guests",
-      tables: {},
-      permissions: [`permission.guests({ operations: ${operations} })`],
-    },
-    {
-      "server/guests.ts": `import { v } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
-import { permissions } from "../grasp.config.ts";
-
-export const guests = permissions.guests;
-
-// What the declaration may leave out, called past its types on purpose:
-// the call is what refuses it.
-const loose = (client: object) =>
-  client as unknown as Record<string, (...input: unknown[]) => Promise<unknown>>;
-
-const outcome = async (run: () => Promise<unknown>): Promise<string> => {
-  try {
-    return JSON.stringify({ ok: (await run()) ?? null });
-  } catch (error) {
-    const details = Reflect.get(Object(error), "details");
-    return JSON.stringify({
-      error: String(Reflect.get(Object(error), "code") ?? "failed"),
-      ...(details === undefined ? {} : { details }),
-    });
-  }
-};
-
-export const invite = action({
-  args: { json: v.string() },
-  returns: v.string(),
-  handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).invite(JSON.parse(args.json))),
-});
-
-export const list = action({
-  args: {},
-  returns: v.string(),
-  handler: async (ctx) => await outcome(async () => await loose(ctx.guests).list()),
-});
-
-export const read = action({
-  args: { id: v.string() },
-  returns: v.string(),
-  handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).read(args.id)),
-});
-
-export const revoke = action({
-  args: { id: v.string() },
-  returns: v.string(),
-  handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).revoke(args.id)),
-});
-`,
-    }
-  );
-
-type Person = Awaited<ReturnType<typeof signedInApi>>;
-
-/** The App's current version, as an admin reviews it. */
-const currentVersion = async (app: string): Promise<number> => {
-  const found = await env.DB.prepare(
-    "SELECT current_version AS version FROM apps WHERE id = ?"
-  )
-    .bind(app)
-    .first<{ version: number }>();
-  return found?.version ?? 0;
-};
-
-/** An admin's binding of the App's `guests` to `permissionId`. */
-const bindGuests = async (app: string, permissionId: string) => {
-  const admin = await signedInApi(idp, "admin");
-  return await admin.api.resourceBindings.approve({
-    app,
-    alias: "guests",
-    target: { kind: "guests", permissionId },
-    reviewed: { version: await currentVersion(app) },
-  });
-};
-
-/** The App's permission to invite guests, asked for by `builder` and granted. */
-const grantGuests = async (
-  builder: Person,
-  app: string,
-  binding = "GUESTS"
-): Promise<string> =>
-  await requestGranted(idp, builder, {
-    subject: { type: "app", appId: app },
-    object: { type: "platform" },
-    actions: ["guests"],
-    binding,
-  });
-
-/**
- * An App that may invite guests, with `files`: its permission granted by
- * an admin, and its `guests` resource bound to it.
- */
-const guestApp = async (
-  builder: Person,
-  files = guestFiles()
-): Promise<{ app: AppId; permission: string }> => {
-  const { id } = await builder.api.apps.create({ name: `Guests ${unique()}` });
-  await release(builder, id, files);
-  const permission = await grantGuests(builder, id);
-  await bindGuests(id, permission);
-  return { app: appIdSchema.parse(id), permission };
-};
-
-/** Who `userId` is to a call: their ID, role and teams. */
-const callerOf = async (userId: string) => {
-  const member = await env.DB.prepare(
-    "SELECT role FROM members WHERE user_id = ?"
-  )
-    .bind(userId)
-    .first<{ role: "admin" | "builder" | "user" }>();
-  return { userId, role: member?.role ?? "user", teams: [] };
-};
-
-/**
- * Calls `guests.<method>` of `app`'s current release as `userId`, with
- * `input`, as a page would: what the action answered, read back, or the
- * call's own refusal.
- */
-const call = async (
-  app: AppId,
-  userId: string,
-  method: string,
-  input: Record<string, unknown> = {}
-): Promise<unknown> => {
-  const path = `guests.${method}`;
-  const sealed = await loadRelease(env, app, await currentVersion(app));
-  const operation = sealed.app.operations[path];
-  if (operation === undefined) {
-    throw new Error(`No ${path}`);
-  }
-  const { result } = await callAppFunction(
-    env,
-    await callerOf(userId),
-    app,
-    JSON.stringify({
-      reference: { name: path, kind: operation.kind },
-      input,
-    })
-  );
-  if (result.ok && typeof result.value === "string") {
-    const parsed: unknown = JSON.parse(result.value);
-    return parsed;
-  }
-  return { refused: result.ok ? result.value : result.error.code };
-};
-
-/** Asks `app` to invite a guest, as `userId`, with `input` on the defaults. */
-const ask = async (
-  app: AppId,
-  userId: string,
-  input: Record<string, unknown> = {}
-) =>
-  await call(app, userId, "invite", {
-    json: JSON.stringify({
-      name: "Anna",
-      skill: "interview-a-stakeholder",
-      ...input,
-    }),
-  });
-
-const invitedSchema = z.object({
-  ok: z.object({ id: z.string(), link: z.string(), status: z.string() }),
-});
-
-/** Invites a guest in `app` for `userId`: the chat's ID and link secret. */
-const invite = async (
-  app: AppId,
-  userId: string,
-  input: Record<string, unknown> = {}
-): Promise<{ id: string; token: string; link: string }> => {
-  const { ok } = invitedSchema.parse(await ask(app, userId, input));
-  return { id: ok.id, token: new URL(ok.link).hash.slice(1), link: ok.link };
-};
-
-/** What the guest's page sends, and what core answers. */
-const guest = async (
-  body: unknown,
-  init: RequestInit = {},
-  coreEnv: Env = env
-): Promise<{ status: number; body: unknown }> => {
-  const response = await routed(
-    "/api/guest",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: typeof body === "string" ? body : JSON.stringify(body),
-      ...init,
-    },
-    coreEnv
-  );
-  return { status: response.status, body: await response.json() };
-};
-
-const viewSchema = z.object({
-  name: z.string(),
-  status: z.string(),
-  turnsLeft: z.number(),
-  messages: z.array(z.object({ role: z.string(), text: z.string() })),
-});
-
-const viewOf = (answer: { body: unknown }): GuestView =>
-  // SAFETY: checked by the schema; the rest is as core answers it.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  viewSchema.parse(answer.body) as GuestView;
-
-const codeOf = ({ status, body }: { status: number; body: unknown }) => ({
-  status,
-  code: z.object({ code: z.string() }).parse(body).code,
-});
-
-/** A plan's step over rows the query itself gives: no table's. */
-const literalRows = /^SCAN (?:\d+-ROW VALUES CLAUSE|CONSTANT ROW)$/u;
-
-/** Core's read of a chat's messages. */
-const readsMessages = /^select .* from "guest_messages"/iu;
-
-/** A guest's message, "Hello", with the secret `token`. */
-const send = (token: string) => ({ action: "send", token, text: "Hello" });
-
-/** The model answers with `replies`, in order, while `run` runs. */
-const answering = async <T>(
-  replies: ProviderReply[],
-  run: (provider: FakeProvider) => Promise<T>
-): Promise<T> => await run(await fakeProvider(...replies));
-
-const reply = (text: string): ProviderReply => ({
-  text,
-  inputTokens: 50,
-  outputTokens: 10,
-});
-
-/**
- * The company connected an AI provider and chose its model, which a chat
- * is invited with; a test that has the model answer connects its own.
- */
-const connected = async (): Promise<void> => {
-  await fakeProvider();
-};
+mockIdpWith(idp);
 
 describe("guest chats", { timeout: 60_000 }, () => {
   beforeEach(connected);
@@ -707,163 +463,6 @@ describe("guest chats", { timeout: 60_000 }, () => {
       revoked: "revoked",
       opened: { status: 404, code: "guest.link_invalid" },
       leaked: false,
-    });
-  });
-
-  it("list an App's open chats first, however many ended since, so each can be revoked", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { app } = await guestApp(builder);
-    const oldest = await invite(app, builder.userId, { name: "Still open" });
-    for (let chat = 0; chat < 101; chat += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-      const made = await invite(app, builder.userId);
-      // oxlint-disable-next-line no-await-in-loop -- finished before the next
-      await guest({ action: "finish", token: made.token });
-    }
-    const newest = await invite(app, builder.userId, { name: "Newest open" });
-    const { ok: listed } = z
-      .object({
-        ok: z.array(z.object({ id: z.string(), status: z.string() })),
-      })
-      .parse(await call(app, builder.userId, "list"));
-    expect({
-      listed: listed.length,
-      first: listed.slice(0, 2),
-      rest: [...new Set(listed.slice(2).map(({ status }) => status))],
-    }).toStrictEqual({
-      listed: 100,
-      first: [
-        { id: newest.id, status: "open" },
-        { id: oldest.id, status: "open" },
-      ],
-      rest: ["finished"],
-    });
-  });
-
-  it("are invited only by a person using the App, with a Grasp skill, at most 50 open at once", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { app } = await guestApp(builder);
-    const refusals = {
-      unknownSkill: await ask(app, builder.userId, { skill: "run-anything" }),
-      tooLong: await ask(app, builder.userId, { days: 15 }),
-      noName: await ask(app, builder.userId, { name: " " }),
-    };
-    const open: string[] = [];
-    for (let chat = 0; chat < 50; chat += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one invitation at a time
-      const made = await invite(app, builder.userId);
-      open.push(made.id);
-    }
-    const fiftyFirst = await ask(app, builder.userId);
-    await call(app, builder.userId, "revoke", { id: open[0] });
-    const afterRevoke = invitedSchema.safeParse(
-      await ask(app, builder.userId)
-    ).success;
-    expect({ ...refusals, fiftyFirst, afterRevoke }).toStrictEqual({
-      unknownSkill: { error: "resource.invalid_args" },
-      tooLong: { error: "resource.invalid_args" },
-      noName: { error: "resource.invalid_args" },
-      fiftyFirst: {
-        error: "resource.limit_reached",
-        details: { limit: "open" },
-      },
-      afterRevoke: true,
-    });
-  });
-
-  it("need a permission of their own: a platform permission does one thing, and only an App asks for it", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({
-      name: `Asks ${unique()}`,
-    });
-    const request = async (
-      asked: Parameters<typeof builder.api.permissions.request>[0]
-    ) => await outcome(builder.api.permissions.request(asked));
-    expect({
-      both: await request({
-        subject: { type: "app", appId: app },
-        object: { type: "platform" },
-        actions: ["statistics", "guests"],
-        binding: "PLATFORM",
-      }),
-      agent: await request({
-        subject: { type: "agent", agentId: "organization" },
-        object: { type: "platform" },
-        actions: ["guests"],
-        binding: "GUESTS",
-      }),
-      app: await request({
-        subject: { type: "app", appId: app },
-        object: { type: "platform" },
-        actions: ["guests"],
-        binding: "GUESTS",
-      }),
-    }).toStrictEqual({
-      both: "permission.invalid",
-      agent: "permission.invalid",
-      app: "ok",
-    });
-  });
-
-  it("find chats and their messages by index, reading no table whole", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { app } = await guestApp(builder);
-    const { id, token } = await invite(app, builder.userId);
-    const recorded = await recordedQueries(async () => {
-      await answering([reply("What do you do?")], async () => {
-        await guest({ action: "open", token });
-        await guest({ action: "send", token, text: "I close the month." });
-      });
-      await call(app, builder.userId, "list");
-      await call(app, builder.userId, "read", { id });
-      await invite(app, builder.userId);
-      await guest({ action: "finish", token });
-      await sweepGuestChats(env, new Date());
-    });
-    const ofGuests = recorded.filter(({ query }) => query.includes("guest_"));
-    const plans = await Promise.all(
-      ofGuests.map(async (query) => await planOf(query))
-    );
-    const steps = plans.flat();
-    expect({
-      open: steps.some((step) => step.includes("guest_chats_open_idx")),
-      read: ofGuests.length > 0,
-      scans: steps.filter(
-        (step) => fullScan.test(step) && !literalRows.test(step)
-      ),
-      sorts: steps.filter((step) => step.includes("TEMP B-TREE")),
-    }).toStrictEqual({ open: true, read: true, scans: [], sorts: [] });
-  });
-
-  it("are deleted with what was written 30 days after they end, and not before", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { app } = await guestApp(builder);
-    const ended = await invite(app, builder.userId);
-    await guest({ action: "finish", token: ended.token });
-    const open = await invite(app, builder.userId, { days: 14 });
-    const day = 24 * 60 * 60 * 1000;
-    const readable = async (id: string): Promise<boolean> =>
-      "ok" in
-      z
-        .record(z.string(), z.unknown())
-        .parse(await call(app, builder.userId, "read", { id }));
-    await sweepGuestChats(env, new Date(Date.now() + 29 * day));
-    const before = [await readable(ended.id), await readable(open.id)];
-    // A sweep deletes 100 at most, the oldest first, and the file's other
-    // tests left more than that: the clock's next runs take the rest.
-    const later = new Date(Date.now() + 31 * day);
-    for (let run = 0; run < 4; run += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one run after another
-      await sweepGuestChats(env, later);
-    }
-    expect({
-      before,
-      ended: await call(app, builder.userId, "read", { id: ended.id }),
-      open: await readable(open.id),
-    }).toStrictEqual({
-      before: [true, true],
-      ended: { error: "resource.item_not_found" },
-      open: true,
     });
   });
 });

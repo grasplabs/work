@@ -41,7 +41,7 @@ import type { Took } from "./store.ts";
 // a claim, and an intake makes at most `claimChecksMax` checks: past that
 // nothing is written, and it is audited (store.ts).
 //
-// Ways it can fail, each held by apps/core/test/brain-intake.test.ts:
+// Ways it can fail, each held by apps/core/test/brain-intake-teams.test.ts:
 // - a claim resting on fewer than five people, or on one person cited
 //   five times;
 // - a claim citing facts that don't exist, facts of another kind, or

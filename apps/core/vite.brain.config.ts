@@ -1,7 +1,9 @@
 import { coreProject } from "./vite.config.ts";
 
-// The Brain baseline (test/brain-baseline.test.ts) and its CI scale size
-// (test/brain-scale*.test.ts, an arm per file) in a group of their own:
+// The Brain baseline (test/brain-baseline*.test.ts, its measured trials in
+// parts, a file each: brain-baseline-parts.ts) and its CI scale size
+// (test/brain-scale-*-of-*.test.ts, each arm in parts, a file each:
+// brain-scale-arm.ts) in a group of their own:
 // each run takes its trials one at a time, and beside a shard's other
 // heavy core files the baseline ran four to eight times as long as alone,
 // near its 300 s timeout (GRA-698), and the scale run two to two and a
@@ -13,10 +15,9 @@ export default coreProject({
   name: "@grasp-os/core:brain",
   include: [
     "test/brain-baseline.test.ts",
+    "test/brain-baseline-*-of-*.test.ts",
     "test/brain-recall-e02.test.ts",
-    "test/brain-scale.test.ts",
-    "test/brain-scale-agent.test.ts",
-    "test/brain-scale-full-context.test.ts",
+    "test/brain-scale-*-of-*.test.ts",
   ],
   sequence: { groupOrder: 3 },
   // One file at a time, so none runs beside another's trials.

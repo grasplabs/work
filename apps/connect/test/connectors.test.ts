@@ -1,38 +1,29 @@
-import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
 import { signCapability } from "@grasp-os/shared/capability";
 import { companyToolClasses, toolClassOf } from "@grasp-os/shared/connect";
-import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import bundled from "#connectors";
-
 import { nativeConnector } from "../src/bundled-connectors.ts";
-import { connections, connectionTokens } from "../src/db/schema.ts";
-import type { EgressProps } from "../src/egress.ts";
+import { connectionTokens } from "../src/db/schema.ts";
 import { rightsFor } from "../src/provider-rights.ts";
 import { providers as providerConfigs } from "../src/providers.ts";
 import { accessTokenFor } from "../src/tokens.ts";
-import { connectApp, fakeApps } from "./app-provider.ts";
-import type { AppName } from "./app-provider.ts";
+import { agentFor, callAs, chatOrigin, outcome } from "./connect.ts";
 import {
-  agentFor,
-  callAs,
-  chatOrigin,
-  connectAccount,
-  outcome,
-  ownAccount,
-  someone,
-} from "./connect.ts";
-import type { Call } from "./connect.ts";
+  api,
+  connectionTo,
+  egressProps,
+  probe,
+  providers,
+  refused,
+  tools,
+} from "./connectors-harness.ts";
 import { sampleHost, storageHost } from "./fixtures/sample-connector.ts";
-import { fakeProviders } from "./oauth-provider.ts";
-import type { ProviderName } from "./oauth-provider.ts";
-import { fakeSampleApi } from "./sample-api.ts";
-import { callTool as call, claimedAgo, toolError } from "./tool-calls.ts";
+import { nativeToolsOf } from "./native-tool-checks.ts";
+import { callTool as call, claimedAgo } from "./tool-calls.ts";
 
 // Native connectors run in isolates of their own, and reach their provider
 // only through connect's egress handler, which adds the connection's token.
@@ -45,95 +36,23 @@ import { callTool as call, claimedAgo, toolError } from "./tool-calls.ts";
 // The sample connector's `probe.*` tools make each attempt from inside the
 // isolate, as connector code gone wrong would.
 
-const providers = fakeProviders();
-const apps = fakeApps();
-const api = fakeSampleApi();
-
-/** A person's own Microsoft account, connected to `server`. */
-const connectionTo = async (
-  server: string,
-  provider: ProviderName = "microsoft",
-  person: ConnectionPerson = someone()
-): Promise<{ id: string; person: ConnectionPerson }> => {
-  const id = await connectAccount(
-    providers,
-    person,
-    ownAccount(person, provider)
-  );
-  await drizzle(env.DB)
-    .update(connections)
-    .set({ server })
-    .where(eq(connections.id, id));
-  return { id, person };
-};
-
-const appNames: ReadonlySet<string> = new Set<AppName>([
-  "sample-oauth",
-  "sample-key",
-]);
-const isApp = (provider: string): provider is AppName => appNames.has(provider);
-
-/**
- * A person's own account at `provider`, connected to `server`: through
- * the app's own sign-in for an app, whose connector is the one it names.
- */
-const connectionOf = async (
-  server: string,
-  provider: string
-): Promise<{ id: string; person: ConnectionPerson }> => {
-  if (!isApp(provider)) {
-    return await connectionTo(
-      server,
-      provider === "google" ? "google" : "microsoft"
-    );
-  }
-  const person = someone();
-  const id = await connectApp(
-    apps,
-    person,
-    apps.account(provider, person.email)
-  );
-  return { id, person };
-};
-
-/** What a probe reports about its attempt. */
-interface Attempt {
-  status: number | null;
-  bytes: number;
-  error: string | null;
-}
-
-const isAttempt = (value: unknown): value is Attempt =>
-  typeof value === "object" &&
-  value !== null &&
-  "status" in value &&
-  "bytes" in value &&
-  "error" in value;
-
-/** Has the sample connector's code send a request, and says how it went. */
-const probe = async (
-  connection: { id: string; person: ConnectionPerson },
-  input: {
-    url: string;
-    method?: string;
-    headers?: [string, string][];
-    mailbox?: string;
-  },
-  extra: Partial<Call> = {}
-): Promise<Attempt> => {
-  const tool = input.mailbox === undefined ? "probe.fetch" : "probe.mailbox";
-  const { output } = await call(connection, tool, input, extra);
-  const attempt: unknown = JSON.parse(output);
-  if (!isAttempt(attempt)) {
-    throw new TypeError("Not a probe's report");
-  }
-  return attempt;
-};
-
-/** A probe's report of a request the egress handler refused. */
-const refused = { status: 403, error: null };
-
 describe("a native connector", () => {
+  // The files the check of every tool's input is split over, by name (Vite
+  // lists them without loading them): a file deleted or renamed leaves
+  // tools unchecked, and this fails.
+  it("has every tool's input checked by the native-tools files, each tool once", () => {
+    const checked = Object.keys(
+      import.meta.glob("./native-tools-*-of-*.test.ts")
+    ).flatMap((file) =>
+      nativeToolsOf(file).map(
+        ({ connector, action }) => `${connector} ${action}`
+      )
+    );
+    expect(checked.toSorted()).toStrictEqual(
+      tools.map(({ connector, action }) => `${connector} ${action}`).toSorted()
+    );
+  });
+
   it("can't write from a lookup of a call's effect: only the action's GETs leave", async () => {
     const connection = await connectionTo("sample");
     const file = async () =>
@@ -495,12 +414,12 @@ describe("a native connector", () => {
   // these manifests and reviewed as it changes); core refuses a call of a
   // class that is off for its person (tool-classes.ts).
   it("of each suite asks its provider for rights of its own once a tool's class is on", () => {
-    const tools = Object.values(providerConfigs).flatMap((config) =>
+    const suiteTools = Object.values(providerConfigs).flatMap((config) =>
       Object.entries(
         nativeConnector(config.server)?.manifest.actions ?? {}
       ).map(([action, declared]) => ({ config, action, declared }))
     );
-    const withoutRights = tools.flatMap(({ config, action, declared }) => {
+    const withoutRights = suiteTools.flatMap(({ config, action, declared }) => {
       const signIn = new Set(rightsFor(config.id, []));
       const toolClass = toolClassOf(declared);
       const asked = rightsFor(config.id, [toolClass]) ?? [];
@@ -508,12 +427,17 @@ describe("a native connector", () => {
         ? []
         : [`${config.server} ${action} (${toolClass})`];
     });
-    expect({ checked: tools.length > 0, withoutRights }).toStrictEqual({
+    expect({ checked: suiteTools.length > 0, withoutRights }).toStrictEqual({
       checked: true,
       withoutRights: [],
     });
   });
 });
+
+const tokenFor = (mailbox: string) =>
+  api.sent
+    .filter(({ path }) => path.includes(encodeURIComponent(mailbox)))
+    .map(({ headers }) => headers.authorization);
 
 // Each call loads the connector into a fresh isolate, so a test's cost
 // grows with its calls: on a loaded CI runner a call took up to ten times
@@ -720,10 +644,6 @@ describe("a connector's code", { timeout: 60_000 }, () => {
       call(anna, "items.list", { mailbox: "anna@acme.test" }),
       call(ben, "items.list", { mailbox: "ben@acme.test" }),
     ]);
-    const tokenFor = (mailbox: string) =>
-      api.sent
-        .filter(({ path }) => path.includes(encodeURIComponent(mailbox)))
-        .map(({ headers }) => headers.authorization);
     expect(tokenFor("anna@acme.test")).toStrictEqual([
       `Bearer ${tokens[0]}`,
       `Bearer ${tokens[0]}`,
@@ -870,18 +790,6 @@ describe("a connector's code", { timeout: 60_000 }, () => {
   });
 });
 
-/** Props for the egress handler, as connect sets them for one call. */
-const egressProps = (fields: Partial<EgressProps> = {}): EgressProps => ({
-  connector: "sample@1.0.0",
-  callId: "call-1",
-  hosts: [sampleHost],
-  routes: [{ method: "GET", host: sampleHost, path: "/v1/probe/{case}" }],
-  values: {},
-  credential: { header: "authorization", value: "Bearer a-token-for-one-call" },
-  expiresAt: Date.now() + 30_000,
-  ...fields,
-});
-
 describe("the egress handler", () => {
   const url = `https://${sampleHost}/v1/probe/ok`;
 
@@ -906,98 +814,4 @@ describe("the egress handler", () => {
     await expect(egress.fetch(url)).resolves.toMatchObject({ status: 403 });
     expect(api.sent).toStrictEqual([]);
   });
-});
-
-// The connector contract: a tool may select a resource by its one declared
-// property only, and parses its input strictly, so no second selector, at
-// the top or nested, gets past it. Connect sees only top-level keys; the
-// connector refuses the rest itself, before anything goes out.
-const tools = bundled.flatMap(({ manifest }) => {
-  const parsed = connectorManifestSchema.safeParse(manifest);
-  if (!parsed.success) {
-    // `sample-unreached`, which connect refuses whole (above).
-    return [];
-  }
-  const { name, provider, actions } = parsed.data;
-  return Object.keys(actions).map((action) => ({
-    connector: name,
-    provider,
-    action,
-  }));
-});
-
-// Each tool makes several calls at once, each in a fresh isolate: on a
-// loaded CI runner the slowest took a third of Vitest's default five
-// seconds. The calls go out together and nothing polls or sleeps, so
-// sixty seconds is room for a slow runner, as above.
-describe("every native tool", { timeout: 60_000 }, () => {
-  it.each(tools)(
-    "$connector $action refuses a second resource selector",
-    async ({ connector, provider, action }) => {
-      const connection = await connectionOf(connector, provider);
-      const manifest = nativeConnector(connector)?.manifest;
-      const tool = manifest?.actions[action];
-      const field = tool?.resource ?? "mailbox";
-      const declared = new Set(tool?.input);
-      const extra = [`shared${field}`, "target", "userId"].filter(
-        (key) => !declared.has(key)
-      );
-      const undeclared = [
-        { [field]: "a@acme.test", [extra[0] ?? "x"]: "b@acme.test" },
-        {
-          [field]: "a@acme.test",
-          [extra[1] ?? "y"]: { [field]: "b@acme.test" },
-        },
-        { [field]: "a@acme.test", [extra[2] ?? "z"]: "b@acme.test" },
-      ];
-      // Nor nested under a property it does declare. Connect itself refuses
-      // a nested selector under the attachments of a tool that takes files
-      // (GRA-887), before the tool: checked apart below.
-      const filesField = tool?.takesFiles === true ? "attachments" : undefined;
-      const nested = [...declared]
-        .filter((other) => other !== field && other !== filesField)
-        .map((other) => ({
-          [field]: "a@acme.test",
-          [other]: { [field]: "b@acme.test" },
-        }));
-      const refusals = await Promise.all(
-        [...undeclared, ...nested].map(
-          async (input) =>
-            await toolError(
-              call(connection, action, input, {
-                idempotencyKey: crypto.randomUUID(),
-              })
-            )
-        )
-      );
-      expect(
-        refusals
-          .slice(0, undeclared.length)
-          .every((text) => String(text).includes("unrecognized_keys"))
-      ).toBeTruthy();
-      expect(
-        refusals
-          .slice(undeclared.length)
-          .every((text) => String(text).includes("Invalid input"))
-      ).toBeTruthy();
-      const refusedByConnect =
-        filesField === undefined
-          ? undefined
-          : await outcome(
-              call(
-                connection,
-                action,
-                {
-                  [field]: "a@acme.test",
-                  [filesField]: { [field]: "b@acme.test" },
-                },
-                { idempotencyKey: crypto.randomUUID() }
-              )
-            );
-      expect(refusedByConnect).toBe(
-        filesField === undefined ? undefined : "connect.invalid"
-      );
-      expect(api.sent).toStrictEqual([]);
-    }
-  );
 });

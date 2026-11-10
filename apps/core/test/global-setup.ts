@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -11,6 +10,8 @@ import {
 import buildExtractor from "../build-extractor.ts";
 import { bundleConnect, connectBundle } from "./build-connect.ts";
 import { testVersionModule } from "./compiler-version.ts";
+import { prebuiltKey, restorePrebuilt, savePrebuilt } from "./prebuilt.ts";
+import { runNode } from "./run-node.ts";
 import { removeEndedRuns, removeTestRun, testAssets } from "./test-run.ts";
 
 /**
@@ -19,15 +20,14 @@ import { removeEndedRuns, removeTestRun, testAssets } from "./test-run.ts";
  * for byte. Built in this process, Vite's own code would be the copy the
  * test runner transformed, and some of that ends up in the kit.
  */
-const buildAppCompiler = (): void => {
-  execFileSync(
-    process.execPath,
+const buildAppCompiler = async (): Promise<void> => {
+  await runNode(
     [
       path.join(import.meta.dirname, "../../../packages/compiler/build.ts"),
       testAssets,
       testVersionModule,
     ],
-    { stdio: "inherit" }
+    { output: "inherit" }
   );
 };
 
@@ -36,8 +36,14 @@ const writeTestAssets = async (): Promise<void> => {
   cpSync(path.join(import.meta.dirname, "fixtures/assets"), testAssets, {
     recursive: true,
   });
-  buildAppCompiler();
-  await buildExtractor(testAssets);
+  // The compiler builds in a process of its own, so the extractor builds
+  // here meanwhile.
+  await Promise.all([buildAppCompiler(), buildExtractor(testAssets)]);
+};
+
+const writeConnectBundle = async (): Promise<void> => {
+  mkdirSync(path.dirname(connectBundle), { recursive: true });
+  writeFileSync(connectBundle, await bundleConnect());
 };
 
 const prepare = async (): Promise<void> => {
@@ -51,9 +57,24 @@ const prepare = async (): Promise<void> => {
   );
   // The guides the agent reads, as core's build embeds them.
   writeAgentDocs();
-  await writeTestAssets();
-  mkdirSync(path.dirname(connectBundle), { recursive: true });
-  writeFileSync(connectBundle, await bundleConnect());
+  // The builds below, reused when their inputs are those of a build kept
+  // earlier (prebuilt.ts).
+  const files = {
+    assets: testAssets,
+    versionModule: testVersionModule,
+    connectBundle,
+  };
+  const key = prebuiltKey();
+  if (key !== null && restorePrebuilt(key, files)) {
+    return;
+  }
+  // At once: the compiler's build and Wrangler's bundle of connect run in
+  // processes of their own, and each took over 10 s of a CI runner's
+  // start, one after the other.
+  await Promise.all([writeTestAssets(), writeConnectBundle()]);
+  if (key !== null) {
+    savePrebuilt(key, files);
+  }
 };
 
 declare global {

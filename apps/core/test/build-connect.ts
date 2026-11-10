@@ -2,7 +2,6 @@
  * Bundles the connect Worker the way its deploy does, so core's tests call
  * the real one over the CONNECT service binding.
  */
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +12,7 @@ import {
   connectorsFile,
 } from "../../connect/build.ts";
 import { testComposioClassesFile } from "../../connect/test/global-setup.ts";
+import { runNode } from "./run-node.ts";
 import { testRun } from "./test-run.ts";
 
 const connect = path.join(import.meta.dirname, "../../connect");
@@ -31,9 +31,9 @@ export const bundleConnect = async (): Promise<string> => {
   const out = mkdtempSync(path.join(tmpdir(), "grasp-os-connect-"));
   try {
     // Its output is only shown if bundling fails, in the error. The fake
-    // Composio's tools are classed as in connect's own tests.
-    execFileSync(
-      process.execPath,
+    // Composio's tools are classed as in connect's own tests. Not
+    // blocking: the global setup builds the App compiler meanwhile.
+    await runNode(
       [
         wrangler,
         "deploy",
@@ -43,7 +43,7 @@ export const bundleConnect = async (): Promise<string> => {
         "--alias",
         `#composio-classes:${testComposioClassesFile}`,
       ],
-      { cwd: connect }
+      { cwd: connect, output: "quiet" }
     );
     const bundle = path.join(out, "index.js");
     // The launcher reports its CLI dying of a signal as success.

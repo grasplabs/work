@@ -1,7 +1,7 @@
 /**
  * Google's APIs for Stephen's eval on Google Workspace
- * (stephen-eval-google.test.ts): a person's Gmail and Google Calendar, the
- * files of a shared drive, and a company's spreadsheets, as the Google
+ * (stephen-eval-google-*-of-*.test.ts): a person's Gmail and Google
+ * Calendar, the files of a shared drive, and a company's spreadsheets, as the Google
  * Workspace connector's reads ask for them, in the shapes Gmail v1,
  * Calendar v3, Drive v3 and Sheets v4 document. Calendar times come back
  * in UTC, as the connector asks for them (`timeZone=UTC`), and a day in a

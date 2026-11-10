@@ -110,6 +110,7 @@
     "./lab-compare": "./src/lab-compare.ts",
     "./lab-runs": "./src/lab-runs.ts",
     "./log": "./src/log.ts",
+    "./lowered-limit": "./src/lowered-limit.ts",
     "./mail-ingress": "./src/mail-ingress.ts",
     "./members": "./src/members.ts",
     "./memory": "./src/memory.ts",

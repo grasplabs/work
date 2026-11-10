@@ -62,7 +62,7 @@ const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
  */
 export const pageTests = [
   "test/page*.test.ts",
-  "test/app-releases.test.ts",
+  "test/app-releases*.test.ts",
   "test/migration-run.test.ts",
   "test/app-functions.test.ts",
   "test/app-packages.test.ts",
@@ -72,23 +72,21 @@ export const pageTests = [
   "test/app-publish-stores.test.ts",
   "test/app-publish.test.ts",
   "test/app-tests.test.ts",
-  "test/app-test-live.test.ts",
+  "test/app-test-live*.test.ts",
   "test/draft-runs.test.ts",
-  "test/app-files-uploads.test.ts",
-  "test/app-files-downloads.test.ts",
-  "test/app-files-records.test.ts",
-  "test/resource-bindings.test.ts",
+  "test/app-files-*.test.ts",
+  "test/resource-bindings*.test.ts",
   "test/brain-app-recall.test.ts",
-  "test/resource-connectors.test.ts",
+  "test/resource-connectors*.test.ts",
   "test/http-connections.test.ts",
   "test/store-operations.test.ts",
-  "test/sealed-workflow-starts.test.ts",
+  "test/sealed-workflow-starts*.test.ts",
   "test/definition-export.test.ts",
   "test/workflow-query-subscriptions.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
   "test/workflow-app-functions.test.ts",
-  "test/agent-builds.test.ts",
+  "test/agent-builds*.test.ts",
   "test/app-chat-build.test.ts",
   "test/app-preview.test.ts",
   "test/workflow-ai-steps.test.ts",
@@ -106,7 +104,7 @@ export const pageTests = [
   "test/run-object.test.ts",
   "test/rpc-targets.test.ts",
   "test/statistics.test.ts",
-  "test/guests.test.ts",
+  "test/guests*.test.ts",
   "test/app-function-calls.test.ts",
   "test/workflow-schema-builds.test.ts",
   "test/type-check-parity.test.ts",
@@ -161,11 +159,59 @@ export const coreProject = (
       // fallback can't load: bundled first, as Wrangler bundles it for the
       // Worker, so each require resolves. Node's built-ins stay imports,
       // which workerd's nodejs_compat serves.
+      //
+      // The rest are bundled for speed: each worker's runtime fetches every
+      // module it loads from Vitest one request at a time, and these
+      // libraries are thousands of small ones (pi-ai's TypeBox alone over
+      // 500). Bundled, a worker loads core in less than half the requests
+      // (some 1,400 instead of 3,400), which six workers on a CI runner
+      // all make at once. Every specifier core imports from them is
+      // listed: one left off still loads, module by module, but as a second
+      // copy of the library next to the bundled one.
       deps: {
         optimizer: {
           ssr: {
             enabled: true,
-            include: ["@chat-adapter/teams"],
+            include: [
+              "@chat-adapter/teams",
+              "zod",
+              "drizzle-orm",
+              "drizzle-orm/d1",
+              "drizzle-orm/sqlite-core",
+              "drizzle-orm/batch",
+              "drizzle-orm/durable-sqlite",
+              "@earendil-works/pi-ai",
+              "@earendil-works/pi-ai/utils/transcript",
+              "@earendil-works/pi-ai/models",
+              "@earendil-works/pi-ai/utils/estimate",
+              "@earendil-works/pi-ai/utils/event-stream",
+              "@earendil-works/pi-ai/providers/faux",
+              "@earendil-works/pi-ai/providers/anthropic.models",
+              "@earendil-works/pi-ai/providers/openrouter.models",
+              "@earendil-works/pi-ai/providers/openai.models",
+              "@earendil-works/pi-ai/providers/mistral.models",
+              "@earendil-works/pi-ai/api/anthropic-messages",
+              "@earendil-works/pi-ai/api/openai-completions",
+              "@earendil-works/pi-ai/api/openai-responses",
+              "@earendil-works/pi-agent-core",
+              "@earendil-works/pi-durable",
+              "@earendil-works/pi-durable/storage/sqlite/cloudflare",
+              "@earendil-works/chord",
+              "@earendil-works/chord/context",
+              "better-auth/minimal",
+              "better-auth/api",
+              "better-auth/plugins/organization",
+              "better-auth/plugins/organization/access",
+              "better-auth/adapters/drizzle",
+              "@better-auth/sso",
+              "jose",
+              "yaml",
+              "typebox/value",
+              "@orama/orama",
+              "chat",
+              "postal-mime",
+              "csv-parse/sync",
+            ],
             exclude: ["@opentelemetry/api"],
             rolldownOptions: {
               external: [
@@ -215,6 +261,9 @@ export const coreProject = (
             SLACK_SIGNING_SECRET: slackApp.signingSecret,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_READ_LIMITS: "20/60",
+            // A live-read budget a test spends in dozens of reads
+            // (src/app.ts, test/page-client-load.test.ts).
+            LIVE_READ_LIMITS: "50/300",
             // The gateway runs call the model through; tests fake the AI binding.
             // Who core's mail is from (src/mail.ts); tests capture what
             // the EMAIL binding is given (test/mail-capture.ts).
@@ -357,14 +406,11 @@ export default coreProject({
     "test/brain-recall-real-model.test.ts",
     // The Brain baseline, its CI scale size and experiment E02, in a group
     // of their own: vite.brain.config.ts.
-    "test/brain-baseline.test.ts",
+    "test/brain-baseline*.test.ts",
     "test/brain-recall-e02.test.ts",
-    "test/brain-scale.test.ts",
-    "test/brain-scale-agent.test.ts",
-    "test/brain-scale-full-context.test.ts",
+    "test/brain-scale-*-of-*.test.ts",
     // Stephen's eval, in a group of its own: vite.stephen.config.ts.
-    "test/stephen-eval.test.ts",
-    "test/stephen-eval-google.test.ts",
+    "test/stephen-eval*.test.ts",
     // Stephen's eval against a real model, which costs money, on request
     // only: vite.stephen-model.config.ts.
     "test/stephen-real-model.test.ts",
