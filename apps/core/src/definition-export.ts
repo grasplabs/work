@@ -56,6 +56,10 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 //   unresolved under the alias that names it, never by its name. Its
 //   events, listens and decisions travel with the App's declaration,
 //   which is the App's own source (`grasp.config.ts`) its builders read.
+//   The definition names the workflow versions the App's drafts bound
+//   (`workflowBindings`) by ID and number, as the App's builders read
+//   them already: an ID grants nothing, and a destination binds its own.
+//   Kept, so the definition still hashes to `definitionHash`.
 // - An export goes unrecorded: it is in the audit log before anything is
 //   answered, or it fails.
 // - What is exported isn't what was sealed: every part is read back with

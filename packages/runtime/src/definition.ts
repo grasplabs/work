@@ -123,6 +123,18 @@ export interface DefinedFunction {
   readonly name: string;
 }
 
+/**
+ * The workflow version a draft bound under a workflow permission's alias
+ * (`bindWorkflow`): what making the version current binds (core's
+ * app-workflow-bindings.ts). A claim until then: a definition committed
+ * by hand may name any, so core checks each again as it binds it.
+ */
+export interface DefinedWorkflowBinding {
+  readonly alias: string;
+  readonly workflowId: string;
+  readonly version: number;
+}
+
 /** An App's definition (see the header). */
 export interface AppDefinition {
   readonly name: string;
@@ -131,6 +143,11 @@ export interface AppDefinition {
   readonly answers: readonly DefinedAnswer[];
   /** The server functions it gives stable IDs; absent while it gives none. */
   readonly functions?: readonly DefinedFunction[];
+  /**
+   * The workflow versions it binds, by alias, in alias order; absent
+   * while it records none. Never part of the code generated from it.
+   */
+  readonly workflowBindings?: readonly DefinedWorkflowBinding[];
 }
 
 /** The files generated from an App's definition, which only Grasp writes. */
@@ -224,6 +241,15 @@ const definitionSchema = z.strictObject({
           message:
             "A function's path: its module's path and its export's name, joined by dots",
         }),
+      })
+    )
+    .optional(),
+  workflowBindings: z
+    .array(
+      z.strictObject({
+        alias: z.string(),
+        workflowId: z.string().min(1).max(128),
+        version: z.int().min(1),
       })
     )
     .optional(),
@@ -500,9 +526,16 @@ const ordered = (value: unknown, declared = false): unknown => {
  * form, and no `functions` while it gives none, so a definition from
  * before functions had IDs keeps its text, and its hash.
  */
-const compactForm = ({ functions, ...definition }: AppDefinition): unknown => ({
+const compactForm = ({
+  functions,
+  workflowBindings,
+  ...definition
+}: AppDefinition): unknown => ({
   ...definition,
   ...(functions === undefined || functions.length === 0 ? {} : { functions }),
+  ...(workflowBindings === undefined || workflowBindings.length === 0
+    ? {}
+    : { workflowBindings }),
   permissions: definition.permissions.map((data) =>
     permissionTypes(data, (descriptor) =>
       // SAFETY: a permission's descriptors, as `permission.*` made them.
@@ -524,10 +557,13 @@ const compactForm = ({ functions, ...definition }: AppDefinition): unknown => ({
  * read from its compact form, a refusal naming the one that isn't one.
  */
 const fullForm = (data: z.output<typeof definitionSchema>): AppDefinition => {
-  const { tables, permissions, functions, ...rest } = data;
+  const { tables, permissions, functions, workflowBindings, ...rest } = data;
   return {
     ...rest,
     ...(functions === undefined || functions.length === 0 ? {} : { functions }),
+    ...(workflowBindings === undefined || workflowBindings.length === 0
+      ? {}
+      : { workflowBindings }),
     permissions: permissions.map((permission) =>
       permissionTypes(permission, (compact) =>
         fromCompact(
@@ -566,6 +602,29 @@ export const definitionText = (definition: AppDefinition): string =>
 export const canonicalDefinition = (definition: AppDefinition): AppDefinition =>
   fullForm(definitionSchema.parse(JSON.parse(definitionText(definition))));
 
+/**
+ * Refuses a recorded workflow binding under an alias no workflow
+ * permission of the definition has, or two under one alias.
+ */
+const requireDeclaredBindings = (definition: AppDefinition): void => {
+  const bound = new Set<string>();
+  for (const { alias } of definition.workflowBindings ?? []) {
+    if (bound.has(alias)) {
+      refuse(`Two workflow versions are bound as \`${alias}\`.`);
+    }
+    bound.add(alias);
+    if (
+      !definition.permissions.some(
+        (held) => held.alias === alias && held["~permission"] === "workflows"
+      )
+    ) {
+      refuse(
+        `The definition binds a workflow as \`${alias}\`, which it doesn't declare.`
+      );
+    }
+  }
+};
+
 /** The App a definition declares: its config and its schema, as code would. */
 export const definitionApp = (
   declared: AppDefinition
@@ -584,6 +643,7 @@ export const definitionApp = (
     }
     named.add(name);
   }
+  requireDeclaredBindings(definition);
   const tables: Record<string, AnyTable> = {};
   for (const table of definition.tables) {
     if (Object.hasOwn(tables, table.name)) {

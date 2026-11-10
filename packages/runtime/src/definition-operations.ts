@@ -149,11 +149,16 @@ export type DefinitionOperation =
       /**
        * Sets the events, listen tasks and decisions workflow permission
        * `alias` declares: what a version the builder binds has, as the
-       * host resolved it (app-workflow-bindings.ts in core).
+       * host resolved it (app-workflow-bindings.ts in core); and records
+       * that version, `bound`, as the one the definition binds there.
        */
       readonly op: "setWorkflowContract";
       readonly alias: string;
       readonly contract: WorkflowEventContract;
+      readonly bound?: {
+        readonly workflowId: string;
+        readonly version: number;
+      };
     }
   | {
       /** Renames function `function` (by its path now), keeping its ID. */
@@ -509,6 +514,28 @@ const withoutIndex = (
   });
 };
 
+/**
+ * `definition` binding `bound` under `alias`, in place of what it bound
+ * there; nothing there, without `bound`. In alias order, so the same
+ * bindings make the same text.
+ */
+const withWorkflowBinding = (
+  definition: AppDefinition,
+  alias: string,
+  bound?: { readonly workflowId: string; readonly version: number }
+): AppDefinition => {
+  const { workflowBindings = [], ...rest } = definition;
+  const kept = workflowBindings.filter((held) => held.alias !== alias);
+  const next =
+    bound === undefined
+      ? kept
+      : [
+          ...kept,
+          { alias, workflowId: bound.workflowId, version: bound.version },
+        ].toSorted((a, b) => (a.alias < b.alias ? -1 : 1));
+  return next.length === 0 ? rest : { ...rest, workflowBindings: next };
+};
+
 /** `definition` without the permission whose alias is `alias`. */
 const withoutPermission = (
   definition: AppDefinition,
@@ -519,10 +546,15 @@ const withoutPermission = (
       `The App has no permission \`${alias}\`. Its permissions: ${definition.permissions.map((held) => `\`${typeof held.alias === "string" ? held.alias : ""}\``).join(", ") || "none yet"}.`
     );
   }
-  return {
-    ...definition,
-    permissions: definition.permissions.filter((held) => held.alias !== alias),
-  };
+  return withWorkflowBinding(
+    {
+      ...definition,
+      permissions: definition.permissions.filter(
+        (held) => held.alias !== alias
+      ),
+    },
+    alias
+  );
 };
 
 /** `definition` without what a removal names. */
@@ -796,10 +828,10 @@ const applied = (
       };
     }
     case "setWorkflowContract": {
-      return withWorkflowContract(
-        definition,
+      return withWorkflowBinding(
+        withWorkflowContract(definition, operation.alias, operation.contract),
         operation.alias,
-        operation.contract
+        operation.bound
       );
     }
     case "removeTable":

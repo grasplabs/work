@@ -1077,6 +1077,10 @@ export const commitFiles = async (
     definitionInput === undefined
       ? (previous[0] ?? emptyDefinition(name))
       : givenDefinition(definitionInput);
+  // Imported here, not at the top: bindings reach back into this module.
+  const { requireRecordableBindings } =
+    await import("./app-workflow-bindings.ts");
+  await requireRecordableBindings(env, by, definition, previous[0] ?? null);
   applyChanges(files, input, definition);
   const stored = await storedVersion(env, appId, files, definition, previous);
   if (sameVersion(stored, latest)) {
@@ -1333,13 +1337,13 @@ export const proposeDraft = async (
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const latest =
     parent === null ? undefined : await findVersion(env, appId, parent);
-  const stored = await storedVersion(
-    env,
-    appId,
-    files,
-    definition ?? emptyDefinition(name),
-    await carriedDefinitions(env, appId, latest)
-  );
+  const carried = await carriedDefinitions(env, appId, latest);
+  const proposed = definition ?? emptyDefinition(name);
+  // Imported here, not at the top: bindings reach back into this module.
+  const { requireRecordableBindings } =
+    await import("./app-workflow-bindings.ts");
+  await requireRecordableBindings(env, by, proposed, carried[0] ?? null);
+  const stored = await storedVersion(env, appId, files, proposed, carried);
   if (sameVersion(stored, latest)) {
     throw appErrors.create("app.nothing_to_commit");
   }
@@ -1653,7 +1657,8 @@ export const makeCurrent = async (
 ): Promise<App> => {
   const found = await appFor(env, by, app, "builder");
   const appId = found.id;
-  const { version: number, approved } = await findVersion(env, appId, version);
+  const row = await findVersion(env, appId, version);
+  const { version: number, approved } = row;
   if (found.currentVersion === number) {
     return found;
   }
@@ -1675,6 +1680,13 @@ export const makeCurrent = async (
     await import("./app-schema.ts");
   const { boundFunctionsServedSql, requireBoundFunctionsServed } =
     await import("./app-function-bindings.ts");
+  const {
+    bindableSql,
+    bindingChangeStatements,
+    ownWorkflowBindings,
+    tellBindingChanged,
+    versionBindingChanges,
+  } = await import("./app-workflow-bindings.ts");
   const release = await readBackRelease(env, appId, number);
   const previous = found.currentVersion;
   // No workflow bound to one of the App's functions loses it, or finds it
@@ -1686,6 +1698,40 @@ export const makeCurrent = async (
     previous,
     release
   );
+  // What the version binds of its workflows, as its release sealed it,
+  // checked now and bound in the same batch (app-workflow-bindings.ts).
+  // The bindings the version records of its own, which its author
+  // answers for: never those it carries over from its parent.
+  const { definition: defined } = await readStored(row);
+  const parentDefinition =
+    row.parent === null
+      ? null
+      : await readStored(await findVersion(env, appId, row.parent));
+  const recorded = ownWorkflowBindings(
+    defined,
+    parentDefinition?.definition ?? null
+  );
+  // What it binds unlike the version current now, as its seal took them
+  // (bound-workflows.ts, `sealedWorkflowPins`): bound, never kept over.
+  const currentDefinition =
+    previous === null
+      ? null
+      : await readStored(await findVersion(env, appId, previous));
+  const chosen = ownWorkflowBindings(
+    defined,
+    currentDefinition?.definition ?? null
+  );
+  const bindingsOf = async () =>
+    await versionBindingChanges(
+      env,
+      by,
+      appId,
+      { author: row.authorId, recorded, chosen },
+      release
+    );
+  // Refused here before the store changes; checked again once it has
+  // (below), as roles may have changed while its schema applied.
+  await bindingsOf();
   // Last before the batch, after every gate above, so no refused gate
   // leaves the store changed: the version's schema applied to its store,
   // its migrations with it, all or nothing (app-schema.ts). The store and
@@ -1696,6 +1742,15 @@ export const makeCurrent = async (
   // that doesn't make it current puts the current version's schema back,
   // or, where it can't, says so (`unfinishedPublish`).
   const applied = await applyVersionSchema(env, by, release, previous);
+  let rebinding: Awaited<ReturnType<typeof bindingsOf>>;
+  try {
+    rebinding = await bindingsOf();
+  } catch (error) {
+    if (applied !== null) {
+      await unfinishedPublish(env, by, appId, number, applied.appliedAt);
+    }
+    throw error;
+  }
   const event = createAuditEvent(
     changeEntry(by, "app.version.current", appId, {
       version: number,
@@ -1741,11 +1796,22 @@ export const makeCurrent = async (
                 runnableReleaseSql(appId, number),
                 publishedSql(appId, number),
                 // A workflow granted a function since it was checked.
-                boundFunctionsServedSql(appId, served)
+                boundFunctionsServedSql(appId, served),
+                // A workflow it binds deleted, or an alias rebound, since
+                // it was checked.
+                bindableSql(appId, rebinding)
               )
             )
             .returning(),
           outboxedEventWhere(db, event, sql`changes() > 0`),
+          // Its workflows bound with it, or not at all.
+          ...bindingChangeStatements(
+            env,
+            by,
+            { app: appId, appVersion: number, switchId: event.id },
+            rebinding.changes,
+            storedEvent(event.id)
+          ),
           ...madeCurrent(env, by, {
             app: appId,
             version: number,
@@ -1788,6 +1854,9 @@ export const makeCurrent = async (
       .get();
     if (ours !== undefined) {
       // The try whose answer was lost may have told no page either.
+      if (rebinding.changes.length > 0) {
+        waitUntil(tellBindingChanged(env, appId));
+      }
       waitUntil(versionMadeCurrent(env, appId));
       return await editableApp(env, by, appId);
     }
@@ -1803,8 +1872,13 @@ export const makeCurrent = async (
     }
     // A workflow bound since to a function it doesn't serve: named.
     await requireBoundFunctionsServed(env, appId, previous, release);
+    // A workflow it binds deleted, or no longer the person's to bind.
+    await bindingsOf();
     // What is left is a conflict: the base moved.
     throw appErrors.create("app.conflict");
+  }
+  if (rebinding.changes.length > 0) {
+    waitUntil(tellBindingChanged(env, appId));
   }
   // The pages open on the App hear of it (spec 11.5): their pages show
   // a new version ready, and switch to it (pages-rpc.ts, `watchVersion`).
