@@ -260,7 +260,7 @@ describe("generated modules", () => {
     for (const forbidden of [
       "handler",
       "schema.ts",
-      "@grasp-os/sdk/server",
+      "@grasp-os/runtime/server",
       "serverModule",
       "server/",
       "internal",

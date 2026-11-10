@@ -56,7 +56,7 @@ const notesFiles = (label = "Notes"): TestApp =>
       },
     },
     {
-      "values.ts": `import { v } from "@grasp-os/sdk";
+      "values.ts": `import { v } from "@grasp-os/runtime";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
@@ -68,7 +68,7 @@ export const noteFields = {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/sdk";
+} from "@grasp-os/runtime";
 import { internal } from "@server/_generated/internal";
 import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../values.ts";
@@ -867,7 +867,7 @@ const undeclaredReturnFiles: TestApp = testApp(
     },
   },
   {
-    "server/notes.ts": `import { v } from "@grasp-os/sdk";
+    "server/notes.ts": `import { v } from "@grasp-os/runtime";
 import { action, mutation, query } from "@server/_generated/server";
 
 export const greet = query({
@@ -919,7 +919,7 @@ const diceFiles: TestApp = testApp(
     },
   },
   {
-    "server/dice.ts": `import { AppError, v } from "@grasp-os/sdk";
+    "server/dice.ts": `import { AppError, v } from "@grasp-os/runtime";
 import { action, mutation, query } from "@server/_generated/server";
 
 const heldRandom = Math.random;

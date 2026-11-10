@@ -16,7 +16,7 @@ Tables live in the App's definition. Grasp adds and changes them with its defini
 From the definition, Grasp generates `server/schema.ts`:
 
 ```ts server/schema.ts
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime";
 
 export default defineSchema({
   tasks: defineTable({
@@ -63,7 +63,7 @@ import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/sdk";
+} from "@grasp-os/runtime";
 import { doc, query } from "@server/_generated/server";
 
 export const get = query({
@@ -111,7 +111,7 @@ Mutations write through `ctx.db`:
 - `delete(table, id)` removes the record.
 
 ```ts server/projects.ts
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { mutation } from "@server/_generated/server";
 
 export const assign = mutation({
@@ -129,7 +129,7 @@ A mutation is one transaction: if a record it read changes before it commits, Gr
 Change only what someone edited, so two people who edit different fields of a record both keep their changes. A form does this for you: `useForm` sends the fields its mutation requires, and only the optional fields the person changed. An editing mutation takes the record's ID and its fields as optional, and patches what it gets:
 
 ```ts server/edits.ts
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { mutation } from "@server/_generated/server";
 
 export const editTask = mutation({

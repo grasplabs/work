@@ -3,9 +3,9 @@ import {
   kitModuleName,
   serverEntryPath,
 } from "@grasp-os/compiler";
-import { defineApp, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { inspectApp, registerApp } from "@grasp-os/sdk/host";
-import { serverModule } from "@grasp-os/sdk/server";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/runtime";
+import { inspectApp, registerApp } from "@grasp-os/runtime/host";
+import { serverModule } from "@grasp-os/runtime/server";
 
 import type { OpenStore } from "../../src/data-stores.ts";
 import { callOperation } from "../../src/operations.ts";
@@ -194,7 +194,7 @@ export default {
       { ...env, SANDBOX_HOST: host },
       {
         modules: { [appModuleName(serverEntryPath)]: appModule },
-        sdk: { [kitModuleName("@grasp-os/sdk/runner")]: runner },
+        sdk: { [kitModuleName("@grasp-os/runtime/runner")]: runner },
       },
       searchParams.get("owner") ?? "app-stand-in"
     );

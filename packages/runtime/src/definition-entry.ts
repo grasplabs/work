@@ -1,4 +1,4 @@
-// `@grasp-os/sdk/definition`: an App's definition (definition.ts), read,
+// `@grasp-os/runtime/definition`: an App's definition (definition.ts), read,
 // changed by its operations, and the config and schema generated from it.
 // Only Grasp writes one: core's definition tools and builds, and the seed.
 // Apart from `host`, as oxc parses it (oxc-parse.ts), which nothing a page

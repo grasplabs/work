@@ -1,4 +1,4 @@
-import { useAction } from "@grasp-os/sdk/react";
+import { useAction } from "@grasp-os/runtime/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {

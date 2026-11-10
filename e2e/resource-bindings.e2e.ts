@@ -29,7 +29,7 @@ const writerFiles = (): TestApp =>
       permissions: ["permission.ai({ maxOutputTokens: 200 })"],
     },
     {
-      "server/desk.ts": `import { v } from "@grasp-os/sdk";
+      "server/desk.ts": `import { v } from "@grasp-os/runtime";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

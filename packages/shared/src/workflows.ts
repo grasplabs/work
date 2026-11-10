@@ -247,7 +247,7 @@ const mailboxSchema = z.object({ name: z.string(), address: z.string() });
  * `truncated` when cut.
  *
  * `stored` is where the message is kept for 30 days, so the run can read
- * its attachments (`readAttachment` in `@grasp-os/sdk/workflow`); null
+ * its attachments (`readAttachment` in `@grasp-os/runtime/workflow`); null
  * when it has none but inline ones, or while keeping messages is switched
  * off.
  */
@@ -435,7 +435,7 @@ const retryableCode = (code: unknown): boolean =>
  * Whether a step that failed with `error` may be tried again, as far as its
  * retries allow: a failure of a class trying again may fix, or an attempt
  * that ran out of time. Engines decide by this alone, so a step is retried
- * the same in tests (`@grasp-os/sdk/testing`) as in a real run.
+ * the same in tests (`@grasp-os/runtime/testing`) as in a real run.
  */
 export const isRetryable = (error: unknown): boolean =>
   typeof error === "object" &&

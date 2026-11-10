@@ -84,7 +84,7 @@ const files: TestApp = testApp(
   },
   {
     "server/notes.ts": `import { action, mutation, query } from "@server/_generated/server";
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 
 export const count = query({
   args: {},

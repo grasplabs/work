@@ -1,4 +1,4 @@
-import type { ManifestTable, RowRule, RowRules } from "@grasp-os/sdk/host";
+import type { ManifestTable, RowRule, RowRules } from "@grasp-os/runtime/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { StoreFields } from "@grasp-os/shared/stores";
 

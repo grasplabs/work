@@ -1,5 +1,5 @@
-import { fileChannel, linkChannel } from "@grasp-os/sdk/host";
-import type { FileChannel, LinkChannel } from "@grasp-os/sdk/host";
+import { fileChannel, linkChannel } from "@grasp-os/runtime/host";
+import type { FileChannel, LinkChannel } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
 import { shownAt } from "@grasp-os/shared/chat";

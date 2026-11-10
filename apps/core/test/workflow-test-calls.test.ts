@@ -1,5 +1,5 @@
-import { v } from "@grasp-os/sdk";
-import { declaredWorkflows } from "@grasp-os/sdk/host";
+import { v } from "@grasp-os/runtime";
+import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -101,7 +101,7 @@ const filesWith = (
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/sdk";
+      "server/requests.ts": `import { v } from "@grasp-os/runtime";
 import { mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -289,7 +289,7 @@ const leftOf = async (app: string) => {
 /** A suite of one workflow test, `body` with `owner` at hand. */
 const suiteOf = (
   body: string
-): string => `import { workflowTest } from "@grasp-os/sdk/testing";
+): string => `import { workflowTest } from "@grasp-os/runtime/testing";
 import { ${["api", "workflows"].filter((name) => body.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
 
 export default workflowTest({

@@ -3,8 +3,8 @@ import {
   declaredPermission,
   declaredPermissions,
   descriptorFromText,
-} from "@grasp-os/sdk/host";
-import type { AppManifest, RowRule } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
+import type { AppManifest, RowRule } from "@grasp-os/runtime/host";
 import type {
   ReviewChange,
   TableRowRules,

@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vite-plus/test";
 
 const entry = createRequire(import.meta.url).resolve(
-  "@grasp-os/sdk/expression-check"
+  "@grasp-os/runtime/expression-check"
 );
 
 describe("the expression check under plain Node", () => {

@@ -8,7 +8,7 @@
  * bookkeeping), so the seed starts each run with one, and a few are bad
  * on purpose, so some runs fail as real ones do.
  */
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 
 import type { PersonKey, TeamName } from "./company.ts";
@@ -115,7 +115,7 @@ export const decisionResponse = JSON.stringify(
  * run, and `decider` answers its decisions.
  */
 const suite = (tests: Record<string, string>): string =>
-  `import { workflowTest } from "@grasp-os/sdk/testing";
+  `import { workflowTest } from "@grasp-os/runtime/testing";
 import { workflows } from "@server/_generated/api";
 
 export default workflowTest({

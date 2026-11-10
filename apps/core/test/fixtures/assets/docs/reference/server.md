@@ -1,4 +1,4 @@
-# @grasp-os/sdk/server
+# @grasp-os/runtime/server
 
 ## Functions
 

@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { describe, expect, it } from "vite-plus/test";
 
 import { boundEventsOf } from "../src/bound-workflow-events.ts";

@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -56,7 +56,7 @@ const files = (): TestApp =>
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/sdk";
+      "server/requests.ts": `import { v } from "@grasp-os/runtime";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

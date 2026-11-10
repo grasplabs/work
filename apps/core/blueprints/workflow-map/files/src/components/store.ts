@@ -2,7 +2,7 @@
 // store (server/), and what each refusal means to the person using
 // it.
 
-import type { Id } from "@grasp-os/sdk";
+import type { Id } from "@grasp-os/runtime";
 
 import type { Parameter, Step, WorkflowRecord } from "./totals";
 

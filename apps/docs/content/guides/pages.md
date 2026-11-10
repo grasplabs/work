@@ -24,7 +24,7 @@ Grasp generates the route tree from these files, as TanStack does in any project
 `useQuery` subscribes to a query. It returns `undefined` while the query loads, then the query's result, and renders again whenever that result changes: nobody refreshes a Page in Grasp.
 
 ```tsx src/routes/tasks.$taskId.tsx
-import { useMutation, useQuery } from "@grasp-os/sdk/react";
+import { useMutation, useQuery } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   PageHeader,
@@ -75,7 +75,7 @@ export const Route = createFileRoute("/tasks/$taskId")({
 ```
 
 ```ts server/details.ts
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { doc, query } from "@server/_generated/server";
 
 export const get = query({
@@ -96,7 +96,7 @@ Pass `"skip"` instead of the arguments to read nothing yet. A query that fails t
 Pages link to each other with TanStack's `Link`, and move in code with its `useNavigate`, typed by the routes the App has:
 
 ```tsx src/routes/index.tsx
-import { useQuery } from "@grasp-os/sdk/react";
+import { useQuery } from "@grasp-os/runtime/react";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { api } from "@server/_generated/api";
 import { createFileRoute, Link } from "@tanstack/react-router";

@@ -1,5 +1,5 @@
-import type { FilesOperation } from "@grasp-os/sdk";
-import { declaredPermission, schemaHash } from "@grasp-os/sdk/host";
+import type { FilesOperation } from "@grasp-os/runtime";
+import { declaredPermission, schemaHash } from "@grasp-os/runtime/host";
 import {
   appFilesPath,
   downloadNameOf,

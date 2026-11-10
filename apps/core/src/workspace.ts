@@ -4611,7 +4611,7 @@ export class Workspace extends DurableObject<Env> {
    * App `appId` at `at` reported on `page`, for the agent's next
    * check (preview-reports.ts): only of the draft's own revision, which a
    * frame names for what that revision's page ran into, an update of it
-   * the frame tried and rolled back too (@grasp-os/sdk's
+   * the frame tried and rolled back too (@grasp-os/runtime's
    * preview-updates.ts). Dropped for any other: an earlier page's
    * problems decide nothing of the draft now. Never kept for a frame
    * showing a version of the App, or a version of the draft opened

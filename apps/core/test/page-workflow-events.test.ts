@@ -1,5 +1,5 @@
-import { v } from "@grasp-os/sdk";
-import { declaredWorkflows } from "@grasp-os/sdk/host";
+import { v } from "@grasp-os/runtime";
+import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -74,7 +74,7 @@ const files = (): TestApp =>
       ],
     },
     {
-      "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+      "server/invoices.ts": `import { v } from "@grasp-os/runtime";
 import { permissions } from "../grasp.config.ts";
 
 export const review = permissions.review;

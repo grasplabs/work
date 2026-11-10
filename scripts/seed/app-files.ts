@@ -7,8 +7,8 @@ import {
   applyOperation,
   definitionSources,
   emptyDefinition,
-} from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 
 import type { AppSeed } from "./apps.ts";
 

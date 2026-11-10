@@ -1,7 +1,7 @@
-import { defineApp, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
-import { runFunction } from "@grasp-os/sdk/runner";
-import { serverModule } from "@grasp-os/sdk/server";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/runtime";
+import { inspectApp, manifestText, registerApp } from "@grasp-os/runtime/host";
+import { runFunction } from "@grasp-os/runtime/runner";
+import { serverModule } from "@grasp-os/runtime/server";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";

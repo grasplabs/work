@@ -1,5 +1,5 @@
 /* oxlint-disable unicorn/no-thenable -- an if step's list is its then */
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";

@@ -1,4 +1,4 @@
-import type { ValueDescriptor } from "@grasp-os/sdk";
+import type { ValueDescriptor } from "@grasp-os/runtime";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StoreFields } from "@grasp-os/shared/stores";

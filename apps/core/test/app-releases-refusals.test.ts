@@ -1,4 +1,4 @@
-import { definitionManifest } from "@grasp-os/sdk/definition";
+import { definitionManifest } from "@grasp-os/runtime/definition";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -112,7 +112,7 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
     const fixture = await appWith(
       withFiles(notesFiles(), {
         "server/__proto__.ts":
-          'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });\n',
+          'import { v } from "@grasp-os/runtime";\nimport { query } from "@server/_generated/server";\n\nexport const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });\n',
       })
     );
     const refused: unknown = await seal(fixture).then(
@@ -159,7 +159,7 @@ JSON.stringify = (value, ...rest) => {
       "server code that imports a platform-only SDK module",
       {
         "server/extra.ts":
-          'import { inspectApp } from "@grasp-os/sdk/host";\nexport const peek = inspectApp;\n',
+          'import { inspectApp } from "@grasp-os/runtime/host";\nexport const peek = inspectApp;\n',
       },
     ],
     [
@@ -286,7 +286,7 @@ JSON.stringify = (value, ...rest) => {
   it("seals functions at any segment a reference doesn't answer, `preferences` among them", async () => {
     const fixture = await appWith(
       withFiles(notesFiles(), {
-        "server/preferences.ts": `import { v } from "@grasp-os/sdk";
+        "server/preferences.ts": `import { v } from "@grasp-os/runtime";
 import { api } from "@server/_generated/api";
 import { action, query } from "@server/_generated/server";
 

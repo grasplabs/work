@@ -1,4 +1,7 @@
-import type { PreviewApplied, PreviewLoad } from "@grasp-os/sdk/page-runtime";
+import type {
+  PreviewApplied,
+  PreviewLoad,
+} from "@grasp-os/runtime/page-runtime";
 import { shownAt } from "@grasp-os/shared/chat";
 import type {
   PreviewAt,
@@ -15,7 +18,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 // for every preview that asks for it, and stages its modules) and hands
 // the frame the address of the page's module over the frame's own
 // bridge; the frame imports it, loading from core only the modules the
-// write changed, and swaps it in with React Fast Refresh (@grasp-os/sdk's
+// write changed, and swaps it in with React Fast Refresh (@grasp-os/runtime's
 // preview-updates.ts). The frame isn't started again, so what the page
 // holds stays.
 //

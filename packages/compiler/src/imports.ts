@@ -525,12 +525,12 @@ export interface CodeKind {
 /**
  * The SDK modules core's own entry modules import in the isolates it
  * runs: the workflow SDK a sealed run's host drives
- * (`@grasp-os/sdk/workflow`, sealed-isolate.ts) and the test harness an
- * App's tests run on (`@grasp-os/sdk/testing`, app-tests.ts).
+ * (`@grasp-os/runtime/workflow`, sealed-isolate.ts) and the test harness an
+ * App's tests run on (`@grasp-os/runtime/testing`, app-tests.ts).
  */
 export const sdkImports = [
-  "@grasp-os/sdk/workflow",
-  "@grasp-os/sdk/testing",
+  "@grasp-os/runtime/workflow",
+  "@grasp-os/runtime/testing",
 ] as const;
 
 /**
@@ -540,8 +540,8 @@ export const sdkImports = [
  * the testing module beside them.
  */
 export const generatedWorkflowSdkImports = [
-  "@grasp-os/sdk/workflow",
-  "@grasp-os/sdk/workflow-generated",
+  "@grasp-os/runtime/workflow",
+  "@grasp-os/runtime/workflow-generated",
 ] as const;
 
 /** Generated workflow code imports only `generatedWorkflowSdkImports`. */

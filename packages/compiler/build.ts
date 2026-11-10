@@ -80,7 +80,7 @@ const root = import.meta.dirname;
 const dist = path.join(root, "dist");
 const modules = path.join(root, "node_modules");
 const ui = realpathSync(path.join(modules, "@grasp-os/ui"));
-const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
+const sdk = realpathSync(path.join(modules, "@grasp-os/runtime"));
 /**
  * The SDK's own dependency: its types name `@grasp-os/shared`'s (a
  * workflow's `Json`, a run's errors), so the kit's type chunks
@@ -88,13 +88,13 @@ const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
  */
 const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
 /**
- * The Brain's contract, which the SDK re-exports (`@grasp-os/sdk/brain`)
+ * The Brain's contract, which the SDK re-exports (`@grasp-os/runtime/brain`)
  * and Knowledge's types come from: carried for the same reason.
  */
 const brain = realpathSync(path.join(sdk, "node_modules/@grasp-os/brain"));
 /** The platform's own packages the kit's types come from, by name. */
 const ownPackages: Readonly<Record<string, string>> = {
-  "@grasp-os/sdk": sdk,
+  "@grasp-os/runtime": sdk,
   "@grasp-os/ui": ui,
   "@grasp-os/shared": shared,
   "@grasp-os/brain": brain,
@@ -182,7 +182,7 @@ const uiEntries = (): Entry[] =>
   });
 
 /**
- * `@grasp-os/sdk`'s page modules: the React SDK and the legacy hooks
+ * `@grasp-os/runtime`'s page modules: the React SDK and the legacy hooks
  * App code imports, and the runtime that renders a page in its frame
  * and mounts the session client (see kit.ts). They share the client's
  * module, so the provider the runtime mounts is the one the hooks read.
@@ -190,9 +190,9 @@ const uiEntries = (): Entry[] =>
 const sdkEntries = (extra: readonly string[] = []): Entry[] =>
   [sdkRoot, pageSdk, pageRuntime, ...extra].map((specifier) => {
     const target =
-      exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
+      exportsOf(sdk)[`.${specifier.slice("@grasp-os/runtime".length)}`];
     if (typeof target !== "string") {
-      throw new TypeError(`@grasp-os/sdk doesn't export ${specifier}`);
+      throw new TypeError(`@grasp-os/runtime doesn't export ${specifier}`);
     }
     return { specifier, id: path.join(sdk, target) };
   });
@@ -563,7 +563,7 @@ const buildSdkModules = async (
         input: Object.fromEntries(
           specifiers.map((specifier) => {
             const target =
-              exported[`.${specifier.slice("@grasp-os/sdk".length)}`];
+              exported[`.${specifier.slice("@grasp-os/runtime".length)}`];
             if (typeof target !== "string") {
               throw new TypeError(`The SDK doesn't export ${specifier}`);
             }
@@ -844,7 +844,7 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
 /**
  * The type chunks: the platform's own packages as App code type-checks
  * against them, rolled up into one declaration file per module it may
- * import (`@grasp-os/sdk/react`, `@grasp-os/ui/components/button`, the
+ * import (`@grasp-os/runtime/react`, `@grasp-os/ui/components/button`, the
  * server and workflow modules, …) and chunks for what those
  * share, with the packages they reach inlined. A check parses only the
  * chunks the modules it imports reach, never the sources of everything
@@ -986,9 +986,9 @@ const emitOwnDeclarations = (
 
 /**
  * Where a type chunk goes in the kit's types, under `/node_modules/`: at
- * the source of its main module (`@grasp-os/sdk/src/react` for the chunk
- * of `@grasp-os/sdk/react`), so a diagnostic that names a module
- * (`typeof import("/node_modules/@grasp-os/sdk/src/react")`) names it as
+ * the source of its main module (`@grasp-os/runtime/src/react` for the chunk
+ * of `@grasp-os/runtime/react`), so a diagnostic that names a module
+ * (`typeof import("/node_modules/@grasp-os/runtime/src/react")`) names it as
  * a check of the sources did, with no hash that changes from release to
  * release. A chunk the entries share takes `.shared.d.ts` there.
  */
@@ -1048,7 +1048,7 @@ const ownDeclarations = (declarations: Map<string, string>): RolldownPlugin => {
 
 /**
  * The type chunks of the own modules among `specifiers`, by their path in
- * the kit's types (`/node_modules/@grasp-os/sdk/src/react.d.ts`), with a
+ * the kit's types (`/node_modules/@grasp-os/runtime/src/react.d.ts`), with a
  * package.json for each own package that exports its modules' chunks
  * and nothing else. Other packages stay imports, resolved among the
  * kit's types.
@@ -1097,7 +1097,7 @@ const rollUpTypes = async (
           moduleIds.find((id) => path.basename(id) === `${name}.ts`) ??
           moduleIds[0];
         return main === undefined
-          ? "@grasp-os/sdk/src/[name].shared.d.ts"
+          ? "@grasp-os/runtime/src/[name].shared.d.ts"
           : `${chunkPathOf(main)}.shared.d.ts`;
       },
     });
@@ -1719,7 +1719,7 @@ const buildAppCompiler = async (
     // generated modules import (app-code.ts).
     ...serverSdkImports,
     // And its tests, against the SDK's testing module (app-code.ts).
-    "@grasp-os/sdk/testing",
+    "@grasp-os/runtime/testing",
   ];
   const typeSources = collectTypes(typed);
   const kit: Kit = {

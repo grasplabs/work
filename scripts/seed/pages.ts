@@ -25,7 +25,7 @@ const appPage = ({
   title: string;
   intro: string;
   workflows: readonly WorkflowSeed[];
-}): string => `import { useWorkflow } from "@grasp-os/sdk/react";
+}): string => `import { useWorkflow } from "@grasp-os/runtime/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";

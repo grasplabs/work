@@ -104,7 +104,7 @@ export interface Importer {
 export interface LockfileInput {
   /** The checkout's pnpm-lock.yaml, as text. */
   readonly checkoutLock: string;
-  /** Each project directory (`.`, `vendor/@grasp-os/sdk`) and its manifest. */
+  /** Each project directory (`.`, `vendor/@grasp-os/runtime`) and its manifest. */
   readonly importers: Readonly<Record<string, Importer>>;
   /** The App's and its workflows' locks, each with whose it is. */
   readonly locks: readonly {

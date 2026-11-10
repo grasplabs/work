@@ -1,4 +1,4 @@
-import { fileChannel } from "@grasp-os/sdk/host";
+import { fileChannel } from "@grasp-os/runtime/host";
 import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";

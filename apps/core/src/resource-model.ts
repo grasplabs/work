@@ -1,9 +1,9 @@
-import type { ValueDescriptor } from "@grasp-os/sdk";
+import type { ValueDescriptor } from "@grasp-os/runtime";
 import {
   descriptorFromText,
   jsonSchemaOf,
   schemaFromDescriptor,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";

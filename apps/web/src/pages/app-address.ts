@@ -2,7 +2,7 @@ import { useRouter, useRouterState } from "@tanstack/react-router";
 
 // Where in an App its frame is, carried in the page's own address: the
 // App's routes are its own single page app's, routed in the frame
-// (@grasp-os/sdk's page-runtime.ts), and the page keeps their path in
+// (@grasp-os/runtime's page-runtime.ts), and the page keeps their path in
 // its address, under the App's page, so Back, Forward, reload and a
 // shared link all land where the person was. The App's `/` is the App's
 // page itself; every other route sits under `sub` (`/apps/<id>/pages`

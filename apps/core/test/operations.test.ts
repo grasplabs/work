@@ -6,12 +6,12 @@ import {
   v,
   paginationOptionsValidator,
   paginationResultValidator,
-} from "@grasp-os/sdk";
-import type { Id } from "@grasp-os/sdk";
-import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
-import { runFunction } from "@grasp-os/sdk/runner";
-import type { FunctionChannel } from "@grasp-os/sdk/runner";
-import { serverModule } from "@grasp-os/sdk/server";
+} from "@grasp-os/runtime";
+import type { Id } from "@grasp-os/runtime";
+import { inspectApp, manifestText, registerApp } from "@grasp-os/runtime/host";
+import { runFunction } from "@grasp-os/runtime/runner";
+import type { FunctionChannel } from "@grasp-os/runtime/runner";
+import { serverModule } from "@grasp-os/runtime/server";
 import type { AppId } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";

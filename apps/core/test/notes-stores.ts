@@ -1,6 +1,6 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import type { ValueShape } from "@grasp-os/sdk";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime";
+import type { ValueShape } from "@grasp-os/runtime";
+import { manifestText, schemaManifest } from "@grasp-os/runtime/host";
 import { storedFieldsSchema } from "@grasp-os/shared/stores";
 import type { Commit, StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";

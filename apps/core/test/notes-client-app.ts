@@ -1,4 +1,4 @@
-import type { Id, FunctionReference, ReferenceKind } from "@grasp-os/sdk";
+import type { Id, FunctionReference, ReferenceKind } from "@grasp-os/runtime";
 
 import type { Release } from "../src/app-releases.ts";
 import { testApp, withoutDefinition } from "./app-definitions.ts";
@@ -24,14 +24,14 @@ export const notesSpec = {
 } satisfies AppSpec;
 
 export const notesFiles: TestApp = testApp(notesSpec, {
-  "values.ts": `import { v } from "@grasp-os/sdk";
+  "values.ts": `import { v } from "@grasp-os/runtime";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
 };
 `,
-  "server/notes.ts": `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+  "server/notes.ts": `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/runtime";
 import { action, doc, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../values.ts";
 
@@ -135,7 +135,7 @@ export const big = action({
 `,
 
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@grasp-os/sdk/react";
+import { useMutation, useQuery } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 
@@ -198,7 +198,7 @@ export const defineNotes = `for (const operation of ${JSON.stringify(notesDefini
  * generated, so its fields' validators are its own values.
  */
 export const notesCode: Record<string, string> = {
-  "values.ts": `import { v } from "@grasp-os/sdk";
+  "values.ts": `import { v } from "@grasp-os/runtime";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),

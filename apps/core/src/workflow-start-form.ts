@@ -1,6 +1,6 @@
-import type { ValueDescriptor } from "@grasp-os/sdk";
-import { descriptorFromText, jsonSchemaOf } from "@grasp-os/sdk/host";
-import type { JsonSchema } from "@grasp-os/sdk/host";
+import type { ValueDescriptor } from "@grasp-os/runtime";
+import { descriptorFromText, jsonSchemaOf } from "@grasp-os/runtime/host";
+import type { JsonSchema } from "@grasp-os/runtime/host";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
 import { eq } from "drizzle-orm";

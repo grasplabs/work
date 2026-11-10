@@ -1,5 +1,5 @@
-import { ValueDefinitionError } from "@grasp-os/sdk";
-import type { ValueDescriptor } from "@grasp-os/sdk";
+import { ValueDefinitionError } from "@grasp-os/runtime";
+import type { ValueDescriptor } from "@grasp-os/runtime";
 import {
   holdsReference,
   manifestText,
@@ -7,13 +7,13 @@ import {
   referencesRenamed,
   SchemaDefinitionError,
   schemaHash as hashOf,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import type {
   ManifestTable,
   ReadManifest,
   SchemaAnswer,
   SchemaManifest,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { RecordChangePage } from "@grasp-os/shared/app-data";
 import {

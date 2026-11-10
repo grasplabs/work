@@ -1,5 +1,5 @@
-import { bridgeTransport } from "@grasp-os/sdk/page-runtime";
-import type { PageBridge } from "@grasp-os/sdk/page-runtime";
+import { bridgeTransport } from "@grasp-os/runtime/page-runtime";
+import type { PageBridge } from "@grasp-os/runtime/page-runtime";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { pageLimits } from "@grasp-os/shared/page-limits";
 import { portTransport } from "@grasp-os/shared/page-port";

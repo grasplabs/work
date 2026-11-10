@@ -1,5 +1,5 @@
 /**
- * Type-checks a workflow's JavaScript expressions (`@grasp-os/sdk/expression-check`)
+ * Type-checks a workflow's JavaScript expressions (`@grasp-os/runtime/expression-check`)
  * against the types of what they read, on tsrs in the type checker's
  * isolate (checker.ts), diagnostics only: core sends the request this
  * builds, and reads the diagnostics back with it. A reference to a field,
@@ -27,9 +27,9 @@ import {
   allowedMethods,
   checkExpression,
   checkRoots,
-} from "@grasp-os/sdk/expression-check";
-import type { ExpressionError } from "@grasp-os/sdk/expression-check";
-import { parseProgram } from "@grasp-os/sdk/oxc-parse";
+} from "@grasp-os/runtime/expression-check";
+import type { ExpressionError } from "@grasp-os/runtime/expression-check";
+import { parseProgram } from "@grasp-os/runtime/oxc-parse";
 
 import type { Diagnostic } from "./diagnostic.ts";
 import { serverTarget, typeCheckRequest } from "./type-check.ts";
@@ -107,7 +107,7 @@ declare function $value<T>(value: T & $NoMethod<T>): Exclude<T, $Function>;
 const refusedArgument = "TS2345";
 
 /**
- * The SDK's value types (`@grasp-os/sdk`'s values.ts), as a scope's types
+ * The SDK's value types (`@grasp-os/runtime`'s values.ts), as a scope's types
  * name them (`valueTypeOf` writes a file as `FileValue`, say): declared
  * here, since the module imports nothing.
  */

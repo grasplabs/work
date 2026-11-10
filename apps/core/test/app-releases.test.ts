@@ -1,5 +1,5 @@
 import { serverSdkModules } from "@grasp-os/compiler";
-import { schemaHash } from "@grasp-os/sdk/host";
+import { schemaHash } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { releaseFormatVersion } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -940,11 +940,11 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a type error",
-      'import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
+      'import { v } from "@grasp-os/runtime";\nimport { query } from "@server/_generated/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
     ],
     [
       "a path into the kit's packages, for its types",
-      'import type { runPage } from "../node_modules/@grasp-os/sdk/src/page-runtime.ts";\nexport type Reached = typeof runPage;\n',
+      'import type { runPage } from "../node_modules/@grasp-os/runtime/src/page-runtime.ts";\nexport type Reached = typeof runPage;\n',
     ],
     [
       "a module of the kit's pages, for its types",
@@ -952,11 +952,11 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a module the SDK doesn't give it, named with a trailing slash",
-      'import type { GraspClient } from "@grasp-os/sdk/client/";\nexport type Reached = GraspClient;\n',
+      'import type { GraspClient } from "@grasp-os/runtime/client/";\nexport type Reached = GraspClient;\n',
     ],
     [
       "a reference path into the kit",
-      '/// <reference path="../node_modules/@grasp-os/sdk/src/client.ts" />\nexport const extra = 1;\n',
+      '/// <reference path="../node_modules/@grasp-os/runtime/src/client.ts" />\nexport const extra = 1;\n',
     ],
     [
       "a lib it references, the DOM's",
@@ -968,19 +968,19 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a dynamic import of the platform's bootstrap",
-      'export const load = async (): Promise<unknown> => await import("@grasp-os/sdk/client");\n',
+      'export const load = async (): Promise<unknown> => await import("@grasp-os/runtime/client");\n',
     ],
     [
       "a type's import() of the platform's bootstrap",
-      'export type Host = typeof import("@grasp-os/sdk/host");\n',
+      'export type Host = typeof import("@grasp-os/runtime/host");\n',
     ],
     [
       "a re-export of everything of the platform's bootstrap",
-      'export * from "@grasp-os/sdk/client";\n',
+      'export * from "@grasp-os/runtime/client";\n',
     ],
     [
       "a require-style import of the platform's bootstrap",
-      'import client = require("@grasp-os/sdk/client");\nexport const reached = client;\n',
+      'import client = require("@grasp-os/runtime/client");\nexport const reached = client;\n',
     ],
     [
       "a line the type check is told to ignore",
@@ -1008,7 +1008,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "an ambient module that shadows the SDK's",
-      'declare module "@grasp-os/sdk" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
+      'declare module "@grasp-os/runtime" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
     ],
   ])("refuses %s", async (_case, source) => {
     await expect(refusedSeal(withOperation(source))).resolves.toStrictEqual({
@@ -1073,7 +1073,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     // 10.7.6): a test principal's `action` answers once, so its type
     // refuses one, as the host does (`function.mode_mismatch`).
     const streamed = withFiles(notesFiles(), {
-      "server/streams.ts": `import { v } from "@grasp-os/sdk";
+      "server/streams.ts": `import { v } from "@grasp-os/runtime";
 import { action } from "@server/_generated/server";
 
 export const once = action({ args: {}, returns: v.number(), handler: async () => 1 });
@@ -1092,7 +1092,7 @@ export const progress = action({
     const running = (reference: string): TestApp =>
       withFiles(streamed, {
         "tests/helper.ts": `import type { api } from "@server/_generated/api";
-import type { TestPrincipal } from "@grasp-os/sdk/testing";
+import type { TestPrincipal } from "@grasp-os/runtime/testing";
 
 export const run = async (principal: TestPrincipal, refs: typeof api, flag: boolean): Promise<number> =>
   await principal.action(${reference}, {});
@@ -1119,7 +1119,7 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
       refusedSeal(
         withFiles(notesFiles(), {
           "tests/helper.ts":
-            'import type { api } from "@server/_generated/api";\nimport type * as testing from "@grasp-os/sdk/testing";\nexport type Checked = [typeof api, typeof testing];\n',
+            'import type { api } from "@server/_generated/api";\nimport type * as testing from "@grasp-os/runtime/testing";\nexport type Checked = [typeof api, typeof testing];\n',
         })
       )
     ).resolves.toStrictEqual({ code: "ok", files: [] });
@@ -1176,11 +1176,11 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
       refusedSeal(
         withFiles(
           withOperation(
-            'import { v } from "@grasp-os/sdk";\n\nexport const later = (): number => {\n  const spare = 1;\n  return 2;\n};\n'
+            'import { v } from "@grasp-os/runtime";\n\nexport const later = (): number => {\n  const spare = 1;\n  return 2;\n};\n'
           ),
           {
             "tests/helper.ts":
-              'import { v } from "@grasp-os/sdk";\n\nexport const helper = 1;\n',
+              'import { v } from "@grasp-os/runtime";\n\nexport const helper = 1;\n',
           }
         )
       )

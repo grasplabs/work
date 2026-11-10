@@ -1,4 +1,4 @@
-import type { Id } from "@grasp-os/sdk";
+import type { Id } from "@grasp-os/runtime";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {

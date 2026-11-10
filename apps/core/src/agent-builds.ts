@@ -3,8 +3,8 @@ import {
   definitionText,
   emptyDefinition,
   tryOperation,
-} from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appErrors, fileChangesSchema } from "@grasp-os/shared/apps";
 import type {
   App,
@@ -1836,7 +1836,7 @@ const buildDeclaration = `/**
  * \`search(query, { limit?, cursor? })\` (at least 2 letters or digits)
  * and \`team(teamId, { limit?, cursor? })\`, at most 100 a read, each
  * person \`{ id, name, email, teams }\`; a visitor is refused it. Pages
- * get the same from \`@grasp-os/sdk/react\`: \`useUser()\` (undefined
+ * get the same from \`@grasp-os/runtime/react\`: \`useUser()\` (undefined
  * while loading; for showing, never deciding) and \`usePeople()\` (the same
  * three reads). The top-level \`people\` path is the platform's: no
  * function registers there.

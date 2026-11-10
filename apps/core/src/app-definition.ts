@@ -5,7 +5,7 @@ import {
   definitionSources,
   generatedFiles,
   validatorSource,
-} from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
 import type {
   AppDefinition,
   DefinedField,
@@ -13,8 +13,8 @@ import type {
   DefinedTable,
   DefinitionOperation,
   ValueDescriptor,
-} from "@grasp-os/sdk/definition";
-import type { AppManifest, SchemaManifest } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/definition";
+import type { AppManifest, SchemaManifest } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type {
   DataModel,
@@ -31,7 +31,7 @@ import { z } from "zod";
 import { catalogOf, planSchemaChange } from "./schema-changes.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 
-// An App's definition (@grasp-os/sdk's definition.ts), what the App is,
+// An App's definition (@grasp-os/runtime's definition.ts), what the App is,
 // and the config and schema generated from it among its files. The
 // definition is no file: each version holds it as metadata (apps.ts), a
 // chat's draft its own copy (workspace.ts). Every version the App

@@ -70,7 +70,7 @@ import {
 } from "./workflows/page-decisions.ts";
 
 // What the frontend's page host reaches for the frames it runs (see
-// @grasp-os/sdk/page-runtime): an App's page to load, its server to
+// @grasp-os/runtime/page-runtime): an App's page to load, its server to
 // call and its current version. Next to them, never on the frame bridge
 // and for the App's builders only, its error log (`errors`): its pages'
 // problems and what its server code wrote with `console`

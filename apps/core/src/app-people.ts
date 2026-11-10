@@ -3,14 +3,14 @@ import {
   peopleLimits,
   peopleFunctions,
   schemaFromDescriptor,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import type {
   PeopleFunctionName,
   PeoplePage,
   Person,
   TeamRef,
   User,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";

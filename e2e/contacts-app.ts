@@ -18,7 +18,7 @@ export const contactsApp: TestApp = testApp(
     },
   },
   {
-    "server/contacts.ts": `import { v } from "@grasp-os/sdk";
+    "server/contacts.ts": `import { v } from "@grasp-os/runtime";
 import { mutation, query } from "@server/_generated/server";
 
 export const list = query({
@@ -37,7 +37,7 @@ export const add = mutation({
 });
 `,
     "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@grasp-os/sdk/react";
+import { useMutation, useQuery } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { useState } from "react";

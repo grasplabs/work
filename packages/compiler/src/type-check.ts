@@ -128,7 +128,7 @@ export const appCodeTarget = serverTarget(
   new Set([
     ...serverSdkImports,
     // Its tests' (app-code.ts): what the source checks give tests alone.
-    "@grasp-os/sdk/testing",
+    "@grasp-os/runtime/testing",
   ])
 );
 

@@ -20,7 +20,7 @@
  * start over, stop `vp run dev`, delete `apps/core/.wrangler/state`, and
  * start it again.
  */
-import { definitionText as appDefinitionText } from "@grasp-os/sdk/definition";
+import { definitionText as appDefinitionText } from "@grasp-os/runtime/definition";
 import { appErrors } from "@grasp-os/shared/apps";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";

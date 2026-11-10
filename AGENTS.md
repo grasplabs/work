@@ -12,7 +12,7 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 | `apps/docs` | SDK docs: how to build with Grasp, for people and the agent; ships with each release |
 | `apps/admin` | Grasp's admin, where staff manage every client (TanStack Start); production runs in grasp-os-ops |
 | `apps/router` | Stateless router: `*.<domain>` to each client's core; production runs in grasp-os-ops |
-| `packages/sdk` | `@grasp-os/sdk`: workflow SDK and screen hooks, the only API App code sees |
+| `packages/runtime` | `@grasp-os/runtime`: workflow SDK and screen hooks, the only API App code sees |
 | `packages/ui` | `@grasp-os/ui`: shadcn on Base UI, Tailwind v4, shared with App screens |
 | `packages/compiler` | `@grasp-os/compiler`: the screen compiler |
 | `packages/connectors/*` | Native MCP servers, loaded by connect |
@@ -80,7 +80,7 @@ Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issu
 - Every external call goes through connect; every model call through the model gateway in core.
 - Agents and Apps start with access to nothing; every resource needs an explicit permission.
 - Anything that runs on its own is a workflow. Screens never run in the background or register hooks.
-- Workflow code imports only `@grasp-os/sdk`, never the engine.
+- Workflow code imports only `@grasp-os/runtime`, never the engine.
 - Only use platform APIs that also run on workerd. Platform services sit behind adapter interfaces so the on-prem profile can swap them.
 - EU jurisdiction is set when a resource is created (R2 `jurisdiction`, Durable Object `jurisdiction("eu")`, D1 location).
 - All React is compiled by the React Compiler, and the build fails on anything it can't compile. Don't write `useMemo`, `useCallback` or `memo` by hand; if the compiler rejects a component, fix the component. The one exception is a `@grasp-os/ui` component that uses a library the compiler itself lists as incompatible: opt out that component alone with `"use no memo"`, say why in a comment, list its file in the compiler's `kitOptOuts`, and turn off `react/incompatible-library` for that file alone. App code never opts out.

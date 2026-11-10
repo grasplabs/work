@@ -1,5 +1,5 @@
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
-import type { BoundWorkflowEvent } from "@grasp-os/sdk/host";
+import { schemaFromDescriptor } from "@grasp-os/runtime/host";
+import type { BoundWorkflowEvent } from "@grasp-os/runtime/host";
 
 // The events of a workflow an App binds, as its references carry them
 // (spec 10.4.6): `workflows.<wf>.events.<alias>` and the event waits of

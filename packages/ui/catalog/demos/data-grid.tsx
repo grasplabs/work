@@ -2,10 +2,10 @@ import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/sdk";
-import type { Infer, InferInput, FunctionReference } from "@grasp-os/sdk";
-import { GraspClient } from "@grasp-os/sdk/client";
-import { GraspProvider } from "@grasp-os/sdk/react";
+} from "@grasp-os/runtime";
+import type { Infer, InferInput, FunctionReference } from "@grasp-os/runtime";
+import { GraspClient } from "@grasp-os/runtime/client";
+import { GraspProvider } from "@grasp-os/runtime/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
 import {
   RecordGrid,

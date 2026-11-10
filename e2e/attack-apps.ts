@@ -11,7 +11,7 @@ import type { TestApp } from "../apps/core/test/app-definitions.ts";
  * the test runs itself.
  */
 
-const operations = `import { v } from "@grasp-os/sdk";
+const operations = `import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 
 export const secret = query({ args: {}, returns: v.string(), handler: () => "fictional-marker-7f3a" });
@@ -32,7 +32,7 @@ export const html = query({
 const leavingPage = (
   attacker: string
 ): string => `import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@grasp-os/sdk/react";
+import { useQuery } from "@grasp-os/runtime/react";
 import { useEffect } from "react";
 import { api } from "@server/_generated/api";
 
@@ -398,7 +398,7 @@ export const Route = createFileRoute("/")({ component: Turn });
  * whatever ran marks the frame's body.
  */
 const injectingPage = `import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@grasp-os/sdk/react";
+import { useQuery } from "@grasp-os/runtime/react";
 import { useEffect, useState } from "react";
 import { api } from "@server/_generated/api";
 

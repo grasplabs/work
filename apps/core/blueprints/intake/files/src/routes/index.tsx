@@ -1,10 +1,10 @@
-import type { Id } from "@grasp-os/sdk";
+import type { Id } from "@grasp-os/runtime";
 import {
   useClient,
   useMutation,
   useQuery,
   useWorkflow,
-} from "@grasp-os/sdk/react";
+} from "@grasp-os/runtime/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {

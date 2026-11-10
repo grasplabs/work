@@ -66,7 +66,7 @@ export const notesFiles = (marker: string): TestApp =>
       permissions: ["permission.ai({ maxOutputTokens: 100 })"],
     },
     {
-      "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+      "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/runtime";
 import { action, doc, mutation, query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 
@@ -258,7 +258,7 @@ export const consult = action({
 `,
 
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@grasp-os/sdk/react";
+import { useQuery } from "@grasp-os/runtime/react";
 import { api } from "@server/_generated/api";
 
 function Desk() {

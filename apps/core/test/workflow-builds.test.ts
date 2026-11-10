@@ -223,7 +223,7 @@ describe("JSON workflow builds", () => {
       ],
     }).toStrictEqual({
       inOrder: true,
-      imports: ["@grasp-os/sdk/workflow"],
+      imports: ["@grasp-os/runtime/workflow"],
     });
     // What runs is sealed with it: the compiled module and the SDK too.
     const artifacts = await sealedArtifacts(workflow.id, 1);
@@ -413,7 +413,7 @@ describe("JSON workflow builds", () => {
     );
     expect(heads.every((head) => head !== null)).toBeTruthy();
     const { files } = await workflowSource(env, by, workflow.id, 1);
-    expect(files[generatedPath]).toContain("@grasp-os/sdk/workflow");
+    expect(files[generatedPath]).toContain("@grasp-os/runtime/workflow");
   });
 
   it("refuses an expression that reads a sensitive parameter, or all of them", async () => {

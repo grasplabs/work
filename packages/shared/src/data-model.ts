@@ -4,7 +4,7 @@ import type { AppDataAccess } from "./app-data.ts";
 // (core's app-definition.ts, over the App's definition): its tables, each
 // field's kind as a person picks it, and what publishing the draft does
 // to the records the App holds. The view changes the model only through
-// the definition's own operations (`@grasp-os/sdk/definition`), as the
+// the definition's own operations (`@grasp-os/runtime/definition`), as the
 // chat's agent does, each given a field's type as code writes it: a kind
 // becomes that code here (`fieldKindCode`), so the page never builds code
 // of its own.

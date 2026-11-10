@@ -83,7 +83,7 @@ const lookCapMs = 400;
 // whether it answered. One that is held waits after its read until the
 // test lets it go (`<step>: release`, marked once the test has done what
 // it does meanwhile), never for a time that a slow runner could outlast.
-const operationsCode = `import { AppError, v } from "@grasp-os/sdk";
+const operationsCode = `import { AppError, v } from "@grasp-os/runtime";
 import { action, mutation, query } from "@server/_generated/server";
 
 const secret = ${JSON.stringify(secret)};
@@ -199,7 +199,7 @@ const appCode = testApp(
 const pageOf = (
   label: string
 ): string => `import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@grasp-os/sdk/react";
+import { useQuery } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 

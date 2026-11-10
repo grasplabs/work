@@ -35,7 +35,7 @@ export const guestFiles = (
       permissions: [`permission.guests({ operations: ${operations} })`],
     },
     {
-      "server/guests.ts": `import { v } from "@grasp-os/sdk";
+      "server/guests.ts": `import { v } from "@grasp-os/runtime";
 import { action } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

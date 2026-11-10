@@ -1,4 +1,4 @@
-import { serverModuleSource } from "@grasp-os/sdk/host";
+import { serverModuleSource } from "@grasp-os/runtime/host";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -66,7 +66,7 @@ const files = (label: string): TestApp =>
       },
     },
     {
-      "server/notes.ts": `import { v } from "@grasp-os/sdk";
+      "server/notes.ts": `import { v } from "@grasp-os/runtime";
 import { action, mutation, query } from "@server/_generated/server";
 export const label = query({
   args: {},

@@ -1,4 +1,4 @@
-import type { LinkChannel, LinkDecision } from "@grasp-os/sdk/host";
+import type { LinkChannel, LinkDecision } from "@grasp-os/runtime/host";
 import type {
   LinkIntent,
   PageLinkMessage,

@@ -1,5 +1,5 @@
 import { brainErrors } from "@grasp-os/brain/contract";
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";

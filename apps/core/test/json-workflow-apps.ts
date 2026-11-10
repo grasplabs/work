@@ -1,10 +1,10 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import {
   declaredWorkflows,
   GraspClient,
   workflowReferenceOf,
-} from "@grasp-os/sdk/host";
-import type { ClientTransport } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
+import type { ClientTransport } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {

@@ -1,5 +1,5 @@
-import { v } from "@grasp-os/sdk";
-import { declaredWorkflows } from "@grasp-os/sdk/host";
+import { v } from "@grasp-os/runtime";
+import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -106,7 +106,7 @@ const filesWith = (
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/sdk";
+      "server/requests.ts": `import { v } from "@grasp-os/runtime";
 import { permissions } from "../grasp.config.ts";
 
 export const followUp = permissions.followUp;
@@ -300,7 +300,7 @@ const refusal = async (work: () => Promise<unknown>): Promise<string> => {
 /** A suite of one workflow test, `body` with `owner` at hand. */
 const suiteOf = (
   body: string
-): string => `import { workflowTest } from "@grasp-os/sdk/testing";
+): string => `import { workflowTest } from "@grasp-os/runtime/testing";
 import { ${["api", "workflows"].filter((name) => body.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
 
 export default workflowTest({
@@ -510,8 +510,8 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     const { builder, app } = await requestsApp(
       async (by) => await workflowOf(by, greeting()),
       {
-        "tests/greet.test.ts": `import { workflowTest } from "@grasp-os/sdk/testing";
-import type { WorkflowTestRun } from "@grasp-os/sdk/testing";
+        "tests/greet.test.ts": `import { workflowTest } from "@grasp-os/runtime/testing";
+import type { WorkflowTestRun } from "@grasp-os/runtime/testing";
 import { workflows } from "@server/_generated/api";
 
 let kept: WorkflowTestRun | undefined;

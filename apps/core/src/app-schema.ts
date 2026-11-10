@@ -1,4 +1,4 @@
-import { manifestText } from "@grasp-os/sdk/host";
+import { manifestText } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { App } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";

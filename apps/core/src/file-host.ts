@@ -1,4 +1,4 @@
-import type { ValueDescriptor } from "@grasp-os/sdk";
+import type { ValueDescriptor } from "@grasp-os/runtime";
 import { chunksOf, fileLimits } from "@grasp-os/shared/app-file-limits";
 import type {
   FileDescription,

@@ -42,15 +42,15 @@ const refreshMarkers = [
   "__graspRefresh",
   "injectIntoGlobalHook",
   "performReactRefresh",
-  kitModuleName("@grasp-os/sdk/preview-refresh"),
-  // The receiver of a preview's updates (@grasp-os/sdk's preview-updates.ts).
+  kitModuleName("@grasp-os/runtime/preview-refresh"),
+  // The receiver of a preview's updates (@grasp-os/runtime's preview-updates.ts).
   "The route tree's module has no routeTree.",
 ];
 
 /** The preview kit's own modules, which a production frame never loads. */
 const previewModules = [
-  kitModuleName("@grasp-os/sdk/preview-refresh"),
-  kitModuleName("@grasp-os/sdk/preview-runtime"),
+  kitModuleName("@grasp-os/runtime/preview-refresh"),
+  kitModuleName("@grasp-os/runtime/preview-runtime"),
 ];
 
 /** What only React's development builds have. */
@@ -125,14 +125,14 @@ describe("a chat's preview of its draft", { timeout: 60_000 }, () => {
       sameArtifact: preview.page.artifact === published.page.artifact,
     }).toStrictEqual({
       published: {
-        runtime: kitModuleName("@grasp-os/sdk/page-runtime"),
+        runtime: kitModuleName("@grasp-os/runtime/page-runtime"),
         refresh: [],
         previewModules: [],
         development: [],
         compiled: true,
       },
       preview: {
-        runtime: kitModuleName("@grasp-os/sdk/preview-runtime"),
+        runtime: kitModuleName("@grasp-os/runtime/preview-runtime"),
         refresh: refreshMarkers,
         previewModules,
         development: [developmentMarker],

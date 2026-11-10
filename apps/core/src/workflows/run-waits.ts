@@ -1,5 +1,5 @@
-import { eventFingerprint } from "@grasp-os/sdk/host";
-import type { BoundWorkflow } from "@grasp-os/sdk/host";
+import { eventFingerprint } from "@grasp-os/runtime/host";
+import type { BoundWorkflow } from "@grasp-os/runtime/host";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { coreStepPrefix } from "@grasp-os/shared/workflows";

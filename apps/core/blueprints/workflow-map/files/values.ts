@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 
 // The workflow map's store: its teams, its workflows as they run now
 // (drawn) or as they should (designed), and every version of each, kept

@@ -1,4 +1,4 @@
-import type { AppManifest } from "@grasp-os/sdk/host";
+import type { AppManifest } from "@grasp-os/runtime/host";
 import {
   checkEvidenceSchema,
   releaseFormatVersion,

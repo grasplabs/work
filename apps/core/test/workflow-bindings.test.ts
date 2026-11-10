@@ -1,4 +1,4 @@
-import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";

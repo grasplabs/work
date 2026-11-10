@@ -1,5 +1,5 @@
-import type { Id } from "@grasp-os/sdk";
-import { useAction, useForm } from "@grasp-os/sdk/react";
+import type { Id } from "@grasp-os/runtime";
+import { useAction, useForm } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,

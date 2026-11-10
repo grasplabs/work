@@ -1,7 +1,7 @@
-import type { FunctionReference, ReferenceKind } from "@grasp-os/sdk";
-import { GraspError } from "@grasp-os/sdk/client";
-import { GraspClient } from "@grasp-os/sdk/host";
-import type { ClientTransport, StreamLink } from "@grasp-os/sdk/host";
+import type { FunctionReference, ReferenceKind } from "@grasp-os/runtime";
+import { GraspError } from "@grasp-os/runtime/client";
+import { GraspClient } from "@grasp-os/runtime/host";
+import type { ClientTransport, StreamLink } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -44,7 +44,7 @@ export const files: TestApp = testApp(
     },
   },
   {
-    "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+    "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/runtime";
 import { action, doc, mutation, query } from "@server/_generated/server";
 
 export const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,7 +77,7 @@ export const waits = action({
   },
 });
 `,
-    "server/writer.ts": `import { v } from "@grasp-os/sdk";
+    "server/writer.ts": `import { v } from "@grasp-os/runtime";
 import { action } from "@server/_generated/server";
 
 import { create, list, pause } from "./notes.ts";
@@ -162,7 +162,7 @@ export const huge = action({
 });
 `,
     "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { useStream } from "@grasp-os/sdk/react";
+import { useStream } from "@grasp-os/runtime/react";
 import { api } from "@server/_generated/api";
 
 function Writer() {

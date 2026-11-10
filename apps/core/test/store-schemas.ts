@@ -1,12 +1,12 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import type { SchemaDefinition } from "@grasp-os/sdk";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime";
+import type { SchemaDefinition } from "@grasp-os/runtime";
 import {
   manifestText,
   readSchemaManifest,
   schemaHash,
   schemaManifest,
-} from "@grasp-os/sdk/host";
-import type { AccessMode, SchemaManifest } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
+import type { AccessMode, SchemaManifest } from "@grasp-os/runtime/host";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 

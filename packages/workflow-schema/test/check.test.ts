@@ -663,7 +663,7 @@ describe("checking a workflow", () => {
 });
 
 describe("expressions reaching past the run's data", () => {
-  // The threat model's first layer (`@grasp-os/sdk/expression-check`):
+  // The threat model's first layer (`@grasp-os/runtime/expression-check`):
   // whatever the document says, no expression reaches a prototype, a
   // computed name or a function.
   const refused = [

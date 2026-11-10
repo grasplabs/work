@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 
 // The intake's values: what its tables (server/schema.ts, generated from
 // its definition) and its functions share. Its store holds drafts of a

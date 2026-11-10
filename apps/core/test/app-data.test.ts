@@ -1,4 +1,4 @@
-import { schemaHash } from "@grasp-os/sdk/host";
+import { schemaHash } from "@grasp-os/runtime/host";
 import type { RecordChange } from "@grasp-os/shared/app-data";
 import { recordChangeLimits } from "@grasp-os/shared/app-data";
 import type { AuditActor } from "@grasp-os/shared/audit";
@@ -82,7 +82,7 @@ const files: TestApp = testApp(
   },
   {
     "server/notes.ts": `import { mutation } from "@server/_generated/server";
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200), status: v.string().optional() },

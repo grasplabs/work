@@ -35,7 +35,7 @@ export const notesOfFields = (
       },
     },
     {
-      "values.ts": `import { v } from "@grasp-os/sdk";
+      "values.ts": `import { v } from "@grasp-os/runtime";
 
 export const noteFields = {
 ${Object.entries(fields)
@@ -69,7 +69,7 @@ export const migrationFile = (
   toSchema: string,
   handler: string,
   fixtures = passingFixtures
-): string => `import { defineMigration, v } from "@grasp-os/sdk";
+): string => `import { defineMigration, v } from "@grasp-os/runtime";
 import { noteFields } from "../../values.ts";
 
 export default defineMigration({

@@ -49,7 +49,7 @@ export default defineConfig({
   agents: {
     llmsTxt: {
       details:
-        "Grasp runs Apps and workflows inside a company's own deployment. An App is a TypeScript project on `@grasp-os/sdk`: a schema, server functions and Pages. These docs are the version this deployment runs.",
+        "Grasp runs Apps and workflows inside a company's own deployment. An App is a TypeScript project on `@grasp-os/runtime`: a schema, server functions and Pages. These docs are the version this deployment runs.",
     },
     api: false,
     agentReadability: false,

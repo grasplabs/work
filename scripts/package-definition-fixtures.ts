@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { inspectApp, symbolicModules } from "@grasp-os/sdk/host";
+import { inspectApp, symbolicModules } from "@grasp-os/runtime/host";
 import {
   definitionPackageFormatVersion,
   definitionPackageSchema,
@@ -44,12 +44,12 @@ import {
 import { pageRuleNames } from "../packages/compiler/src/page-rules.ts";
 import { ultraciteOf } from "../packages/compiler/src/ultracite.ts";
 import { ultraciteConfig } from "../packages/compiler/ultracite-config.ts";
-import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
-import notes from "../packages/sdk/test/notes/.grasp/app.ts";
+import { notesWorkflows } from "../packages/runtime/test/notes-workflows.ts";
+import notes from "../packages/runtime/test/notes/.grasp/app.ts";
 import { packageProject, PackagingError } from "./package-definition-lib.ts";
 
 export const ROOT = path.join(import.meta.dirname, "..");
-export const notesDir = path.join(ROOT, "packages/sdk/test/notes");
+export const notesDir = path.join(ROOT, "packages/runtime/test/notes");
 export const hash = (digit: string): string => digit.repeat(64);
 
 /**
@@ -535,8 +535,8 @@ export const appDefinition = async (
   mkdirSync(path.join(dir, "node_modules/@grasp-os"), { recursive: true });
   mkdirSync(path.join(dir, "node_modules/@server"), { recursive: true });
   symlinkSync(
-    path.join(ROOT, "packages/sdk"),
-    path.join(dir, "node_modules/@grasp-os/sdk")
+    path.join(ROOT, "packages/runtime"),
+    path.join(dir, "node_modules/@grasp-os/runtime")
   );
   symlinkSync(
     path.join(dir, "server/_generated"),

@@ -34,7 +34,7 @@ const drafted: TestApp = testApp(
     },
   },
   {
-    "server/notes.ts": `import { v } from "@grasp-os/sdk";
+    "server/notes.ts": `import { v } from "@grasp-os/runtime";
 import { mutation } from "@server/_generated/server";
 
 export const create = mutation({

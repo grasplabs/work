@@ -39,7 +39,7 @@ export const appFiles: TestApp = withFiles(
 /** A suite of one test, `body`, with an owner and a page at hand. */
 export const suiteOf = (
   body: string
-): string => `import { appTest } from "@grasp-os/sdk/testing";
+): string => `import { appTest } from "@grasp-os/runtime/testing";
 import { ${["api", "workflows"].filter((name) => body.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
 
 export const page = { pagination: { pageSize: 50 } };

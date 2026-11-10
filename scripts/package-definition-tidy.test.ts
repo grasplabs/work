@@ -161,7 +161,7 @@ export const imported = [comments, spanning.missing, imports];
       // builds pass them: in pages and components, and in server code.
       const unusedFiles = {
         "src/components/unused.ts": unusedNames,
-        "server/unused.ts": `import { v } from "@grasp-os/sdk";
+        "server/unused.ts": `import { v } from "@grasp-os/runtime";
 
 export const later = (): number => {
   const spare = 1;

@@ -1,5 +1,5 @@
-import type { LinksReference } from "@grasp-os/sdk";
-import { useClient } from "@grasp-os/sdk/react";
+import type { LinksReference } from "@grasp-os/runtime";
+import { useClient } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { createContext, use } from "react";

@@ -1,6 +1,6 @@
 // What the editor holds of a workflow, and what it saves from it.
 
-import type { Id } from "@grasp-os/sdk";
+import type { Id } from "@grasp-os/runtime";
 
 import { recordOf } from "./store";
 import type { Workflow } from "./store";

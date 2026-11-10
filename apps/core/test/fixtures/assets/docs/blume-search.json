@@ -40,7 +40,7 @@
     "locale": "",
     "route": "/reference/server",
     "section": "Reference",
-    "title": "@grasp-os/sdk/server",
+    "title": "@grasp-os/runtime/server",
     "version": ""
   }
 ]

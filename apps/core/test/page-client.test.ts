@@ -1,4 +1,4 @@
-import { GraspError } from "@grasp-os/sdk/client";
+import { GraspError } from "@grasp-os/runtime/client";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -626,7 +626,7 @@ describe("the session client", { timeout: 120_000 }, () => {
 /** A page of the Notes App whose component runs `body` first. */
 const page = (body: string): string =>
   `import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@grasp-os/sdk/react";
+import { useMutation, useQuery } from "@grasp-os/runtime/react";
 import { api } from "@server/_generated/api";
 
 function Notes() {
@@ -780,7 +780,7 @@ describe("a page's build", { timeout: 120_000 }, () => {
       diagnosticsOf(
         withFiles(files, {
           "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { GraspClient } from "@grasp-os/sdk/client";
+import { GraspClient } from "@grasp-os/runtime/client";
 function Notes() {
   return <p>{String(GraspClient)}</p>;
 }
@@ -803,9 +803,9 @@ export const Route = createFileRoute("/")({ component: Notes });
 
   it("builds forms of the operations, a record's edit and a native schema, typed by what they bind", async () => {
     const formPage = `import { createFileRoute } from "@tanstack/react-router";
-import { v } from "@grasp-os/sdk";
-import type { FunctionReturn } from "@grasp-os/sdk";
-import { useForm } from "@grasp-os/sdk/react";
+import { v } from "@grasp-os/runtime";
+import type { FunctionReturn } from "@grasp-os/runtime";
+import { useForm } from "@grasp-os/runtime/react";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 
@@ -893,7 +893,7 @@ export const Route = createFileRoute("/")({ component: Notes });
         ],
       },
       {
-        "values.ts": `import { v } from "@grasp-os/sdk";
+        "values.ts": `import { v } from "@grasp-os/runtime";
 
 export const taskFields = {
   title: v.string().trim().min(1).max(200),
@@ -907,7 +907,7 @@ export const taskFields = {
   brief: v.file().optional(),
 };
 `,
-        "server/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+        "server/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/runtime";
 import { doc, mutation, query } from "@server/_generated/server";
 import { taskFields } from "../values.ts";
 
@@ -947,7 +947,7 @@ export const rename = mutation({
       }
     );
     const tasksPage = `import { createFileRoute } from "@tanstack/react-router";
-import { useForm, useMutation } from "@grasp-os/sdk/react";
+import { useForm, useMutation } from "@grasp-os/runtime/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
 import { RichText } from "@grasp-os/ui/components/rich-text";
 import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/ui/form";
@@ -1019,7 +1019,7 @@ export const Route = createFileRoute("/tasks")({ component: Tasks });
       diagnosticsOf(
         withFiles(files, {
           "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { defineApp } from "@grasp-os/sdk";
+import { defineApp } from "@grasp-os/runtime";
 function Notes() {
   return <p>{typeof defineApp}</p>;
 }
@@ -1028,7 +1028,7 @@ export const Route = createFileRoute("/")({ component: Notes });
         })
       )
     ).resolves.toStrictEqual([
-      expect.stringContaining("Pages import only { v } from @grasp-os/sdk"),
+      expect.stringContaining("Pages import only { v } from @grasp-os/runtime"),
     ]);
   });
 });

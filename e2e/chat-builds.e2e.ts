@@ -30,7 +30,7 @@ const invoices = testApp(
     },
   },
   {
-    "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+    "server/invoices.ts": `import { v } from "@grasp-os/runtime";
 import { mutation } from "@server/_generated/server";
 
 export const book = mutation({

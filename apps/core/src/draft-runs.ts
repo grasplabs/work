@@ -1,11 +1,11 @@
-import { definitionText } from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+import { definitionText } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import {
   declaredPermission,
   generatedPaths,
   generateModules,
   manifestText,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";

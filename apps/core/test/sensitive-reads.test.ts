@@ -1,4 +1,4 @@
-import { GraspClient } from "@grasp-os/sdk/host";
+import { GraspClient } from "@grasp-os/runtime/host";
 import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -65,7 +65,7 @@ const files: TestApp = testApp(
     },
   },
   {
-    "server/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
+    "server/pay.ts": `import { AppError, v } from "@grasp-os/runtime";
 import { mutation, query } from "@server/_generated/server";
 
 export const pay = mutation({

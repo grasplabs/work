@@ -1,4 +1,7 @@
-import type { PreviewApplied, PreviewLoad } from "@grasp-os/sdk/page-runtime";
+import type {
+  PreviewApplied,
+  PreviewLoad,
+} from "@grasp-os/runtime/page-runtime";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type {
   PreviewAt,

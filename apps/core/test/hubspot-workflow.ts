@@ -1,7 +1,7 @@
 // An independent workflow bound to HubSpot through Composio, as an admin
 // connects it and approves the binding: what Grasp's admin snapshot and
 // Integrations read of the workflows that use a connection.
-import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { composioConsentText } from "@grasp-os/shared/connect";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";

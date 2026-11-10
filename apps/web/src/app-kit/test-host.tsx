@@ -1,6 +1,6 @@
-import type { FunctionReference, ValueSchema } from "@grasp-os/sdk";
-import { GraspClient } from "@grasp-os/sdk/client";
-import { GraspProvider } from "@grasp-os/sdk/react";
+import type { FunctionReference, ValueSchema } from "@grasp-os/runtime";
+import { GraspClient } from "@grasp-os/runtime/client";
+import { GraspProvider } from "@grasp-os/runtime/react";
 import { isRecord } from "@grasp-os/shared/json";
 import { act } from "react";
 import type { ReactNode } from "react";

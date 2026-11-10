@@ -3,7 +3,7 @@ import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/sdk";
+} from "@grasp-os/runtime";
 import { doc, mutation, query } from "@server/_generated/server";
 
 const stage = v.enum(["lead", "qualified", "proposal", "won", "lost"]);

@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { sealedTableSchema } from "@grasp-os/workflow-schema/sealed";
 import type { SealedTask } from "@grasp-os/workflow-schema/sealed";
 import { env } from "cloudflare:workers";

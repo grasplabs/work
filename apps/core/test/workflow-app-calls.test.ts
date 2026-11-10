@@ -1,5 +1,5 @@
-import { applyOperation, readDefinition } from "@grasp-os/sdk/definition";
-import type { DefinitionOperation } from "@grasp-os/sdk/definition";
+import { applyOperation, readDefinition } from "@grasp-os/runtime/definition";
+import type { DefinitionOperation } from "@grasp-os/runtime/definition";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -41,7 +41,7 @@ const idp = mockIdp();
 /** The Notes App's functions, as code exports them. */
 const notesCode = (
   create = "create"
-): string => `import { v } from "@grasp-os/sdk";
+): string => `import { v } from "@grasp-os/runtime";
 import { mutation, query } from "@server/_generated/server";
 
 export const ${create} = mutation({

@@ -1,5 +1,5 @@
 import type { Schema } from "@cfworker/json-schema";
-import { compactDescriptorSchema } from "@grasp-os/sdk/host";
+import { compactDescriptorSchema } from "@grasp-os/runtime/host";
 import { decisionLimits } from "@grasp-os/shared/decisions";
 import {
   appErrorCodeMaxLength,

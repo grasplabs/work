@@ -1,4 +1,4 @@
-import { declaredWorkflows } from "@grasp-os/sdk/host";
+import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import type {
   DecisionConfirmation,

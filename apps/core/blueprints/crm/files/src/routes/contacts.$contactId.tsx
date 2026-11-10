@@ -1,4 +1,4 @@
-import { useForm, useMutation, useQuery } from "@grasp-os/sdk/react";
+import { useForm, useMutation, useQuery } from "@grasp-os/runtime/react";
 import {
   Card,
   CardContent,

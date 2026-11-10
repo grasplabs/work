@@ -22,7 +22,7 @@ export const isolationFiles: TestApp = testApp(
     },
   },
   {
-    "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
+    "server/notes.ts": `import { AppError, v } from "@grasp-os/runtime";
 import { action, mutation, query } from "@server/_generated/server";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

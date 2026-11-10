@@ -7,12 +7,12 @@ import {
   discard,
   refresh,
   register,
-} from "@grasp-os/sdk/preview-refresh";
+} from "@grasp-os/runtime/preview-refresh";
 import { act, createElement, useState } from "react";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { previewReceiver } from "../../../../packages/sdk/src/preview-updates.ts";
+import { previewReceiver } from "../../../../packages/runtime/src/preview-updates.ts";
 
 // A chat's preview taking an update of its pages, with React, React Fast
 // Refresh and TanStack Router themselves: the route tree's module
@@ -94,7 +94,7 @@ describe("a preview's pages as their updates come", () => {
     const { createRoot } = await import("react-dom/client");
     const { createMemoryHistory, createRouter, RouterProvider } =
       await import("@tanstack/react-router");
-    const { routeBy } = await import("@grasp-os/sdk/page-runtime");
+    const { routeBy } = await import("@grasp-os/runtime/page-runtime");
     const container = document.createElement("div");
     document.body.append(container);
     // The pages as the frame first loaded them.

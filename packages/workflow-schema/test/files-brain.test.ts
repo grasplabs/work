@@ -1,4 +1,4 @@
-import { parseProgram } from "@grasp-os/sdk/oxc-parse";
+import { parseProgram } from "@grasp-os/runtime/oxc-parse";
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkWorkflow } from "../src/check.ts";

@@ -1,5 +1,5 @@
 {
-  "name": "@grasp-os/sdk",
+  "name": "@grasp-os/runtime",
   "private": true,
   "description": "Apps and workflows SDK: values, server functions and React hooks",
   "license": "AGPL-3.0-only",

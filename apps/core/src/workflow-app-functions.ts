@@ -1,4 +1,4 @@
-import type { FunctionManifest } from "@grasp-os/sdk/host";
+import type { FunctionManifest } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import type { Permissions } from "@grasp-os/workflow-schema/format";

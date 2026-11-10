@@ -39,14 +39,14 @@ export const notesSpec = (label = "Notes"): AppSpec => ({
 
 export const notesFiles = (label = "Notes"): TestApp =>
   testApp(notesSpec(label), {
-    "values.ts": `import { v } from "@grasp-os/sdk";
+    "values.ts": `import { v } from "@grasp-os/runtime";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
 };
 `,
-    "server/notes.ts": `import { v } from "@grasp-os/sdk";
+    "server/notes.ts": `import { v } from "@grasp-os/runtime";
 import { internal } from "@server/_generated/internal";
 import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../values.ts";
@@ -114,7 +114,7 @@ export const tablelessFiles = (): TestApp =>
   testApp(
     { name: "Hello", tables: {} },
     {
-      "server/hello.ts": `import { v } from "@grasp-os/sdk";
+      "server/hello.ts": `import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
 `,
@@ -354,9 +354,9 @@ export const withOperation = (source: string): TestApp =>
 
 /** The modules only the platform's bootstrap imports (spec 10.7.1). */
 export const bootstrapModules = [
-  "@grasp-os/sdk/client",
-  "@grasp-os/sdk/host",
-  "@grasp-os/sdk/page-runtime",
+  "@grasp-os/runtime/client",
+  "@grasp-os/runtime/host",
+  "@grasp-os/runtime/page-runtime",
 ] as const;
 
 /** How a file names a module: for its values, or for its types alone. */
@@ -412,11 +412,11 @@ export const errorsOf = (built: object): string[] =>
 
 /** Types a page may name that its values may not: only `{ v }` is the SDK root's. */
 export const pageTypes =
-  'import type { FunctionReturn } from "@grasp-os/sdk";\nimport type { ReactNode } from "react";\nexport type Shown = FunctionReturn<never> | ReactNode;';
+  'import type { FunctionReturn } from "@grasp-os/runtime";\nimport type { ReactNode } from "react";\nexport type Shown = FunctionReturn<never> | ReactNode;';
 
 /** Types other App code may name from a module its values may not reach. */
 export const codeTypes =
-  'import type { Doc } from "@grasp-os/sdk/server";\nexport type Stored = Doc<never>;';
+  'import type { Doc } from "@grasp-os/runtime/server";\nexport type Stored = Doc<never>;';
 
 /** Each kind of App file, the build that reads it, and what it holds besides. */
 export const targets = {

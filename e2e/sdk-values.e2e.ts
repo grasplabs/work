@@ -8,10 +8,10 @@ import { z } from "zod";
 // The SDK's value schemas check what a person types in a page before the
 // host checks it again, so they must give the same answers in a browser as
 // in workerd. This runs the SDK's own conformance cases
-// (packages/sdk/test/value-cases.ts, which workerd runs through
+// (packages/runtime/test/value-cases.ts, which workerd runs through
 // values.test.ts) in the browser, from the same source files.
 
-const sdkDir = path.join(import.meta.dirname, "../packages/sdk");
+const sdkDir = path.join(import.meta.dirname, "../packages/runtime");
 const sharedDir = path.join(import.meta.dirname, "../packages/shared/src");
 const brainDir = path.join(import.meta.dirname, "../packages/brain/src");
 

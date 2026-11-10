@@ -57,7 +57,7 @@ import {
 const idp = mockIdp();
 
 const pageCode = `import { createFileRoute } from "@tanstack/react-router";
-import { useRetryFailed } from "@grasp-os/sdk/react";
+import { useRetryFailed } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 
 function Notes() {
@@ -295,7 +295,7 @@ describe("pages", { timeout: 60_000 }, () => {
       entry: appModulesOf(frame).includes(frame.entry),
       kit: {
         runtime: Object.hasOwn(kit, frame.page.runtime),
-        hooks: Object.hasOwn(kit, kitModuleName("@grasp-os/sdk/react")),
+        hooks: Object.hasOwn(kit, kitModuleName("@grasp-os/runtime/react")),
         button: Object.hasOwn(
           kit,
           kitModuleName("@grasp-os/ui/components/button")

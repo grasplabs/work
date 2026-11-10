@@ -235,7 +235,7 @@ const mainSource = ({
   refusal,
 }: RunDefinition): string => `import { WorkerEntrypoint } from "cloudflare:workers";
 import { bindings, currentAttempt, inAttempt, unwrapped } from ${JSON.stringify(bindingsModule)};
-import ${JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"))};
+import ${JSON.stringify(kitModuleName("@grasp-os/runtime/workflow"))};
 import definition from ${JSON.stringify(module)};
 ${settling}
 

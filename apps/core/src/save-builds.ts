@@ -6,7 +6,7 @@ import {
   isLintedCode,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
-import { generateModules, symbolicModules } from "@grasp-os/sdk/host";
+import { generateModules, symbolicModules } from "@grasp-os/runtime/host";
 import type {
   BuildDiagnostic,
   CommittedVersion,

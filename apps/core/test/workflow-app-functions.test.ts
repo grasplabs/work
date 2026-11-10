@@ -1,5 +1,5 @@
-import { applyOperation, readDefinition } from "@grasp-os/sdk/definition";
-import type { DefinitionOperation } from "@grasp-os/sdk/definition";
+import { applyOperation, readDefinition } from "@grasp-os/runtime/definition";
+import type { DefinitionOperation } from "@grasp-os/runtime/definition";
 import type { Json } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { executionErrors } from "@grasp-os/shared/workflows";
@@ -40,7 +40,7 @@ const idp = mockIdp();
 /** The Notes App's functions, as code exports them. */
 const notesCode = (
   create = "create"
-): string => `import { v } from "@grasp-os/sdk";
+): string => `import { v } from "@grasp-os/runtime";
 import { mutation, query } from "@server/_generated/server";
 
 export const ${create} = mutation({
@@ -437,7 +437,7 @@ export const create = mutation({
         .slice(notesCode().indexOf("export const titles"))
         .replace(
           /^/u,
-          `import { v } from "@grasp-os/sdk";
+          `import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 
 `
@@ -576,7 +576,7 @@ import { query } from "@server/_generated/server";
   });
 
   it("gives an App's actions no ID, so no workflow reaches one, and a bound mutation turned into one is gone", async () => {
-    const stamps = `import { v } from "@grasp-os/sdk";
+    const stamps = `import { v } from "@grasp-os/runtime";
 import { action } from "@server/_generated/server";
 
 export const stamp = action({
@@ -858,7 +858,7 @@ export const list = query({
 
   it("fails as the host refused it, an attempt gone mid-call included, and as the App failed otherwise", async () => {
     const source = withFiles(notes(), {
-      "server/failing.ts": `import { AppError, v } from "@grasp-os/sdk";
+      "server/failing.ts": `import { AppError, v } from "@grasp-os/runtime";
 import { mutation } from "@server/_generated/server";
 
 export const fail = mutation({
@@ -945,7 +945,7 @@ export const fail = mutation({
     // Its build doesn't answer within the build wait: the commit stands,
     // `archive` without an ID.
     const added = withFiles(source, {
-      "server/archive.ts": `import { v } from "@grasp-os/sdk";
+      "server/archive.ts": `import { v } from "@grasp-os/runtime";
 import { mutation } from "@server/_generated/server";
 
 export const archive = mutation({ args: {}, returns: v.null(), handler: async () => null });

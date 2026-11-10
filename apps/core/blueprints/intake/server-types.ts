@@ -1,22 +1,22 @@
 // What `@server/_generated/server` is to the intake's server code here, for
 // the repo's type check and lint: the module the host generates for an
-// App (`serverModuleSource`, @grasp-os/sdk's generate.ts), whose code is
+// App (`serverModuleSource`, @grasp-os/runtime's generate.ts), whose code is
 // the same for every App and whose types come from the App's own
 // schema.ts. Never part of the App: its seal generates the real one, and
 // type-checks its server code against it.
-import type { Id as SdkId } from "@grasp-os/sdk";
+import type { Id as SdkId } from "@grasp-os/runtime";
 import type {
   Doc as SdkDoc,
   ActionCtx as SdkActionCtx,
   MutationCtx as SdkMutationCtx,
   QueryCtx as SdkQueryCtx,
-} from "@grasp-os/sdk/server";
-import { serverModule } from "@grasp-os/sdk/server";
+} from "@grasp-os/runtime/server";
+import { serverModule } from "@grasp-os/runtime/server";
 
 import config from "./files/grasp.config.ts";
 import schema from "./files/server/schema.ts";
 
-export type { CallerCtx } from "@grasp-os/sdk/server";
+export type { CallerCtx } from "@grasp-os/runtime/server";
 
 type DataModel = (typeof schema)["tables"];
 

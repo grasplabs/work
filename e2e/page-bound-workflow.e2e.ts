@@ -60,14 +60,14 @@ const appFiles = (): TestApp =>
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/sdk";
+      "server/requests.ts": `import { v } from "@grasp-os/runtime";
 import { permissions } from "../grasp.config.ts";
 
 export const followUp = permissions.followUp;
 `,
 
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { useWorkflow } from "@grasp-os/sdk/react";
+import { useWorkflow } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { workflows } from "@server/_generated/api";

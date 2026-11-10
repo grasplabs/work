@@ -3,12 +3,12 @@ import {
   schemaFromDescriptor,
   workflowFingerprint,
   workflowFunctions,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import type {
   BoundWorkflow,
   WorkflowMutationName,
   WorkflowPin,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {

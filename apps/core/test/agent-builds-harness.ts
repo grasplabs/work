@@ -1,5 +1,5 @@
-import { readDefinition } from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+import { readDefinition } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
@@ -63,13 +63,13 @@ export const unclosed = fixed.replace(
 
 /** A workflow a builder wrote, with its tests. */
 export const intake = {
-  "workflows/intake.ts": `import { v, workflow } from "@grasp-os/sdk/workflow";
+  "workflows/intake.ts": `import { v, workflow } from "@grasp-os/runtime/workflow";
 
 export default workflow("intake", { params: {}, input: v.object({ invoice: v.string() }) }, async (step, { input }) => {
   return await step.do("read", { description: "Read the invoice" }, async () => input.invoice);
 });
 `,
-  "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+  "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/runtime/testing";
 
 import definition from "./intake.ts";
 

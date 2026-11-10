@@ -24,7 +24,7 @@ const symbolicTree = "symbolic()";
  */
 /** The SDK's type the stand-in trees name, imported as a type. */
 const standInImport =
-  'import type { FunctionReference } from "@grasp-os/sdk";\n';
+  'import type { FunctionReference } from "@grasp-os/runtime";\n';
 
 /**
  * The stand-in trees' type: at every path, a reference that takes and

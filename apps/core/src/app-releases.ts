@@ -5,8 +5,8 @@ import {
   kitModules,
   serverSdkModules,
 } from "@grasp-os/compiler";
-import { isFunctionPath } from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+import { isFunctionPath } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import {
   contractFingerprints,
   contractsFormatVersion,
@@ -17,8 +17,11 @@ import {
   readAppManifest,
   schemaHash,
   symbolicModules,
-} from "@grasp-os/sdk/host";
-import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
+import type {
+  AppManifest,
+  WorkflowBindingExtras,
+} from "@grasp-os/runtime/host";
 import {
   checkEvidencePath,
   releaseFormatVersion,

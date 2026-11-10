@@ -9,9 +9,9 @@ import {
 } from "./workflow-journal.ts";
 import type { CaughtError, Read } from "./workflow-steps.ts";
 
-// `@grasp-os/sdk/workflow-generated`: what only the code generated from a
+// `@grasp-os/runtime/workflow-generated`: what only the code generated from a
 // grasp-workflow/2 document calls (@grasp-os/workflow-schema's
-// generate.ts), beside `@grasp-os/sdk/workflow`. Not the SDK's API: no
+// generate.ts), beside `@grasp-os/runtime/workflow`. Not the SDK's API: no
 // workflow is written against it.
 
 /**

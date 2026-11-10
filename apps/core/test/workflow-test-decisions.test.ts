@@ -1,5 +1,5 @@
-import { v } from "@grasp-os/sdk";
-import { declaredWorkflows } from "@grasp-os/sdk/host";
+import { v } from "@grasp-os/runtime";
+import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -138,7 +138,7 @@ const filesWith = (
       ],
     },
     {
-      "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+      "server/invoices.ts": `import { v } from "@grasp-os/runtime";
 import { permissions } from "../grasp.config.ts";
 
 export const approval = permissions.approval;
@@ -704,7 +704,7 @@ describe(
         {},
         {
           tests: {
-            "tests/approval.test.ts": `import { workflowTest } from "@grasp-os/sdk/testing";
+            "tests/approval.test.ts": `import { workflowTest } from "@grasp-os/runtime/testing";
 import { workflows } from "@server/_generated/api";
 
 export default workflowTest({

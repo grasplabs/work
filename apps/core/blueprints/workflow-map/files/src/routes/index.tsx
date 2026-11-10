@@ -1,5 +1,9 @@
-import type { Id } from "@grasp-os/sdk";
-import { useClient, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
+import type { Id } from "@grasp-os/runtime";
+import {
+  useClient,
+  usePaginatedQuery,
+  useQuery,
+} from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";

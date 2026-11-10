@@ -2,12 +2,12 @@ import {
   declaredPermission,
   declaredPermissions,
   descriptorFromText,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import type {
   AppManifest,
   BoundWorkflowDecision,
   WorkflowBindingExtras,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";

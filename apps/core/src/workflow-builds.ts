@@ -42,7 +42,7 @@ import {
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
 // its definition, checked at publication, translated into TypeScript on
-// `@grasp-os/sdk/workflow` (@grasp-os/workflow-schema's generate.ts),
+// `@grasp-os/runtime/workflow` (@grasp-os/workflow-schema's generate.ts),
 // type-checked and compiled into
 // JavaScript by the App compiler, as App code is, and sealed with the
 // version: the original JSON, the generated code, the compiled module, the
@@ -82,7 +82,7 @@ import {
 // - Injection through the definition into code, and code reaching past
 //   the SDK: closed by the generator (literals only, expressions printed
 //   from their checked syntax tree) and the compiler (generated code may
-//   import `@grasp-os/sdk/workflow` alone); see generate.ts.
+//   import `@grasp-os/runtime/workflow` alone); see generate.ts.
 // - A load whose request is cancelled mid-read (workerd never settles it)
 //   holds every later load of that version in the isolate, or a load that
 //   failed or ran on past its time is served as verified: loads of one

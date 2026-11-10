@@ -1,5 +1,5 @@
-import { v } from "@grasp-os/sdk";
-import { declaredPermission, generatedPaths } from "@grasp-os/sdk/host";
+import { v } from "@grasp-os/runtime";
+import { declaredPermission, generatedPaths } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -105,7 +105,7 @@ const files = (page = pageOf("approval")): TestApp =>
       ],
     },
     {
-      "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+      "server/invoices.ts": `import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

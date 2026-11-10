@@ -1,5 +1,5 @@
-import { declaredPermissions, generatedPaths } from "@grasp-os/sdk/host";
-import type { WorkflowPin } from "@grasp-os/sdk/host";
+import { declaredPermissions, generatedPaths } from "@grasp-os/runtime/host";
+import type { WorkflowPin } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";

@@ -1,4 +1,4 @@
-import { GraspClient } from "@grasp-os/sdk/host";
+import { GraspClient } from "@grasp-os/runtime/host";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";

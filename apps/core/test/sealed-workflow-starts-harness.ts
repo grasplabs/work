@@ -36,7 +36,7 @@ export const files = (): TestApp =>
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/sdk";
+      "server/requests.ts": `import { v } from "@grasp-os/runtime";
 import { action, mutation } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

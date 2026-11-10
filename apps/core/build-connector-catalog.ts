@@ -1,5 +1,5 @@
 /**
- * Writes the SDK's connector catalog (packages/sdk/src/connector-catalog.gen.ts):
+ * Writes the SDK's connector catalog (packages/runtime/src/connector-catalog.gen.ts):
  * the type of every generated connector contract of this release, so an
  * App's `ctx.resources.<alias>.call(action, args)` infers the action's
  * arguments and answer from the contract its declaration names (spec 12).
@@ -20,8 +20,8 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { connectorCatalogSource } from "@grasp-os/sdk/host";
-import type { CatalogAction } from "@grasp-os/sdk/host";
+import { connectorCatalogSource } from "@grasp-os/runtime/host";
+import type { CatalogAction } from "@grasp-os/runtime/host";
 import { toolClassOf } from "@grasp-os/shared/connect";
 import type { ToolClass } from "@grasp-os/shared/connect";
 import { z } from "zod";
@@ -35,7 +35,7 @@ import { readContractSchema } from "./src/connector-contracts.ts";
 
 const catalogFile = path.join(
   import.meta.dirname,
-  "../../packages/sdk/src/connector-catalog.gen.ts"
+  "../../packages/runtime/src/connector-catalog.gen.ts"
 );
 
 /**

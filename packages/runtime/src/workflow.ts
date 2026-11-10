@@ -63,7 +63,7 @@ import type {
  *   on a first run and on a replay alike: a field nobody wrote, `__proto__`
  *   and `constructor` included, is `undefined` or an own field holding
  *   data, never something inherited, and nothing changes it. The check of
- *   expressions (`@grasp-os/sdk/expression-check`) is the first layer, the
+ *   expressions (`@grasp-os/runtime/expression-check`) is the first layer, the
  *   isolate's frozen intrinsics the third.
  * - Members exposing undeclared names. `ctx.connections`, `ctx.apps`,
  *   `ctx.decisions`, `ctx.events` and `ctx.ai` are built only from

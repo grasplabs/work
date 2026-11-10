@@ -4,12 +4,12 @@ import {
   definitionText,
   emptyDefinition,
   generatedFiles,
-} from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
 import type {
   AppDefinition,
   DefinitionOperation,
   FrozenJson,
-} from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
 
 // An App's definition as a test writes it, and the config and schema
 // generated from it, exactly as Grasp's definition tools make them. Every

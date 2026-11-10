@@ -1,4 +1,4 @@
-import { dataModelSource } from "@grasp-os/sdk/host";
+import { dataModelSource } from "@grasp-os/runtime/host";
 /**
  * What a build reads of an App's files, and how much of it a build takes.
  * Core uses these before it hashes and sends the files; the compiler again

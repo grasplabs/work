@@ -1,6 +1,6 @@
-import type { FunctionReference, ReferenceKind } from "@grasp-os/sdk";
-import { GraspClient } from "@grasp-os/sdk/host";
-import type { ClientTransport } from "@grasp-os/sdk/host";
+import type { FunctionReference, ReferenceKind } from "@grasp-os/runtime";
+import { GraspClient } from "@grasp-os/runtime/host";
+import type { ClientTransport } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {

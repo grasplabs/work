@@ -9,13 +9,13 @@ import {
   workflowSdkModules,
 } from "@grasp-os/compiler";
 import type { AppCodeBuild } from "@grasp-os/compiler";
-import { declaredPermission, manifestText } from "@grasp-os/sdk/host";
+import { declaredPermission, manifestText } from "@grasp-os/runtime/host";
 import {
   appTestTimeoutMs,
   maxAppTestName,
   maxAppTests,
   testNamePattern,
-} from "@grasp-os/sdk/testing";
+} from "@grasp-os/runtime/testing";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
@@ -96,7 +96,7 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 // and a failing test refuses it (`requireAppTestsPass`, called by
 // app-publish.ts); a rollback to a version published already runs none
 // again. The suites are
-// App code, written with `appTest` (`@grasp-os/sdk/testing`); the host
+// App code, written with `appTest` (`@grasp-os/runtime/testing`); the host
 // they call is core's, and real. Threat model, and how each is closed:
 //
 // - Test code reaches what it shouldn't: it runs in a Loader isolate with
@@ -300,7 +300,7 @@ const testsMain = (
   path: string,
   testMs: number
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
-import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/testing"))};
+import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/runtime/testing"))};
 import suite from ${JSON.stringify(appModuleName(path))};
 export class AppTests extends WorkerEntrypoint {
   async run(host) {
@@ -322,7 +322,7 @@ const sessionTestsMain = (
   path: string,
   testMs: number
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
-import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/testing"))};
+import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/runtime/testing"))};
 import suite from ${JSON.stringify(appModuleName(path))};
 const hostOf = (numbered) => ({
   open: async (fixtures, name) => {

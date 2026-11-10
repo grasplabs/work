@@ -1,4 +1,4 @@
-import type { SchemaManifest } from "@grasp-os/sdk/host";
+import type { SchemaManifest } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import {

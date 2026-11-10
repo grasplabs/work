@@ -492,7 +492,7 @@ const pagesTarget = pageTarget(
     ...kit.imports,
     "lucide-react",
     "react/jsx-runtime",
-    "@grasp-os/sdk/server",
+    "@grasp-os/runtime/server",
   ])
 );
 
@@ -871,7 +871,7 @@ export type GeneratedWorkflowBuild =
 /**
  * Builds the module the host generated from a JSON workflow
  * (`generatedWorkflowEntry`): type-checked against the SDK's own declarations,
- * then compiled, importing only `@grasp-os/sdk/workflow`
+ * then compiled, importing only `@grasp-os/runtime/workflow`
  * (`generatedWorkflowCode`). It is the host's own output, so a type error
  * is the generator's, and nothing is sealed that doesn't check.
  */

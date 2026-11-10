@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
@@ -87,15 +87,15 @@ const appFiles = (admin: string, colleague: string): TestApp =>
       ],
     },
     {
-      "server/requests.ts": `import { v } from "@grasp-os/sdk";
+      "server/requests.ts": `import { v } from "@grasp-os/runtime";
 import { permissions } from "../grasp.config.ts";
 
 export const followUp = permissions.followUp;
 `,
 
-      "src/components/review.tsx": `import { v } from "@grasp-os/sdk";
-import type { WorkflowDecisionInboxItem } from "@grasp-os/sdk";
-import { useForm, useWorkflow } from "@grasp-os/sdk/react";
+      "src/components/review.tsx": `import { v } from "@grasp-os/runtime";
+import type { WorkflowDecisionInboxItem } from "@grasp-os/runtime";
+import { useForm, useWorkflow } from "@grasp-os/runtime/react";
 import { Form, FormError, SubmitButton, TextField } from "@grasp-os/ui/form";
 import { workflows } from "@server/_generated/api";
 
@@ -150,7 +150,7 @@ export function Review({
   );
 }
 `,
-      "src/components/watched.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
+      "src/components/watched.tsx": `import { useWorkflow } from "@grasp-os/runtime/react";
 import { workflows } from "@server/_generated/api";
 
 /** Run \`runId\`'s status, as the person may see it: \`unavailable\` otherwise. */
@@ -160,7 +160,7 @@ export function Watched({ runId }: { runId: string }) {
 }
 `,
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
+import { useQuery, useWorkflow } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { workflows } from "@server/_generated/api";

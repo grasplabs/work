@@ -1,4 +1,4 @@
-import { definitionText } from "@grasp-os/sdk/definition";
+import { definitionText } from "@grasp-os/runtime/definition";
 import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 

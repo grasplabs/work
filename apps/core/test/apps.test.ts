@@ -1,4 +1,7 @@
-import { definitionSources, definitionText } from "@grasp-os/sdk/definition";
+import {
+  definitionSources,
+  definitionText,
+} from "@grasp-os/runtime/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -480,7 +483,7 @@ export const Route = createFileRoute("/")({ component: Page });
     await apps.files.commit(
       app.id,
       {
-        "server/extra.ts": `import { v } from "@grasp-os/sdk";
+        "server/extra.ts": `import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });

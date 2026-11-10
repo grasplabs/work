@@ -1,4 +1,4 @@
-import type { FileChannel } from "@grasp-os/sdk/host";
+import type { FileChannel } from "@grasp-os/runtime/host";
 import {
   downloadNameOf,
   fileLimits,

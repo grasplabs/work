@@ -13,7 +13,7 @@ import type { TestApp } from "../apps/core/test/app-definitions.ts";
  * its sealed release.
  */
 
-const operations = `import { v } from "@grasp-os/sdk";
+const operations = `import { v } from "@grasp-os/runtime";
 import { action, mutation, query } from "@server/_generated/server";
 
 /** Every note, each with who wrote it. */
@@ -51,7 +51,7 @@ export const platformShaped = query({
 const pageCode = (
   attacker: string
 ) => `import { createFileRoute } from "@tanstack/react-router";
-import { useAction, useMutation, useQuery } from "@grasp-os/sdk/react";
+import { useAction, useMutation, useQuery } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
 import { api } from "@server/_generated/api";

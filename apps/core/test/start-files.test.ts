@@ -1,4 +1,4 @@
-import { fileChannel, declaredWorkflows } from "@grasp-os/sdk/host";
+import { fileChannel, declaredWorkflows } from "@grasp-os/runtime/host";
 import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import type { Json } from "@grasp-os/shared/json";
@@ -80,7 +80,7 @@ const files = ({
       ],
     },
     {
-      "server/review.ts": `import { v } from "@grasp-os/sdk";
+      "server/review.ts": `import { v } from "@grasp-os/runtime";
 import { action, mutation } from "@server/_generated/server";
 import { permissions } from "../grasp.config.ts";
 

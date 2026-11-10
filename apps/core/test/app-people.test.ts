@@ -1,4 +1,4 @@
-import { peopleReferences } from "@grasp-os/sdk/host";
+import { peopleReferences } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -52,7 +52,7 @@ const peopleFiles = (people = true): TestApp =>
       permissions: people ? ["people"] : [],
     },
     {
-      "server/dir.ts": `import { v } from "@grasp-os/sdk";
+      "server/dir.ts": `import { v } from "@grasp-os/runtime";
 import { action, mutation, query } from "@server/_generated/server";
 
 /** Who calls, as the function sees it. */

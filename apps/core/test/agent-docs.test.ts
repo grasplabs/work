@@ -145,7 +145,7 @@ describe("the docs the chat's agent builds from", () => {
       toolStep("readDocs", { path: "/guides/unwritten" }),
       toolStep("readDocs", { path: "/inline-hashes.json" }),
       toolStep("readDocs", { path: "/../index.html" }),
-      toolStep("readFile", { path: "@grasp-os/sdk/src/server.ts" }),
+      toolStep("readFile", { path: "@grasp-os/runtime/src/server.ts" }),
       says("Read.")
     );
     const { chat, ask } = await newChat();
@@ -176,7 +176,7 @@ describe("the docs the chat's agent builds from", () => {
     }).toStrictEqual({
       search: {
         path: "/reference/server",
-        title: "@grasp-os/sdk/server",
+        title: "@grasp-os/runtime/server",
         lines: [
           "5: ### query",
           "7: Declares a query: a server function that reads, as [a Page](/docs/guides/pages#reading) calls it.",

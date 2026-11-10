@@ -26,7 +26,7 @@ A function is registered by exporting it from a module under `server/`. Its name
 A query reads through `ctx.db` and returns a value. Pages subscribe to queries, and Grasp sends them the new result whenever the data it read changes.
 
 ```ts server/counts.ts
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 
 export const open = query({
@@ -45,7 +45,7 @@ export const open = query({
 A mutation reads and writes through `ctx.db`. Its writes are staged and commit together once it returns: if it throws, nothing is written.
 
 ```ts server/edits.ts
-import { AppError, v } from "@grasp-os/sdk";
+import { AppError, v } from "@grasp-os/runtime";
 import { mutation } from "@server/_generated/server";
 
 export const rename = mutation({
@@ -71,7 +71,7 @@ A mutation may run more than once: again when what it read changed before it com
 An action has no `ctx.db`. It composes the App's queries and mutations, each its own call, and reaches outside the App only through the permissions your App declares in `grasp.config.ts`, such as a connection or a workflow it starts.
 
 ```ts server/imports.ts
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { action } from "@server/_generated/server";
 
 import { add } from "./tasks.ts";
@@ -105,7 +105,7 @@ Every function of your App may use what the App's permissions declare, as its ki
 `ctx.auth.getUser()` tells you who called: their `id`, `name`, `email` and their `roles` in the App (`builder` and `user`). Decide what someone may do here, in the server function, never in a Page.
 
 ```ts server/roles.ts
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 
 export const canManage = query({

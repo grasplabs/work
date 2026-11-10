@@ -1,5 +1,5 @@
-import type { ValueSchema } from "@grasp-os/sdk";
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import type { ValueSchema } from "@grasp-os/runtime";
+import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import type { BindingKind } from "./format.ts";

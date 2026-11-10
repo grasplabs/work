@@ -24,7 +24,7 @@ const helloFiles = (greeting = "hello"): TestApp =>
   testApp(
     { name: "Hello", tables: {} },
     {
-      "server/hello.ts": `import { v } from "@grasp-os/sdk";
+      "server/hello.ts": `import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 
 export const hello = query({
@@ -41,7 +41,7 @@ const helloTest = (greeting: string): Record<string, string> => ({
   "tests/fixtures/people.json": JSON.stringify({
     principals: { reader: { role: "user" } },
   }),
-  "tests/hello.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+  "tests/hello.test.ts": `import { appTest } from "@grasp-os/runtime/testing";
 import { api } from "@server/_generated/api";
 
 export default appTest({
@@ -189,7 +189,7 @@ describe("publishing a version", { timeout: 120_000 }, () => {
     const { owner, app } = await appWith(helloFiles());
     await publishVersion(env, owner, app, 1);
     const broken = await committed(owner, app, {
-      "server/hello.ts": `import { v } from "@grasp-os/sdk";
+      "server/hello.ts": `import { v } from "@grasp-os/runtime";
 import { query } from "@server/_generated/server";
 
 export const hello = query({

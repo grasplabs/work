@@ -23,7 +23,7 @@ import {
   registerApp,
   serverModuleSource,
   symbolicModules,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import type { Code, Nodes } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { describe, expect, it } from "vite-plus/test";

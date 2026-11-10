@@ -8,7 +8,7 @@ import type { TestApp } from "../apps/core/test/app-definitions.ts";
  * and an outline to switch to.
  */
 
-const operations = `import { v } from "@grasp-os/sdk";
+const operations = `import { v } from "@grasp-os/runtime";
 import { action } from "@server/_generated/server";
 
 const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
@@ -41,7 +41,7 @@ export const outline = action({
 `;
 
 const appPage = `import { createFileRoute } from "@tanstack/react-router";
-import { useStream } from "@grasp-os/sdk/react";
+import { useStream } from "@grasp-os/runtime/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { api } from "@server/_generated/api";

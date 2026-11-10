@@ -1,4 +1,4 @@
-import type { AnyPermission } from "@grasp-os/sdk";
+import type { AnyPermission } from "@grasp-os/runtime";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import type { ConnectorContract } from "@grasp-os/shared/connect";

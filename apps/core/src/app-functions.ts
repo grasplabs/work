@@ -1,5 +1,8 @@
-import { declaredPermission } from "@grasp-os/sdk/host";
-import type { FunctionManifest, WorkflowQueryName } from "@grasp-os/sdk/host";
+import { declaredPermission } from "@grasp-os/runtime/host";
+import type {
+  FunctionManifest,
+  WorkflowQueryName,
+} from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";

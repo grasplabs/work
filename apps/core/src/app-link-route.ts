@@ -1,4 +1,4 @@
-import { declaredPermission } from "@grasp-os/sdk/host";
+import { declaredPermission } from "@grasp-os/runtime/host";
 import { appLinksPath, linkTargetOf } from "@grasp-os/shared/app-link-limits";
 import type { LinkIntent } from "@grasp-os/shared/app-link-limits";
 import {

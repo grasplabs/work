@@ -340,7 +340,7 @@ jobs:
         run: |
           if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm packages/sdk/src/oxc-parse.wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
+          elif ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm packages/runtime/src/oxc-parse.wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "oxc.wasm's glue, build and pin are main's: nothing to prove." >> "$GITHUB_STEP_SUMMARY"

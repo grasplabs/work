@@ -34,7 +34,7 @@ import { writeReference } from "./reference.ts";
 import type { ReferenceOptions } from "./reference.ts";
 
 const root = import.meta.dirname;
-const sdk = path.join(root, "../../packages/sdk");
+const sdk = path.join(root, "../../packages/runtime");
 const reference = path.join(root, "content/reference");
 const site = path.join(root, "dist");
 
@@ -48,10 +48,10 @@ const inlineHashesFile = "inline-hashes.json";
  * Pages' hooks, and what an App's tests run on.
  */
 const modules: Readonly<Record<string, string>> = {
-  index: "@grasp-os/sdk",
-  server: "@grasp-os/sdk/server",
-  react: "@grasp-os/sdk/react",
-  testing: "@grasp-os/sdk/testing",
+  index: "@grasp-os/runtime",
+  server: "@grasp-os/runtime/server",
+  react: "@grasp-os/runtime/react",
+  testing: "@grasp-os/runtime/testing",
 };
 
 /** A module's page, by its file: the root's is `sdk`, beside the index. */
