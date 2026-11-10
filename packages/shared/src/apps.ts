@@ -43,7 +43,7 @@ export const appPathSchema = z
         // The modules Grasp generates for an App, as Convex's
         // `_generated/`: never one of its own files, in any case (an
         // App's paths never differ only in case).
-        !path.toLowerCase().startsWith("server/_generated/")
+        !`${path.toLowerCase()}/`.startsWith("server/_generated/")
       );
     },
     {

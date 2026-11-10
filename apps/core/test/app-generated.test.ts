@@ -131,11 +131,11 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
       { "server/_generated/extra.ts": "export const x = 1;\n" },
     ],
     ["writes in another case", { "Server/_Generated/api.ts": "export {};\n" }],
+    ["writes a file in its place", { "server/_generated": "export {};\n" }],
   ])(
-    "refuses a commit that %s under it, keeping the version's own",
+    "refuses a commit that %s under it, committing nothing",
     async (_what, changes) => {
       const { owner, app } = await appWith(notesFiles());
-      const before = await filesOf(app, 1);
       expect({
         refused: await failure(
           async () =>
@@ -147,8 +147,12 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
               "Forged references"
             )
         ),
-        kept: await filesOf(app, 1).then((after) => after[api] === before[api]),
-      }).toStrictEqual({ refused: "app.invalid", kept: true });
+        // Nothing of it committed.
+        next: await failure(async () => await findVersion(env, app, 2)),
+      }).toStrictEqual({
+        refused: "app.invalid",
+        next: "app.version_not_found",
+      });
     }
   );
 
