@@ -459,4 +459,6 @@ export const onboardingErrors = defineErrorFamily({
     "Nobody who does that work has agreed to anything yet.",
   "onboarding.agreements_kept":
     "The team is told: what was agreed stays as it was agreed.",
+  "onboarding.interviews_kept":
+    "The team is told: the interviews stay part of the onboarding.",
 });
