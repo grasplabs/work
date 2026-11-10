@@ -13694,6 +13694,10 @@ msgstr "Este mes unas {ahead} de las {of} de tu plan"
 msgid "This month so far"
 msgstr "Este mes hasta ahora"
 
+#: src/chat/failure.ts
+msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month."
+msgstr "Se ha alcanzado el límite de este mes para la IA de Grasp. Tu administrador puede cambiar a la clave propia de tu organización en Ajustes › Proveedores de IA, o la IA de Grasp vuelve el mes que viene."
+
 #: src/chat/cited-note.tsx
 msgid "This note can't be opened"
 msgstr "No se puede abrir esta nota"

@@ -13694,6 +13694,10 @@ msgstr "Deze maand ongeveer {ahead} van de {of} in je abonnement"
 msgid "This month so far"
 msgstr "Deze maand tot nu toe"
 
+#: src/chat/failure.ts
+msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month."
+msgstr "De limiet van deze maand voor de AI van Grasp is bereikt. Je beheerder kan in Instellingen › AI-aanbieders overstappen op de eigen sleutel van je organisatie, of de AI van Grasp is er volgende maand weer."
+
 #: src/chat/cited-note.tsx
 msgid "This note can't be opened"
 msgstr "Deze notitie kan niet worden geopend"

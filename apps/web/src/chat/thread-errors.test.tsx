@@ -30,6 +30,7 @@ const at = "2026-10-22T10:00:00.000Z";
 /** Each of the model gateway's error codes, which the type keeps complete. */
 const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.invalid_call": true,
+  "model.grasp_limit_reached": true,
   "model.unconfigured": true,
   "model.no_provider": true,
   "model.provider_key_failed": true,

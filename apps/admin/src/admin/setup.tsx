@@ -78,7 +78,7 @@ import { fetchDrift, retryClientFn } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
-import { aiStatusLine } from "./ai-status-words.ts";
+import { aiStatusLine, graspAiLine } from "./ai-status-words.ts";
 import { attentionWords } from "./platform-parts.tsx";
 import { Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
@@ -927,7 +927,25 @@ const AiStatus = ({ status }: { status: Promise<AiStatusReport | null> }) => (
   >
     <CardContent>
       <Await fallback={<p>AI: reading its core…</p>} promise={status}>
-        {(report) => <p>{aiStatusLine(report)}</p>}
+        {(report) => {
+          const grasp = graspAiLine(report);
+          return (
+            <>
+              <p>{aiStatusLine(report)}</p>
+              {grasp === null ? null : (
+                <p
+                  className={
+                    report?.graspAi?.reached === true
+                      ? "text-status-attention"
+                      : undefined
+                  }
+                >
+                  {grasp}
+                </p>
+              )}
+            </>
+          );
+        }}
       </Await>
     </CardContent>
   </Section>

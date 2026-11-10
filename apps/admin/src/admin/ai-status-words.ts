@@ -87,3 +87,28 @@ export const aiStatusLine = (
   }
   return `${connected} · working · last used ${agoWords(lastOkAt, now)}`;
 };
+
+/** An amount in millionths of a US dollar, to the cent. */
+const dollars = (micros: number): string =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(micros / 1_000_000);
+
+/**
+ * The company's use of Grasp's AI this month in one plain line, while it
+ * runs its AI on Grasp's key: what it came to against its limit, and that
+ * its AI is stopped once it reached it. None for a company on its own
+ * key, one whose core reports none, or one that couldn't be asked.
+ */
+export const graspAiLine = (report: AiStatusReport | null): string | null => {
+  const use = report?.graspAi;
+  if (use === undefined) {
+    return null;
+  }
+  const spent = dollars(use.spentMicros);
+  const limit = dollars(use.limitMicros);
+  return use.reached
+    ? `On Grasp’s AI: ${spent} this month, at its limit of ${limit}. Its AI is stopped until next month, or until its admin connects a key of its own.`
+    : `On Grasp’s AI: ${spent} of ${limit} this month.`;
+};

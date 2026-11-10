@@ -510,7 +510,18 @@ export type AiSource = z.infer<typeof aiSourceSchema>;
 export const graspAi = {
   provider: "anthropic",
   model: "anthropic/claude-sonnet-5-5",
-} as const satisfies { provider: AiProviderId; model: string };
+  /**
+   * The most an organization's use of Grasp's AI may come to in a UTC
+   * month, in US dollars at list prices: past it, its calls on Grasp's
+   * key are refused until the next month. One amount for every
+   * organization for now.
+   */
+  monthlyLimitUsd: 100,
+} as const satisfies {
+  provider: AiProviderId;
+  model: string;
+  monthlyLimitUsd: number;
+};
 
 /** Grasp's AI, as an organization's admins see it. */
 export interface GraspAiListed {
@@ -519,6 +530,11 @@ export interface GraspAiListed {
   model: AiProviderModel;
   /** Where its calls run, in plain words. */
   whereItRuns: string;
+  /**
+   * This month's use of it against its limit, in US dollars: at the
+   * limit its calls are refused until the next month.
+   */
+  month: { spentUsd: number; limitUsd: number; reached: boolean };
 }
 
 /** The organization's AI providers and its choice of models. */
