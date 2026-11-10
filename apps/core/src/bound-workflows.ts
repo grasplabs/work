@@ -179,6 +179,8 @@ export const versionEventContract = async (
   let complete = true;
   for (const row of pinned) {
     if (!aliasPattern.test(row.alias)) {
+      // No reference can name it: the App can't declare it.
+      complete = false;
       continue;
     }
     const contract = contracts.get(row.contractId ?? "");

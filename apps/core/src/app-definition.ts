@@ -477,8 +477,8 @@ const text = z.string().min(1).max(20_000);
 
 /**
  * An operation the definition tools make: one of the definition's own,
- * but the workflow contract, which only the host sets, from the version
- * a builder binds (`bindWorkflow`, read by `defineInDraft`).
+ * but the workflow contract, which the tools set only from the version a
+ * builder binds (`bindWorkflow`, read by `defineInDraft`).
  */
 export type DraftOperation =
   | Exclude<DefinitionOperation, { readonly op: "setWorkflowContract" }>

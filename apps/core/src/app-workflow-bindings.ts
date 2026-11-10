@@ -168,13 +168,13 @@ const requireDeclaredContract = async (
   }
   const release = await loadRelease(env, app.id, app.currentVersion);
   const declared = declaredPermission(release.app, alias, "workflows");
-  if (
-    declared !== undefined &&
-    !sameEventContract(
-      declared,
-      await versionEventContract(env, workflow, version)
-    )
-  ) {
+  if (declared === undefined) {
+    return;
+  }
+  // All of it, or the App could rely on part of a contract the version
+  // no longer resolves.
+  const bound = await versionEventContract(env, workflow, version);
+  if (!bound.complete || !sameEventContract(declared, bound)) {
     throw workflowResourceErrors.create(
       "workflow.app_binding_contract_changed"
     );

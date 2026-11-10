@@ -149,8 +149,7 @@ export type DefinitionOperation =
       /**
        * Sets the events, listen tasks and decisions workflow permission
        * `alias` declares: what a version the builder binds has, as the
-       * host resolved it (app-workflow-bindings.ts in core), never what
-       * App code says.
+       * host resolved it (app-workflow-bindings.ts in core).
        */
       readonly op: "setWorkflowContract";
       readonly alias: string;
@@ -370,8 +369,12 @@ const permissionFrom = (
     );
   }
   // A workflow's events, listen tasks and decisions are what the version
-  // bound has, written from it (`setWorkflowContract`), never by hand: a
-  // hand-written one would type references the bound version can't take.
+  // bound has, written from it (`setWorkflowContract`), never by a tool by
+  // hand: a hand-written one would type references the bound version
+  // can't take. Whatever a definition declares, binding a version holds
+  // it to the declaration (app-workflow-bindings.ts in core), and core
+  // holds every event an App sends to a type the bound version lets a
+  // page send, and every answer to its decision.
   if (
     isWorkflowPermission(declared) &&
     (Object.keys(declared.events).length > 0 ||

@@ -1008,7 +1008,7 @@ export const defineInDraft = async <Saved>(
   let result: { definition: AppDefinition } = { definition: held.own };
   for (const each of Array.isArray(parsed) ? parsed : [parsed]) {
     // A workflow's contract is what the version bound has, read for the
-    // person binding it; never what anyone writes of it.
+    // person binding it; the tools never take one written by hand.
     const applied: DefinitionOperation =
       each.op === "bindWorkflow"
         ? {
@@ -1947,7 +1947,7 @@ build: {
    * tools do (\`addTable\`, \`addField\`, \`changeField\`,
    * \`renameField\`, \`renameTable\`, \`setAccess\`, \`addIndex\`, \`addPermission\`,
    * \`removeTable\`, \`removeField\`, \`removeIndex\`,
-   * \`removePermission\`, \`moveField\`, \`renameFunction\`:
+   * \`removePermission\`, \`bindWorkflow\`, \`moveField\`, \`renameFunction\`:
    * \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
    * grasp.config.ts and server/schema.ts from it. \`ok: false\` with the
    * problem saves nothing; otherwise the \`plan\` of what it does to the

@@ -398,7 +398,7 @@ export const dispatchNotifyIntent = async (
       admitted = await unlessAccepted(env, delivery, refusal);
     }
     requireLive(entry.signal);
-    admitted ??= await admitRunEvent(env, delivery);
+    admitted ??= await admitRunEvent(env, delivery, true);
     requireLive(entry.signal);
     await audited(env, actor, "workflow.event.sent", target, {
       ...detail,
