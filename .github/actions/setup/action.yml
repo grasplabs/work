@@ -18,9 +18,10 @@
 # lockfile installed, and a store is saved only by the install that filled it.
 #
 # Only the tests that install offline read the store
-# (scripts/package-definition.test.ts): a job that runs none passes
-# `store: false` and restores node_modules alone, about 9 s sooner, and
-# the store only to install when node_modules missed.
+# (scripts/package-definition*.test.ts, all in the first test shard): a
+# job restores node_modules alone, about 9 s sooner than with the store,
+# and the store only to install when node_modules missed, unless it
+# passes `store: true`.
 #
 # Only a job that says so saves a cache it missed: `static` for a pull
 # request, so the pull request's next run hits it, and `release` on a
@@ -38,7 +39,7 @@ inputs:
     default: "false"
   store:
     description: "Restore pnpm's store even when node_modules hit, for tests that install offline from it: true or false"
-    default: "true"
+    default: "false"
   oxc-wasm:
     description: "Download oxc.wasm, for a job that builds or tests the compiler: true or false"
     default: "true"
