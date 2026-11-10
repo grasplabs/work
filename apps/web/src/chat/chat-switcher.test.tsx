@@ -30,6 +30,7 @@ const today = new Date().toISOString();
 const chat = (id: string, title: string): ChatSummary => ({
   id,
   title,
+  agentId: "organization",
   createdAt: today,
   lastAt: today,
   running: false,

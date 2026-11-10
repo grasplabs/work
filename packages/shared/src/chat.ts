@@ -60,10 +60,26 @@ export type ChatChannel = z.infer<typeof chatChannelSchema>;
 /** A chat's title: what the person, or their first question, named it. */
 export const chatTitleSchema = z.string().trim().min(1).max(200);
 
+/**
+ * One of the company's agents as a person who may talk to it sees it:
+ * enough to pick it and to show who answers, never its instructions.
+ */
+export interface ChatAgent {
+  id: string;
+  /** What people call it. */
+  name: string;
+  /** The figure it is drawn with. */
+  face: string;
+  /** One line on what it is for. */
+  job: string;
+}
+
 /** A chat in the person's list. */
 export interface ChatSummary {
   id: string;
   title: string;
+  /** The agent that answers in it (`ChatsApi.agents`), for good. */
+  agentId: string;
   /** When it was made (ISO 8601). */
   createdAt: string;
   /**
@@ -946,8 +962,18 @@ export interface ChatsApi {
    * is `agent.chat_not_found`.
    */
   summary: (chatId: string) => Promise<ChatSummary>;
-  /** Makes a chat. */
-  create: (title: string) => Promise<ChatSummary>;
+  /**
+   * The company's agents the person may talk to here, the first one
+   * first: the ones that are on and have them in their audience. An agent
+   * outside it is never listed.
+   */
+  agents: () => Promise<ChatAgent[]>;
+  /**
+   * Makes a chat with the agent `agentId`, one of `agents()`, or with
+   * the company's first agent when none is named. An agent the person may
+   * not talk to is `agent.unknown`, as one the company doesn't have.
+   */
+  create: (title: string, agentId?: string) => Promise<ChatSummary>;
   /**
    * The person's chat for App `app`, where its agent changes the App with
    * them: the one they last used, or a new one named after the App. Only

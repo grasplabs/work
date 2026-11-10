@@ -18,6 +18,7 @@ import type {
   ChatQuestion,
   ChatSearchHit,
   ChatsApi,
+  ChatAgent,
   ChatSummary,
   ChatUpdate,
   PreviewAt,
@@ -71,6 +72,7 @@ import {
   editableApp,
   hasPages,
 } from "./apps.ts";
+import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { personOf } from "./connections.ts";
@@ -285,22 +287,32 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
   }
 
-  async create(title: string): Promise<ChatSummary> {
+  async agents(): Promise<ChatAgent[]> {
+    return await withPerson(
+      this.#check,
+      async ({ userId }) => await chatAgentsFor(this.#env, userId)
+    );
+  }
+
+  async create(title: string, agentId?: string): Promise<ChatSummary> {
     return await withPerson(this.#check, async (person) => {
       const { userId } = person;
       const parsed = chatTitleSchema.safeParse(title);
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_title");
       }
+      // Only an agent the person may talk to, refused before a chat is made.
+      const agent = await chatAgentOf(this.#env, userId, agentId);
       const chat = await this.#chatsOf(userId).createChat(
         parsed.data,
         userId,
-        chatAgentId,
+        agent,
         actorOf(person)
       );
       return {
         id: chat.id,
         title: chat.title,
+        agentId: chat.agentId,
         createdAt: chat.createdAt.toISOString(),
         lastAt: chat.lastAt.toISOString(),
         running: false,
@@ -359,6 +371,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return {
       id: chat.id,
       title: chat.title,
+      agentId: chat.agentId,
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
       running: false,
@@ -551,10 +564,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         workspaceId: personalWorkspaceId(by.userId),
         chatId: await this.#ownChat(by.userId, chatId),
       };
-      const authority = chatAuthority({
-        agentId: chatAgentId,
-        personId: by.userId,
-      });
+      // The chat's own agent: its restricted mode is kept under it.
+      const { agentId } = await this.#chatsOf(by.userId).chatSummary(
+        scope.chatId,
+        by.userId
+      );
+      const authority = chatAuthority({ agentId, personId: by.userId });
       const unrestricted = async (): Promise<void> => {
         if (await isRestricted(this.#env, authority, chatContext(scope))) {
           throw permissionErrors.create("permission.restricted");

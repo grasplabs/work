@@ -991,6 +991,7 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         appId: chats.appId,
         via: chats.via,
+        agentId: chats.agentId,
         said: sql<string>`'' || ${saidWords}`,
       })
       .from(chats)
@@ -1009,6 +1010,7 @@ export class Workspace extends DurableObject<Env> {
       chat: {
         id: row.id,
         title: row.title,
+        agentId: row.agentId,
         createdAt: row.createdAt.toISOString(),
         lastAt: row.lastAt.toISOString(),
         running: this.#isRunning(row.id),
@@ -3144,6 +3146,7 @@ export class Workspace extends DurableObject<Env> {
       .select({
         id: chats.id,
         title: chats.title,
+        agentId: chats.agentId,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
         appId: chats.appId,
@@ -3161,12 +3164,13 @@ export class Workspace extends DurableObject<Env> {
   #summaryOf(
     chat: Pick<
       typeof chats.$inferSelect,
-      "id" | "title" | "createdAt" | "lastAt" | "appId" | "via"
+      "id" | "title" | "agentId" | "createdAt" | "lastAt" | "appId" | "via"
     >
   ): ChatSummary {
     return {
       id: chat.id,
       title: chat.title,
+      agentId: chat.agentId,
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
       running: this.#isRunning(chat.id),
