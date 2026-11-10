@@ -365,18 +365,14 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
   it("are imported by the App's own tests, which pass as it is published", async () => {
     const [page, server] = [await chart(), await maths()];
     const files = withFiles(appFiles(page, server), {
-      "tests/fixtures/people.json": JSON.stringify({
-        principals: { reader: { role: "user" } },
-      }),
       "tests/maths.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+import { expect } from "vitest";
 import { double } from ${JSON.stringify(server)};
+import schema from "../server/schema.ts";
 
-export default appTest({
-  fixtures: "people",
-  tests: {
-    "doubles": async (t) => {
-      t.equal(double(2), 4);
-    },
+export default appTest(schema, {
+  "doubles": async () => {
+    expect(double(2)).toBe(4);
   },
 });
 `,

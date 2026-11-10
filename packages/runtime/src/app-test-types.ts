@@ -85,9 +85,12 @@ export interface TestStartOptions {
   readonly models?: Readonly<Record<string, Json>>;
   /**
    * Who may answer each of its decisions, by the decision binding's
-   * alias: identities of this test.
+   * alias: identities of this test, whatever the App's tables (only who
+   * they are is read).
    */
-  readonly deciders?: Readonly<Record<string, readonly TestIdentity[]>>;
+  readonly deciders?: Readonly<
+    Record<string, readonly Pick<TestIdentity, "respond">[]>
+  >;
   /**
    * A fault: once task `restartAfterStep`'s step is journaled the first
    * time, the run's activation ends there, as if its process died, and

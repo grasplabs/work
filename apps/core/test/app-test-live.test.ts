@@ -64,13 +64,13 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
     await expect(fixturesLeft()).resolves.toBe(0);
   });
 
-  it("show each principal only the rows they may read", async () => {
+  it("show each identity only the rows they may read", async () => {
     const built = await appWith(
       withFiles(appFiles, {
         "tests/access.test.ts": suiteOf({
           "another owner's snapshots never hold the note": `
-      const owner = await t.as("note-owner");
-      const other = await t.as("other-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
+      const other = t.withIdentity({ name: "other-owner" });
       const mine = await owner.subscribe(api.notes.list, page);
       const theirs = await other.subscribe(api.notes.list, page);
       const createdId = await owner.mutation(api.notes.create, { title: "Mine" });
@@ -81,12 +81,12 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
         seen.push(...p.items.map((note) => note._id));
         return p.items.some((note) => note.title === "Theirs");
       });
-      t.equal(seen.includes(createdId), false, "the other owner saw the note");
-      t.equal(last.items.map((note) => note.title), ["Theirs"]);`,
+      expect(seen.includes(createdId), "the other owner saw the note").toBe(false);
+      expect(last.items.map((note) => note.title)).toEqual(["Theirs"]);`,
           "a refusal it expects": `
-      const owner = await t.as("note-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
       const live = await owner.subscribe({ ...api.notes.list, name: "notes.nothing" }, page);
-      await t.rejectsCode(live.next(), "function.not_found");`,
+      await expect(live.next()).rejects.toMatchObject({ code: "function.not_found" });`,
         }),
       })
     );
@@ -98,20 +98,20 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       withFiles(appFiles, {
         "tests/failing.test.ts": suiteOf({
           "follows a query the App doesn't have": `
-      const owner = await t.as("note-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
       const live = await owner.subscribe({ ...api.notes.list, name: "notes.nothing" }, page);
       await live.next();`,
           "waits for a note nobody makes": `
-      const owner = await t.as("note-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
       const live = await owner.subscribe(api.notes.list, page);
       await live.next((p) => p.items.length > 0);`,
           "waits for two snapshots at once": `
-      const owner = await t.as("note-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
       const live = await owner.subscribe(api.notes.list, page);
       void live.next(() => false).catch(() => null);
       await live.next();`,
           "reads a live query it closed": `
-      const owner = await t.as("note-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
       const live = await owner.subscribe(api.notes.list, page);
       await live.close();
       await live.next();`,
@@ -136,14 +136,14 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       withFiles(appFiles, {
         "tests/lost.test.ts": suiteOf({
           "follows the note it makes": `
-      const owner = await t.as("note-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
       const live = await owner.subscribe(api.notes.list, page);
       await owner.mutation(api.notes.create, { title: "Kept" });
       await live.next((p) => p.items.length === 1);`,
           // Never asks for a snapshot: core giving up on the query must
           // still fail it.
           "follows a query it never reads": `
-      const owner = await t.as("note-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
       await owner.subscribe(api.notes.list, page);
       for (let round = 0; round < 15; round += 1) {
         await owner.mutation(api.notes.create, { title: \`Note \${round}\` });

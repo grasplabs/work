@@ -26,10 +26,10 @@ import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
-// A decision a run an App's test started waits for (`workflowTest`,
+// A decision a run an App's test started waits for (`identity.start`,
 // workflows/fixture-decisions.ts), from its threat model first: answered
 // by a principal it doesn't ask, or by the run's own; a recipient the
-// fixture's binding doesn't cover; a second answer; an answer to a run
+// start's binding doesn't cover; a second answer; an answer to a run
 // that was cancelled; a replay asking or taking twice; a decline or no
 // answer taken for an approval; the decision reaching the organization's
 // own decisions. Then the run taking the branch its answer chose.
@@ -108,22 +108,25 @@ const definitionOf = (
 /** What an answer carries: a comment, or nothing. */
 const response = v.union(v.null(), v.object({ comment: v.string() }));
 
-/** What each test's fixture gives the approval workflow. */
+/** What each test's start gives the approval workflow. */
 interface Given {
-  /** Whom the run asks, by principal name. */
+  /** Whom the run asks, by identity name. */
   reviewer?: string;
-  /** Who the binding lets answer, by principal name. */
+  /** Who the binding lets answer, by identity name. */
   deciders?: string[];
 }
 
-/**
- * The App's files: it binds `approval`, its fixture `desk` naming
- * `desk-user` (who starts runs), `approver` and `other`, with `tests`.
- */
-const filesWith = (
-  { reviewer = "approver", deciders = ["approver"] }: Given,
-  tests: Record<string, string> = {}
-): TestApp =>
+/** The start options `given` makes: the reviewer a parameter, the deciders. */
+const optionsOf = ({
+  reviewer = "approver",
+  deciders = ["approver"],
+}: Given) => ({
+  params: { reviewer: `person:${reviewer}` },
+  deciders: { invoiceApproval: deciders },
+});
+
+/** The App's files: it binds `approval`, with `tests`. */
+const filesWith = (tests: Record<string, string> = {}): TestApp =>
   testApp(
     {
       name: "Invoices",
@@ -144,19 +147,6 @@ import { permissions } from "../grasp.config.ts";
 export const approval = permissions.approval;
 `,
 
-      "tests/fixtures/desk.json": JSON.stringify({
-        principals: {
-          "desk-user": { role: "user" },
-          approver: { role: "user" },
-          other: { role: "user" },
-        },
-        workflows: {
-          approval: {
-            params: { reviewer: `person:${reviewer}` },
-            deciders: { invoiceApproval: deciders },
-          },
-        },
-      }),
       ...tests,
     }
   );
@@ -186,7 +176,7 @@ const invoicesApp = async (
     input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
     response: JSON.stringify(response.descriptor),
   });
-  const files = filesWith(given, tests);
+  const files = filesWith(tests);
   const fixture = await appWith(files, "Invoices", builder);
   const workflow = await createWorkflowResource(
     env,
@@ -204,7 +194,7 @@ const invoicesApp = async (
   });
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
-  return { builder, app: fixture.app, release, files };
+  return { builder, app: fixture.app, release, options: optionsOf(given) };
 };
 
 /** A start of `approval` on an invoice of `amount`, as the SDK sends it. */
@@ -237,18 +227,28 @@ const codeOf = (answer: string): string => {
   return result.ok ? "ok" : result.error.code;
 };
 
-/** A test session on `app`'s release, and a run of it `desk-user` started. */
+/**
+ * A test session on `app`'s release, acting as `desk-user` (who starts
+ * runs), `approver` and `other`, and a run of it `desk-user` started.
+ */
 const runningIn = async (app: Awaited<ReturnType<typeof invoicesApp>>) => {
   const host = fixtureHostFor(
     env,
     app.release,
-    app.files.files,
     await releaseIdsOf(env, app.release)
   );
-  const session = await host.open("desk", `test-${unique()}`);
+  const session = await host.open(`test-${unique()}`);
+  for (const name of ["desk-user", "approver", "other"]) {
+    // oxlint-disable-next-line no-await-in-loop -- one after another, as a test names them
+    await session.identify(JSON.stringify({ name, role: "user", teams: [] }));
+  }
   const started = resultSchema.parse(
     JSON.parse(
-      await session.start("desk-user", await startOf(app.release, 5000))
+      await session.start(
+        "desk-user",
+        await startOf(app.release, 5000),
+        JSON.stringify(app.options)
+      )
     )
   );
   if (!started.ok) {
@@ -465,7 +465,7 @@ describe(
       await session.close();
     });
 
-    it("opens nothing for a recipient the fixture's binding doesn't cover, nor for the run's own principal", async () => {
+    it("opens nothing for a recipient the start's binding doesn't cover, nor for the run's own person", async () => {
       const uncovered = await invoicesApp({ reviewer: "other" });
       const first = await runningIn(uncovered);
       const own = await invoicesApp({
@@ -704,33 +704,37 @@ describe(
         {},
         {
           tests: {
-            "tests/approval.test.ts": `import { workflowTest } from "@grasp-os/sdk/testing";
+            "tests/approval.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { workflows } from "@server/_generated/api";
+import { expect } from "vitest";
+import schema from "../server/schema.ts";
 
-export default workflowTest({
-  fixtures: "desk",
-  tests: {
-    "an approver's approval takes the approved branch": async (t) => {
-      const desk = await t.as("desk-user");
-      const approver = await t.as("approver");
-      const run = await desk.start(workflows.approval, { amount: 5000 });
-      await t.rejectsCode(
-        desk.respond(run, "review", { approved: true }),
-        "decision.forbidden"
-      );
-      await approver.respond(run, "review", {
-        approved: true,
-        value: { comment: "Fine" },
-      });
-      t.equal(await t.runs.untilTerminal(run), {
-        status: "completed",
-        result: { status: "approved" },
-      });
-      await t.rejectsCode(
-        approver.respond(run, "review", { approved: false }),
-        "decision.closed"
-      );
-    },
+export default appTest(schema, {
+  "an approver's approval takes the approved branch": async (t) => {
+    const desk = t.withIdentity({ name: "desk-user" });
+    const approver = t.withIdentity({ name: "approver" });
+    const run = await desk.start(
+      workflows.approval,
+      { amount: 5000 },
+      {
+        params: { reviewer: "person:approver" },
+        deciders: { invoiceApproval: [approver] },
+      }
+    );
+    await expect(
+      desk.respond(run, "review", { approved: true })
+    ).rejects.toMatchObject({ code: "decision.forbidden" });
+    await approver.respond(run, "review", {
+      approved: true,
+      value: { comment: "Fine" },
+    });
+    expect(await t.runs.untilTerminal(run)).toEqual({
+      status: "completed",
+      result: { status: "approved" },
+    });
+    await expect(
+      approver.respond(run, "review", { approved: false })
+    ).rejects.toMatchObject({ code: "decision.closed" });
   },
 });
 `,

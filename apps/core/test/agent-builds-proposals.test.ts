@@ -222,7 +222,7 @@ export const titles = action({
       }),
       alongside: writing({
         "src/routes/index.tsx": fixed,
-        "workflows/intake.workflow-tests.ts": "export default [];\n",
+        "workflows/intake.json": "{}\n",
       }),
     };
     const { chat, grant } = await setUp([
@@ -254,14 +254,11 @@ export const titles = action({
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
-      added: noWorkflows([
-        "workflows/outtake.ts",
-        "workflows/outtake.workflow-tests.ts",
-      ]),
+      added: noWorkflows(["workflows/outtake.ts"]),
       imported: noWorkflows(["workflows/lib/take.ts"]),
       // Refused as a whole, naming only the workflow's file: the page
       // beside it didn't land either.
-      alongside: noWorkflows(["workflows/intake.workflow-tests.ts"]),
+      alongside: noWorkflows(["workflows/intake.json"]),
       unchanged: [],
     });
   });

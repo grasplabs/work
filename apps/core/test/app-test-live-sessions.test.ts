@@ -13,6 +13,7 @@ import {
   envWith,
   fixturesLeft,
   follower,
+  identified,
   pushOfNotes,
   requestFor,
 } from "./app-test-live-harness.ts";
@@ -22,13 +23,10 @@ const session = async () => {
   const built = await appWith(appFiles);
   await publishVersion(env, built.owner, built.app, 1);
   const release = await loadRelease(env, built.app, 1);
-  const host = fixtureHostFor(
-    env,
-    release,
-    appFiles.files,
-    await releaseIdsOf(env, release)
-  );
-  return { host, release, opened: await host.open("notes", "live") };
+  const host = fixtureHostFor(env, release, await releaseIdsOf(env, release));
+  const opened = await host.open("live");
+  await identified(opened);
+  return { host, release, opened };
 };
 
 /**
@@ -67,10 +65,10 @@ const tearingSession = async (torn: number) => {
   const host = fixtureHostFor(
     envWith({ DATA_STORES: stores }),
     release,
-    appFiles.files,
     await releaseIdsOf(env, release)
   );
-  const opened = await host.open("notes", "torn");
+  const opened = await host.open("torn");
+  await identified(opened);
   const followed = follower();
   await opened.subscribe(
     "note-owner",

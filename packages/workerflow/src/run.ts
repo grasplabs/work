@@ -1382,7 +1382,14 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       supersedeIn(this.#store.sql, now);
     });
     await this.#store.setAlarm(now);
+    // The activation that held it ends now, so its alarm handler returns
+    // and the alarm just set runs the next: one whose definition waits on
+    // nothing of the engine's would otherwise hold the handler for good.
+    this.#running?.supersede();
   }
+
+  /** The activation this object's alarm handler runs now, if any. */
+  #running: Activation | undefined;
 
   /**
    * The definition a run executes, built afresh for every activation:
@@ -2314,10 +2321,14 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#compensate(activation, resolved);
       return;
     }
+    // Held while it runs, so a restart can end it (`restartActivation`).
+    this.#running = activation;
     const settlement = await Promise.race([
       activation.execute(resolved),
       activation.stopped,
-    ]);
+    ]).finally(() => {
+      this.#running = undefined;
+    });
     if (settlement === superseded || settlement === suspended) {
       // A later activation owns the run, or the run waits for the alarm
       // its suspension set. Either way this handler is done: a waiting run

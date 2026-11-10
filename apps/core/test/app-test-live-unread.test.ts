@@ -26,7 +26,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       withFiles(appFiles, {
         "tests/unread.test.ts": suiteOf({
           "never reads what it follows": `
-      const owner = await t.as("note-owner");
+      const owner = t.withIdentity({ name: "note-owner" });
       await owner.subscribe(api.notes.list, page);
       const paced = await owner.subscribe(api.notes.list, page);
       for (let round = 0; round < 110; round += 1) {

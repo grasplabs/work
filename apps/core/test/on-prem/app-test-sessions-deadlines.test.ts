@@ -18,7 +18,7 @@ import { slowToAdmit } from "./app-test-sessions-harness.ts";
 
 describe("an App's tests on-prem", { timeout: 180_000 }, () => {
   it("run no suite that got its place after the run's time was up", async () => {
-    const built = await appWith(suiteOf("t.equal(1, 1);"));
+    const built = await appWith(suiteOf("expect(1).toBe(1);"));
     // The sandbox answers the suite's ask for a place only once the run's
     // time is surely up: the run starts before the suite asks, so its
     // second is over a second after the ask, whatever the build took.
@@ -37,7 +37,7 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
   });
 
   it("start no ask for a suite's place that could still wait past the run's time", async () => {
-    const built = await appWith(suiteOf("t.equal(1, 1);"));
+    const built = await appWith(suiteOf("expect(1).toBe(1);"));
     // Every ask for the suite's place refused at once (`busy`), each
     // one's start noted: an ask may wait up to 6 s in the supervisor
     // (2 × its 3 s), so none may start later than 6 s before the end.

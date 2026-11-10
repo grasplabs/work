@@ -11,7 +11,6 @@ import { releaseIdsOf } from "../../src/apps.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import {
   activation,
-  appFiles,
   appWith,
   envWith,
   heldPlace,
@@ -46,7 +45,6 @@ const inSuiteSession = async (
   const suiteHost = fixtureHostFor(
     env,
     release,
-    appFiles.files,
     await releaseIdsOf(env, release),
     {
       parent: () => {},
@@ -99,7 +97,7 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
   });
 
   it("give a suite its time from when it has a place, not while it waits for one", async () => {
-    const built = await appWith(suiteOf("t.equal(1, 1);"));
+    const built = await appWith(suiteOf("expect(1).toBe(1);"));
     // The sandbox answers the suite's ask for a place a second after the
     // suite's own time would be up, were it counted from the ask.
     const suiteMs = 5000;
@@ -120,16 +118,17 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     const { answer } = await inSuiteSession(
       await notesRelease(),
       `const said = [];
-    const real = await numbered.open("notes", "real");
+    const real = await numbered.open("real");
+    const owner = JSON.stringify({ name: "note-owner", role: "user", teams: [] });
     for (const id of [real + 7, String(real), real + 0.5, -1, null]) {
       try {
-        await numbered.principal(id, "note-owner");
+        await numbered.identify(id, owner);
         said.push("answered");
       } catch (error) {
         said.push(error.message);
       }
     }
-    said.push((await numbered.principal(real, "note-owner")) ?? "known");
+    said.push((await numbered.identify(real, owner)) ?? "known");
     await numbered.close(real);
     return said;`
     );
@@ -152,7 +151,7 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     const { answer, opened } = await inSuiteSession(
       await notesRelease(),
       `const kept = numbered.dup();
-    this.ctx.waitUntil(scheduler.wait(300).then(() => kept.open("notes", "late")).catch(() => null));
+    this.ctx.waitUntil(scheduler.wait(300).then(() => kept.open("late")).catch(() => null));
     return "answered";`,
       { lingerMs: 1500 }
     );
@@ -168,7 +167,8 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
       release,
       `const [request] = values;
     const released = [];
-    const session = await numbered.open("notes", "left-open");
+    const session = await numbered.open("left-open");
+    await numbered.identify(session, JSON.stringify({ name: "note-owner", role: "user", teams: [] }));
     const callback = (name) =>
       Object.assign(() => undefined, {
         [Symbol.dispose]: () => {

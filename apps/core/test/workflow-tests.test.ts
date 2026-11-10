@@ -3,6 +3,7 @@ import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -20,16 +21,18 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { runEngine } from "../src/workflows/engine.ts";
+import { startWorkflow } from "../src/workflow-starts.ts";
+import { runEngine, runObjectOf } from "../src/workflows/engine.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { passing } from "./json-workflow-apps.ts";
 import { fakeProvider } from "./model-provider.ts";
+import { liveStatus, sleeping } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
-// Workflow tests of an App (`workflowTest`, spec 28.2): a test principal
+// Workflow runs in an App's tests (`appTest`, spec 28.2): a test identity
 // starts a workflow the release under test binds, and the run is real, on
 // the engine, the same version as anyone's, but nothing of the
 // organization's. The threat model is in workflows/fixture-runs.ts; the
@@ -38,8 +41,8 @@ import { connectDb } from "./test-env.ts";
 // connection (its model calls are workflow-test-calls.test.ts's);
 // it outlives its test, or a test died before removing it; a test asks
 // about a run it didn't start; a test starts what the release doesn't
-// bind. Then what a test sees: the run's end, and how often each
-// task completed.
+// bind. Then what a test sees: the run's end, how often each task
+// completed, and its time moved on by the test's clock (`t.clock`).
 
 /** An object of `fields`, each required. */
 const objectSchema = (fields: Record<string, unknown>) => ({
@@ -87,11 +90,7 @@ const hold = (duration: string) => ({
 });
 
 /** The App's files: it binds `followUp`, with `tests` as its tests. */
-const filesWith = (
-  tests: Record<string, string> = {},
-  /** The parameter values the fixture gives each workflow, by alias. */
-  workflows?: Record<string, { params: Record<string, unknown> }>
-): TestApp =>
+const filesWith = (tests: Record<string, string> = {}): TestApp =>
   testApp(
     {
       name: "Requests",
@@ -112,10 +111,6 @@ import { permissions } from "../grasp.config.ts";
 export const followUp = permissions.followUp;
 `,
 
-      "tests/fixtures/desk.json": JSON.stringify({
-        principals: { "desk-user": { role: "user" } },
-        ...(workflows === undefined ? {} : { workflows }),
-      }),
       ...tests,
     }
   );
@@ -155,15 +150,10 @@ const workflowOf = async (
 /** The Requests App with `tests`, binding workflow `workflow` as `followUp`. */
 const requestsApp = async (
   workflow: (by: Acting) => Promise<string>,
-  tests: Record<string, string> = {},
-  workflows?: Record<string, { params: Record<string, unknown> }>
+  tests: Record<string, string> = {}
 ) => {
   const builder = await person("builder");
-  const fixture = await appWith(
-    filesWith(tests, workflows),
-    "Requests",
-    builder
-  );
+  const fixture = await appWith(filesWith(tests), "Requests", builder);
   const workflowId = await workflow(builder);
   await bindWorkflowToApp(env, builder, workflowId, {
     app: fixture.app,
@@ -209,26 +199,35 @@ const startedAs = (answer: string): number | string => {
 };
 
 /**
- * A test session on the Requests App's release, for `desk-user`, its
- * fixture giving `workflows` their parameters, on `on`.
+ * A test session on the Requests App's release, on `on`, with
+ * `desk-user` as someone it acts as: each start with `options` as its
+ * test gives a start's (`TestStartOptions`), none unless said.
  */
 const sessionOf = async (
   release: Release,
   {
-    workflows,
+    options = {},
     on = env,
   }: {
-    workflows?: Record<string, { params: Record<string, unknown> }>;
+    options?: Record<string, unknown>;
     on?: Env;
   } = {}
 ) => {
-  const host = fixtureHostFor(
-    on,
-    release,
-    filesWith({}, workflows).files,
-    await releaseIdsOf(on, release)
+  const host = fixtureHostFor(on, release, await releaseIdsOf(on, release));
+  const session = await host.open(`test-${unique()}`);
+  const refused = await session.identify(
+    JSON.stringify({ name: "desk-user", role: "user", teams: [] })
   );
-  return await host.open("desk", `test-${unique()}`);
+  if (refused !== undefined) {
+    throw new Error(refused);
+  }
+  const given = JSON.stringify(options);
+  const start = session.start.bind(session);
+  // Its starts, with the options a test's `identity.start` sends.
+  return Object.assign(session, {
+    start: async (name: unknown, request: unknown): Promise<string> =>
+      await start(name, request, given),
+  });
 };
 
 /** How run `run` of `session` ended, as the test is told. */
@@ -297,19 +296,17 @@ const refusal = async (work: () => Promise<unknown>): Promise<string> => {
   }
 };
 
-/** A suite of one workflow test, `body` with `owner` at hand. */
+/** A suite of one test of the App's workflow, `body` with `owner` at hand. */
 const suiteOf = (
   body: string
-): string => `import { workflowTest } from "@grasp-os/sdk/testing";
+): string => `import { appTest } from "@grasp-os/sdk/testing";
 import { ${["api", "workflows"].filter((name) => body.includes(`${name}.`)).join(", ")} } from "@server/_generated/api";
+${body.includes("expect(") ? 'import { expect } from "vitest";\n' : ""}import schema from "../server/schema.ts";
 
-export default workflowTest({
-  fixtures: "desk",
-  tests: {
-    "runs": async (t) => {
-${body.includes("owner") ? '      const owner = await t.as("desk-user");' : ""}
-      ${body}
-    },
+export default appTest(schema, {
+  "runs": async (t) => {
+${body.includes("owner") ? '    const owner = t.withIdentity({ name: "desk-user" });' : ""}
+    ${body}
   },
 });
 `;
@@ -325,13 +322,13 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       {
         "tests/greet.test.ts": suiteOf(`
       const run = await owner.start(workflows.followUp, { who: "Ada" });
-      t.equal(await t.runs.untilTerminal(run), {
+      expect(await t.runs.untilTerminal(run)).toEqual({
         status: "completed",
         result: { status: "Hello, Ada" },
       });
-      t.equal(await t.effects.completedCount(run, "greet"), 1);
-      t.equal(await t.effects.completedCount(run, "hold"), 1);
-      t.equal(await t.effects.completedCount(run, "elsewhere"), 0);`),
+      expect(await t.effects.completedCount(run, "greet")).toBe(1);
+      expect(await t.effects.completedCount(run, "hold")).toBe(1);
+      expect(await t.effects.completedCount(run, "elsewhere")).toBe(0);`),
       }
     );
     let outcome: unknown;
@@ -365,11 +362,11 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
         "tests/greet.test.ts": suiteOf(`
       const run = await owner.start(workflows.followUp, { who: "Ada" });
       const ended = await t.runs.untilTerminal(run);
-      t.equal(ended.status, "completed", "the run");`),
+      expect(ended.status, "the run").toBe("completed");`),
       }
     );
     await expect(activated(builder, app)).resolves.toStrictEqual([
-      'tests/greet.test.ts, "runs": the run: expected "completed", got "failed"',
+      "tests/greet.test.ts, \"runs\": the run: expected 'failed' to be 'completed' // Object.is equality",
     ]);
   });
 
@@ -510,9 +507,11 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     const { builder, app } = await requestsApp(
       async (by) => await workflowOf(by, greeting()),
       {
-        "tests/greet.test.ts": `import { workflowTest } from "@grasp-os/sdk/testing";
+        "tests/greet.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import type { WorkflowTestRun } from "@grasp-os/sdk/testing";
 import { workflows } from "@server/_generated/api";
+import { expect } from "vitest";
+import schema from "../server/schema.ts";
 
 let kept: WorkflowTestRun | undefined;
 
@@ -525,34 +524,28 @@ const askedOf = async (ask: () => Promise<unknown>): Promise<string> => {
   }
 };
 
-export default workflowTest({
-  fixtures: "desk",
-  tests: {
-    "first": async (t) => {
-      const owner = await t.as("desk-user");
-      const run = await owner.start(workflows.followUp, { who: "Ada" });
-      kept = run;
-      t.equal((await t.runs.untilTerminal(run)).status, "completed");
-    },
-    "second": async (t) => {
-      const theirs = kept;
-      if (theirs === undefined) {
-        throw new Error("the first test kept no run");
-      }
-      const owner = await t.as("desk-user");
-      const own = await owner.start(workflows.followUp, { who: "Bob" });
-      t.equal((await t.runs.untilTerminal(own)).status, "completed");
-      t.equal(
-        [
-          await askedOf(async () => await t.runs.untilTerminal(theirs)),
-          await askedOf(async () => await t.effects.completedCount(theirs, "greet")),
-        ],
-        [
-          "expected a run this test started, not one another test started",
-          "expected a run this test started, not one another test started",
-        ]
-      );
-    },
+export default appTest(schema, {
+  "first": async (t) => {
+    const owner = t.withIdentity({ name: "desk-user" });
+    const run = await owner.start(workflows.followUp, { who: "Ada" });
+    kept = run;
+    expect((await t.runs.untilTerminal(run)).status).toBe("completed");
+  },
+  "second": async (t) => {
+    const theirs = kept;
+    if (theirs === undefined) {
+      throw new Error("the first test kept no run");
+    }
+    const owner = t.withIdentity({ name: "desk-user" });
+    const own = await owner.start(workflows.followUp, { who: "Bob" });
+    expect((await t.runs.untilTerminal(own)).status).toBe("completed");
+    expect([
+      await askedOf(async () => await t.runs.untilTerminal(theirs)),
+      await askedOf(async () => await t.effects.completedCount(theirs, "greet")),
+    ]).toEqual([
+      "expected a run this test started, not one another test started",
+      "expected a run this test started, not one another test started",
+    ]);
   },
 });
 `,
@@ -851,10 +844,13 @@ export default workflowTest({
       },
       {
         "tests/leak.test.ts": suiteOf(`
-      const run = await owner.start(workflows.followUp, { who: "Ada" });
-      t.equal(JSON.stringify(await t.runs.untilTerminal(run)), "shown");`),
-      },
-      { followUp: { params: { word: "fixture-secret-word" } } }
+      const run = await owner.start(
+        workflows.followUp,
+        { who: "Ada" },
+        { params: { word: "fixture-secret-word" } }
+      );
+      expect(JSON.stringify(await t.runs.untilTerminal(run))).toBe("shown");`),
+      }
     );
     await setWorkflowParams(env, builder, workflowId, {
       expectedRevision: 0,
@@ -973,7 +969,7 @@ export default workflowTest({
     });
   });
 
-  it("run with the fixture's parameter values or their defaults, never the organization's", async () => {
+  it("run with the parameter values the start gives or their defaults, never the organization's", async () => {
     const params = {
       greeting: {
         label: "Greeting",
@@ -999,9 +995,12 @@ export default workflowTest({
       values: { greeting: "Ultramarine" },
     });
     const ended = async (
-      workflows?: Record<string, { params: Record<string, unknown> }>
+      options?: Record<string, unknown>
     ): Promise<unknown> => {
-      const session = await sessionOf(release, { workflows });
+      const session = await sessionOf(
+        release,
+        options === undefined ? {} : { options }
+      );
       const run = startedAs(
         await session.start("desk-user", await startOf(release, { who: "Ada" }))
       );
@@ -1011,12 +1010,152 @@ export default workflowTest({
     };
     expect({
       defaults: await ended(),
-      fixture: await ended({ followUp: { params: { greeting: "Fixture" } } }),
-      unknown: await ended({ followUp: { params: { colour: "red" } } }),
+      fixture: await ended({ params: { greeting: "Fixture" } }),
+      unknown: await ended({ params: { colour: "red" } }),
     }).toStrictEqual({
       defaults: { status: "completed", result: { status: "Hello, Ada" } },
       fixture: { status: "completed", result: { status: "Fixture, Ada" } },
       unknown: "workflow.params_invalid",
     });
+  });
+
+  it("move a test's runs' clock on: a sleep due by then runs now, with no wall-clock wait, and a run started later starts at the moved time", async () => {
+    const { release, app } = await requestsApp(
+      async (by) => await workflowOf(by, greeting([hold("1 hour")]))
+    );
+    const session = await sessionOf(release);
+    const began = Date.now();
+    const first = startedAs(
+      await session.start("desk-user", await startOf(release, { who: "Ada" }))
+    );
+    const [firstId = ""] = await recordedRuns(app);
+    await sleeping(firstId, "hold");
+    const hour = 60 * 60 * 1000;
+    const advanced: unknown = JSON.parse(await session.advanceClock(hour));
+    const firstEnd = await endOf(session, first);
+    // Started once the clock moved an hour on: its own hour's sleep is an
+    // hour from then, so it waits until the clock moves on again.
+    const second = startedAs(
+      await session.start("desk-user", await startOf(release, { who: "Bo" }))
+    );
+    const both = await recordedRuns(app);
+    const secondId = both.find((id) => id !== firstId) ?? "";
+    await sleeping(secondId, "hold");
+    const beforeAdvance = await liveStatus(secondId);
+    await session.advanceClock(hour);
+    const secondEnd = await endOf(session, second);
+    const took = Date.now() - began;
+    await session.close();
+    expect({ advanced, firstEnd, beforeAdvance, secondEnd }).toStrictEqual({
+      advanced: { ok: true, value: null },
+      firstEnd: { status: "completed", result: { status: "Hello, Ada" } },
+      beforeAdvance: "waiting",
+      secondEnd: { status: "completed", result: { status: "Hello, Bo" } },
+    });
+    // Two hours of sleep, in far less than the test's own deadline.
+    expect(took).toBeLessThan(20_000);
+  });
+
+  it("move the clock from an App's own test, to a deadline its run waits for", async () => {
+    const { builder, app } = await requestsApp(
+      async (by) =>
+        await workflowOf(
+          by,
+          greeting([
+            { id: "hold", type: "wait", until: { $expr: "params.due" } },
+          ]),
+          {
+            params: {
+              due: {
+                label: "Due",
+                type: { kind: "number", default: 0 },
+                sensitive: false,
+              },
+            },
+          }
+        ),
+      {
+        "tests/clock.test.ts": suiteOf(`
+      const due = Date.now() + 60 * 60 * 1000;
+      const run = await owner.start(
+        workflows.followUp,
+        { who: "Ada" },
+        { params: { due } }
+      );
+      await t.clock.advance(2 * 60 * 60 * 1000);
+      expect(await t.runs.untilTerminal(run)).toEqual({
+        status: "completed",
+        result: { status: "Hello, Ada" },
+      });
+      await expect(t.clock.advance(-1)).rejects.toThrow(
+        "expected the milliseconds to move the clock on by"
+      );`),
+      }
+    );
+    await expect(activated(builder, app)).resolves.toBe("current");
+  });
+
+  it("refuse to move the clock by anything but whole milliseconds, or of a run of the organization's", async () => {
+    const { release, builder, workflowId } = await requestsApp(
+      async (by) => await workflowOf(by, greeting([hold("1 hour")]))
+    );
+    const session = await sessionOf(release);
+    const answerSchema = z.union([
+      z.object({ ok: z.literal(true) }),
+      z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }),
+    ]);
+    const refusedFor = async (ms: unknown): Promise<unknown> => {
+      const answer = answerSchema.parse(
+        JSON.parse(await session.advanceClock(ms))
+      );
+      return answer.ok ? "moved" : answer.error.code;
+    };
+    const asked = {
+      negative: await refusedFor(-1),
+      fraction: await refusedFor(1.5),
+      text: await refusedFor("3600000"),
+      tooFar: await refusedFor(400 * 24 * 60 * 60 * 1000),
+    };
+    await session.close();
+    // A run of the organization's, asleep: its object refuses to move its
+    // clock, and its alarm stays where its sleep set it.
+    const { runId } = await startWorkflow(
+      env,
+      { type: "person", person: builder },
+      workflowId,
+      { version: 1, args: { who: "Ada" }, key: unique() }
+    );
+    if (runId === null) {
+      throw new Error("The start admitted no run");
+    }
+    await sleeping(runId, "hold");
+    const alarmOf = async (): Promise<number | null> =>
+      await runInDurableObject(
+        runObjectOf(env, runId),
+        async (_object, state) => await state.storage.getAlarm()
+      );
+    const before = await alarmOf();
+    const moved = await runObjectOf(env, runId)
+      .advanceFixtureClock(60 * 60 * 1000)
+      .then(() => "moved")
+      .catch((error: unknown) =>
+        error instanceof Error ? error.message : "thrown"
+      );
+    const after = await alarmOf();
+    const status = await liveStatus(runId);
+    await runEngine(env).terminate(runId);
+    expect({ asked, moved, alarmKept: after === before, status }).toStrictEqual(
+      {
+        asked: {
+          negative: "contract.invalid_args",
+          fraction: "contract.invalid_args",
+          text: "contract.invalid_args",
+          tooFar: "contract.invalid_args",
+        },
+        moved: "Only a run an App's test started has its clock moved.",
+        alarmKept: true,
+        status: "waiting",
+      }
+    );
   });
 });

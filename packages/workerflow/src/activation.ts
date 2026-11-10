@@ -1005,6 +1005,15 @@ export class Activation {
     );
   }
 
+  /**
+   * Ends this activation as superseded, now: a later generation took the
+   * run while its definition waits on nothing of the engine's
+   * (`WorkflowRun.restartActivation`). Whatever it still calls is fenced.
+   */
+  supersede(): void {
+    this.#endSuperseded();
+  }
+
   /** Ends this activation as superseded, once. */
   #endSuperseded(): void {
     if (this.#over) {

@@ -1462,6 +1462,16 @@ export class TestRuns extends WorkflowRun {
     }
   }
 
+  /** The tests' way to `advanceClock`, which only a host's test calls. */
+  async advanceClockBy(ms: number): Promise<void> {
+    await this.advanceClock(ms);
+  }
+
+  /** The tests' way to `restartActivation`, which only a host's test calls. */
+  async restartNow(): Promise<void> {
+    await this.restartActivation();
+  }
+
   /** Fails, as storage might, for a run whose ID asks it to. */
   override async deleteRun(): Promise<DeleteOutcome> {
     const run = this.journal()?.run;
