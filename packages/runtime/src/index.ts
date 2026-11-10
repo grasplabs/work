@@ -1,4 +1,4 @@
-// The SDK's root module (`@grasp-os/sdk`): values and schemas (values.ts),
+// `@grasp-os/runtime/app`, the SDK's root (`@grasp-os/sdk`) re-exports it: values and schemas (values.ts),
 // and how an App registers itself, the permissions it needs and the error
 // it fails with on purpose. Server code and schemas import these; the
 // server constructors come from the generated `server/_generated/server`

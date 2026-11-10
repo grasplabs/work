@@ -11,7 +11,7 @@ import { z } from "zod";
 // (packages/runtime/test/value-cases.ts, which workerd runs through
 // values.test.ts) in the browser, from the same source files.
 
-const sdkDir = path.join(import.meta.dirname, "../packages/runtime");
+const runtimeDir = path.join(import.meta.dirname, "../packages/runtime");
 const sharedDir = path.join(import.meta.dirname, "../packages/shared/src");
 const brainDir = path.join(import.meta.dirname, "../packages/brain/src");
 
@@ -94,7 +94,7 @@ test("the SDK's values give the same outcomes in a browser as in workerd", async
       await route.fulfill({ status: 404 });
       return;
     }
-    const source = await readFile(path.join(sdkDir, pathname), "utf-8");
+    const source = await readFile(path.join(runtimeDir, pathname), "utf-8");
     await route.fulfill({
       contentType: "text/javascript",
       body: stripTypeScriptTypes(source),
