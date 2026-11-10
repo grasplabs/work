@@ -968,7 +968,7 @@ const definitions = (known: Set<string>) => [
     label: "Edit a workflow",
     api: "workflowBuild",
     description:
-      "Saves a workflow's draft (its workflow.json `source` and its `modules`) over the revision you read (`env.workflowBuild.draft`), as `env.workflowBuild.edit` does, and returns the draft as saved, with its problems. Refused if anyone saved since.",
+      "Saves a workflow's draft (its workflow.json `source`) over the revision you read (`env.workflowBuild.draft`), as `env.workflowBuild.edit` does, and returns the draft as saved, with its problems. Refused if anyone saved since.",
     parameters: Type.Object(
       {
         workflow: Type.String({
@@ -981,16 +981,13 @@ const definitions = (known: Set<string>) => [
           minLength: 1,
           description: "The whole workflow.json.",
         }),
-        modules: Type.Record(Type.String(), Type.String(), {
-          description: "All its modules, by name: {} for none.",
-        }),
       },
       { additionalProperties: false }
     ),
-    run: async (scope, { workflow, expectedRevision, source, modules }) =>
+    run: async (scope, { workflow, expectedRevision, source }) =>
       await exports
         .WorkflowBuildApi({ props: scope })
-        .edit(workflow, { expectedRevision, source, modules }),
+        .edit(workflow, { expectedRevision, source }),
   }),
 ];
 
