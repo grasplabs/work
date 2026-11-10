@@ -965,6 +965,14 @@ const settersOnArrays = () => {
   }
 };
 
+/** A file made by \`File\` as the global's prototype holds it. */
+const fileByGlobalPrototype = () => {
+  const PlatformFile: unknown = Reflect.get(Reflect.getPrototypeOf(globalThis) ?? {}, "File");
+  return typeof PlatformFile === "function"
+    ? Number(Reflect.get(Reflect.construct(PlatformFile, [[], "a"]), "lastModified"))
+    : null;
+};
+
 const read = () => ({
   now: Date.now(),
   date: new Date().getTime(),
@@ -976,6 +984,7 @@ const read = () => ({
   fileUndefined: new File([], "a", { lastModified: undefined }).lastModified,
   fileSetters: settersOnArrays(),
   handedFile: swappedConstruct(),
+  globalFile: fileByGlobalPrototype(),
   // Where the platform has the timeline's marks: its compatibility date
   // decides.
   markTime: "mark" in performance ? performance.mark("a").startTime : null,
@@ -994,15 +1003,107 @@ const twice = async () => {
 
 export const sample = query({ args: {}, handler: () => read() });
 
-/** Whether generating a key, which no seed reaches, is refused. */
-const keyRefused = async () => {
+/** Keys made as the App's modules load, before any mutation starts. */
+const ecdsaKeys = crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+const rsaKeys = crypto.subtle.generateKey(
+  { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+  false,
+  ["encrypt", "decrypt", "wrapKey"]
+);
+
+/**
+ * Whether \`attempt\` ran, was refused as a mutation refuses what no seed
+ * reaches, or failed otherwise.
+ */
+const outcome = async (attempt: () => unknown) => {
   try {
-    await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
-    return false;
-  } catch {
-    return true;
+    await attempt();
+    return "ran";
+  } catch (error) {
+    return error instanceof Error && error.message.includes("answers the same when it runs again")
+      ? "refused"
+      : "failed";
   }
 };
+
+/** What draws on the platform's clock or randomness that no seed reaches, each tried. */
+const unseeded = async () => {
+  const ecdsa = (await ecdsaKeys) as CryptoKeyPair;
+  const rsa = (await rsaKeys) as CryptoKeyPair;
+  const data = new Uint8Array([1, 2, 3]);
+  let nameReads = 0;
+  // HMAC to whatever reads it first, ECDSA to whatever reads it after.
+  const switching = {
+    hash: "SHA-256",
+    get name() {
+      nameReads += 1;
+      return nameReads === 1 ? "HMAC" : "ECDSA";
+    },
+  };
+  // Read before \`body\`: each puts a form on whatever it is read on.
+  const byGetter = {
+    body: "plain",
+    get method() {
+      Reflect.set(this, "body", new FormData());
+      return "POST";
+    },
+  };
+  const byTrap = new Proxy(
+    { body: "plain", method: "POST" },
+    {
+      get: (target, key, receiver) => {
+        if (key !== "body") {
+          Reflect.set(receiver, "body", new FormData());
+        }
+        return Reflect.get(target, key);
+      },
+    }
+  );
+  const contentTypeOf = (init: RequestInit) =>
+    new Request("https://example.test", init).headers.get("content-type");
+  const toWrap = await crypto.subtle.importKey("raw", new Uint8Array(16), "AES-GCM", true, ["encrypt"]);
+  const hmacKey = await crypto.subtle.importKey("raw", new Uint8Array(32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return {
+    key: await outcome(() => crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"])),
+    formBody: await outcome(() => new Response(new FormData()).headers.get("content-type")),
+    formRequest: await outcome(() =>
+      new Request("https://example.test", { method: "POST", body: new FormData() }).headers.get("content-type")
+    ),
+    formRequestByGetter: contentTypeOf(byGetter),
+    formRequestByTrap: contentTypeOf(byTrap),
+    formFile: await outcome(() => new FormData().append("f", new Blob(["x"]), "n")),
+    formRead: await outcome(() =>
+      new Response("a=b", { headers: { "content-type": "application/x-www-form-urlencoded" } }).formData()
+    ),
+    ecdsa: await outcome(() => crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, ecdsa.privateKey, data)),
+    switchedName: await outcome(() => crypto.subtle.sign(switching, ecdsa.privateKey, data)),
+    rsaOaep: await outcome(() => crypto.subtle.encrypt("RSA-OAEP", rsa.publicKey, data)),
+    wrapped: await outcome(() => crypto.subtle.wrapKey("raw", toWrap, rsa.publicKey, "RSA-OAEP")),
+    hmac: await outcome(() => crypto.subtle.sign("HMAC", hmacKey, data)),
+    // Options whose getters read private fields, so need themselves as \`this\`.
+    privateInit: await outcome(() => new Request("https://example.test", new PrivateInit()).method),
+    privateGcm: await outcome(() => crypto.subtle.encrypt(new PrivateGcm(), toWrap, data)),
+  };
+};
+
+class PrivateInit {
+  readonly #method = "POST";
+  readonly #body = "plain";
+  get method() {
+    return this.#method;
+  }
+  get body() {
+    return this.#body;
+  }
+}
+
+class PrivateGcm {
+  readonly name = "AES-GCM";
+  readonly #iv = new Uint8Array(12);
+  get iv() {
+    return this.#iv;
+  }
+}
 
 export const roll = mutation({
   args: {},
@@ -1012,7 +1113,7 @@ export const roll = mutation({
     throw new AppError("dice.rolled", "Rolled.", {
       ...read,
       nested: [await ctx.runQuery(sample, {}), await ctx.runQuery(sample, {})],
-      keyRefused: await keyRefused(),
+      unseeded: await unseeded(),
     });
   },
 });
@@ -1043,7 +1144,7 @@ export const look = query({ args: {}, handler: twice });
 
 export const peek = action({ args: {}, handler: twice });
 
-export const generate = action({ args: {}, handler: keyRefused });
+export const generate = action({ args: {}, handler: unseeded });
 `,
   }
 );
@@ -1060,6 +1161,7 @@ const readSchema = z.strictObject({
   fileUndefined: z.number(),
   fileSetters: z.number(),
   handedFile: z.number().nullable(),
+  globalFile: z.number().nullable(),
   markTime: z.number().nullable(),
   random: z.number(),
   heldRandom: z.number(),
@@ -1070,12 +1172,31 @@ const readSchema = z.strictObject({
 /** Two reads, one before and one after time passed. */
 const twiceSchema = z.strictObject({ before: readSchema, after: readSchema });
 
+/** How each of `diceFiles`' `unseeded` attempts went. */
+const outcomeSchema = z.enum(["ran", "refused", "failed"]);
+const unseededSchema = z.strictObject({
+  key: outcomeSchema,
+  formBody: outcomeSchema,
+  formRequest: outcomeSchema,
+  formRequestByGetter: z.string().nullable(),
+  formRequestByTrap: z.string().nullable(),
+  formFile: outcomeSchema,
+  formRead: outcomeSchema,
+  ecdsa: outcomeSchema,
+  switchedName: outcomeSchema,
+  rsaOaep: outcomeSchema,
+  wrapped: outcomeSchema,
+  hmac: outcomeSchema,
+  privateInit: outcomeSchema,
+  privateGcm: outcomeSchema,
+});
+
 /** What `roll` fails with. */
 const rolledSchema = z.strictObject({
   before: readSchema,
   after: readSchema,
   nested: z.tuple([readSchema, readSchema]),
-  keyRefused: z.boolean(),
+  unseeded: unseededSchema,
 });
 
 /** `read`'s randomness alone. */
@@ -1096,6 +1217,7 @@ const timesOf = (read: z.infer<typeof readSchema>) => ({
   fileUndefined: read.fileUndefined,
   fileSetters: read.fileSetters,
   handedFile: read.handedFile,
+  globalFile: read.globalFile,
 });
 
 describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
@@ -1140,6 +1262,7 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
       fileSetters: before.now,
       // Never handed the platform's \`File\`.
       handedFile: null,
+      globalFile: before.now,
     };
     expect({
       again,
@@ -1160,7 +1283,7 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
         (value, index) => value === randomnessOf(before)[index]
       ),
       aUuid: z.uuidv4().safeParse(before.uuid).success,
-      keyRefused: first.keyRefused,
+      unseeded: first.unseeded,
     }).toStrictEqual({
       again: first,
       times: [startedAt, startedAt, startedAt, startedAt],
@@ -1169,7 +1292,25 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
       ownSeeds: 3,
       newForAnother: [false, false, false, false],
       aUuid: true,
-      keyRefused: true,
+      // Refused where no seed reaches; what draws none runs, and an
+      // algorithm is checked as the platform reads it.
+      unseeded: {
+        key: "refused",
+        formBody: "refused",
+        formRequest: "refused",
+        // The body as checked, whatever the init's getters write.
+        formRequestByGetter: "text/plain;charset=UTF-8",
+        formRequestByTrap: "text/plain;charset=UTF-8",
+        formFile: "refused",
+        formRead: "refused",
+        ecdsa: "refused",
+        switchedName: "failed",
+        rsaOaep: "refused",
+        wrapped: "refused",
+        hmac: "ran",
+        privateInit: "ran",
+        privateGcm: "ran",
+      },
     });
   });
 
@@ -1216,8 +1357,31 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
     expect({
       query: await live("dice.look"),
       action: await live("dice.peek"),
-      keyRefused: valueOf(await call(dice, dice.owner, "dice.generate", {})),
-    }).toStrictEqual({ query: platform, action: platform, keyRefused: false });
+      unseeded: unseededSchema.parse(
+        valueOf(await call(dice, dice.owner, "dice.generate", {}))
+      ),
+    }).toStrictEqual({
+      query: platform,
+      action: platform,
+      unseeded: {
+        key: "ran",
+        formBody: "ran",
+        formRequest: "ran",
+        formRequestByGetter: "text/plain;charset=UTF-8",
+        formRequestByTrap: "text/plain;charset=UTF-8",
+        formFile: "ran",
+        formRead: "ran",
+        ecdsa: "ran",
+        // The platform's own refusal: HMAC, as it read the name, isn't
+        // the key's algorithm.
+        switchedName: "failed",
+        rsaOaep: "ran",
+        wrapped: "ran",
+        hmac: "ran",
+        privateInit: "ran",
+        privateGcm: "ran",
+      },
+    });
   });
 });
 

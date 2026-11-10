@@ -7,6 +7,56 @@
 // that loads after can't put the original back or reach it another way.
 // A migration's transform has the same replacements, refusing, shadowed
 // while it runs and restored after (determinism.ts).
+//
+// Every way the platform reads the clock or draws randomness of its own
+// is on this one list, so both get each. One answers from the sources
+// where they can stand in for it, and is refused (`unseeded`) where they
+// can't:
+// - The clock (`Date`, a formatter given no date, `performance.now`) and
+//   randomness (`Math.random`, `crypto.getRandomValues`, `randomUUID`):
+//   from the sources.
+// - What records the time it is made: a `File`'s `lastModified` and a
+//   `PerformanceMark`'s or `performance.mark`'s `startTime`, each unless
+//   given, from the sources; `performance.measure`, refused. workerd keeps
+//   its classes on the global's prototype, so `File` and `PerformanceMark`
+//   are replaced there as well as on the global.
+// - A file the platform makes itself, of the time it runs: `FormData`'s
+//   `append` or `set` given a blob, and reading a body as a form
+//   (`formData()`), which makes one of each file in it. Both refused,
+//   deliberately broadly: also a file given with no name (which the
+//   platform keeps as it is) and a urlencoded body (which holds no
+//   files), as neither is of use without a network, and one rule is
+//   simpler to hold than telling them apart.
+// - A form's body: a `Response` or `Request` made with a `FormData` body
+//   gets a multipart boundary of the platform's randomness, in its
+//   `content-type` and its bytes, so is refused. A request's `body` is
+//   read once, and the platform reads `init` through a proxy that
+//   answers that body, so neither a `body` getter answering the check
+//   one thing and the platform another, nor a getter or proxy trap of
+//   `init`'s writing a form to it after, changes what the platform
+//   reads; every other field is read on `init` itself, so its getters
+//   run with it as `this`. An algorithm's name below is held the same
+//   way.
+// - Keys and randomized cryptography: `generateKey` is refused, and so is
+//   `sign`, `encrypt` or `wrapKey` with an algorithm that draws a nonce,
+//   salt or padding (ECDSA, RSA-PSS, RSA-OAEP): only the algorithms that
+//   answer the same for the same key, data and parameters pass (an AES
+//   mode's IV or counter is the caller's). The algorithm's name is read
+//   once and passed on as read. `deriveBits`, `deriveKey`, `importKey`,
+//   `digest`, `DigestStream`, `verify`, `decrypt` and `unwrapKey` draw
+//   none.
+// Looked at in workerd and drawing none: `performance.timeOrigin` and an
+// event's `timeStamp` (both 0), `navigator`, `structuredClone` (files
+// don't clone), `URL.createObjectURL` (not implemented); `scheduler.wait`
+// and timers answer no time. Not a value code reads, so not on the list:
+// when a weak reference is cleared, which only the garbage collector
+// decides; and `fetch`, a sink, not a source: an App's isolate has no
+// network (`globalOutbound: null`), and the boundary of a form it would
+// send never comes back to App code.
+// Not stopped, and not a boundary: a value computed while App modules
+// load, before a mutation starts or a transform runs, comes from the
+// platform's own clock and randomness, as determinism.ts says for a
+// transform.
 
 /**
  * The intrinsics the replacements call, and the platform's functions they
@@ -16,8 +66,17 @@
  * what it passes on (the real `Date`, formatter or `File`), nor the
  * arguments that carry a time.
  */
-const { apply, construct, getPrototypeOf, setPrototypeOf } = Reflect;
+const {
+  apply,
+  construct,
+  get: reflectGet,
+  getPrototypeOf,
+  setPrototypeOf,
+} = Reflect;
 const { defineProperty, getOwnPropertyDescriptor, hasOwn } = Object;
+const platformString = String;
+const PlatformProxy = Proxy;
+const toUpperCase: unknown = Reflect.get(String.prototype, "toUpperCase");
 const platformDate = Date;
 const datePrototype = Date.prototype;
 const dateToString: unknown = Reflect.get(datePrototype, "toString");
@@ -39,6 +98,69 @@ const platformPerformanceMark: unknown = Reflect.get(
   "PerformanceMark"
 );
 
+/** `Class`'s prototype, where it is a class that has one. */
+const prototypeOf = (Class: unknown): object | undefined => {
+  const prototype: unknown =
+    typeof Class === "function" ? Reflect.get(Class, "prototype") : undefined;
+  return typeof prototype === "object" && prototype !== null
+    ? prototype
+    : undefined;
+};
+
+/** `key` of `target`, its own, where it holds one: its value, or its getter. */
+const ownValue = (target: object | undefined, key: string): unknown =>
+  target === undefined
+    ? undefined
+    : Reflect.getOwnPropertyDescriptor(target, key)?.value;
+const ownGetter = (target: object | undefined, key: string): unknown =>
+  target === undefined
+    ? undefined
+    : Reflect.getOwnPropertyDescriptor(target, key)?.get;
+
+/** The object `object` finds `key` on: itself, or one of its prototypes. */
+const holderOf = (object: unknown, key: string): object | undefined => {
+  let at = object;
+  while (typeof at === "object" && at !== null) {
+    if (hasOwn(at, key)) {
+      return at;
+    }
+    at = getPrototypeOf(at);
+  }
+  return undefined;
+};
+
+const platformRequest: unknown = Reflect.get(globalThis, "Request");
+const platformResponse: unknown = Reflect.get(globalThis, "Response");
+const formDataPrototype = prototypeOf(Reflect.get(globalThis, "FormData"));
+const formDataHas = ownValue(formDataPrototype, "has");
+const formDataAppend = ownValue(formDataPrototype, "append");
+const formDataSet = ownValue(formDataPrototype, "set");
+const blobSize = ownGetter(
+  prototypeOf(Reflect.get(globalThis, "Blob")),
+  "size"
+);
+const requestMethod = ownGetter(prototypeOf(platformRequest), "method");
+/**
+ * Where a request and a response keep `formData` (in workerd, one
+ * `Body`), each once, with the platform's.
+ */
+const formReaders = [
+  ...new Set([
+    holderOf(prototypeOf(platformRequest), "formData"),
+    holderOf(prototypeOf(platformResponse), "formData"),
+  ]),
+].flatMap((holder) =>
+  holder === undefined ? [] : [{ holder, read: ownValue(holder, "formData") }]
+);
+const platformSubtle: object = crypto.subtle;
+const platformGenerateKey: unknown = Reflect.get(platformSubtle, "generateKey");
+const platformSign: unknown = Reflect.get(platformSubtle, "sign");
+const platformEncrypt: unknown = Reflect.get(platformSubtle, "encrypt");
+const platformWrapKey: unknown = Reflect.get(platformSubtle, "wrapKey");
+
+/** What a replacement stands in for. */
+export type Reads = "the clock" | "randomness";
+
 /** What the clock and randomness answer from. */
 export interface ClockAndRandomness {
   /**
@@ -48,13 +170,16 @@ export interface ClockAndRandomness {
   readonly now: () => number;
   /** `performance.now()`, and a mark's `startTime` unless given. */
   readonly performanceNow: () => number;
-  /** `performance.measure`, called on the platform's `performance`. */
-  readonly measure: (this: unknown, ...args: unknown[]) => unknown;
   readonly random: () => number;
   readonly getRandomValues: (array: ArrayBufferView<ArrayBuffer>) => unknown;
   readonly randomUUID: () => string;
-  /** `crypto.subtle.generateKey`, called on the platform's `SubtleCrypto`. */
-  readonly generateKey: (this: unknown, ...args: unknown[]) => unknown;
+  /**
+   * Called before the platform's own of what the sources can't stand in
+   * for (`what`, which reads `reads`): a measure, a form's file or body,
+   * generating a key, a randomized signature or encryption. Throws to
+   * refuse it; returns to let the platform's run.
+   */
+  readonly unseeded: (what: string, reads: Reads) => void;
 }
 
 /**
@@ -72,15 +197,18 @@ export interface Replacement {
   readonly get: ((this: unknown) => unknown) | undefined;
   readonly value: unknown;
   readonly ifOwn: boolean;
+  /** What it stands in for. */
+  readonly reads: Reads;
 }
 
-/** `value` in place of `key` of `target`. */
+/** `value` in place of `key` of `target`, standing in for what `reads`. */
 const replacing = (
   target: object,
   key: string,
   value: unknown,
+  reads: Reads,
   ifOwn = false
-): Replacement => ({ target, key, get: undefined, value, ifOwn });
+): Replacement => ({ target, key, get: undefined, value, ifOwn, reads });
 
 /**
  * `object`, its prototype taken away: only its own fields are read, never
@@ -91,6 +219,24 @@ export const withoutPrototype = <T extends object>(object: T): T => {
   setPrototypeOf(object, null);
   return object;
 };
+
+/**
+ * The algorithms whose `sign`, `encrypt` and `wrapKey` answer the same for
+ * the same key, data and parameters, by their names as the platform
+ * matches them (in capitals). ECDSA, RSA-PSS and RSA-OAEP draw a nonce,
+ * salt or padding of the platform's randomness, and any other is taken to.
+ */
+const deterministicAlgorithms: Readonly<Record<string, true | undefined>> =
+  withoutPrototype({
+    HMAC: true,
+    "RSASSA-PKCS1-V1_5": true,
+    ED25519: true,
+    "NODE-ED25519": true,
+    "AES-GCM": true,
+    "AES-CBC": true,
+    "AES-CTR": true,
+    "AES-KW": true,
+  });
 
 /** The descriptor that puts `replacement` in place, `configurable` or for good. */
 export const descriptorOf = (
@@ -115,20 +261,21 @@ export const isInPlace = ({
 };
 
 /**
- * `value` in place of `key` where code reaches the platform's function:
- * on `object`'s prototype, and on `object` itself (`ifOwn`).
+ * `value` in place of `key` where code reaches the platform's: on
+ * `object`'s prototype, and on `object` itself (`ifOwn`).
  */
 const whereReached = (
   object: object,
   key: string,
-  value: unknown
+  value: unknown,
+  reads: Reads
 ): Replacement[] => {
   const prototype: unknown = getPrototypeOf(object);
   return [
     ...(typeof prototype === "object" && prototype !== null
-      ? [replacing(prototype, key, value)]
+      ? [replacing(prototype, key, value, reads)]
       : []),
-    replacing(object, key, value, true),
+    replacing(object, key, value, reads, true),
   ];
 };
 
@@ -156,6 +303,18 @@ const withDefault = (
   };
 };
 
+/** A field's data descriptor, holding `value`, as an assignment makes one. */
+const dataField = (value: unknown): PropertyDescriptor =>
+  // SAFETY: a data descriptor's fields; `__proto__: null` only sets its
+  // prototype, so no `get` or `set` of App code's is read as one.
+  ({
+    __proto__: null,
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  }) as PropertyDescriptor;
+
 /**
  * `args` with `value` at `index`, each element defined, never set: an
  * array App code put an index setter on `Array.prototype` for never hands
@@ -169,26 +328,104 @@ const argumentsWith = (
   const given: unknown[] = [];
   const length = args.length > index ? args.length : index + 1;
   for (let at = 0; at < length; at += 1) {
-    // SAFETY: a data descriptor's fields; `__proto__: null` only sets its
-    // prototype, so no `get` or `set` of App code's is read as one.
-    defineProperty(given, at, {
-      __proto__: null,
-      value: at === index ? value : args[at],
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    } as PropertyDescriptor);
+    defineProperty(given, at, dataField(at === index ? value : args[at]));
   }
   return given;
 };
 
 /**
- * In place of the platform's class `Class` (the global `name`, and its
- * prototype's `constructor`): one whose instances take the time they are
- * made, `options[key]`, from `time` when its argument at `index` doesn't
- * set it. Nothing where the platform has no such class; throws where
- * its class has no prototype to replace `constructor` on, so nothing
- * runs with the class half replaced.
+ * `object` as the platform reads it, with `key` as read once (`value`):
+ * a proxy over it whose `get` answers `value` for `key`, so a getter that
+ * answers one thing to a check and another to the platform is never read
+ * again, and whatever App code writes to `object` after (a getter writing
+ * `this.body`, a trap writing to its receiver) never reaches what the
+ * platform reads. Every other field is read on `object` with `object` as
+ * receiver, so its getters, private fields too, run as they would
+ * without the check. workerd reads a request's `init` and an algorithm
+ * by `[[Get]]` alone (no `has` or descriptor reads), which is all the
+ * proxy has to answer.
+ */
+const withOwn = (object: object, key: string, value: unknown): object =>
+  // SAFETY: the handler has exactly a `ProxyHandler`'s `get` trap;
+  // `__proto__: null` only sets its prototype.
+  new PlatformProxy(object, {
+    // No prototype: a trap the handler doesn't have is never looked up on
+    // `Object.prototype`, where App code could define one.
+    __proto__: null,
+    get: (target, field): unknown => {
+      if (field === key) {
+        return value;
+      }
+      const read: unknown = reflectGet(target, field, target);
+      return read;
+    },
+  } as ProxyHandler<object>);
+
+/** Whether `check`, called on `value`, passes: only the platform's own do. */
+const passes = (check: unknown, value: unknown, args: unknown[]): boolean => {
+  if (typeof check !== "function") {
+    return false;
+  }
+  try {
+    apply(check, value, args);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const isFormData = (value: unknown): boolean =>
+  passes(formDataHas, value, [""]);
+const isBlob = (value: unknown): boolean => passes(blobSize, value, []);
+const isRequest = (value: unknown): boolean => passes(requestMethod, value, []);
+
+/** `args[index]`, where given: never looked up on `Array.prototype`. */
+const argumentAt = (args: readonly unknown[], index: number): unknown =>
+  args.length > index ? args[index] : undefined;
+
+/**
+ * In place of the platform's class `Class` (the global `name`, on the
+ * global and its prototype, and its prototype's `constructor`): one that
+ * constructs it with the arguments `given` answers for those it is given.
+ * Nothing where the platform has no such class; throws where its class
+ * has no prototype to replace `constructor` on, so nothing runs with the
+ * class half replaced.
+ */
+const classWith = (
+  Class: unknown,
+  name: string,
+  reads: Reads,
+  given: (args: unknown[]) => unknown[]
+): Replacement[] => {
+  if (typeof Class !== "function") {
+    return [];
+  }
+  const prototype = prototypeOf(Class);
+  if (prototype === undefined) {
+    throw new TypeError(`${name} has no prototype here.`);
+  }
+  // SAFETY: the handler has exactly a `ProxyHandler`'s `construct` trap;
+  // `__proto__: null` only sets its prototype.
+  const replaced = new Proxy(Class, {
+    // No prototype: a trap the handler doesn't have is never looked up on
+    // `Object.prototype`, where App code could define one.
+    __proto__: null,
+    construct: (target, args: unknown[], newTarget) => {
+      const made: unknown = construct(target, given(args), newTarget);
+      // SAFETY: constructing the platform's class makes one of its instances.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      return made as object;
+    },
+  } as ProxyHandler<typeof Class>);
+  return [
+    ...whereReached(globalThis, name, replaced, reads),
+    replacing(prototype, "constructor", replaced, reads),
+  ];
+};
+
+/**
+ * The platform's class `Class` (`name`), its instances taking the time
+ * they are made, `options[key]`, from `time` when its argument at `index`
+ * doesn't set it.
  */
 const timedClass = (
   Class: unknown,
@@ -196,37 +433,10 @@ const timedClass = (
   index: number,
   key: string,
   time: () => number
-): Replacement[] => {
-  if (typeof Class !== "function") {
-    return [];
-  }
-  const prototype: unknown = Class.prototype;
-  if (typeof prototype !== "object" || prototype === null) {
-    throw new TypeError(`${name} has no prototype here.`);
-  }
-  // SAFETY: the handler has exactly a `ProxyHandler`'s `construct` trap;
-  // `__proto__: null` only sets its prototype.
-  const timed = new Proxy(Class, {
-    // No prototype: a trap the handler doesn't have is never looked up on
-    // `Object.prototype`, where App code could define one.
-    __proto__: null,
-    construct: (target, args: unknown[], newTarget) => {
-      const given = argumentsWith(
-        args,
-        index,
-        withDefault(args[index], key, time)
-      );
-      const made: unknown = construct(target, given, newTarget);
-      // SAFETY: constructing the platform's class makes one of its instances.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return made as object;
-    },
-  } as ProxyHandler<typeof Class>);
-  return [
-    replacing(globalThis, name, timed),
-    replacing(prototype, "constructor", timed),
-  ];
-};
+): Replacement[] =>
+  classWith(Class, name, "the clock", (args) =>
+    argumentsWith(args, index, withDefault(argumentAt(args, index), key, time))
+  );
 
 /** `Date`, its time without a date taken from `now`. */
 const dateFrom = (now: () => number): DateConstructor =>
@@ -303,42 +513,138 @@ const markFrom = (performanceNow: () => number) =>
 
 /**
  * What tells the time and what draws randomness, each in place of the
- * platform's, from `sources`: `Date.now` (on the real `Date`, which the
- * global's proxy hands descriptor reads and gets to), `new Date()` and
- * `Date()` through the global `Date` or `Date.prototype.constructor`,
- * `Intl.DateTimeFormat` formatting no date, the performance timeline's
- * clock and what reads it (a mark's time, a measure), a file's
- * `lastModified` and a mark's `startTime` unless given, `Math.random`,
- * `crypto`'s `getRandomValues` and `randomUUID`, and `SubtleCrypto`'s
- * `generateKey`.
+ * platform's, from `sources` (see the threat model above): `Date.now` (on
+ * the real `Date`, which the global's proxy hands descriptor reads and
+ * gets to), `new Date()` and `Date()` through the global `Date` or
+ * `Date.prototype.constructor`, `Intl.DateTimeFormat` formatting no date,
+ * the performance timeline's clock and what reads it (a mark's time, a
+ * measure), a file's `lastModified` and a mark's `startTime` unless
+ * given, `Math.random`, `crypto`'s `getRandomValues` and `randomUUID`;
+ * and, asking `unseeded` first, a form's files and body, and
+ * `SubtleCrypto`'s `generateKey` and randomized `sign`, `encrypt` and
+ * `wrapKey`.
  */
 export const clockAndRandomnessFrom = (
   sources: ClockAndRandomness
 ): Replacement[] => {
+  const { unseeded } = sources;
   const date = dateFrom(sources.now);
+  /**
+   * The platform's `method`, called once `unseeded` let `what` run, put
+   * where `place` puts it. Nothing where the platform has no such method.
+   */
+  const unseededAt = (
+    method: unknown,
+    what: string,
+    reads: Reads,
+    place: (call: unknown) => Replacement[]
+  ): Replacement[] =>
+    typeof method === "function"
+      ? place(function unseededCall(this: unknown, ...args: unknown[]) {
+          unseeded(what, reads);
+          const answer: unknown = apply(method, this, args);
+          return answer;
+        })
+      : [];
+  /**
+   * `FormData`'s `key`, the platform's `method` (`append` or `set`):
+   * given a blob, it makes a file of it, of the time it runs.
+   */
+  const formEntry = (key: string, method: unknown): Replacement[] =>
+    formDataPrototype !== undefined && typeof method === "function"
+      ? [
+          replacing(
+            formDataPrototype,
+            key,
+            function formEntryCall(this: unknown, ...args: unknown[]): unknown {
+              if (isBlob(argumentAt(args, 1))) {
+                unseeded("a form's file", "the clock");
+              }
+              const answer: unknown = apply(method, this, args);
+              return answer;
+            },
+            "the clock"
+          ),
+        ]
+      : [];
+  /**
+   * `SubtleCrypto`'s `key`, the platform's `method`, which takes its
+   * algorithm at `index`: asks `unseeded` unless the algorithm answers
+   * the same each time. Its name is read once, and the algorithm passed
+   * on as read.
+   */
+  const randomized = (
+    key: string,
+    method: unknown,
+    index: number,
+    what: string
+  ): Replacement[] => {
+    if (typeof method !== "function") {
+      return [];
+    }
+    return whereReached(
+      platformSubtle,
+      key,
+      function randomizedCall(this: unknown, ...args: unknown[]): unknown {
+        const algorithm = argumentAt(args, index);
+        let name: unknown;
+        let given = args;
+        if (typeof algorithm === "string") {
+          name = algorithm;
+        } else if (
+          (typeof algorithm === "object" || typeof algorithm === "function") &&
+          algorithm !== null
+        ) {
+          const read: unknown = reflectGet(algorithm, "name");
+          name = read === undefined ? undefined : platformString(read);
+          given = argumentsWith(args, index, withOwn(algorithm, "name", name));
+        }
+        const capitals: unknown =
+          typeof name === "string" && typeof toUpperCase === "function"
+            ? apply(toUpperCase, name, [])
+            : undefined;
+        if (
+          typeof capitals !== "string" ||
+          deterministicAlgorithms[capitals] !== true
+        ) {
+          unseeded(what, "randomness");
+        }
+        const answer: unknown = apply(method, this, given);
+        return answer;
+      },
+      "randomness"
+    );
+  };
   return [
-    replacing(platformDate, "now", sources.now),
-    replacing(globalThis, "Date", date),
-    replacing(datePrototype, "constructor", date),
+    replacing(platformDate, "now", sources.now, "the clock"),
+    replacing(globalThis, "Date", date, "the clock"),
+    replacing(datePrototype, "constructor", date, "the clock"),
     {
       target: dateFormatPrototype,
       key: "format",
       get: formatFrom(sources.now),
       value: undefined,
       ifOwn: false,
+      reads: "the clock",
     },
     replacing(
       dateFormatPrototype,
       "formatToParts",
-      formatToPartsFrom(sources.now)
+      formatToPartsFrom(sources.now),
+      "the clock"
     ),
-    ...whereReached(performance, "now", sources.performanceNow),
+    ...whereReached(performance, "now", sources.performanceNow, "the clock"),
     ...(typeof platformMark === "function"
-      ? whereReached(performance, "mark", markFrom(sources.performanceNow))
+      ? whereReached(
+          performance,
+          "mark",
+          markFrom(sources.performanceNow),
+          "the clock"
+        )
       : []),
-    ...(typeof platformMeasure === "function"
-      ? whereReached(performance, "measure", sources.measure)
-      : []),
+    ...unseededAt(platformMeasure, "performance.measure", "the clock", (call) =>
+      whereReached(performance, "measure", call, "the clock")
+    ),
     ...timedClass(platformFile, "File", 2, "lastModified", sources.now),
     ...timedClass(
       platformPerformanceMark,
@@ -347,10 +653,51 @@ export const clockAndRandomnessFrom = (
       "startTime",
       sources.performanceNow
     ),
-    replacing(Math, "random", sources.random),
-    ...whereReached(crypto, "getRandomValues", sources.getRandomValues),
-    ...whereReached(crypto, "randomUUID", sources.randomUUID),
-    ...whereReached(crypto.subtle, "generateKey", sources.generateKey),
+    ...formEntry("append", formDataAppend),
+    ...formEntry("set", formDataSet),
+    ...formReaders.flatMap(({ holder, read }) =>
+      unseededAt(read, "reading a form", "the clock", (call) => [
+        replacing(holder, "formData", call, "the clock"),
+      ])
+    ),
+    ...classWith(platformResponse, "Response", "randomness", (args) => {
+      if (isFormData(argumentAt(args, 0))) {
+        unseeded("a form's body", "randomness");
+      }
+      return args;
+    }),
+    ...classWith(platformRequest, "Request", "randomness", (args) => {
+      const init = argumentAt(args, 1);
+      if (
+        (typeof init !== "object" && typeof init !== "function") ||
+        init === null ||
+        isRequest(init)
+      ) {
+        return args;
+      }
+      const body: unknown = reflectGet(init, "body");
+      if (isFormData(body)) {
+        unseeded("a form's body", "randomness");
+      }
+      return argumentsWith(args, 1, withOwn(init, "body", body));
+    }),
+    replacing(Math, "random", sources.random, "randomness"),
+    ...whereReached(
+      crypto,
+      "getRandomValues",
+      sources.getRandomValues,
+      "randomness"
+    ),
+    ...whereReached(crypto, "randomUUID", sources.randomUUID, "randomness"),
+    ...unseededAt(
+      platformGenerateKey,
+      "generating a key",
+      "randomness",
+      (call) => whereReached(platformSubtle, "generateKey", call, "randomness")
+    ),
+    ...randomized("sign", platformSign, 0, "a randomized signature"),
+    ...randomized("encrypt", platformEncrypt, 0, "randomized encryption"),
+    ...randomized("wrapKey", platformWrapKey, 3, "randomized key wrapping"),
   ];
 };
 

@@ -257,6 +257,108 @@ const ownValue = (holder: unknown, key: string): unknown =>
 const generatedKey = (): unknown =>
   crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
 
+/** Keys as module code could keep them, made before a transform runs. */
+const ecdsaKeys = await crypto.subtle.generateKey(
+  { name: "ECDSA", namedCurve: "P-256" },
+  false,
+  ["sign", "verify"]
+);
+const rsaPssKeys = await crypto.subtle.generateKey(
+  {
+    name: "RSA-PSS",
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: "SHA-256",
+  },
+  false,
+  ["sign", "verify"]
+);
+const rsaOaepKeys = await crypto.subtle.generateKey(
+  {
+    name: "RSA-OAEP",
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: "SHA-256",
+  },
+  false,
+  ["encrypt", "decrypt", "wrapKey"]
+);
+const wrappedKey = await crypto.subtle.importKey(
+  "raw",
+  new Uint8Array(16),
+  "AES-GCM",
+  true,
+  ["encrypt"]
+);
+const signed = new Uint8Array([1, 2, 3]);
+
+/**
+ * Options as a class keeps them, for a request (`method`, `body`) or for
+ * AES-GCM (`name`, `iv`): its getters read private fields, so only work
+ * with the instance itself as `this`. Each reader ignores the other's.
+ */
+class PrivateOptions {
+  readonly name = "AES-GCM";
+  readonly #method = "POST";
+  readonly #body = "plain";
+  readonly #iv = new Uint8Array(12);
+
+  get method(): string {
+    return this.#method;
+  }
+
+  get body(): string {
+    return this.#body;
+  }
+
+  get iv(): Uint8Array<ArrayBuffer> {
+    return this.#iv;
+  }
+}
+
+/** The content type of a request made with `init`. */
+const contentTypeOf = (init: RequestInit): string =>
+  new Request("https://example.test", init).headers.get("content-type") ?? "";
+
+// The cases below that answer a promise only start it: a handler answers
+// its row, so never sees one settle, but the runner refuses the call.
+
+/** Starts reading a multipart form, with a file in it, from a body. */
+const multipartFormRead = (): void => {
+  void new Response(
+    '--b\r\nContent-Disposition: form-data; name="f"; filename="n"\r\n\r\nx\r\n--b--\r\n',
+    { headers: { "content-type": "multipart/form-data; boundary=b" } }
+  ).formData();
+};
+
+/** The time of the file a form makes of a blob it is given by `key`. */
+const formFileTime = (key: "append" | "set"): unknown => {
+  const form = new FormData();
+  form[key]("f", new Blob(["x"]), "n");
+  const file = form.get("f");
+  return file instanceof File ? file.lastModified : file;
+};
+
+/** A timed class, as the global's prototype holds it. */
+const globalClass = (name: string): unknown =>
+  Reflect.get(Reflect.getPrototypeOf(globalThis) ?? {}, name);
+
+/** A file made by `File` as the global's prototype holds it. */
+const fileByGlobalPrototype = (): unknown => {
+  const PlatformFile: unknown = globalClass("File");
+  return typeof PlatformFile === "function"
+    ? Reflect.get(Reflect.construct(PlatformFile, [[], "a"]), "lastModified")
+    : undefined;
+};
+
+/** A mark made by `PerformanceMark` as the global's prototype holds it. */
+const markByGlobalPrototype = (): unknown => {
+  const PlatformMark: unknown = globalClass("PerformanceMark");
+  return typeof PlatformMark === "function"
+    ? Reflect.get(Reflect.construct(PlatformMark, ["a"]), "startTime")
+    : undefined;
+};
+
 /** `Date.now` read through its descriptor, which a proxy's `get` never sees. */
 const nowByDescriptor = (): unknown => called(ownValue(Date, "now"), Date);
 
@@ -447,6 +549,63 @@ describe("the runner", () => {
     ["a mark's time", "the clock", () => new PerformanceMark("a").startTime],
     ["a marked time", "the clock", () => performance.mark("a").startTime],
     ["a measure", "the clock", () => performance.measure("a").duration],
+    ["a file past the global", "the clock", fileByGlobalPrototype],
+    ["a mark past the global", "the clock", markByGlobalPrototype],
+    ["an appended file's time", "the clock", () => formFileTime("append")],
+    ["a set file's time", "the clock", () => formFileTime("set")],
+    ["a read form's files", "the clock", multipartFormRead],
+    [
+      "a form body's boundary",
+      "randomness",
+      () => new Response(new FormData()).headers.get("content-type"),
+    ],
+    [
+      "a form request's boundary",
+      "randomness",
+      () =>
+        new Request("https://example.test", {
+          method: "POST",
+          body: new FormData(),
+        }).headers.get("content-type"),
+    ],
+    [
+      "an ECDSA signature",
+      "randomness",
+      () => {
+        void crypto.subtle.sign(
+          { name: "ECDSA", hash: "SHA-256" },
+          ecdsaKeys.privateKey,
+          signed
+        );
+      },
+    ],
+    [
+      "an RSA-PSS signature",
+      "randomness",
+      () => {
+        void crypto.subtle.sign(
+          { name: "rsa-pss", saltLength: 32 },
+          rsaPssKeys.privateKey,
+          signed
+        );
+      },
+    ],
+    [
+      "RSA-OAEP encryption",
+      "randomness",
+      () => {
+        void crypto.subtle.encrypt("RSA-OAEP", rsaOaepKeys.publicKey, signed);
+      },
+    ],
+    [
+      "an RSA-OAEP wrapped key",
+      "randomness",
+      () => {
+        void crypto.subtle.wrapKey("raw", wrappedKey, rsaOaepKeys.publicKey, {
+          name: "RSA-OAEP",
+        });
+      },
+    ],
   ])(
     "takes away %s while a handler runs, and gives it back after",
     (_case, refused, impurity) => {
@@ -467,6 +626,130 @@ describe("the runner", () => {
       expect(impurity).not.toThrow();
     }
   );
+
+  test("leaves a handler what draws neither, and gives the platform a request's body as checked", async () => {
+    const hmacKey = await crypto.subtle.importKey(
+      "raw",
+      new Uint8Array(32),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const aesKey = await crypto.subtle.importKey(
+      "raw",
+      new Uint8Array(16),
+      "AES-GCM",
+      false,
+      ["encrypt"]
+    );
+    let bodyReads = 0;
+    // A plain body to the check, a form to whatever reads it after.
+    const init: RequestInit = {
+      method: "POST",
+      get body(): BodyInit {
+        bodyReads += 1;
+        return bodyReads === 1 ? "plain" : new FormData();
+      },
+    };
+    // Started in the handler, which answers its row, not a promise;
+    // settled after, so a platform's rejection fails the test.
+    const started: Promise<ArrayBuffer>[] = [];
+    const pure = looseMigration({
+      ...declaration,
+      name: "pure",
+      handler: (_ctx: unknown, row: object) => {
+        const form = new FormData();
+        form.append("a", "b");
+        started.push(
+          crypto.subtle.sign("HMAC", hmacKey, signed),
+          crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: new Uint8Array(12) },
+            aesKey,
+            signed
+          ),
+          crypto.subtle.encrypt(new PrivateOptions(), aesKey, signed)
+        );
+        const request = new Request("https://example.test", init);
+        const privately = new Request(
+          "https://example.test",
+          new PrivateOptions()
+        );
+        return {
+          ...row,
+          category: [
+            String(form.has("a")),
+            request.headers.get("content-type") ?? "",
+            privately.method,
+            privately.headers.get("content-type") ?? "",
+          ].join("|"),
+        };
+      },
+    });
+    expect(
+      runMigration(notes([pure]), {
+        name: "pure",
+        rows: [{ id: "n1", fields: { title: "Plan" } }],
+      })
+    ).toMatchObject({
+      ok: true,
+      rows: [
+        {
+          title: "Plan",
+          category:
+            "true|text/plain;charset=UTF-8|POST|text/plain;charset=UTF-8",
+        },
+      ],
+    });
+    const settled = await Promise.all(started);
+    expect(settled.map((answer) => answer.byteLength)).toStrictEqual([
+      32, 19, 19,
+    ]);
+  });
+
+  test("gives the platform a request's body as checked, whatever its init writes to the receiver", () => {
+    // Read before `body`: each puts a form on whatever it is read on.
+    const byGetter: RequestInit = {
+      body: "plain",
+      get method(): string {
+        Reflect.set(this, "body", new FormData());
+        return "POST";
+      },
+    };
+    const byTrap = new Proxy<RequestInit>(
+      { body: "plain", method: "POST" },
+      {
+        get: (target, key, receiver): unknown => {
+          if (key !== "body") {
+            Reflect.set(receiver, "body", new FormData());
+          }
+          const value: unknown = Reflect.get(target, key);
+          return value;
+        },
+      }
+    );
+    const sneaky = looseMigration({
+      ...declaration,
+      name: "sneaky",
+      handler: (_ctx: unknown, row: object) => ({
+        ...row,
+        category: `${contentTypeOf(byGetter)}|${contentTypeOf(byTrap)}`,
+      }),
+    });
+    expect(
+      runMigration(notes([sneaky]), {
+        name: "sneaky",
+        rows: [{ id: "n1", fields: { title: "Plan" } }],
+      })
+    ).toMatchObject({
+      ok: true,
+      rows: [
+        {
+          title: "Plan",
+          category: "text/plain;charset=UTF-8|text/plain;charset=UTF-8",
+        },
+      ],
+    });
+  });
 
   test.each([
     [
