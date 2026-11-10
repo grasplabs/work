@@ -502,8 +502,11 @@ const Ai = (props: StepProps) => (
   <AiStep
     ai={props.data.ai}
     lines={useHeadlines(props).ai}
-    onDone={() => {
+    onConnected={() => {
       props.go(afterAi(props.furthest));
+    }}
+    onDone={() => {
+      props.go("about");
     }}
   />
 );

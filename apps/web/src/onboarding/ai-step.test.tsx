@@ -135,9 +135,10 @@ const shown = async (
           <AiStep
             ai={rootRoute.useLoaderData()}
             lines={{ title: "Which AI should I think with?", sentence: "" }}
-            onDone={() => {
+            onConnected={() => {
               went += 1;
             }}
+            onDone={() => {}}
           />
         </Explained>
       </Seen>

@@ -133,9 +133,13 @@ const Connected = ({
 const ConnectForm = ({
   offered,
   onDone,
+  onConnected,
 }: {
   offered: readonly Offered[];
+  /** The way on where there is nothing to connect. */
   onDone: () => void;
+  /** The way on once the model answered. */
+  onConnected: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -188,7 +192,7 @@ const ConnectForm = ({
     }
     // Every step reads what core now has: a model is ready for calls.
     await router.invalidate({ sync: true });
-    onDone();
+    onConnected();
   };
   return (
     <>
@@ -323,10 +327,14 @@ export const AiStep = ({
   ai,
   lines,
   onDone,
+  onConnected,
 }: {
   ai: AiReadiness | null;
   lines: { title: string; sentence: string; voice?: StepVoice };
+  /** The way on for an admin who had a model already. */
   onDone: () => void;
+  /** The way on for an admin whose model just answered: they may have been sent back here. */
+  onConnected: () => void;
 }) => (
   <>
     <Heading
@@ -340,7 +348,11 @@ export const AiStep = ({
         providers={ai?.listing.providers.map(({ label }) => label) ?? []}
       />
     ) : (
-      <ConnectForm offered={ai.listing.offered} onDone={onDone} />
+      <ConnectForm
+        offered={ai.listing.offered}
+        onConnected={onConnected}
+        onDone={onDone}
+      />
     )}
   </>
 );
