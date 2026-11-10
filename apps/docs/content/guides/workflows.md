@@ -31,6 +31,30 @@ export default defineApp({
 });
 ```
 
+A workflow that waits for events from the App, or asks people to decide, declares them too: the `events` its Pages and mutations send (each event's `type` and `data`), the `listens` tasks waiting on them, and the `decisions` people answer (each one's `value` and the `context` they review). They are the contract the App relies on, and what `workflows.<alias>` in `@server/_generated/api` names and types. Binding the workflow in the draft writes them in from the version you bind, with the `bindWorkflow` definition tool:
+
+```ts
+permission.workflow("review", {
+  args: v.object({ task: v.id("tasks") }),
+  returns: v.object({ approved: v.boolean() }),
+  events: {
+    edited: {
+      type: "tasks.task.edited",
+      data: v.object({ task: v.id("tasks") }),
+    },
+  },
+  listens: { "do/1/awaitEdit": ["edited"] },
+  decisions: {
+    approve: {
+      value: v.object({ comment: v.string() }),
+      context: v.object({ title: v.string() }),
+    },
+  },
+});
+```
+
+A version whose events, decisions or listen tasks differ from what the App's current version declares can't be bound directly. Bind it in the App's draft, which declares the new contract, publish the App, and then bind the version.
+
 Then any of the App's actions and mutations can start it:
 
 ```ts server/reviews.ts
@@ -109,7 +133,7 @@ export const Route = createFileRoute("/")({ component: Tasks });
 
 Before its first start, `useWorkflow` is `idle`, and `loading` while the run you gave it by ID loads. A run is `queued`, `running`, `waiting` (for time, an event or a decision) or `paused`; `compensating` while it undoes its work after a failure or a cancellation; and it ends `completed` with its `result`, `failed` with its error, or `cancelled`. A run the person may no longer see, such as one whose decision someone else answered, is `unavailable`.
 
-`pause`, `resume` and `cancel` control the run, for whoever may. `send` sends it an event its workflow declares, typed by that event: `review.send(workflows.review.events.<name>, data)`.
+`pause`, `resume` and `cancel` control the run, for whoever may. `send` sends it an event its workflow declares, typed by that event: `review.send(workflows.review.events.<name>, data)`. A mutation sends one the same way, with `ctx.sendEvent(workflows.review.events.<name>, { runId, data })`. To answer a decision the run waits for, make its form with `useForm(workflows.review.decisions.<name>, { defaultValues: { approved: false, value }, onSubmit })` and pass what it submits to `review.respond(wait, answer)`.
 
 `useWorkflow` is built on the workflow reference's own queries and mutations, which a Page can also use directly: `useQuery(workflows.review.queries.run, { runId })` follows one run (`null` for a run the person may not see), `useQuery(workflows.review.queries.canStart)` says whether they may start one, and `useMutation(workflows.review.mutations.start)` starts one with `{ args }`. `mutations.pause`, `.resume` and `.cancel` take `{ runId }`, and `mutations.send` takes `{ runId, event, data }`, the event by its name. `queries.runs` lists the person's runs, and `queries.history` one run's history.
 
