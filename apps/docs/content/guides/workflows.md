@@ -46,7 +46,7 @@ export default defineApp({
 
 A workflow that waits for events from the App, or asks people to decide, declares them too: the `events` its Pages and mutations send (each event's `type` and `data`), the `listens` tasks waiting on them, and the `decisions` people answer (each one's `value` and the `context` they review). They are the contract the App relies on, and what `workflows.<alias>` in `@server/_generated/api` names and types. Binding the workflow in the draft writes them in from the version you bind, with the `bindWorkflow` definition tool, as `review` above declares them.
 
-A version whose events, decisions or listen tasks differ from what the App's current version declares can't be bound directly. Bind it in the App's draft, which declares the new contract, publish the App, and then bind the version.
+A version whose events, decisions or listen tasks differ from what the App's current version declares can't be bound directly. Bind it in the App's draft, which declares the new contract, and publish the App: the version is bound as that App version becomes current, and bound again to whatever an older App version bound if you roll back to it.
 
 Then any of the App's actions and mutations can start it:
 

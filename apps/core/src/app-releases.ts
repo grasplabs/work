@@ -67,7 +67,7 @@ import {
 } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { boundWorkflowsOf } from "./bound-workflows.ts";
+import { sealedWorkflowPins } from "./bound-workflows.ts";
 import { checkEvidenceText, evidenceMatches } from "./check-evidence.ts";
 import { appStoreFor, openStore } from "./data-stores.ts";
 import {
@@ -1005,13 +1005,15 @@ interface InspectedRelease {
 /**
  * `files`, an App's code for release `key`, built and inspected as a seal
  * does (see the header): inspected with symbolic references, then built
- * and type-checked with the modules generated from what it read; then
- * each explicit migration run on its fixtures.
+ * and type-checked with the modules generated from what it read and the
+ * workflow versions it binds, `definition` its definition; then each
+ * explicit migration run on its fixtures.
  */
 const inspectForSeal = async (
   env: Env,
   key: { app: AppId; version: number },
   files: Readonly<Record<string, string>>,
+  definition: AppDefinition,
   /** `preview` for a chat's draft. */
   profile: BuildProfile
 ): Promise<InspectedRelease> => {
@@ -1034,11 +1036,11 @@ const inspectForSeal = async (
   const inspection = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(inspection);
 
-  // The real modules, then the same code built with them: the workflows
-  // it declares as the App binds them now, sealed with it.
+  // The real modules, then the same code built with them: the workflow
+  // versions it binds once current, sealed with it.
   const generated = await generateModules(
     manifest,
-    await boundWorkflowsOf(env, key.app, manifest)
+    await sealedWorkflowPins(env, key.app, manifest, definition)
   );
   // Type-checked with them, against the SDK's server side: nothing is
   // sealed that doesn't check.
@@ -1226,6 +1228,7 @@ export const sealDraftRelease = async (
     env,
     key,
     Object.fromEntries(files),
+    definition,
     "preview"
   );
   const { artifacts, text, hash } = await packaged(env, key, built, {
@@ -1306,6 +1309,7 @@ export const sealRelease = async (
     env,
     { app, version },
     files,
+    defined,
     "production"
   );
   await requireFunctionIds(env, app, files, defined);

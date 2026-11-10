@@ -56,6 +56,14 @@ export interface AppSpec {
    * permission's own expression.
    */
   readonly contracts?: Readonly<Record<string, WorkflowEventContract>>;
+  /**
+   * The workflow version a draft bound under each alias of `contracts`
+   * (`bindWorkflow`), which the version records: a definition committed
+   * by hand may name any.
+   */
+  readonly bound?: Readonly<
+    Record<string, { readonly workflowId: string; readonly version: number }>
+  >;
   /** Answers for a schema change, by table and field name. */
   readonly answers?: readonly {
     readonly table: string;
@@ -86,6 +94,18 @@ const applied = (
     return id;
   });
 };
+
+/** What sets each of `spec`'s workflow contracts, with the version bound. */
+const contractOperations = (spec: AppSpec): DefinitionOperation[] =>
+  Object.entries(spec.contracts ?? {}).map(([alias, contract]) => {
+    const bound = spec.bound?.[alias];
+    return {
+      op: "setWorkflowContract",
+      alias,
+      contract,
+      ...(bound === undefined ? {} : { bound }),
+    };
+  });
 
 /** The definition `spec` describes, its IDs taken from names, so it is the same each time. */
 export const definitionOf = (spec: AppSpec): AppDefinition => {
@@ -130,8 +150,8 @@ export const definitionOf = (spec: AppSpec): AppDefinition => {
   for (const permission of spec.permissions ?? []) {
     apply({ op: "addPermission", permission });
   }
-  for (const [alias, contract] of Object.entries(spec.contracts ?? {})) {
-    apply({ op: "setWorkflowContract", alias, contract });
+  for (const operation of contractOperations(spec)) {
+    apply(operation);
   }
   const answers = (spec.answers ?? []).map(({ table, field, value }) => {
     const defined = definition.tables.find(({ name }) => name === table);

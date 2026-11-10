@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { commitApp } from "./app-definitions.ts";
+import { appOf, commitApp } from "./app-definitions.ts";
 import { racingDb, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -274,19 +274,25 @@ describe("binding a workflow its App's current version declares", () => {
     }
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
     await api.bindToApp(flow.id, { app, alias: "review", version: 1 });
-    await release(builder, app, requestsApp("review", jobEventsDeclared));
-    // Another version of the App, declaring none of the workflow's events:
-    // made current by a builder while the binding is on its way.
-    const { version: declaringNone } = await commitApp(
+    const declaring = requestsApp("review", jobEventsDeclared);
+    await release(builder, app, declaring);
+    // Another version of the App, declaring the same of the workflow: made
+    // current by a builder while the binding is on its way.
+    const { version: another } = await commitApp(
       builder.api.apps.files,
       app,
-      requestsApp("review"),
-      "No events"
+      appOf(declaring.definition, {
+        ...declaring.files,
+        "src/routes/index.tsx": (
+          declaring.files["src/routes/index.tsx"] ?? ""
+        ).replace("Requests", "Open requests"),
+      }),
+      "Rename the page"
     );
     const racing = {
       ...env,
       DB: racingDb(async () => {
-        await builder.api.apps.versions.setCurrent(app, declaringNone);
+        await builder.api.apps.versions.setCurrent(app, another);
       }, /insert into "app_workflow_bindings"/iu),
     };
 
@@ -302,14 +308,14 @@ describe("binding a workflow its App's current version declares", () => {
     expect({
       raced,
       kept: listed.map(({ alias, version }) => ({ alias, version })),
-      // Against the version current now, it is another contract.
+      // Checked against the version current now, it binds.
       again: await outcome(
         api.bindToApp(flow.id, { app, alias: "review", version: 2 })
       ),
     }).toStrictEqual({
       raced: "workflow.binding_conflict",
       kept: [{ alias: "review", version: 1 }],
-      again: "workflow.app_binding_contract_changed",
+      again: "ok",
     });
   });
 });

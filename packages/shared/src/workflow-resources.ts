@@ -183,6 +183,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.app_binding_unavailable": "This App has no such workflow binding.",
   "workflow.app_binding_contract_changed":
     "This workflow version's events, decisions or listen tasks aren't the ones the App declares. Bind it in the App's draft instead, which declares them, then publish the App.",
+  "workflow.app_version_binding_unavailable":
+    "This App version binds a workflow version that can't be bound now: the workflow was deleted, or whoever bound it in the draft, or whoever makes the App version current, has no role in it. Bind one in the App's draft again, then publish.",
   "workflow.call_denied":
     "This run may no longer make that call: the person it acts for, the approval or permission behind the binding, or the trigger, App or agent that started it lost what it needed since the run started.",
   "workflow.call_invalid":

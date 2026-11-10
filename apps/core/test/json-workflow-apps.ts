@@ -431,11 +431,14 @@ export const endLiveResourceRuns = async (): Promise<void> => {
 /**
  * The App every bound workflow here is bound to: one page, one alias,
  * declaring `declares` of the workflow besides its args and returns (its
- * events, listen tasks and decisions, as the version bound has them).
+ * events, listen tasks and decisions, as the version bound has them), and
+ * recording `bound` as the version it binds, as a draft's `bindWorkflow`
+ * does.
  */
 export const requestsApp = (
   alias: string,
-  declares?: WorkflowEventContract
+  declares?: WorkflowEventContract,
+  bound?: { readonly workflowId: string; readonly version: number }
 ): TestApp =>
   testApp(
     {
@@ -450,6 +453,7 @@ export const requestsApp = (
         `permission.workflow(${JSON.stringify(alias)}, { args: v.object({ who: v.string().trim().min(1) }), returns: v.object({ status: v.string() }) })`,
       ],
       ...(declares === undefined ? {} : { contracts: { [alias]: declares } }),
+      ...(bound === undefined ? {} : { bound: { [alias]: bound } }),
     },
     {
       "server/requests.ts": `import { permissions } from "../grasp.config.ts";

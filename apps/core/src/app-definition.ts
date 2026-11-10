@@ -485,7 +485,9 @@ export type DraftOperation =
   | {
       /**
        * Declares, for workflow permission `alias`, the events, listen
-       * tasks and decisions version `version` of workflow `workflow` has.
+       * tasks and decisions version `version` of workflow `workflow` has,
+       * and records that version as the one the App binds there once the
+       * App version is current.
        */
       readonly op: "bindWorkflow";
       readonly alias: string;

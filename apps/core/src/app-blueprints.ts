@@ -388,7 +388,11 @@ export const markBlueprint = async (
   const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const row = await findVersion(env, found.id, version);
-  const definition = await readStored(row);
+  // Without the workflow versions it binds: each App created from it
+  // binds workflows of its own (`BlueprintWorkflow`), never this App's.
+  const versionDefinition = await readStored(row);
+  const { workflowBindings: _bound, ...definition } =
+    versionDefinition.definition;
   const db = drizzle(env.DB);
   const marked = async () =>
     await db
@@ -414,7 +418,7 @@ export const markBlueprint = async (
         name: found.name,
         description: found.description,
         tree: row.tree,
-        definition: definition.text,
+        definition: definitionText(definition),
         appId: found.id,
         version: row.version,
         approved: approvedVersion(found, row),

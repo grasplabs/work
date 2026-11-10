@@ -18,6 +18,7 @@ export type {
   DefinedFunction,
   DefinedRule,
   DefinedTable,
+  DefinedWorkflowBinding,
 } from "./definition.ts";
 export type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 export {

@@ -1008,7 +1008,8 @@ export const defineInDraft = async <Saved>(
   let result: { definition: AppDefinition } = { definition: held.own };
   for (const each of Array.isArray(parsed) ? parsed : [parsed]) {
     // A workflow's contract is what the version bound has, read for the
-    // person binding it; the tools never take one written by hand.
+    // person binding it, and the version is recorded with it: the tools
+    // never take either written by hand.
     const applied: DefinitionOperation =
       each.op === "bindWorkflow"
         ? {
@@ -1016,12 +1017,7 @@ export const defineInDraft = async <Saved>(
             alias: each.alias,
             // One after the other: each operation applies to the last.
             // oxlint-disable-next-line no-await-in-loop -- see above
-            contract: await bindableContract(
-              env,
-              by,
-              each.workflow,
-              each.version
-            ),
+            ...(await bindableContract(env, by, each.workflow, each.version)),
           }
         : each;
     const next = tryOperation(result.definition, applied);
