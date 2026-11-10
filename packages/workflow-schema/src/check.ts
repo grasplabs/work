@@ -1146,7 +1146,8 @@ const checkAppMembers = (walk: Walk): void => {
   // What a test run answers: each permission of every other kind (`ai`
   // among them), and each App function, so a workflow that publishes can
   // always be test-run.
-  let count = Object.keys(walk.bindings).length;
+  const bound = Object.keys(walk.bindings).length;
+  let count = bound;
   for (const [alias, { app, functions }] of Object.entries(apps)) {
     count += Object.keys(functions).length;
     const first = aliasOf.get(app);
@@ -1162,7 +1163,8 @@ const checkAppMembers = (walk: Walk): void => {
       );
     }
   }
-  if (count > maxCandidateFixtures) {
+  // Past it on the other permissions alone, `checkAliases` says so.
+  if (count > maxCandidateFixtures && bound <= maxCandidateFixtures) {
     problem(
       walk,
       "/permissions/apps",

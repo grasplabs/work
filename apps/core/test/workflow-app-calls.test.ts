@@ -394,7 +394,7 @@ export const create = mutation({
       env,
       acting,
       workflow.id,
-      { expectedRevision: base, source, modules: {} }
+      { expectedRevision: base, source }
     );
     const { runId } = await startCandidateRun(env, acting, workflow.id, {
       revision,
@@ -445,7 +445,6 @@ export const create = mutation({
       return await editWorkflowDraft(env, acting, workflow.id, {
         expectedRevision: revision,
         source: text,
-        modules: {},
       });
     };
     const before = await save(writingNotes(app, create, titles));
