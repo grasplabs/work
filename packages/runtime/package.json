@@ -24,6 +24,7 @@
     "./definition": "./src/definition-entry.ts",
     "./page": "./src/page.ts",
     "./check": "./src/check.ts",
+    "./server-modules": "./src/server-modules.ts",
     "./forms": "./src/forms.ts",
     "./vitest": "./src/vitest.ts"
   },

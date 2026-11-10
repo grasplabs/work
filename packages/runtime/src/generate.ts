@@ -22,8 +22,8 @@ import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 // - `server/_generated/`, part of the App's own files: regenerated on
 //   every save, from the App's code and definition alone
 //   (`generateServerModules`), never from running the code, so it is the
-//   same bytes for the same files and definition, and a stale or edited
-//   copy is told by comparing them (core's app-releases.ts).
+//   same bytes for the same files and definition. Nothing builds from the
+//   copy: a seal generates it again (core's app-releases.ts).
 //   - `server.ts` (`@server/_generated/server`): the server constructors
 //     and `doc`, specialized to the App's schema and permissions. Its code
 //     is the same for every App (`serverModule(schema, config)`); the

@@ -1,4 +1,3 @@
-import { isServerModule } from "@grasp-os/compiler";
 import type { IndexRead } from "@grasp-os/compiler";
 import {
   canonicalDefinition,
@@ -6,7 +5,6 @@ import {
   definitionSources,
   generatedFiles,
   generatedServerSources,
-  serverFunctionsOf,
   validatorSource,
 } from "@grasp-os/runtime/definition";
 import type {
@@ -17,12 +15,12 @@ import type {
   DefinitionOperation,
   ValueDescriptor,
 } from "@grasp-os/runtime/definition";
-import { generatedPaths as hostGeneratedPaths } from "@grasp-os/runtime/host";
-import type {
-  AppManifest,
-  SchemaManifest,
-  ServerFunctions,
+import {
+  generatedPaths as hostGeneratedPaths,
+  isGeneratedServerFile,
+  isUnderGeneratedServerFolder,
 } from "@grasp-os/runtime/host";
+import type { AppManifest, SchemaManifest } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type {
   DataModel,
@@ -81,10 +79,9 @@ import type { SchemaIds } from "./schema-changes.ts";
 export const generatedPaths: ReadonlySet<string> = new Set([
   generatedFiles.config,
   generatedFiles.schema,
-  hostGeneratedPaths.api,
-  hostGeneratedPaths.internal,
-  hostGeneratedPaths.server,
-  hostGeneratedPaths.dataModel,
+  ...Object.values(hostGeneratedPaths).filter((path) =>
+    isGeneratedServerFile(path)
+  ),
 ]);
 
 /**
@@ -102,70 +99,12 @@ export const refuseGeneratedFiles = (paths: Iterable<string>): void => {
   }
 };
 
-/** Where Grasp generates `server/_generated/` among an App's files. */
-const serverGeneratedPaths: ReadonlySet<string> = new Set([
-  hostGeneratedPaths.api,
-  hostGeneratedPaths.dataModel,
-  hostGeneratedPaths.internal,
-  hostGeneratedPaths.server,
-]);
-
-/** Whether `path` is one of `server/_generated/`'s, as Grasp generates them. */
-export const isServerGenerated = (path: string): boolean =>
-  serverGeneratedPaths.has(path);
-
-/**
- * The App's server modules among `files`, each one's source by its path
- * under `server/` without `.ts` (`crm/deals`), as the generated
- * references read them.
- */
-const serverModulesOf = (
-  files: ReadonlyMap<string, string>
-): Record<string, string> =>
-  Object.fromEntries(
-    [...files]
-      .filter(([path]) => isServerModule(path))
-      .map(([path, source]) => [
-        path.slice("server/".length, -".ts".length),
-        source,
-      ])
-  );
-
-/**
- * The functions `files`' server modules declare, as their syntax does
- * (`serverFunctionsOf`): what `server/_generated/` references, and what
- * the host generates a release's from.
- */
-export const serverFunctionsIn = (
-  files: ReadonlyMap<string, string> | Readonly<Record<string, string>>
-): ServerFunctions =>
-  serverFunctionsOf(
-    serverModulesOf(
-      files instanceof Map ? files : new Map(Object.entries(files))
-    )
-  );
-
-/**
- * `server/_generated/`, by path, as `definition` and `files`' own server
- * modules generate it: what every write puts among them
- * (`withGeneratedCode`).
- */
-const generatedServerFiles = (
-  files: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
-  definition: AppDefinition
-): Record<string, string> =>
-  generatedServerSources(
-    serverModulesOf(
-      files instanceof Map ? files : new Map(Object.entries(files))
-    ),
-    definition
-  );
-
 /**
  * `files` with what is generated among them as `definition` and their
- * own server modules generate it, changed in place, whatever they held:
- * every write of an App's files comes through here, the definition
- * tools' and a commit's alike.
+ * own server modules generate it (`generatedServerSources`), changed in
+ * place, whatever they held: every write of an App's files comes through
+ * here, the definition tools' and a commit's alike, and so does every
+ * seal (app-releases.ts).
  */
 export const withGeneratedCode = (
   files: Map<string, string>,
@@ -177,16 +116,15 @@ export const withGeneratedCode = (
   // `server/_generated/` holds what Grasp generates and nothing else,
   // whatever a tree written another way held there.
   for (const path of files.keys()) {
-    if (
-      path.toLowerCase().startsWith("server/_generated/") &&
-      !isServerGenerated(path)
-    ) {
+    if (isUnderGeneratedServerFolder(path)) {
       files.delete(path);
     }
   }
-  for (const [path, source] of Object.entries(
-    generatedServerFiles(files, definition)
-  )) {
+  const generated = generatedServerSources(
+    Object.fromEntries(files),
+    definition
+  );
+  for (const [path, source] of Object.entries(generated)) {
     files.set(path, source);
   }
 };

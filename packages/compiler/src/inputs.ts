@@ -1,4 +1,9 @@
-import { dataModelSource, serverModuleSource } from "@grasp-os/runtime/host";
+import {
+  dataModelSource,
+  generatedPaths,
+  generatedServerFolder,
+  serverModuleSource,
+} from "@grasp-os/runtime/host";
 /**
  * What a build reads of an App's files, and how much of it a build takes.
  * Core uses these before it hashes and sends the files; the compiler again
@@ -132,11 +137,8 @@ const defaultRoot = `import { createRootRoute } from "@tanstack/react-router";
 export const Route = createRootRoute();
 `;
 
-/** Where the generated modules App code imports are, as Convex has them. */
-export const generatedServerFolder = "server/_generated/";
-
 /** Where the generated module of the server constructors is (`@server/_generated/server`). */
-const serverModulePath = "server/_generated/server.ts";
+const serverModulePath = generatedPaths.server;
 
 /**
  * Whether `path` is App server code the references' types read
@@ -149,7 +151,7 @@ const serverModulePath = "server/_generated/server.ts";
 export const isServerTypeFile = (path: string): boolean =>
   path === "grasp.config.ts" ||
   path === "values.ts" ||
-  path === "server/_generated/internal.ts" ||
+  path === generatedPaths.internal ||
   (path.startsWith("server/") &&
     !path.startsWith(generatedServerFolder) &&
     !path.startsWith("server/migrations/") &&
@@ -167,6 +169,18 @@ export const isTypeOnlyFile = (path: string): boolean =>
   isServerTypeFile(path) ||
   path === serverModulePath ||
   path === pageDataModel.path;
+
+/**
+ * Whether any of `files`' front end names the references
+ * (`@server/_generated/api`), so a build of its pages reads them.
+ */
+export const importsReferences = (
+  files: Readonly<Record<string, string>>
+): boolean =>
+  Object.entries(files).some(
+    ([path, source]) =>
+      path.startsWith(sourceFolder) && source.includes(pageReferences.specifier)
+  );
 
 /**
  * The files a build reads: the App's front end and declarations, the
@@ -191,13 +205,14 @@ export const buildFiles = (
     )
   );
   // Only for a front end: an App of server code alone has no pages to
-  // build, though its files always hold the references Grasp generates
-  // (`server/_generated/api.ts`).
+  // build. Its references only for one that imports them, so a build
+  // reads the same files whether or not they hold their own copy of
+  // `server/_generated/` (every save writes one).
   const [schema] = pageDataModel.reads;
   const frontEnd = Object.keys(own).some((path) =>
     path.startsWith(sourceFolder)
   );
-  const read = frontEnd
+  const read = importsReferences(own)
     ? {
         ...own,
         ...Object.fromEntries(
@@ -344,10 +359,9 @@ const generatedLimits = {
 export const hostGeneratedFolder = ".grasp/";
 
 /**
- * Whether `path` is one the host generates (`server/_generated/`,
- * `.grasp/`, the route tree): never an App's own file. Its files hold
- * `server/_generated/` as Grasp writes it on every save, and nothing else
- * of them; a build generates its own.
+ * Whether `path` is one Grasp generates (`server/_generated/`, `.grasp/`,
+ * the route tree), never one a builder writes: a build generates its own,
+ * whatever the files hold of it.
  */
 export const isGeneratedPath = (path: string): boolean =>
   path.startsWith(generatedServerFolder) ||

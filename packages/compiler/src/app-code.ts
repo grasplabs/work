@@ -38,10 +38,13 @@
  * Pages never reach any of it: `pageImportError` says so, by name,
  * where a page tries.
  */
+import {
+  migrationsFolder as migrationsFolderPath,
+  serverModuleOf,
+} from "@grasp-os/runtime/server-modules";
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
 
 import {
-  generatedServerFolder,
   hasAppPathSegments,
   hostGeneratedFolder,
   routeTreePath,
@@ -110,7 +113,7 @@ const rootServerFiles: ReadonlySet<string> = new Set([configPath]);
 const generatedFile = /^(?:server\/_generated|\.grasp)\/[\w.-]+\.ts$/u;
 
 /** Where an App's migrations are. */
-const migrationsPrefix = "server/migrations/";
+const migrationsPrefix = migrationsFolderPath;
 
 /**
  * The App's migrations: each one file, `server/migrations/<name>.ts`,
@@ -131,19 +134,14 @@ export const migrationsFolder: CodeFolder = {
 
 /**
  * Whether `path` is one of the App's server modules, whose exports are
- * its functions: a `.ts` file anywhere under `server/` but its schema,
- * its generated modules and its migrations, its folders named as any App
- * path's may be (`hasAppPathSegments`), dots included but never leading,
- * so no `.`, `..` or hidden folder is ever server code.
+ * its functions: as the host reads them (the runtime's `serverModuleOf`),
+ * a `.ts` file anywhere under `server/` but its schema, its generated
+ * modules and its migrations, its folders named as any App path's may
+ * be, dots included but never leading, so no `.`, `..` or hidden folder
+ * is ever server code.
  */
 export const isServerModule = (path: string): boolean =>
-  path.startsWith("server/") &&
-  path !== schemaPath &&
-  !path.startsWith(generatedServerFolder) &&
-  !path.startsWith(migrationsPrefix) &&
-  path.endsWith(".ts") &&
-  !path.endsWith(".d.ts") &&
-  hasAppPathSegments(path);
+  serverModuleOf(path) !== undefined;
 
 /**
  * `server/`: its modules, its migrations and the modules the host
@@ -171,10 +169,7 @@ export const serverCodeFolders: readonly CodeFolder[] = [
  * paths begin (`server/admin/users.ts` is `admin/users`), sorted.
  */
 const serverModulePaths = (files: Iterable<string>): string[] =>
-  [...files]
-    .filter((path) => isServerModule(path))
-    .map((path) => path.slice("server/".length, -".ts".length))
-    .toSorted();
+  [...files].flatMap((path) => serverModuleOf(path) ?? []).toSorted();
 
 /**
  * The entry the host runs an App's server from (`serverEntryPath`): the

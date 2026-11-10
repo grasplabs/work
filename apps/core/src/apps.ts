@@ -9,6 +9,7 @@ import {
   withExportedFunctions,
 } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -57,7 +58,6 @@ import type { Person } from "./app-access.ts";
 import {
   generatedPaths,
   functionIdsOf,
-  isServerGenerated,
   schemaIdsOf,
   withGeneratedCode,
 } from "./app-definition.ts";
@@ -384,7 +384,7 @@ const sizeOf = (files: ReadonlyMap<string, string>): Size => {
   let count = 0;
   let length = 0;
   for (const [path, content] of files) {
-    if (!isServerGenerated(path)) {
+    if (!isGeneratedServerFile(path)) {
       count += 1;
       length += content.length;
     }
@@ -1293,7 +1293,7 @@ export const draftOverLatest = async (
     // What Grasp generates is generated again as the draft is committed
     // (`storedVersion`): never a clash of its own.
     const clashes = Object.entries(changes).flatMap(([path, content]) =>
-      !isServerGenerated(path) &&
+      !isGeneratedServerFile(path) &&
       before.get(path) !== files.get(path) &&
       (content ?? undefined) !== files.get(path)
         ? [changedSince(path)]

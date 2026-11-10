@@ -2,6 +2,7 @@ import { ensureCollection } from "@grasp-os/brain/collections";
 import { compilerVersion } from "@grasp-os/compiler";
 import { definitionText } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import {
   acceptedUpdateSchema,
   appErrors,
@@ -35,11 +36,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import {
-  generatedPaths,
-  isServerGenerated,
-  withGeneratedCode,
-} from "./app-definition.ts";
+import { generatedPaths, withGeneratedCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
 import {
@@ -981,7 +978,7 @@ export const blueprintUpdate = async (
     over: pending.latest.version,
     // What Grasp generates is no change of the blueprint's.
     changes: diffFiles(pending.ours, pending.merged.files).filter(
-      ({ path }) => !isServerGenerated(path)
+      ({ path }) => !isGeneratedServerFile(path)
     ),
     conflicts: pending.merged.conflicts,
     definitionConflict: pending.merged.definitionConflict,

@@ -92,6 +92,10 @@ export {
   contractFingerprints,
   contractsFormatVersion,
   generatedPaths,
+  generatedServerFolder,
+  isGeneratedServerFile,
+  isUnderGeneratedServerFolder,
+  ownFiles,
   workflowFingerprint,
 } from "./codegen-contracts.ts";
 export { valueTypeOf } from "./codegen-render.ts";

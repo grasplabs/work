@@ -70,8 +70,12 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import { serverFunctionsOf } from "@grasp-os/runtime/definition";
-import { generateModules, readAppManifest } from "@grasp-os/runtime/host";
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
+import {
+  generateModules,
+  generatedServerFolder,
+  readAppManifest,
+} from "@grasp-os/runtime/host";
 import {
   definitionPackageFormatVersion,
   definitionPackageSchema,
@@ -86,12 +90,10 @@ import {
   oxcWasmModule,
   oxcWasmPin,
 } from "../packages/compiler/oxc-wasm/wasm.ts";
-import { isServerModule } from "../packages/compiler/src/app-code.ts";
 import {
   buildFiles,
   codeExtensions,
   declarationExtension,
-  generatedServerFolder,
   hostGeneratedFolder,
   isGeneratedPath,
   routeTreePath,
@@ -423,17 +425,9 @@ const planApp = async (
   project: Plan,
   app: DefinitionPackage["app"]
 ): Promise<void> => {
-  const modules = Object.fromEntries(
-    Object.entries(app.files)
-      .filter(([file]) => isServerModule(file))
-      .map(([file, source]) => [
-        file.slice("server/".length, -".ts".length),
-        source,
-      ])
-  );
   const generated = await generateModules(
     readAppManifest(app.manifest),
-    serverFunctionsOf(modules)
+    serverFunctionsIn(app.files)
   );
   for (const [file, text] of Object.entries(generated)) {
     project.add(`app/${safePath(file, "generated")}`, text);

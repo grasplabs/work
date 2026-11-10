@@ -5,7 +5,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { emptyDefinition } from "../src/definition.ts";
 import {
   generatedServerSources,
-  serverFunctionsOf,
+  serverFunctionsIn,
 } from "../src/server-syntax.ts";
 
 // The functions an App's server modules declare, read from their syntax
@@ -36,7 +36,12 @@ const declaration = (
 
 describe("the functions a server module's syntax declares", () => {
   test("are each `export const` of a builder, public or internal by its builder", () => {
-    expect(serverFunctionsOf({ tasks, "crm/deals": tasks })).toStrictEqual({
+    expect(
+      serverFunctionsIn({
+        "server/tasks.ts": tasks,
+        "server/crm/deals.ts": tasks,
+      })
+    ).toStrictEqual({
       "tasks.add": "public",
       "tasks.archive": "internal",
       "tasks.count": "internal",
@@ -64,7 +69,7 @@ export declare const declared: ReturnType<typeof query>;
 export type Row = { id: string };
 export function helper() { return 1; }
 `;
-    expect(serverFunctionsOf({ other })).toStrictEqual({});
+    expect(serverFunctionsIn({ "server/other.ts": other })).toStrictEqual({});
   });
 
   test("never hold a path a function can't have, nor a name a reference answers", () => {
@@ -75,14 +80,21 @@ export const _hidden = query({ args: {}, handler: async () => 1 });
 export const fine = query({ args: {}, handler: async () => 1 });
 `;
     expect(
-      serverFunctionsOf({ named, "v1.0/extra": named, "a/b/c/d": named })
+      serverFunctionsIn({
+        "server/named.ts": named,
+        "server/v1.0/extra.ts": named,
+        "server/a/b/c/d.ts": named,
+      })
     ).toStrictEqual({ "named.fine": "public" });
   });
 
   test("are none of a module that doesn't parse", () => {
     expect(
-      serverFunctionsOf({ broken: "export const list = query({", tasks })
-    ).toStrictEqual(serverFunctionsOf({ tasks }));
+      serverFunctionsIn({
+        "server/broken.ts": "export const list = query({",
+        "server/tasks.ts": tasks,
+      })
+    ).toStrictEqual(serverFunctionsIn({ "server/tasks.ts": tasks }));
   });
 
   test("are the same for a module as long as an App's file may be, whatever was read before", () => {
@@ -92,7 +104,13 @@ export const fine = query({ args: {}, handler: async () => 1 });
     }
     large = large.slice(0, large.lastIndexOf("export const"));
     const each = [1, 2, 3].map(
-      () => Object.keys(serverFunctionsOf({ tasks, large })).length
+      () =>
+        Object.keys(
+          serverFunctionsIn({
+            "server/tasks.ts": tasks,
+            "server/large.ts": large,
+          })
+        ).length
     );
     expect({
       fits: large.length <= appLimits.fileLength,
@@ -105,8 +123,14 @@ export const fine = query({ args: {}, handler: async () => 1 });
     const many = `import { query } from "@server/_generated/server";
 ${Array.from({ length: appMaxOperations }, (_, index) => `export const f${index} = query({ args: {}, handler: async () => 1 });`).join("\n")}
 `;
-    const one = serverFunctionsOf({ many, tasks });
-    const other = serverFunctionsOf({ tasks, many });
+    const one = serverFunctionsIn({
+      "server/many.ts": many,
+      "server/tasks.ts": tasks,
+    });
+    const other = serverFunctionsIn({
+      "server/tasks.ts": tasks,
+      "server/many.ts": many,
+    });
     expect({
       count: Object.keys(one).length,
       same:
@@ -120,9 +144,15 @@ ${Array.from({ length: appMaxOperations }, (_, index) => `export const f${index}
   test("make the same generated modules whatever order the modules come in", () => {
     const definition = emptyDefinition("Tasks");
     expect(
-      generatedServerSources({ tasks, "crm/deals": tasks }, definition)
+      generatedServerSources(
+        { "server/tasks.ts": tasks, "server/crm/deals.ts": tasks },
+        definition
+      )
     ).toStrictEqual(
-      generatedServerSources({ "crm/deals": tasks, tasks }, definition)
+      generatedServerSources(
+        { "server/crm/deals.ts": tasks, "server/tasks.ts": tasks },
+        definition
+      )
     );
   });
 });

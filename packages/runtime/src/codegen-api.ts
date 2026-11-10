@@ -22,7 +22,7 @@ import { workflowFunctions } from "./workflow-functions.ts";
  * An App's server functions as its modules' syntax declares them: each
  * one's visibility by its path (`tasks.list` for `server/tasks.ts`'s
  * `export const list = query(…)`), read without running the code
- * (exported-names.ts). What the generated `api` and `internal` trees
+ * (server-modules.ts). What the generated `api` and `internal` trees
  * hold, so they depend only on the server files' paths and what they
  * export, never on a release.
  */

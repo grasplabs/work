@@ -24,7 +24,7 @@ import { defineApp, permission, v } from "../src/index.ts";
 import { readPageBuild } from "../src/page-functions.ts";
 import { runFunction } from "../src/runner.ts";
 import type { FunctionChannel } from "../src/runner.ts";
-import { serverFunctionsOf } from "../src/server-syntax.ts";
+import { serverFunctionsIn } from "../src/server-syntax.ts";
 import { serverModule } from "../src/server.ts";
 import { isPlainObject, valueLimits } from "../src/value-descriptor.ts";
 import { schemaOf } from "../src/value-schema.ts";
@@ -62,7 +62,7 @@ import notesSource from "./notes/server/notes.ts?raw";
 const notesManifest = (): AppManifest => inspectApp(notes).manifest;
 
 /** The fixture's functions, as its server module's syntax declares them. */
-const notesFunctions = serverFunctionsOf({ notes: notesSource });
+const notesFunctions = serverFunctionsIn({ "server/notes.ts": notesSource });
 
 /** `manifest` as JSON text, as a sandbox answers it. */
 const textOf = (manifest: unknown): string => JSON.stringify(manifest);

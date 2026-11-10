@@ -18,7 +18,7 @@ import {
   generateModules,
   readAppManifest,
 } from "../packages/runtime/src/host.ts";
-import { serverFunctionsOf } from "../packages/runtime/src/server-syntax.ts";
+import { serverFunctionsIn } from "../packages/runtime/src/server-syntax.ts";
 import {
   ROOT,
   notesFiles,
@@ -123,9 +123,7 @@ describe(
       const notices = read("THIRD-PARTY-NOTICES.md");
       const regenerated = await generateModules(
         readAppManifest(definition.app.manifest),
-        serverFunctionsOf({
-          notes: definition.app.files["server/notes.ts"] ?? "",
-        })
+        serverFunctionsIn(definition.app.files)
       );
 
       expect({

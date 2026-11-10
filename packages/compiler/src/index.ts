@@ -64,6 +64,7 @@ export {
 export {
   appCodeLimitErrors,
   buildFiles,
+  importsReferences,
   isGeneratedPath,
   isLintedCode,
   isPageFile,

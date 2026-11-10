@@ -25,12 +25,7 @@ import { getHeapStatistics } from "node:v8";
 
 import { z } from "zod";
 
-import {
-  configPath,
-  isServerModule,
-  migrationsFolder,
-  schemaPath,
-} from "./src/app-code.ts";
+import { configPath, migrationsFolder, schemaPath } from "./src/app-code.ts";
 import { withTypeCheck } from "./src/checked-build.ts";
 import type { Unchecked } from "./src/checked-build.ts";
 import type { Diagnostic } from "./src/diagnostic.ts";
@@ -75,7 +70,8 @@ const blueprintFiles = async (
   });
   const { generateModules, inspectApp, registerApp } =
     await import("@grasp-os/runtime/host");
-  const { serverFunctionsOf } = await import("@grasp-os/runtime/definition");
+  const { serverFunctionsIn } = await import("@grasp-os/runtime/definition");
+  const { serverModuleOf } = await import("@grasp-os/runtime/server-modules");
   const all: z.infer<typeof blueprintsSchema> = {};
   const names = readdirSync(blueprints).filter((name) =>
     existsSync(path.join(blueprints, name, "files", configPath))
@@ -99,15 +95,15 @@ const blueprintFiles = async (
       }
     }
     const modules: Record<string, Record<string, unknown>> = {};
-    const sources: Record<string, string> = {};
-    for (const file of Object.keys(files).filter(isServerModule).toSorted()) {
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      const namespace: unknown = await import(
-        pathToFileURL(path.join(dir, file)).href
-      );
-      const module = file.slice("server/".length, -".ts".length);
-      modules[module] = moduleSchema.parse(namespace);
-      sources[module] = files[file] ?? "";
+    for (const file of Object.keys(files).toSorted()) {
+      const module = serverModuleOf(file);
+      if (module !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        const namespace: unknown = await import(
+          pathToFileURL(path.join(dir, file)).href
+        );
+        modules[module] = moduleSchema.parse(namespace);
+      }
     }
     const migrations: unknown[] = [];
     for (const migrationFile of Object.keys(files)
@@ -132,7 +128,7 @@ const blueprintFiles = async (
       // oxlint-disable-next-line no-await-in-loop -- as above
       ...(await generateModules(
         inspectApp(registerApp(parts)).manifest,
-        serverFunctionsOf(sources)
+        serverFunctionsIn(files)
       )),
     };
   }

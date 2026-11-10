@@ -4,15 +4,51 @@ import { canonicalText } from "@grasp-os/shared/json";
 import type { AppManifest, FunctionManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
 
-/** Where each generated module is, among the App's files. */
+/**
+ * Where the modules App code imports as `@server/_generated/<module>` are:
+ * part of the App's files, which only Grasp writes, as Convex's
+ * `convex/_generated/`.
+ */
+export const generatedServerFolder = "server/_generated/";
+
+/** Where each generated module is: in the App's files, or the host's own (`.grasp/`). */
 export const generatedPaths = {
-  api: "server/_generated/api.ts",
-  internal: "server/_generated/internal.ts",
-  server: "server/_generated/server.ts",
-  dataModel: "server/_generated/dataModel.ts",
+  api: `${generatedServerFolder}api.ts`,
+  internal: `${generatedServerFolder}internal.ts`,
+  server: `${generatedServerFolder}server.ts`,
+  dataModel: `${generatedServerFolder}dataModel.ts`,
   contracts: ".grasp/contracts.json",
   functions: ".grasp/functions.ts",
 } as const;
+
+/** Each of `server/_generated/`'s files, as Grasp generates them among the App's. */
+const generatedServerFiles: ReadonlySet<string> = new Set(
+  Object.values(generatedPaths).filter((path) =>
+    path.startsWith(generatedServerFolder)
+  )
+);
+
+/** Whether `path` is one of the files Grasp generates in `server/_generated/`. */
+export const isGeneratedServerFile = (path: string): boolean =>
+  generatedServerFiles.has(path);
+
+/**
+ * `files` as people review them: without what Grasp generates in
+ * `server/_generated/`, which no one wrote and every save writes again.
+ */
+export const ownFiles = <Content>(
+  files: Readonly<Record<string, Content>>
+): Record<string, Content> =>
+  Object.fromEntries(
+    Object.entries(files).filter(([path]) => !isGeneratedServerFile(path))
+  );
+
+/**
+ * Whether `path` is under `server/_generated/` in any case, or is that
+ * folder's own name: never one of an App's own files.
+ */
+export const isUnderGeneratedServerFolder = (path: string): boolean =>
+  `${path.toLowerCase()}/`.startsWith(generatedServerFolder);
 
 /**
  * The format of `contracts.json`: 5 since it names no release and seals

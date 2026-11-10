@@ -1,5 +1,11 @@
-import { isAppLayout, isGeneratedPath } from "@grasp-os/compiler";
 import {
+  importsReferences,
+  isAppLayout,
+  isGeneratedPath,
+} from "@grasp-os/compiler";
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
+import {
+  isGeneratedServerFile,
   generatedPaths,
   generateModules,
   symbolicModules,
@@ -8,7 +14,6 @@ import type { AppManifest } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 
-import { isServerGenerated, serverFunctionsIn } from "./app-definition.ts";
 import { filesManifest } from "./app-inspection.ts";
 import type { BuildOptions } from "./pages.ts";
 
@@ -31,13 +36,6 @@ import type { BuildOptions } from "./pages.ts";
 // `server/_generated/`, which is what a save and a draft's check build
 // (save-builds.ts): nothing of them is sealed. A running version's pages
 // get them from its release (page-references.ts).
-
-/** Whether any of `files` names the references, so a build could import them. */
-const mentionsReferences = (files: Readonly<Record<string, string>>): boolean =>
-  Object.entries(files).some(
-    ([path, source]) =>
-      path.startsWith("src/") && source.includes("@server/_generated/api")
-  );
 
 /**
  * The modules of what the host generates that a page's build holds, by
@@ -98,9 +96,9 @@ export const withReferencesText = async (
   // Never the files' own copy of `server/_generated/` (every save writes
   // one): a page builds only with what is generated here, or without.
   const own = Object.fromEntries(
-    Object.entries(files).filter(([path]) => !isServerGenerated(path))
+    Object.entries(files).filter(([path]) => !isGeneratedServerFile(path))
   );
-  if (!(mentionsReferences(own) && isAppLayout(own))) {
+  if (!(importsReferences(own) && isAppLayout(own))) {
     return own;
   }
   let references: PageModules | undefined;

@@ -5,13 +5,18 @@ import {
   kitModules,
   serverSdkModules,
 } from "@grasp-os/compiler";
-import { isFunctionPath } from "@grasp-os/runtime/definition";
+import {
+  definitionSources,
+  isFunctionPath,
+  serverFunctionsIn,
+} from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
 import {
   contractFingerprints,
   contractsFormatVersion,
   generatedPaths,
   generateModules,
+  isUnderGeneratedServerFolder,
   readSealedWorkflows,
   manifestVersion,
   readAppManifest,
@@ -50,7 +55,6 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { serverFunctionsIn, withGeneratedCode } from "./app-definition.ts";
 import {
   builtCode,
   checkedCode,
@@ -1039,22 +1043,24 @@ const requireDeclaredFunctions = (
 };
 
 /**
- * `files`, a version's or a draft's, as a seal reads them: with what is
- * generated among them (the config, the schema and `server/_generated/`)
- * generated again from them and `definition` (app-definition.ts,
- * `withGeneratedCode`), whatever their own copy holds. A release never
- * takes the copy: one written by an earlier generator, or changed in
- * storage, seals as if it were current. The version's tree stays as it
- * was committed.
+ * `files`, a version's or a draft's, as a seal reads them: their config
+ * and schema generated again from `definition`, and nothing of their
+ * `server/_generated/`, which the seal generates once, from them
+ * (`inspectForSeal`). A release never takes the copy: one written by an
+ * earlier generator, or changed in storage, seals as if it were current.
+ * The version's tree stays as it was committed.
  */
 const sealedSource = (
   files: Readonly<Record<string, string>>,
   definition: AppDefinition
-): Record<string, string> => {
-  const source = new Map(Object.entries(files));
-  withGeneratedCode(source, definition);
-  return Object.fromEntries(source);
-};
+): Record<string, string> => ({
+  ...Object.fromEntries(
+    Object.entries(files).filter(
+      ([path]) => !isUnderGeneratedServerFolder(path)
+    )
+  ),
+  ...definitionSources(definition),
+});
 
 /**
  * `files`, an App's code for release `key`, built and inspected as a seal

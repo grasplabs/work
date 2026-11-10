@@ -11,6 +11,7 @@ import type {
   DefinitionOperation,
   FrozenJson,
 } from "@grasp-os/runtime/definition";
+import { ownFiles } from "@grasp-os/runtime/host";
 import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 
 // An App's definition as a test writes it, and the code generated from
@@ -20,26 +21,6 @@ import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 // (core's apps.ts, app-definition.ts), the tests' Apps (core's and e2e/'s)
 // too: a test commits its files with the definition (`TestApp`,
 // `commitApp`), never what is generated, which no write may name.
-
-/** Where Grasp generates the references, among an App's files. */
-const generatedFolder = "server/_generated/";
-
-/** Whether `path` is one of the App's server modules, as Grasp reads them. */
-const isServerModule = (path: string): boolean =>
-  path.startsWith("server/") &&
-  path !== generatedFiles.schema &&
-  !path.startsWith(generatedFolder) &&
-  !path.startsWith("server/migrations/") &&
-  path.endsWith(".ts") &&
-  !path.endsWith(".d.ts");
-
-/** `files` without what Grasp generates under `server/_generated/`. */
-const withoutGenerated = <Content>(
-  files: Readonly<Record<string, Content>>
-): Record<string, Content> =>
-  Object.fromEntries(
-    Object.entries(files).filter(([path]) => !path.startsWith(generatedFolder))
-  );
 
 /** A row rule, as `setAccess` takes it. */
 type Rule =
@@ -219,18 +200,10 @@ export const appOf = (
 ): TestApp => {
   // The config, schema and `server/_generated/` always the definition's
   // and the code's, as a commit makes them.
-  const own = { ...withoutGenerated(files), ...definitionSources(definition) };
-  const modules = Object.fromEntries(
-    Object.entries(own)
-      .filter(([path]) => isServerModule(path))
-      .map(([path, source]) => [
-        path.slice("server/".length, -".ts".length),
-        source,
-      ])
-  );
+  const own = { ...ownFiles(files), ...definitionSources(definition) };
   return {
     [defined]: true,
-    files: { ...own, ...generatedServerSources(modules, definition) },
+    files: { ...own, ...generatedServerSources(own, definition) },
     definition,
   };
 };
@@ -285,7 +258,7 @@ export const sourceParts = (
   definition: AppDefinition | undefined;
 } =>
   defined in source
-    ? { files: withoutGenerated(source.files), definition: source.definition }
+    ? { files: ownFiles(source.files), definition: source.definition }
     : { files: source, definition: undefined };
 
 /**
@@ -350,7 +323,7 @@ export const definedWith = (
  */
 export const withoutDefinition = (app: TestApp): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(withoutGenerated(app.files)).filter(
+    Object.entries(ownFiles(app.files)).filter(
       ([path]) =>
         path !== generatedFiles.config && path !== generatedFiles.schema
     )

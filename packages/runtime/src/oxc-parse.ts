@@ -12,9 +12,10 @@ import oxcParse from "#oxc-parse";
  * node types, every offset in UTF-16 code units), from core's Worker
  * where oxc-parser's own WebAssembly would declare 61 MiB up front.
  *
- * One instance, started on the first call. A call that traps (its memory
- * or the stack run out on input nested too deep) leaves the instance
- * unusable, so the next call starts a fresh one.
+ * Expressions share one instance, started on the first call; a call that
+ * traps (its memory or the stack run out on input nested too deep) leaves
+ * it unusable, so the next call starts a fresh one. A whole program gets
+ * an instance of its own (`answer`).
  */
 
 /** The language a text is parsed as: JavaScript in a module, or TypeScript. */
@@ -44,58 +45,39 @@ let started: OxcParse | undefined;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** A new instance, with all of its memory. */
-const fresh = (): OxcParse =>
+/** A new instance, with none of its memory used. */
+const instance = (): OxcParse =>
   exportsSchema.parse(new WebAssembly.Instance(oxcParse).exports);
 
-/** `oxc`'s answer to `name` of `language` and `source`, as text. */
-const answerOf = (
-  oxc: OxcParse,
-  name: "parse" | "parse_expression",
-  language: Language,
-  source: string
-): string => {
-  const put = (text: string): [number, number] => {
-    const bytes = encoder.encode(text);
-    const pointer = oxc.alloc(bytes.length);
-    new Uint8Array(oxc.memory.buffer, pointer, bytes.length).set(bytes);
-    return [pointer, bytes.length];
-  };
-  const length = oxc[name](...put(fileNames[language]), ...put(source));
-  return decoder.decode(
-    new Uint8Array(oxc.memory.buffer, oxc.out_ptr(), length)
-  );
-};
-
 /**
- * Its answer to `name` of `language` and `source`, as text: the same for
- * the same text, whatever was parsed before. An instance that answered
- * before holds what it allocated then, so a large text it refuses, or
- * traps on, is tried again on a fresh one, whose answer stands.
+ * Its answer to `name` of `language` and `source`, as text. An expression
+ * is parsed on the instance kept for them, which is started again after a
+ * call that traps; a whole program on an instance of its own, so how much
+ * of its memory a large one may use never depends on what was parsed
+ * before, and the same text always gets the same answer.
  */
 const answer = (
   name: "parse" | "parse_expression",
   language: Language,
   source: string
 ): string => {
-  const reused = started !== undefined;
-  started ??= fresh();
+  const kept = name === "parse_expression";
+  const oxc = kept ? (started ??= instance()) : instance();
+  const put = (text: string): [number, number] => {
+    const bytes = encoder.encode(text);
+    const pointer = oxc.alloc(bytes.length);
+    new Uint8Array(oxc.memory.buffer, pointer, bytes.length).set(bytes);
+    return [pointer, bytes.length];
+  };
   try {
-    const text = answerOf(started, name, language, source);
-    if (!(reused && text.startsWith('{"error"'))) {
-      return text;
-    }
+    const length = oxc[name](...put(fileNames[language]), ...put(source));
+    return decoder.decode(
+      new Uint8Array(oxc.memory.buffer, oxc.out_ptr(), length)
+    );
   } catch (error) {
-    started = undefined;
-    if (!reused) {
-      throw error;
+    if (kept) {
+      started = undefined;
     }
-  }
-  started = fresh();
-  try {
-    return answerOf(started, name, language, source);
-  } catch (error) {
-    started = undefined;
     throw error;
   }
 };

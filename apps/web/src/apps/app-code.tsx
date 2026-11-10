@@ -1,3 +1,4 @@
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import type { AppFiles, FileDiff, ViewedApp } from "@grasp-os/shared/apps";
 import type { ChatDraft } from "@grasp-os/shared/chat";
 import {
@@ -52,10 +53,6 @@ import { useCoreRead } from "./use-core-read.ts";
 // What Grasp generates among an App's files (`server/_generated/`), which
 // no one edits and every save writes again, isn't shown, as Convex's
 // dashboard leaves out `convex/_generated/`: the builder's editor reads it.
-
-/** Whether `path` is one Grasp generates under `server/_generated/`. */
-const isGenerated = (path: string): boolean =>
-  path.startsWith("server/_generated/");
 
 /** Which version's files are shown. */
 type Source = "current" | "draft";
@@ -211,7 +208,9 @@ interface OpenFile {
 /** The files of one version: their tree, and the open one's text. */
 const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
   const { t } = useLingui();
-  const paths = Object.keys(files).filter((path) => !isGenerated(path));
+  const paths = Object.keys(files).filter(
+    (path) => !isGeneratedServerFile(path)
+  );
   const tree = treeOf(paths);
   // The one asked for while this version has it, else its config, else
   // the tree's first.
@@ -444,7 +443,7 @@ const DraftChanges = ({
   );
   return changes?.state === "ready" ? (
     <ChangesView
-      diffs={changes.data.filter(({ path }) => !isGenerated(path))}
+      diffs={changes.data.filter(({ path }) => !isGeneratedServerFile(path))}
       layout={layout}
       onOpen={onOpen}
     />

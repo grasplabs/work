@@ -1,5 +1,6 @@
 import { appCodeFiles } from "@grasp-os/compiler";
 import {
+  ownFiles,
   declaredPermission,
   declaredPermissions,
   descriptorFromText,
@@ -22,7 +23,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { definitionPlan, isServerGenerated } from "./app-definition.ts";
+import { definitionPlan } from "./app-definition.ts";
 import {
   isSealed,
   loadRelease,
@@ -47,17 +48,6 @@ import { workspace } from "./durable-objects.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
 import { takesFile } from "./workflows/start-files.ts";
-
-/**
- * `files` as a review shows them: without what Grasp generates under
- * `server/_generated/`, which no one wrote and every save writes again.
- */
-const reviewed = (
-  files: Readonly<Record<string, string>>
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(([path]) => !isServerGenerated(path))
-  );
 
 // What a version changes, for the builder who reviews it before making
 // it current: worked out here from the version and the App as they are
@@ -428,7 +418,7 @@ export const reviewVersion = async (
 ): Promise<VersionReview> => {
   const found = await appFor(env, by, app, "builder");
   const row = await findVersion(env, found.id, version);
-  const files = reviewed(await versionFiles(env, found.id, row.version));
+  const files = ownFiles(await versionFiles(env, found.id, row.version));
   const { currentVersion: current } = found;
   // The current version itself changes nothing against itself.
   const currentRow =
@@ -438,7 +428,7 @@ export const reviewVersion = async (
       ? undefined
       : {
           version: currentRow.version,
-          files: reviewed(
+          files: ownFiles(
             await versionFiles(env, found.id, currentRow.version)
           ),
         };

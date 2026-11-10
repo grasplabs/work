@@ -1,12 +1,12 @@
 import { typeCheckerName } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
 import { generateModules } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { serverFunctionsIn } from "../src/app-definition.ts";
 import { loadBuiltinRelease } from "../src/builtins.ts";
 import { inspectDraft, withDraftReferences } from "../src/draft-references.ts";
 import { buildPages, checkAppCode } from "../src/pages.ts";

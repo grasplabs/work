@@ -6,6 +6,7 @@ import {
   isLintedCode,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
 import { generateModules, symbolicModules } from "@grasp-os/runtime/host";
 import type {
   BuildDiagnostic,
@@ -17,7 +18,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
-import { generatedPaths, serverFunctionsIn } from "./app-definition.ts";
+import { generatedPaths } from "./app-definition.ts";
 import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { keepLints, readLints } from "./build-cache.ts";
 import { inspectDraft, withDraftReferences } from "./draft-references.ts";
