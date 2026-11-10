@@ -230,6 +230,185 @@ describe("an App's migrations", () => {
   });
 });
 
+// Ways a transform's module code reaches the platform's clock or
+// randomness past what the runner takes away (src/determinism.ts): each
+// answers what it reached, or reads the clock plainly when it reached
+// nothing, which the runner refuses.
+
+/** What calling `method` on `self` answers, if it is a function. */
+const called = (method: unknown, self?: unknown): unknown => {
+  if (typeof method !== "function") {
+    return undefined;
+  }
+  const answer: unknown = Reflect.apply(method, self, []);
+  return answer;
+};
+
+/** The value `key` of `holder` has as its own, if it has one. */
+const ownValue = (holder: unknown, key: string): unknown =>
+  typeof holder === "object" || typeof holder === "function"
+    ? Reflect.getOwnPropertyDescriptor(holder ?? {}, key)?.value
+    : undefined;
+
+/**
+ * Starts generating an extractable key, whose bytes are randomness: the
+ * runner refuses the call, before any promise of a key.
+ */
+const generatedKey = (): unknown =>
+  crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
+
+/** `Date.now` read through its descriptor, which a proxy's `get` never sees. */
+const nowByDescriptor = (): unknown => called(ownValue(Date, "now"), Date);
+
+/** `Date.now` read through every descriptor of `Date` at once. */
+const nowByDescriptors = (): unknown =>
+  called(Object.getOwnPropertyDescriptors(Date).now.value, Date);
+
+/** `Date.now` read through the descriptor of a date's constructor. */
+const nowByPrototype = (): unknown => {
+  const prototype: unknown = Reflect.getPrototypeOf(new Date(0));
+  const constructor = ownValue(prototype, "constructor");
+  return called(ownValue(constructor, "now"), constructor);
+};
+
+/** `performance.now` read on the prototype the platform keeps it on. */
+const timelineByPrototype = (): unknown =>
+  called(ownValue(Reflect.getPrototypeOf(performance), "now"), performance);
+
+/** A date made by the platform's `Date`, if `reach` hands it to `capture`. */
+const handedDate = (
+  reach: (capture: (target: unknown) => void) => unknown
+): unknown => {
+  let handed: unknown;
+  reach((target) => {
+    handed = target;
+  });
+  if (typeof handed !== "function") {
+    return Date.now();
+  }
+  const made: unknown = Reflect.construct(handed, []);
+  return String(made);
+};
+
+/** The proxy traps module code could define on `Object.prototype`. */
+const traps = ["getOwnPropertyDescriptor", "has", "ownKeys"] as const;
+
+/**
+ * Proxy traps defined on `Object.prototype`: a handler that inherits them
+ * calls them with its target.
+ */
+const nowByInheritedTrap = (): unknown =>
+  handedDate((capture) => {
+    const objectPrototype: object = Object.prototype;
+    for (const trap of traps) {
+      Reflect.defineProperty(objectPrototype, trap, {
+        configurable: true,
+        value: (target: object, ...rest: unknown[]): unknown => {
+          capture(target);
+          const answer: unknown = Reflect.apply(Reflect[trap], undefined, [
+            target,
+            ...rest,
+          ]);
+          return answer;
+        },
+      });
+    }
+    try {
+      Reflect.getOwnPropertyDescriptor(Date, "length");
+      Reflect.has(Date, "length");
+      Reflect.ownKeys(Date);
+    } finally {
+      for (const trap of traps) {
+        Reflect.deleteProperty(objectPrototype, trap);
+      }
+    }
+  });
+
+/** `Reflect.construct` replaced while a date is made: what it is handed. */
+const nowByConstruct = (): unknown =>
+  handedDate((capture) => {
+    const real = Reflect.construct;
+    Reflect.set(
+      Reflect,
+      "construct",
+      (...args: Parameters<typeof real>): unknown => {
+        capture(args[0]);
+        const made: unknown = real(...args);
+        return made;
+      }
+    );
+    try {
+      return new Date(0);
+    } finally {
+      Reflect.set(Reflect, "construct", real);
+    }
+  });
+
+/**
+ * `Reflect.apply` replaced while a formatter's `format` is read: the
+ * platform's getter it is handed answers the platform's `format`, which
+ * formats the time when given no date.
+ */
+const nowByApply = (): unknown => {
+  const real = Reflect.apply;
+  let reached: unknown;
+  Reflect.set(Reflect, "apply", (...args: Parameters<typeof real>): unknown => {
+    const answer: unknown = real(...args);
+    if (typeof reached !== "function" && typeof answer === "function") {
+      reached = answer;
+    }
+    return answer;
+  });
+  try {
+    Reflect.get(new Intl.DateTimeFormat("en"), "format");
+  } finally {
+    Reflect.set(Reflect, "apply", real);
+  }
+  return typeof reached === "function"
+    ? called(reached)
+    : new Intl.DateTimeFormat("en").format();
+};
+
+/** The clock and randomness, read plainly. */
+const clockAndRandom = (): string => `${Date.now()}:${Math.random()}`;
+
+/** The platform's clocks and randomness, as module code could keep them. */
+const platformNow = Date.now.bind(Date);
+const platformTimeline = performance.now.bind(performance);
+const platformUUID = crypto.randomUUID.bind(crypto);
+
+/** Replaces `key` of `target` with `value`; what puts it back. */
+const replaced = (
+  target: object,
+  key: string,
+  value: unknown
+): (() => void) => {
+  const before = Reflect.getOwnPropertyDescriptor(target, key);
+  Reflect.defineProperty(target, key, {
+    configurable: true,
+    writable: true,
+    value,
+  });
+  return () => {
+    if (before === undefined) {
+      Reflect.deleteProperty(target, key);
+    } else {
+      Reflect.defineProperty(target, key, before);
+    }
+  };
+};
+
+/** `Object.defineProperty`, except that it skips the clock and randomness. */
+const realDefineProperty = Object.defineProperty;
+const skipping = (
+  target: object,
+  key: PropertyKey,
+  descriptor: PropertyDescriptor
+): object =>
+  key === "now" || key === "random"
+    ? target
+    : realDefineProperty(target, key, descriptor);
+
 describe("the runner", () => {
   const registered = notes([deriveCategory]);
 
@@ -254,8 +433,20 @@ describe("the runner", () => {
   test.each([
     ["randomness", "randomness", () => Math.random()],
     ["random values", "randomness", () => crypto.randomUUID()],
+    ["a generated key", "randomness", generatedKey],
     ["the clock", "the clock", () => Date.now()],
     ["the current date", "the clock", () => new Date().toISOString()],
+    ["the clock's descriptor", "the clock", nowByDescriptor],
+    ["the clock's descriptors", "the clock", nowByDescriptors],
+    ["the clock past a prototype", "the clock", nowByPrototype],
+    ["the timeline past its prototype", "the clock", timelineByPrototype],
+    ["the clock to a trap it inherits", "the clock", nowByInheritedTrap],
+    ["the clock to a replaced construct", "the clock", nowByConstruct],
+    ["the clock to a replaced apply", "the clock", nowByApply],
+    ["a file's time", "the clock", () => new File([], "a").lastModified],
+    ["a mark's time", "the clock", () => new PerformanceMark("a").startTime],
+    ["a marked time", "the clock", () => performance.mark("a").startTime],
+    ["a measure", "the clock", () => performance.measure("a").duration],
   ])(
     "takes away %s while a handler runs, and gives it back after",
     (_case, refused, impurity) => {
@@ -273,7 +464,72 @@ describe("the runner", () => {
       });
       expect(answer).toMatchObject({ ok: false, index: 0 });
       expect(answer.ok ? "" : answer.message).toContain(refused);
-      expect(() => [Math.random(), Date.now(), new Date()]).not.toThrow();
+      expect(impurity).not.toThrow();
+    }
+  );
+
+  test.each([
+    [
+      "Array.prototype.map",
+      () => replaced(Array.prototype, "map", () => []),
+      clockAndRandom,
+      "the clock",
+    ],
+    [
+      "Array.prototype.toReversed",
+      () => replaced(Array.prototype, "toReversed", () => []),
+      clockAndRandom,
+      "the clock",
+    ],
+    [
+      "Object.defineProperty",
+      () => replaced(Object, "defineProperty", skipping),
+      clockAndRandom,
+      "the clock",
+    ],
+    [
+      "a `get` on Object.prototype",
+      () => replaced(Object.prototype, "get", () => platformNow),
+      clockAndRandom,
+      "the clock",
+    ],
+    [
+      "performance's own `now`",
+      () => replaced(performance, "now", platformTimeline),
+      () => performance.now(),
+      "the clock",
+    ],
+    [
+      "crypto's own `randomUUID`",
+      () => replaced(crypto, "randomUUID", platformUUID),
+      () => crypto.randomUUID(),
+      "randomness",
+    ],
+  ])(
+    "takes away what module code reaches and gives it back after, though it replaced %s before",
+    (_case, replace, impurity, refused) => {
+      const impure = looseMigration({
+        ...declaration,
+        name: "impure",
+        handler: (_ctx: unknown, row: object) => ({
+          ...row,
+          category: String(impurity()),
+        }),
+      });
+      const app = notes([impure]);
+      const undo = replace();
+      let answer: ReturnType<typeof runMigration>;
+      try {
+        answer = runMigration(app, {
+          name: "impure",
+          rows: [{ id: "n1", fields: { title: "Plan" } }],
+        });
+      } finally {
+        undo();
+      }
+      expect(answer).toMatchObject({ ok: false, index: 0 });
+      expect(answer.ok ? "" : answer.message).toContain(refused);
+      expect(impurity).not.toThrow();
     }
   );
 
