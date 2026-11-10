@@ -518,7 +518,13 @@ export const requireToolClassOn = async (
   ) {
     throw connectErrors.create("connect.class_off");
   }
-  // An agent narrows the tool's own class too, as its app does.
-  await requireAgentHasClass(env, authority, toolClass);
+  // An agent narrows both the class the company checked the call as (a
+  // mail tool in a mailbox is its person's own, `inMailbox`) and the
+  // tool's own class, which its app narrows: off for either is off.
+  const checked = inMailbox(owner.provider, action, toolClass);
+  await requireAgentHasClass(env, authority, checked);
+  if (checked !== toolClass) {
+    await requireAgentHasClass(env, authority, toolClass);
+  }
   return {};
 };
