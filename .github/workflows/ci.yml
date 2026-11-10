@@ -374,15 +374,10 @@ jobs:
             echo "A draft runs only the fast checks; marking it ready for review runs the rest."
             exit 0
           fi
-          # e2e's parts, its Firefox and WebKit part and the build they
-          # start: one result, the first that isn't a success.
-          for part in "$E2E_BUILD" "$E2E_BROWSERS"; do
-            if [ "$E2E" = success ] && [ "$part" != success ]; then
-              E2E=$part
-            fi
-          done
+          # Each job by its own name: when e2e-build fails, the parts it
+          # holds back show as skipped, and the build is what failed.
           failed=""
-          for job in "test shards=$TEST" "release=$RELEASE" "workerd=$WORKERD" "e2e parts=$E2E" "admin-e2e=$ADMIN_E2E" "oxc-wasm=$OXC_WASM"; do
+          for job in "test shards=$TEST" "release=$RELEASE" "workerd=$WORKERD" "e2e-build=$E2E_BUILD" "e2e parts=$E2E" "e2e browsers=$E2E_BROWSERS" "admin-e2e=$ADMIN_E2E" "oxc-wasm=$OXC_WASM"; do
             [ "${job#*=}" = success ] || failed="$failed ${job%%=*} (${job#*=}),"
           done
           if [ -n "$failed" ]; then
