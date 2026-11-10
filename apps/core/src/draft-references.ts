@@ -5,7 +5,7 @@ import {
 } from "@grasp-os/compiler";
 import { serverFunctionsIn } from "@grasp-os/runtime/definition";
 import {
-  isGeneratedServerFile,
+  isUnderGeneratedServerFolder,
   generatedPaths,
   generateModules,
   symbolicModules,
@@ -96,7 +96,9 @@ export const withReferencesText = async (
   // Never the files' own copy of `server/_generated/` (every save writes
   // one): a page builds only with what is generated here, or without.
   const own = Object.fromEntries(
-    Object.entries(files).filter(([path]) => !isGeneratedServerFile(path))
+    Object.entries(files).filter(
+      ([path]) => !isUnderGeneratedServerFolder(path)
+    )
   );
   if (!(importsReferences(own) && isAppLayout(own))) {
     return own;

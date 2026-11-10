@@ -2,6 +2,7 @@ import {
   definitionSources,
   definitionText,
 } from "@grasp-os/runtime/definition";
+import { ownFiles } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -105,14 +106,7 @@ const storedUnchecked = async (
  * `files` as an App's limits count them: what Grasp generates under
  * `server/_generated/` apart.
  */
-const counted = (
-  files: Readonly<Record<string, string>>
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(
-      ([path]) => !path.startsWith("server/_generated/")
-    )
-  );
+const counted = ownFiles;
 
 /** The App's definition, and the config and schema generated from it. */
 const defined = testApp({ name: "Invoice desk" });

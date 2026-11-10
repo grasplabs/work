@@ -33,6 +33,13 @@ export const isGeneratedServerFile = (path: string): boolean =>
   generatedServerFiles.has(path);
 
 /**
+ * Whether `path` is under `server/_generated/` in any case, or is that
+ * folder's own name: never one of an App's own files.
+ */
+export const isUnderGeneratedServerFolder = (path: string): boolean =>
+  `${path.toLowerCase()}/`.startsWith(generatedServerFolder);
+
+/**
  * `files` as people review them: without what Grasp generates in
  * `server/_generated/`, which no one wrote and every save writes again.
  */
@@ -40,15 +47,10 @@ export const ownFiles = <Content>(
   files: Readonly<Record<string, Content>>
 ): Record<string, Content> =>
   Object.fromEntries(
-    Object.entries(files).filter(([path]) => !isGeneratedServerFile(path))
+    Object.entries(files).filter(
+      ([path]) => !isUnderGeneratedServerFolder(path)
+    )
   );
-
-/**
- * Whether `path` is under `server/_generated/` in any case, or is that
- * folder's own name: never one of an App's own files.
- */
-export const isUnderGeneratedServerFolder = (path: string): boolean =>
-  `${path.toLowerCase()}/`.startsWith(generatedServerFolder);
 
 /**
  * The format of `contracts.json`: 5 since it names no release and seals

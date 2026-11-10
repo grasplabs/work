@@ -39,7 +39,7 @@
  * where a page tries.
  */
 import {
-  migrationsFolder as migrationsFolderPath,
+  migrationsFolder as migrationsPrefix,
   serverModuleOf,
 } from "@grasp-os/runtime/server-modules";
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
@@ -111,9 +111,6 @@ const schemaFiles: ReadonlySet<string> = new Set([schemaPath, "values.ts"]);
 /** The server file at the App's root: its config. */
 const rootServerFiles: ReadonlySet<string> = new Set([configPath]);
 const generatedFile = /^(?:server\/_generated|\.grasp)\/[\w.-]+\.ts$/u;
-
-/** Where an App's migrations are. */
-const migrationsPrefix = migrationsFolderPath;
 
 /**
  * The App's migrations: each one file, `server/migrations/<name>.ts`,

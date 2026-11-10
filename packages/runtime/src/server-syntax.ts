@@ -1,5 +1,7 @@
+import { appLimits } from "@grasp-os/shared/app-limits";
 import { appMaxOperations } from "@grasp-os/shared/function-limits";
 
+import { canRegisterAt } from "./app-functions.ts";
 import type { ServerFunctions } from "./codegen-api.ts";
 import { definitionManifest, isFunctionPath } from "./definition.ts";
 import type { AppDefinition } from "./definition.ts";
@@ -14,38 +16,53 @@ import type { Declared } from "./server-modules.ts";
 // it again on every save, the same bytes for the same files and
 // definition.
 
-/** Names a reference answers itself, which no function registers at. */
-const referenceKeys: ReadonlySet<string> = new Set(["name", "then"]);
-
-/** The most module sources whose functions are kept, parsed once each. */
-const parsedMax = 32;
+/** The most characters of module sources whose functions are kept: one App's. */
+const parsedMaxLength = appLimits.totalLength;
 
 /**
- * The functions of each module source parsed lately, by its text: a save
- * reads the same modules for its references, its check and its preview,
- * and a module that doesn't change is never parsed again.
+ * The functions of each module source read lately, by its text, the most
+ * lately used last: a save reads the same modules for its references, its
+ * check and its preview, and a module that doesn't change is never parsed
+ * again.
  */
 const parsed = new Map<string, ReadonlyMap<string, Declared>>();
+
+/** The characters of `parsed`'s sources together. */
+let parsedLength = 0;
 
 /** The functions the TypeScript module `source` declares; none of one that doesn't parse. */
 const declaredFunctionsOf = (source: string): ReadonlyMap<string, Declared> => {
   const kept = parsed.get(source);
   if (kept !== undefined) {
+    parsed.delete(source);
+    parsed.set(source, kept);
     return kept;
   }
   let declared: ReadonlyMap<string, Declared>;
   try {
     declared = declaredFunctionsIn(parseProgram(source, "ts").program);
-  } catch {
-    // What doesn't parse, or runs the parser out of memory or stack.
+  } catch (error) {
+    // What doesn't parse, or runs the parser out of its memory or stack,
+    // declares nothing, every time. Anything else (no memory for an
+    // instance at all) says nothing of the source: the write fails.
+    if (
+      !(
+        error instanceof SyntaxError ||
+        error instanceof WebAssembly.RuntimeError
+      )
+    ) {
+      throw error;
+    }
     declared = new Map();
   }
   parsed.set(source, declared);
-  if (parsed.size > parsedMax) {
-    const [oldest] = parsed.keys();
-    if (oldest !== undefined) {
-      parsed.delete(oldest);
+  parsedLength += source.length;
+  for (const oldest of parsed.keys()) {
+    if (parsedLength <= parsedMaxLength) {
+      break;
     }
+    parsed.delete(oldest);
+    parsedLength -= oldest.length;
   }
   return declared;
 };
@@ -68,12 +85,12 @@ export const serverFunctionsIn = (
     for (const [name, { visibility }] of declaredFunctionsOf(source)) {
       const path = `${module.replaceAll("/", ".")}.${name}`;
       // Never a folder named with a dot, which would make another
-      // function's path, nor a name a reference answers itself, which
-      // registration refuses (app-functions.ts).
+      // function's path, nor a path registration refuses
+      // (app-functions.ts).
       if (
         isFunctionPath(path) &&
         !module.includes(".") &&
-        !path.split(".").some((segment) => referenceKeys.has(segment))
+        canRegisterAt(path.split("."))
       ) {
         functions[path] = visibility;
       }

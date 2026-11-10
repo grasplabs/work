@@ -76,8 +76,8 @@ const indexRead = (
 };
 
 /** `server/deals/open.ts` as pages reach it: `deals.open`. */
-const moduleOf = (path: string): string =>
-  (serverModuleOf(path) ?? path).replaceAll("/", ".");
+const moduleOf = (path: string): string | undefined =>
+  serverModuleOf(path)?.replaceAll("/", ".");
 
 /**
  * The indexes each exported function (`export const name = …`) of the
@@ -98,10 +98,11 @@ export const indexReadsOf = (
     }
     return children(declaration, "declarations").flatMap((declarator) => {
       const name = nameOf(child(declarator, "id"));
-      if (name === undefined) {
+      const module = moduleOf(path);
+      if (name === undefined || module === undefined) {
         return [];
       }
-      const query = `${moduleOf(path)}.${name}`;
+      const query = `${module}.${name}`;
       const reads: IndexRead[] = [];
       walk(declarator, (node) => {
         const read =
@@ -127,10 +128,14 @@ export const exportedFunctionsOf = (
   tree: Parsed | undefined
 ): string[] =>
   [...declaredFunctionsIn(tree?.program)].flatMap(
-    ([name, { kind, visibility }]) =>
-      visibility === "public" && kind !== "action"
-        ? [`${moduleOf(path)}.${name}`]
-        : []
+    ([name, { kind, visibility }]) => {
+      const module = moduleOf(path);
+      return module !== undefined &&
+        visibility === "public" &&
+        kind !== "action"
+        ? [`${module}.${name}`]
+        : [];
+    }
   );
 
 /**

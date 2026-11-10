@@ -9,7 +9,7 @@ import {
   withExportedFunctions,
 } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
-import { isGeneratedServerFile } from "@grasp-os/runtime/host";
+import { isGeneratedServerFile, ownFiles } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -679,7 +679,10 @@ const exportedPaths = async (
     // commit gives what this one couldn't.
     const build = await withinBuildWait(
       env,
-      async () => await buildAppCode(env, Object.fromEntries(files), app)
+      // Without their copy of `server/_generated/`, as a seal builds
+      // them (app-releases.ts, `sealedSource`): the same build, cached.
+      async () =>
+        await buildAppCode(env, ownFiles(Object.fromEntries(files)), app)
     );
     if (build === "late" || build.functions === undefined) {
       return undefined;
