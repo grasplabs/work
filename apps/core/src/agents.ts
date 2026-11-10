@@ -78,7 +78,8 @@ export const readAgent = async (
     .where(eq(agents.id, id))
     .get();
   if (row === undefined) {
-    return id === firstAgentId ? firstAgent : undefined;
+    // A copy: what a caller does to it never reaches the next read.
+    return id === firstAgentId ? { ...firstAgent } : undefined;
   }
   return {
     id: row.id,
