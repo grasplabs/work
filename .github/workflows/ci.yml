@@ -50,11 +50,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  # Everything but `vp test` and the build (release, below), once: format,
-  # lint and types, the repo checks, that generated files are committed,
-  # and on a pull request its branch name and title, which becomes the
-  # commit on main and the release note. Part of the required `check`
-  # (below).
+  # Format, lint and types, the migrations' check against main, and on a
+  # pull request its branch name and title, which becomes the commit on
+  # main and the release note. The other repo checks, and that generated
+  # files are committed, run beside it (generated, below). Part of the
+  # required `check` (below).
   static:
     name: static
     if: github.event_name != 'push'
@@ -786,7 +786,8 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
       # The builds above regenerate the route trees, which must be committed
-      # (static checks the other generated files without building).
+      # (generated, above, checks the other generated files without
+      # building).
       - if: github.event_name != 'push'
         run: git diff --exit-code -- '*routeTree.gen.ts'
       # Every file but the build's `.grasp-release` marker, which only

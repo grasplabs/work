@@ -18,6 +18,7 @@ import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 
 import { z } from "zod";
@@ -45,33 +46,32 @@ const run = (command: string, args: string[], cwd = ROOT): string =>
   execFileSync(command, args, { cwd, encoding: "utf-8" }).trim();
 
 /**
- * Runs a build beside others, printing its output whole once it ends, so
- * two builds' lines never interleave; a failed build prints what it wrote
- * before the error.
+ * Runs a build beside others, printing each line as it comes, prefixed
+ * with whose it is (`[core] `), so a build that fails early or hangs
+ * shows where, and two builds' lines stay told apart.
  */
 const runBeside = async (
+  name: string,
   command: string,
   args: string[],
   cwd = ROOT
 ): Promise<void> => {
   const label = `${path.relative(ROOT, cwd) || "."}$ ${command} ${args.join(" ")}`;
-  const output: string[] = [];
+  console.info(`[${name}] ${label}`);
   const child = spawn(command, args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  child.stdout.on("data", (chunk: Buffer) => {
-    output.push(chunk.toString());
-  });
-  child.stderr.on("data", (chunk: Buffer) => {
-    output.push(chunk.toString());
-  });
+  for (const stream of [child.stdout, child.stderr]) {
+    createInterface({ input: stream }).on("line", (line) => {
+      console.info(`[${name}] ${line}`);
+    });
+  }
   // Rejects with the spawn's error, if it couldn't start.
   await once(child, "close");
-  console.info(`${label}\n${output.join("")}`);
   if (child.exitCode !== 0) {
     throw new Error(
-      `${label} exited with ${String(child.exitCode ?? child.signalCode)}`
+      `[${name}] ${label} exited with ${String(child.exitCode ?? child.signalCode)}`
     );
   }
 };
@@ -139,9 +139,14 @@ const buildWorker = async (
     parseJsonc(readFileSync(configFile, "utf-8"))
   );
   // Each app's own build step.
-  await runBeside("vp", ["run", "build"], dir);
+  await runBeside(app, "vp", ["run", "build"], dir);
   const outDir = path.join(bundleDir, app);
-  await runBeside("wrangler", ["deploy", "--dry-run", "--outdir", outDir], dir);
+  await runBeside(
+    app,
+    "wrangler",
+    ["deploy", "--dry-run", "--outdir", outDir],
+    dir
+  );
   return {
     key: app,
     config,
@@ -189,7 +194,7 @@ const buildWorkers = async (): Promise<WorkerBuild[]> => {
     return await Promise.all(
       RELEASED_APPS.map(async (app) => {
         if (app === "core") {
-          await runBeside("vp", [
+          await runBeside(FRONTEND, "vp", [
             "run",
             "--filter",
             `@grasp-os/${FRONTEND}`,
