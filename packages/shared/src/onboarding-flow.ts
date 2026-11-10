@@ -180,3 +180,72 @@ export const flowAgreementsOf = (flow: OnboardingFlow): FlowAgreement[] =>
   flow.on
     ? flowAgreements.filter((agreement) => flow.grasp.agreements[agreement])
     : [];
+
+/** `flow` with the steps in `off` switched off, in the order they were. */
+const without = (off: readonly FlowStep[]): OnboardingFlow["steps"] =>
+  flowSteps.map((id) => ({ id, on: !off.includes(id) }));
+
+/**
+ * The flows staff start from. `full` is all of it. `short` keeps who is
+ * who, the team leads and the interviews. `setup` is the admin's own
+ * setting up, with no interviews and nothing of Grasp's before them.
+ * `none` is no onboarding: people sign in straight to the platform.
+ */
+export const flowPresets = {
+  full: defaultFlow,
+  short: {
+    on: true,
+    steps: without(["about", "sources", "documents", "pulse"]),
+    grasp: defaultFlow.grasp,
+  },
+  setup: {
+    on: true,
+    steps: without(["about", "pulse", "leads", "interviews"]),
+    grasp: {
+      kickoff: false,
+      agreements: { processing: false, assessment: false, council: false },
+    },
+  },
+  none: { ...defaultFlow, on: false },
+} as const satisfies Record<string, OnboardingFlow>;
+export type FlowPreset = keyof typeof flowPresets;
+
+/** `flow` with step `id` moved to place `to`, from 0, the others keeping their order. */
+export const withStepMoved = (
+  flow: OnboardingFlow,
+  id: FlowStep,
+  to: number
+): OnboardingFlow => {
+  const moved = flow.steps.find((step) => step.id === id);
+  if (moved === undefined) {
+    return flow;
+  }
+  const rest = flow.steps.filter((step) => step.id !== id);
+  const at = Math.min(Math.max(to, 0), rest.length);
+  return { ...flow, steps: [...rest.slice(0, at), moved, ...rest.slice(at)] };
+};
+
+/** The screens the admin goes through in this flow, in order; none where there is no onboarding. */
+export const flowScreens = (flow: OnboardingFlow): SetupStepId[] =>
+  flow.on
+    ? flow.steps
+        .filter(({ on }) => on)
+        .flatMap(({ id }): SetupStepId[] =>
+          id === "interviews" ? ["team", "listening", "review", "open"] : [id]
+        )
+    : [];
+
+/**
+ * How the platform opens to the company in this flow: on Grasp's `go`
+ * once the interviews told enough; once the admin `finished` the last
+ * screen, where nobody is interviewed; or `at_once`, where there is
+ * nothing to go through.
+ */
+export const flowOpening = (
+  flow: OnboardingFlow
+): "go" | "finished" | "at_once" => {
+  if (flowInterviews(flow)) {
+    return "go";
+  }
+  return flowScreens(flow).length > 0 ? "finished" : "at_once";
+};

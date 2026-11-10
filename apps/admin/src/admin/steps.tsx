@@ -5,7 +5,6 @@ import {
   listenDays,
   mayInvite,
   RESEARCH_SOURCES,
-  STAGES,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   OrgView,
@@ -14,6 +13,7 @@ import type {
   Stage,
   StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
+import type { OnboardingFlow } from "@grasp-os/shared/onboarding-flow";
 import { Button } from "@grasp-os/ui/components/button";
 import { Progress } from "@grasp-os/ui/components/progress";
 /**
@@ -57,6 +57,7 @@ import type { ReactNode } from "react";
 import { AgreementsAction } from "./agreements.tsx";
 import { CommandButton, GateControls } from "./commands.tsx";
 import type { GateState } from "./commands.tsx";
+import { stageShown, stagesIn } from "./flow-stages.ts";
 import { Kickoff, visionWords } from "./kickoff.tsx";
 import { Done, KnowledgeDots, Tile } from "./parts.tsx";
 import { Section, SectionRow } from "./section.tsx";
@@ -119,13 +120,27 @@ const NotHere = ({ children }: { children: ReactNode }) => (
 );
 
 /** The steps, each a link that opens it underneath, with the open one marked as a chosen tab is. */
+/** How many columns the steps take when wide, by how many the flow has: a class each, as a class is never built from a number. */
+const stageColumns: Record<number, string> = {
+  1: "lg:grid-cols-1",
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+  4: "lg:grid-cols-4",
+  5: "lg:grid-cols-5",
+  6: "lg:grid-cols-6",
+  7: "lg:grid-cols-7",
+};
+
 const StageList = ({
   view,
   stage,
+  shown,
   clientId,
 }: {
   view: OrgView;
   stage: Stage;
+  /** The steps this company's flow has. */
+  shown: readonly Stage[];
   clientId: string;
 }) => {
   const lines = stageLines(view);
@@ -134,8 +149,8 @@ const StageList = ({
       aria-label="The steps of this onboarding"
       className="bg-card overflow-hidden rounded-xl border"
     >
-      <ol className="grid lg:grid-cols-7">
-        {STAGES.map((each) => {
+      <ol className={cn("grid", stageColumns[shown.length])}>
+        {shown.map((each) => {
           const open = each === stage;
           const status = view.stages[each];
           return (
@@ -1009,14 +1024,15 @@ const Opens = ({
 /** One organization's onboarding: its steps, and the chosen one opened underneath. */
 export const OrgSteps = ({
   view,
-  stage,
+  stage: asked,
   clientId,
   paused,
   gate,
   agreements,
+  flow,
 }: {
   view: OrgView;
-  /** The step that is open. */
+  /** The step asked for: it opens while the flow has it. */
   stage: Stage;
   clientId: string;
   /** What was agreed, as core keeps it, to change it from. */
@@ -1025,28 +1041,34 @@ export const OrgSteps = ({
   paused: boolean;
   /** The gate as core keeps it: open now or not, and Grasp's go. */
   gate: GateState;
-}) => (
-  <>
-    <StageList clientId={clientId} stage={stage} view={view} />
-    {stage === "conversation" ? (
-      <Conversation clientId={clientId} view={view} />
-    ) : null}
-    {stage === "research" ? <Research view={view} /> : null}
-    {stage === "agreed" ? (
-      <Agreed
-        agreements={agreements}
-        clientId={clientId}
-        paused={paused}
-        view={view}
-      />
-    ) : null}
-    {stage === "connected" ? <Company view={view} /> : null}
-    {stage === "leads" ? <Leads clientId={clientId} view={view} /> : null}
-    {stage === "interviews" ? (
-      <Interviews clientId={clientId} paused={paused} view={view} />
-    ) : null}
-    {stage === "open" ? (
-      <Opens clientId={clientId} gate={gate} paused={paused} view={view} />
-    ) : null}
-  </>
-);
+  /** How much onboarding the company goes through; none from a Grasp that says no flow. */
+  flow: OnboardingFlow | undefined;
+}) => {
+  const shown = stagesIn(flow);
+  const stage = stageShown(shown, asked, view.stages);
+  return (
+    <>
+      <StageList clientId={clientId} shown={shown} stage={stage} view={view} />
+      {stage === "conversation" ? (
+        <Conversation clientId={clientId} view={view} />
+      ) : null}
+      {stage === "research" ? <Research view={view} /> : null}
+      {stage === "agreed" ? (
+        <Agreed
+          agreements={agreements}
+          clientId={clientId}
+          paused={paused}
+          view={view}
+        />
+      ) : null}
+      {stage === "connected" ? <Company view={view} /> : null}
+      {stage === "leads" ? <Leads clientId={clientId} view={view} /> : null}
+      {stage === "interviews" ? (
+        <Interviews clientId={clientId} paused={paused} view={view} />
+      ) : null}
+      {stage === "open" ? (
+        <Opens clientId={clientId} gate={gate} paused={paused} view={view} />
+      ) : null}
+    </>
+  );
+};
