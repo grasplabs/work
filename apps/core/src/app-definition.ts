@@ -60,7 +60,7 @@ import type { SchemaIds } from "./schema-changes.ts";
 //   doesn't declare, hide one, or type a page's calls as something else:
 //   no write names a path under `server/_generated/`, in any case (the
 //   path schema, shared's apps.ts; `refuseGeneratedFiles`), and every
-//   write generates it again anyway.
+//   write generates it again anyway, dropping anything else there.
 // - A copy that is stale or forged in storage (a tree written another
 //   way, or by an earlier generator): sealing a version compares its
 //   copy with what the seal generates, byte for byte, and refuses it
@@ -101,9 +101,17 @@ export const refuseGeneratedFiles = (paths: Iterable<string>): void => {
   }
 };
 
-/** Whether `path` is one Grasp generates under `server/_generated/`. */
+/** Where Grasp generates `server/_generated/` among an App's files. */
+export const serverGeneratedPaths: readonly string[] = [
+  hostGeneratedPaths.api,
+  hostGeneratedPaths.dataModel,
+  hostGeneratedPaths.internal,
+  hostGeneratedPaths.server,
+];
+
+/** Whether `path` is one of `server/_generated/`'s, as Grasp generates them. */
 export const isServerGenerated = (path: string): boolean =>
-  path.startsWith("server/_generated/");
+  serverGeneratedPaths.includes(path);
 
 /**
  * The App's server modules among `files`, each one's source by its path
@@ -164,6 +172,16 @@ export const withGeneratedCode = (
 ): void => {
   for (const [path, source] of Object.entries(definitionSources(definition))) {
     files.set(path, source);
+  }
+  // `server/_generated/` holds what Grasp generates and nothing else,
+  // whatever a tree written another way held there.
+  for (const path of files.keys()) {
+    if (
+      path.toLowerCase().startsWith("server/_generated/") &&
+      !isServerGenerated(path)
+    ) {
+      files.delete(path);
+    }
   }
   for (const [path, source] of Object.entries(
     generatedServerFiles(files, definition)

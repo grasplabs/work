@@ -59,6 +59,22 @@ const nameOf = (node: Node | undefined): string | undefined =>
     ? node.name
     : undefined;
 
+/** TypeScript's wrappers of an expression, which change no value. */
+const typeWrappers: ReadonlySet<string> = new Set([
+  "TSAsExpression",
+  "TSSatisfiesExpression",
+  "TSNonNullExpression",
+]);
+
+/** `node` without the type wrappers around it (`query(…) satisfies T`). */
+const unwrapped = (node: Node | undefined): Node | undefined => {
+  let current = node;
+  while (current !== undefined && typeWrappers.has(current.type)) {
+    current = child(current, "expression");
+  }
+  return current;
+};
+
 /** The functions one statement declares: `export const name = builder(…)`. */
 const declaredBy = (statement: Node): [string, "public" | "internal"][] => {
   const declaration = child(statement, "declaration");
@@ -71,7 +87,7 @@ const declaredBy = (statement: Node): [string, "public" | "internal"][] => {
   }
   return children(declaration, "declarations").flatMap((declarator) => {
     const name = nameOf(child(declarator, "id"));
-    const init = child(declarator, "init");
+    const init = unwrapped(child(declarator, "init"));
     const builder =
       init?.type === "CallExpression"
         ? nameOf(child(init, "callee"))

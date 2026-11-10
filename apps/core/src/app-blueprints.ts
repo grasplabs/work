@@ -35,7 +35,11 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import { generatedPaths, withGeneratedCode } from "./app-definition.ts";
+import {
+  generatedPaths,
+  isServerGenerated,
+  withGeneratedCode,
+} from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
 import {
@@ -975,7 +979,10 @@ export const blueprintUpdate = async (
     to: pending.blueprint.tree,
     definition: pending.theirs.definition.hash,
     over: pending.latest.version,
-    changes: diffFiles(pending.ours, pending.merged.files),
+    // What Grasp generates is no change of the blueprint's.
+    changes: diffFiles(pending.ours, pending.merged.files).filter(
+      ({ path }) => !isServerGenerated(path)
+    ),
     conflicts: pending.merged.conflicts,
     definitionConflict: pending.merged.definitionConflict,
   };

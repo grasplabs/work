@@ -1,5 +1,6 @@
 import { isPageFile } from "@grasp-os/compiler";
 import {
+  definitionSources,
   definitionText,
   emptyDefinition,
   readDefinition,
@@ -1048,8 +1049,13 @@ export const applyChanges = (
   const submitted = new Map(
     [...generatedPaths].map((path) => [path, files.get(path)])
   );
-  withGeneratedCode(files, definition);
+  // The App's limits first, which `server/_generated/` doesn't count
+  // toward: nothing past them is read for what it declares.
+  for (const [path, source] of Object.entries(definitionSources(definition))) {
+    files.set(path, source);
+  }
   checkLimits(files, before);
+  withGeneratedCode(files, definition);
   checkPaths(files.keys(), added);
   checkMemory(agentsBefore, files.get(appMemoryPath));
   const generated = [...generatedPaths].flatMap((path): [string, string][] => {

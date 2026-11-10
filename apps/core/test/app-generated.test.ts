@@ -165,9 +165,18 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
     // Without one at all: a version committed before it was part of the files.
     const { [internal]: _gone, ...without } = files;
     await storedAsIs(app, owner, 3, without, 1);
+    // With a module of its own there, which no write could put.
+    await storedAsIs(
+      app,
+      owner,
+      4,
+      { ...files, "server/_generated/extra.ts": "export const x = 1;\n" },
+      1
+    );
     const refusals = await Promise.all([
       failure(async () => await seal(fixture, 2)),
       failure(async () => await seal(fixture, 3)),
+      failure(async () => await seal(fixture, 4)),
     ]);
     // Saved again, it is generated anew, and publishes.
     await commitDefined(
@@ -177,17 +186,21 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
       { "AGENTS.md": "# Notes\n" },
       "Saved again"
     );
-    const saved = await filesOf(app, 4);
-    const { manifest } = await sealRelease(env, { app, version: 4, by: owner });
+    const saved = await filesOf(app, 5);
+    const { manifest } = await sealRelease(env, { app, version: 5, by: owner });
     expect({
       refusals,
       regenerated:
         saved[api] === files[api] && saved[internal] === files[internal],
       sealed: manifest.resourceVersion,
     }).toStrictEqual({
-      refusals: ["version.generated_stale", "version.generated_stale"],
+      refusals: [
+        "version.generated_stale",
+        "version.generated_stale",
+        "version.generated_stale",
+      ],
       regenerated: true,
-      sealed: 4,
+      sealed: 5,
     });
   });
 
@@ -238,6 +251,11 @@ import { query } from "@server/_generated/server";
 const read = query;
 export const hidden = read({ args: {}, returns: v.string(), handler: () => "hidden" });
 `,
+        // Declared as a query by a builder of its own, so no function.
+        "server/local.ts": `const query = (definition: unknown): unknown => definition;
+
+export const fake = query({ args: {} });
+`,
         // Internal, though its syntax reads as a public query's.
         "server/renamed.ts": `import { v } from "@grasp-os/sdk";
 import { internalQuery as query } from "@server/_generated/server";
@@ -263,7 +281,9 @@ export const secret = query({ args: {}, returns: v.string(), handler: () => "sec
     }).toStrictEqual({
       referenced: false,
       code: "version.function_undeclared",
-      details: { functions: ["aliased.hidden", "renamed.secret"] },
+      details: {
+        functions: ["aliased.hidden", "local.fake", "renamed.secret"],
+      },
     });
   });
 });

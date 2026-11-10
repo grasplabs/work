@@ -20,7 +20,7 @@ export const list = query({ args: {}, handler: async () => [] });
 export const add = mutation({ args: { title: v.string() }, handler: async () => null });
 export const sync = action({ args: {}, handler: async () => null });
 export const count = internalQuery({ args: {}, handler: async () => 0 });
-export const purge = internalMutation({ args: {}, handler: async () => null });
+export const purge = internalMutation({ args: {}, handler: async () => null }) satisfies object;
 `;
 
 /** A query of a few lines, numbered `index`. */

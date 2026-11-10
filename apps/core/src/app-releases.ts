@@ -50,7 +50,11 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { generatedServerFiles, serverFunctionsIn } from "./app-definition.ts";
+import {
+  generatedServerFiles,
+  serverFunctionsIn,
+  serverGeneratedPaths,
+} from "./app-definition.ts";
 import {
   builtCode,
   checkedCode,
@@ -1006,37 +1010,37 @@ interface InspectedRelease {
 
 /**
  * Refuses a release whose code registers a function its syntax doesn't
- * declare (`functions`, app-definition.ts `serverFunctionsIn`), or
- * declares as another visibility: one made through an alias of a builder
- * or a wrapper, which the generated references don't name, so its pages
- * and code could never reach it as the release has it
- * (`version.function_undeclared`, naming each).
+ * declare (`functions`, app-definition.ts `serverFunctionsIn`), declares
+ * as another visibility, or declares but doesn't register: one made
+ * through an alias of a builder or a wrapper, which the generated
+ * references don't name, or name wrongly, so its pages and code could
+ * never reach it as the release has it (`version.function_undeclared`,
+ * naming each).
  */
 const requireDeclaredFunctions = (
   manifest: AppManifest,
   functions: ServerFunctions
 ): void => {
-  const undeclared = Object.values(manifest.operations)
-    .filter(
-      ({ path, visibility }) =>
-        !Object.hasOwn(functions, path) || functions[path] !== visibility
-    )
-    .map(({ path }) => path)
-    .toSorted();
+  const registered = Object.values(manifest.operations);
+  const undeclared = [
+    ...registered
+      .filter(
+        ({ path, visibility }) =>
+          !Object.hasOwn(functions, path) || functions[path] !== visibility
+      )
+      .map(({ path }) => path),
+    // And a reference to one its code declares that doesn't register (a
+    // `query` of its own, say), which no call could reach.
+    ...Object.keys(functions).filter(
+      (path) => !Object.hasOwn(manifest.operations, path)
+    ),
+  ].toSorted();
   if (undeclared.length > 0) {
     throw versionErrors.create("version.function_undeclared", {
       functions: undeclared.slice(0, 50),
     });
   }
 };
-
-/** Where `server/_generated/` is among an App's files, in order. */
-const serverGeneratedPaths: readonly string[] = [
-  generatedPaths.api,
-  generatedPaths.dataModel,
-  generatedPaths.internal,
-  generatedPaths.server,
-];
 
 /**
  * Refuses sealing a version whose `server/_generated/` (`files`' copy)
@@ -1052,9 +1056,18 @@ const requireGeneratedCurrent = (
   files: Readonly<Record<string, string>>,
   expected: Readonly<Record<string, string>>
 ): void => {
-  const stale = serverGeneratedPaths.filter(
-    (path) => !Object.hasOwn(files, path) || files[path] !== expected[path]
+  // And nothing else there: no write makes one, so only storage could.
+  const others = Object.keys(files).filter(
+    (path) =>
+      path.toLowerCase().startsWith("server/_generated/") &&
+      !serverGeneratedPaths.includes(path)
   );
+  const stale = [
+    ...serverGeneratedPaths.filter(
+      (path) => !Object.hasOwn(files, path) || files[path] !== expected[path]
+    ),
+    ...others,
+  ];
   if (stale.length > 0) {
     throw versionErrors.create("version.generated_stale", { paths: stale });
   }
