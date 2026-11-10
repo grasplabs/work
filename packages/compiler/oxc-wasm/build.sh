@@ -7,7 +7,7 @@
 # profile: `build.sh <oxc.wasm out> <oxc-parse.wasm out>`. Run by the
 # Build oxc WASM workflow, which publishes oxc.wasm; installs and builds
 # only download it (wasm.ts). oxc-parse.wasm is committed
-# (packages/sdk/src/oxc-parse.wasm), and CI's oxc-wasm job builds it again
+# (packages/runtime/src/oxc-parse.wasm), and CI's oxc-wasm job builds it again
 # and compares. Needs git, rustup and jq.
 #
 # What the bytes depend on, each fixed here or by the commit: the
@@ -44,7 +44,7 @@ remap="\"--remap-path-prefix=$work/oxc=oxc\", \"--remap-path-prefix=$HOME=~\""
 #   file that needs more traps, and src/oxc.ts starts a fresh instance.
 cargo build --release --target wasm32-wasip1 -p grasp_oxc_wasm \
   --config "target.wasm32-wasip1.rustflags=[$remap, \"-C\", \"link-arg=--max-memory=67108864\"]"
-# The parser alone, for core's Worker (packages/sdk/src/oxc-parse.ts): no
+# The parser alone, for core's Worker (packages/runtime/src/oxc-parse.ts): no
 # `tools`, no WASI (it imports nothing), and built for size, as what it
 # parses is small: half the bytes of oxc's speed-first profile.
 # - A memory of at most 16 MiB (256 pages), out of core's 128 MB: an
