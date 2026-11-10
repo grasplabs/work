@@ -8,7 +8,7 @@ import type { AppManifest } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 
-import { serverFunctionsIn } from "./app-definition.ts";
+import { isServerGenerated, serverFunctionsIn } from "./app-definition.ts";
 import { filesManifest } from "./app-inspection.ts";
 import type { BuildOptions } from "./pages.ts";
 
@@ -84,8 +84,9 @@ export const pageModulesOf = (
 };
 
 /**
- * `files` with the page modules (`PageModules`) as `referencesOf`
- * answers them: unchanged when no page names the references, when the
+ * `files`, without their own copy of `server/_generated/`, with the page
+ * modules (`PageModules`) as `referencesOf` answers them: none when no
+ * page names the references, when the
  * files aren't of spec 8's layout, or when there are none (their server
  * code doesn't build or inspect: an expected error). A page that imports
  * them then fails its build and says so, and the server build says why.
@@ -94,19 +95,24 @@ export const withReferencesText = async (
   files: Record<string, string>,
   referencesOf: () => Promise<PageModules | undefined>
 ): Promise<Record<string, string>> => {
-  if (!(mentionsReferences(files) && isAppLayout(files))) {
-    return files;
+  // Never the files' own copy of `server/_generated/` (every save writes
+  // one): a page builds only with what is generated here, or without.
+  const own = Object.fromEntries(
+    Object.entries(files).filter(([path]) => !isServerGenerated(path))
+  );
+  if (!(mentionsReferences(own) && isAppLayout(own))) {
+    return own;
   }
   let references: PageModules | undefined;
   try {
     references = await referencesOf();
   } catch (error) {
     if (isExpectedError(error)) {
-      return files;
+      return own;
     }
     throw error;
   }
-  return references === undefined ? files : { ...files, ...references };
+  return references === undefined ? own : { ...own, ...references };
 };
 
 /**

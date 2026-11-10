@@ -1,3 +1,5 @@
+import { appLimits } from "@grasp-os/shared/app-limits";
+import { appMaxOperations } from "@grasp-os/shared/function-limits";
 import { describe, expect, test } from "vite-plus/test";
 
 import { emptyDefinition } from "../src/definition.ts";
@@ -19,6 +21,16 @@ export const add = mutation({ args: { title: v.string() }, handler: async () => 
 export const sync = action({ args: {}, handler: async () => null });
 export const count = internalQuery({ args: {}, handler: async () => 0 });
 export const purge = internalMutation({ args: {}, handler: async () => null });
+`;
+
+/** A query of a few lines, numbered `index`. */
+const declaration = (
+  index: number
+): string => `export const list${index} = query({
+  args: { id: v.id("tasks"), done: v.boolean() },
+  handler: async (ctx, { done }) =>
+    await ctx.db.query("tasks").withIndex("by_done", (q) => q.eq("done", done)).collect(),
+});
 `;
 
 describe("the functions a server module's syntax declares", () => {
@@ -68,6 +80,38 @@ export const fine = query({ args: {}, handler: async () => 1 });
     expect(
       serverFunctionsOf({ broken: "export const list = query({", tasks })
     ).toStrictEqual(serverFunctionsOf({ tasks }));
+  });
+
+  test("are the same for a module as long as an App's file may be, whatever was read before", () => {
+    let large = `import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n`;
+    for (let index = 0; large.length < appLimits.fileLength; index += 1) {
+      large += declaration(index);
+    }
+    large = large.slice(0, large.lastIndexOf("export const"));
+    const each = [1, 2, 3].map(
+      () => Object.keys(serverFunctionsOf({ tasks, large })).length
+    );
+    expect({
+      fits: large.length <= appLimits.fileLength,
+      same: new Set(each).size,
+      read: (each[0] ?? 0) > 100,
+    }).toStrictEqual({ fits: true, same: 1, read: true });
+  });
+
+  test("are at most as many as an App may register, the same ones whatever order the modules come in", () => {
+    const many = `import { query } from "@server/_generated/server";
+${Array.from({ length: appMaxOperations }, (_, index) => `export const f${index} = query({ args: {}, handler: async () => 1 });`).join("\n")}
+`;
+    const one = serverFunctionsOf({ many, tasks });
+    const other = serverFunctionsOf({ tasks, many });
+    expect({
+      count: Object.keys(one).length,
+      same:
+        Object.keys(one).toSorted().join(",") ===
+        Object.keys(other).toSorted().join(","),
+      first: Object.keys(one).filter((path) => path.startsWith("tasks."))
+        .length,
+    }).toStrictEqual({ count: appMaxOperations, same: true, first: 0 });
   });
 
   test("make the same generated modules whatever order the modules come in", () => {

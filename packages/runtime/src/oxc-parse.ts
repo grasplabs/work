@@ -44,25 +44,56 @@ let started: OxcParse | undefined;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** Its answer to `name` of `language` and `source`, as text. */
-const answer = (
+/** A new instance, with all of its memory. */
+const fresh = (): OxcParse =>
+  exportsSchema.parse(new WebAssembly.Instance(oxcParse).exports);
+
+/** `oxc`'s answer to `name` of `language` and `source`, as text. */
+const answerOf = (
+  oxc: OxcParse,
   name: "parse" | "parse_expression",
   language: Language,
   source: string
 ): string => {
-  started ??= exportsSchema.parse(new WebAssembly.Instance(oxcParse).exports);
-  const oxc = started;
   const put = (text: string): [number, number] => {
     const bytes = encoder.encode(text);
     const pointer = oxc.alloc(bytes.length);
     new Uint8Array(oxc.memory.buffer, pointer, bytes.length).set(bytes);
     return [pointer, bytes.length];
   };
+  const length = oxc[name](...put(fileNames[language]), ...put(source));
+  return decoder.decode(
+    new Uint8Array(oxc.memory.buffer, oxc.out_ptr(), length)
+  );
+};
+
+/**
+ * Its answer to `name` of `language` and `source`, as text: the same for
+ * the same text, whatever was parsed before. An instance that answered
+ * before holds what it allocated then, so a large text it refuses, or
+ * traps on, is tried again on a fresh one, whose answer stands.
+ */
+const answer = (
+  name: "parse" | "parse_expression",
+  language: Language,
+  source: string
+): string => {
+  const reused = started !== undefined;
+  started ??= fresh();
   try {
-    const length = oxc[name](...put(fileNames[language]), ...put(source));
-    return decoder.decode(
-      new Uint8Array(oxc.memory.buffer, oxc.out_ptr(), length)
-    );
+    const text = answerOf(started, name, language, source);
+    if (!(reused && text.startsWith('{"error"'))) {
+      return text;
+    }
+  } catch (error) {
+    started = undefined;
+    if (!reused) {
+      throw error;
+    }
+  }
+  started = fresh();
+  try {
+    return answerOf(started, name, language, source);
   } catch (error) {
     started = undefined;
     throw error;

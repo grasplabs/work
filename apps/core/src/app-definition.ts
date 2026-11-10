@@ -92,13 +92,18 @@ export const generatedPaths: ReadonlySet<string> = new Set([
  * the same file.
  */
 export const refuseGeneratedFiles = (paths: Iterable<string>): void => {
-  const named = [...paths].filter((path) =>
-    generatedPaths.has(path.toLowerCase())
+  const generated = new Set(
+    [...generatedPaths].map((path) => path.toLowerCase())
   );
+  const named = [...paths].filter((path) => generated.has(path.toLowerCase()));
   if (named.length > 0) {
     throw appErrors.create("app.generated_file", { issues: named.toSorted() });
   }
 };
+
+/** Whether `path` is one Grasp generates under `server/_generated/`. */
+export const isServerGenerated = (path: string): boolean =>
+  path.startsWith("server/_generated/");
 
 /**
  * The App's server modules among `files`, each one's source by its path

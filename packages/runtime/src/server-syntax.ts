@@ -1,3 +1,5 @@
+import { appMaxOperations } from "@grasp-os/shared/function-limits";
+
 import type { ServerFunctions } from "./codegen-api.ts";
 import { definitionManifest, isFunctionPath } from "./definition.ts";
 import type { AppDefinition } from "./definition.ts";
@@ -105,14 +107,20 @@ export const declaredFunctionsOf = (
  * The functions an App's server modules declare (`modules`: each one's
  * source by its path under `server/` without `.ts`, `crm/deals`), each
  * one's visibility by its path (`crm.deals.list`): only paths a function
- * can have (`isFunctionPath`). A module that doesn't parse declares none
- * here: such code is never sealed.
+ * can have (`isFunctionPath`), and at most as many as an App may register
+ * (`appMaxOperations`). A module that doesn't parse declares none here:
+ * such code is never sealed.
  */
 export const serverFunctionsOf = (
   modules: Readonly<Record<string, string>>
 ): ServerFunctions => {
   const functions: Record<string, "public" | "internal"> = {};
-  for (const [module, source] of Object.entries(modules)) {
+  // In path order, each module's in its own: so the most an App may have
+  // (`appMaxOperations`) are the same ones whatever order they come in.
+  const ordered = Object.entries(modules).toSorted(([a], [b]) =>
+    a < b ? -1 : 1
+  );
+  for (const [module, source] of ordered) {
     const prefix = module.replaceAll("/", ".");
     for (const [name, visibility] of declaredFunctionsOf(source) ?? []) {
       const path = `${prefix}.${name}`;
@@ -125,6 +133,11 @@ export const serverFunctionsOf = (
         !path.split(".").some((segment) => referenceKeys.has(segment))
       ) {
         functions[path] = visibility;
+      }
+      // No more than an App may register: what is generated stays bounded
+      // whatever the code declares, and a seal refuses the App anyway.
+      if (Object.keys(functions).length >= appMaxOperations) {
+        return functions;
       }
     }
   }

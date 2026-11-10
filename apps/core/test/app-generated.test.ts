@@ -229,7 +229,7 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
     );
   });
 
-  it("refuses to publish a function made through an alias of a builder or a wrapper, naming it", async () => {
+  it("refuses to publish a function made through an alias of a builder, or of another visibility than its syntax says, naming each", async () => {
     const fixture = await appWith(
       withFiles(notesFiles(), {
         "server/aliased.ts": `import { v } from "@grasp-os/sdk";
@@ -238,25 +238,32 @@ import { query } from "@server/_generated/server";
 const read = query;
 export const hidden = read({ args: {}, returns: v.string(), handler: () => "hidden" });
 `,
+        // Internal, though its syntax reads as a public query's.
+        "server/renamed.ts": `import { v } from "@grasp-os/sdk";
+import { internalQuery as query } from "@server/_generated/server";
+
+export const secret = query({ args: {}, returns: v.string(), handler: () => "secret" });
+`,
       })
     );
     const { tree } = await findVersion(env, fixture.app, 1);
     const files = await readTree(env, fixture.app, tree);
-    let details: unknown;
+    let refused: object = {};
     try {
       await seal(fixture);
     } catch (error) {
-      details =
-        typeof error === "object" && error !== null
-          ? Reflect.get(error, "details")
-          : undefined;
+      refused = typeof error === "object" && error !== null ? error : {};
     }
+    const code: unknown = Reflect.get(refused, "code");
+    const details: unknown = Reflect.get(refused, "details");
     expect({
       referenced: files.get(api)?.includes("aliased.hidden"),
+      code,
       details,
     }).toStrictEqual({
       referenced: false,
-      details: { functions: ["aliased.hidden"] },
+      code: "version.function_undeclared",
+      details: { functions: ["aliased.hidden", "renamed.secret"] },
     });
   });
 });

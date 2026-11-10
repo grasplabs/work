@@ -1040,24 +1040,20 @@ const serverGeneratedPaths: readonly string[] = [
 
 /**
  * Refuses sealing a version whose `server/_generated/` (`files`' copy)
- * isn't, byte for byte, both what its code and `definition` generate
- * (app-definition.ts, `generatedServerFiles`) and what its seal generated
- * from what it registers (`generated`): one written by an earlier
- * generator, changed in storage, or from another definition than the
- * version's (`version.generated_stale`, naming each path). Its builder's
- * editor and its pages then read the same references.
+ * isn't, byte for byte, `expected`: what its code and definition generate
+ * (app-definition.ts, `generatedServerFiles`), checked before anything is
+ * inspected, and what its seal generated from what it registers, checked
+ * after. One written by an earlier generator, changed in storage, or from
+ * another definition than the version's is refused
+ * (`version.generated_stale`, naming each path). Its builder's editor and
+ * its pages then read the same references.
  */
 const requireGeneratedCurrent = (
   files: Readonly<Record<string, string>>,
-  definition: AppDefinition,
-  generated: Readonly<Record<string, string>>
+  expected: Readonly<Record<string, string>>
 ): void => {
-  const expected = generatedServerFiles(files, definition);
   const stale = serverGeneratedPaths.filter(
-    (path) =>
-      !Object.hasOwn(files, path) ||
-      files[path] !== expected[path] ||
-      files[path] !== generated[path]
+    (path) => !Object.hasOwn(files, path) || files[path] !== expected[path]
   );
   if (stale.length > 0) {
     throw versionErrors.create("version.generated_stale", { paths: stale });
@@ -1371,6 +1367,7 @@ export const sealRelease = async (
   // release names the definition its schema is applied by (app-schema.ts).
   const { hash: definition, definition: defined } = await readStored(row);
   const files = await versionFiles(env, app, version);
+  requireGeneratedCurrent(files, generatedServerFiles(files, defined));
   const built = await inspectForSeal(
     env,
     { app, version },
@@ -1378,7 +1375,7 @@ export const sealRelease = async (
     defined,
     "production"
   );
-  requireGeneratedCurrent(files, defined, built.generated);
+  requireGeneratedCurrent(files, built.generated);
   await requireFunctionIds(env, app, files, defined);
   const store = await boundStore(env, request, built.manifest, built.schema);
   // Every page built and sealed with the release, so none is compiled
