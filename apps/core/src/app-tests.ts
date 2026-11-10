@@ -1127,9 +1127,13 @@ class FixtureSession extends TestTarget {
       const given = this.#startOptionsOf(options);
       this.#starts += 1;
       let recorded = false;
-      let started: FixtureRunStarted;
+      let number: number;
       try {
-        started = await this.#inClockTurn(async () => {
+        number = await this.#inClockTurn(async () => {
+          // Closed while it waited its turn: nothing to start.
+          if (this.#closed) {
+            throw sessionEnded();
+          }
           const run = await startFixtureRun(
             this.#env,
             this.#release,
@@ -1156,8 +1160,8 @@ class FixtureSession extends TestTarget {
             await discardFixtureRuns(this.#env, [run.runId]);
             throw sessionEnded();
           }
-          this.#runs.push(run);
-          return run;
+          // Its number in the session, taken as it joins.
+          return this.#runs.push(run) - 1;
         });
       } catch (error) {
         // Refused before it was recorded: its room goes back. One recorded
@@ -1168,7 +1172,7 @@ class FixtureSession extends TestTarget {
         }
         throw error;
       }
-      result = { ok: true, value: { run: this.#runs.indexOf(started) } };
+      result = { ok: true, value: { run: number } };
     } catch (error) {
       result = { ok: false, error: refusalOf(error, requestId) };
     }
