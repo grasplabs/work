@@ -4,6 +4,8 @@
 // soon. Grasp's staff close it for the onboarding and open it with their
 // go, once Grasp knows enough of the company or the interviews are over.
 
+import type { FlowStep, OnboardingFlow } from "./onboarding-flow.ts";
+
 /** How much each source counts towards what Grasp knows, in percent. */
 export const knownWeights = {
   /** The kickoff with the sponsor, and the website. */
@@ -24,6 +26,61 @@ export const knownWeights = {
   review: 10,
 } as const;
 export type KnownSource = keyof typeof knownWeights;
+
+/** Every source, in the order the onboarding counts them. */
+const knownSources: readonly KnownSource[] = [
+  "kickoff",
+  "people",
+  "sources",
+  "documents",
+  "tools",
+  "leads",
+  "conversations",
+  "review",
+];
+
+/**
+ * The sources this flow asks the company for: a source whose step is off
+ * leaves what Grasp can know of it, so the percentage is of what is asked
+ * (`knownPercent`). The conversations and the review come with the
+ * interviews, and the kickoff with Grasp's first conversation; none where
+ * the company goes through no onboarding.
+ */
+export const knownSourcesOf = (flow: OnboardingFlow): KnownSource[] => {
+  if (!flow.on) {
+    return [];
+  }
+  const on = (step: FlowStep): boolean =>
+    flow.steps.some(({ id, on: stepOn }) => id === step && stepOn);
+  const asked: Record<KnownSource, boolean> = {
+    kickoff: flow.grasp.kickoff,
+    people: on("company"),
+    sources: on("sources"),
+    documents: on("documents"),
+    tools: on("pulse"),
+    leads: on("leads"),
+    conversations: on("interviews"),
+    review: on("interviews"),
+  };
+  return knownSources.filter((source) => asked[source]);
+};
+
+/**
+ * How much Grasp knows, in percent of what `parts` could come to: of all
+ * of it for the whole onboarding, whose weights add up to 100. Where
+ * nothing is asked, there is nothing left to know.
+ */
+export const knownPercent = (
+  parts: readonly Pick<KnownPart, "weight" | "known">[]
+): number => {
+  let total = 0;
+  let sum = 0;
+  for (const { weight, known } of parts) {
+    total += weight;
+    sum += weight * known;
+  }
+  return total === 0 ? 100 : Math.round((sum / total) * 100);
+};
 
 /** The thresholds staff choose from, and the one unless they choose. */
 export const gateThresholds = [70, 80, 90] as const;

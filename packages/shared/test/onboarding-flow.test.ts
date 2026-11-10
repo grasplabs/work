@@ -10,6 +10,7 @@ import {
   storedFlowOf,
 } from "../src/onboarding-flow.ts";
 import type { FlowStep, OnboardingFlow } from "../src/onboarding-flow.ts";
+import { knownPercent, knownSourcesOf } from "../src/onboarding-gate.ts";
 
 /** The default flow's steps in `order`, with those in `off` switched off. */
 const stepsOf = (
@@ -23,6 +24,9 @@ const moved = (one: FlowStep, other: FlowStep): FlowStep[] => {
   const at = rest.indexOf(other);
   return [...rest.slice(0, at), one, ...rest.slice(at)];
 };
+
+/** A source that counts for ten, with `known` of it in. */
+const weighed = (known: number) => ({ weight: 10, known });
 
 describe("an onboarding flow", () => {
   it("is everything, in order, for a company whose flow nobody set", () => {
@@ -133,6 +137,38 @@ describe("an onboarding flow", () => {
     }).toStrictEqual({
       off: [false, []],
       noInterviews: [false, ["processing"]],
+    });
+  });
+
+  it("asks for the sources its steps give, so what Grasp knows is a share of what is asked", () => {
+    const short: OnboardingFlow = {
+      ...defaultFlow,
+      steps: stepsOf(flowSteps, ["documents", "pulse", "interviews"]),
+      grasp: { ...defaultFlow.grasp, kickoff: false },
+    };
+    expect({
+      whole: knownSourcesOf(defaultFlow),
+      short: knownSourcesOf(short),
+      off: knownSourcesOf({ ...defaultFlow, on: false }),
+      half: knownPercent([weighed(1), weighed(0)]),
+      thirds: knownPercent([weighed(1), weighed(1), weighed(0)]),
+      nothingAsked: knownPercent([]),
+    }).toStrictEqual({
+      whole: [
+        "kickoff",
+        "people",
+        "sources",
+        "documents",
+        "tools",
+        "leads",
+        "conversations",
+        "review",
+      ],
+      short: ["people", "sources", "leads"],
+      off: [],
+      half: 50,
+      thirds: 67,
+      nothingAsked: 100,
     });
   });
 });
