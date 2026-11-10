@@ -10,7 +10,7 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { chatSession, workspace } from "../src/durable-objects.ts";
@@ -677,6 +677,10 @@ describe("chat agent after a restart", () => {
         // the object that starts again has the method as it is.
         const methods = Reflect.getPrototypeOf(instance) ?? instance;
         const note: unknown = Reflect.get(methods, "note");
+        // Back as it was however the test ends: the class is the isolate's.
+        onTestFinished(() => {
+          Reflect.set(methods, "note", note);
+        });
         Reflect.set(methods, "note", async () => {
           Reflect.set(methods, "note", note);
           state.abort("Reset under the note by the test");
