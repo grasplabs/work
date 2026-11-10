@@ -18,7 +18,7 @@ import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -106,20 +106,30 @@ const boundTakesFile = async (
     ...pins.map(({ pinned }) => pinned),
     ...active.filter(({ alias }) => declared.has(alias)),
   ];
-  for (const pinned of bound) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const row = await drizzle(env.DB)
-      .select({ contract: workflowResourceVersions.contract })
-      .from(workflowResourceVersions)
-      .where(
-        and(
-          eq(workflowResourceVersions.workflowResourceId, pinned.workflowId),
-          eq(workflowResourceVersions.version, pinned.version)
-        )
-      )
-      .get();
+  // One read for every distinct workflow version, however many bindings
+  // name it: the pins and the active bindings often name the same ones.
+  const pairs = [
+    ...new Map(
+      bound.map(({ workflowId, version }) => [
+        `${workflowId}@${version}`,
+        [workflowId, version] as const,
+      ])
+    ).values(),
+  ];
+  if (pairs.length === 0) {
+    return false;
+  }
+  const rows = await drizzle(env.DB)
+    .select({ contract: workflowResourceVersions.contract })
+    .from(workflowResourceVersions)
+    .where(
+      sql`EXISTS (SELECT 1 FROM json_each(${JSON.stringify(pairs)}) AS pair
+        WHERE ${workflowResourceVersions.workflowResourceId} = json_extract(pair.value, '$[0]')
+        AND ${workflowResourceVersions.version} = json_extract(pair.value, '$[1]'))`
+    );
+  for (const row of rows) {
     const parsed =
-      row?.contract === null || row === undefined
+      row.contract === null
         ? undefined
         : boundContractSchema.safeParse(JSON.parse(row.contract));
     if (
