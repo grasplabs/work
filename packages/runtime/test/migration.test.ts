@@ -292,6 +292,30 @@ const wrappedKey = await crypto.subtle.importKey(
 );
 const signed = new Uint8Array([1, 2, 3]);
 
+/**
+ * Options as a class keeps them, for a request (`method`, `body`) or for
+ * AES-GCM (`name`, `iv`): its getters read private fields, so only work
+ * with the instance itself as `this`. Each reader ignores the other's.
+ */
+class PrivateOptions {
+  readonly name = "AES-GCM";
+  readonly #method = "POST";
+  readonly #body = "plain";
+  readonly #iv = new Uint8Array(12);
+
+  get method(): string {
+    return this.#method;
+  }
+
+  get body(): string {
+    return this.#body;
+  }
+
+  get iv(): Uint8Array<ArrayBuffer> {
+    return this.#iv;
+  }
+}
+
 /** The content type of a request made with `init`. */
 const contentTypeOf = (init: RequestInit): string =>
   new Request("https://example.test", init).headers.get("content-type") ?? "";
@@ -627,23 +651,37 @@ describe("the runner", () => {
         return bodyReads === 1 ? "plain" : new FormData();
       },
     };
+    // Started in the handler, which answers its row, not a promise;
+    // settled after, so a platform's rejection fails the test.
+    const started: Promise<ArrayBuffer>[] = [];
     const pure = looseMigration({
       ...declaration,
       name: "pure",
       handler: (_ctx: unknown, row: object) => {
         const form = new FormData();
         form.append("a", "b");
-        // Started only: a handler answers its row, not a promise.
-        void crypto.subtle.sign("HMAC", hmacKey, signed);
-        void crypto.subtle.encrypt(
-          { name: "AES-GCM", iv: new Uint8Array(12) },
-          aesKey,
-          signed
+        started.push(
+          crypto.subtle.sign("HMAC", hmacKey, signed),
+          crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: new Uint8Array(12) },
+            aesKey,
+            signed
+          ),
+          crypto.subtle.encrypt(new PrivateOptions(), aesKey, signed)
         );
         const request = new Request("https://example.test", init);
+        const privately = new Request(
+          "https://example.test",
+          new PrivateOptions()
+        );
         return {
           ...row,
-          category: `${String(form.has("a"))}:${request.headers.get("content-type") ?? ""}`,
+          category: [
+            String(form.has("a")),
+            request.headers.get("content-type") ?? "",
+            privately.method,
+            privately.headers.get("content-type") ?? "",
+          ].join("|"),
         };
       },
     });
@@ -654,8 +692,18 @@ describe("the runner", () => {
       })
     ).toMatchObject({
       ok: true,
-      rows: [{ title: "Plan", category: "true:text/plain;charset=UTF-8" }],
+      rows: [
+        {
+          title: "Plan",
+          category:
+            "true|text/plain;charset=UTF-8|POST|text/plain;charset=UTF-8",
+        },
+      ],
     });
+    const settled = await Promise.all(started);
+    expect(settled.map((answer) => answer.byteLength)).toStrictEqual([
+      32, 19, 19,
+    ]);
   });
 
   test("gives the platform a request's body as checked, whatever its init writes to the receiver", () => {

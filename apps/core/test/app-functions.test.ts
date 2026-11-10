@@ -1080,8 +1080,30 @@ const unseeded = async () => {
     rsaOaep: await outcome(() => crypto.subtle.encrypt("RSA-OAEP", rsa.publicKey, data)),
     wrapped: await outcome(() => crypto.subtle.wrapKey("raw", toWrap, rsa.publicKey, "RSA-OAEP")),
     hmac: await outcome(() => crypto.subtle.sign("HMAC", hmacKey, data)),
+    // Options whose getters read private fields, so need themselves as \`this\`.
+    privateInit: await outcome(() => new Request("https://example.test", new PrivateInit()).method),
+    privateGcm: await outcome(() => crypto.subtle.encrypt(new PrivateGcm(), toWrap, data)),
   };
 };
+
+class PrivateInit {
+  readonly #method = "POST";
+  readonly #body = "plain";
+  get method() {
+    return this.#method;
+  }
+  get body() {
+    return this.#body;
+  }
+}
+
+class PrivateGcm {
+  readonly name = "AES-GCM";
+  readonly #iv = new Uint8Array(12);
+  get iv() {
+    return this.#iv;
+  }
+}
 
 export const roll = mutation({
   args: {},
@@ -1165,6 +1187,8 @@ const unseededSchema = z.strictObject({
   rsaOaep: outcomeSchema,
   wrapped: outcomeSchema,
   hmac: outcomeSchema,
+  privateInit: outcomeSchema,
+  privateGcm: outcomeSchema,
 });
 
 /** What `roll` fails with. */
@@ -1284,6 +1308,8 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
         rsaOaep: "refused",
         wrapped: "refused",
         hmac: "ran",
+        privateInit: "ran",
+        privateGcm: "ran",
       },
     });
   });
@@ -1352,6 +1378,8 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
         rsaOaep: "ran",
         wrapped: "ran",
         hmac: "ran",
+        privateInit: "ran",
+        privateGcm: "ran",
       },
     });
   });

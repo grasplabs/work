@@ -30,11 +30,13 @@
 // - A form's body: a `Response` or `Request` made with a `FormData` body
 //   gets a multipart boundary of the platform's randomness, in its
 //   `content-type` and its bytes, so is refused. A request's `body` is
-//   read once and passed on as read, held for good on a copy of `init`,
-//   so neither a `body` getter answering the check one thing and the
-//   platform another, nor a getter or proxy trap of `init`'s writing to
-//   the copy it is handed as receiver, changes what the platform reads.
-//   An algorithm's name below is held the same way.
+//   read once, and the platform reads `init` through a proxy that
+//   answers that body, so neither a `body` getter answering the check
+//   one thing and the platform another, nor a getter or proxy trap of
+//   `init`'s writing a form to it after, changes what the platform
+//   reads; every other field is read on `init` itself, so its getters
+//   run with it as `this`. An algorithm's name below is held the same
+//   way.
 // - Keys and randomized cryptography: `generateKey` is refused, and so is
 //   `sign`, `encrypt` or `wrapKey` with an algorithm that draws a nonce,
 //   salt or padding (ECDSA, RSA-PSS, RSA-OAEP): only the algorithms that
@@ -73,6 +75,7 @@ const {
 } = Reflect;
 const { defineProperty, getOwnPropertyDescriptor, hasOwn } = Object;
 const platformString = String;
+const PlatformProxy = Proxy;
 const toUpperCase: unknown = Reflect.get(String.prototype, "toUpperCase");
 const platformDate = Date;
 const datePrototype = Date.prototype;
@@ -331,29 +334,32 @@ const argumentsWith = (
 };
 
 /**
- * `object` with `key` as read once (`value`): an object that inherits the
- * rest of `object`'s fields, and holds `key` as its own, so a getter of
- * `object`'s that answers one thing to a check and another to the
- * platform is never read again. Held for good, neither writable nor
- * configurable: the platform reads the inherited fields with the copy as
- * receiver, so a getter of `object`'s (or a proxy's trap) is handed the
- * copy, and must not be able to put another value in place of `key`
- * before the platform reads it.
+ * `object` as the platform reads it, with `key` as read once (`value`):
+ * a proxy over it whose `get` answers `value` for `key`, so a getter that
+ * answers one thing to a check and another to the platform is never read
+ * again, and whatever App code writes to `object` after (a getter writing
+ * `this.body`, a trap writing to its receiver) never reaches what the
+ * platform reads. Every other field is read on `object` with `object` as
+ * receiver, so its getters, private fields too, run as they would
+ * without the check. workerd reads a request's `init` and an algorithm
+ * by `[[Get]]` alone (no `has` or descriptor reads), which is all the
+ * proxy has to answer.
  */
-const withOwn = (object: object, key: string, value: unknown): object => {
-  const copy = {};
-  setPrototypeOf(copy, object);
-  // SAFETY: a data descriptor's fields; `__proto__: null` only sets its
-  // prototype, so no `get` or `set` of App code's is read as one.
-  defineProperty(copy, key, {
+const withOwn = (object: object, key: string, value: unknown): object =>
+  // SAFETY: the handler has exactly a `ProxyHandler`'s `get` trap;
+  // `__proto__: null` only sets its prototype.
+  new PlatformProxy(object, {
+    // No prototype: a trap the handler doesn't have is never looked up on
+    // `Object.prototype`, where App code could define one.
     __proto__: null,
-    value,
-    writable: false,
-    enumerable: true,
-    configurable: false,
-  } as PropertyDescriptor);
-  return copy;
-};
+    get: (target, field): unknown => {
+      if (field === key) {
+        return value;
+      }
+      const read: unknown = reflectGet(target, field, target);
+      return read;
+    },
+  } as ProxyHandler<object>);
 
 /** Whether `check`, called on `value`, passes: only the platform's own do. */
 const passes = (check: unknown, value: unknown, args: unknown[]): boolean => {
