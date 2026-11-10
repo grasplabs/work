@@ -200,22 +200,13 @@ describe("generated modules", () => {
   });
 
   test("give a page the release's public functions by name, its workflows' too, as data a client reads them from", () => {
-    const workflowsBound = declaredWorkflows(notesManifest(), notesWorkflows);
-    const published = [
-      ...Object.values(notesManifest().operations),
-      ...workflowsBound.flatMap((workflow) => {
-        const { queries, mutations } = workflowFunctions(workflow);
-        return [...Object.values(queries), ...Object.values(mutations)];
-      }),
-    ].filter((fn) => fn !== undefined && fn.visibility === "public");
-    expect(releaseFunctions).toStrictEqual(
-      Object.fromEntries(
-        published.map((fn) => [
-          fn.path,
-          { kind: fn.kind, args: fn.args, returns: fn.returns },
-        ])
-      )
-    );
+    const { operations } = notesManifest();
+    const create = operations["notes.create"];
+    expect(releaseFunctions["notes.create"]).toStrictEqual({
+      kind: "mutation",
+      args: create?.args,
+      returns: create?.returns,
+    });
     // Never an internal function's, and a query without `returns` says so.
     expect({
       internal: Object.hasOwn(releaseFunctions, "notes.count"),

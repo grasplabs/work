@@ -589,7 +589,7 @@ describe("the session client", { timeout: 120_000 }, () => {
     );
   });
 
-  it("refuses arguments by the function's validator in core, and options the call can't take before sending anything", async () => {
+  it("refuses arguments by the function's validator in core, options the call can't take before sending anything, and a call of another kind in core", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client, net } = clientFor(opened);
@@ -615,12 +615,13 @@ describe("the session client", { timeout: 120_000 }, () => {
       // @ts-expect-error -- a query takes no idempotency key
       client.query(api.get, { id }, { idempotencyKey: "no" })
     ).rejects.toThrow(TypeError);
-    // A reference that isn't a public query.
-    await expect(
-      // @ts-expect-error -- a mutation isn't a query, and the client checks
-      failureOf(client.query(api.create, { id }))
-    ).resolves.toMatchObject({ code: "contract.invalid_request" });
     expect(net.sent()).toBe(sent);
+    // A reference to a mutation, read as a query: it holds a name alone,
+    // so core is what refuses it, by what the name is in the release.
+    await expect(
+      // @ts-expect-error -- a mutation isn't a query
+      failureOf(client.query(api.create, { id }))
+    ).resolves.toMatchObject({ code: "function.kind_mismatch" });
   });
 });
 /** A page of the Notes App whose component runs `body` first. */

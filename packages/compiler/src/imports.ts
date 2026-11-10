@@ -2,7 +2,7 @@ import { parse } from "es-module-lexer/js";
 import type { Import } from "es-module-lexer/js";
 
 import { appCodeImport, pageImportError, typeImportError } from "./app-code.ts";
-import { routeTreePath } from "./inputs.ts";
+import { isTypeOnlyFile, routeTreePath } from "./inputs.ts";
 import {
   appModuleName,
   kitModuleName,
@@ -308,7 +308,11 @@ export const pageTypeImportError = (
     return server;
   }
   if (isRelative(specifier)) {
-    return resolveTypeFile(file, specifier, files) === undefined
+    const resolved = resolveTypeFile(file, specifier, files);
+    // The server code a build reads for the references' types alone is
+    // never a page's, however a path reaches it (a folder's index).
+    return resolved === undefined ||
+      (isTypeOnlyFile(resolved) && file !== pageReferences.path)
       ? `"${specifier}" is not a file of this App's pages.`
       : undefined;
   }

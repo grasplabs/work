@@ -50,6 +50,7 @@ import {
   appModuleName,
   kitModuleName,
   packageModuleIn,
+  pageFunctions,
   serverRunner,
 } from "./kit.ts";
 
@@ -283,6 +284,10 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   }
   if (schemaFiles.has(path)) {
     return "schema";
+  }
+  // The release's functions are the pages': no server code reads them.
+  if (path === pageFunctions.path) {
+    return undefined;
   }
   if (generatedFile.test(path)) {
     return "generated";
@@ -543,8 +548,7 @@ const serverPath = (
     }
   }
   const path = parts.join("/").replace(/\.tsx?$/u, "");
-  // A folder's own name too: `../server` may resolve to its index.
-  return ["values", "grasp.config", "server", ".grasp"].includes(path) ||
+  return ["values", "grasp.config"].includes(path) ||
     path.startsWith("server/") ||
     path.startsWith(".grasp/")
     ? path
