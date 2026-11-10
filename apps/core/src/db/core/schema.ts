@@ -3052,6 +3052,63 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
 });
 
 /**
+ * Whether one of the company's agents answers at all, and for whom
+ * (agent-reach.ts): one row per agent an admin set it for, by the agent's
+ * ID. The organization's own agent keeps `stephen_reach`. No row: on, for
+ * everyone, as the organization's agent is until an admin changes it.
+ */
+export const agentReach = sqliteTable("agent_reach", {
+  agentId: text("agent_id").primaryKey(),
+  on: integer({ mode: "boolean" }).notNull(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * The places an agent works in that an admin changed (agent-reach.ts):
+ * one row per agent and chat platform, by its adapter's name. `who`
+ * narrows who reaches the agent there (`asAgent`: as for the agent as a
+ * whole); `acts` says whether it does things there or only answers. The
+ * organization's own agent keeps `stephen_places`. No row: as the agent,
+ * and it acts.
+ */
+export const agentPlaces = sqliteTable(
+  "agent_places",
+  {
+    agentId: text("agent_id").notNull(),
+    place: text().notNull(),
+    who: text({ enum: ["asAgent", "nobody", "everyone", "teams"] }).notNull(),
+    teams: text().notNull().default("[]"),
+    acts: integer({ mode: "boolean" }).notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.place] })]
+);
+
+/**
+ * How an agent narrows a class of tools the company turned on
+ * (agent-reach.ts): one row per agent and class an admin changed.
+ * `asClass`: as the company has the class. It only narrows: the class
+ * gate checks the company's setting and the app's first. No row: as the
+ * class is.
+ */
+export const agentToolClasses = sqliteTable(
+  "agent_tool_classes",
+  {
+    agentId: text("agent_id").notNull(),
+    toolClass: text("tool_class").notNull(),
+    who: text({ enum: ["asClass", "nobody", "everyone", "teams"] }).notNull(),
+    teams: text().notNull().default("[]"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.toolClass] })]
+);
+
+/**
  * Settings › Stephen, as a whole (stephen-reach.ts): one row, `stephen`,
  * once an admin changed it: whether he answers in chat apps at all, and
  * for whom (`who` and `teams`, as in `tool_class_settings`). No row: on,

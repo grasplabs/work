@@ -143,12 +143,30 @@ const chatCalling = async (
   });
   return {
     subject,
+    /** The chat's agent, which no other chat here has. */
+    agentId: chat.agent.agentId,
     answered: async () => {
       await chat.ask("List the mailbox and send Ben the invoice.");
       const [result] = await codeResults(chat.stub, chat.chat.id);
       return result?.text;
     },
   };
+};
+
+/** Narrows `toolClass` for the agent `agentId`, as an admin would. */
+const agentClass = async (
+  agentId: string,
+  toolClass: string,
+  who: "asClass" | "nobody" | "everyone" | "teams",
+  teams: string[] = []
+): Promise<void> => {
+  await env.DB.prepare(
+    `INSERT INTO agent_tool_classes
+       (agent_id, tool_class, who, teams, changed_by, changed_at)
+     VALUES (?, ?, ?, ?, 'admin', ?)`
+  )
+    .bind(agentId, toolClass, who, JSON.stringify(teams), Date.now())
+    .run();
 };
 
 /**
@@ -312,6 +330,7 @@ describe("the classes a company turned on", setUpTime, () => {
       env.DB.prepare("DELETE FROM tool_class_settings"),
       env.DB.prepare("DELETE FROM shared_mailbox_pointers"),
       env.DB.prepare("DELETE FROM app_tool_classes"),
+      env.DB.prepare("DELETE FROM agent_tool_classes"),
     ]);
   });
 
@@ -461,6 +480,67 @@ describe("the classes a company turned on", setUpTime, () => {
     const again = await chatCalling(admin, outside.userId, mailbox, id);
     await expect(again.answered()).resolves.toBe(
       answer({ list: "done", send: off })
+    );
+  });
+
+  it("let an agent narrow a class to some teams, for that agent alone, but never widen it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const inTeam = await signedInApi(idp, "user");
+    const outside = await signedInApi(idp, "user");
+    const { id, mailbox } = await connectShared(admin, readCompanyGrant);
+    await pointedAt(admin, mailbox);
+    const team = await teamOf(inTeam.userId);
+    await admin.api.connections.setToolClass("read-company", {
+      who: "everyone",
+    });
+
+    // The agent reads the company's for one team only; Reach others, off
+    // for the company, stays off however the agent has it.
+    const theirs = await chatCalling(admin, inTeam.userId, mailbox, id);
+    await agentClass(theirs.agentId, "read-company", "teams", [team]);
+    await agentClass(theirs.agentId, "reach-others", "everyone");
+    await expect(theirs.answered()).resolves.toBe(
+      answer({ list: "done", send: off })
+    );
+
+    const others = await chatCalling(admin, outside.userId, mailbox, id);
+    await agentClass(others.agentId, "read-company", "teams", [team]);
+    await expect(others.answered()).resolves.toBe(
+      answer({ list: off, send: off })
+    );
+
+    // Another agent, which no admin narrowed: those rows aren't its.
+    const another = await chatCalling(admin, outside.userId, mailbox, id);
+    await expect(another.answered()).resolves.toBe(
+      answer({ list: "done", send: off })
+    );
+
+    // As the class: the agent has it as the company does.
+    const asClass = await chatCalling(admin, outside.userId, mailbox, id);
+    await agentClass(asClass.agentId, "read-company", "asClass");
+    await expect(asClass.answered()).resolves.toBe(
+      answer({ list: "done", send: off })
+    );
+  });
+
+  it("give an agent whose class can't be read the class for nobody", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const { id, mailbox } = await connectShared(admin, readCompanyGrant);
+    await pointedAt(admin, mailbox);
+    await admin.api.connections.setToolClass("read-company", {
+      who: "everyone",
+    });
+    const chat = await chatCalling(admin, person.userId, mailbox, id);
+    await env.DB.prepare(
+      `INSERT INTO agent_tool_classes
+         (agent_id, tool_class, who, teams, changed_by, changed_at)
+       VALUES (?, 'read-company', 'teams', 'not json', 'admin', ?)`
+    )
+      .bind(chat.agentId, Date.now())
+      .run();
+    await expect(chat.answered()).resolves.toBe(
+      answer({ list: off, send: off })
     );
   });
 
