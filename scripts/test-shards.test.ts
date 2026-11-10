@@ -22,13 +22,18 @@ import type { ShardFile, TimedFile } from "./test-shards.ts";
 const file = (
   key: string,
   seconds: number,
-  { group = 0, serial = false }: { group?: number; serial?: boolean } = {}
+  {
+    group = 0,
+    serial = false,
+    browser = false,
+  }: { group?: number; serial?: boolean; browser?: boolean } = {}
 ): ShardFile => ({
   key,
   project: key.split(" ")[0] ?? key,
   seconds,
   group,
   serial,
+  browser,
 });
 
 /** Many short files and a few long ones, as a test suite has. */
@@ -135,11 +140,11 @@ describe("splitting the test files between shards", () => {
     }
   });
 
-  it("runs the UI kit's browser checks in the first shard, where CI installs Chromium", () => {
-    const browser = "@grasp-os/ui:browser test/kit.browser.test.tsx";
+  it("runs a browser project's files in the first shard, where CI installs the browser", () => {
+    const browser = "kit test/kit.browser.test.tsx";
     const files = [
       ...suite,
-      file(browser, 30),
+      file(browser, 30, { browser: true }),
       ...Array.from({ length: 300 }, (_, index) =>
         file(`scripts ${index}`, 30)
       ),

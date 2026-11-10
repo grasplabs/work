@@ -22,6 +22,8 @@ export interface ShardFile {
   readonly group: number;
   /** Whether the project runs its files one at a time (`fileParallelism: false`). */
   readonly serial: boolean;
+  /** Whether the project runs its files in a browser (`browser.enabled`). */
+  readonly browser: boolean;
   /** How long the file's tests take, in seconds. */
   readonly seconds: number;
 }
@@ -118,12 +120,11 @@ export const installsOffline = (key: string): boolean =>
 
 /**
  * Whether a test file runs in the first shard, whatever the split: those
- * that install offline (`installsOffline`), and the UI kit's checks in a
- * real Chromium (`@grasp-os/ui:browser`), as CI installs Chromium for the
- * test shards only there too.
+ * that install offline (`installsOffline`), and those of a project run in
+ * a browser, as CI installs the test shards' browser only there too.
  */
-export const runsInFirstShard = (key: string): boolean =>
-  installsOffline(key) || key.startsWith("@grasp-os/ui:browser ");
+export const runsInFirstShard = ({ key, browser }: ShardFile): boolean =>
+  browser || installsOffline(key);
 
 /** A unit by its first file's key, for an order that is the same on every runner. */
 const keyOfUnit = (unit: readonly ShardFile[]): string => unit[0]?.key ?? "";
@@ -140,7 +141,7 @@ export const spreadOver = (
   const shards: ShardFile[][] = Array.from({ length: count }, () => []);
   const units = unitsOf(files);
   const pinned = (unit: readonly ShardFile[]): boolean =>
-    unit.some(({ key }) => runsInFirstShard(key));
+    unit.some(runsInFirstShard);
   for (const unit of units.filter(pinned)) {
     shards[0]?.push(...unit);
   }
@@ -196,7 +197,7 @@ export const splitIntoShards = (
     );
   }
   const misplaced = files.filter(
-    ({ key, group }) => runsInFirstShard(key) && group !== order[0]
+    (each) => runsInFirstShard(each) && each.group !== order[0]
   );
   if (misplaced.length > 0) {
     throw new Error(

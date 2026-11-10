@@ -42,6 +42,7 @@ export const shardFileOf = (spec: TestSpecification): ShardFile => ({
   group: spec.project.config.sequence.groupOrder,
   // `fileParallelism: false` resolves to one worker.
   serial: spec.project.config.maxWorkers === 1,
+  browser: spec.project.config.browser.enabled,
   seconds: secondsOf(spec),
 });
 
