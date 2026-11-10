@@ -1,6 +1,6 @@
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
 
-import { generatedServerFolder } from "./codegen-contracts.ts";
+import { isUnderGeneratedServerFolder } from "./codegen-contracts.ts";
 import type { FunctionKind, Visibility } from "./server-function.ts";
 
 // An App's server modules and the functions their syntax declares, read
@@ -33,7 +33,7 @@ export const serverModuleOf = (path: string): string | undefined => {
   const isModule =
     path.startsWith("server/") &&
     path !== schemaPath &&
-    !path.startsWith(generatedServerFolder) &&
+    !isUnderGeneratedServerFolder(path) &&
     !path.startsWith(migrationsFolder) &&
     path.endsWith(".ts") &&
     !path.endsWith(".d.ts") &&

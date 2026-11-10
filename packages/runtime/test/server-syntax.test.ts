@@ -42,18 +42,18 @@ describe("the functions a server module's syntax declares", () => {
         "server/crm/deals.ts": tasks,
       })
     ).toStrictEqual({
-      "tasks.add": "public",
-      "tasks.archive": "internal",
-      "tasks.count": "internal",
-      "tasks.list": "public",
-      "tasks.purge": "internal",
-      "tasks.sync": "public",
-      "crm.deals.add": "public",
-      "crm.deals.archive": "internal",
-      "crm.deals.count": "internal",
-      "crm.deals.list": "public",
-      "crm.deals.purge": "internal",
-      "crm.deals.sync": "public",
+      "tasks.add": { kind: "mutation", visibility: "public" },
+      "tasks.archive": { kind: "mutation", visibility: "internal" },
+      "tasks.count": { kind: "query", visibility: "internal" },
+      "tasks.list": { kind: "query", visibility: "public" },
+      "tasks.purge": { kind: "mutation", visibility: "internal" },
+      "tasks.sync": { kind: "action", visibility: "public" },
+      "crm.deals.add": { kind: "mutation", visibility: "public" },
+      "crm.deals.archive": { kind: "mutation", visibility: "internal" },
+      "crm.deals.count": { kind: "query", visibility: "internal" },
+      "crm.deals.list": { kind: "query", visibility: "public" },
+      "crm.deals.purge": { kind: "mutation", visibility: "internal" },
+      "crm.deals.sync": { kind: "action", visibility: "public" },
     });
   });
 
@@ -85,7 +85,17 @@ export const fine = query({ args: {}, handler: async () => 1 });
         "server/v1.0/extra.ts": named,
         "server/a/b/c/d.ts": named,
       })
-    ).toStrictEqual({ "named.fine": "public" });
+    ).toStrictEqual({ "named.fine": { kind: "query", visibility: "public" } });
+  });
+
+  test("are none of a module nested too deep to read, and never fail the read", () => {
+    const deep = `import { query } from "@server/_generated/server";
+export const list = query({ args: {}, handler: async () => 1 });
+export const sum = ${"a+".repeat(10_000)}a;
+`;
+    expect(
+      serverFunctionsIn({ "server/deep.ts": deep, "server/tasks.ts": tasks })
+    ).toStrictEqual(serverFunctionsIn({ "server/tasks.ts": tasks }));
   });
 
   test("are none of a module that doesn't parse", () => {

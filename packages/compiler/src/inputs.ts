@@ -9,6 +9,7 @@ import {
  * Core uses these before it hashes and sends the files; the compiler again
  * on what it is sent.
  */
+import { serverModuleOf } from "@grasp-os/runtime/server-modules";
 import {
   appLimits,
   appManifestMaxBytes,
@@ -152,13 +153,8 @@ export const isServerTypeFile = (path: string): boolean =>
   path === "grasp.config.ts" ||
   path === "values.ts" ||
   path === generatedPaths.internal ||
-  (path.startsWith("server/") &&
-    !path.startsWith(generatedServerFolder) &&
-    !path.startsWith("server/migrations/") &&
-    path.endsWith(".ts") &&
-    !path.endsWith(".d.ts") &&
-    !path.endsWith(".test.ts") &&
-    hasAppPathSegments(path));
+  path === "server/schema.ts" ||
+  (serverModuleOf(path) !== undefined && !path.endsWith(".test.ts"));
 
 /**
  * Whether `path`, one of a pages build's files (`buildFiles`), is there

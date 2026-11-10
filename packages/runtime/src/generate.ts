@@ -91,7 +91,7 @@ export const generateServerModules = (
  * versions the host resolved its workflow bindings to, `bound`
  * (`WorkflowBindingExtras`), which only `contracts.json` seals.
  */
-export const generateReleaseModules = async (
+const generateReleaseModules = async (
   manifest: AppManifest,
   bound: readonly WorkflowBindingExtras[] = []
 ): Promise<Record<string, string>> => {

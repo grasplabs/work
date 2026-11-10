@@ -9,7 +9,11 @@ import {
   withExportedFunctions,
 } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
-import { isGeneratedServerFile, ownFiles } from "@grasp-os/runtime/host";
+import {
+  isGeneratedServerFile,
+  isUnderGeneratedServerFolder,
+  ownFiles,
+} from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -384,7 +388,7 @@ const sizeOf = (files: ReadonlyMap<string, string>): Size => {
   let count = 0;
   let length = 0;
   for (const [path, content] of files) {
-    if (!isGeneratedServerFile(path)) {
+    if (!isUnderGeneratedServerFolder(path)) {
       count += 1;
       length += content.length;
     }

@@ -6,8 +6,12 @@ import {
   isLintedCode,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
-import { serverFunctionsIn } from "@grasp-os/runtime/definition";
+import {
+  serverFunctionsIn,
+  undeclaredFunctions,
+} from "@grasp-os/runtime/definition";
 import { generateModules, symbolicModules } from "@grasp-os/runtime/host";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import type {
   BuildDiagnostic,
   CommittedVersion,
@@ -266,8 +270,32 @@ const checkedDraftCode = async (
         };
   }
   const { manifest } = inspected;
-  const generated = await generateModules(manifest, serverFunctionsIn(code));
-  return await checkAppCode(env, { ...code, ...generated }, app, options);
+  const functions = serverFunctionsIn(code);
+  const generated = await generateModules(manifest, functions);
+  const checked = await checkAppCode(
+    env,
+    { ...code, ...generated },
+    app,
+    options
+  );
+  // What a seal refuses (app-releases.ts, `requireDeclaredFunctions`),
+  // the check says first, by name.
+  const undeclared = undeclaredFunctions(manifest, functions).map(
+    (path): Diagnostic => ({
+      rule: "server",
+      severity: "error",
+      message: `\`${path}\`: ${versionErrors.create("version.function_undeclared").message}`,
+    })
+  );
+  return undeclared.length === 0
+    ? checked
+    : {
+        ok: false,
+        diagnostics: [
+          ...undeclared,
+          ...(checked.ok ? [] : checked.diagnostics),
+        ],
+      };
 };
 
 /**

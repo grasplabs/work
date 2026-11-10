@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Release } from "../src/app-releases.ts";
 import { createApp, findVersion, readTree, versionFiles } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { draftServerBuild } from "../src/save-builds.ts";
 import { definitionOf, redefined, withFiles } from "./app-definitions.ts";
 import { notesFiles } from "./app-releases-harness.ts";
 import { commitDefined } from "./apps.ts";
@@ -264,7 +265,7 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
     }).toStrictEqual({ copy: false, sealed: true });
   });
 
-  it("refuses to publish a function made through an alias of a builder, or of another visibility than its syntax says, naming each", async () => {
+  it("refuses to publish a function made through an alias of a builder, or of another kind or visibility than its syntax says, naming each in the draft's check first", async () => {
     const fixture = await appWith(
       withFiles(notesFiles(), {
         "server/aliased.ts": `import { v } from "@grasp-os/sdk";
@@ -278,6 +279,12 @@ export const hidden = read({ args: {}, returns: v.string(), handler: () => "hidd
 
 export const fake = query({ args: {} });
 `,
+        // An action, though its syntax reads as a query's.
+        "server/kinds.ts": `import { v } from "@grasp-os/sdk";
+import { action as query } from "@server/_generated/server";
+
+export const act = query({ args: {}, returns: v.string(), handler: () => "act" });
+`,
         // Internal, though its syntax reads as a public query's.
         "server/renamed.ts": `import { v } from "@grasp-os/sdk";
 import { internalQuery as query } from "@server/_generated/server";
@@ -288,6 +295,12 @@ export const secret = query({ args: {}, returns: v.string(), handler: () => "sec
     );
     const { tree } = await findVersion(env, fixture.app, 1);
     const files = await readTree(env, fixture.app, tree);
+    // The draft's check says so first, by name.
+    const checked = await draftServerBuild(env, {
+      app: fixture.app,
+      version: 1,
+      files: Object.fromEntries(files),
+    });
     let refused: object = {};
     try {
       await seal(fixture);
@@ -296,16 +309,26 @@ export const secret = query({ args: {}, returns: v.string(), handler: () => "sec
     }
     const code: unknown = Reflect.get(refused, "code");
     const details: unknown = Reflect.get(refused, "details");
+    const undeclared = [
+      "aliased.hidden",
+      "kinds.act",
+      "local.fake",
+      "renamed.secret",
+    ];
     expect({
       referenced: files.get(api)?.includes("aliased.hidden"),
+      checked: undeclared.map((path) =>
+        checked.diagnostics.some(({ message }) =>
+          message.startsWith(`\`${path}\``)
+        )
+      ),
       code,
       details,
     }).toStrictEqual({
       referenced: false,
+      checked: undeclared.map(() => true),
       code: "version.function_undeclared",
-      details: {
-        functions: ["aliased.hidden", "local.fake", "renamed.secret"],
-      },
+      details: { functions: undeclared },
     });
   });
 });

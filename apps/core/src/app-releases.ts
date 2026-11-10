@@ -9,6 +9,7 @@ import {
   definitionSources,
   isFunctionPath,
   serverFunctionsIn,
+  undeclaredFunctions,
 } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
 import {
@@ -16,7 +17,7 @@ import {
   contractsFormatVersion,
   generatedPaths,
   generateModules,
-  isUnderGeneratedServerFolder,
+  ownFiles,
   readSealedWorkflows,
   manifestVersion,
   readAppManifest,
@@ -1009,32 +1010,16 @@ interface InspectedRelease {
 }
 
 /**
- * Refuses a release whose code registers a function its syntax doesn't
- * declare (`functions`, app-definition.ts `serverFunctionsIn`), declares
- * as another visibility, or declares but doesn't register: one made
- * through an alias of a builder or a wrapper, which the generated
- * references don't name, or name wrongly, so its pages and code could
- * never reach it as the release has it (`version.function_undeclared`,
- * naming each).
+ * Refuses a release where what its code registers and what its syntax
+ * declares (`functions`) disagree (`undeclaredFunctions`): its pages and
+ * code could never reach those functions as the release has them
+ * (`version.function_undeclared`, naming each).
  */
 const requireDeclaredFunctions = (
   manifest: AppManifest,
   functions: ServerFunctions
 ): void => {
-  const registered = Object.values(manifest.operations);
-  const undeclared = [
-    ...registered
-      .filter(
-        ({ path, visibility }) =>
-          !Object.hasOwn(functions, path) || functions[path] !== visibility
-      )
-      .map(({ path }) => path),
-    // And a reference to one its code declares that doesn't register (a
-    // `query` of its own, say), which no call could reach.
-    ...Object.keys(functions).filter(
-      (path) => !Object.hasOwn(manifest.operations, path)
-    ),
-  ].toSorted();
+  const undeclared = undeclaredFunctions(manifest, functions);
   if (undeclared.length > 0) {
     throw versionErrors.create("version.function_undeclared", {
       functions: undeclared.slice(0, 50),
@@ -1054,11 +1039,7 @@ const sealedSource = (
   files: Readonly<Record<string, string>>,
   definition: AppDefinition
 ): Record<string, string> => ({
-  ...Object.fromEntries(
-    Object.entries(files).filter(
-      ([path]) => !isUnderGeneratedServerFolder(path)
-    )
-  ),
+  ...ownFiles(files),
   ...definitionSources(definition),
 });
 

@@ -16,6 +16,7 @@ import {
 import { workflowsExport } from "./codegen-workflows.ts";
 import { declaredPermissions } from "./manifest-permissions.ts";
 import { pageFunctionsOf, pageWorkflowsOf } from "./page-functions.ts";
+import type { Declared } from "./server-modules.ts";
 import { workflowFunctions } from "./workflow-functions.ts";
 
 /**
@@ -26,7 +27,7 @@ import { workflowFunctions } from "./workflow-functions.ts";
  * hold, so they depend only on the server files' paths and what they
  * export, never on a release.
  */
-export type ServerFunctions = Readonly<Record<string, "public" | "internal">>;
+export type ServerFunctions = Readonly<Record<string, Declared>>;
 
 /** A tree of function references as a module's typed, frozen export. */
 const referenceExport = (name: string, paths: readonly string[]): string => {
@@ -55,7 +56,7 @@ const pathsOf = (
   visibility: "public" | "internal"
 ): string[] =>
   Object.keys(functions)
-    .filter((path) => functions[path] === visibility)
+    .filter((path) => functions[path]?.visibility === visibility)
     .toSorted();
 
 /** `@server/_generated/internal`: the internal tree. */

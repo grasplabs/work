@@ -2,8 +2,9 @@ import { appLimits } from "@grasp-os/shared/app-limits";
 import { appMaxOperations } from "@grasp-os/shared/function-limits";
 
 import { canRegisterAt } from "./app-functions.ts";
+import type { AppManifest } from "./app-types.ts";
 import type { ServerFunctions } from "./codegen-api.ts";
-import { definitionManifest, isFunctionPath } from "./definition.ts";
+import { definitionManifest } from "./definition.ts";
 import type { AppDefinition } from "./definition.ts";
 import { generateServerModules } from "./generate.ts";
 import { parseProgram } from "./oxc-parse.ts";
@@ -42,16 +43,18 @@ const declaredFunctionsOf = (source: string): ReadonlyMap<string, Declared> => {
   try {
     declared = declaredFunctionsIn(parseProgram(source, "ts").program);
   } catch (error) {
-    // What doesn't parse, or runs the parser out of its memory or stack,
-    // declares nothing, every time. Anything else (no memory for an
-    // instance at all) says nothing of the source: the write fails.
+    // What doesn't parse, or runs the parser out of its memory, declares
+    // nothing, every time. Anything else (the host's stack, nested too
+    // deep for where the call runs; no memory for an instance) declares
+    // nothing now, kept for no later read: a seal refuses what that
+    // hides (`undeclaredFunctions`).
     if (
       !(
         error instanceof SyntaxError ||
         error instanceof WebAssembly.RuntimeError
       )
     ) {
-      throw error;
+      return new Map();
     }
     declared = new Map();
   }
@@ -77,22 +80,18 @@ const declaredFunctionsOf = (source: string): ReadonlyMap<string, Declared> => {
 export const serverFunctionsIn = (
   files: Readonly<Record<string, string>>
 ): ServerFunctions => {
-  const functions: Record<string, "public" | "internal"> = {};
+  const functions: Record<string, Declared> = {};
   const modules = Object.entries(serverModulesOf(files)).toSorted(([a], [b]) =>
     a < b ? -1 : 1
   );
   for (const [module, source] of modules) {
-    for (const [name, { visibility }] of declaredFunctionsOf(source)) {
+    for (const [name, declared] of declaredFunctionsOf(source)) {
       const path = `${module.replaceAll("/", ".")}.${name}`;
       // Never a folder named with a dot, which would make another
       // function's path, nor a path registration refuses
       // (app-functions.ts).
-      if (
-        isFunctionPath(path) &&
-        !module.includes(".") &&
-        canRegisterAt(path.split("."))
-      ) {
-        functions[path] = visibility;
+      if (!module.includes(".") && canRegisterAt(path.split("."))) {
+        functions[path] = declared;
       }
       // No more than an App may register: what is generated stays bounded
       // whatever the code declares, and a seal refuses the App anyway.
@@ -117,3 +116,31 @@ export const generatedServerSources = (
     serverFunctionsIn(files),
     definitionManifest(definition)
   );
+
+/**
+ * The paths of the functions where `manifest`, what the code registers,
+ * and `functions`, what its syntax declares, disagree, sorted: one
+ * registered that the syntax doesn't declare (an alias of a builder, a
+ * wrapper), or declares as another kind or visibility; and one declared
+ * that doesn't register (a builder of the module's own). The references
+ * generated from the syntax would name none of them rightly.
+ */
+export const undeclaredFunctions = (
+  manifest: Pick<AppManifest, "operations">,
+  functions: ServerFunctions
+): string[] =>
+  [
+    ...Object.values(manifest.operations).flatMap(
+      ({ path, kind, visibility }) => {
+        const declared = Object.hasOwn(functions, path)
+          ? functions[path]
+          : undefined;
+        return declared?.kind === kind && declared.visibility === visibility
+          ? []
+          : [path];
+      }
+    ),
+    ...Object.keys(functions).filter(
+      (path) => !Object.hasOwn(manifest.operations, path)
+    ),
+  ].toSorted();

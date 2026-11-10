@@ -106,7 +106,6 @@ const storedUnchecked = async (
  * `files` as an App's limits count them: what Grasp generates under
  * `server/_generated/` apart.
  */
-const counted = ownFiles;
 
 /** The App's definition, and the config and schema generated from it. */
 const defined = testApp({ name: "Invoice desk" });
@@ -901,7 +900,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
     // The App's definition counts too: its first version gets one.
     const room =
       appLimits.totalLength -
-      Object.values(counted(defined.files)).join("").length;
+      Object.values(ownFiles(defined.files)).join("").length;
     const full = Object.fromEntries(
       Array.from(
         { length: Math.ceil(room / appLimits.fileLength) },
@@ -945,7 +944,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
     // More files than an App may have now: committed when the limits were
     // higher, its definition among them.
     const count =
-      appLimits.files + 2 - Object.keys(counted(defined.files)).length;
+      appLimits.files + 2 - Object.keys(ownFiles(defined.files)).length;
     await storedUnchecked(
       app.id,
       userId,
