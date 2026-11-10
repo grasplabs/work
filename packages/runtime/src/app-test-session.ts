@@ -74,6 +74,11 @@ export interface AppTestSession {
    * `null` when it hadn't by the test's deadline.
    */
   runOutcome: (run: number) => Promise<string>;
+  /**
+   * Whether run `run` waits for something, or has ended, by the test's
+   * deadline: false when neither.
+   */
+  runWaits: (run: number) => Promise<boolean>;
   /** How many times run `run`'s task `task` completed its step. */
   completedCount: (run: number, task: string) => Promise<number>;
   /** How many model requests run `run`'s task `task` made. */

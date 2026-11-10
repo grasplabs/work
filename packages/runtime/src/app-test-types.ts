@@ -220,6 +220,13 @@ export interface TestRuns {
   untilTerminal: <Returns>(
     run: WorkflowTestRun<Returns>
   ) => Promise<TestRunOutcome<Returns>>;
+  /**
+   * Once `run` waits for something (a sleep, a wait, a decision), or has
+   * ended: what to wait for before moving the clock past a sleep it has
+   * yet to reach (`t.clock.advance`). Fails the test if neither by the
+   * test's own deadline.
+   */
+  untilWaiting: (run: WorkflowTestRun) => Promise<void>;
 }
 
 /** What a test asks of the effects its runs made. */
@@ -242,7 +249,9 @@ export interface TestClock {
   /**
    * Moves the time of this test's runs, those under way and those it
    * starts later, `ms` milliseconds on: a sleep, a wait's timeout or a
-   * retry that comes due by then runs now, without waiting for it.
+   * retry that comes due by then runs now, without waiting for it. A
+   * sleep a run reaches only later counts from then: wait for the run to
+   * reach it first (`t.runs.untilWaiting`).
    */
   advance: (ms: number) => Promise<void>;
 }

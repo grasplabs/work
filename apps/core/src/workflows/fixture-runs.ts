@@ -482,6 +482,44 @@ export const fixtureRunOutcome = async (
   }
 };
 
+/** The engine's statuses of a run that waits for something, or has ended. */
+const waitsOrEnded: ReadonlySet<string> = new Set([
+  "waiting",
+  "complete",
+  "errored",
+  "terminated",
+]);
+
+/**
+ * Whether test run `run` waits for something (a sleep, a wait, a
+ * decision) or has ended, asking the engine until it does, `until` (ms
+ * since the epoch) passes, or `stopped` says its test is over: false when
+ * neither by then.
+ */
+export const fixtureRunWaits = async (
+  env: Env,
+  run: FixtureRunStarted,
+  { until, stopped }: { until: number; stopped: () => boolean }
+): Promise<boolean> => {
+  const engine = runEngine(env);
+  for (;;) {
+    // One look after another, as the run goes on.
+    // oxlint-disable-next-line no-await-in-loop
+    const status = await engine.status(run.runId);
+    if (stopped()) {
+      return false;
+    }
+    if (status !== undefined && waitsOrEnded.has(status.status)) {
+      return true;
+    }
+    if (Date.now() + pollMs > until) {
+      return false;
+    }
+    // oxlint-disable-next-line no-await-in-loop
+    await scheduler.wait(pollMs);
+  }
+};
+
 /** A task's ID, as a workflow names it: what `completedCount` takes. */
 const taskIdSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u);
 

@@ -1095,6 +1095,26 @@ export default appTest(schema, {
     await expect(activated(builder, app)).resolves.toBe("current");
   });
 
+  it("move the clock from an App's own test past a sleep its run has reached", async () => {
+    const { builder, app } = await requestsApp(
+      async (by) => await workflowOf(by, greeting([hold("1 hour")])),
+      {
+        "tests/clock.test.ts": suiteOf(`
+      const run = await owner.start(workflows.followUp, { who: "Ada" });
+      await t.runs.untilWaiting(run);
+      await t.clock.advance(60 * 60 * 1000);
+      expect(await t.runs.untilTerminal(run)).toEqual({
+        status: "completed",
+        result: { status: "Hello, Ada" },
+      });`),
+      }
+    );
+    const began = Date.now();
+    await expect(activated(builder, app)).resolves.toBe("current");
+    // An hour's sleep, in far less than the test's own deadline.
+    expect(Date.now() - began).toBeLessThan(60_000);
+  });
+
   it("refuse to move the clock by anything but whole milliseconds, or of a run of the organization's", async () => {
     const { release, builder, workflowId } = await requestsApp(
       async (by) => await workflowOf(by, greeting([hold("1 hour")]))

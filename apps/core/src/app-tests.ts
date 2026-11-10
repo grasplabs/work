@@ -88,6 +88,7 @@ import {
   advanceFixtureClocks,
   discardFixtureRuns,
   fixtureRunOutcome,
+  fixtureRunWaits,
   fixtureTaskCompletions,
   startFixtureRun,
   sweepFixtureRuns,
@@ -345,6 +346,7 @@ const hostOf = (numbered) => ({
       end: async (transaction, commit) => await numbered.end(session, transaction, commit),
       start: async (who, request, options) => await numbered.start(session, who, request, options),
       runOutcome: async (run) => await numbered.runOutcome(session, run),
+      runWaits: async (run) => await numbered.runWaits(session, run),
       completedCount: async (run, task) => await numbered.completedCount(session, run, task),
       modelRequestCount: async (run, task) => await numbered.modelRequestCount(session, run, task),
       advanceClock: async (ms) => await numbered.advanceClock(session, ms),
@@ -1170,6 +1172,21 @@ class FixtureSession extends TestTarget {
   }
 
   /**
+   * Whether run `run` waits for something (a sleep, a wait, a decision)
+   * or has ended, asking the engine until the test's own time: false when
+   * neither by then.
+   */
+  async runWaits(run: unknown): Promise<boolean> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    return await fixtureRunWaits(this.#env, this.#runOf(run), {
+      until: this.#endsAt,
+      stopped: () => this.#closed,
+    });
+  }
+
+  /**
    * How many times run `run`'s task `task` completed its step, as the
    * engine recorded it: once, however often the run was replayed.
    */
@@ -1724,6 +1741,10 @@ class NumberedFixtureHost extends TestTarget {
     return await this.#session(id).runOutcome(run);
   }
 
+  async runWaits(id: unknown, run: unknown): Promise<boolean> {
+    return await this.#session(id).runWaits(run);
+  }
+
   async completedCount(
     id: unknown,
     run: unknown,
@@ -1759,6 +1780,7 @@ const numberedMethods = [
   "end",
   "start",
   "runOutcome",
+  "runWaits",
   "completedCount",
   "modelRequestCount",
   "advanceClock",

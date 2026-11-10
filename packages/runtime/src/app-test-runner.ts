@@ -342,6 +342,13 @@ const contextFor = (
           await session.runOutcome(numberOf(test, handle)),
           handle
         )) as TestRuns["untilTerminal"],
+      untilWaiting: async (handle) => {
+        if (!(await session.runWaits(numberOf(test, handle)))) {
+          throw new TestAssertionError(
+            `the run of ${handle.workflow} neither waited nor ended before the test's deadline`
+          );
+        }
+      },
     },
     effects: {
       completedCount: async (handle, task) =>
