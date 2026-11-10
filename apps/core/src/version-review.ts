@@ -1,5 +1,6 @@
 import { appCodeFiles } from "@grasp-os/compiler";
 import {
+  ownFiles,
   declaredPermission,
   declaredPermissions,
   descriptorFromText,
@@ -417,7 +418,7 @@ export const reviewVersion = async (
 ): Promise<VersionReview> => {
   const found = await appFor(env, by, app, "builder");
   const row = await findVersion(env, found.id, version);
-  const files = await versionFiles(env, found.id, row.version);
+  const files = ownFiles(await versionFiles(env, found.id, row.version));
   const { currentVersion: current } = found;
   // The current version itself changes nothing against itself.
   const currentRow =
@@ -427,7 +428,9 @@ export const reviewVersion = async (
       ? undefined
       : {
           version: currentRow.version,
-          files: await versionFiles(env, found.id, currentRow.version),
+          files: ownFiles(
+            await versionFiles(env, found.id, currentRow.version)
+          ),
         };
   const fileChanges = differences(
     new Map(Object.entries(before?.files ?? {})),

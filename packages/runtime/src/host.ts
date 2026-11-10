@@ -91,6 +91,10 @@ export {
   contractFingerprints,
   contractsFormatVersion,
   generatedPaths,
+  generatedServerFolder,
+  isGeneratedServerFile,
+  isUnderGeneratedServerFolder,
+  ownFiles,
   workflowFingerprint,
 } from "./codegen-contracts.ts";
 export { valueTypeOf } from "./codegen-render.ts";
@@ -98,6 +102,7 @@ export { readSealedWorkflows } from "./codegen-sealed.ts";
 export { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 export { symbolicModules } from "./codegen-stand-ins.ts";
 export { workflowReferenceOf } from "./codegen-workflows.ts";
+export type { ServerFunctions } from "./codegen-api.ts";
 export { generateModules } from "./generate.ts";
 export { workflowFunctions, workflowQueryNames } from "./workflow-functions.ts";
 export type {

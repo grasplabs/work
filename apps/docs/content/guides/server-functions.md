@@ -21,7 +21,7 @@ Every function declares its arguments (`args`) with `v`, and Grasp checks them b
 
 The types of `api` and `internal` come from your functions' own code. So when two functions call each other, or one reaches itself through `internal`, TypeScript can't infer their types: declare `returns`, or annotate the handler's return type.
 
-A function is registered by exporting it from a module under `server/`. Its name is the module's path and the export: `list` in `server/tasks.ts` is `tasks.list`.
+A function is registered by exporting it from a module under `server/`, declared as `export const list = query({ … })`: one of `query`, `mutation`, `action`, `internalQuery`, `internalMutation` and `internalAction` from `@server/_generated/server`, called by name. Grasp finds your functions by that form, so a function made through an alias of a constructor or a wrapper gets no reference in `api` or `internal`, and the App can't be published until it is declared that way. Its name is the module's path and the export: `list` in `server/tasks.ts` is `tasks.list`.
 
 ## Queries
 

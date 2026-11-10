@@ -2,6 +2,7 @@ import { ensureCollection } from "@grasp-os/brain/collections";
 import { compilerVersion } from "@grasp-os/compiler";
 import { definitionText } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import {
   acceptedUpdateSchema,
   appErrors,
@@ -35,7 +36,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import { generatedPaths, withDefinitionCode } from "./app-definition.ts";
+import { generatedPaths, withGeneratedCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
 import {
@@ -516,7 +517,7 @@ export const createFromBlueprint = async (
   // Its code as its definition generates it, as every version's is: what
   // the blueprint holds already (its version's, or a built-in's, which
   // its build checks).
-  withDefinitionCode(files, definition);
+  withGeneratedCode(files, definition);
   // The blueprint's code, kept under the copy (`app_origins.code`): what an
   // update of the blueprint is merged over. Its AGENTS.md isn't, as it
   // isn't copied (above).
@@ -854,7 +855,7 @@ const mergeOver = (
   // Its config and schema follow it: no file conflict of their own, a
   // definition conflict being said as such, whether or not the code the
   // two generate differs (stable IDs alone change none).
-  withDefinitionCode(files, kept);
+  withGeneratedCode(files, kept);
   return {
     files,
     definition: kept,
@@ -965,7 +966,10 @@ export const blueprintUpdate = async (
     to: pending.blueprint.tree,
     definition: pending.theirs.definition.hash,
     over: pending.latest.version,
-    changes: diffFiles(pending.ours, pending.merged.files),
+    // What Grasp generates is no change of the blueprint's.
+    changes: diffFiles(pending.ours, pending.merged.files).filter(
+      ({ path }) => !isGeneratedServerFile(path)
+    ),
     conflicts: pending.merged.conflicts,
     definitionConflict: pending.merged.definitionConflict,
   };

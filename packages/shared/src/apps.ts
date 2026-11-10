@@ -41,8 +41,9 @@ export const appPathSchema = z
         // the object's prototype, not a file.
         !Object.hasOwn(Object.prototype, path) &&
         // The modules Grasp generates for an App, as Convex's
-        // `_generated/`: never one of its own files.
-        !path.startsWith("server/_generated/")
+        // `_generated/`: never one of its own files, in any case (an
+        // App's paths never differ only in case).
+        !`${path.toLowerCase()}/`.startsWith("server/_generated/")
       );
     },
     {

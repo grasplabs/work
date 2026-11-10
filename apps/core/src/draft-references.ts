@@ -1,5 +1,11 @@
-import { isAppLayout, isGeneratedPath } from "@grasp-os/compiler";
 import {
+  importsReferences,
+  isAppLayout,
+  isGeneratedPath,
+} from "@grasp-os/compiler";
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
+import {
+  ownFiles,
   generatedPaths,
   generateModules,
   symbolicModules,
@@ -21,19 +27,15 @@ import type { BuildOptions } from "./pages.ts";
 // checks the arguments with that function's own validator
 // (app-functions.ts, `publicOperationOf`).
 //
-// Generation is deterministic: the same manifest always makes the same
-// bytes, whatever the App binds: a binding's pin is sealed only in
-// `.grasp/contracts.json`, which no page imports. This module makes them from files as they are, which is
-// what a save and a draft's check build (save-builds.ts): nothing of them
-// is sealed. A running version's pages get them from its release
-// (page-references.ts).
-
-/** Whether any of `files` names the references, so a build could import them. */
-const mentionsReferences = (files: Readonly<Record<string, string>>): boolean =>
-  Object.entries(files).some(
-    ([path, source]) =>
-      path.startsWith("src/") && source.includes("@server/_generated/api")
-  );
+// Generation is deterministic: the same files make the same references
+// (from the functions their syntax declares, as every save writes them
+// into `server/_generated/`, app-definition.ts), and the same manifest the
+// same functions, whatever the App binds: a binding's pin is sealed only
+// in `.grasp/contracts.json`, which no page imports. This module makes
+// them from files as they are, never from their copy of
+// `server/_generated/`, which is what a save and a draft's check build
+// (save-builds.ts): nothing of them is sealed. A running version's pages
+// get them from its release (page-references.ts).
 
 /**
  * The modules of what the host generates that a page's build holds, by
@@ -80,8 +82,9 @@ export const pageModulesOf = (
 };
 
 /**
- * `files` with the page modules (`PageModules`) as `referencesOf`
- * answers them: unchanged when no page names the references, when the
+ * `files`, without their own copy of `server/_generated/`, with the page
+ * modules (`PageModules`) as `referencesOf` answers them: none when no
+ * page names the references, when the
  * files aren't of spec 8's layout, or when there are none (their server
  * code doesn't build or inspect: an expected error). A page that imports
  * them then fails its build and says so, and the server build says why.
@@ -90,26 +93,34 @@ export const withReferencesText = async (
   files: Record<string, string>,
   referencesOf: () => Promise<PageModules | undefined>
 ): Promise<Record<string, string>> => {
-  if (!(mentionsReferences(files) && isAppLayout(files))) {
-    return files;
+  // Never the files' own copy of `server/_generated/` (every save writes
+  // one): a page builds only with what is generated here, or without.
+  const own = ownFiles(files);
+  if (!(importsReferences(own) && isAppLayout(own))) {
+    return own;
   }
   let references: PageModules | undefined;
   try {
     references = await referencesOf();
   } catch (error) {
     if (isExpectedError(error)) {
-      return files;
+      return own;
     }
     throw error;
   }
-  return references === undefined ? files : { ...files, ...references };
+  return references === undefined ? own : { ...own, ...references };
 };
 
-/** The page modules `manifest` generates. */
+/**
+ * The page modules `manifest` and `files`, the code it was inspected
+ * from, generate: the references from the functions its syntax declares
+ * (app-definition.ts), the release's functions from the manifest.
+ */
 const referencesOf = async (
-  manifest: AppManifest
+  manifest: AppManifest,
+  files: Readonly<Record<string, string>>
 ): Promise<PageModules | undefined> =>
-  pageModulesOf(await generateModules(manifest));
+  pageModulesOf(await generateModules(manifest, serverFunctionsIn(files)));
 
 /**
  * `files` with the references their pages import as
@@ -122,7 +133,7 @@ export const withReferencesFrom = async (
 ): Promise<Record<string, string>> =>
   await withReferencesText(
     files,
-    async () => await referencesOf(await manifestOf())
+    async () => await referencesOf(await manifestOf(), files)
   );
 
 /**
@@ -189,7 +200,7 @@ export const withDraftReferences = async (
     const inspected = await inspection();
     if ("manifest" in inspected) {
       try {
-        return await referencesOf(inspected.manifest);
+        return await referencesOf(inspected.manifest, files);
       } catch (error) {
         if (!isExpectedError(error)) {
           throw error;
