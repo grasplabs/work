@@ -5,7 +5,9 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { agentFor } from "../src/agent-reach.ts";
 import { readAgent } from "../src/agents.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
+import { model, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import {
   auditedDuring,
   openRpc,
@@ -197,6 +199,64 @@ describe("the agent builder", setUpTime, () => {
       longInstructions: "agent.record_invalid",
       extra: "agent.record_invalid",
       noSuchAgent: "agent.unknown",
+    });
+  });
+
+  it("counts a name once however its accents and capitals are written", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { makeAgent } = admin.api.connections;
+    await makeAgent(said({ name: "Élodie" }));
+    expect({
+      lowerCase: await outcome(makeAgent(said({ name: "élodie" }))),
+      // The same name with its accent as a mark of its own.
+      decomposed: await outcome(makeAgent(said({ name: "E\u0301lodie" }))),
+      another: await outcome(makeAgent(said({ name: "Elodie" }))),
+    }).toStrictEqual({
+      lowerCase: "agent.name_taken",
+      decomposed: "agent.name_taken",
+      another: "ok",
+    });
+  });
+
+  it("stops a paused agent answering, before the model is asked, until it is turned back on", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const gateway = await fakeProvider(says("Back."));
+    const chat = await member.api.chats.create("Paused");
+    await admin.api.connections.setAgentPaused(chatAgentId, true);
+    await expect(
+      outcome(member.api.chats.send(chat.id, { text: "Hi.", model }))
+    ).resolves.toBe("agent.paused");
+    expect(gateway.requests).toHaveLength(0);
+    await admin.api.connections.setAgentPaused(chatAgentId, false);
+    await expect(
+      outcome(member.api.chats.send(chat.id, { text: "Hi.", model }))
+    ).resolves.toBe("ok");
+  });
+
+  it("writes and records nothing for a change that leaves the first agent as Grasp ships it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const shipped = await readAgent(env, chatAgentId);
+    if (shipped === undefined) {
+      throw new Error("Expected the first agent");
+    }
+    const events = await auditedDuring(async () => {
+      await admin.api.connections.setAgentPaused(chatAgentId, false);
+      await admin.api.connections.changeAgent(chatAgentId, {
+        name: shipped.name,
+        face: shipped.face,
+        job: shipped.job,
+        instructions: shipped.instructions,
+        modelRole: shipped.modelRole,
+      });
+    });
+    expect(
+      events.filter(({ action }) => action.startsWith("agent."))
+    ).toStrictEqual([]);
+    // Still as shipped: no row was written for it.
+    await expect(readAgent(env, chatAgentId)).resolves.toMatchObject({
+      changedBy: null,
+      changedAt: null,
     });
   });
 

@@ -63,28 +63,63 @@ const requireAgent = async (env: Env, agentId: unknown): Promise<Agent> => {
   return agent;
 };
 
+/**
+ * A name as two agents may not share it: the same letters in any
+ * capitalisation and any way of writing an accent are one name.
+ */
+const agentNameKey = (name: string): string =>
+  name.normalize("NFKC").toLowerCase();
+
 /** Refuses `name` when an agent other than `agentId` answers to it. */
 const requireNameFree = async (
   env: Env,
   name: string,
   agentId: string
 ): Promise<void> => {
-  const lowered = name.toLowerCase();
+  const key = agentNameKey(name);
   const [taken, first] = await Promise.all([
     drizzle(env.DB)
       .select({ id: agents.id })
       .from(agents)
-      .where(
-        and(eq(sql`lower(${agents.name})`, lowered), ne(agents.id, agentId))
-      )
+      .where(and(eq(agents.nameKey, key), ne(agents.id, agentId)))
       .get(),
     // The first agent's name while it has no row of its own.
     agentId === firstAgentId ? undefined : readAgent(env, firstAgentId),
   ]);
-  if (taken !== undefined || first?.name.toLowerCase() === lowered) {
+  if (
+    taken !== undefined ||
+    (first !== undefined && agentNameKey(first.name) === key)
+  ) {
     throw agentErrors.create("agent.name_taken");
   }
 };
+
+/**
+ * Runs `write`, a batch that names an agent: two admins who both found a
+ * name free can both write it, and the index then refuses the second,
+ * which is told what the first check would have said.
+ */
+const namedOnce = async (write: () => Promise<unknown>): Promise<void> => {
+  try {
+    await write();
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("UNIQUE constraint failed: agents.name_key")
+    ) {
+      throw agentErrors.create("agent.name_taken");
+    }
+    throw error;
+  }
+};
+
+/** Whether `said` is what `agent` already is. */
+const unchanged = (agent: Agent, said: AgentInput): boolean =>
+  agent.name === said.name &&
+  agent.face === said.face &&
+  agent.job === said.job &&
+  agent.instructions === said.instructions &&
+  agent.modelRole === said.modelRole;
 
 /** An agent's row as its record. */
 const recordOf = (row: typeof agents.$inferSelect): Agent => ({
@@ -144,35 +179,39 @@ export const makeAgent = async (
   const now = new Date();
   const by = { changedBy: identity.userId, changedAt: now };
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    // It reaches nobody and has no class before it exists.
-    db
-      .insert(agentReach)
-      .values({ agentId: id, on: true, who: "nobody", teams: "[]", ...by }),
-    db.insert(agentToolClasses).values(
-      companyToolClasses.map((toolClass) => ({
-        agentId: id,
-        toolClass,
-        who: "nobody" as const,
-        teams: "[]",
-        ...by,
-      }))
-    ),
-    db.insert(agents).values({
-      id,
-      ...made,
-      state: "on",
-      madeBy: identity.userId,
-      madeAt: now,
-      ...by,
-    }),
-    outboxedIfChanged(db, {
-      actor: actorOf(identity),
-      action: "agent.made",
-      target: { type: "agent", id },
-      detail: detailOf(made),
-    }),
-  ]);
+  await namedOnce(
+    async () =>
+      await auditedBatch(env, db, [
+        // It reaches nobody and has no class before it exists.
+        db
+          .insert(agentReach)
+          .values({ agentId: id, on: true, who: "nobody", teams: "[]", ...by }),
+        db.insert(agentToolClasses).values(
+          companyToolClasses.map((toolClass) => ({
+            agentId: id,
+            toolClass,
+            who: "nobody" as const,
+            teams: "[]",
+            ...by,
+          }))
+        ),
+        db.insert(agents).values({
+          id,
+          ...made,
+          nameKey: agentNameKey(made.name),
+          state: "on",
+          madeBy: identity.userId,
+          madeAt: now,
+          ...by,
+        }),
+        outboxedIfChanged(db, {
+          actor: actorOf(identity),
+          action: "agent.made",
+          target: { type: "agent", id },
+          detail: detailOf(made),
+        }),
+      ])
+  );
   return {
     id,
     ...made,
@@ -196,40 +235,49 @@ export const changeAgent = async (
   requireCompanyAdmin(identity);
   const changed = inputOf(input);
   const agent = await requireAgent(env, agentId);
+  if (unchanged(agent, changed)) {
+    // A change to nothing: nothing is written and nothing recorded, the
+    // first agent's first row included.
+    return;
+  }
   await requireNameFree(env, changed.name, agent.id);
   const now = new Date();
   const by = { changedBy: identity.userId, changedAt: now };
+  const named = { ...changed, nameKey: agentNameKey(changed.name) };
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db
-      .insert(agents)
-      // The first agent's row, the first time it is changed.
-      .values({
-        id: agent.id,
-        ...changed,
-        state: agent.state,
-        madeBy: identity.userId,
-        madeAt: now,
-        ...by,
-      })
-      .onConflictDoUpdate({
-        target: agents.id,
-        set: { ...changed, ...by },
-        setWhere: or(
-          sql`${agents.name} IS NOT ${changed.name}`,
-          sql`${agents.face} IS NOT ${changed.face}`,
-          sql`${agents.job} IS NOT ${changed.job}`,
-          sql`${agents.instructions} IS NOT ${changed.instructions}`,
-          sql`${agents.modelRole} IS NOT ${changed.modelRole}`
-        ),
-      }),
-    outboxedIfChanged(db, {
-      actor: actorOf(identity),
-      action: "agent.changed",
-      target: { type: "agent", id: agent.id },
-      detail: detailOf(changed),
-    }),
-  ]);
+  await namedOnce(
+    async () =>
+      await auditedBatch(env, db, [
+        db
+          .insert(agents)
+          // The first agent's row, the first time it is changed.
+          .values({
+            id: agent.id,
+            ...named,
+            state: agent.state,
+            madeBy: identity.userId,
+            madeAt: now,
+            ...by,
+          })
+          .onConflictDoUpdate({
+            target: agents.id,
+            set: { ...named, ...by },
+            setWhere: or(
+              sql`${agents.name} IS NOT ${changed.name}`,
+              sql`${agents.face} IS NOT ${changed.face}`,
+              sql`${agents.job} IS NOT ${changed.job}`,
+              sql`${agents.instructions} IS NOT ${changed.instructions}`,
+              sql`${agents.modelRole} IS NOT ${changed.modelRole}`
+            ),
+          }),
+        outboxedIfChanged(db, {
+          actor: actorOf(identity),
+          action: "agent.changed",
+          target: { type: "agent", id: agent.id },
+          detail: detailOf(changed),
+        }),
+      ])
+  );
 };
 
 /**
@@ -249,6 +297,10 @@ export const setAgentPaused = async (
   }
   const agent = await requireAgent(env, agentId);
   const state = paused ? "paused" : "on";
+  if (agent.state === state) {
+    // As it is already: nothing is written and nothing recorded.
+    return;
+  }
   const now = new Date();
   const by = { changedBy: identity.userId, changedAt: now };
   const db = drizzle(env.DB);
@@ -258,6 +310,7 @@ export const setAgentPaused = async (
       .values({
         id: agent.id,
         name: agent.name,
+        nameKey: agentNameKey(agent.name),
         face: agent.face,
         job: agent.job,
         instructions: agent.instructions,

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1823a371-8a70-4572-a8ef-4984b2159dce",
+  "id": "aa87c461-09ab-482b-ba51-7b72a6ccdd69",
   "prevId": "012aeab0-e8b0-4115-9d0a-350b08a26cbd",
   "tables": {
     "access_revocations": {
@@ -676,6 +676,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "face": {
           "name": "face",
           "type": "text",
@@ -741,10 +748,10 @@
         }
       },
       "indexes": {
-        "agents_name_idx": {
-          "name": "agents_name_idx",
+        "agents_name_key_idx": {
+          "name": "agents_name_key_idx",
           "columns": [
-            "lower(\"name\")"
+            "name_key"
           ],
           "isUnique": true
         }
@@ -14815,14 +14822,6 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {
-      "agents_name_idx": {
-        "columns": {
-          "lower(\"name\")": {
-            "isExpression": true
-          }
-        }
-      }
-    }
+    "indexes": {}
   }
 }

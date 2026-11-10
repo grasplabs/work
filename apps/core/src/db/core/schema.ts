@@ -3066,6 +3066,12 @@ export const agents = sqliteTable(
   {
     id: text().primaryKey(),
     name: text().notNull(),
+    /**
+     * The name as two agents may not share it (`agentNameKey`): folded
+     * by core, since SQLite's `lower` folds ASCII letters alone. Written
+     * with every name.
+     */
+    nameKey: text("name_key"),
     face: text().notNull(),
     job: text().notNull(),
     instructions: text().notNull(),
@@ -3079,7 +3085,7 @@ export const agents = sqliteTable(
   (table) => [
     // No two agents answer to one name, however it is capitalised: people
     // say which agent they mean by it.
-    uniqueIndex("agents_name_idx").on(sql`lower(${table.name})`),
+    uniqueIndex("agents_name_key_idx").on(table.nameKey),
   ]
 );
 
