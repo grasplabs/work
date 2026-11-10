@@ -13,6 +13,7 @@ import type {
   AiProvidersListing,
   AiProviderStatus,
   AiProviderTest,
+  AiSource,
 } from "@grasp-os/shared/ai-providers";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -60,13 +61,17 @@ const fakeAiProviders = ({
   choice: initial = null,
   tested = { ok: true, model: "openai/gpt-5-mini" },
   platform = [],
+  graspAvailable = false,
 }: {
+  /** Whether this deployment has Grasp's key for Grasp's AI. */
+  graspAvailable?: boolean;
   connected?: { provider: OrganizationProviderId; status?: AiProviderStatus }[];
   choice?: AiModelChoiceNow | null;
   tested?: AiProviderTest;
   platform?: AiPlatformUse[];
 } = {}) => {
   const asked: unknown[][] = [];
+  let source: AiSource = "own";
   const listed = (
     provider: OrganizationProviderId,
     key: string,
@@ -91,15 +96,15 @@ const fakeAiProviders = ({
     list: async (): Promise<AiProvidersListing> => {
       await Promise.resolve();
       return {
-        source: "own",
+        source,
         grasp: {
-          available: false,
+          available: graspAvailable,
           model: {
             model: "anthropic/claude-sonnet-5-5",
             name: "Claude Sonnet 5.5",
           },
           whereItRuns: "Anthropic, United States",
-          month: { spentUsd: 0, limitUsd: 100, reached: false },
+          month: { spentUsd: 12.5, limitUsd: 100, reached: false },
         },
         providers,
         offered: organizationProviderIds.map((provider) => ({
@@ -138,6 +143,11 @@ const fakeAiProviders = ({
       await Promise.resolve();
       asked.push(["models", next]);
       choice = next;
+    },
+    setSource: async (next: AiSource): Promise<void> => {
+      await Promise.resolve();
+      asked.push(["source", next]);
+      source = next;
     },
     remove: async (provider: OrganizationProviderId): Promise<void> => {
       await Promise.resolve();
@@ -591,6 +601,41 @@ describe("Settings › AI providers", () => {
       before: "It works: GPT-5 mini answered the test.",
       after: null,
     });
+  });
+
+  it("switches the organization's AI to Grasp's AI and back, saying what the month came to against its limit", async () => {
+    const { api, asked } = fakeAiProviders({
+      connected: [{ provider: "openai" }],
+      graspAvailable: true,
+    });
+    await shown(api);
+    expect(text()).toContain("Your AI runs on your own keys");
+
+    await press(button("Switch to Grasp’s AI"));
+    const onGrasp = text();
+    await press(button("Switch to your own keys"));
+
+    expect({
+      asked,
+      onGrasp: [
+        onGrasp.includes("Your AI runs on Grasp’s AI"),
+        onGrasp.includes("This month: $12.50 of $100.00."),
+      ],
+      back: text().includes("Your AI runs on your own keys"),
+    }).toStrictEqual({
+      asked: [
+        ["source", "grasp"],
+        ["source", "own"],
+      ],
+      onGrasp: [true, true],
+      back: true,
+    });
+  });
+
+  it("says nothing of Grasp's AI where the deployment doesn't offer it", async () => {
+    const { api } = fakeAiProviders();
+    await shown(api);
+    expect(text()).not.toContain("Grasp’s AI or your own keys");
   });
 
   it("shows the providers and models without a way to change them to anyone who can't", async () => {
