@@ -1,7 +1,7 @@
-import type { FilesReference, Id } from "@grasp-os/sdk";
-import { GraspError } from "@grasp-os/sdk/client";
-import { fileChannel, GraspClient } from "@grasp-os/sdk/host";
-import type { FileChannel, FileTransport } from "@grasp-os/sdk/host";
+import type { FilesReference, Id } from "@grasp-os/runtime/app";
+import { fileChannel, GraspClient } from "@grasp-os/runtime/host";
+import type { FileChannel, FileTransport } from "@grasp-os/runtime/host";
+import { GraspError } from "@grasp-os/runtime/page";
 import {
   appFilesPath,
   fileChunkHashHeader,

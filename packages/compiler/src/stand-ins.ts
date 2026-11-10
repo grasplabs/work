@@ -1,4 +1,4 @@
-import { symbolicModules } from "@grasp-os/sdk/host";
+import { symbolicModules } from "@grasp-os/runtime/host";
 
 import { child, children, parsed, walk } from "./syntax.ts";
 import type { Node } from "./syntax.ts";

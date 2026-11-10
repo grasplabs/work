@@ -1,6 +1,6 @@
 // What `@server/_generated/server` is to the intake's server code here, for
 // the repo's type check and lint: the module the host generates for an
-// App (`serverModuleSource`, @grasp-os/sdk's generate.ts), whose code is
+// App (`serverModuleSource`, @grasp-os/runtime's generate.ts), whose code is
 // the same for every App and whose types come from the App's own
 // schema.ts. Never part of the App: its seal generates the real one, and
 // type-checks its server code against it.

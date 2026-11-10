@@ -1,5 +1,5 @@
-import { currencyDecimals } from "@grasp-os/sdk";
-import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
+import { currencyDecimals } from "@grasp-os/runtime/app";
+import type { ValueDescriptor } from "@grasp-os/runtime/forms";
 
 import type { DataGridText } from "./data-grid-text.ts";
 

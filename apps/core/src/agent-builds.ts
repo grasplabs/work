@@ -3,8 +3,8 @@ import {
   definitionText,
   emptyDefinition,
   tryOperation,
-} from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appErrors, fileChangesSchema } from "@grasp-os/shared/apps";
 import type {
   App,

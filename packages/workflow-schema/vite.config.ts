@@ -1,7 +1,7 @@
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { defineProject } from "vite-plus";
 
-import { oxcParseTestConfig } from "../sdk/oxc-parse-test-config.ts";
+import { oxcParseTestConfig } from "../runtime/oxc-parse-test-config.ts";
 
 // Workflows are checked and generated inside core's Worker, so the tests
 // run in workerd too.

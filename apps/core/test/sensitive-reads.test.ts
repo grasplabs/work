@@ -1,4 +1,4 @@
-import { GraspClient } from "@grasp-os/sdk/host";
+import { GraspClient } from "@grasp-os/runtime/host";
 import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";

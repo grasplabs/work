@@ -1,56 +1,19 @@
 {
   "name": "@grasp-os/sdk",
   "private": true,
-  "description": "Apps and workflows SDK: values, server functions and React hooks",
+  "description": "The Apps and workflows SDK: what App code imports, re-exported by name from @grasp-os/runtime",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "sideEffects": [
-    "./src/preview-refresh.ts"
-  ],
-  "imports": {
-    "#oxc-parse": {
-      "types": "./src/oxc-parse-module.ts",
-      "workerd": "./src/oxc-parse-module.ts",
-      "node": "./src/oxc-parse-module.node.ts"
-    }
-  },
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
-    "./host": "./src/host.ts",
-    "./definition": "./src/definition-entry.ts",
     "./server": "./src/server.ts",
-    "./runner": "./src/runner.ts",
-    "./workflow": "./src/workflow.ts",
-    "./workflow-generated": "./src/workflow-generated.ts",
-    "./expression-check": "./src/expression-check.ts",
-    "./oxc-parse": "./src/oxc-parse.ts",
-    "./brain": "./src/brain.ts",
-    "./testing": "./src/testing.ts",
-    "./client": "./src/client.ts",
-    "./form-binding": "./src/form-binding.ts",
     "./react": "./src/react.ts",
-    "./page-runtime": "./src/page-runtime.ts",
-    "./preview-refresh": "./src/preview-refresh.ts",
-    "./preview-runtime": "./src/preview-runtime.ts"
+    "./workflow": "./src/workflow.ts",
+    "./testing": "./src/testing.ts"
   },
   "dependencies": {
-    "@grasp-os/brain": "workspace:*",
-    "@grasp-os/shared": "workspace:*",
-    "@noble/ciphers": "catalog:",
-    "@oxc-project/types": "catalog:",
-    "@standard-schema/spec": "catalog:",
-    "@tanstack/react-form": "catalog:",
-    "@tanstack/react-router": "catalog:",
-    "capnweb": "catalog:",
-    "react-refresh": "catalog:",
-    "zod": "catalog:"
-  },
-  "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "catalog:",
-    "@types/react": "catalog:",
-    "@types/react-dom": "catalog:",
-    "react": "catalog:",
-    "react-dom": "catalog:"
+    "@grasp-os/runtime": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.2.0",

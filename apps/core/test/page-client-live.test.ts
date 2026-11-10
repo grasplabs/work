@@ -1,5 +1,5 @@
-import { GraspClient } from "@grasp-os/sdk/host";
-import type { ClientTransport } from "@grasp-os/sdk/host";
+import { GraspClient } from "@grasp-os/runtime/host";
+import type { ClientTransport } from "@grasp-os/runtime/host";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import { querySubscriptionLimits } from "@grasp-os/shared/pages";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";

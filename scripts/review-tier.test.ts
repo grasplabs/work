@@ -38,8 +38,8 @@ describe("ranking a pull request's complexity", () => {
   it("calls a change across four apps or packages High, however small", () => {
     expect(
       assess(
-        ["apps/core", "apps/web", "packages/sdk", "packages/ui"].map((area) =>
-          changed(`${area}/src/name.ts`, 2)
+        ["apps/core", "apps/web", "packages/runtime", "packages/ui"].map(
+          (area) => changed(`${area}/src/name.ts`, 2)
         )
       ).complexity
     ).toBe("High");

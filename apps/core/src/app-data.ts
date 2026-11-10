@@ -1,6 +1,6 @@
-import type { ValueDescriptor } from "@grasp-os/sdk";
-import { schemaFromDescriptor, schemaHash } from "@grasp-os/sdk/host";
-import type { ManifestTable } from "@grasp-os/sdk/host";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import { schemaFromDescriptor, schemaHash } from "@grasp-os/runtime/host";
+import type { ManifestTable } from "@grasp-os/runtime/host";
 import {
   appDataErrors,
   appDataExportMaxRecords,

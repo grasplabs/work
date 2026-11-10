@@ -1,4 +1,4 @@
-import type { FunctionManifest } from "@grasp-os/sdk/host";
+import type { FunctionManifest } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";

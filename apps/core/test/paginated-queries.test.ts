@@ -1,7 +1,7 @@
-import type { Id } from "@grasp-os/sdk";
-import { GraspError } from "@grasp-os/sdk/client";
-import { clientInternals, GraspClient } from "@grasp-os/sdk/host";
-import type { ClientTransport } from "@grasp-os/sdk/host";
+import type { Id } from "@grasp-os/runtime/app";
+import { clientInternals, GraspClient } from "@grasp-os/runtime/host";
+import type { ClientTransport } from "@grasp-os/runtime/host";
+import { GraspError } from "@grasp-os/runtime/page";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import {
   appFunctionPath,

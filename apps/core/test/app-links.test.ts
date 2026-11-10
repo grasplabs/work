@@ -1,4 +1,4 @@
-import { linkChannel } from "@grasp-os/sdk/host";
+import { linkChannel } from "@grasp-os/runtime/host";
 import { appLinksPath } from "@grasp-os/shared/app-link-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { pagePersonHeader } from "@grasp-os/shared/page-limits";

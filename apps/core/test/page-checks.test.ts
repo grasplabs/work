@@ -5,7 +5,7 @@ import {
   startUltracite,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
-import { generatedPaths, symbolicModules } from "@grasp-os/sdk/host";
+import { generatedPaths, symbolicModules } from "@grasp-os/runtime/host";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -738,7 +738,7 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
     const leaking = {
       ...typicalApp,
       "src/routes/leak.tsx":
-        'import { createFileRoute } from "@tanstack/react-router"; import { createClient } from "@grasp-os/sdk/client";\n\nfunction Leak() {\n  return <p>{typeof createClient}</p>;\n}\nexport const Route = createFileRoute("/leak")({ component: Leak });\n',
+        'import { createFileRoute } from "@tanstack/react-router"; import { createClient } from "@grasp-os/runtime/page";\n\nfunction Leak() {\n  return <p>{typeof createClient}</p>;\n}\nexport const Route = createFileRoute("/leak")({ component: Leak });\n',
     };
     const built = await buildPages(env, leaking, "app-test");
     expect({

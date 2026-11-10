@@ -1,6 +1,6 @@
 import { kitModuleName } from "@grasp-os/compiler";
-import { v } from "@grasp-os/sdk";
-import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { v } from "@grasp-os/runtime/app";
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/runtime/host";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";

@@ -1,6 +1,6 @@
 import { generatedWorkflowEntry } from "@grasp-os/compiler";
-import { definitionText, readDefinition } from "@grasp-os/sdk/definition";
-import { readAppManifest } from "@grasp-os/sdk/host";
+import { definitionText, readDefinition } from "@grasp-os/runtime/definition";
+import { readAppManifest } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";

@@ -1,4 +1,5 @@
-// What a host needs of the SDK and App code never does. A host holds
+// `@grasp-os/runtime/host`: what a host needs of the runtime and App code
+// never does. A host holds
 // descriptors as data (in a manifest, from a browser, from another version)
 // and turns them back into schemas here, without running the code that
 // declared them.
@@ -144,3 +145,18 @@ export type { FileChannel } from "./file-channel.ts";
 
 // How a declared name becomes a member of a client (`ctx.connections.<alias>.<action>`).
 export { memberName } from "./member-names.ts";
+
+// The runner an App's isolates run its functions, migrations and
+// inspection with (runner.ts), and the channel a function's host answers
+// it over.
+export {
+  installMutationRuntime,
+  manifestOfApp,
+  runFunction,
+  runMigration,
+} from "./runner.ts";
+export type { FunctionChannel, MigrationRow, MutationStart } from "./runner.ts";
+
+// The Brain's client over the binding a host hands a run (brain.ts).
+export { brain, brainErrors } from "./brain.ts";
+export type * from "./brain.ts";

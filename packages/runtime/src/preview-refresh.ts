@@ -1,7 +1,7 @@
 /**
  * React Fast Refresh in a chat's preview frame: the
  * preview kit's only module that loads the Refresh runtime. It hooks into
- * React before React DOM loads (`@grasp-os/sdk/preview-runtime` loads it
+ * React before React DOM loads (preview-runtime.ts loads it
  * first), so the renderer hands Refresh what it needs to swap components.
  *
  * A preview build's modules register their components here, by family

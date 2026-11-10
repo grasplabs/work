@@ -32,7 +32,7 @@ import {
 } from "./preview-updates.ts";
 
 /** The page runtime's module, by its flat name in the kit. */
-const pageRuntimeModule = "@grasp-os~sdk~page-runtime.js";
+const pageRuntimeModule = "@grasp-os~runtime~page.js";
 
 /** What the page runtime's module exports, as this calls it. */
 interface PageRuntime {

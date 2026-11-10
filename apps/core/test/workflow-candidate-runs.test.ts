@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime/app";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";

@@ -80,7 +80,7 @@ const blueprintFiles = async (
     },
   });
   const { generateModules, inspectApp, registerApp } =
-    await import("@grasp-os/sdk/host");
+    await import("@grasp-os/runtime/host");
   const all: z.infer<typeof blueprintsSchema> = {};
   const names = readdirSync(blueprints).filter((name) =>
     existsSync(path.join(blueprints, name, "files", configPath))

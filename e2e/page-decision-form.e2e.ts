@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime/app";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";

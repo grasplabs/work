@@ -1,4 +1,4 @@
-import { GraspError } from "@grasp-os/sdk/client";
+import { GraspError } from "@grasp-os/runtime/page";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -780,7 +780,7 @@ describe("a page's build", { timeout: 120_000 }, () => {
       diagnosticsOf(
         withFiles(files, {
           "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { GraspClient } from "@grasp-os/sdk/client";
+import { GraspClient } from "@grasp-os/runtime/page";
 function Notes() {
   return <p>{String(GraspClient)}</p>;
 }
@@ -789,7 +789,9 @@ export const Route = createFileRoute("/")({ component: Notes });
         })
       )
     ).resolves.toStrictEqual([
-      expect.stringContaining("the platform's: it makes the session client"),
+      expect.stringContaining(
+        "is the platform's own, which App code never imports"
+      ),
     ]);
   });
 

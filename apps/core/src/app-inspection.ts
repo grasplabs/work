@@ -2,12 +2,13 @@ import {
   appCodeFiles,
   appModuleName,
   kitModuleName,
+  serverRunner,
   serverEntryPath,
   serverSdkModules,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
-import { readAppManifest, symbolicModules } from "@grasp-os/sdk/host";
-import type { AppManifest } from "@grasp-os/sdk/host";
+import { readAppManifest, symbolicModules } from "@grasp-os/runtime/host";
+import type { AppManifest } from "@grasp-os/runtime/host";
 import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
@@ -49,7 +50,7 @@ const inspectModule = "grasp-inspect.js";
  * untrusted, this module too; it only bounds what it hands back.
  */
 const inspectMain = `import { WorkerEntrypoint } from "cloudflare:workers";
-import { manifestOfApp } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
+import { manifestOfApp } from ${JSON.stringify(kitModuleName(serverRunner))};
 import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
 
 export class Inspect extends WorkerEntrypoint {

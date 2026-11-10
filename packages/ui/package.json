@@ -18,7 +18,7 @@
     "@dnd-kit/core": "catalog:",
     "@dnd-kit/sortable": "catalog:",
     "@dnd-kit/utilities": "catalog:",
-    "@grasp-os/sdk": "workspace:*",
+    "@grasp-os/runtime": "workspace:*",
     "@shadcn/react": "catalog:",
     "@tanstack/react-form": "catalog:",
     "@tanstack/react-table": "catalog:",

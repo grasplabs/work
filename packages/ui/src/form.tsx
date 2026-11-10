@@ -3,16 +3,16 @@ import type {
   FilesReference,
   FunctionReference,
   FunctionReturn,
-} from "@grasp-os/sdk";
-import { bindingOf } from "@grasp-os/sdk/form-binding";
-import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
-import { useQuery, useRetryFailed, useUpload } from "@grasp-os/sdk/react";
+} from "@grasp-os/runtime/app";
+import { bindingOf } from "@grasp-os/runtime/forms";
+import type { ValueDescriptor } from "@grasp-os/runtime/forms";
+import { useQuery, useRetryFailed, useUpload } from "@grasp-os/runtime/react";
 import type {
   Declaring,
   FormStatus,
   GraspForm,
   TextFieldName,
-} from "@grasp-os/sdk/react";
+} from "@grasp-os/runtime/react";
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import { ButtonGroup } from "@grasp-os/ui/components/button-group";

@@ -13,6 +13,7 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 | `apps/admin` | Grasp's admin, where staff manage every client (TanStack Start); production runs in grasp-os-ops |
 | `apps/router` | Stateless router: `*.<domain>` to each client's core; production runs in grasp-os-ops |
 | `packages/sdk` | `@grasp-os/sdk`: workflow SDK and screen hooks, the only API App code sees |
+| `packages/runtime` | `@grasp-os/runtime`: what the SDK re-exports, and the hosts, pages and checks only platform code imports |
 | `packages/ui` | `@grasp-os/ui`: shadcn on Base UI, Tailwind v4, shared with App screens |
 | `packages/compiler` | `@grasp-os/compiler`: the screen compiler |
 | `packages/connectors/*` | Native MCP servers, loaded by connect |

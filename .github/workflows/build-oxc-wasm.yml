@@ -5,7 +5,7 @@
 # release of another name. Installs, CI and release builds download it by
 # that name and check the SHA-256 pin.json pins (wasm.ts), and never build
 # it. The parser build beside it, oxc-parse.wasm, is committed instead
-# (packages/sdk/src), and each run checks it is this build too.
+# (packages/runtime/src), and each run checks it is this build too.
 #
 # Run by hand on the branch that changes the glue (`gh workflow run
 # build-oxc-wasm.yml --ref <branch>`), as its pull request needs the
@@ -31,7 +31,7 @@ on:
     branches: [main]
     paths:
       - packages/compiler/oxc-wasm/**
-      - packages/sdk/src/oxc-parse.wasm
+      - packages/runtime/src/oxc-parse.wasm
       - .github/actions/oxc-wasm-build/**
       - .github/workflows/build-oxc-wasm.yml
   workflow_dispatch:

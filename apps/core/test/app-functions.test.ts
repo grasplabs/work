@@ -1401,10 +1401,11 @@ describe("the SDK a release runs with", { timeout: 120_000 }, () => {
 
   it("needs nothing of its runner but what its protocol pins", async () => {
     const notes = await sealedNotes();
-    // A runner exporting only what the host's modules import of it
-    // (runFunction, installMutationRuntime, manifestOfApp) and what an
-    // App's entry does (registerApp): the host brings the rest itself.
-    await rewriteSdk(notes, "sdk/@grasp-os~sdk~runner.js", (text) => {
+    // The runtime's host module exporting only what the host's modules
+    // import of it (runFunction, installMutationRuntime, manifestOfApp)
+    // and what an App's entry does (registerApp): the host brings the
+    // rest itself.
+    await rewriteSdk(notes, "sdk/@grasp-os~runtime~host.js", (text) => {
       const pinned = exportsOnly(text, [
         "runFunction",
         "installMutationRuntime",

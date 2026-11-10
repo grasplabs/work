@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime/app";
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";

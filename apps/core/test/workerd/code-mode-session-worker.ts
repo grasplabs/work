@@ -3,9 +3,9 @@ import {
   kitModuleName,
   serverEntryPath,
 } from "@grasp-os/compiler";
-import { defineApp, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { inspectApp, registerApp } from "@grasp-os/sdk/host";
-import { serverModule } from "@grasp-os/sdk/server";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import { inspectApp, registerApp } from "@grasp-os/runtime/host";
+import { serverModule } from "@grasp-os/runtime/server";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
 import { requestText } from "../../src/app-requests.ts";
@@ -61,7 +61,7 @@ const release = {
       'export default { "jobs.echo": async (channel, args) => ({ n: args.n + 1 }) };',
   },
   sdk: {
-    [kitModuleName("@grasp-os/sdk/runner")]:
+    [kitModuleName("@grasp-os/runtime/host")]:
       // Its mutation runtime changes nothing: the function isn't a mutation.
       "export const installMutationRuntime = () => () => {};\nexport const runFunction = async (registered, path, args, channel) => await registered[path](channel, args);",
   },

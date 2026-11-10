@@ -2,7 +2,7 @@ import {
   dataModelSource,
   generatedPaths,
   serverModuleSource,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 
 // The modules the host adds to every build of an App's server code
 // before it knows anything of its registration: the server builders and

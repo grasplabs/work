@@ -15,7 +15,7 @@
     "@fontsource-variable/geist": "catalog:",
     "@fontsource-variable/jetbrains-mono": "catalog:",
     "@fontsource-variable/newsreader": "catalog:",
-    "@grasp-os/sdk": "workspace:*",
+    "@grasp-os/runtime": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
     "@lingui/core": "catalog:",

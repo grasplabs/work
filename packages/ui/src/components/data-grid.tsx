@@ -1,7 +1,7 @@
-import type { FunctionReference } from "@grasp-os/sdk";
-import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
-import { usePaginatedQuery, useRetryFailed } from "@grasp-os/sdk/react";
-import type { PageItemOf, PaginatedArgsOf } from "@grasp-os/sdk/react";
+import type { FunctionReference } from "@grasp-os/runtime/app";
+import type { ValueDescriptor } from "@grasp-os/runtime/forms";
+import { usePaginatedQuery, useRetryFailed } from "@grasp-os/runtime/react";
+import type { PageItemOf, PaginatedArgsOf } from "@grasp-os/runtime/react";
 import {
   Alert,
   AlertDescription,

@@ -5,11 +5,15 @@ import {
   defineTable,
   permission,
   v,
-} from "@grasp-os/sdk";
-import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
-import { runFunction } from "@grasp-os/sdk/runner";
-import type { FunctionChannel } from "@grasp-os/sdk/runner";
-import { serverModule } from "@grasp-os/sdk/server";
+} from "@grasp-os/runtime/app";
+import {
+  inspectApp,
+  manifestText,
+  registerApp,
+  runFunction,
+} from "@grasp-os/runtime/host";
+import type { FunctionChannel } from "@grasp-os/runtime/host";
+import { serverModule } from "@grasp-os/runtime/server";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { streamMaxEmits } from "@grasp-os/shared/function-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";

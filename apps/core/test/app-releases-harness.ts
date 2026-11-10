@@ -352,11 +352,29 @@ export const withOperation = (source: string): TestApp =>
     "server/extra.ts": source,
   });
 
-/** The modules only the platform's bootstrap imports (spec 10.7.1). */
-export const bootstrapModules = [
+/**
+ * Modules App code never imports: every entry of the platform's runtime,
+ * and paths of the SDK that aren't its entries, including the platform
+ * entries the SDK had before the runtime held them.
+ */
+export const platformModules = [
+  "@grasp-os/runtime/app",
+  "@grasp-os/runtime/server",
+  "@grasp-os/runtime/react",
+  "@grasp-os/runtime/workflow",
+  "@grasp-os/runtime/testing",
+  "@grasp-os/runtime/host",
+  "@grasp-os/runtime/definition",
+  "@grasp-os/runtime/page",
+  "@grasp-os/runtime/check",
+  "@grasp-os/runtime/forms",
   "@grasp-os/sdk/client",
   "@grasp-os/sdk/host",
-  "@grasp-os/sdk/page-runtime",
+  "@grasp-os/sdk/src/index.ts",
+  "@grasp-os/sdk/",
+  "@grasp-os/runtime",
+  "@grasp-os/ui/../runtime/host",
+  "@grasp-os/shared/json",
 ] as const;
 
 /** How a file names a module: for its values, or for its types alone. */
@@ -373,11 +391,11 @@ export const importForms = {
     `import type D${index} = require("${module}");\nexport type E${index} = typeof D${index};`,
 } as const;
 
-/** A file that names every bootstrap module as `form` writes one. */
+/** A file that names every platform module as `form` writes one. */
 export const namingAll = (
   form: (module: string, index: number) => string
 ): string =>
-  bootstrapModules.map((module, index) => form(module, index)).join("\n");
+  platformModules.map((module, index) => form(module, index)).join("\n");
 
 /** What a build said, whatever it built. */
 export const saidSchema = z.object({
@@ -399,7 +417,7 @@ export const refusedIn = (built: object, file: string): string[] =>
     .parse(built)
     .diagnostics.filter((diagnostic) => diagnostic.file === file)
     .flatMap(({ message }) =>
-      bootstrapModules.filter((module) => message.includes(`"${module}"`))
+      platformModules.filter((module) => message.includes(`"${module}"`))
     )
     .toSorted();
 

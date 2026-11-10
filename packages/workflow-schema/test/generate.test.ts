@@ -1,4 +1,4 @@
-import { parseProgram } from "@grasp-os/sdk/oxc-parse";
+import { parseProgram } from "@grasp-os/runtime/check";
 import { describe, expect, it } from "vite-plus/test";
 
 import { generateWorkflow, taskAtLine } from "../src/generate.ts";
@@ -263,10 +263,7 @@ describe("generating a workflow", () => {
       nodes
         .filter(({ type }) => type === "ImportDeclaration")
         .map((node) => (isNode(node.source) ? node.source.value : undefined))
-    ).toStrictEqual([
-      "@grasp-os/sdk/workflow",
-      "@grasp-os/sdk/workflow-generated",
-    ]);
+    ).toStrictEqual(["@grasp-os/sdk/workflow"]);
     const types = new Set(nodes.map(({ type }) => type));
     for (const loop of [
       "ForStatement",

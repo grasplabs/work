@@ -12,7 +12,7 @@ export const steeringCases = (
 ): (readonly [string, string])[] => [
   [
     "a reference path into the kit",
-    '/// <reference path="../../node_modules/@grasp-os/sdk/src/client.ts" />\nexport const extra = 1;\n',
+    '/// <reference path="../../node_modules/@grasp-os/runtime/src/page.ts" />\nexport const extra = 1;\n',
   ],
   [
     "a lib it references, the DOM's",

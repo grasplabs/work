@@ -1,5 +1,5 @@
-import { declaredWorkflows, workflowFunctions } from "@grasp-os/sdk/host";
-import type { WorkflowQueryName } from "@grasp-os/sdk/host";
+import { declaredWorkflows, workflowFunctions } from "@grasp-os/runtime/host";
+import type { WorkflowQueryName } from "@grasp-os/runtime/host";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";

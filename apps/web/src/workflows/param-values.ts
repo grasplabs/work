@@ -1,4 +1,4 @@
-import { currencyDecimals } from "@grasp-os/sdk";
+import { currencyDecimals } from "@grasp-os/runtime/app";
 
 // How an independent workflow's parameter is taken from a field, by the
 // JSON Schema its current version seals for it (`WorkflowParamSetting`):

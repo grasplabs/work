@@ -1,4 +1,4 @@
-import { serverModuleSource } from "@grasp-os/sdk/host";
+import { serverModuleSource } from "@grasp-os/runtime/host";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";

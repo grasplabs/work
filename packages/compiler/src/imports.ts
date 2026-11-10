@@ -523,26 +523,26 @@ export interface CodeKind {
 }
 
 /**
- * The SDK modules core's own entry modules import in the isolates it
- * runs: the workflow SDK a sealed run's host drives
- * (`@grasp-os/sdk/workflow`, sealed-isolate.ts) and the test harness an
- * App's tests run on (`@grasp-os/sdk/testing`, app-tests.ts).
+ * The runtime's modules core's own entry modules import in the isolates
+ * it runs: the workflow runtime a sealed run's host drives
+ * (`@grasp-os/runtime/workflow`, sealed-isolate.ts) and the test runner
+ * an App's tests run on (`@grasp-os/runtime/testing`, app-tests.ts), and
+ * the SDK's testing entry those tests import: built with the runner, so
+ * the suites they declare are the ones it runs.
  */
 export const sdkImports = [
-  "@grasp-os/sdk/workflow",
+  "@grasp-os/runtime/workflow",
+  "@grasp-os/runtime/testing",
   "@grasp-os/sdk/testing",
 ] as const;
 
 /**
- * The SDK modules the code the host generates from a JSON workflow
+ * The modules the code the host generates from a JSON workflow
  * (grasp-workflow/2, @grasp-os/workflow-schema) imports: the workflow SDK,
- * and the helpers only generated code calls, and nothing else, not even
- * the testing module beside them.
+ * the helpers only generated code calls included, and nothing else, not
+ * even the testing module beside it.
  */
-export const generatedWorkflowSdkImports = [
-  "@grasp-os/sdk/workflow",
-  "@grasp-os/sdk/workflow-generated",
-] as const;
+export const generatedWorkflowSdkImports = ["@grasp-os/sdk/workflow"] as const;
 
 /** Generated workflow code imports only `generatedWorkflowSdkImports`. */
 export const generatedWorkflowCode: CodeKind = {
@@ -596,6 +596,9 @@ export const codeImportError = (
     return undefined;
   }
   if (typeOnly) {
+    if (specifier !== undefined && kind.imports.has(specifier)) {
+      return undefined;
+    }
     return (
       typeImportError(file, specifier, false) ??
       typeFileError(file, specifier, typeFiles)

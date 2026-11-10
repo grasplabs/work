@@ -3,7 +3,7 @@ import type {
   PreviewLoad,
   PageBridge,
   Theme,
-} from "@grasp-os/sdk/page-runtime";
+} from "@grasp-os/runtime/page";
 import { requestErrors } from "@grasp-os/shared/errors";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { portTransport } from "@grasp-os/shared/page-port";

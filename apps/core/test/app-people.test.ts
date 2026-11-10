@@ -1,4 +1,4 @@
-import { peopleReferences } from "@grasp-os/sdk/host";
+import { peopleReferences } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";

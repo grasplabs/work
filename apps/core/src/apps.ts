@@ -6,8 +6,8 @@ import {
   tryReadDefinition,
   isFunctionPath,
   withExportedFunctions,
-} from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -91,7 +91,7 @@ import { liveStoreSql } from "./store-deletion.ts";
 // `apps/<app>/trees/<sha256>.json`: canonical JSON by path, stored under
 // its own SHA-256, which the version row names. Reading a version is one
 // read, checked against the hash. Its definition, what the App is as data
-// (@grasp-os/sdk's definition.ts: its tables, with the stable IDs its
+// (@grasp-os/runtime's definition.ts: its tables, with the stable IDs its
 // store matches them by, and its permissions), is no file: the row holds
 // it, as its text (`definitionText`), with its SHA-256, and a migration reaches it as
 // it reaches any row.

@@ -1,4 +1,4 @@
-import { manifestText } from "@grasp-os/sdk/host";
+import { manifestText } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";

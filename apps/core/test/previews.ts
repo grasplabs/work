@@ -1,4 +1,4 @@
-import { definitionText } from "@grasp-os/sdk/definition";
+import { definitionText } from "@grasp-os/runtime/definition";
 import type {
   PreviewAt,
   PreviewRefresh,

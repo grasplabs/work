@@ -1,4 +1,4 @@
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -125,7 +125,7 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   (`sealedRunModules`, which takes only a run so loaded). A
 //   tampered build never runs (`workflow.version_corrupt`).
 // - A step the build doesn't have. The build's code is a handler whose
-//   every `ctx` call journals itself (@grasp-os/sdk's workflow-journal.ts)
+//   every `ctx` call journals itself (@grasp-os/runtime's workflow-journal.ts)
 //   under its step's name: `<task>:<step>` (`enter` or `task`), from a
 //   task's second run on, which only a task inside a loop's items has,
 //   `<task>:<step>@<n>`, its count of earlier runs, a decision task's parts

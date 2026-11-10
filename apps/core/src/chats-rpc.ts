@@ -144,7 +144,7 @@ const encoder = new TextEncoder();
 
 /**
  * What the open frame of a preview imports of `built`, a build of its
- * draft at `revision` (@grasp-os/sdk's preview-runtime.ts): its route
+ * draft at `revision` (@grasp-os/runtime's preview-runtime.ts): its route
  * tree's module, by address, and the App's and the kit's modules it
  * loads, and the App's version it is of, when it shows one
  * (`PreviewRefresh.appVersion`), and whether it runs in place of server

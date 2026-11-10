@@ -1,5 +1,5 @@
 import { serverSdkModules } from "@grasp-os/compiler";
-import { schemaHash } from "@grasp-os/sdk/host";
+import { schemaHash } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { releaseFormatVersion } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -944,7 +944,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a path into the kit's packages, for its types",
-      'import type { runPage } from "../node_modules/@grasp-os/sdk/src/page-runtime.ts";\nexport type Reached = typeof runPage;\n',
+      'import type { runPage } from "../node_modules/@grasp-os/runtime/src/page-runtime.ts";\nexport type Reached = typeof runPage;\n',
     ],
     [
       "a module of the kit's pages, for its types",
@@ -952,11 +952,11 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a module the SDK doesn't give it, named with a trailing slash",
-      'import type { GraspClient } from "@grasp-os/sdk/client/";\nexport type Reached = GraspClient;\n',
+      'import type { GraspClient } from "@grasp-os/runtime/page/";\nexport type Reached = GraspClient;\n',
     ],
     [
       "a reference path into the kit",
-      '/// <reference path="../node_modules/@grasp-os/sdk/src/client.ts" />\nexport const extra = 1;\n',
+      '/// <reference path="../node_modules/@grasp-os/runtime/src/page.ts" />\nexport const extra = 1;\n',
     ],
     [
       "a lib it references, the DOM's",
@@ -968,19 +968,19 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a dynamic import of the platform's bootstrap",
-      'export const load = async (): Promise<unknown> => await import("@grasp-os/sdk/client");\n',
+      'export const load = async (): Promise<unknown> => await import("@grasp-os/runtime/page");\n',
     ],
     [
       "a type's import() of the platform's bootstrap",
-      'export type Host = typeof import("@grasp-os/sdk/host");\n',
+      'export type Host = typeof import("@grasp-os/runtime/host");\n',
     ],
     [
       "a re-export of everything of the platform's bootstrap",
-      'export * from "@grasp-os/sdk/client";\n',
+      'export * from "@grasp-os/runtime/page";\n',
     ],
     [
       "a require-style import of the platform's bootstrap",
-      'import client = require("@grasp-os/sdk/client");\nexport const reached = client;\n',
+      'import client = require("@grasp-os/runtime/page");\nexport const reached = client;\n',
     ],
     [
       "a line the type check is told to ignore",

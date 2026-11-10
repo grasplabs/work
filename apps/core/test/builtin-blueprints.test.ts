@@ -4,7 +4,7 @@ import {
   definitionSources,
   generatedFiles,
   readDefinition,
-} from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { collectionIdSchema, appIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";

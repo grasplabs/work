@@ -1,4 +1,4 @@
-import { declaredPermissions, schemaHash } from "@grasp-os/sdk/host";
+import { declaredPermissions, schemaHash } from "@grasp-os/runtime/host";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppId } from "@grasp-os/shared/ids";

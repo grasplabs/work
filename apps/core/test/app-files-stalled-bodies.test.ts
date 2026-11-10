@@ -1,4 +1,4 @@
-import { fileChannel } from "@grasp-os/sdk/host";
+import { fileChannel } from "@grasp-os/runtime/host";
 import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { readDeadlineMs } from "@grasp-os/shared/http";
 import { pageLeaseHeader } from "@grasp-os/shared/pages";

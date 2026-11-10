@@ -1,4 +1,4 @@
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { issuesOf } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";

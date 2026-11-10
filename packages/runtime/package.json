@@ -1,0 +1,52 @@
+{
+  "name": "@grasp-os/runtime",
+  "private": true,
+  "description": "The platform's runtime of Apps and workflows: what @grasp-os/sdk re-exports, and the hosts, pages and checks only the platform imports",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": [
+    "./src/preview-refresh.ts"
+  ],
+  "imports": {
+    "#oxc-parse": {
+      "types": "./src/oxc-parse-module.ts",
+      "workerd": "./src/oxc-parse-module.ts",
+      "node": "./src/oxc-parse-module.node.ts"
+    }
+  },
+  "exports": {
+    "./app": "./src/index.ts",
+    "./server": "./src/server.ts",
+    "./react": "./src/react.ts",
+    "./workflow": "./src/workflow.ts",
+    "./testing": "./src/testing.ts",
+    "./host": "./src/host.ts",
+    "./definition": "./src/definition-entry.ts",
+    "./page": "./src/page.ts",
+    "./check": "./src/check.ts",
+    "./forms": "./src/forms.ts"
+  },
+  "dependencies": {
+    "@grasp-os/brain": "workspace:*",
+    "@grasp-os/shared": "workspace:*",
+    "@noble/ciphers": "catalog:",
+    "@oxc-project/types": "catalog:",
+    "@standard-schema/spec": "catalog:",
+    "@tanstack/react-form": "catalog:",
+    "@tanstack/react-router": "catalog:",
+    "capnweb": "catalog:",
+    "react-refresh": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}

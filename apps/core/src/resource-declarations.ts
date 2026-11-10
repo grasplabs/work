@@ -1,4 +1,4 @@
-import type { AnyPermission } from "@grasp-os/sdk";
+import type { AnyPermission } from "@grasp-os/runtime/app";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { jsonOf } from "@grasp-os/shared/operations";

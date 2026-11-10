@@ -98,7 +98,7 @@ describe(
         readFileSync(path.join(out, file), "utf-8");
 
       const root = packageJsonSchema.parse(JSON.parse(read("package.json")));
-      const vendored = ["brain", "sdk", "ui", "shared"].map((name) =>
+      const vendored = ["brain", "runtime", "sdk", "ui", "shared"].map((name) =>
         packageJsonSchema
           .pick({ dependencies: true })
           .parse(JSON.parse(read(`vendor/@grasp-os/${name}/package.json`)))
@@ -180,6 +180,7 @@ describe(
         grasp: [
           "@grasp-os/brain",
           "@grasp-os/shared",
+          "@grasp-os/runtime",
           "@grasp-os/sdk",
           "@grasp-os/ui",
         ],
@@ -193,6 +194,7 @@ describe(
         importers: [
           ".",
           "vendor/@grasp-os/brain",
+          "vendor/@grasp-os/runtime",
           "vendor/@grasp-os/sdk",
           "vendor/@grasp-os/shared",
           "vendor/@grasp-os/ui",

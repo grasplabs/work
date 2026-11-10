@@ -1,5 +1,5 @@
-import { declaredWorkflows, workflowFunctions } from "@grasp-os/sdk/host";
-import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/sdk/host";
+import { declaredWorkflows, workflowFunctions } from "@grasp-os/runtime/host";
+import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";

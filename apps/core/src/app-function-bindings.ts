@@ -1,5 +1,5 @@
-import { functionBreak } from "@grasp-os/sdk/host";
-import type { FunctionManifest } from "@grasp-os/sdk/host";
+import { functionBreak } from "@grasp-os/runtime/host";
+import type { FunctionManifest } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";

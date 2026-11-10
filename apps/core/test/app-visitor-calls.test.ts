@@ -1,4 +1,4 @@
-import { peopleReferences } from "@grasp-os/sdk/host";
+import { peopleReferences } from "@grasp-os/runtime/host";
 import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";

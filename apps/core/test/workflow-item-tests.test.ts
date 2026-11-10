@@ -1,4 +1,4 @@
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime/app";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type {

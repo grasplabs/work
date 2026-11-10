@@ -12,7 +12,7 @@ import { searchQueryMaxLength } from "./limits.ts";
 
 // The Brain's general contract (GRA-294a; the Brain design's "Brain SDK and
 // API"): what callers ask of it and what it answers, the same for an App,
-// a page, an agent and a workflow. The SDK (`@grasp-os/sdk/brain`) types
+// a page, an agent and a workflow. The SDK (`@grasp-os/runtime/host`) types
 // calls from these schemas, and core validates every call against them
 // again: types never authorize.
 //

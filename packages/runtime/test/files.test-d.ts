@@ -8,7 +8,7 @@
 // `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { GraspClient } from "../src/client.ts";
+import type { GraspClient } from "../src/page.ts";
 import { useFile, useUpload } from "../src/react.ts";
 import type {
   FileRef,

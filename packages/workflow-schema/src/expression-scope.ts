@@ -1,5 +1,5 @@
-import type { ValueDescriptor } from "@grasp-os/sdk";
-import { valueTypeOf } from "@grasp-os/sdk/host";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import { valueTypeOf } from "@grasp-os/runtime/host";
 
 import type { CheckedWorkflow } from "./check.ts";
 import { eachStep, resultStepTypes } from "./format.ts";

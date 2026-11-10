@@ -1,5 +1,5 @@
 /**
- * Type-checks a workflow's JavaScript expressions (`@grasp-os/sdk/expression-check`)
+ * Type-checks a workflow's JavaScript expressions (`@grasp-os/runtime/check`)
  * against the types of what they read, on tsrs in the type checker's
  * isolate (checker.ts), diagnostics only: core sends the request this
  * builds, and reads the diagnostics back with it. A reference to a field,
@@ -27,9 +27,9 @@ import {
   allowedMethods,
   checkExpression,
   checkRoots,
-} from "@grasp-os/sdk/expression-check";
-import type { ExpressionError } from "@grasp-os/sdk/expression-check";
-import { parseProgram } from "@grasp-os/sdk/oxc-parse";
+  parseProgram,
+} from "@grasp-os/runtime/check";
+import type { ExpressionError } from "@grasp-os/runtime/check";
 
 import type { Diagnostic } from "./diagnostic.ts";
 import { serverTarget, typeCheckRequest } from "./type-check.ts";

@@ -3,9 +3,9 @@ import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "@grasp-os/sdk";
-import type { Id } from "@grasp-os/sdk";
-import { useMutation } from "@grasp-os/sdk/react";
+} from "@grasp-os/runtime/app";
+import type { Id } from "@grasp-os/runtime/app";
+import { useMutation } from "@grasp-os/runtime/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
 import type { DataGridState } from "@grasp-os/ui/components/data-grid";
 import { act } from "react";

@@ -3,8 +3,11 @@ import {
   generatedPaths,
   generateModules,
   symbolicModules,
-} from "@grasp-os/sdk/host";
-import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
+import type {
+  AppManifest,
+  WorkflowBindingExtras,
+} from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 

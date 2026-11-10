@@ -1,5 +1,5 @@
-import { definitionManifest } from "@grasp-os/sdk/definition";
-import { schemaHash } from "@grasp-os/sdk/host";
+import { definitionManifest } from "@grasp-os/runtime/definition";
+import { schemaHash } from "@grasp-os/runtime/host";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";

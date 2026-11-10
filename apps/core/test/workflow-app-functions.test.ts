@@ -1,5 +1,5 @@
-import { applyOperation, readDefinition } from "@grasp-os/sdk/definition";
-import type { DefinitionOperation } from "@grasp-os/sdk/definition";
+import { applyOperation, readDefinition } from "@grasp-os/runtime/definition";
+import type { DefinitionOperation } from "@grasp-os/runtime/definition";
 import type { Json } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { executionErrors } from "@grasp-os/shared/workflows";

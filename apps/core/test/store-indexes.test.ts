@@ -1,6 +1,6 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
-import type { AccessMode } from "@grasp-os/sdk/host";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import { manifestText, schemaManifest } from "@grasp-os/runtime/host";
+import type { AccessMode } from "@grasp-os/runtime/host";
 import { storeMaxIndexes } from "@grasp-os/shared/store-limits";
 import { queryRequestSchema } from "@grasp-os/shared/store-queries";
 import type { FilterNode, RangeBound } from "@grasp-os/shared/store-reads";

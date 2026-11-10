@@ -480,7 +480,7 @@ export interface AppFilesApi {
   read: (app: string, version?: number) => Promise<AppFiles>;
   /**
    * Commits `changes` over the App's latest version as its next version,
-   * with `definition` (@grasp-os/sdk's `AppDefinition`, checked whole:
+   * with `definition` (@grasp-os/runtime's `AppDefinition`, checked whole:
    * `app.definition_invalid` otherwise) if given, else the latest
    * version's, and builds its pages, so the version opens without
    * building. Its `grasp.config.ts` and `server/schema.ts` are always

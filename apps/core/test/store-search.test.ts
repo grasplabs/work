@@ -1,7 +1,7 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { databaseReader, manifestText } from "@grasp-os/sdk/host";
-import type { AccessMode } from "@grasp-os/sdk/host";
-import type { PaginationResult } from "@grasp-os/sdk/server";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import { databaseReader, manifestText } from "@grasp-os/runtime/host";
+import type { AccessMode } from "@grasp-os/runtime/host";
+import type { PaginationResult } from "@grasp-os/runtime/server";
 import {
   queryMaxScannedEntries,
   searchMaxTerms,

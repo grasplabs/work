@@ -1,5 +1,5 @@
 import { collections } from "@grasp-os/brain/schema";
-import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";

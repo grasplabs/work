@@ -1,4 +1,4 @@
-import { schemaHash } from "@grasp-os/sdk/host";
+import { schemaHash } from "@grasp-os/runtime/host";
 import type { RecordChange } from "@grasp-os/shared/app-data";
 import { recordChangeLimits } from "@grasp-os/shared/app-data";
 import type { AuditActor } from "@grasp-os/shared/audit";

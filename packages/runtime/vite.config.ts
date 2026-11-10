@@ -3,7 +3,7 @@ import { defineProject } from "vite-plus";
 
 import { oxcParseTestConfig } from "./oxc-parse-test-config.ts";
 
-// The SDK runs inside workerd (workflow runs, and `describeWorkflow` when core
+// The runtime runs inside workerd (workflow runs, and `describeWorkflow` when core
 // saves a workflow), so its tests run there too, without Node compatibility.
 export default defineProject({
   // Fails the suite when it isn't running in workerd.

@@ -1,6 +1,6 @@
-import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-import type { ValueShape } from "@grasp-os/sdk";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import { defineSchema, defineTable, rows, v } from "@grasp-os/runtime/app";
+import type { ValueShape } from "@grasp-os/runtime/app";
+import { manifestText, schemaManifest } from "@grasp-os/runtime/host";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";

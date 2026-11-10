@@ -1,4 +1,4 @@
-import { definitionManifest } from "@grasp-os/sdk/definition";
+import { definitionManifest } from "@grasp-os/runtime/definition";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -16,7 +16,7 @@ import {
 } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
 import {
-  bootstrapModules,
+  platformModules,
   builds,
   errorsOf,
   importForms,
@@ -159,7 +159,7 @@ JSON.stringify = (value, ...rest) => {
       "server code that imports a platform-only SDK module",
       {
         "server/extra.ts":
-          'import { inspectApp } from "@grasp-os/sdk/host";\nexport const peek = inspectApp;\n',
+          'import { inspectApp } from "@grasp-os/runtime/host";\nexport const peek = inspectApp;\n',
       },
     ],
     [
@@ -478,7 +478,7 @@ describe("import boundaries", { timeout: 120_000 }, () => {
         .map(([form, write]) => [target, form, kind, write] as const)
     )
   )(
-    "keep the platform's bootstrap out of %s, naming it for its %s",
+    "keep the platform's runtime and the SDK's non-entries out of %s, naming them for their %s",
     async (_target, _form, kind, write) => {
       const { file, wrap, build } = kind;
       const built = await build(
@@ -489,7 +489,7 @@ describe("import boundaries", { timeout: 120_000 }, () => {
       );
       expect({ ok: built.ok, refused: refusedIn(built, file) }).toStrictEqual({
         ok: false,
-        refused: [...bootstrapModules].toSorted(),
+        refused: [...platformModules].toSorted(),
       });
     }
   );

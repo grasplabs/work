@@ -1,5 +1,5 @@
-import { readDefinition } from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+import { readDefinition } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";

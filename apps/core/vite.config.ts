@@ -8,7 +8,7 @@ import {
 import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 
-import { oxcParseTestConfig } from "../../packages/sdk/oxc-parse-test-config.ts";
+import { oxcParseTestConfig } from "../../packages/runtime/oxc-parse-test-config.ts";
 import { testComposioKey } from "../connect/test/provider-config.ts";
 import { digestModuleOf, testBlueprintsModule } from "./build-blueprints.ts";
 import { connectBundle } from "./test/build-connect.ts";

@@ -1012,7 +1012,7 @@ export const appVersions = sqliteTable(
      */
     code: text(),
     /**
-     * The version's App definition (@grasp-os/sdk's definition.ts), as its
+     * The version's App definition (@grasp-os/runtime's definition.ts), as its
      * text (`definitionText`): its name, tables with their stable IDs, access and
      * permissions, from which its `grasp.config.ts` and `server/schema.ts`
      * were generated as it was committed. Written once, never changed (a

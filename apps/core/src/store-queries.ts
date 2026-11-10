@@ -1,15 +1,15 @@
-import type { ValueDescriptor } from "@grasp-os/sdk";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import {
   allowsNull,
   indexBase,
   relationOf,
   schemaFromDescriptor,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import type {
   IndexBase,
   ManifestTable,
   SchemaManifest,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import { isRecord } from "@grasp-os/shared/json";
 import { pageLimits } from "@grasp-os/shared/pages";
 import {

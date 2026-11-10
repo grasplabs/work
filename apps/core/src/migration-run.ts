@@ -1,13 +1,14 @@
 import {
   appModuleName,
   kitModuleName,
+  serverRunner,
   serverEntryPath,
 } from "@grasp-os/compiler";
 import {
   migrationPlatformMessages,
   schemaFromDescriptor,
-} from "@grasp-os/sdk/host";
-import type { MigrationManifest } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
+import type { MigrationManifest } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { MigrationEvidence } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -254,7 +255,7 @@ const platformMessages = new Set([
  */
 const migrateMain = `import ${JSON.stringify(quietModule)};
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { runMigration } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
+import { runMigration } from ${JSON.stringify(kitModuleName(serverRunner))};
 import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
 import request from ${JSON.stringify(requestModule)};
 

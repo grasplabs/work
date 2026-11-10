@@ -211,7 +211,7 @@ catalog:
   # The kit's carousel.
   embla-carousel-react: 8.6.0
   # oxc's ESTree types, which the SDK reads oxc-parse.wasm's trees with
-  # (packages/sdk/src/oxc-parse.ts): the release of the oxc commit
+  # (packages/runtime/src/oxc-parse.ts): the release of the oxc commit
   # packages/compiler/oxc-wasm/pin.json names.
   "@oxc-project/types": 0.156.0
   # The WASI oxc.wasm runs on in the isolate, napi-rs's.

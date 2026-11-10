@@ -8,7 +8,7 @@
  * bookkeeping), so the seed starts each run with one, and a few are bad
  * on purpose, so some runs fail as real ones do.
  */
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime/app";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 
 import type { PersonKey, TeamName } from "./company.ts";

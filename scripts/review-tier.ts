@@ -75,7 +75,7 @@ const testWeight = 0.25;
 const highAreas = 4;
 
 /**
- * The workspace a file belongs to: `apps/core`, `packages/sdk`, each
+ * The workspace a file belongs to: `apps/core`, `packages/runtime`, each
  * connector (`packages/connectors/microsoft-365`), or the repository's
  * root.
  */

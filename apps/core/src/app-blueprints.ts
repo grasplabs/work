@@ -1,7 +1,7 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import { compilerVersion } from "@grasp-os/compiler";
-import { definitionText } from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
+import { definitionText } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import {
   acceptedUpdateSchema,
   appErrors,

@@ -1,5 +1,5 @@
-import { memberName } from "@grasp-os/sdk/host";
-import type { CompactDescriptor } from "@grasp-os/sdk/host";
+import { memberName } from "@grasp-os/runtime/host";
+import type { CompactDescriptor } from "@grasp-os/runtime/host";
 import { decidersPattern } from "@grasp-os/shared/decisions";
 import { operationPathMaxSegments } from "@grasp-os/shared/function-limits";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -47,7 +47,7 @@ export interface ValueRecord {
 }
 
 /**
- * An expression (`@grasp-os/sdk/expression-check`): JavaScript a run
+ * An expression (`@grasp-os/runtime/check`): JavaScript a run
  * evaluates where it stands, reading `args`, `params`, `run`, `inbox`,
  * `state`, the results of the steps that ran before it by their IDs and,
  * in a catch, `error`; in a step's `state`, `output` too. As JSON, it is
@@ -108,7 +108,7 @@ export type DurationUnit = "second" | "minute" | "hour" | "day" | "week";
 
 /**
  * A value's schema, as `v` declares it, in the compact form an SDK value
- * descriptor is written by hand in (`@grasp-os/sdk/host`'s
+ * descriptor is written by hand in (`@grasp-os/runtime/host`'s
  * `descriptorFromCompact`): `{ "kind": "string", "max": 200 }` is
  * `v.string().max(200)`. A run's args, its returns, a model's answer, a
  * key of the state and a parameter are each declared so.

@@ -20,7 +20,7 @@ import {
   readSkillWithSources,
   selectSkillWithSources,
 } from "@grasp-os/brain/skills";
-import type { BrainBinding } from "@grasp-os/sdk/brain";
+import type { BrainBinding } from "@grasp-os/runtime/host";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
@@ -44,7 +44,7 @@ import { citedVersions } from "./workflows/run-evidence.ts";
 
 // The company brain for a chat's code: `await env.brain.recall({ query })`
 // and `await env.brain.gaps()`. Its recall is the SDK's Brain binding
-// (`brain(binding)` in @grasp-os/sdk/brain), the one contract every caller
+// (`brain(binding)` in @grasp-os/runtime/host), the one contract every caller
 // of the Brain uses: read as the chat's agent acting for its person, as a
 // Knowledge read is (agent-knowledge.ts), so it reads only collections the
 // agent was granted that the person may read too, and only once the agent

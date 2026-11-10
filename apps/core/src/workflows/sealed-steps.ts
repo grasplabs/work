@@ -5,7 +5,7 @@ import type { LoadedBuild } from "../workflow-builds.ts";
 // trace, resource-run-trace.ts) places them: by its build's own table of
 // tasks, never by what a name merely looks like.
 //
-// The SDK's journal (@grasp-os/sdk's workflow-journal.ts) names each step
+// The SDK's journal (@grasp-os/runtime's workflow-journal.ts) names each step
 // of a task by the task's ID and the part of it it is (`SealedTask.steps`:
 // `enter` or `task`), and from the task's second run on, which only a
 // task inside a loop's items has, its count of earlier runs after `@`

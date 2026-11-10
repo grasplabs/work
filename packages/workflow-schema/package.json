@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
-    "@grasp-os/sdk": "workspace:*",
+    "@grasp-os/runtime": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "zod": "catalog:"
   },

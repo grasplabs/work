@@ -5,13 +5,13 @@ import {
   skillsReadInputSchema,
   skillsSelectInputSchema,
 } from "@grasp-os/brain/contract";
-import { AppError } from "@grasp-os/sdk";
+import { AppError } from "@grasp-os/runtime/app";
 import type {
   AnyPermission,
   JsonValue,
   PermissionKind,
   ValueSchema,
-} from "@grasp-os/sdk";
+} from "@grasp-os/runtime/app";
 import {
   actionPermission,
   appErrorDetailsOf,
@@ -20,10 +20,14 @@ import {
   descriptorFromText,
   schemaFromDescriptor,
   schemaHash,
-} from "@grasp-os/sdk/host";
-import type { AppManifest, FunctionManifest } from "@grasp-os/sdk/host";
-import type { MutationStart, FunctionChannel } from "@grasp-os/sdk/runner";
-import type { RunHandle } from "@grasp-os/sdk/server";
+} from "@grasp-os/runtime/host";
+import type {
+  AppManifest,
+  FunctionManifest,
+  MutationStart,
+  FunctionChannel,
+} from "@grasp-os/runtime/host";
+import type { RunHandle } from "@grasp-os/runtime/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";

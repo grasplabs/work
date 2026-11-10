@@ -65,6 +65,7 @@ import {
   kitStylesheet,
   previewRefresh,
   previewRuntime,
+  serverRunner,
   routerSpecifier,
   pageRuntime,
   pageSdk,
@@ -82,19 +83,28 @@ const modules = path.join(root, "node_modules");
 const ui = realpathSync(path.join(modules, "@grasp-os/ui"));
 const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
 /**
- * The SDK's own dependency: its types name `@grasp-os/shared`'s (a
+ * The runtime the SDK re-exports, as the SDK depends on it: what every
+ * module of the kit is built from, App code's SDK entries included.
+ */
+const runtime = realpathSync(path.join(sdk, "node_modules/@grasp-os/runtime"));
+/**
+ * The runtime's own dependency: its types name `@grasp-os/shared`'s (a
  * workflow's `Json`, a run's errors), so the kit's type chunks
  * carry what they name of it, or a check would read each as `any`.
  */
-const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
+const shared = realpathSync(
+  path.join(runtime, "node_modules/@grasp-os/shared")
+);
 /**
- * The Brain's contract, which the SDK re-exports (`@grasp-os/sdk/brain`)
- * and Knowledge's types come from: carried for the same reason.
+ * The Brain's contract, which the runtime re-exports
+ * (`@grasp-os/runtime/host`) and Knowledge's types come from: carried
+ * for the same reason.
  */
-const brain = realpathSync(path.join(sdk, "node_modules/@grasp-os/brain"));
+const brain = realpathSync(path.join(runtime, "node_modules/@grasp-os/brain"));
 /** The platform's own packages the kit's types come from, by name. */
 const ownPackages: Readonly<Record<string, string>> = {
   "@grasp-os/sdk": sdk,
+  "@grasp-os/runtime": runtime,
   "@grasp-os/ui": ui,
   "@grasp-os/shared": shared,
   "@grasp-os/brain": brain,
@@ -181,21 +191,114 @@ const uiEntries = (): Entry[] =>
     }));
   });
 
+/** A specifier of one of the platform's own packages: its name and subpath. */
+const ownSpecifier = /^(?<name>@grasp-os\/[^/]+)(?:\/(?<subpath>.+))?$/u;
+
+/** The name and subpath (`""` for the root) of an own package's specifier. */
+const ownModuleOf = (
+  specifier: string
+): { name: string; subpath: string } | undefined => {
+  const groups = ownSpecifier.exec(specifier)?.groups;
+  return groups?.name === undefined
+    ? undefined
+    : { name: groups.name, subpath: groups.subpath ?? "" };
+};
+
 /**
- * `@grasp-os/sdk`'s page modules: the React SDK and the legacy hooks
- * App code imports, and the runtime that renders a page in its frame
- * and mounts the session client (see kit.ts). They share the client's
- * module, so the provider the runtime mounts is the one the hooks read.
+ * What `subpath` (`.`, `./components/button`) is among `exported`: by its
+ * own key, or by a pattern's (`./components/*`).
+ */
+const exportTarget = (
+  exported: ReturnType<typeof exportsOf>,
+  subpath: string
+): string | undefined => {
+  const exact = Object.hasOwn(exported, subpath)
+    ? exported[subpath]
+    : undefined;
+  if (typeof exact === "string") {
+    return exact;
+  }
+  for (const [key, target] of Object.entries(exported)) {
+    const [prefix = "", suffix] = key.split("*");
+    if (
+      suffix !== undefined &&
+      typeof target === "string" &&
+      subpath.startsWith(prefix) &&
+      subpath.endsWith(suffix)
+    ) {
+      return target.replace(
+        "*",
+        subpath.slice(prefix.length, subpath.length - suffix.length)
+      );
+    }
+  }
+  return undefined;
+};
+
+/** The source file an own package's specifier names, by its exports. */
+const ownSourceOf = (specifier: string): string | undefined => {
+  const named = ownModuleOf(specifier);
+  if (named === undefined) {
+    return undefined;
+  }
+  const dir = Object.hasOwn(ownPackages, named.name)
+    ? ownPackages[named.name]
+    : undefined;
+  const target =
+    dir === undefined
+      ? undefined
+      : exportTarget(
+          exportsOf(dir),
+          named.subpath === "" ? "." : `./${named.subpath}`
+        );
+  if (dir === undefined || target === undefined) {
+    throw new Error(`The kit's types have no module ${specifier}`);
+  }
+  return path.join(dir, target);
+};
+
+/**
+ * The kit's modules built from one of the runtime's files rather than a
+ * package export: the preview kit's own, which no package exports (React
+ * Fast Refresh hooks into React as it loads, which no other page may
+ * have), and the host as an App's server isolate gets it, its runner
+ * alone (`serverRunner`, kit.ts).
+ */
+const runtimeFiles: Readonly<Record<string, string>> = {
+  [previewRuntime]: "src/preview-runtime.ts",
+  [previewRefresh]: "src/preview-refresh.ts",
+  [serverRunner]: "src/runner.ts",
+};
+
+/** The runtime file a kit module no package exports is built from, if it is one. */
+const runtimeFileOf = (specifier: string): string | undefined => {
+  const file = Object.hasOwn(runtimeFiles, specifier)
+    ? runtimeFiles[specifier]
+    : undefined;
+  return file === undefined ? undefined : path.join(runtime, file);
+};
+
+/** The source a kit module is built from: an own package's export, or a runtime file. */
+const kitSourceOf = (specifier: string): string => {
+  const file = runtimeFileOf(specifier) ?? ownSourceOf(specifier);
+  if (file === undefined) {
+    throw new Error(`The kit has no module ${specifier}`);
+  }
+  return file;
+};
+
+/**
+ * The page modules of the SDK and the runtime: the SDK's root and React
+ * hooks App code imports, and the runtime that renders a page in its
+ * frame and mounts the session client (see kit.ts). The SDK re-exports
+ * the runtime, so all share the client's module, and the provider the
+ * runtime mounts is the one the hooks read.
  */
 const sdkEntries = (extra: readonly string[] = []): Entry[] =>
-  [sdkRoot, pageSdk, pageRuntime, ...extra].map((specifier) => {
-    const target =
-      exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
-    if (typeof target !== "string") {
-      throw new TypeError(`@grasp-os/sdk doesn't export ${specifier}`);
-    }
-    return { specifier, id: path.join(sdk, target) };
-  });
+  [sdkRoot, pageSdk, pageRuntime, ...extra].map((specifier) => ({
+    specifier,
+    id: kitSourceOf(specifier),
+  }));
 
 /**
  * lucide-react's icons, one module each, and the export names App code
@@ -533,10 +636,10 @@ const buildKitModules = async (
 };
 
 /**
- * The SDK's modules for `specifiers`, which code runs with outside
- * pages: what a workflow's or an App test's isolate loads (`sdkImports`
- * and the JSON workflows' own), or what an App's server isolate loads
- * (`serverSdkImports`), each a set
+ * The SDK's and the runtime's modules for `specifiers`, which code runs
+ * with outside pages: what a workflow's or an App test's isolate loads
+ * (`sdkImports` and the JSON workflows' own), or what an App's server
+ * isolate loads (`serverSdkImports`), each a set
  * of its own, so each isolate carries only what it uses. One module per
  * specifier, named by it (`@grasp-os~sdk~workflow.js`), and chunks for
  * what they share (Zod), importing each other by flat name like the kit's
@@ -545,7 +648,6 @@ const buildKitModules = async (
 const buildSdkModules = async (
   specifiers: readonly string[]
 ): Promise<Record<string, string>> => {
-  const exported = exportsOf(sdk);
   const config: InlineConfig = {
     configFile: false,
     root,
@@ -561,17 +663,10 @@ const buildSdkModules = async (
       copyPublicDir: false,
       rolldownOptions: {
         input: Object.fromEntries(
-          specifiers.map((specifier) => {
-            const target =
-              exported[`.${specifier.slice("@grasp-os/sdk".length)}`];
-            if (typeof target !== "string") {
-              throw new TypeError(`The SDK doesn't export ${specifier}`);
-            }
-            return [
-              kitModuleName(specifier).slice(0, -".js".length),
-              path.join(sdk, target),
-            ];
-          })
+          specifiers.map((specifier) => [
+            kitModuleName(specifier).slice(0, -".js".length),
+            kitSourceOf(specifier),
+          ])
         ),
         preserveEntrySignatures: "strict",
         output: {
@@ -625,6 +720,15 @@ const declaration = /\.d\.[cm]?ts$/u;
 /** A module that imports each of `specifiers`, which a program starts from. */
 const importing = (specifiers: readonly string[]): string =>
   specifiers.map((specifier) => `import "${specifier}";`).join("\n");
+
+/**
+ * `importing`, for a program of the sources on disk: a kit module no
+ * package exports (`runtimeFiles`) by its file.
+ */
+const importingSources = (specifiers: readonly string[]): string =>
+  importing(
+    specifiers.map((specifier) => runtimeFileOf(specifier) ?? specifier)
+  );
 
 /**
  * How the kit is loaded at build time: the options App code is checked
@@ -813,7 +917,7 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
   const [error] = tsrs(
     diskHost(
       {
-        [entry]: importing(specifiers),
+        [entry]: importingSources(specifiers),
         [config]: JSON.stringify({
           compilerOptions: kitOptions,
           files: [entry],
@@ -856,72 +960,6 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
 const isOwnSource = (file: string): boolean =>
   Object.values(ownPackages).some((dir) => file.startsWith(`${dir}/src/`));
 
-/** A specifier of one of the platform's own packages: its name and subpath. */
-const ownSpecifier = /^(?<name>@grasp-os\/[^/]+)(?:\/(?<subpath>.+))?$/u;
-
-/** The name and subpath (`""` for the root) of an own package's specifier. */
-const ownModuleOf = (
-  specifier: string
-): { name: string; subpath: string } | undefined => {
-  const groups = ownSpecifier.exec(specifier)?.groups;
-  return groups?.name === undefined
-    ? undefined
-    : { name: groups.name, subpath: groups.subpath ?? "" };
-};
-
-/**
- * What `subpath` (`.`, `./components/button`) is among `exported`: by its
- * own key, or by a pattern's (`./components/*`).
- */
-const exportTarget = (
-  exported: ReturnType<typeof exportsOf>,
-  subpath: string
-): string | undefined => {
-  const exact = Object.hasOwn(exported, subpath)
-    ? exported[subpath]
-    : undefined;
-  if (typeof exact === "string") {
-    return exact;
-  }
-  for (const [key, target] of Object.entries(exported)) {
-    const [prefix = "", suffix] = key.split("*");
-    if (
-      suffix !== undefined &&
-      typeof target === "string" &&
-      subpath.startsWith(prefix) &&
-      subpath.endsWith(suffix)
-    ) {
-      return target.replace(
-        "*",
-        subpath.slice(prefix.length, subpath.length - suffix.length)
-      );
-    }
-  }
-  return undefined;
-};
-
-/** The source file an own package's specifier names, by its exports. */
-const ownSourceOf = (specifier: string): string | undefined => {
-  const named = ownModuleOf(specifier);
-  if (named === undefined) {
-    return undefined;
-  }
-  const dir = Object.hasOwn(ownPackages, named.name)
-    ? ownPackages[named.name]
-    : undefined;
-  const target =
-    dir === undefined
-      ? undefined
-      : exportTarget(
-          exportsOf(dir),
-          named.subpath === "" ? "." : `./${named.subpath}`
-        );
-  if (dir === undefined || target === undefined) {
-    throw new Error(`The kit's types have no module ${specifier}`);
-  }
-  return path.join(dir, target);
-};
-
 const typescriptSource = /\.tsx?$/u;
 
 /** Where a source's declaration goes: `app.ts` → `app.d.ts`. */
@@ -948,7 +986,7 @@ const emitOwnDeclarations = (
   const [error] = tsrs(
     diskHost(
       {
-        [entry]: importing(specifiers),
+        [entry]: importingSources(specifiers),
         [config]: JSON.stringify({
           compilerOptions: {
             ...kitOptions,
@@ -986,9 +1024,9 @@ const emitOwnDeclarations = (
 
 /**
  * Where a type chunk goes in the kit's types, under `/node_modules/`: at
- * the source of its main module (`@grasp-os/sdk/src/react` for the chunk
- * of `@grasp-os/sdk/react`), so a diagnostic that names a module
- * (`typeof import("/node_modules/@grasp-os/sdk/src/react")`) names it as
+ * the source of its main module (`@grasp-os/runtime/src/react` for the chunk
+ * of `@grasp-os/runtime/react`), so a diagnostic that names a module
+ * (`typeof import("/node_modules/@grasp-os/runtime/src/react")`) names it as
  * a check of the sources did, with no hash that changes from release to
  * release. A chunk the entries share takes `.shared.d.ts` there.
  */
@@ -1048,7 +1086,7 @@ const ownDeclarations = (declarations: Map<string, string>): RolldownPlugin => {
 
 /**
  * The type chunks of the own modules among `specifiers`, by their path in
- * the kit's types (`/node_modules/@grasp-os/sdk/src/react.d.ts`), with a
+ * the kit's types (`/node_modules/@grasp-os/runtime/src/react.d.ts`), with a
  * package.json for each own package that exports its modules' chunks
  * and nothing else. Other packages stay imports, resolved among the
  * kit's types.
@@ -1058,10 +1096,7 @@ const rollUpTypes = async (
 ): Promise<Record<string, string>> => {
   const own = specifiers.filter((specifier) => ownModuleOf(specifier));
   const entries = new Map(
-    own.map((specifier) => [
-      specifier,
-      declarationOf(ownSourceOf(specifier) ?? specifier),
-    ])
+    own.map((specifier) => [specifier, declarationOf(kitSourceOf(specifier))])
   );
   const declarations = emitOwnDeclarations(own);
   const bundle = await rolldown({
@@ -1097,7 +1132,7 @@ const rollUpTypes = async (
           moduleIds.find((id) => path.basename(id) === `${name}.ts`) ??
           moduleIds[0];
         return main === undefined
-          ? "@grasp-os/sdk/src/[name].shared.d.ts"
+          ? "@grasp-os/runtime/src/[name].shared.d.ts"
           : `${chunkPathOf(main)}.shared.d.ts`;
       },
     });

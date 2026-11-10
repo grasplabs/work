@@ -1,4 +1,7 @@
-import { definitionSources, definitionText } from "@grasp-os/sdk/definition";
+import {
+  definitionSources,
+  definitionText,
+} from "@grasp-os/runtime/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";

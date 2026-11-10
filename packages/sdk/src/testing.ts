@@ -1,21 +1,12 @@
-// An App's tests (`appTest`), which core's test runner runs against the
-// real host: app-test-suite.ts and app-test-runner.ts.
-export { appTestTimeoutMs, runAppSuite } from "./app-test-runner.ts";
-export type {
-  AppTestHost,
-  AppTestReport,
-  AppTestResult,
-  AppTestSession,
-  AppTestSubscription,
-} from "./app-test-session.ts";
+// `@grasp-os/sdk/testing`: an App's tests (`appTest`, `workflowTest`)
+// and what they reach. Re-exported by name from @grasp-os/runtime, whose
+// runner the platform runs them with.
+
 export {
   appTest,
-  maxAppTestName,
-  maxAppTests,
   TestDefinitionError,
-  testNamePattern,
   workflowTest,
-} from "./app-test-suite.ts";
+} from "@grasp-os/runtime/testing";
 export type {
   AppTestContext,
   AppTestDefinition,
@@ -33,4 +24,4 @@ export type {
   WorkflowTestFunction,
   WorkflowTestRun,
   WorkflowTestSuite,
-} from "./app-test-types.ts";
+} from "@grasp-os/runtime/testing";

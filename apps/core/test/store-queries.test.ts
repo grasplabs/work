@@ -1,11 +1,11 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import type { Id, ValueShape } from "@grasp-os/sdk";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import type { Id, ValueShape } from "@grasp-os/runtime/app";
 import {
   databaseReader,
   manifestText,
   schemaManifest,
-} from "@grasp-os/sdk/host";
-import type { AccessMode } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
+import type { AccessMode } from "@grasp-os/runtime/host";
 import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";

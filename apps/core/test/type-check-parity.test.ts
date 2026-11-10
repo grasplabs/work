@@ -1,6 +1,6 @@
 import { typeCheckerName } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
-import { generateModules } from "@grasp-os/sdk/host";
+import { generateModules } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";

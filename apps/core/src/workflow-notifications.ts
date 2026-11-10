@@ -2,7 +2,7 @@ import {
   declaredWorkflows,
   eventFingerprint,
   schemaFromDescriptor,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { isExpectedError, issuesOf } from "@grasp-os/shared/errors";

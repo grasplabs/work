@@ -1,14 +1,14 @@
-import type { FrozenJson, ValueDescriptor } from "@grasp-os/sdk/definition";
+import type { FrozenJson, ValueDescriptor } from "@grasp-os/runtime/definition";
 import {
   fieldWidens,
   holdsReference,
   referencesRenamed,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import type {
   ManifestTable,
   SchemaAnswer,
   SchemaManifest,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { fieldValueSchema } from "@grasp-os/shared/stores";

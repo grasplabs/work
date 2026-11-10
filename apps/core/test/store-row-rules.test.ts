@@ -1,13 +1,19 @@
-import { defineApp, defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-import type { Id, SchemaDefinition } from "@grasp-os/sdk";
+import {
+  defineApp,
+  defineSchema,
+  defineTable,
+  rows,
+  v,
+} from "@grasp-os/runtime/app";
+import type { Id, SchemaDefinition } from "@grasp-os/runtime/app";
 import {
   inspectApp,
   manifestText,
   registerApp,
   schemaManifest,
-} from "@grasp-os/sdk/host";
-import { runFunction } from "@grasp-os/sdk/runner";
-import { serverModule } from "@grasp-os/sdk/server";
+  runFunction,
+} from "@grasp-os/runtime/host";
+import { serverModule } from "@grasp-os/runtime/server";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";

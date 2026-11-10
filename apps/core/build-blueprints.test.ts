@@ -13,7 +13,7 @@ import {
   definitionSources,
   definitionText,
   emptyDefinition,
-} from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 

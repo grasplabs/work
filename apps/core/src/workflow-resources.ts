@@ -1,7 +1,7 @@
 import { generatedWorkflowEntry } from "@grasp-os/compiler";
-import type { ValueDescriptor } from "@grasp-os/sdk";
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
-import type { FunctionManifest } from "@grasp-os/sdk/host";
+import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import { schemaFromDescriptor } from "@grasp-os/runtime/host";
+import type { FunctionManifest } from "@grasp-os/runtime/host";
 import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {

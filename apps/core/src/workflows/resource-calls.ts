@@ -1,4 +1,4 @@
-import { jsonSchemaOf } from "@grasp-os/sdk/host";
+import { jsonSchemaOf } from "@grasp-os/runtime/host";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
   attachmentRefsSchema,

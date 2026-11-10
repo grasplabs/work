@@ -102,7 +102,7 @@ import { pageFramePolicy } from "./security-headers.ts";
 export interface FrameCode {
   /** The module to render: its default export is the page. */
   entry: string;
-  /** The kit module that renders it (@grasp-os/sdk/page-runtime). */
+  /** The kit module that renders it (@grasp-os/runtime/page). */
   runtime: string;
   /**
    * The App's modules, by flat name, each importing the others by address
@@ -185,7 +185,7 @@ const frameAccessMs = 10 * minute;
  * which the browser caches, and one open for a while can still load one
  * late: between one window and two. A chat's preview's module tokens hold
  * at most an hour, whose frame the page opens again with a fresh token
- * when one expires (@grasp-os/sdk's preview-runtime.ts); a published
+ * when one expires (@grasp-os/runtime's preview-runtime.ts); a published
  * build's at most six, which a person keeps
  * open through a stretch of a working day.
  */
@@ -541,7 +541,7 @@ const moduleKey = (scope: string, hash: string): string =>
  * `/page-modules/<scope>/<hash>.js?token=<token>`: one module, as a
  * frame imports it. A preview's frame may put a number of its own before
  * the hash (`/<visit>/<hash>.js`): the same module, at an address the
- * frame hasn't evaluated yet, so it evaluates it afresh (@grasp-os/sdk's
+ * frame hasn't evaluated yet, so it evaluates it afresh (@grasp-os/runtime's
  * preview-updates.ts); the modules it imports, relative to it, are then
  * evaluated afresh too. One asked without a token is a module all the
  * same, refused as one.
@@ -1319,7 +1319,7 @@ const scriptJson = (value: unknown): string =>
 // write's modules under the preview's scope (`previewFrame`), and the page
 // hands the frame the address of its page's module, which the frame
 // imports from its own module address and swaps in with React Fast
-// Refresh, keeping what the page holds (@grasp-os/sdk's
+// Refresh, keeping what the page holds (@grasp-os/runtime's
 // preview-runtime.ts). Only the modules a write changed have new
 // addresses, so only they load. Every frame's policy allows its App
 // modules' directory, which takes them: a preview's frame that takes

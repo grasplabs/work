@@ -1050,7 +1050,7 @@ export interface ChatsApi {
   dataModel: (chatId: string, app: string) => Promise<DraftDataModel>;
   /**
    * Changes the definition of the chat's draft of `app` by `operation`
-   * (an operation of `@grasp-os/sdk/definition`, as the chat's agent's
+   * (an operation of `@grasp-os/runtime/definition`, as the chat's agent's
    * definition tools make them, or a few made as one: a field renamed and
    * retyped), by the person themselves: the model after it, the plan, and
    * what this change alone does (`change`), or the problem, which changed

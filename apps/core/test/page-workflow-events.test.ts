@@ -1,5 +1,5 @@
-import { v } from "@grasp-os/sdk";
-import { declaredWorkflows } from "@grasp-os/sdk/host";
+import { v } from "@grasp-os/runtime/app";
+import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {

@@ -1,7 +1,7 @@
-import type { FunctionReference, ReferenceKind } from "@grasp-os/sdk";
-import { GraspError } from "@grasp-os/sdk/client";
-import { GraspClient } from "@grasp-os/sdk/host";
-import type { ClientTransport, StreamLink } from "@grasp-os/sdk/host";
+import type { FunctionReference, ReferenceKind } from "@grasp-os/runtime/app";
+import { GraspClient } from "@grasp-os/runtime/host";
+import type { ClientTransport, StreamLink } from "@grasp-os/runtime/host";
+import { GraspError } from "@grasp-os/runtime/page";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";

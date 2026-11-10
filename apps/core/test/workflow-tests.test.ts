@@ -1,5 +1,5 @@
-import { v } from "@grasp-os/sdk";
-import { declaredWorkflows } from "@grasp-os/sdk/host";
+import { v } from "@grasp-os/runtime/app";
+import { declaredWorkflows } from "@grasp-os/runtime/host";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";

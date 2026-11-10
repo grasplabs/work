@@ -139,12 +139,12 @@ export const Route = createFileRoute("/")({ component: Notes });
     [
       "imports inside it, in a declaration file",
       "leak.d.ts",
-      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/sdk/page-runtime";\n  import type { serverModule } from "@grasp-os/sdk/server";\n  global {\n    type Leak = [typeof runPage, typeof serverModule];\n  }\n}\n',
+      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/runtime/page";\n  import type { serverModule } from "@grasp-os/sdk/server";\n  global {\n    type Leak = [typeof runPage, typeof serverModule];\n  }\n}\n',
     ],
     [
       "imports inside it, in a component's declarations",
       "src/components/leak.d.ts",
-      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/sdk/page-runtime";\n  global {\n    type Leak = [typeof runPage];\n  }\n}\n',
+      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/runtime/page";\n  global {\n    type Leak = [typeof runPage];\n  }\n}\n',
     ],
     [
       "one that shadows a kit module",
@@ -245,12 +245,12 @@ export const Route = createFileRoute("/")({ component: Notes });
     "never name the kit's own files for their types in %s, by any path",
     async (_case, file, up) => {
       const lines = [
-        `/// <reference path="${up}node_modules/@grasp-os/sdk/src/client.ts" />`,
+        `/// <reference path="${up}node_modules/@grasp-os/runtime/src/page.ts" />`,
         '/// <reference types="node" />',
-        `export type R = typeof import("${up}node_modules/@grasp-os/sdk/src/page-runtime.ts");`,
-        'import type * as C from "/node_modules/@grasp-os/sdk/src/client-core.ts";',
-        `import type { serverModule } from "${up}node_modules/@grasp-os/sdk/src/server.ts";`,
-        `import type { Doc } from "${up}node_modules/@grasp-os/sdk/src/query-types.ts";`,
+        `export type R = typeof import("${up}node_modules/@grasp-os/runtime/src/page-runtime.ts");`,
+        'import type * as C from "/node_modules/@grasp-os/runtime/src/client-core.ts";',
+        `import type { serverModule } from "${up}node_modules/@grasp-os/runtime/src/server.ts";`,
+        `import type { Doc } from "${up}node_modules/@grasp-os/runtime/src/query-types.ts";`,
         "export type Reached = typeof C | typeof serverModule | Doc<never>;",
       ].join("\n");
       const page =
@@ -366,7 +366,7 @@ export const Route = createFileRoute("/")({ component: Notes });
       "a migration in a dotted folder",
       'import derive from "../../server/migrations/v1.0/derive.ts";',
     ],
-    ["the host's SDK", 'import { inspectApp } from "@grasp-os/sdk/host";'],
+    ["the SDK's server side", 'import { query } from "@grasp-os/sdk/server";'],
   ])(
     "never import %s: the build fails before it starts",
     async (_case, line) => {

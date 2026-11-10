@@ -1,4 +1,4 @@
-import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { actorOf } from "@grasp-os/shared/audit";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";

@@ -9,13 +9,13 @@ import {
   workflowSdkModules,
 } from "@grasp-os/compiler";
 import type { AppCodeBuild } from "@grasp-os/compiler";
-import { declaredPermission, manifestText } from "@grasp-os/sdk/host";
+import { declaredPermission, manifestText } from "@grasp-os/runtime/host";
 import {
   appTestTimeoutMs,
   maxAppTestName,
   maxAppTests,
   testNamePattern,
-} from "@grasp-os/sdk/testing";
+} from "@grasp-os/runtime/testing";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
@@ -300,7 +300,7 @@ const testsMain = (
   path: string,
   testMs: number
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
-import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/testing"))};
+import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/runtime/testing"))};
 import suite from ${JSON.stringify(appModuleName(path))};
 export class AppTests extends WorkerEntrypoint {
   async run(host) {
@@ -322,7 +322,7 @@ const sessionTestsMain = (
   path: string,
   testMs: number
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
-import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/testing"))};
+import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/runtime/testing"))};
 import suite from ${JSON.stringify(appModuleName(path))};
 const hostOf = (numbered) => ({
   open: async (fixtures, name) => {

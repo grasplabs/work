@@ -74,7 +74,7 @@ export default {
       transformIsolate(
         {
           modules: { [appModuleName(serverEntryPath)]: app },
-          sdk: { [kitModuleName("@grasp-os/sdk/runner")]: runner },
+          sdk: { [kitModuleName("@grasp-os/runtime/host")]: runner },
         },
         {
           name: "derive-category",

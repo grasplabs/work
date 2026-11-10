@@ -1,4 +1,4 @@
-import { definitionText } from "@grasp-os/sdk/definition";
+import { definitionText } from "@grasp-os/runtime/definition";
 import { shownAt } from "@grasp-os/shared/chat";
 import type { PreviewAt, PreviewBundle } from "@grasp-os/shared/chat";
 import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";

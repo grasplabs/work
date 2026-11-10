@@ -1,4 +1,8 @@
-import type { Id, FunctionReference, ReferenceKind } from "@grasp-os/sdk";
+import type {
+  Id,
+  FunctionReference,
+  ReferenceKind,
+} from "@grasp-os/runtime/app";
 
 import type { Release } from "../src/app-releases.ts";
 import { testApp, withoutDefinition } from "./app-definitions.ts";

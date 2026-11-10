@@ -1,11 +1,11 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
 import {
   databaseReader,
   manifestText,
   schemaManifest,
-} from "@grasp-os/sdk/host";
-import type { AccessMode } from "@grasp-os/sdk/host";
-import type { PaginationResult } from "@grasp-os/sdk/server";
+} from "@grasp-os/runtime/host";
+import type { AccessMode } from "@grasp-os/runtime/host";
+import type { PaginationResult } from "@grasp-os/runtime/server";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import {
   cursorMaxLength,

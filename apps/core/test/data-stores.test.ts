@@ -1,12 +1,12 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import type { ValueShape } from "@grasp-os/sdk";
+import { defineSchema, defineTable, v } from "@grasp-os/runtime/app";
+import type { ValueShape } from "@grasp-os/runtime/app";
 import {
   manifestMaxBytes,
   manifestText,
   schemaHash as hashOf,
   schemaManifest,
-} from "@grasp-os/sdk/host";
-import type { AccessMode } from "@grasp-os/sdk/host";
+} from "@grasp-os/runtime/host";
+import type { AccessMode } from "@grasp-os/runtime/host";
 import { auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import { auditEventTypeOf } from "@grasp-os/shared/audit-log";
 import { canonicalJson } from "@grasp-os/shared/json";

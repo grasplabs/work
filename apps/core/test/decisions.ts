@@ -2,7 +2,7 @@
  * The approval workflow the decision tests run, and how they drive it:
  * start it, and wait on its decision.
  */
-import { v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/runtime/app";
 import type { DecisionAnswerInput } from "@grasp-os/shared/decisions";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";

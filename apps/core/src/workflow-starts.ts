@@ -1,5 +1,8 @@
 import { brainErrors } from "@grasp-os/brain/contract";
-import { descriptorFromText, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import {
+  descriptorFromText,
+  schemaFromDescriptor,
+} from "@grasp-os/runtime/host";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";

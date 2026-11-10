@@ -24,7 +24,7 @@
  *   "workflows/<alias>.json" }]`, each a grasp-workflow/2 definition
  *   in the folder (not in `files/`: it is no file of the App), which the
  *   copy binds under its alias and asks to start under its binding name;
- * - `definition.json`: the App's definition (@grasp-os/sdk's
+ * - `definition.json`: the App's definition (@grasp-os/runtime's
  *   definition.ts), which each copy's first version holds, in the folder
  *   too: it is no file of the App either;
  * - `files/`: the App's files, by path, written against `@grasp-os/sdk`
@@ -54,7 +54,7 @@ import {
   definitionSources,
   definitionText,
   readDefinition,
-} from "@grasp-os/sdk/definition";
+} from "@grasp-os/runtime/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
 import { declaredCollectionSchema } from "@grasp-os/shared/knowledge";

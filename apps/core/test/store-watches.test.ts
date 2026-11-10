@@ -1,5 +1,5 @@
-import { defineSchema, defineTable } from "@grasp-os/sdk";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import { defineSchema, defineTable } from "@grasp-os/runtime/app";
+import { manifestText, schemaManifest } from "@grasp-os/runtime/host";
 import { querySubscriptionLimits } from "@grasp-os/shared/pages";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vite-plus/test";
