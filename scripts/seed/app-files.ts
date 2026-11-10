@@ -9,20 +9,42 @@ import {
   emptyDefinition,
 } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
+import { descriptorFromText } from "@grasp-os/runtime/host";
 
+import { decisionResponse } from "./apps.ts";
 import type { AppSeed } from "./apps.ts";
 
 /**
  * An App's definition: no tables, a permission to start each of its
- * workflows, which it binds under its alias.
+ * workflows, which it binds under its alias. A workflow that asks a
+ * decision declares it as the version bound has it, as binding it in a
+ * draft writes it (`bindWorkflow`): what a decision is about, and what a
+ * person may answer. Core refuses to bind a version whose contract
+ * differs from what the App's current version declares.
  */
 export const appDefinition = (seed: AppSeed): AppDefinition => {
   let definition = emptyDefinition(seed.name);
-  for (const { alias, declared } of seed.workflows) {
+  for (const { alias, declared, decision } of seed.workflows) {
     definition = applyOperation(definition, {
       op: "addPermission",
       permission: `permission.workflow(${JSON.stringify(alias)}, { args: ${declared.args}, returns: ${declared.returns} })`,
     });
+    if (decision !== undefined) {
+      definition = applyOperation(definition, {
+        op: "setWorkflowContract",
+        alias,
+        contract: {
+          events: {},
+          listens: {},
+          decisions: {
+            [decision.binding]: {
+              value: descriptorFromText(decisionResponse),
+              context: descriptorFromText(decision.input),
+            },
+          },
+        },
+      });
+    }
   }
   return definition;
 };
