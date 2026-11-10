@@ -47,7 +47,10 @@ import {
 } from "./app-definition.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
-import { bindableContract } from "./app-workflow-bindings.ts";
+import {
+  bindableContract,
+  carriedOverBinding,
+} from "./app-workflow-bindings.ts";
 import {
   appFor,
   applyChanges,
@@ -1010,16 +1013,31 @@ export const defineInDraft = async <Saved>(
     // A workflow's contract is what the version bound has, read for the
     // person binding it, and the version is recorded with it: the tools
     // never take either written by hand.
-    const applied: DefinitionOperation =
-      each.op === "bindWorkflow"
-        ? {
-            op: "setWorkflowContract",
-            alias: each.alias,
-            // One after the other: each operation applies to the last.
-            // oxlint-disable-next-line no-await-in-loop -- see above
-            ...(await bindableContract(env, by, each.workflow, each.version)),
-          }
-        : each;
+    let applied: DefinitionOperation;
+    if (each.op === "bindWorkflow") {
+      // One after the other: each operation applies to the last.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const bindable = await bindableContract(
+        env,
+        by,
+        each.workflow,
+        each.version
+      );
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const carried = await carriedOverBinding(
+        env,
+        app.id,
+        held.before,
+        each.alias,
+        bindable.bound
+      );
+      if (carried !== undefined) {
+        return { ok: false, problem: carried };
+      }
+      applied = { op: "setWorkflowContract", alias: each.alias, ...bindable };
+    } else {
+      applied = each;
+    }
     const next = tryOperation(result.definition, applied);
     if ("problem" in next) {
       return { ok: false, problem: next.problem };

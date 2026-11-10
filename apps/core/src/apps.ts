@@ -1761,8 +1761,9 @@ export const makeCurrent = async (
                 publishedSql(appId, number),
                 // A workflow granted a function since it was checked.
                 boundFunctionsServedSql(appId, served),
-                // A workflow it binds deleted since it was checked.
-                bindableSql(rebinding)
+                // A workflow it binds deleted, or an alias rebound, since
+                // it was checked.
+                bindableSql(appId, rebinding)
               )
             )
             .returning(),
@@ -1817,6 +1818,9 @@ export const makeCurrent = async (
       .get();
     if (ours !== undefined) {
       // The try whose answer was lost may have told no page either.
+      if (rebinding.length > 0) {
+        waitUntil(tellBindingChanged(env, appId));
+      }
       waitUntil(versionMadeCurrent(env, appId));
       return await editableApp(env, by, appId);
     }

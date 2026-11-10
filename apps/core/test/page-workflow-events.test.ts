@@ -52,7 +52,13 @@ import {
 import { liveStatus } from "./runs.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  outcome,
+  routed,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 
 // A page's typed `send` (spec 10.4.6; page-workflows.ts, and the run
 // inbox it admits to, workflows/run-events.ts) through the real host, from
@@ -70,7 +76,10 @@ const idp = mockIdp();
  * returns: by default the event the workflow takes, and the task waiting
  * on it, as the bound version has them.
  */
-const files = (declares = jobEventsDeclared): TestApp =>
+const files = (
+  declares = jobEventsDeclared,
+  bound?: { readonly workflowId: string; readonly version: number }
+): TestApp =>
   testApp(
     {
       name: "Invoices",
@@ -84,6 +93,7 @@ const files = (declares = jobEventsDeclared): TestApp =>
         'permission.workflow("review", {\n  args: v.object({ jobId: v.string() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
       contracts: { review: declares },
+      ...(bound === undefined ? {} : { bound: { review: bound } }),
     },
     {
       "server/invoices.ts": `import { permissions } from "../grasp.config.ts";
@@ -140,7 +150,7 @@ const jobEvents = {
  * A workflow waiting, in `job`, for its job's completion through
  * `jobEvents`, then ending with the event's source and job.
  */
-const definitionOf = (contract: string): string =>
+const definitionOf = (contract: string, events = "jobEvents"): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     args: objectSchema({ jobId: { kind: "string" } }),
@@ -151,12 +161,12 @@ const definitionOf = (contract: string): string =>
           'job.timedOut ? "" : job.event.source + " " + job.event.data.jobId',
       },
     },
-    permissions: { events: { jobEvents: { contract } } },
+    permissions: { events: { [events]: { contract } } },
     steps: [
       {
         id: "job",
         type: "waitForEvent",
-        events: "jobEvents",
+        events,
         eventType: completed,
         timeout: "1 hour",
       },
@@ -284,6 +294,7 @@ const invoicesApp = async (
     fixture,
     app: fixture.app,
     workflow: workflow.id,
+    contract,
     grants,
     reference: workflowReference(release, "review"),
   };
@@ -734,8 +745,36 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
   });
 
   it("shows a run's event wait only for an event its release declares, and a page follows a run another App version started only when that version declared the same workflow", async () => {
-    const { admin, builder, fixture, app, grants, reference } =
-      await invoicesApp([["start"], ["send"]]);
+    const {
+      admin,
+      builder,
+      fixture,
+      app,
+      workflow,
+      contract,
+      grants,
+      reference,
+    } = await invoicesApp([["start"], ["send"]]);
+    // Version 2 of the workflow waits through another event binding,
+    // `laterEvents`, of the same events.
+    await publishWorkflowVersion(env, builder.acting, workflow, {
+      definition: definitionOf(contract, "laterEvents"),
+      basedOn: 1,
+    });
+    await approveWorkflowBinding(env, admin.acting, workflow, {
+      alias: "laterEvents",
+      target: { kind: "event" },
+      reviewed: { version: 2 },
+    });
+    const laterDeclared = contractOf({
+      events: {
+        laterEvents: {
+          type: completed,
+          data: v.object({ jobId: v.string() }).descriptor,
+        },
+      },
+      listens: { job: ["laterEvents"] },
+    });
     /**
      * Makes version `version` of the App, declaring `declares` of `review`,
      * the one that runs, its grants, asked for again, granted for it: a
@@ -743,11 +782,12 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
      */
     const current = async (
       version: number,
-      declares: WorkflowEventContract
+      declares: WorkflowEventContract,
+      bound: number
     ) => {
       // Its files over the last version's: the mutation sending the
       // event goes with the event's declaration.
-      const made = files(declares);
+      const made = files(declares, { workflowId: workflow, version: bound });
       await commitDefined(
         env,
         builder.acting,
@@ -783,10 +823,10 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     const firstRun = await startedRun(builder, app, firstLease, reference);
     const first = await waitsOn(firstLease, firstRun);
 
-    // Version 2 declares the workflow without its event: its pages type
-    // no event, so they follow no run version 1 started, and show no
-    // event wait in a run of their own.
-    const secondLease = await current(2, contractOf({}));
+    // Version 2 binds version 2 of the workflow, declaring its other
+    // event: its pages follow no run version 1 started, and show their
+    // own runs' wait on it.
+    const secondLease = await current(2, laterDeclared, 2);
     const secondRun = await startedRun(
       builder,
       app,
@@ -799,8 +839,9 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
       firstVersionsRun: await waitsOn(secondLease, firstRun),
     };
 
-    // Version 3 declares it as version 1 did: it follows version 1's run.
-    const thirdLease = await current(3, jobEventsDeclared);
+    // Version 3 binds and declares it as version 1 did: it follows
+    // version 1's run.
+    const thirdLease = await current(3, jobEventsDeclared, 1);
     const third = {
       firstVersionsRun: await waitsOn(thirdLease, firstRun),
       secondVersionsRun: await waitsOn(thirdLease, secondRun),
@@ -813,12 +854,20 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     expect({ first, second, third }).toStrictEqual({
       first: [eventWait],
       // A run of another contract: not shown, as a run that doesn't exist.
-      second: { ownRun: [], firstVersionsRun: null },
+      second: {
+        ownRun: [
+          {
+            kind: "event",
+            event: { kind: "workflowEvent", alias: "laterEvents" },
+          },
+        ],
+        firstVersionsRun: null,
+      },
       third: { firstVersionsRun: [eventWait], secondVersionsRun: null },
     });
   });
 
-  it("refuses a page's send and a mutation's event of a type the App declares but its binding's contract lets no page send, so nothing reaches the run, while a page-sendable type goes through", async () => {
+  it("never makes current an App version declaring an event of a type its binding's contract lets no page send, while a page's and a mutation's page-sendable event goes through", async () => {
     // The binding's contract admits the timeout too, from no page: an
     // App's committed definition naming it as the event's type.
     const timeoutDeclared = contractOf({
@@ -831,7 +880,7 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
       listens: { job: ["jobEvents"] },
     });
     const [forged, sendable] = await Promise.all([
-      invoicesApp([["start"], ["send"]], timeoutDeclared),
+      outcome(invoicesApp([["start"], ["send"]], timeoutDeclared)),
       invoicesApp([["start"], ["send"]]),
     ]);
     /** What a page's send and a mutation's `ctx.sendEvent` each come to. */
@@ -892,30 +941,17 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
         runs: { pageRun, mutationRun },
       };
     };
-    const refused = await sentBy(forged);
     const taken = await sentBy(sendable);
     expect({
-      refused: { ...refused, runs: undefined },
-      refusedRuns: [
-        await liveStatus(refused.runs.pageRun),
-        await liveStatus(refused.runs.mutationRun),
-      ],
+      forged,
       taken: { ...taken, runs: undefined },
       takenRuns: [
         await statusOf(taken.runs.pageRun, "complete"),
         await statusOf(taken.runs.mutationRun, "complete"),
       ],
     }).toStrictEqual({
-      // Refused before the run's inbox took anything; the mutation
-      // stands, its event settled undeliverable.
-      refused: {
-        page: "workflow.event_invalid",
-        committed: null,
-        delivered: "workflow.event_invalid",
-        sentToRuns: 0,
-        runs: undefined,
-      },
-      refusedRuns: ["waiting", "waiting"],
+      // Its version is never current, so no page or mutation of it sends.
+      forged: "workflow.app_binding_contract_changed",
       taken: {
         page: "sent",
         committed: null,

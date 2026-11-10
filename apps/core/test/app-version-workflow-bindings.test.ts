@@ -167,6 +167,7 @@ describe(
           workflowId: detail.workflowId,
           version: detail.version,
           appVersion: detail.appVersion,
+          recordedBy: detail.recordedBy,
           replacedVersion: detail.replacedVersion,
         }));
 
@@ -185,6 +186,7 @@ describe(
             workflowId: flow,
             version: 2,
             appVersion: second,
+            recordedBy: builder.userId,
             replacedVersion: 1,
           },
         ],
@@ -215,7 +217,7 @@ describe(
       });
     });
 
-    it("keeps a rebind of the same contract made since, when a later version only carries the binding its parent recorded", async () => {
+    it("keeps a rebind of the same contract made since, when a later version only carries the binding its parent recorded, and tells a draft binding that recorded version again to bind it directly", async () => {
       const [admin, builder] = await Promise.all([
         signedIn("admin"),
         signedIn("builder"),
@@ -246,15 +248,28 @@ export const Route = createFileRoute("/")({ component: Desk });
         "Rename the page"
       );
       await builder.api.apps.versions.setCurrent(app, third);
+      // Version 2 again, from a draft: what the current version records
+      // already, so it would bind nothing.
+      const again = await builder.api.chats.defineDraft(
+        await appChat(builder, app),
+        app,
+        { op: "bindWorkflow", alias: "review", workflow: flow, version: 2 }
+      );
 
       expect({
         rebound,
         current: await boundOf(builder, app),
         sealed: await sealedOf(app, third),
+        again,
       }).toStrictEqual({
         rebound: "ok",
         current: { review: { workflowId: flow, version: 3 } },
         sealed: { review: { workflowId: flow, version: 3 } },
+        again: {
+          ok: false,
+          problem:
+            "The App's current version binds version 2 as `review` already, and `review` was bound to another version directly since. Bind version 2 directly, as `env.workflowBuild.bind` does: its contract is the one the App declares.",
+        },
       });
     });
 
@@ -300,7 +315,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       });
     });
 
-    it("refuses the whole switch when the workflow is deleted, or the App version unpublished, as the switch lands", async () => {
+    it("refuses the whole switch when the workflow is deleted, the alias unbound, or the App version unpublished, as the switch lands", async () => {
       const [admin, builder] = await Promise.all([
         signedIn("admin"),
         signedIn("builder"),
@@ -323,8 +338,9 @@ export const Route = createFileRoute("/")({ component: Desk });
         )
       );
       const afterUnpublished = await boundOf(builder, app);
-      // Published again, and the workflow it binds deleted as it lands.
-      const deleted = await outcome(
+      // Published again, and the alias unbound as it lands: not the
+      // binding it was checked against any more.
+      const unbound = await outcome(
         publishVersion(
           {
             ...env,
@@ -332,6 +348,19 @@ export const Route = createFileRoute("/")({ component: Desk });
               const [held] =
                 await builder.api.workflowResources.appBindings(app);
               await builder.api.workflowResources.unbindFromApp(held?.id ?? "");
+            }, switching),
+          },
+          builder.acting,
+          app,
+          second
+        )
+      );
+      // Published again, and the workflow it binds deleted as it lands.
+      const deleted = await outcome(
+        publishVersion(
+          {
+            ...env,
+            DB: racingDb(async () => {
               await builder.api.workflowResources.delete(flow);
             }, switching),
           },
@@ -345,12 +374,14 @@ export const Route = createFileRoute("/")({ component: Desk });
       expect({
         unpublished,
         afterUnpublished,
+        unbound,
         deleted,
         currentVersion,
         afterDeleted: await boundOf(builder, app),
       }).toStrictEqual({
         unpublished: "version.unpublished",
         afterUnpublished: { review: { workflowId: flow, version: 1 } },
+        unbound: "app.conflict",
         deleted: "workflow.app_version_binding_unavailable",
         currentVersion: first,
         afterDeleted: {},
