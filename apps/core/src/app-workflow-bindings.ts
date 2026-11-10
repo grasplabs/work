@@ -111,7 +111,10 @@ import type { StartFiles } from "./workflows/start-files.ts";
 // - Whoever bound it lost their role in the workflow before it is made
 //   current: refused, the whole switch with it
 //   (`workflow.app_version_binding_unavailable`), as is a version made
-//   current by someone without one.
+//   current by someone without one. The author answers for what their
+//   version records unlike its parent; a binding a later version only
+//   carries over binds on the authority of whoever makes that one
+//   current, who must have a role in it too.
 // - The workflow deleted, the App version unpublished, or the alias
 //   rebound directly, as the switch lands: the switch's own statement
 //   requires each workflow version it binds live, each alias still binding
@@ -133,11 +136,12 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   as it is sealed; for every other alias its release seals what the App
 //   binds then, so a direct rebind made before it is sealed stays. One
 //   made after it is sealed stays too, while its contract is the one the
-//   version declares: the switch binds such a pin again only where the
-//   App binds nothing there, or a version of another contract (a
-//   rollback across a contract change), so pages and starts agree on
-//   the contract, if not on the very version, as after any direct
-//   rebind. What the version records of its own is always bound.
+//   version declares, and so does an unbinding (a workflow deleted
+//   since, say): the switch binds such a pin again only over a version
+//   of another contract (a rollback across a contract change), so pages
+//   and starts agree on the contract, if not on the very version, as
+//   after any direct rebind. What the version records unlike the version
+//   current as it is made current is always bound.
 //
 // What an alias binds is otherwise the App's configuration, set by its
 // builders and an admin's grant, like a workflow's parameters. The
@@ -401,6 +405,33 @@ export const requireRecordableBindings = async (
 };
 
 /**
+ * That `by` may make each of `changes`, and `author`, read now, each the
+ * version recorded of its own: a former member binds nothing, and Grasp
+ * staff none (`role.forbidden`).
+ */
+const requireMayMake = async (
+  env: Env,
+  by: Acting,
+  author: string,
+  changes: readonly BindingChange[]
+): Promise<void> => {
+  if (changes.length > 0) {
+    requireNotStaff(by);
+  }
+  const authorNow = changes.some(({ recordedBy }) => recordedBy !== undefined)
+    ? await memberOf(env.DB, author)
+    : undefined;
+  for (const change of changes) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    await requireMayBind(env, by, change);
+    if (change.recordedBy !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await requireMayBind(env, authorNow, change);
+    }
+  }
+};
+
+/**
  * What making an App version current does to its workflow bindings: the
  * bindings it makes (`changes`), and what every alias it declares binds
  * as it was checked (`held`, an active binding's ID, or none), which the
@@ -472,6 +503,8 @@ export const versionBindingChanges = async (
     );
   };
   const changes: BindingChange[] = [];
+  /** The aliases left unbound: their pins carried, nothing bound now. */
+  const left = new Set<string>();
   for (const { alias, pinned } of release.workflows) {
     const held = active.find((binding) => binding.alias === alias);
     if (
@@ -486,14 +519,18 @@ export const versionBindingChanges = async (
       bound.version === pinned.version;
     const recordedBy = recorded.some(names) ? author : undefined;
     // A pin the version only took from the App's binding as it was
-    // sealed: a direct rebind of the same contract since stays.
-    const kept =
-      !chosen.some(names) &&
-      held !== undefined &&
+    // sealed: a direct rebind of the same contract since stays, and so
+    // does an unbinding (a workflow deleted since, say), which leaves
+    // nothing bound to its contract.
+    if (!chosen.some(names)) {
+      if (held === undefined) {
+        left.add(alias);
+        continue;
+      }
       // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-      (await fits(alias, held));
-    if (kept) {
-      continue;
+      if (await fits(alias, held)) {
+        continue;
+      }
     }
     changes.push({
       alias,
@@ -510,28 +547,15 @@ export const versionBindingChanges = async (
           }),
     });
   }
-  if (changes.length > 0) {
-    requireNotStaff(by);
-  }
-  // Read now, as their role is: a former member binds nothing.
-  const authorNow = changes.some(({ recordedBy }) => recordedBy !== undefined)
-    ? await memberOf(env.DB, author)
-    : undefined;
-  for (const change of changes) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    await requireMayBind(env, by, change);
-    if (change.recordedBy !== undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      await requireMayBind(env, authorNow, change);
-    }
-  }
+  await requireMayMake(env, by, author, changes);
   for (const { alias } of declared) {
     // What its release seals, which its pages read runs of, otherwise
     // what the App binds now, which the switch leaves; one it keeps over
     // a sealed pin fits already.
-    const bound =
-      release.workflows.find((pin) => pin.alias === alias)?.pinned ??
-      active.find((binding) => binding.alias === alias);
+    const bound = left.has(alias)
+      ? undefined
+      : (release.workflows.find((pin) => pin.alias === alias)?.pinned ??
+        active.find((binding) => binding.alias === alias));
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
     if (bound !== undefined && !(await fits(alias, bound))) {
       throw workflowResourceErrors.create(
@@ -651,7 +675,8 @@ export const bindingChangeStatements = (
             replacedVersion: change.replacing?.version ?? null,
           },
         },
-        heldSql(app, change.alias, id)
+        // Only by the try that inserted it.
+        sql`changes() > 0`
       ),
     ];
   });
