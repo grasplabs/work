@@ -410,6 +410,12 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await page.getByRole("button", { name: "English" }).click();
   await page.getByRole("button", { name: "Let’s start" }).click();
 
+  // Which AI Grasp thinks with, before anything needs it: connected here.
+  await expect(
+    page.getByRole("heading", { name: "Which AI should I think with?" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+
   // The story told at once: the plan, summed up.
   await expect(
     page.getByText(/^Your people, documents and tools first\./u)

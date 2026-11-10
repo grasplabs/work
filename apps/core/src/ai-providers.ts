@@ -230,6 +230,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       provider,
       label: aiProviders[provider].label,
       whereItRuns: aiProviders[provider].whereItRuns,
+      models: catalogModelsOf(provider),
     })),
     // As it stands: never a model of a provider no longer connected.
     choice: choiceOf(

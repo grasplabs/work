@@ -632,6 +632,10 @@ msgstr "{label} rechaza tu clave desde {since}."
 msgid "{label} isn't answering since {since}."
 msgstr "{label} no responde desde {since}."
 
+#: src/onboarding/ai-step.tsx
+msgid "{label} refused that key. Check it in your provider's console and paste it again."
+msgstr "{label} ha rechazado esa clave. Compruébala en la consola de tu proveedor y pégala de nuevo."
+
 #: src/onboarding/setup-parts.tsx
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, en el sitio de soporte de Grasp, en una pestaña nueva"
@@ -2632,6 +2636,7 @@ msgstr "A fecha de {date}."
 msgid "As the App's code sets it"
 msgstr "Como lo define el código de la App"
 
+#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
 msgstr "Tal como lo llama tu endpoint, por ejemplo llama-3.3-70b."
@@ -2901,6 +2906,7 @@ msgstr "Volver a la lista"
 msgid "Back to the small chat"
 msgstr "Volver al chat pequeño"
 
+#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 msgid "Base URL"
 msgstr "URL base"
@@ -3949,10 +3955,6 @@ msgstr "Conectar {app}"
 msgid "Connect {name}"
 msgstr "Conectar {name}"
 
-#: src/onboarding/review-parts.tsx
-msgid "Connect a provider"
-msgstr "Conectar un proveedor"
-
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
 msgstr "Conectar cuentas propias"
@@ -3962,7 +3964,6 @@ msgid "Connect again"
 msgstr "Volver a conectar"
 
 #: src/frame/connect-ai-provider.tsx
-#: src/onboarding/review-parts.tsx
 msgid "Connect an AI provider"
 msgstr "Conecta un proveedor de IA"
 
@@ -4027,7 +4028,7 @@ msgstr "Conectadas, sin usar en ningún flujo de trabajo que usted pueda abrir"
 msgid "Connected, via Composio"
 msgstr "Conectada, a través de Composio"
 
-#: src/onboarding/review-parts.tsx
+#: src/onboarding/ai-step.tsx
 msgid "Connected: {names}"
 msgstr "Conectado: {names}"
 
@@ -4121,6 +4122,7 @@ msgstr "Contexto"
 
 #: src/interview/before.tsx
 #: src/onboarding/about-story.tsx
+#: src/onboarding/ai-step.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Continue"
@@ -5201,6 +5203,18 @@ msgstr "Todo lo que Grasp aprendió sobre {company}, cada dato rastreable hasta 
 msgid "Everything Grasp stores for your organization stays here."
 msgstr "Todo lo que Grasp guarda para tu organización se queda aquí."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Everything I read and every conversation I have runs on an AI model, on your organization’s own key."
+msgstr "Todo lo que leo y cada conversación que mantengo funciona con un modelo de IA, con la clave propia de tu organización."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Pick your provider, paste its key and choose a model. The key is stored sealed and never shown again."
+msgstr "Todo lo que leo y cada conversación que mantengo funciona con un modelo de IA, con la clave propia de tu organización. Elige tu proveedor, pega su clave y elige un modelo. La clave se guarda sellada y no se vuelve a mostrar."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Yours is ready."
+msgstr "Todo lo que leo y cada conversación que mantengo funciona con un modelo de IA, con la clave propia de tu organización. La tuya está lista."
+
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Todo lo que me has contado se elimina para siempre y no se puede recuperar. ¿Solo hay algo mal? Corrígelo mejor con «Añadir algo»."
@@ -5981,10 +5995,6 @@ msgstr "La IA de Grasp llama a los modelos con las claves de proveedor propias d
 #: src/settings/ai-providers.tsx
 msgid "Grasp's AI uses the default model. When its provider refuses a call before anything was billed, the fallbacks are tried in order."
 msgstr "La IA de Grasp usa el modelo predeterminado. Si su proveedor rechaza una llamada antes de cobrar nada, se prueban los modelos de reserva por orden."
-
-#: src/onboarding/review-parts.tsx
-msgid "Grasp’s AI works with your organization’s own AI provider key, such as Anthropic, OpenAI or Mistral AI. Connect one and choose a model, then come back here."
-msgstr "La IA de Grasp funciona con la clave propia de un proveedor de IA de tu organización, como Anthropic, OpenAI o Mistral AI. Conecta uno, elige un modelo y vuelve aquí."
 
 #: src/frame/connect-ai-provider.tsx
 msgid "Grasp's AI works with your organization's own AI provider key. Connect one and choose a model to start."
@@ -7038,6 +7048,7 @@ msgstr "Guardado entre ejecuciones"
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Ocultó al modelo algo que el chat ya no puede leer"
 
+#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/kept-state.tsx
 msgid "Key"
@@ -7647,6 +7658,7 @@ msgid "Minutes saved a request"
 msgstr "Minutos ahorrados por solicitud"
 
 #: src/apps/resource-bindings.tsx
+#: src/onboarding/ai-step.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
 msgstr "Modelo"
@@ -9887,6 +9899,7 @@ msgstr "Propuesta por el agente, en el chat de otra persona."
 msgid "Proposed packages"
 msgstr "Propuso paquetes"
 
+#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 msgid "Provider"
 msgstr "Proveedor"
@@ -11040,6 +11053,7 @@ msgstr "Ejecuciones a la semana"
 msgid "runs a week by these workflows"
 msgstr "ejecuciones a la semana de estos flujos de trabajo"
 
+#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 msgid "Runs at: {whereItRuns}"
 msgstr "Funciona en: {whereItRuns}"
@@ -14184,6 +14198,10 @@ msgstr "Subiendo…"
 msgid "URL of {name}"
 msgstr "URL de {name}"
 
+#: src/onboarding/ai-step.tsx
+msgid "Use a different model"
+msgstr "Usar otro modelo"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Use a staff list instead"
 msgstr "Usar una lista de personal en su lugar"
@@ -15182,6 +15200,10 @@ msgstr "Dónde, por ejemplo Dropbox"
 #: src/settings/staff-access.tsx
 msgid "Whether people from Grasp can sign in to help with this workspace. They come in only while a window your organization opened lasts."
 msgstr "Si las personas de Grasp pueden iniciar sesión para ayudar con este espacio de trabajo. Solo entran mientras dure un periodo que tu organización abrió."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Which AI should I think with?"
+msgstr "¿Con qué IA debo pensar?"
 
 #: src/chat/suggestions.tsx
 msgid "Which AI tools do people use?"

@@ -465,6 +465,34 @@ export interface AiPlatformUse {
   provider: { id: AiProviderId; label: string; whereItRuns: string } | null;
 }
 
+/**
+ * The models most organizations choose, by provider, the one to start
+ * with first: what an admin is offered before the provider's whole list.
+ * Each is one of the provider's own models, as core's catalog names it.
+ * A custom endpoint names its own models, so it has none.
+ */
+export const featuredModels: Readonly<
+  Record<OrganizationProviderId, readonly string[]>
+> = {
+  anthropic: [
+    "anthropic/claude-sonnet-5-5",
+    "anthropic/claude-opus-5-5",
+    "anthropic/claude-haiku-5-5",
+  ],
+  openai: ["openai/gpt-5.5", "openai/gpt-5.4", "openai/gpt-5.4-mini"],
+  mistral: [
+    "mistral/mistral-large-latest",
+    "mistral/mistral-medium-latest",
+    "mistral/mistral-small-latest",
+  ],
+  openrouter: [
+    "openrouter/anthropic/claude-sonnet-5.5",
+    "openrouter/openai/gpt-5.5",
+    "openrouter/google/gemini-2.5-pro",
+  ],
+  "openai-compatible": [],
+};
+
 /** The organization's AI providers and its choice of models. */
 export interface AiProvidersListing {
   providers: AiProviderListed[];
@@ -473,6 +501,8 @@ export interface AiProvidersListing {
     provider: OrganizationProviderId;
     label: string;
     whereItRuns: string;
+    /** Its models an admin can choose once it is connected; none for a custom endpoint, whose models the organization names. */
+    models: AiProviderModel[];
   }[];
   /** The models its calls use, as they stand; none until an admin chose. */
   choice: AiModelChoiceNow | null;

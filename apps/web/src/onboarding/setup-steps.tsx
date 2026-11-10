@@ -74,6 +74,7 @@ import { useCore } from "../use-core.ts";
 import { SpokenText } from "../voice/spoken-text.tsx";
 import { speak, usePrepare, useSaid } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
+import { AiStep } from "./ai-step.tsx";
 import {
   HrPlatform,
   Pulse as PulseStep,
@@ -89,12 +90,7 @@ import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
 import { useWayIn } from "./platform-reveal.tsx";
 import { useReveal } from "./reveal-state.ts";
-import {
-  AiProviderItem,
-  DifferenceItem,
-  MailItem,
-  NoMailItem,
-} from "./review-parts.tsx";
+import { DifferenceItem, MailItem, NoMailItem } from "./review-parts.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
@@ -119,7 +115,7 @@ import {
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
-import { openItems, stepIndex, steps } from "./setup.ts";
+import { afterAi, openItems, stepIndex, steps } from "./setup.ts";
 import type {
   AiReadiness,
   Listening,
@@ -206,6 +202,8 @@ export interface StepProps {
   settled: ReviewItemId[];
   onSettle: (item: ReviewItemId, settled: boolean) => void;
   go: (step: SetupStep) => void;
+  /** The furthest step they reached before, by its place. */
+  furthest: number;
   /** "How this works" tells its story in the brain's figures: this sets the figure, or gives it back with null. */
   onStory: (scene: BrainScene | null) => void;
 }
@@ -303,7 +301,7 @@ const useHeadlines = ({
   const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
   const { differences, mapped } = data.review;
   const openCount =
-    openItems(settled, mailToLetThrough(data), data.ai).length +
+    openItems(settled, mailToLetThrough(data)).length +
     differences.filter(({ holds }) => holds === null).length;
   // A sign-in to connect where the deployment signs in with one; else a staff list.
   const [onlySuite, ...otherSuites] = data.suites;
@@ -313,6 +311,13 @@ const useHeadlines = ({
     companySentence = t`The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
   } else if (onlySuite !== undefined) {
     companySentence = t`The quickest way is to connect your ${signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
+  }
+  // Which AI: asked for until a model is ready for calls; where core can't say, neither is said.
+  let aiSentence = t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key.`;
+  if (data.ai?.ready === false) {
+    aiSentence = t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Pick your provider, paste its key and choose a model. The key is stored sealed and never shown again.`;
+  } else if (data.ai?.ready === true) {
+    aiSentence = t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Yours is ready.`;
   }
   // Before the organization, the leads step asks for the HR platform, until the admin said which.
   const hr: Headline = {
@@ -339,6 +344,7 @@ const useHeadlines = ({
         .join(" "),
       voice: { tone: tones.warm },
     },
+    ai: { title: t`Which AI should I think with?`, sentence: aiSentence },
     company: {
       title: t`Who’s who at your company?`,
       sentence: companySentence,
@@ -481,7 +487,7 @@ const Welcome = (props: StepProps) => {
       </div>
       <Primary
         onClick={() => {
-          props.go("about");
+          props.go("ai");
         }}
         ready={picked}
       >
@@ -490,6 +496,20 @@ const Welcome = (props: StepProps) => {
     </>
   );
 };
+
+/** Which AI Grasp thinks with: the organization's provider, its key and a model (ai-step.tsx). */
+const Ai = (props: StepProps) => (
+  <AiStep
+    ai={props.data.ai}
+    lines={useHeadlines(props).ai}
+    onConnected={() => {
+      props.go(afterAi(props.furthest));
+    }}
+    onDone={() => {
+      props.go("about");
+    }}
+  />
+);
 
 const xlsxName = /\.xlsx$/iu;
 
@@ -1962,7 +1982,8 @@ const Differences = ({
 /**
  * What only the admin can settle, each with a way to settle it: the steps
  * people told two ways and nobody could explain, settled in core, and
- * letting Grasp's mail through. Nothing moves on by itself: they read what
+ * letting Grasp's mail through. (The AI provider is asked for on the AI
+ * step, before anything needs it.) Nothing moves on by itself: they read what
  * they settled, and go on once nothing is open.
  */
 const Review = (props: StepProps) => {
@@ -1972,8 +1993,7 @@ const Review = (props: StepProps) => {
   const [changing, setChanging] = useState<string[]>([]);
   const { differences } = props.data.review;
   const open =
-    openItems(props.settled, mailToLetThrough(props.data), props.data.ai)
-      .length +
+    openItems(props.settled, mailToLetThrough(props.data)).length +
     differences.filter(
       ({ work, holds }) => holds === null || changing.includes(work)
     ).length;
@@ -1996,7 +2016,6 @@ const Review = (props: StepProps) => {
             onChanging={setChanging}
           />
         )}
-        {props.data.ai === null ? null : <AiProviderItem ai={props.data.ai} />}
         <Mail {...props} />
       </section>
       {open === 0 ? (
@@ -2056,6 +2075,7 @@ const Open = (props: StepProps) => {
  */
 const bodies: Record<SetupStep, ComponentType<StepProps>> = {
   welcome: Welcome,
+  ai: Ai,
   about: About,
   company: Company,
   sources: Sources,

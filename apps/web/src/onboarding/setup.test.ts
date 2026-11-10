@@ -4,10 +4,12 @@ import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  afterAi,
   brainScene,
   closesOn,
   documentSources,
   dotsOf,
+  heldAt,
   keptAt,
   listeningOf,
   openItems,
@@ -15,6 +17,7 @@ import {
   settledAs,
   sourcesFor,
   stepIndex,
+  stepShown,
   suitesFor,
   steps,
   teamNumbersOf,
@@ -299,20 +302,47 @@ describe("what needs the admin", () => {
       unchanged: true,
     });
   });
+});
 
-  it("include connecting an AI provider until a model is ready for calls, and hold nothing up when core can't say", () => {
+describe("the AI step", () => {
+  const listening = stepIndex("listening");
+
+  it("can't be passed while no model is ready for calls: not by where they were, nor by the address", () => {
     expect({
-      none: openItems(["mail"], true, { providers: [], ready: false }),
-      noModel: openItems(["mail"], true, {
-        providers: ["Anthropic"],
-        ready: false,
-      }),
-      ready: openItems(["mail"], true, {
-        providers: ["Anthropic"],
-        ready: true,
-      }),
-      unknown: openItems(["mail"], true, null),
-    }).toStrictEqual({ none: ["ai"], noModel: ["ai"], ready: [], unknown: [] });
+      back: stepShown(undefined, listening, { ready: false }),
+      asked: stepShown("review", listening, { ready: false }),
+      before: stepShown("welcome", listening, { ready: false }),
+      // Not there yet: they get to it on their own.
+      fresh: stepShown(undefined, stepIndex("welcome"), { ready: false }),
+      held: heldAt(listening, { ready: false }),
+    }).toStrictEqual({
+      back: "ai",
+      asked: "ai",
+      before: "welcome",
+      fresh: "welcome",
+      held: stepIndex("ai"),
+    });
+  });
+
+  it("holds nobody once a model is ready, or where core can't say", () => {
+    expect({
+      ready: stepShown(undefined, listening, { ready: true }),
+      asked: stepShown("review", listening, { ready: true }),
+      unknown: stepShown(undefined, listening, null),
+      held: [heldAt(listening, { ready: true }), heldAt(listening, null)],
+    }).toStrictEqual({
+      ready: "listening",
+      asked: "review",
+      unknown: "listening",
+      held: [listening, listening],
+    });
+  });
+
+  it("goes on to how this works, or back to where an admin sent back to it was", () => {
+    expect({
+      first: afterAi(stepIndex("ai")),
+      sentBack: afterAi(listening),
+    }).toStrictEqual({ first: "about", sentBack: "listening" });
   });
 });
 

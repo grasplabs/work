@@ -96,6 +96,7 @@ const fakeAiProviders = ({
           provider,
           label: aiProviders[provider].label,
           whereItRuns: aiProviders[provider].whereItRuns,
+          models: catalogs[provider],
         })),
         choice,
         platform,

@@ -251,6 +251,13 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   await page.getByRole("button", { name: "Nederlands" }).click();
   await page.getByRole("button", { name: "Laten we beginnen" }).click();
 
+  // Which AI Grasp thinks with comes first: connected on this stack, so
+  // it only says so, in Dutch too.
+  await expect(
+    page.getByRole("heading", { name: "Met welke AI zal ik denken?" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Doorgaan" }).click();
+
   // Sound on: Stephen tells it, and in the one sample interview Tim
   // answers in a voice of his own, all in Dutch.
   await expect(page.getByText(story.summary)).toBeVisible({ timeout: 90_000 });

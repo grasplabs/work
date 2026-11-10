@@ -119,6 +119,17 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   ).toBeVisible();
   await page.getByRole("button", { name: "English" }).click();
   await page.getByRole("button", { name: "Let’s start" }).click();
+  // Which AI Grasp thinks with comes first: the stack's providers are
+  // connected and a model is chosen (e2e/people.ts), so it only says so.
+  await expect(
+    page.getByRole("heading", { name: "Which AI should I think with?" })
+  ).toBeVisible();
+  await expect(page.getByText(/^Connected: /u)).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+  // How this works, before its own way on is pressed.
+  await expect(
+    page.getByText(/^Your people, documents and tools first\./u)
+  ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
   // The staff list: four people in three teams, Lea leading Sales.
