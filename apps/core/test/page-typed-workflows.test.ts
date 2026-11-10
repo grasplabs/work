@@ -13,6 +13,7 @@ import { repairResourceTerminations } from "../src/workflows/resource-runs.ts";
 import { tellQueryFollowers } from "../src/workflows/run-changes.ts";
 import { mockIdpWith } from "./idp.ts";
 import {
+  approvalDeclared,
   called,
   controlCommand,
   endLiveResourceRuns,
@@ -29,7 +30,6 @@ import {
   askingOf,
   boundApp,
   callOn,
-  declaresApproval,
   idp,
   pageRuns,
   refusalOf,
@@ -198,7 +198,7 @@ describe(
       });
       const { app, reference } = await boundApp({
         sharing: { admin, builder, workflow },
-        declares: declaresApproval,
+        declares: approvalDeclared,
       });
       const lease = await pageOf(builder, app);
       const channel = pageRuns(builder, app, lease, reference);
@@ -276,7 +276,7 @@ describe(
       });
       const { app, reference } = await boundApp({
         sharing: { admin, builder, workflow },
-        declares: declaresApproval,
+        declares: approvalDeclared,
       });
       const lease = await pageOf(builder, app);
       const channel = pageRuns(builder, app, lease, reference);

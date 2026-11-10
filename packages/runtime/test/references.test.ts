@@ -348,6 +348,14 @@ const pageBuildOf = (files: Readonly<Record<string, string>>) => {
   return readPageBuild(build);
 };
 
+/** `generated` but what the release's contracts seal. */
+const unsealed = (generated: Readonly<Record<string, string>>) =>
+  Object.fromEntries(
+    Object.entries(generated).filter(
+      ([path]) => path !== ".grasp/contracts.json"
+    )
+  );
+
 describe("workflow references", () => {
   const pinned = { workflowId: "workflow-1", version: 3 };
 
@@ -378,21 +386,21 @@ describe("workflow references", () => {
   };
 
   test("seal the workflow version each was resolved from, never into a reference or a page", async () => {
-    const files = await generatedWith([{ alias: "summarizeNote", pinned }]);
+    const [unbound, files] = await Promise.all([
+      generatedWith([]),
+      generatedWith([{ alias: "summarizeNote", pinned }]),
+    ]);
     const contracts: unknown = JSON.parse(
       files[".grasp/contracts.json"] ?? "{}"
     );
     expect({
       // `archiveNotes`, bound to nothing, seals nothing.
       sealed: readSealedWorkflows(at(contracts, ["workflows"])),
-      inReferences: (files["server/_generated/api.ts"] ?? "").includes(
-        "workflow-1"
-      ),
-      inPage: (files[".grasp/functions.ts"] ?? "").includes("workflow-1"),
+      // The references and the page's build are the same bytes, pinned or not.
+      rest: unsealed(files),
     }).toStrictEqual({
       sealed: [{ alias: "summarizeNote", pinned }],
-      inReferences: false,
-      inPage: false,
+      rest: unsealed(unbound),
     });
   });
 
@@ -437,8 +445,6 @@ describe("workflow references", () => {
       // Data all the way down: a clone refuses a function, and keeps all.
       expect(structuredClone(each)).toStrictEqual(each);
     }
-    // No descriptor of the declaration's, or anything else, rides along.
-    expect(JSON.stringify(workflows)).not.toContain("descriptorVersion");
     expect([
       Object.isFrozen(reference),
       Object.isFrozen(reference.events),

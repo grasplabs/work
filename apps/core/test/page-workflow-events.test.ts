@@ -1,5 +1,6 @@
 import { v } from "@grasp-os/runtime/app";
 import { declaredWorkflows } from "@grasp-os/runtime/host";
+import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -39,6 +40,8 @@ import type { TestApp } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  contractOf,
+  jobEventsDeclared,
   mutationCall,
   objectSchema,
   queryCall,
@@ -61,14 +64,11 @@ import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 /**
- * The event the workflow takes, and the task waiting on it, as the bound
- * version has them.
+ * The Invoices App, declaring `declares` of `review` besides its args and
+ * returns: by default the event the workflow takes, and the task waiting
+ * on it, as the bound version has them.
  */
-const declaresJobEvents =
-  'events: { jobEvents: { type: "grasp.job.completed", data: v.object({ jobId: v.string() }) } },\n  listens: { job: ["jobEvents"] },';
-
-/** The Invoices App, declaring `declares` of `review` besides its args and returns. */
-const files = (declares = declaresJobEvents): TestApp =>
+const files = (declares = jobEventsDeclared): TestApp =>
   testApp(
     {
       name: "Invoices",
@@ -79,8 +79,9 @@ const files = (declares = declaresJobEvents): TestApp =>
         },
       },
       permissions: [
-        `permission.workflow("review", {\n  args: v.object({ jobId: v.string() }),\n  returns: v.object({ status: v.string() }),\n  ${declares}\n})`,
+        'permission.workflow("review", {\n  args: v.object({ jobId: v.string() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
+      contracts: { review: declares },
     },
     {
       "server/invoices.ts": `import { v } from "@grasp-os/sdk";
@@ -706,7 +707,10 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
      * the one that runs, its grants, asked for again, granted for it: a
      * page opened now is of it.
      */
-    const current = async (version: number, declares: string) => {
+    const current = async (
+      version: number,
+      declares: WorkflowEventContract
+    ) => {
       await commitDefined(
         env,
         builder.acting,
@@ -743,7 +747,7 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     // Version 2 declares the workflow without its event: its pages type
     // no event, so they follow no run version 1 started, and show no
     // event wait in a run of their own.
-    const secondLease = await current(2, "");
+    const secondLease = await current(2, contractOf({}));
     const secondRun = await startedRun(
       builder,
       app,
@@ -757,7 +761,7 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     };
 
     // Version 3 declares it as version 1 did: it follows version 1's run.
-    const thirdLease = await current(3, declaresJobEvents);
+    const thirdLease = await current(3, jobEventsDeclared);
     const third = {
       firstVersionsRun: await waitsOn(thirdLease, firstRun),
       secondVersionsRun: await waitsOn(thirdLease, secondRun),

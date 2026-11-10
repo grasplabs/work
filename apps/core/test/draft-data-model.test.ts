@@ -1,14 +1,17 @@
+import { declaredPermission } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
-import { chatIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { loadRelease } from "../src/app-releases.ts";
 import { published, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
-  declaresJobEvents,
+  jobEventsDeclared,
   jobEventsContract,
   jobWaitingOf,
   requestsApp,
@@ -431,7 +434,7 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
     const api = builder.api.workflowResources;
     await api.bindToApp(flow.id, { app, alias: "review", version: 1 });
-    await release(builder, app, requestsApp("review", declaresJobEvents));
+    await release(builder, app, requestsApp("review", jobEventsDeclared));
     // Another builder of the App, with no role in the workflow.
     await builder.api.apps.members.add(app, {
       type: "person",
@@ -477,8 +480,6 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
       app,
       bindInDraft("review")
     );
-    const drafted = await builder.api.chats.draftFiles(chatId, app);
-    const config = drafted["grasp.config.ts"];
     // Still the current version's declaration, until the draft is current.
     const draftOnly = await bindSecond();
     const version = await builder.api.chats.proposeDraft(
@@ -487,6 +488,22 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
       "Declare version 2's events"
     );
     await builder.api.apps.versions.setCurrent(app, version);
+    // What the release of the draft's version declares, as its host reads it.
+    const proposed = await loadRelease(env, appIdSchema.parse(app), version);
+    const sealed = declaredPermission(proposed.app, "review", "workflows");
+    const events = await allEvents();
+    const audited = events
+      .filter(
+        ({ action, target, detail }) =>
+          action === "chat.draft_defined" &&
+          target?.id === chatId &&
+          detail.op === "bindWorkflow"
+      )
+      .map(({ detail }) => ({
+        alias: detail.alias,
+        workflow: detail.workflow,
+        version: detail.version,
+      }));
 
     expect({
       beforeDraft,
@@ -494,9 +511,8 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
       noRole,
       forged,
       declared: declared.ok,
-      declaresLater: ["laterEvents: {", 'laterEvents: ["laterEvents"]'].map(
-        (text) => config?.includes(text)
-      ),
+      sealed: { events: sealed?.events, listens: sealed?.listens },
+      audited,
       draftOnly,
       afterCurrent: await bindSecond(),
     }).toStrictEqual({
@@ -509,7 +525,16 @@ describe("a workflow version bound from a draft", { timeout: 120_000 }, () => {
       noRole: "workflow.resource_unavailable",
       forged: "app.invalid",
       declared: true,
-      declaresLater: [true, true],
+      // Version 2's events and listen tasks, as it has them.
+      sealed: {
+        events: {
+          jobEvents: jobEventsDeclared.events.jobEvents,
+          laterEvents: jobEventsDeclared.events.jobEvents,
+        },
+        listens: { job: ["jobEvents"], laterEvents: ["laterEvents"] },
+      },
+      // The workflow and version the declaration was read from.
+      audited: [{ alias: "review", workflow: flow.id, version: "2" }],
       draftOnly: "workflow.app_binding_contract_changed",
       afterCurrent: "ok",
     });

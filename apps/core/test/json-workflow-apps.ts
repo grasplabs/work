@@ -4,7 +4,10 @@ import {
   GraspClient,
   workflowReferenceOf,
 } from "@grasp-os/runtime/host";
-import type { ClientTransport } from "@grasp-os/runtime/host";
+import type {
+  ClientTransport,
+  WorkflowEventContract,
+} from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -283,12 +286,44 @@ export const jobWaitingOf = (
     }
   );
 
+/** A workflow's contract of `parts`, none of the rest. */
+export const contractOf = (
+  parts: Partial<WorkflowEventContract>
+): WorkflowEventContract => ({
+  events: {},
+  listens: {},
+  decisions: {},
+  ...parts,
+});
+
 /**
- * What an App declares, as source, of a workflow `jobWaitingOf` makes
- * with its defaults: its `jobEvents` and the task `job` waiting on it.
+ * The contract of a workflow asking its `approval` decision of a comment
+ * on who to greet (`decisionTasks`, its contract's input `{ who }` and
+ * response `{ comment }`), as an App binding it declares it.
  */
-export const declaresJobEvents =
-  'events: { jobEvents: { type: "grasp.job.completed", data: v.object({ jobId: v.string() }) } }, listens: { job: ["jobEvents"] }';
+export const approvalDeclared = contractOf({
+  decisions: {
+    approval: {
+      value: v.object({ comment: v.string() }).descriptor,
+      context: v.object({ who: v.string() }).descriptor,
+    },
+  },
+});
+
+/**
+ * The contract of a workflow `jobWaitingOf` makes with its defaults, as
+ * an App binding it declares it: its `jobEvents`, and the task `job`
+ * waiting on it.
+ */
+export const jobEventsDeclared = contractOf({
+  events: {
+    jobEvents: {
+      type: completedJob,
+      data: v.object({ jobId: v.string() }).descriptor,
+    },
+  },
+  listens: { job: ["jobEvents"] },
+});
 
 /**
  * What a decision workflow ends with: how it was answered and by whom,
@@ -396,9 +431,12 @@ export const endLiveResourceRuns = async (): Promise<void> => {
 /**
  * The App every bound workflow here is bound to: one page, one alias,
  * declaring `declares` of the workflow besides its args and returns (its
- * events, listen tasks or decisions, as source).
+ * events, listen tasks and decisions, as the version bound has them).
  */
-export const requestsApp = (alias: string, declares?: string): TestApp =>
+export const requestsApp = (
+  alias: string,
+  declares?: WorkflowEventContract
+): TestApp =>
   testApp(
     {
       name: "Requests",
@@ -409,8 +447,9 @@ export const requestsApp = (alias: string, declares?: string): TestApp =>
         },
       },
       permissions: [
-        `permission.workflow(${JSON.stringify(alias)}, { args: v.object({ who: v.string().trim().min(1) }), returns: v.object({ status: v.string() })${declares === undefined ? "" : `, ${declares}`} })`,
+        `permission.workflow(${JSON.stringify(alias)}, { args: v.object({ who: v.string().trim().min(1) }), returns: v.object({ status: v.string() }) })`,
       ],
+      ...(declares === undefined ? {} : { contracts: { [alias]: declares } }),
     },
     {
       "server/requests.ts": `import { permissions } from "../grasp.config.ts";
@@ -586,7 +625,7 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
     };
     definition?: (name: string) => string;
     alias?: string;
-    declares?: string;
+    declares?: WorkflowEventContract;
   } = {}) => {
     const admin = sharing?.admin ?? (await signedIn("admin"));
     const builder = sharing?.builder ?? (await signedIn("builder"));

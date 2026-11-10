@@ -10,6 +10,7 @@ import type {
   DefinitionOperation,
   FrozenJson,
 } from "@grasp-os/runtime/definition";
+import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 
 // An App's definition as a test writes it, and the config and schema
 // generated from it, exactly as Grasp's definition tools make them. Every
@@ -48,6 +49,13 @@ export interface AppSpec {
   readonly tables?: Readonly<Record<string, TableSpec>>;
   /** Each a `permission.*(…)` expression, or `people`. */
   readonly permissions?: readonly string[];
+  /**
+   * The events, listen tasks and decisions of each workflow permission,
+   * by alias, as the version bound has them: written as the host writes
+   * them from that version (`setWorkflowContract`), never in the
+   * permission's own expression.
+   */
+  readonly contracts?: Readonly<Record<string, WorkflowEventContract>>;
   /** Answers for a schema change, by table and field name. */
   readonly answers?: readonly {
     readonly table: string;
@@ -121,6 +129,9 @@ export const definitionOf = (spec: AppSpec): AppDefinition => {
   }
   for (const permission of spec.permissions ?? []) {
     apply({ op: "addPermission", permission });
+  }
+  for (const [alias, contract] of Object.entries(spec.contracts ?? {})) {
+    apply({ op: "setWorkflowContract", alias, contract });
   }
   const answers = (spec.answers ?? []).map(({ table, field, value }) => {
     const defined = definition.tables.find(({ name }) => name === table);

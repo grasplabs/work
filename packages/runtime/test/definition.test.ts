@@ -19,6 +19,8 @@ import {
   readDefinition,
 } from "../src/definition.ts";
 import type { AppDefinition } from "../src/definition.ts";
+import { isWorkflowPermission } from "../src/permission-checks.ts";
+import { permission } from "../src/permission.ts";
 import { descriptorOf } from "../src/sealed-descriptors.ts";
 import { v } from "../src/values.ts";
 
@@ -310,6 +312,24 @@ describe("operations", () => {
         /no name/u,
       ],
       [{ op: "addIndex", table: "tasks", fields: ["title"] }, /has a name/u],
+      // A workflow's events, listens and decisions come from the version
+      // bound (`setWorkflowContract`), never written with it by hand.
+      [
+        {
+          op: "addPermission",
+          permission:
+            'permission.workflow("triage", { args: v.object({}), returns: v.null(), events: { edited: { type: "tasks.task.edited", data: v.null() } } })',
+        },
+        /come from the version you bind/u,
+      ],
+      [
+        {
+          op: "addPermission",
+          permission:
+            'permission.workflow("triage", { args: v.object({}), returns: v.null(), decisions: { sign: { value: v.boolean(), context: v.null() } } })',
+        },
+        /come from the version you bind/u,
+      ],
       // A workflow's events, listens and decisions are set on a workflow
       // the App declares, never declaring one.
       [
@@ -561,6 +581,37 @@ describe("operations", () => {
   });
 });
 
+/**
+ * What the `permission.workflow(...)` call in `definition`'s
+ * grasp.config.ts declares, evaluated as the builders evaluate code.
+ */
+const configured = (definition: AppDefinition) => {
+  const config = definitionSources(definition)["grasp.config.ts"] ?? "";
+  const start = config.indexOf("permission.workflow(");
+  let depth = 0;
+  let end = start;
+  for (let index = start; index < config.length; index += 1) {
+    depth += config[index] === "(" ? 1 : 0;
+    depth -= config[index] === ")" ? 1 : 0;
+    if (depth === 0 && config[index] === ")") {
+      end = index + 1;
+      break;
+    }
+  }
+  const declared = evaluateExpression(config.slice(start, end), {
+    permission,
+    v,
+  });
+  return isWorkflowPermission(declared)
+    ? {
+        alias: declared.alias,
+        events: declared.events,
+        listens: declared.listens,
+        decisions: declared.decisions,
+      }
+    : undefined;
+};
+
 describe("a workflow's contract", () => {
   const triage = () =>
     defined(
@@ -591,14 +642,17 @@ describe("a workflow's contract", () => {
     });
     const readBack = readDefinition(JSON.parse(definitionText(definition)));
     const declared = definitionManifest(readBack).permissions.triage;
-    const config = definitionSources(definition)["grasp.config.ts"] ?? "";
+    // As `permission.workflow` declares it: each listen's events in name order.
+    const expected = {
+      events: contract.events,
+      listens: { "do/1/wait": ["approved", "edited"] },
+      decisions: contract.decisions,
+    };
     expect({
       readBack: definitionText(readBack) === definitionText(definition),
       sources:
         JSON.stringify(definitionSources(readBack)) ===
         JSON.stringify(definitionSources(definition)),
-      // The manifest holds it as `permission.workflow` declares it: each
-      // listen's events in name order.
       declared:
         declared?.["~permission"] === "workflows"
           ? {
@@ -607,37 +661,25 @@ describe("a workflow's contract", () => {
               decisions: declared.decisions,
             }
           : undefined,
-      printed: [
-        "events: {",
-        'type: "tasks.task.edited"',
-        "title: v.string().max(200)",
-        "listens: {",
-        '"do/1/wait": ["approved", "edited"]',
-        "decisions: {",
-        "value: v.boolean()",
-      ].filter((part) => !config.includes(part)),
+      configured: configured(definition),
     }).toStrictEqual({
       readBack: true,
       sources: true,
-      declared: {
-        events: contract.events,
-        listens: { "do/1/wait": ["approved", "edited"] },
-        decisions: contract.decisions,
-      },
-      printed: [],
+      declared: expected,
+      configured: { alias: "triage", ...expected },
     });
-    // Set again with none, it declares none, and prints none.
+    // Set again with none, its code declares none.
     const cleared = applyOperation(definition, {
       op: "setWorkflowContract",
       alias: "triage",
       contract: { events: {}, listens: {}, decisions: {} },
     });
-    const clearedConfig = definitionSources(cleared)["grasp.config.ts"] ?? "";
-    expect(
-      ["events:", "listens:", "decisions:"].filter((part) =>
-        clearedConfig.includes(part)
-      )
-    ).toStrictEqual([]);
+    expect(configured(cleared)).toStrictEqual({
+      alias: "triage",
+      events: {},
+      listens: {},
+      decisions: {},
+    });
   });
 
   test.each<[string, string, Record<string, unknown>, RegExp]>([
@@ -782,8 +824,8 @@ describe("reading", () => {
     expect({
       permissions: definitionText({
         ...definition,
-        permissions: definition.permissions.map((permission) =>
-          Object.fromEntries(Object.entries(permission).toReversed())
+        permissions: definition.permissions.map((held) =>
+          Object.fromEntries(Object.entries(held).toReversed())
         ),
       }),
       fields: text.indexOf('"street"') < text.indexOf('"city"'),

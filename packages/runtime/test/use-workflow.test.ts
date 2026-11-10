@@ -228,7 +228,10 @@ const unheard = (): void => {
  * A hook showing `selection` of `workflow` (`summarizeNote`'s unless
  * given) through `page`'s client, as `useWorkflow` composes it: its
  * calls, its live `run` query (while a run is selected) and `canStart`,
- * read and followed as `useQuery` does.
+ * read and followed as `useQuery` does. Each view reads the reference
+ * again in the page's build, and, as the hook does, starts afresh with new
+ * calls once that reads another workflow (a preview's draft changed it),
+ * retiring the last ones.
  */
 const mount = (
   page: Host,
@@ -237,8 +240,8 @@ const mount = (
 ) => {
   let selection = initial;
   const internals = clientInternals(page.client);
-  const read = readWorkflowReference(internals, workflow);
-  const calls = new WorkflowCalls(page.client, read);
+  let read = readWorkflowReference(internals, workflow);
+  let calls = new WorkflowCalls(page.client, read);
   calls.select(selection);
   const stops = new Map<string, () => void>();
   /** What `reference` with `args` shows now, followed from now on. */
@@ -253,6 +256,13 @@ const mount = (
     return entry.snapshot.value;
   };
   const view = () => {
+    const now = readWorkflowReference(internals, workflow);
+    if (now !== read) {
+      calls.retire();
+      read = now;
+      calls = new WorkflowCalls(page.client, read);
+      calls.select(selection);
+    }
     const local = calls.local();
     const runId = selection ?? local.startedRunId;
     // SAFETY: what the `run` query's descriptor declares, which the host
@@ -275,7 +285,9 @@ const mount = (
     }) as WorkflowViewOf<typeof workflows.summarizeNote>;
   };
   return {
-    calls,
+    get calls() {
+      return calls;
+    },
     view,
     /** Selects run `runId` as the hook commits a new `{ runId }`. */
     select: (runId: string) => {
@@ -1143,6 +1155,43 @@ describe("useWorkflow", () => {
         ).toBeTruthy();
       }
     );
+  });
+
+  describe("a preview's draft changing the page's build", () => {
+    it("keeps a hook's run and commands while its workflow reads the same, and starts afresh once it doesn't", async () => {
+      const page = host();
+      const internals = clientInternals(page.client);
+      const hook = mount(page);
+      await hook.view().start({ noteId });
+      const { pause } = hook.view();
+      // The same build again, as a hot update that changed something else.
+      internals.useFunctions(structuredClone(builtFunctions));
+      const kept = hook.view();
+      // Another value for one of summarizeNote's decisions.
+      internals.useFunctions(
+        buildWith((summarize) => {
+          entry(summarize, "decisions").chooseLength = entry(
+            summarize,
+            "decisions"
+          ).approveSummary;
+        })
+      );
+      const afresh = hook.view();
+      expect(kept).toMatchObject({ status: "loading", runId: "run-1" });
+      expect(afresh).toMatchObject({ status: "idle", canStart: false });
+      expect({
+        sameCommands: kept.pause === pause,
+        newCommands: afresh.pause === pause,
+        // A command the page kept from before refuses, sending nothing.
+        refused: await codeOf(pause()),
+        calls: page.calls.map(({ name }) => name),
+      }).toStrictEqual({
+        sameCommands: true,
+        newCommands: false,
+        refused: "workflow.not_attached",
+        calls: [path("mutations.start")],
+      });
+    });
   });
 
   describe("answering a decision the run shown is held at", () => {

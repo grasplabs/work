@@ -50,6 +50,7 @@ import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
+  contractOf,
   controlCommand,
   queryCall,
   startCommand,
@@ -92,12 +93,25 @@ export const Route = createFileRoute("/")({ component: Desk });
 `;
 
 /** The `review` workflow's decision, as the App declares it. */
-const declaresDecision =
-  "decisions: { approval: { value: v.object({ comment: v.string() }), context: v.object({ amount: v.number() }).nullable() } }";
+const declaresDecision = contractOf({
+  decisions: {
+    approval: {
+      value: v.object({ comment: v.string() }).descriptor,
+      context: v.object({ amount: v.number() }).nullable().descriptor,
+    },
+  },
+});
 
 /** The `review` workflow's event and the task waiting on it, as the App declares them. */
-const declaresEvent =
-  'events: { jobEvents: { type: "grasp.job.completed", data: v.object({ jobId: v.string() }) } },\n  listens: { awaitJob: ["jobEvents"] }';
+const declaresEvent = contractOf({
+  events: {
+    jobEvents: {
+      type: "grasp.job.completed",
+      data: v.object({ jobId: v.string() }).descriptor,
+    },
+  },
+  listens: { awaitJob: ["jobEvents"] },
+});
 
 const files = (
   page = pageOf("approval"),
@@ -113,8 +127,9 @@ const files = (
         },
       },
       permissions: [
-        `permission.workflow("review", {\n  args: v.object({ amount: v.number() }),\n  returns: v.object({ status: v.string() }),\n  ${declares},\n})`,
+        'permission.workflow("review", {\n  args: v.object({ amount: v.number() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
+      contracts: { review: declares },
     },
     {
       "server/invoices.ts": `import { v } from "@grasp-os/sdk";
