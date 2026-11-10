@@ -14,6 +14,7 @@ import {
   storeIdSchema,
 } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   categoryOf,
   isRetryableCode,
@@ -120,28 +121,36 @@ interface UseRefusalContext {
   readonly runId: string | null;
 }
 
-/** Writes `refusal` as `app.use.refused` for `context`. */
+/** Writes `refusal` as `app.use.refused` for `context`; never throws. */
 const writeUseRefusal = async (
   env: Env,
   { app, version, principal, requestId, runId }: UseRefusalContext,
   refusal: UseRefusal
 ): Promise<void> => {
-  await keepAuditEvent(env, drizzle(env.DB), {
-    actor: { type: "app", appId: app, part: "server" },
-    action: "app.use.refused",
-    target: { type: "app", id: app },
-    requestId,
-    detail: {
-      version,
-      person: principal,
-      runId,
-      function: refusal.function,
-      useKind: refusal.use.kind,
-      useName: refusal.use.name,
-      reason: refusal.reason,
+  try {
+    await keepAuditEvent(env, drizzle(env.DB), {
+      actor: { type: "app", appId: app, part: "server" },
+      action: "app.use.refused",
+      target: { type: "app", id: app },
+      requestId,
+      detail: {
+        version,
+        person: principal,
+        runId,
+        function: refusal.function,
+        useKind: refusal.use.kind,
+        useName: refusal.use.name,
+        reason: refusal.reason,
+        errorCode: refusal.errorCode,
+      },
+    });
+  } catch (error) {
+    log.error("app.use.audit_failed", {
+      requestId,
       errorCode: refusal.errorCode,
-    },
-  });
+      ...errorFields(error),
+    });
+  }
 };
 
 /**
@@ -151,25 +160,14 @@ const writeUseRefusal = async (
  * the App's server code acting for `principal`, every field core's own.
  * The write is the request's own work until it is kept: the host waits for
  * it only so long (`useEvidenceWaitMs`), and one it stopped waiting for
- * still finishes rather than ending with the call. One core's database
- * refuses goes straight to the log, and one the log refuses too is
- * logged (`keepAuditEvent`); anything else that fails rejects, for the
- * host to log (operations.ts, `keepEvidence`). The refusal stands either
- * way.
+ * still finishes rather than ending with the call. One that can't be kept
+ * is logged; the refusal stands either way.
  */
 const keptUseRefusals =
   (env: Env, context: UseRefusalContext) =>
   async (refusal: UseRefusal): Promise<void> => {
     const writing = writeUseRefusal(env, context, refusal);
-    waitUntil(
-      (async () => {
-        try {
-          await writing;
-        } catch {
-          // Logged by the host, which awaits it below.
-        }
-      })()
-    );
+    waitUntil(writing);
     await writing;
   };
 
