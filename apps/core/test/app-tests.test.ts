@@ -1,4 +1,4 @@
-import { manifestText } from "@grasp-os/runtime/host";
+import { manifestText, schemaHash } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
@@ -30,10 +30,11 @@ import { applied } from "./store-schemas.ts";
 // version is made current: each suite in its own isolate, every call
 // through the real operation host on a fixture store of the test's own.
 // What the tests here check is what that host did: the App's access
-// rules held between principals and roles, a store per test, refusals a
-// page's call would get, failures named as people read them, the
-// limits on a run, and nothing left in the App's own store or behind in
-// fixture stores.
+// rules held between identities and roles, a store per test, what a
+// test seeds and inspects directly (`t.run`) and where that may happen,
+// refusals a page's call would get, failures named as people read them,
+// the limits on a run, and nothing left in the App's own store or behind
+// in fixture stores.
 
 const appFiles: TestApp = testApp(
   {
@@ -103,111 +104,103 @@ export const count = internalQuery({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).length,
 });
 `,
-
-    "tests/fixtures/notes.json": JSON.stringify({
-      principals: {
-        "note-owner": { role: "user" },
-        "other-owner": { role: "user" },
-        "note-builder": { role: "builder" },
-      },
-    }),
   }
 );
 
-const passingSuite = `import { appTest } from "@grasp-os/sdk/testing";
+/** The imports every suite here starts with. */
+const suiteImports = `import { appTest } from "@grasp-os/sdk/testing";
 import { api } from "@server/_generated/api";
+import { expect } from "vitest";
+import schema from "../server/schema.ts";
+`;
 
-export default appTest({
-  fixtures: "notes",
-  tests: {
-    "an owner reads back the note they create": async (t) => {
-      const owner = await t.as("note-owner");
-      const id = await owner.mutation(api.notes.create, { title: "First note" });
-      t.equal(await owner.query(api.notes.find, { id }), "First note");
-      t.equal(await owner.query(api.notes.titles, {}), ["First note"]);
-    },
-    "each test starts on an empty store": async (t) => {
-      const owner = await t.as("note-owner");
-      t.equal(await owner.query(api.notes.titles, {}), []);
-    },
-    "another owner sees none of it": async (t) => {
-      const owner = await t.as("note-owner");
-      const other = await t.as("other-owner");
-      const id = await owner.mutation(api.notes.create, { title: "Mine" });
-      t.equal(await other.query(api.notes.titles, {}), []);
-      await t.rejectsCode(other.query(api.notes.find, { id }), "note.not_found");
-    },
-    "a builder sets the motto, a user may not": async (t) => {
-      const builder = await t.as("note-builder");
-      const user = await t.as("note-owner");
-      await builder.mutation(api.notes.setMotto, { text: "Write it down" });
-      await t.rejectsCode(user.mutation(api.notes.setMotto, { text: "Mine" }), "data.write_denied");
-    },
-    "no outside system is reached": async (t) => {
-      const owner = await t.as("note-owner");
-      await t.rejectsCode(owner.action(api.notes.searchHelp, { text: "leave" }), "resource.unavailable");
-    },
-    "the host refuses what a page's call is refused": async (t) => {
-      const owner = await t.as("note-owner");
-      const internal = { ...api.notes.titles, name: "notes.count" };
-      await t.rejectsCode(owner.query(internal, {}), "function.not_found");
-      await t.rejectsCode(
-        () => owner.mutation(api.notes.create, { title: "" }),
-        "contract.invalid_args"
-      );
-    },
-    "a call it doesn't wait for ends with it": async (t) => {
-      const owner = await t.as("note-owner");
-      void owner.mutation(api.notes.create, { title: "Late" }).catch(() => null);
-    },
+const passingSuite = `${suiteImports}
+export default appTest(schema, {
+  "an owner reads back the note they create": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    const id = await owner.mutation(api.notes.create, { title: "First note" });
+    expect(await owner.query(api.notes.find, { id })).toBe("First note");
+    expect(await owner.query(api.notes.titles, {})).toEqual(["First note"]);
+  },
+  "each test starts on an empty store": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    expect(await owner.query(api.notes.titles, {})).toEqual([]);
+  },
+  "another owner sees none of it": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    const other = t.withIdentity({ name: "Bo" });
+    const id = await owner.mutation(api.notes.create, { title: "Mine" });
+    expect(await other.query(api.notes.titles, {})).toEqual([]);
+    await expect(other.query(api.notes.find, { id })).rejects.toMatchObject({
+      code: "note.not_found",
+    });
+  },
+  "a builder sets the motto, a user may not": async (t) => {
+    const builder = t.withIdentity({ name: "Cy", role: "builder" });
+    const user = t.withIdentity({ name: "Ada" });
+    await builder.mutation(api.notes.setMotto, { text: "Write it down" });
+    await expect(
+      user.mutation(api.notes.setMotto, { text: "Mine" })
+    ).rejects.toMatchObject({ code: "data.write_denied" });
+  },
+  "no outside system is reached": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    await expect(
+      owner.action(api.notes.searchHelp, { text: "leave" })
+    ).rejects.toMatchObject({ code: "resource.unavailable" });
+  },
+  "the host refuses what a page's call is refused": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    const internal = { ...api.notes.titles, name: "notes.count" };
+    await expect(owner.query(internal, {})).rejects.toMatchObject({
+      code: "function.not_found",
+    });
+    await expect(
+      owner.mutation(api.notes.create, { title: "" })
+    ).rejects.toMatchObject({ code: "contract.invalid_args" });
+  },
+  "a call it doesn't wait for ends with it": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    void owner.mutation(api.notes.create, { title: "Late" }).catch(() => null);
   },
 });
 `;
 
-const failingSuite = `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "@server/_generated/api";
-
-export default appTest({
-  fixtures: "notes",
-  tests: {
-    "compares what the App answers": async (t) => {
-      const owner = await t.as("note-owner");
-      t.equal(await owner.query(api.notes.titles, {}), ["Something"]);
-    },
-    "fails on an error nobody expected": async (t) => {
-      const owner = await t.as("note-owner");
-      const other = await t.as("other-owner");
-      const id = await owner.mutation(api.notes.create, { title: "Mine" });
-      await other.query(api.notes.find, { id });
-    },
-    "fails when an expected refusal never comes": async (t) => {
-      const owner = await t.as("note-owner");
-      await t.rejectsCode(owner.query(api.notes.titles, {}), "note.not_found");
-    },
-    "fails for a principal the fixture doesn't name": async (t) => {
-      await t.as("stranger");
-    },
-    "passes": async (t) => {
-      t.equal(1, 1);
-    },
+const failingSuite = `${suiteImports}
+export default appTest(schema, {
+  "compares what the App answers": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    expect(await owner.query(api.notes.titles, {})).toEqual(["Something"]);
+  },
+  "fails on an error nobody expected": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    const other = t.withIdentity({ name: "Bo" });
+    const id = await owner.mutation(api.notes.create, { title: "Mine" });
+    await other.query(api.notes.find, { id });
+  },
+  "fails when an expected refusal never comes": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    await expect(owner.query(api.notes.titles, {})).rejects.toMatchObject({
+      code: "note.not_found",
+    });
+  },
+  "fails for one name given two roles": async (t) => {
+    t.withIdentity({ name: "Ada" });
+    t.withIdentity({ name: "Ada", role: "builder" });
+  },
+  "passes": async () => {
+    expect(1).toBe(1);
   },
 });
 `;
 
 /** A suite of one test, which runs `body` with an owner at hand. */
-const suiteOf = (
-  body: string,
-  before = ""
-): string => `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "@server/_generated/api";
+const suiteOf = (body: string, before = ""): string => `${suiteImports}
 ${before}
-export default appTest({
-  fixtures: "notes",
-  tests: {
-    "runs": async (t) => {
-      const owner = await t.as("note-owner");
-      ${body}
-    },
+export default appTest(schema, {
+  "runs": async (t) => {
+    const owner = t.withIdentity({ name: "Ada" });
+    ${body}
   },
 });
 `;
@@ -309,7 +302,7 @@ describe("an App's tests", { timeout: 180_000 }, () => {
     await expect(fixturesLeft()).resolves.toBe(0);
   });
 
-  it("give each principal the teams its fixture names, as a table's team rules read them", async () => {
+  it("give each identity the teams it names, as a table's team rules read them, which t.run reads past", async () => {
     const built = await appWith(
       testApp(
         {
@@ -343,29 +336,30 @@ export const titles = query({
 });
 `,
 
-          "tests/fixtures/deals.json": JSON.stringify({
-            principals: {
-              seller: { role: "user", teams: ["sales"] },
-              helper: { role: "user", teams: ["support"] },
-            },
-          }),
-          "tests/deals.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "@server/_generated/api";
-
-export default appTest({
-  fixtures: "deals",
-  tests: {
-    "each team reads its own deals, and adds none for another": async (t) => {
-      const seller = await t.as("seller");
-      const helper = await t.as("helper");
-      await seller.mutation(api.deals.add, { title: "Acme", team: "sales" });
-      t.equal(await seller.query(api.deals.titles, {}), ["Acme"]);
-      t.equal(await helper.query(api.deals.titles, {}), []);
-      await t.rejectsCode(
-        seller.mutation(api.deals.add, { title: "Globex", team: "support" }),
-        "data.write_denied"
-      );
-    },
+          "tests/deals.test.ts": `${suiteImports}
+export default appTest(schema, {
+  "each team reads its own deals, and adds none for another": async (t) => {
+    const seller = t.withIdentity({ name: "Sam", teams: ["sales"] });
+    const helper = t.withIdentity({ name: "Hal", teams: ["support"] });
+    await seller.mutation(api.deals.add, { title: "Acme", team: "sales" });
+    expect(await seller.query(api.deals.titles, {})).toEqual(["Acme"]);
+    expect(await helper.query(api.deals.titles, {})).toEqual([]);
+    await expect(
+      seller.mutation(api.deals.add, { title: "Globex", team: "support" })
+    ).rejects.toMatchObject({ code: "data.write_denied" });
+  },
+  "t.run sees every team's deals": async (t) => {
+    const seller = t.withIdentity({ name: "Sam", teams: ["sales"] });
+    await seller.mutation(api.deals.add, { title: "Acme", team: "sales" });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("deals", { title: "Initech", team: "support" });
+    });
+    const titles = await t.run(async (ctx) => {
+      const deals = await ctx.db.query("deals").take(10);
+      return deals.map((deal) => deal.title).toSorted();
+    });
+    expect(titles).toEqual(["Acme", "Initech"]);
+    expect(await seller.query(api.deals.titles, {})).toEqual(["Acme"]);
   },
 });
 `,
@@ -387,10 +381,14 @@ export default appTest({
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
-      'tests/failing.test.ts, "compares what the App answers": expected ["Something"], got []',
+      expect.stringMatching(
+        /^tests\/failing\.test\.ts, "compares what the App answers": expected \[\] to deeply equal \[ 'Something' \]/u
+      ),
       'tests/failing.test.ts, "fails on an error nobody expected": unexpected error note.not_found: No such note.',
-      'tests/failing.test.ts, "fails when an expected refusal never comes": expected note.not_found, but the call succeeded',
-      'tests/failing.test.ts, "fails for a principal the fixture doesn\'t name": The fixture "notes" has no principal "stranger": name it in tests/fixtures/notes.json.',
+      expect.stringMatching(
+        /^tests\/failing\.test\.ts, "fails when an expected refusal never comes": promise resolved .* instead of rejecting/u
+      ),
+      'tests/failing.test.ts, "fails for one name given two roles": "Ada" is already someone with role user in no team: the same name is the same person.',
     ]);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: null,
@@ -403,8 +401,9 @@ export default appTest({
       withFiles(appFiles, {
         "tests/sneaky.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
 import { titles } from "../server/notes.ts";
+import schema from "../server/schema.ts";
 
-export default appTest({ fixtures: "notes", tests: { "runs a handler": async () => { await titles.handler(); } } });
+export default appTest(schema, { "runs a handler": async () => { await titles.handler(); } });
 `,
       })
     );
@@ -417,22 +416,73 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
     ]);
   });
 
-  it("fail a suite whose fixture the App doesn't have", async () => {
+  it("seed and inspect every record with t.run, past the App's access rules, on the test's own store alone", async () => {
     const built = await appWith(
       withFiles(appFiles, {
-        "tests/notes.test.ts": passingSuite.replace(
-          'fixtures: "notes"',
-          'fixtures: "missing"'
-        ),
+        "tests/seeded.test.ts": `${suiteImports}
+export default appTest(schema, {
+  "seeds what nobody may read, and inspects all of it": async (t) => {
+    const ada = t.withIdentity({ name: "Ada" });
+    const seeded = await t.run(
+      async (ctx) => await ctx.db.insert("notes", { title: "Seeded" })
+    );
+    // Owned by the test itself: no identity reads it through the App.
+    expect(await ada.query(api.notes.titles, {})).toEqual([]);
+    await ada.mutation(api.notes.create, { title: "Ada's" });
+    // Seeded as Ada, it is hers.
+    await ada.run(async (ctx) => {
+      await ctx.db.insert("notes", { title: "Ada's seed" });
+    });
+    expect((await ada.query(api.notes.titles, {})).toSorted()).toEqual([
+      "Ada's",
+      "Ada's seed",
+    ]);
+    const all = await t.run(async (ctx) => {
+      const notes = await ctx.db.query("notes").take(10);
+      return notes.map((note) => note.title).toSorted();
+    });
+    expect(all).toEqual(["Ada's", "Ada's seed", "Seeded"]);
+    expect(await t.run(async (ctx) => await ctx.db.get("notes", seeded))).toMatchObject({
+      title: "Seeded",
+    });
+  },
+  "commits nothing of a run that throws, and reads its own writes": async (t) => {
+    await expect(
+      t.run(async (ctx) => {
+        await ctx.db.insert("notes", { title: "Dropped" });
+        expect(await ctx.db.query("notes").take(10)).toHaveLength(1);
+        throw new Error("changed my mind");
+      })
+    ).rejects.toThrow("changed my mind");
+    expect(await t.run(async (ctx) => await ctx.db.query("notes").take(10))).toEqual([]);
+  },
+  "holds what it writes to the schema": async (t) => {
+    await expect(
+      t.run(async (ctx) => {
+        await ctx.db.insert("notes", { title: "" });
+      })
+    ).rejects.toMatchObject({ code: expect.stringMatching(/invalid/u) });
+  },
+});
+`,
       })
     );
-    const { code, failures } = await refusal(built);
-    expect(code).toBe("version.tests_failed");
-    expect(failures).toStrictEqual([
-      expect.stringMatching(
-        /^tests\/notes\.test\.ts: .*its fixture tests\/fixtures\/missing\.json doesn't exist/u
-      ),
-    ]);
+    await publishVersion(env, built.owner, built.app, 1);
+    await expect(findApp(env, built.app)).resolves.toMatchObject({
+      currentVersion: 1,
+    });
+    // The App's own store holds nothing the tests seeded.
+    const answer = await callAppFunction(
+      env,
+      built.owner,
+      built.app,
+      JSON.stringify({
+        reference: { name: "notes.titles", kind: "query" },
+        args: {},
+      })
+    );
+    expect(answer.result).toStrictEqual({ ok: true, value: [] });
+    await expect(fixturesLeft()).resolves.toBe(0);
   });
 
   it("fail closed on a report that leaves a test out", async () => {
@@ -443,11 +493,11 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
     const forging = `const stringify = JSON.stringify as (value: unknown, ...rest: unknown[]) => string;
 (JSON as { stringify: unknown }).stringify = (value: Record<string, unknown> | null, ...rest: unknown[]) =>
   value !== null && typeof value === "object" && "results" in value
-    ? stringify({ fixtures: value.fixtures, results: [] })
+    ? stringify({ results: [] })
     : stringify(value, ...rest);`;
     const built = await appWith(
       withFiles(appFiles, {
-        "tests/forged.test.ts": suiteOf("t.equal(1, 2);", forging),
+        "tests/forged.test.ts": suiteOf("expect(1).toBe(2);", forging),
       })
     );
     const { code, failures } = await refusal(built);
@@ -458,7 +508,7 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
   });
 
   it("fail a test that never finishes, and a suite that runs past its deadline", async () => {
-    const waiting = `const owner = await t.as("note-owner");
+    const waiting = `const owner = t.withIdentity({ name: "Ada" });
       await owner.mutation(api.notes.create, { title: "Held" });
       await new Promise((resolve) => { setTimeout(resolve, 2500); });`;
     const built = await appWith(
@@ -468,14 +518,10 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
       await new Promise(() => {});`
         ),
         // Each test within its 3 s, both together past the suite's 4 s.
-        "tests/hanging-suite.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
-import { api } from "@server/_generated/api";
-export default appTest({
-  fixtures: "notes",
-  tests: {
-    "first": async (t) => { ${waiting} },
-    "second": async (t) => { ${waiting} },
-  },
+        "tests/hanging-suite.test.ts": `${suiteImports}
+export default appTest(schema, {
+  "first": async (t) => { ${waiting} },
+  "second": async (t) => { ${waiting} },
 });
 `,
       })
@@ -544,7 +590,7 @@ export default appTest({
         "tests/a.test.ts": suiteOf(
           "await new Promise((resolve) => { setTimeout(resolve, 2000); });"
         ),
-        "tests/b.test.ts": suiteOf("t.equal(1, 1);"),
+        "tests/b.test.ts": suiteOf("expect(1).toBe(1);"),
       })
     );
     // The suites may take 500 ms in all: the first runs out of it, and is
@@ -564,35 +610,41 @@ export default appTest({
   it("run a suite in any folder an App's paths allow, dots included", async () => {
     const built = await appWith(
       withFiles(appFiles, {
-        "tests/access.rules/notes.test.ts": suiteOf("t.equal(1, 2);"),
+        "tests/access.rules/notes.test.ts": suiteOf(
+          "expect(1).toBe(2);"
+        ).replace("../server/schema.ts", "../../server/schema.ts"),
       })
     );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
-      'tests/access.rules/notes.test.ts, "runs": expected 2, got 1',
+      'tests/access.rules/notes.test.ts, "runs": expected 1 to be 2 // Object.is equality',
     ]);
   });
 
-  it("refuse a file under tests/ that is no suite, helper or fixture", async () => {
+  it("refuse a file under tests/ that is no suite or helper, a fixture file included", async () => {
     const built = await appWith(
       withFiles(appFiles, {
         "tests/notes.test.ts": passingSuite,
         "tests/notes.spec.js": "export default {};\n",
+        "tests/fixtures/notes.json": "{}\n",
       })
     );
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
-    expect(failures).toStrictEqual([
-      "tests/notes.spec.js: tests/notes.spec.js is in tests/, which holds only test suites (*.test.ts), their helpers (*.ts) and fixtures (tests/fixtures/<name>.json).",
-    ]);
+    expect(failures).toStrictEqual(
+      ["tests/fixtures/notes.json", "tests/notes.spec.js"].map(
+        (file) =>
+          `${file}: ${file} is in tests/, which holds only test suites (*.test.ts) and their helpers (*.ts): a test gives who it acts as (t.withIdentity) and what a run starts with (its start's options) itself.`
+      )
+    );
   });
 
   it("refuse more suites than an App may have", async () => {
     const suites = Object.fromEntries(
       Array.from({ length: 21 }, (_unused, index) => [
         `tests/suite-${index}.test.ts`,
-        suiteOf("t.equal(1, 1);"),
+        suiteOf("expect(1).toBe(1);"),
       ])
     );
     const built = await appWith(
@@ -620,17 +672,17 @@ export default appTest({
     ).rejects.toMatchObject({ code: "version.tests_unavailable" });
   });
 
-  it("need no runtime for fixtures and helpers alone, yet refuse a stray file anywhere", async () => {
+  it("need no runtime for helpers alone, yet refuse a stray file anywhere", async () => {
     /** Version 1 of an App with `files`, sealed where App code may run. */
     const sealedWith = async (files: TestSource) => {
       const built = await appWith(files);
       await sealRelease(env, { app: built.app, version: 1, by: built.owner });
       return built;
     };
-    // `appFiles` holds tests/fixtures/notes.json; a helper, but no suite.
+    // A helper, but no suite.
     const helpers = await sealedWith(
       withFiles(appFiles, {
-        "tests/lib/owner.ts": "export const ownerName = 'note-owner';\n",
+        "tests/lib/owner.ts": "export const ownerName = 'Ada';\n",
       })
     );
     await expect(
@@ -648,7 +700,7 @@ export default appTest({
       code: "version.tests_failed",
       details: {
         failures: [
-          "tests/notes.spec.js: tests/notes.spec.js is in tests/, which holds only test suites (*.test.ts), their helpers (*.ts) and fixtures (tests/fixtures/<name>.json).",
+          "tests/notes.spec.js: tests/notes.spec.js is in tests/, which holds only test suites (*.test.ts) and their helpers (*.ts): a test gives who it acts as (t.withIdentity) and what a run starts with (its start's options) itself.",
         ],
       },
     });
@@ -771,12 +823,7 @@ describe("fixture stores", () => {
         },
       }
     );
-    await object.watch(
-      id,
-      "fixture-note-owner",
-      { notes: notes ?? 0 },
-      watcher
-    );
+    await object.watch(id, "fixture-Ada", { notes: notes ?? 0 }, watcher);
     expect(released).toBe(0);
 
     await discardFixtureStore(env, id);
@@ -784,6 +831,74 @@ describe("fixture stores", () => {
     await vi.waitFor(() => {
       expect(released).toBe(1);
     });
+  });
+
+  it("take an unrestricted read or commit only on a fixture store core recorded, never a listed or unrecorded one", async () => {
+    const app = await sealed();
+    const fixture = await fixtureStore(app);
+    const listed = await storeOfNewApp(env, app.built.owner);
+    const business = await openStore(env, listed);
+    await business.applySchema(applied(manifestText(app.release.app.schema)));
+    const unrecorded = storeIdSchema.parse(crypto.randomUUID());
+    await openFixtureStore(env, unrecorded).applySchema(
+      applied(manifestText(app.release.app.schema))
+    );
+    const { notes = 0 } = await env.DATA_STORES.getByName(fixture).generations(
+      fixture,
+      ["notes"]
+    );
+    const hash = await schemaHash(app.release.app.schema);
+    const scopeOf = (_id: StoreId) => ({
+      schemaHash: hash,
+      principal: "test-run",
+      appMember: true,
+      appBuilder: true,
+      unrestricted: true as const,
+      consumer: { resourceId: app.built.app, resourceVersion: 1 },
+    });
+    const read = { kind: "get" as const, table: "notes", id: "none" };
+    const outcome = async (id: StoreId): Promise<string> => {
+      try {
+        await env.DATA_STORES.getByName(id).read(id, scopeOf(id), read);
+        return "read";
+      } catch (error) {
+        return isExpectedError(error) ? error.code : "threw";
+      }
+    };
+    expect({
+      fixture: await outcome(fixture),
+      listed: await outcome(listed),
+      unrecorded: await outcome(unrecorded),
+    }).toStrictEqual({
+      fixture: "read",
+      listed: "data.access_denied",
+      unrecorded: "data.access_denied",
+    });
+    // A commit as much as a read: an unrestricted write to a listed
+    // store is refused before anything is written.
+    const commitTo = async (id: StoreId): Promise<string> => {
+      try {
+        await env.DATA_STORES.getByName(id).commit({
+          storeId: id,
+          principal: { userId: "test-run" },
+          actor: { type: "person", userId: "test-run" },
+          roles: {
+            appMember: true,
+            appBuilder: true,
+            unrestricted: true,
+          },
+          schemaHash: hash,
+          receipt: { receiptId: "0".repeat(64), fence: 1 },
+          stagedAt: Date.now(),
+          readSet: { notes },
+          writes: [],
+        });
+        return "committed";
+      } catch (error) {
+        return isExpectedError(error) ? error.code : "threw";
+      }
+    };
+    await expect(commitTo(listed)).resolves.toBe("data.access_denied");
   });
 
   it("never discard a store core didn't record as a fixture", async () => {

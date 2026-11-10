@@ -462,13 +462,14 @@ export const visitorPeople = ({
  */
 export const fixturePeople = (
   principal: string,
+  shownAs: string,
   role: "user" | "builder",
   declared: boolean
 ): PeopleAccess => ({
   user: async () =>
     await Promise.resolve({
       id: principal,
-      name: principal,
+      name: shownAs,
       email: null,
       roles: rolesOf(role === "builder"),
     }),

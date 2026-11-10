@@ -3049,7 +3049,13 @@ class SealedRun implements SealedRunKind {
     }
     // Tried once as a real call is: `fixtureCall` marks it as it goes out
     // (`SentCalls`), so no later attempt of its step sends it again.
-    return await fixtureCall(this.#env, fixtureRunOf(this.run), built, effect);
+    return await fixtureCall(
+      this.#env,
+      fixtureRunOf(this.run),
+      task.id,
+      built,
+      effect
+    );
   }
 
   /**

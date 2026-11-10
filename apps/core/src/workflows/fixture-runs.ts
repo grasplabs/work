@@ -3,7 +3,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { asc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -125,22 +125,24 @@ export const discardFixtureRuns = async (
   }
 };
 
-/** What a test gives its run's start beside the request. */
+/** What a test gives its run's start beside the request (`TestStartOptions`). */
 export interface FixtureStart {
-  /** The parameter values its fixture declares for the workflow `alias` binds. */
-  readonly paramsOf: (alias: string) => Readonly<Record<string, unknown>>;
+  /** Its parameter values: any other takes its declared default. */
+  readonly params: Readonly<Record<string, unknown>>;
   /**
-   * Who its fixture lets answer each of its decisions, by the decision
-   * binding's alias: principals' names (fixture-decisions.ts).
+   * Who may answer each of its decisions, by the decision binding's
+   * alias: the test's identities' names (fixture-decisions.ts).
    */
-  readonly decidersOf: (
-    alias: string
-  ) => Readonly<Record<string, readonly string[]>>;
+  readonly deciders: Readonly<Record<string, readonly string[]>>;
   /**
-   * What its fixture answers each of its model bindings with, by the
-   * binding's alias (fixture-calls.ts).
+   * What each of its model bindings answers, by the binding's alias
+   * (fixture-calls.ts).
    */
-  readonly modelsOf: (alias: string) => Readonly<Record<string, unknown>>;
+  readonly models: Readonly<Record<string, unknown>>;
+  /** The task after whose step's first outcome its activation restarts. */
+  readonly restartAfterStep?: string;
+  /** How far the test moved its clock on before it started, in ms. */
+  readonly clockMs: number;
   /** When its test's time is up (ms since the epoch). */
   readonly deadline: number;
   /** Told once its record is written: from then on, it is a run to remove. */
@@ -173,12 +175,7 @@ export const startFixtureRun = async (
   const workflow = workflowResourceIdSchema.parse(pin.workflowId);
   const found = await pinned(env, workflow, pin.version);
   const input = acceptedInput(found.inputDescriptor, declared);
-  const params = await fixtureParams(
-    env,
-    workflow,
-    pin.version,
-    test.paramsOf(resolved.alias)
-  );
+  const params = await fixtureParams(env, workflow, pin.version, test.params);
   const runId = crypto.randomUUID();
   // Recorded before the engine hears of it, so nothing runs unrecorded.
   await drizzle(env.DB)
@@ -194,8 +191,9 @@ export const startFixtureRun = async (
       principal,
       input,
       params,
-      deciders: JSON.stringify(test.decidersOf(resolved.alias)),
-      models: JSON.stringify(test.modelsOf(resolved.alias)),
+      deciders: JSON.stringify(test.deciders),
+      models: JSON.stringify(test.models),
+      restartAfterStep: test.restartAfterStep ?? null,
       createdAt: new Date(),
       deadline: new Date(test.deadline),
     });
@@ -205,6 +203,7 @@ export const startFixtureRun = async (
       id: runId,
       pinned: { workflow, version: pin.version, manifest: found.manifestHash },
       input: z.json().parse(JSON.parse(input)),
+      clockMs: test.clockMs,
     });
   } catch (error) {
     // The engine may have it, or not: removed either way, its record with
@@ -300,9 +299,75 @@ export const fixtureActivation = async (
 };
 
 /**
+ * Whether the fault test run `runId` was given fires now, after task
+ * `task`'s step: once, for the task it names, the first time its step
+ * has an outcome. Taken in one conditional write, so a replay, or two
+ * activations at once, never fire it twice.
+ */
+const faultFires = async (
+  env: Env,
+  runId: string,
+  task: string
+): Promise<boolean> => {
+  const taken = await drizzle(env.DB)
+    .update(appTestRuns)
+    .set({ restartedAt: new Date() })
+    .where(
+      and(
+        eq(appTestRuns.runId, runId),
+        eq(appTestRuns.restartAfterStep, task),
+        isNull(appTestRuns.restartedAt)
+      )
+    )
+    .returning({ runId: appTestRuns.runId });
+  return taken.length > 0;
+};
+
+/** The suffix of a task's step, as the run host names it (`<id>:task`). */
+const taskStepSuffix = ":task";
+
+/**
+ * What never settles: the activation it is in is over, fenced, and the
+ * run goes on in the one that took it over.
+ */
+const never = async (): Promise<never> =>
+  await Promise.withResolvers<never>().promise;
+
+/**
+ * `engineStep`, with the fault test run `runId` was given
+ * (`restartAfterStep`): once its task's step has an outcome, journaled
+ * by the engine, its activation is ended as a dying process would end it
+ * and a new one replays the run from its journal (`restart`). The step
+ * isn't run again: its outcome is the journal's.
+ */
+const withFault = (
+  env: Env,
+  runId: string,
+  engineStep: RunStep,
+  restart: (() => Promise<void>) | undefined
+): RunStep => ({
+  ...engineStep,
+  do: async (name, config, fn) => {
+    const value = await engineStep.do(name, config, fn);
+    const task = name.endsWith(taskStepSuffix)
+      ? name.slice(0, -taskStepSuffix.length)
+      : undefined;
+    if (
+      restart !== undefined &&
+      task !== undefined &&
+      (await faultFires(env, runId, task))
+    ) {
+      await restart();
+      return await never();
+    }
+    return value;
+  },
+});
+
+/**
  * Runs one activation of the test's run `runId` (`fixtureActivation`)
  * against a host that reaches nothing outside it (resource-runs.ts,
- * `runActivation`).
+ * `runActivation`), with the fault its test gave it.
  */
 export const runFixtureWorkflow = async (
   env: Env,
@@ -313,10 +378,28 @@ export const runFixtureWorkflow = async (
 ): Promise<unknown> =>
   await runActivation(
     env,
-    engineStep,
+    withFault(env, runId, engineStep, memory.restart),
     memory,
     await fixtureActivation(env, pin, runId)
   );
+
+/**
+ * Moves the clock of test runs `ids` `ms` on (workerflow's
+ * `advanceClock`): what each waits for that comes due by then runs now.
+ * A run the engine no longer has is passed over.
+ */
+export const advanceFixtureClocks = async (
+  env: Env,
+  ids: readonly string[],
+  ms: number
+): Promise<void> => {
+  const engine = runEngine(env);
+  await Promise.all(
+    ids.map(async (id) => {
+      await engine.advanceFixtureClock(id, ms);
+    })
+  );
+};
 
 /**
  * How a test's run ended, as `t.runs.untilTerminal` answers it: a failure
@@ -417,7 +500,10 @@ export const fixtureTaskCompletions = async (
     throw operationErrors.create("contract.invalid_args");
   }
   return (
-    (await runEngine(env).succeededSteps(runId, `${parsed.data}:task`)) ?? 0
+    (await runEngine(env).succeededSteps(
+      runId,
+      `${parsed.data}${taskStepSuffix}`
+    )) ?? 0
   );
 };
 

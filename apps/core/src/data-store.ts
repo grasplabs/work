@@ -62,6 +62,8 @@ const throwawayKey = "grasp_throwaway_until";
 export class DataStore extends DurableObject<Env> {
   readonly #host: StoreHost;
   readonly #watches = new StoreWatches();
+  /** The fixture store this object was found to be (`#admitScope`). */
+  #fixtureOf: string | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -156,6 +158,7 @@ export class DataStore extends DurableObject<Env> {
     request: ReadRequest,
     staged?: StagedWrites
   ): Promise<string> {
+    await this.#admitScope(storeId, scope);
     return JSON.stringify(
       await this.#live().read(storeId, scope, request, staged)
     );
@@ -172,6 +175,7 @@ export class DataStore extends DurableObject<Env> {
     id: string,
     before: number | null
   ): Promise<string> {
+    await this.#admitScope(storeId, scope);
     return JSON.stringify(
       await this.#live().history(storeId, scope, table, id, before)
     );
@@ -431,6 +435,7 @@ export class DataStore extends DurableObject<Env> {
    * JSON text of its `Committed`, as for `claim`.
    */
   async commit(input: Commit): Promise<string> {
+    await this.#admitScope(input.storeId, input.roles);
     return JSON.stringify(
       await this.#live().commit(input, storeOutboxConsumers(this.env))
     );
@@ -523,6 +528,38 @@ export class DataStore extends DurableObject<Env> {
     this.ctx.storage.kv.put(discardedKey, true);
     await this.ctx.storage.deleteAlarm();
     this.#watches.clear();
+  }
+
+  /**
+   * Refuses a read or commit `unrestricted` (a test's own transaction,
+   * `t.run`) unless `storeId` is this object's, a fixture store core
+   * recorded for an App's tests, and no store the inventory lists: no
+   * business store ever reads or writes past the App's access rules,
+   * whoever asks. A fixture store stays one for its life, so it is asked
+   * once per object.
+   */
+  async #admitScope(storeId: string, scope: unknown): Promise<void> {
+    if (
+      typeof scope !== "object" ||
+      scope === null ||
+      !("unrestricted" in scope) ||
+      scope.unrestricted === undefined ||
+      this.#fixtureOf === storeId
+    ) {
+      return;
+    }
+    if (this.ctx.id.name !== undefined && this.ctx.id.name !== storeId) {
+      throw dataErrors.create("data.access_denied");
+    }
+    const found = await this.env.DB.prepare(
+      "SELECT EXISTS (SELECT 1 FROM business_stores WHERE id = ?1) AS listed, EXISTS (SELECT 1 FROM app_test_fixtures WHERE store_id = ?1) AS fixture"
+    )
+      .bind(storeId)
+      .first<{ listed: number; fixture: number }>();
+    if (found?.listed !== 0 || found.fixture !== 1) {
+      throw dataErrors.create("data.access_denied");
+    }
+    this.#fixtureOf = storeId;
   }
 
   /** Refuses unless `storeId` is this object's and no listed store. */

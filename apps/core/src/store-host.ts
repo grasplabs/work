@@ -3341,6 +3341,10 @@ export class StoreHost {
       rows: readonly (Fragment | undefined)[];
     } => {
       const tableId = tableIdOf(table);
+      // A test's own transaction writes any record (`unrestricted`).
+      if (roles.unrestricted === true) {
+        return { tableId, own: false, rows: [] };
+      }
       const declared = pinned.manifest.tables[table];
       const mode = declared?.access.write ?? "none";
       const admitted =
@@ -4306,6 +4310,10 @@ export class StoreHost {
     roles: WriterRoles,
     target: { table: string; tableId: string; recordId: string }
   ): boolean {
+    // A test's own transaction refers to any record that exists.
+    if (roles.unrestricted === true) {
+      return this.#recordAfter(staged, principal, target) !== undefined;
+    }
     const declared = Object.hasOwn(pinned.manifest.tables, target.table)
       ? pinned.manifest.tables[target.table]
       : undefined;

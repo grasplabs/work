@@ -102,6 +102,12 @@ export interface RunMemory {
    * over by a newer one (run-object.ts).
    */
   current?: () => boolean;
+  /**
+   * Ends the activation as a process that died would, and runs the run
+   * again from its journal: an App's test's fault alone asks it
+   * (fixture-runs.ts).
+   */
+  restart?: () => Promise<void>;
 }
 
 /** Each of core's own workflows, by name. */

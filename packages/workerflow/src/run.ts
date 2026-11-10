@@ -180,6 +180,7 @@ import {
 } from "./notifications.ts";
 import type { RunNotification } from "./notifications.ts";
 import { maxRetentionLimitMs } from "./retention.ts";
+import { clockOffsetOf, moveClockOn, runAlarmOf, runNow } from "./run-time.ts";
 import {
   defaultMaxRunStreamBytes,
   defaultMaxStreamBytes,
@@ -616,14 +617,14 @@ const hasEnded = (run: RunRow): boolean =>
  * When the run itself next needs its alarm: an ended run's purge, a
  * waiting run's wake, any other at once.
  */
-const ownWake = (run: RunRow): number => {
+const ownWake = (run: RunRow, now: number): number => {
   if (hasEnded(run) && run.purge_at !== null) {
     return run.purge_at;
   }
   if (run.status === "waiting" && run.wake_at !== null) {
     return run.wake_at;
   }
-  return Date.now();
+  return now;
 };
 
 /**
@@ -756,7 +757,7 @@ interface DeliveryLimits {
  * (an activation died), rolls back with its next step due, or waits and
  * its wake has come.
  */
-const activatesNow = (run: RunRow): boolean => {
+const activatesNow = (run: RunRow, now: number): boolean => {
   if (
     run.status === "queued" ||
     run.status === "running" ||
@@ -765,7 +766,7 @@ const activatesNow = (run: RunRow): boolean => {
     return true;
   }
   if (run.status === "waiting" || run.status === "rollingBack") {
-    return run.wake_at === null || run.wake_at <= Date.now();
+    return run.wake_at === null || run.wake_at <= now;
   }
   return false;
 };
@@ -775,9 +776,9 @@ const activatesNow = (run: RunRow): boolean => {
  * whatever time it was stamped with, but not in a failed host's backoff,
  * unless `force`.
  */
-const isDue = (run: RunRow, force: boolean): boolean =>
+const isDue = (run: RunRow, force: boolean, now: number): boolean =>
   run.notify_at !== null &&
-  (force || run.notify_failures === 0 || run.notify_at <= Date.now());
+  (force || run.notify_failures === 0 || run.notify_at <= now);
 
 /**
  * Whether the run takes a control that comes with `command`'s fence: not
@@ -861,19 +862,24 @@ const sharingAlarm = (
           return result;
         };
       }
+      // Times the engine sets and reads are the run's (run-time.ts); the
+      // object's alarm is on the wall clock.
       if (property === "setAlarm") {
         return async (time: number | Date): Promise<void> => {
           // Read with no await before the call: the same turn as the
           // write it goes with.
-          await target.setAlarm(earliest(time));
+          await target.setAlarm(earliest(time) - clockOffsetOf(target));
         };
+      }
+      if (property === "getAlarm") {
+        return async () => await runAlarmOf(target);
       }
       if (property === "deleteAlarm") {
         return async (): Promise<void> => {
           const tombstone = expiry();
           await (tombstone === null
             ? target.deleteAlarm()
-            : target.setAlarm(tombstone));
+            : target.setAlarm(tombstone - clockOffsetOf(target)));
         };
       }
       const value: unknown = Reflect.get(target, property, target);
@@ -1146,7 +1152,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       let batch: RunNotification[];
       try {
         const run = this.#run();
-        if (run === undefined || !isDue(run, limits.force)) {
+        if (run === undefined || !isDue(run, limits.force, this.#now())) {
           return;
         }
         batch = readPending(sql, run);
@@ -1160,7 +1166,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
           // Checked before the host is called: a timeout no timer keeps
           // hands nothing over.
           const timeout = this.#notifyTimeout();
-          this.#handedAt = Date.now();
+          this.#handedAt = this.#now();
           // oxlint-disable-next-line no-await-in-loop -- one batch at a time, in order
           await answeredWithin(this.notify(batch), timeout);
         }
@@ -1219,7 +1225,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       } else if (run.status === "paused") {
         own = null;
       } else if (run.lease_until === null) {
-        own = run.wake_at ?? Date.now();
+        own = run.wake_at ?? this.#now();
       } else {
         own = run.lease_until;
       }
@@ -1241,7 +1247,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     try {
       storage.transactionSync(() => {
         if (this.#run()?.run_uid === runId) {
-          failedIn(storage.sql, Date.now());
+          failedIn(storage.sql, this.#now());
         }
       });
     } catch (error) {
@@ -1331,12 +1337,51 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /**
    * The clock an attempt's running time, and a delay function's, is
-   * measured on: Date.now(). A test stands in for it to measure code that
+   * measured on: this.#now(). A test stands in for it to measure code that
    * runs without awaiting anything.
    */
   // oxlint-disable-next-line class-methods-use-this -- the seam a subclass overrides
   protected clock(): number {
     return Date.now();
+  }
+
+  /** The time now, as the run measures it (run-time.ts). */
+  #now(): number {
+    return runNow(this.ctx.storage);
+  }
+
+  /**
+   * Moves the run's time `ms` on (run-time.ts): what comes due by then
+   * (a sleep, a wait's timeout, a retry) is due now, and the alarm is set
+   * again for what the run waits for. Only a host's test does this, for a
+   * run of its own (an App's test's fixture clock): nothing else moves a
+   * run's time.
+   */
+  protected async advanceClock(ms: number): Promise<void> {
+    if (!Number.isSafeInteger(ms) || ms < 0) {
+      throw new RangeError("A run's clock moves on by whole milliseconds.");
+    }
+    moveClockOn(this.ctx.storage, ms);
+    const run = this.#run();
+    if (run !== undefined && run.status !== "paused") {
+      await this.#store.setAlarm(ownWake(run, this.#now()));
+    }
+  }
+
+  /**
+   * Ends the activation that holds the run, as a process that died would
+   * have it ended, and runs it again at once under a new generation, which
+   * replays its journal: whatever its old activation still does is fenced
+   * (an older generation's calls never settle), and the steps it journaled
+   * aren't run again. Only a host's test does this, as a fault (an App's
+   * test's `restartAfterStep`): nothing else of the engine's asks it.
+   */
+  protected async restartActivation(): Promise<void> {
+    const now = this.#now();
+    this.#store.transactionSync(() => {
+      supersedeIn(this.#store.sql, now);
+    });
+    await this.#store.setAlarm(now);
   }
 
   /**
@@ -1406,6 +1451,18 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * The definition and version the run executes, from its journal: what
+   * the host resolves its definition by (`definition`), read in this
+   * object only. Nothing before the run exists.
+   */
+  protected runIdentity(): DefinitionIdentity | undefined {
+    const run = this.#run();
+    return run === undefined
+      ? undefined
+      : { definition: run.definition, version: run.version ?? undefined };
+  }
+
+  /**
    * Creates the run, or finds the one this same start created before. The
    * run and its alarm are written together, before the answer: once a
    * caller hears `created` or `existing`, the run will execute.
@@ -1432,7 +1489,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // finds the tombstone, whatever run was created under the ID since.
     // Only a start with this key could have left it, so it is this start.
     // One past the horizon has expired, dropped yet or not.
-    if (isTombstoned(storage.sql, command.key, Date.now() - horizon)) {
+    if (isTombstoned(storage.sql, command.key, this.#now() - horizon)) {
       return "removed";
     }
     const existing = this.#run();
@@ -1458,7 +1515,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#ensureWake(existing);
       return "existing";
     }
-    const now = Date.now();
+    const now = this.#now();
     createJournal(storage.sql);
     storage.sql.exec(
       "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable, success_retention_ms, error_retention_ms) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
@@ -1504,7 +1561,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       alarm === notifyDue(this.ctx.storage.sql) ||
       alarm === this.#extraObligation()
     ) {
-      await this.#store.setAlarm(ownWake(run));
+      await this.#store.setAlarm(ownWake(run, this.#now()));
     }
   }
 
@@ -1756,7 +1813,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         observer.failure = `no event came within ${deadline.waitMs} ms`;
         this.#close(observer);
       },
-      Math.max(0, deadline.at - Date.now())
+      Math.max(0, deadline.at - this.#now())
     );
     try {
       await next.promise;
@@ -1796,7 +1853,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         observer.cursor = Math.max(observer.cursor, lastEventId(sql));
         if (deadline === undefined) {
           const waitMs = this.#subscriptionWait();
-          deadline = { at: Date.now() + waitMs, waitMs };
+          deadline = { at: this.#now() + waitMs, waitMs };
         }
         // oxlint-disable-next-line no-await-in-loop -- one event at a time, waited for
         await this.#waitForWrite(observer, deadline);
@@ -1949,7 +2006,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     try {
       this.#store.sql.exec(
         "UPDATE activations SET ended_at = ?, ended = 'faulted' WHERE generation = ? AND ended_at IS NULL",
-        Date.now(),
+        this.#now(),
         generation
       );
     } catch {
@@ -1967,7 +2024,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async #leaveToWatchdog(event: string, error: unknown): Promise<void> {
     warnRecovered(event, error);
     try {
-      await this.#store.setAlarm(Date.now() + this.leaseMs);
+      await this.#store.setAlarm(this.#now() + this.leaseMs);
     } catch {
       throw error;
     }
@@ -1980,7 +2037,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async #pauseNow(): Promise<void> {
     const storage = this.#store;
-    const now = Date.now();
+    const now = this.#now();
     try {
       storage.transactionSync(() => {
         supersedeIn(storage.sql, now);
@@ -2020,7 +2077,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (run?.notify_at === null || run === undefined) {
       return "none";
     }
-    if (!isDue(run, force) || this.#delivery !== undefined) {
+    if (!isDue(run, force, this.#now()) || this.#delivery !== undefined) {
       return "later";
     }
     await this.#deliver({ batches: 1, force });
@@ -2042,12 +2099,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // so no delivery time comes out of the handler's wall time before a
     // first attempt, which always runs (activation.ts), and whose deadline
     // a delivery first could push past the handler's limit.
-    if (activatesNow(run)) {
+    if (activatesNow(run, this.#now())) {
       return { run, notified: false };
     }
     // An ended run whose purge is due gets its outbox tried once more.
     const purgeDue =
-      hasEnded(run) && run.purge_at !== null && run.purge_at <= Date.now();
+      hasEnded(run) && run.purge_at !== null && run.purge_at <= this.#now();
     const notified = await this.#notifyDue(purgeDue);
     if (notified !== "delivered") {
       return { run, notified: notified === "later" };
@@ -2071,9 +2128,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // left to the delivery's end (#settleAlarm), which only logs a write
     // that failed: with the outbox emptied nothing else would set one, and
     // the run would be left with no alarm to run it.
-    if (activatesNow(fresh)) {
+    if (activatesNow(fresh, this.#now())) {
       try {
-        await this.#store.setAlarm(Date.now());
+        await this.#store.setAlarm(this.#now());
       } catch (error) {
         await this.#leaveToWatchdog("workflow_alarm_set_failed", error);
       }
@@ -2096,7 +2153,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     const storage = this.#store;
     let due: boolean;
     try {
-      due = this.#expireDueTombstones(Date.now()) || notified;
+      due = this.#expireDueTombstones(this.#now()) || notified;
     } catch (error) {
       await this.#leaveToWatchdog("workflow_tombstone_expiry_failed", error);
       return true;
@@ -2115,7 +2172,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       run.status === "waiting" || run.status === "rollingBack"
         ? run.wake_at
         : null;
-    if (!due || wake === null || wake <= Date.now()) {
+    if (!due || wake === null || wake <= this.#now()) {
       return false;
     }
     try {
@@ -2130,7 +2187,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     // The activation's wall time counts from here, the handler's start:
     // what a delivery before it took is gone from it.
-    const startedAt = Date.now();
+    const startedAt = this.#now();
     // The host's settings first, before the run is read or a generation
     // taken: a mistake in them touches no run. It is logged, and the run
     // is left to a watchdog a lease away, the settings fixed by then or
@@ -2188,7 +2245,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       return;
     }
     const generation = run.generation + 1;
-    const now = Date.now();
+    const now = this.#now();
     // A run rolling back stays so: this activation runs its rollbacks.
     const compensating = run.status === "rollingBack";
     try {
@@ -2299,7 +2356,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // Every end writes its purge time; a run with none is kept.
       return;
     }
-    const now = Date.now();
+    const now = this.#now();
     if (run.purge_at > now) {
       try {
         await storage.setAlarm(run.purge_at);
@@ -2370,7 +2427,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (!hasJournal(storage.sql)) {
       return "missing";
     }
-    const now = Date.now();
+    const now = this.#now();
     const decision = storage.transactionSync(
       (): CommandDecision<Outcome | "missing"> => {
         const run = readRun(storage.sql);
@@ -2572,7 +2629,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async deleteRun(): Promise<DeleteOutcome> {
     const horizon = this.#tombstoneHorizon();
     const storage = this.#store;
-    const now = Date.now();
+    const now = this.#now();
     const removed = storage.transactionSync((): Removal | "missing" => {
       // Not read through readRun: a journal of a layout this engine
       // doesn't read can be deleted too.
@@ -2637,7 +2694,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     let oldest: number | null;
     try {
       horizon = this.#tombstoneHorizon();
-      const since = Date.now() - horizon;
+      const since = this.#now() - horizon;
       oldest = storage.transactionSync(() =>
         expireTombstones(storage.sql, since)
       );
@@ -2704,7 +2761,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (!hasJournal(storage.sql)) {
       return "missing";
     }
-    const now = Date.now();
+    const now = this.#now();
     // Checked before anything is read: this method is the run's boundary.
     const attributes = eventAttributesOf(command.attributes);
     const decision = storage.transactionSync((): EventDecision => {

@@ -163,6 +163,7 @@ import type {
   StepType,
 } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
+import { runNow } from "./run-time.ts";
 import {
   discardChunks,
   isStoredWhole,
@@ -986,6 +987,11 @@ export class Activation {
     this.#stop({ halt: error });
   }
 
+  /** The time now, as the run measures it (run-time.ts). */
+  #now(): number {
+    return runNow(this.#storage);
+  }
+
   /** Records how this activation ended, if nothing has yet. */
   #recordEnd(ended: "superseded" | "faulted"): void {
     if (!this.#ownsRun()) {
@@ -993,7 +999,7 @@ export class Activation {
     }
     this.#storage.sql.exec(
       "UPDATE activations SET ended_at = ?, ended = ? WHERE generation = ? AND ended_at IS NULL",
-      Date.now(),
+      this.#now(),
       ended,
       this.#generation
     );
@@ -1097,7 +1103,7 @@ export class Activation {
     if (this.#over) {
       return;
     }
-    const now = Date.now();
+    const now = this.#now();
     const renewed = this.#write(() => {
       if (this.#holdsGeneration()) {
         this.#renewLease(now);
@@ -1181,7 +1187,7 @@ export class Activation {
         return null;
       }
       const { sql } = this.#storage;
-      const now = Date.now();
+      const now = this.#now();
       if (this.#pausedHere()) {
         return { park: now };
       }
@@ -1416,7 +1422,7 @@ export class Activation {
     return this.#storage.transactionSync(
       (): Landing | Landed | "incomplete" | null => {
         const { sql } = this.#storage;
-        const now = Date.now();
+        const now = this.#now();
         if (!this.#holds(claim)) {
           this.#ignore(claim, now);
           return null;
@@ -1461,7 +1467,7 @@ export class Activation {
     const journaled = this.#write(() =>
       this.#storage.transactionSync(() => {
         const { sql } = this.#storage;
-        const now = Date.now();
+        const now = this.#now();
         if (!this.#holds(claim)) {
           this.#ignore(claim, now);
           return false;
@@ -1621,7 +1627,7 @@ export class Activation {
             };
             return kept;
           }),
-        claim.deadline - Date.now(),
+        claim.deadline - this.#now(),
         this.#clock
       );
     } finally {
@@ -1849,7 +1855,7 @@ export class Activation {
         if (!this.#current()) {
           return null;
         }
-        const now = Date.now();
+        const now = this.#now();
         if (this.#pausing()) {
           this.#pauseIn(this.#storage.sql, now);
           return "paused";
@@ -2086,7 +2092,7 @@ export class Activation {
         // late one.
         this.#write(() => {
           this.#storage.transactionSync(() => {
-            this.#ignore(claim, Date.now());
+            this.#ignore(claim, this.#now());
           });
         });
         return await this.#refuse();
@@ -2213,7 +2219,7 @@ export class Activation {
         return null;
       }
       const { sql } = this.#storage;
-      const now = Date.now();
+      const now = this.#now();
       if (this.#pausing()) {
         // The safe boundary, before the wait is journaled or takes an
         // event: it parks, due at once, and the run pauses once nothing
@@ -2387,7 +2393,7 @@ export class Activation {
     if (
       time === undefined ||
       !Number.isFinite(time) ||
-      time - Date.now() > maxWaitMs
+      time - this.#now() > maxWaitMs
     ) {
       throw new TypeError(
         `sleepUntil takes a Date or a time in milliseconds, at most 365 days ahead: ${String(timestamp)}`
@@ -2447,7 +2453,7 @@ export class Activation {
     if (
       time === undefined ||
       !Number.isFinite(time) ||
-      time - Date.now() > maxWaitMs
+      time - this.#now() > maxWaitMs
     ) {
       throw new TypeError(
         `waitForMatch waits until a Date or a time in milliseconds, at most 365 days ahead: ${String(options.until)}`
@@ -2672,13 +2678,13 @@ export class Activation {
    * itself was counted before it began (compensate).
    */
   async #replayLater(): Promise<never> {
-    const wake = Date.now() + this.#limits.rollbackReplayMs;
+    const wake = this.#now() + this.#limits.rollbackReplayMs;
     const letGo = this.#write(() =>
       this.#storage.transactionSync(() => {
         if (!this.#current()) {
           return false;
         }
-        this.#suspendIn(this.#storage.sql, Date.now(), wake);
+        this.#suspendIn(this.#storage.sql, this.#now(), wake);
         return true;
       })
     );
@@ -2891,7 +2897,7 @@ export class Activation {
         if (!this.#holdsGeneration()) {
           return null;
         }
-        const now = Date.now();
+        const now = this.#now();
         this.#storage.sql.exec(
           "UPDATE run SET status = COALESCE(rollback_end, 'errored'), rollback = ?, ended_at = ?, lease_until = NULL, wake_at = NULL",
           JSON.stringify(outcome),
@@ -2976,7 +2982,7 @@ export class Activation {
         if (!(halted ? this.#holdsGeneration() : this.#current())) {
           return null;
         }
-        const now = Date.now();
+        const now = this.#now();
         const { sql } = this.#storage;
         // The definition threw, and steps of it registered rollbacks: the
         // run rolls back before it ends (a halt doesn't, as on the
@@ -3028,7 +3034,7 @@ export class Activation {
     if (settled === "rollingBack") {
       try {
         // In the same write: the rolling back runs at once.
-        await this.#storage.setAlarm(Date.now());
+        await this.#storage.setAlarm(this.#now());
       } catch (error) {
         // The run is rolling back, journaled: the watchdog alarm, left as
         // it was, brings a compensating activation a lease from now.

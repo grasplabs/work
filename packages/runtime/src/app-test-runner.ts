@@ -1,12 +1,11 @@
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { messageOf } from "@grasp-os/shared/errors";
 import { isRecord } from "@grasp-os/shared/json";
+import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
 import { followed } from "./app-test-follow.ts";
 import {
   TestAssertionError,
-  TestCallError,
-  canonical,
   disposed,
   requestFor,
   unwrapped,
@@ -19,15 +18,26 @@ import type {
 } from "./app-test-session.ts";
 import { readSuite, refuseSuite } from "./app-test-suite.ts";
 import type {
+  AppTestContext,
   TestDecisionAnswer,
-  TestPrincipal,
+  TestIdentity,
+  TestIdentityFields,
+  TestRun,
   TestRunOutcome,
   TestRuns,
-  WorkflowTestContext,
-  WorkflowTestFunction,
+  TestStartOptions,
   WorkflowTestRun,
 } from "./app-test-types.ts";
+import { GraspError } from "./client-error.ts";
+import { databaseWriter } from "./database-writer.ts";
 import type { ReferenceKind } from "./function-references.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
+import type { AnyTables } from "./server-function.ts";
+
+/** What `t.run` waits for before it begins: nobody to register. */
+const nobodyToWaitFor = async (): Promise<void> => {
+  await Promise.resolve();
+};
 
 /**
  * How long one test may run before it fails, in milliseconds, its calls
@@ -36,7 +46,7 @@ import type { ReferenceKind } from "./function-references.ts";
 export const appTestTimeoutMs = 30_000;
 
 /**
- * Each run a principal started: the test that started it, and its number
+ * Each run an identity started: the test that started it, and its number
  * in that test's session, which names another run in any other test's.
  */
 const runNumbers = new WeakMap<
@@ -44,9 +54,15 @@ const runNumbers = new WeakMap<
   { readonly test: RunningTest; readonly number: number }
 >();
 
+/** Each identity a test made: the test, and the name core knows it by. */
+const identityNames = new WeakMap<
+  object,
+  { readonly test: RunningTest; readonly name: string }
+>();
+
 /**
  * The number of `run` in `test`'s session, a handle one of `test`'s own
- * principals started; fails the test for any other, one kept from another
+ * identities started; fails the test for any other, one kept from another
  * test included.
  */
 const numberOf = (test: RunningTest, run: unknown): number => {
@@ -54,7 +70,7 @@ const numberOf = (test: RunningTest, run: unknown): number => {
     typeof run === "object" && run !== null ? runNumbers.get(run) : undefined;
   if (started === undefined) {
     throw new TestAssertionError(
-      "expected a run a test principal started, from start"
+      "expected a run a test identity started, from start"
     );
   }
   if (started.test !== test) {
@@ -63,6 +79,20 @@ const numberOf = (test: RunningTest, run: unknown): number => {
     );
   }
   return started.number;
+};
+
+/** The name of `identity`, one of `test`'s own; fails the test for any other. */
+const nameOf = (test: RunningTest, identity: unknown): string => {
+  const made =
+    typeof identity === "object" && identity !== null
+      ? identityNames.get(identity)
+      : undefined;
+  if (made?.test !== test) {
+    throw new TestAssertionError(
+      "expected an identity this test made, from t.withIdentity"
+    );
+  }
+  return made.name;
 };
 
 /**
@@ -96,33 +126,119 @@ const startedNumber = (value: unknown): number => {
   throw new Error("The test runner answered a start without its run.");
 };
 
-const principalOf = (run: RunningTest, name: string): TestPrincipal => {
-  const { session } = run;
+/** `options` as the session takes them: deciders by name. */
+const startOptionsOf = (
+  test: RunningTest,
+  options: TestStartOptions = {}
+): string => {
+  const { deciders, ...rest } = options;
+  return JSON.stringify({
+    ...rest,
+    ...(deciders === undefined
+      ? {}
+      : {
+          deciders: Object.fromEntries(
+            Object.entries(deciders).map(([alias, identities]) => [
+              alias,
+              identities.map((identity) => nameOf(test, identity)),
+            ])
+          ),
+        }),
+  });
+};
+
+/** What a transaction's `begin` answers: its number. */
+const transactionOf = (value: unknown): number => {
+  if (
+    isRecord(value) &&
+    typeof value.transaction === "number" &&
+    Number.isSafeInteger(value.transaction)
+  ) {
+    return value.transaction;
+  }
+  throw new Error("The test runner answered a transaction without its number.");
+};
+
+/**
+ * `t.run` as `name` (the test itself for `null`): `fn` with a `ctx.db`
+ * over `schema` whose reads and writes are the transaction's, which
+ * commits once `fn` returns and is dropped if it throws.
+ */
+const runAs =
+  (
+    test: RunningTest,
+    schema: SchemaDefinition,
+    name: string | null,
+    ready: () => Promise<void>
+  ) =>
+  async (fn: unknown): Promise<unknown> => {
+    if (typeof fn !== "function") {
+      throw new TestAssertionError("expected a function to run, (ctx) => ...");
+    }
+    await ready();
+    const { session } = test;
+    const transaction = transactionOf(unwrapped(await session.begin(name)));
+    const db = databaseWriter(
+      schema,
+      async (request: ReadRequest) =>
+        unwrapped(await session.read(transaction, JSON.stringify(request))),
+      async (request: WriteRequest) =>
+        unwrapped(await session.write(transaction, JSON.stringify(request)))
+    );
+    let value: unknown;
+    try {
+      value = await Reflect.apply(fn, undefined, [Object.freeze({ db })]);
+    } catch (error) {
+      unwrapped(await session.end(transaction, false));
+      throw error;
+    }
+    unwrapped(await session.end(transaction, true));
+    return value;
+  };
+
+/**
+ * Identity `name` of `test`, each of whose calls waits for `ready`: core
+ * knows them once it settles (`identify`).
+ */
+const identityOf = (
+  test: RunningTest,
+  schema: SchemaDefinition,
+  name: string,
+  ready: () => Promise<void>
+): TestIdentity => {
+  const { session } = test;
   const call =
     (kind: ReferenceKind) =>
-    async (reference: unknown, args: unknown): Promise<never> =>
+    async (reference: unknown, args: unknown): Promise<never> => {
+      const request = requestFor(reference, kind, args);
+      await ready();
       // SAFETY: the host checked the value against the function's
       // contract (its `returns`), which `FunctionReturn` types.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      unwrapped(
-        await session.call(name, requestFor(reference, kind, args))
-      ) as never;
-  return Object.freeze({
+      return unwrapped(await session.call(name, request)) as never;
+    };
+  const identity: TestIdentity = Object.freeze({
     query: call("query"),
     mutation: call("mutation"),
     action: call("action"),
     // SAFETY: what core pushes was checked against the query's contract
     // (its `returns`), which `FunctionReturn` types.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    subscribe: (async (reference: unknown, args: unknown) =>
-      await followed(run, name, reference, args)) as TestPrincipal["subscribe"],
+    subscribe: (async (reference: unknown, args: unknown) => {
+      await ready();
+      return await followed(test, name, reference, args);
+    }) as TestIdentity["subscribe"],
     // SAFETY: a start answers the run's handle, whose result only types it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    start: (async (reference: unknown, args: unknown) => {
-      const answer = await session.start(
-        name,
-        startRequestFor(reference, args)
-      );
+    start: (async (
+      reference: unknown,
+      args: unknown,
+      options?: TestStartOptions
+    ) => {
+      const request = startRequestFor(reference, args);
+      const given = startOptionsOf(test, options);
+      await ready();
+      const answer = await session.start(name, request, given);
       const handle: WorkflowTestRun = Object.freeze({
         workflow:
           isRecord(reference) && typeof reference.contractId === "string"
@@ -130,20 +246,21 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
             : "a workflow",
       });
       runNumbers.set(handle, {
-        test: run,
+        test,
         number: startedNumber(unwrapped(answer)),
       });
       return handle;
-    }) as TestPrincipal["start"],
+    }) as TestIdentity["start"],
     respond: async (
       handle: WorkflowTestRun,
       task: string,
       { approved, value, run: asked }: TestDecisionAnswer
     ): Promise<void> => {
+      await ready();
       unwrapped(
         await session.respond(
           name,
-          numberOf(run, handle),
+          numberOf(test, handle),
           JSON.stringify({
             task,
             approved,
@@ -153,7 +270,12 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
         )
       );
     },
+    // SAFETY: what `fn` returns is what it answers.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    run: runAs(test, schema, name, ready) as TestRun<AnyTables>,
   });
+  identityNames.set(identity, { test, name });
+  return identity;
 };
 
 /** The outcome `text` (`runOutcome`'s answer) holds; fails the test for none. */
@@ -177,51 +299,68 @@ const outcomeOf = (text: string, run: WorkflowTestRun): TestRunOutcome => {
   throw new Error("The test runner answered something else than an outcome.");
 };
 
-const contextFor = (run: RunningTest): WorkflowTestContext => ({
-  runs: {
-    // SAFETY: the run's result was checked against its version's `returns`
-    // schema as it ended, which `Returns` types.
+/** Who `fields` names, as the session registers them (`identify`). */
+const identityRequest = (fields: unknown): { name: string; text: string } => {
+  if (!isRecord(fields) || typeof fields.name !== "string") {
+    throw new TestAssertionError(
+      'expected who to act as, such as t.withIdentity({ name: "Ada" })'
+    );
+  }
+  const { name, role = "user", teams = [] } = fields;
+  return { name, text: JSON.stringify({ name, role, teams }) };
+};
+
+const contextFor = (
+  test: RunningTest,
+  schema: SchemaDefinition
+): AppTestContext => {
+  const { session } = test;
+  return {
+    withIdentity: (fields: TestIdentityFields) => {
+      const { name, text } = identityRequest(fields);
+      // Answered at once, as convex-test's is; core registers them
+      // before any call of theirs, which waits for it. A refusal fails
+      // each of their calls, and the test even if none follows.
+      const registered = session.identify(text);
+      test.pending.add(registered);
+      return identityOf(test, schema, name, async () => {
+        const refused = await registered;
+        if (refused !== undefined) {
+          throw new TestAssertionError(refused);
+        }
+      });
+    },
+    // SAFETY: what `fn` returns is what it answers.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    untilTerminal: (async (handle: WorkflowTestRun) =>
-      outcomeOf(
-        await run.session.runOutcome(numberOf(run, handle)),
-        handle
-      )) as TestRuns["untilTerminal"],
-  },
-  effects: {
-    completedCount: async (handle, task) =>
-      await run.session.completedCount(numberOf(run, handle), task),
-  },
-  as: async (name) => {
-    const refused = await run.session.principal(name);
-    if (refused !== undefined) {
-      throw new TestAssertionError(refused);
-    }
-    return principalOf(run, name);
-  },
-  equal: (actual, expected, message) => {
-    if (canonical(actual) !== canonical(expected)) {
-      throw new TestAssertionError(
-        `${message === undefined ? "" : `${message}: `}expected ${canonical(expected)}, got ${canonical(actual)}`
-      );
-    }
-  },
-  rejectsCode: async (work, code) => {
-    try {
-      await (typeof work === "function" ? work() : work);
-    } catch (error) {
-      if (error instanceof TestCallError && error.code === code) {
-        return;
-      }
-      throw new TestAssertionError(
-        error instanceof TestCallError
-          ? `expected ${code}, but the call failed with ${error.code}: ${error.message}`
-          : `expected ${code}, but it threw ${messageOf(error)}`
-      );
-    }
-    throw new TestAssertionError(`expected ${code}, but the call succeeded`);
-  },
-});
+    run: runAs(test, schema, null, nobodyToWaitFor) as TestRun<AnyTables>,
+    runs: {
+      // SAFETY: the run's result was checked against its version's
+      // `returns` schema as it ended, which `Returns` types.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      untilTerminal: (async (handle: WorkflowTestRun) =>
+        outcomeOf(
+          await session.runOutcome(numberOf(test, handle)),
+          handle
+        )) as TestRuns["untilTerminal"],
+    },
+    effects: {
+      completedCount: async (handle, task) =>
+        await session.completedCount(numberOf(test, handle), task),
+      modelRequestCount: async (handle, task) =>
+        await session.modelRequestCount(numberOf(test, handle), task),
+    },
+    clock: {
+      advance: async (ms) => {
+        if (!Number.isSafeInteger(ms) || ms < 0) {
+          throw new TestAssertionError(
+            "expected the milliseconds to move the clock on by, a whole number of them"
+          );
+        }
+        unwrapped(await session.advanceClock(ms));
+      },
+    },
+  };
+};
 
 /** The most of one failure's text a report holds. */
 const maxFailureLength = 2000;
@@ -229,10 +368,13 @@ const maxFailureLength = 2000;
 /** Why a test failed, in one line. */
 const failureOf = (error: unknown): string => {
   let failure = `threw ${messageOf(error)}`;
-  if (error instanceof TestAssertionError) {
-    failure = error.message;
-  } else if (error instanceof TestCallError) {
+  if (error instanceof GraspError) {
     failure = `unexpected error ${error.code}: ${error.message}`;
+  } else if (error instanceof Error && error.name === "AssertionError") {
+    // vitest's `expect` failing: its message says what it expected.
+    failure = error.message;
+  } else if (error instanceof TestAssertionError) {
+    failure = error.message;
   }
   return failure.slice(0, maxFailureLength);
 };
@@ -266,7 +408,7 @@ const withinTime = async (
  * Runs `suite` (a test file's default export) over core's `host`, one
  * test after another, each in a session of its own that is closed after
  * it. Never throws for a test: each failure is in the report. Throws for
- * a file whose default export isn't an `appTest` or `workflowTest` suite. Each test may run
+ * a file whose default export isn't an `appTest` suite. Each test may run
  * `testTimeoutMs`: `appTestTimeoutMs`, or less where core says so.
  */
 export const runAppSuite = async (
@@ -275,30 +417,35 @@ export const runAppSuite = async (
   { testTimeoutMs = appTestTimeoutMs }: { testTimeoutMs?: number } = {}
 ): Promise<AppTestReport> => {
   const timeoutMs = Math.min(testTimeoutMs, appTestTimeoutMs);
-  if (!isRecord(suite) || (suite.kind !== "app" && suite.kind !== "workflow")) {
+  if (!isRecord(suite) || suite.kind !== "app") {
     return refuseSuite(
-      "A test file (tests/*.test.ts) default-exports an appTest or workflowTest suite."
+      "A test file (tests/*.test.ts) default-exports an appTest suite."
     );
   }
-  const { fixtures, tests } = readSuite<WorkflowTestFunction>(
-    suite,
-    suite.kind
-  );
+  const { schema, tests } = readSuite(suite.schema, suite.tests);
   const results: AppTestResult[] = [];
   for (const [name, test] of Object.entries(tests)) {
     // One test after another: each may only rely on its own session.
     // oxlint-disable-next-line no-await-in-loop -- see above
-    const session = await host.open(fixtures, name);
+    const session = await host.open(name);
     const run: RunningTest = {
       session,
       closers: new Set(),
       waiting: new Set(),
       faults: new Set(),
+      pending: new Set(),
     };
     const failures: string[] = [];
     try {
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await withinTime(test(contextFor(run)), timeoutMs, run.waiting);
+      await withinTime(test(contextFor(run, schema)), timeoutMs, run.waiting);
+      // Who it named, registered before it is judged.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      for (const refused of await Promise.all(run.pending)) {
+        if (refused !== undefined) {
+          run.faults.add(new TestAssertionError(refused));
+        }
+      }
       const [fault] = run.faults;
       if (fault !== undefined) {
         throw fault;
@@ -317,5 +464,5 @@ export const runAppSuite = async (
     }
     results.push({ name, failures });
   }
-  return { fixtures, results };
+  return { results };
 };

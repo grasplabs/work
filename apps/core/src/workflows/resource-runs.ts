@@ -811,6 +811,12 @@ export interface ResourceRunMemory {
   over?: AbortSignal;
   /** Whether the run is still this activation's. */
   current?: () => boolean;
+  /**
+   * Ends the activation as a process that died would, and runs the run
+   * again from its journal (run-object.ts): an App's test's fault alone
+   * asks it (fixture-runs.ts).
+   */
+  restart?: () => Promise<void>;
 }
 
 /**

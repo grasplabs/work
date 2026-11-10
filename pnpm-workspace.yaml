@@ -64,6 +64,10 @@ catalog:
   oxfmt: 0.68.0
   oxlint: 1.83.0
   vitest: 4.1.11
+  # vitest's own `expect`, which an App's tests assert with in the
+  # sandbox, where vitest's runner can't run (packages/runtime's testing
+  # module): the same version as vitest's.
+  "@vitest/expect": 4.1.11
   # Same workerd as Wrangler; runs the on-prem smoke test.
   workerd: 1.20261023.1
   wrangler: 4.154.0

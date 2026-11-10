@@ -24,7 +24,8 @@
     "./definition": "./src/definition-entry.ts",
     "./page": "./src/page.ts",
     "./check": "./src/check.ts",
-    "./forms": "./src/forms.ts"
+    "./forms": "./src/forms.ts",
+    "./vitest": "./src/vitest.ts"
   },
   "dependencies": {
     "@grasp-os/brain": "workspace:*",
@@ -34,6 +35,7 @@
     "@standard-schema/spec": "catalog:",
     "@tanstack/react-form": "catalog:",
     "@tanstack/react-router": "catalog:",
+    "@vitest/expect": "catalog:",
     "capnweb": "catalog:",
     "react-refresh": "catalog:",
     "zod": "catalog:"

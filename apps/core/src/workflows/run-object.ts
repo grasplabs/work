@@ -318,6 +318,15 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           current: () =>
             !cancelledIn(this.ctx.storage.sql) &&
             this.generation() === generation,
+          // Only a run an App's test started is ever restarted
+          // (fixture-runs.ts).
+          ...(pin.type === "fixture"
+            ? {
+                restart: async () => {
+                  await this.restartActivation();
+                },
+              }
+            : {}),
         });
       },
     };
@@ -448,6 +457,21 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   protected override extraAlarm(): number | null {
     const mark = cancelMarkIn(this.ctx.storage.sql);
     return unfinished(mark) ? (mark.due ?? null) : null;
+  }
+
+  /**
+   * Moves the clock of a run an App's test started `ms` on (workerflow's
+   * `advanceClock`, `t.clock.advance`). Refused for any other run: no
+   * run of the organization's has its time moved. A run not created yet
+   * (its test moved its clock before it started) is the test's to create
+   * next, and starts at that time.
+   */
+  async advanceFixtureClock(ms: number): Promise<void> {
+    const identity = this.runIdentity();
+    if (identity !== undefined && pinOf(identity)?.type !== "fixture") {
+      throw new Error("Only a run an App's test started has its clock moved.");
+    }
+    await this.advanceClock(ms);
   }
 
   /** Records that the run's cancel is done (`markCancelled`). */

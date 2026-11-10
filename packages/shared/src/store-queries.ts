@@ -253,6 +253,13 @@ export const readScopeSchema = z.strictObject({
   appBuilder: z.boolean(),
   /** The teams the reader is in, for `team` row rules (`writerRolesSchema`). */
   teams: callerTeamsSchema,
+  /**
+   * Set only for a test's own transaction (`t.run`, app-tests.ts): the
+   * App's access modes and row rules don't hold it back. Core sets it on
+   * no other call, and the store takes it only on a store core recorded
+   * as a test's fixture and no inventory lists (data-store.ts).
+   */
+  unrestricted: z.literal(true).optional(),
   consumer: z.strictObject({
     resourceId: identifierSchema,
     resourceVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),

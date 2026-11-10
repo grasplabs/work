@@ -1,7 +1,7 @@
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -87,6 +87,56 @@ const requireModelBinding = async (
   }
 };
 
+/** A task's ID, as a workflow names it. */
+const taskIdSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u);
+
+/**
+ * Counts one model request of test run `runId`'s task `task`, as the
+ * test's model provider answers it: in the run's record, one write that
+ * adds one to what it held.
+ */
+const countModelRequest = async (
+  env: Env,
+  runId: string,
+  task: string
+): Promise<void> => {
+  const path = `$."${taskIdSchema.parse(task)}"`;
+  await drizzle(env.DB)
+    .update(appTestRuns)
+    .set({
+      modelRequests: sql`json_set(${appTestRuns.modelRequests}, ${path}, coalesce(json_extract(${appTestRuns.modelRequests}, ${path}), 0) + 1)`,
+    })
+    .where(eq(appTestRuns.runId, runId));
+};
+
+/** The counts `countModelRequest` keeps. */
+const countsSchema = z.record(z.string(), z.number().int().min(0));
+
+/**
+ * How many model requests test run `runId`'s task `task` made
+ * (`t.effects.modelRequestCount`): as the provider counted them, never
+ * the engine.
+ */
+export const fixtureModelRequests = async (
+  env: Env,
+  runId: string,
+  task: unknown
+): Promise<number> => {
+  const parsed = taskIdSchema.safeParse(task);
+  if (!parsed.success) {
+    throw operationErrors.create("contract.invalid_args");
+  }
+  const row = await drizzle(env.DB)
+    .select({ counts: appTestRuns.modelRequests })
+    .from(appTestRuns)
+    .where(eq(appTestRuns.runId, runId))
+    .get();
+  if (row === undefined) {
+    throw operationErrors.create("function.cancelled");
+  }
+  return ownOf(countsSchema.parse(JSON.parse(row.counts)), parsed.data) ?? 0;
+};
+
 /**
  * The named calls a run an App's test started makes: its decisions
  * (fixture-decisions.ts), and the model calls
@@ -106,6 +156,7 @@ export const fixtureCalls: ReadonlySet<string> = new Set([
 export const fixtureCall = async (
   env: Env,
   run: FixtureDecisionRun,
+  task: string,
   call: BuiltCall,
   effect: Effect
 ): Promise<Json> => {
@@ -120,9 +171,11 @@ export const fixtureCall = async (
     if (answer === undefined) {
       throw unfixtured();
     }
-    // Answered: marked as it is, as a real model call is as it goes out.
+    // Answered: marked as it is, as a real model call is as it goes out,
+    // and counted as the provider's request, in the run's record.
     effect.requireHolds();
     effect.sending?.();
+    await countModelRequest(env, run.runId, task);
     return requireShape(JSON.stringify(call.outputSchema), answer, "output");
   }
   throw operationErrors.create("resource.unavailable");

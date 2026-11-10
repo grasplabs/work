@@ -378,6 +378,13 @@ export interface Invocation {
    * of either, and a function fails as it starts.
    */
   readonly people?: PeopleAccess;
+  /**
+   * Set only by a test's own transaction (`t.run`, app-tests.ts), on a
+   * test's fixture store: what it reads and writes isn't held to the
+   * App's access modes or row rules. The store takes it on no other store
+   * (data-store.ts).
+   */
+  readonly unrestricted?: true;
 }
 
 /**
@@ -826,8 +833,12 @@ const trusted = async <Answer>(
  * invocation's `authorize` alone and can't differ between them. Its
  * refusal is the host's.
  */
-const admit = async (invocation: Invocation): Promise<WriterRoles> =>
-  await trusted(invocation.authorize);
+const admit = async (invocation: Invocation): Promise<WriterRoles> => {
+  const roles = await trusted(invocation.authorize);
+  return invocation.unrestricted === true
+    ? { ...roles, unrestricted: true }
+    : roles;
+};
 
 /**
  * Runs `work`, which reads a value App code made: whatever it throws (a
@@ -1361,6 +1372,10 @@ const mayUse = (
   const checked = run.compiled.tables.get(table);
   if (checked === undefined) {
     throw dataErrors.create("data.unknown_table", { table });
+  }
+  // A test's own transaction (`t.run`) reads and writes every table.
+  if (run.invocation.unrestricted === true) {
+    return use === "read" ? fn.kind !== "action" : fn.kind === "mutation";
   }
   return use === "read"
     ? fn.kind !== "action" && checked.readable
@@ -2502,6 +2517,7 @@ const scopeOf = async (
   appMember: roles.appMember,
   appBuilder: roles.appBuilder,
   ...(roles.teams === undefined ? {} : { teams: [...roles.teams] }),
+  ...(roles.unrestricted === true ? { unrestricted: true } : {}),
   consumer: { ...invocation.consumer },
 });
 

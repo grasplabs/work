@@ -14,7 +14,6 @@ import {
   appTestTimeoutMs,
   maxAppTestName,
   maxAppTests,
-  testNamePattern,
 } from "@grasp-os/runtime/testing";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
@@ -81,8 +80,12 @@ import {
 } from "./sandboxed.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 import { Subscription } from "./subscription.ts";
+import { openTestTransaction } from "./test-transactions.ts";
+import type { TestTransaction } from "./test-transactions.ts";
+import { fixtureModelRequests } from "./workflows/fixture-calls.ts";
 import { answerFixtureDecision } from "./workflows/fixture-decisions.ts";
 import {
+  advanceFixtureClocks,
   discardFixtureRuns,
   fixtureRunOutcome,
   fixtureTaskCompletions,
@@ -325,10 +328,10 @@ const sessionTestsMain = (
 import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/runtime/testing"))};
 import suite from ${JSON.stringify(appModuleName(path))};
 const hostOf = (numbered) => ({
-  open: async (fixtures, name) => {
-    const session = await numbered.open(fixtures, name);
+  open: async (name) => {
+    const session = await numbered.open(name);
     return {
-      principal: async (who) => await numbered.principal(session, who),
+      identify: async (request) => await numbered.identify(session, request),
       call: async (who, request) => await numbered.call(session, who, request),
       subscribe: async (who, request, onSnapshot, onLost) => {
         const answer = await numbered.subscribe(session, who, request, onSnapshot, onLost);
@@ -336,9 +339,15 @@ const hostOf = (numbered) => ({
           ? { subscription: { release: async () => await numbered.release(answer.subscription) } }
           : answer;
       },
-      start: async (who, request) => await numbered.start(session, who, request),
+      begin: async (who) => await numbered.begin(session, who),
+      read: async (transaction, request) => await numbered.read(session, transaction, request),
+      write: async (transaction, request) => await numbered.write(session, transaction, request),
+      end: async (transaction, commit) => await numbered.end(session, transaction, commit),
+      start: async (who, request, options) => await numbered.start(session, who, request, options),
       runOutcome: async (run) => await numbered.runOutcome(session, run),
       completedCount: async (run, task) => await numbered.completedCount(session, run, task),
+      modelRequestCount: async (run, task) => await numbered.modelRequestCount(session, run, task),
+      advanceClock: async (ms) => await numbered.advanceClock(session, ms),
       respond: async (who, run, request) => await numbered.respond(session, who, run, request),
       close: async () => await numbered.close(session),
     };
@@ -364,7 +373,6 @@ const outcomeSchema = z.union([
   z.object({
     ok: z.literal(true),
     value: z.object({
-      fixtures: z.string(),
       results: z
         .array(
           z.object({
@@ -378,104 +386,75 @@ const outcomeSchema = z.union([
   z.object({ ok: z.literal(false), message: z.string() }),
 ]);
 
-/** The most JSON one workflow's model answers in a fixture hold. */
-const maxFixtureAnswers = 256 * 1024;
+/** The most JSON one run's model answers hold (`TestStartOptions.models`). */
+const maxModelAnswers = 256 * 1024;
 
-/** A fixture as `tests/fixtures/<name>.json` declares it. */
-const fixtureSchema = z
-  .strictObject({
-    /**
-     * Who the tests act as, by the name `t.as` takes, their App role and
-     * the teams they are in (team IDs, as a table's `team` row rules
-     * match them; none unless named).
-     */
-    principals: z
-      .record(
-        z.string().regex(testNamePattern),
-        z.strictObject({
-          role: z.enum(["user", "builder"]),
-          teams: z.array(identifierSchema).max(20).optional(),
-        })
-      )
-      .refine(
-        (principals) => {
-          const count = Object.keys(principals).length;
-          return count > 0 && count <= 20;
-        },
-        { message: "A fixture names between 1 and 20 principals." }
-      ),
-    /**
-     * What each workflow the App binds runs with in its tests, by its alias
-     * (`workflowTest`): its parameter values, a parameter not named here
-     * taking its declared default, never the organization's own values;
-     * who may answer its decisions, by the decision binding's alias, as the
-     * fixture's principals (workflows/fixture-decisions.ts); what each of
-     * its model bindings answers, by alias, so no model is asked; and which
-     * public query or mutation of the App serves each of its operation
-     * bindings, by alias, run on the test's own store
-     * (workflows/fixture-calls.ts).
-     */
-    workflows: z
-      .record(
-        z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-        z.strictObject({
-          params: z.record(z.string(), z.json()).optional(),
-          deciders: z
-            .record(
-              z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-              z.array(z.string().regex(testNamePattern)).max(20)
-            )
-            .optional(),
-          models: z
-            .record(z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u), z.json())
-            // Kept with each run the test starts: well within a row.
-            .refine(
-              (models) => JSON.stringify(models).length <= maxFixtureAnswers,
-              {
-                message: `A workflow's model answers are at most ${maxFixtureAnswers / 1024} KiB of JSON.`,
-              }
-            )
-            .optional(),
-        })
-      )
-      .optional(),
-  })
-  .refine(
-    ({ principals, workflows = {} }) =>
-      Object.values(workflows).every(({ deciders = {} }) =>
-        Object.values(deciders).every((names) =>
-          names.every((name) => Object.hasOwn(principals, name))
-        )
-      ),
-    { message: "A workflow's deciders are principals the fixture names." }
-  );
+/** The most people one test acts as (`t.withIdentity`). */
+const maxIdentitiesPerTest = 20;
 
-type Fixture = z.infer<typeof fixtureSchema>;
+/** A binding's alias, as a workflow declares it. */
+const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
 
-/** Where fixture `name` is among an App's files. */
-const fixturePath = (name: string): string => `tests/fixtures/${name}.json`;
+/** Who a test acts as, as `t.withIdentity` registers them (`identify`). */
+const identitySchema = z.strictObject({
+  /** Their name: the same name in one test is the same person. */
+  name: z.string().trim().min(1).max(64),
+  role: z.enum(["user", "builder"]),
+  /** The teams they are in (team IDs, as a table's `team` rules match them). */
+  teams: z.array(identifierSchema).max(20),
+});
 
-/** Fixture `name` from `files`, or why it can't be read. */
-const fixtureOf = (
-  files: AppFiles,
-  name: string
-): { fixture: Fixture } | { error: string } => {
-  const path = fixturePath(name);
-  const text = Object.hasOwn(files, path) ? files[path] : undefined;
-  if (text === undefined) {
-    return { error: `its fixture ${path} doesn't exist` };
-  }
+/** Someone a test acts as, as its session knows them. */
+interface TestIdentity {
+  readonly name: string;
+  /** Who core runs their calls for: `fixture-<name>`, never a person's ID. */
+  readonly principal: string;
+  readonly role: "user" | "builder";
+  readonly teams: readonly string[];
+}
+
+/**
+ * What a test gives a run it starts (`TestStartOptions`, deciders by
+ * name): its parameter values, a parameter not named taking its declared
+ * default, never the organization's own; who may answer its decisions, by
+ * the decision binding's alias, as the test's identities
+ * (workflows/fixture-decisions.ts); what each of its model bindings
+ * answers, by alias, so no model is asked (workflows/fixture-calls.ts);
+ * and a fault, the task after whose step the run is restarted.
+ */
+const startOptionsSchema = z.strictObject({
+  params: z.record(z.string(), z.json()).optional(),
+  deciders: z
+    .record(aliasSchema, z.array(z.string().trim().min(1).max(64)).max(20))
+    .optional(),
+  models: z
+    .record(aliasSchema, z.json())
+    // Kept with each run the test starts: well within a row.
+    .refine((models) => JSON.stringify(models).length <= maxModelAnswers, {
+      message: `A run's model answers are at most ${maxModelAnswers / 1024} KiB of JSON.`,
+    })
+    .optional(),
+  restartAfterStep: z
+    .string()
+    .regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u)
+    .optional(),
+});
+
+/** Who a test acts as, read from `t.withIdentity`'s request. */
+const identityOf = (
+  request: unknown
+): z.infer<typeof identitySchema> | { error: string } => {
   let data: unknown;
   try {
-    data = JSON.parse(text);
+    data = typeof request === "string" ? JSON.parse(request) : undefined;
   } catch {
-    return { error: `its fixture ${path} isn't JSON` };
+    data = undefined;
   }
-  const parsed = fixtureSchema.safeParse(data);
+  const parsed = identitySchema.safeParse(data);
   return parsed.success
-    ? { fixture: parsed.data }
+    ? parsed.data
     : {
-        error: `its fixture ${path} isn't { "principals": { "<name>": { "role": "user" | "builder", "teams"?: ["<team ID>"] } } }: ${parsed.error.issues[0]?.message ?? "invalid"}`,
+        error: `t.withIdentity takes { name, role?: "user" | "builder", teams?: ["<team ID>"] }: ${parsed.error.issues[0]?.message ?? "invalid"}`,
       };
 };
 
@@ -792,6 +771,25 @@ const sandboxRefusals: ReadonlySet<string> = new Set([
   "function.ended",
 ]);
 
+/** The furthest a test moves its runs' clock on at once: a year. */
+const maxClockAdvanceMs = 366 * 24 * 60 * 60 * 1000;
+
+/**
+ * What a test's request (its JSON text, within a call's bounds) holds;
+ * nothing for any other value, which what reads it refuses.
+ */
+const jsonRequestOf = (request: unknown): unknown => {
+  if (typeof request !== "string" || request.length > functionRequestMaxBytes) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(request);
+    return parsed;
+  } catch {
+    return undefined;
+  }
+};
+
 /** The most of an answer's JSON text a test sends (`respond`). */
 const maxAnswerLength = 64 * 1024;
 
@@ -819,8 +817,12 @@ class FixtureSession extends TestTarget {
   readonly #calls: OneAtATime | undefined;
   /** When the test's time is up: its calls wait for others no longer. */
   readonly #endsAt: number;
-  readonly #fixtures: string;
-  readonly #fixture: Fixture;
+  /** Who the test acts as, by name (`identify`). */
+  readonly #identities = new Map<string, TestIdentity>();
+  /** The transactions it opened (`begin`), by number; ended ones undefined. */
+  readonly #transactions: (TestTransaction | undefined)[] = [];
+  /** How far its runs' clock is moved on, in ms (`advanceClock`). */
+  #clockMs = 0;
   #store: Promise<OpenStore> | undefined;
   #closed = false;
   /** Each principal's live queries, by name (`subscribe`). */
@@ -840,7 +842,7 @@ class FixtureSession extends TestTarget {
    */
   #starts = 0;
 
-  constructor(context: SessionContext, fixtures: string, fixture: Fixture) {
+  constructor(context: SessionContext) {
     super();
     this.#env = context.env;
     this.#release = context.release;
@@ -850,36 +852,18 @@ class FixtureSession extends TestTarget {
     this.#sandbox = context.sandbox;
     this.#calls = context.calls;
     this.#endsAt = Date.now() + context.testMs;
-    this.#fixtures = fixtures;
-    this.#fixture = fixture;
   }
 
-  /** What the fixture gives the workflow the App binds as `alias`. */
-  #workflowOf(alias: string) {
-    const { workflows = {} } = this.#fixture;
-    return Object.hasOwn(workflows, alias) ? workflows[alias] : undefined;
-  }
-
-  /** The teams principal `name` is in, in the fixture: none unless named. */
-  #teamsOf(name: string): string[] {
-    const principal = Object.hasOwn(this.#fixture.principals, name)
-      ? this.#fixture.principals[name]
-      : undefined;
-    return [...(principal?.teams ?? [])];
-  }
-
-  /** The role principal `name` has in the fixture; throws for none. */
-  #roleOf(name: unknown): "user" | "builder" {
-    const principal =
-      typeof name === "string" && Object.hasOwn(this.#fixture.principals, name)
-        ? this.#fixture.principals[name]
-        : undefined;
-    if (principal === undefined) {
+  /** Identity `name`, whom the test named (`identify`); throws for anyone else. */
+  #identityOf(name: unknown): TestIdentity {
+    const identity =
+      typeof name === "string" ? this.#identities.get(name) : undefined;
+    if (identity === undefined) {
       throw new Error(
-        `The fixture "${this.#fixtures}" has no principal ${JSON.stringify(name)}: name it in ${fixturePath(this.#fixtures)}.`
+        `The test has no identity named ${JSON.stringify(name)}: name them with t.withIdentity first.`
       );
     }
-    return principal.role;
+    return identity;
   }
 
   /** The session's store, created on first use. */
@@ -897,17 +881,39 @@ class FixtureSession extends TestTarget {
   }
 
   /**
-   * Why principal `name` can't be used, nothing when it can: answered,
-   * never thrown, so the session stays whole and only the test fails.
+   * Registers who the test acts as (`t.withIdentity`, `request` its JSON
+   * text): why they can't be, nothing when they can. Answered, never
+   * thrown, so the session stays whole and only the test fails. The same
+   * name is the same person, so naming them again with another role or
+   * other teams is refused.
    */
   // oxlint-disable-next-line require-await
-  async principal(name: unknown): Promise<string | undefined> {
-    try {
-      this.#roleOf(name);
-      return undefined;
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+  async identify(request: unknown): Promise<string | undefined> {
+    if (this.#closed) {
+      throw sessionEnded();
     }
+    const read = identityOf(request);
+    if ("error" in read) {
+      return read.error;
+    }
+    const teams = [...new Set(read.teams)].toSorted();
+    const known = this.#identities.get(read.name);
+    if (known !== undefined) {
+      return known.role === read.role &&
+        canonicalJson(known.teams) === canonicalJson(teams)
+        ? undefined
+        : `${JSON.stringify(read.name)} is already someone with role ${known.role} in ${known.teams.length === 0 ? "no team" : `teams ${known.teams.join(", ")}`}: the same name is the same person.`;
+    }
+    if (this.#identities.size >= maxIdentitiesPerTest) {
+      return `A test acts as at most ${maxIdentitiesPerTest} people.`;
+    }
+    this.#identities.set(read.name, {
+      name: read.name,
+      principal: `fixture-${read.name}`,
+      role: read.role,
+      teams,
+    });
+    return undefined;
   }
 
   /**
@@ -919,19 +925,57 @@ class FixtureSession extends TestTarget {
     if (this.#closed) {
       throw sessionEnded();
     }
-    const role = this.#roleOf(name);
-    return JSON.stringify(await this.#invoke(String(name), role, request));
+    const identity = this.#identityOf(name);
+    return JSON.stringify(await this.#invoke(identity, request));
   }
 
   /**
-   * Runs the call `request` names as principal `name`, with `role`, as a
-   * page's call is resolved and run: its result, a refusal included.
+   * What a call of `identity`'s on `store` runs as: the test's person,
+   * with their role and teams, which nothing changes while the test runs,
+   * on a store only the test reaches, until its wall-clock limit.
+   */
+  #invocationOf(
+    identity: TestIdentity,
+    store: OpenStore,
+    requestId: string
+  ): Invocation {
+    return {
+      principal: identity.principal,
+      // The test's person calling, and nobody else to read.
+      people: fixturePeople(
+        identity.principal,
+        identity.name,
+        identity.role,
+        declaredPermission(this.#release.app, "people", "people") !== undefined
+      ),
+      actor: { type: "person", userId: identity.principal },
+      // The test's store holds no one's data: nothing to record.
+      sensitiveReads: null,
+      consumer: {
+        resourceId: this.#release.manifest.resourceId,
+        resourceVersion: this.#release.manifest.resourceVersion,
+      },
+      store,
+      requestId,
+      deadline: Date.now() + platformLimits.serverInvocationWallMs,
+      runId: null,
+      authorize: async () =>
+        await Promise.resolve({
+          appMember: true,
+          appBuilder: identity.role === "builder",
+          teams: [...identity.teams],
+        }),
+    };
+  }
+
+  /**
+   * Runs the call `request` names as `identity`, as a page's call is
+   * resolved and run: its result, a refusal included.
    * A live read (`live`) runs only a query, by its deadline, and is told
    * what the query read of the session's store.
    */
   async #invoke(
-    name: string,
-    role: "user" | "builder",
+    identity: TestIdentity,
     request: unknown,
     live?: {
       readonly deadline: number;
@@ -954,34 +998,8 @@ class FixtureSession extends TestTarget {
       const run = async (): Promise<OperationResult> => {
         const wallEnd = Date.now() + platformLimits.serverInvocationWallMs;
         const invocation: Invocation = {
-          principal: `fixture-${name}`,
-          // The fixture as the person calling, and nobody else to read.
-          people: fixturePeople(
-            `fixture-${name}`,
-            role,
-            declaredPermission(this.#release.app, "people", "people") !==
-              undefined
-          ),
-          // A test's fixture person, on a store only the test reaches.
-          actor: { type: "person", userId: `fixture-${name}` },
-          // The test's store holds no one's data: nothing to record.
-          sensitiveReads: null,
-          consumer: {
-            resourceId: this.#release.manifest.resourceId,
-            resourceVersion: this.#release.manifest.resourceVersion,
-          },
-          store,
-          requestId,
+          ...this.#invocationOf(identity, store, requestId),
           deadline: Math.min(wallEnd, live?.deadline ?? wallEnd),
-          runId: null,
-          // The fixture's role and teams, which nothing changes while the
-          // test runs.
-          authorize: async () =>
-            await Promise.resolve({
-              appMember: true,
-              appBuilder: role === "builder",
-              teams: this.#teamsOf(name),
-            }),
           // No resources: outside systems aren't the tests' to reach.
           ...(live === undefined || this.#release.store === null
             ? {}
@@ -1028,17 +1046,46 @@ class FixtureSession extends TestTarget {
   }
 
   /**
-   * Starts, as principal `name`, the workflow `request` names (a call of
+   * The options a start is given (`TestStartOptions`, deciders by name),
+   * as JSON text; refused (`contract.invalid_args`) unless each decider is
+   * someone the test named.
+   */
+  #startOptionsOf(options: unknown): z.infer<typeof startOptionsSchema> {
+    let data: unknown;
+    try {
+      data = typeof options === "string" ? JSON.parse(options) : undefined;
+    } catch {
+      data = undefined;
+    }
+    const given = operationErrors.parse(
+      "contract.invalid_args",
+      startOptionsSchema,
+      data
+    );
+    for (const names of Object.values(given.deciders ?? {})) {
+      for (const decider of names) {
+        this.#identityOf(decider);
+      }
+    }
+    return given;
+  }
+
+  /**
+   * Starts, as identity `name`, the workflow `request` names (a call of
    * its reference's `start` mutation): the run, a real one of the workflow version the
    * release under test binds, with nothing of the organization's around it
    * (fixture-runs.ts). Answers the JSON text of an `OperationResult`: the
    * run's number in this session, or why it was refused.
    */
-  async start(name: unknown, request: unknown): Promise<string> {
+  async start(
+    name: unknown,
+    request: unknown,
+    options: unknown
+  ): Promise<string> {
     if (this.#closed) {
       throw sessionEnded();
     }
-    this.#roleOf(name);
+    const identity = this.#identityOf(name);
     const requestId = crypto.randomUUID();
     let result: OperationResult;
     try {
@@ -1046,6 +1093,7 @@ class FixtureSession extends TestTarget {
       if (this.#starts >= maxRunsPerTest) {
         throw operationErrors.create("function.call_limit");
       }
+      const given = this.#startOptionsOf(options);
       this.#starts += 1;
       let recorded = false;
       let started: FixtureRunStarted;
@@ -1053,12 +1101,16 @@ class FixtureSession extends TestTarget {
         started = await startFixtureRun(
           this.#env,
           this.#release,
-          `fixture-${String(name)}`,
+          identity.principal,
           request,
           {
-            paramsOf: (alias) => this.#workflowOf(alias)?.params ?? {},
-            decidersOf: (alias) => this.#workflowOf(alias)?.deciders ?? {},
-            modelsOf: (alias) => this.#workflowOf(alias)?.models ?? {},
+            params: given.params ?? {},
+            deciders: given.deciders ?? {},
+            models: given.models ?? {},
+            ...(given.restartAfterStep === undefined
+              ? {}
+              : { restartAfterStep: given.restartAfterStep }),
+            clockMs: this.#clockMs,
             deadline: this.#endsAt,
             recorded: () => {
               recorded = true;
@@ -1146,7 +1198,7 @@ class FixtureSession extends TestTarget {
     if (this.#closed) {
       throw sessionEnded();
     }
-    this.#roleOf(name);
+    this.#identityOf(name);
     const requestId = crypto.randomUUID();
     let result: OperationResult;
     try {
@@ -1165,23 +1217,150 @@ class FixtureSession extends TestTarget {
   }
 
   /**
-   * Principal `name`'s live queries: a connection of its own to the
+   * Opens a transaction on the test's store (`t.run`), as identity `name`
+   * or, for `null`, the test itself (`test-run`, which no identity's
+   * principal is), with the App's access rules lifted
+   * (test-transactions.ts). Answers the JSON text of an
+   * `OperationResult` holding its number (`{ transaction }`), or why it
+   * was refused.
+   */
+  async begin(name: unknown): Promise<string> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    const requestId = crypto.randomUUID();
+    let result: OperationResult;
+    try {
+      const identity: TestIdentity =
+        name === null
+          ? { name: "test", principal: "test-run", role: "builder", teams: [] }
+          : this.#identityOf(name);
+      const store = await this.#storeOf();
+      const opened = await openTestTransaction(this.#release.app, {
+        ...this.#invocationOf(identity, store, requestId),
+        // Until the test's own end: a transaction is as long as its test.
+        deadline: this.#endsAt,
+      });
+      if ("refused" in opened) {
+        result = opened.refused;
+      } else {
+        this.#transactions.push(opened.transaction);
+        result = {
+          ok: true,
+          value: { transaction: this.#transactions.length - 1 },
+        };
+      }
+    } catch (error) {
+      result = { ok: false, error: refusalOf(error, requestId) };
+    }
+    return JSON.stringify(result);
+  }
+
+  /** Transaction `transaction`, which `begin` answered, unless it ended. */
+  #transactionOf(transaction: unknown): TestTransaction {
+    const open =
+      typeof transaction === "number" && Number.isSafeInteger(transaction)
+        ? this.#transactions[transaction]
+        : undefined;
+    if (open === undefined) {
+      throw new Error("No open transaction of this test has that number.");
+    }
+    return open;
+  }
+
+  /** One read in transaction `transaction`, as the JSON text of its result. */
+  async read(transaction: unknown, request: unknown): Promise<string> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    return JSON.stringify(
+      await this.#transactionOf(transaction).read(jsonRequestOf(request))
+    );
+  }
+
+  /** One write in transaction `transaction`, as the JSON text of its result. */
+  async write(transaction: unknown, request: unknown): Promise<string> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    return JSON.stringify(
+      await this.#transactionOf(transaction).write(jsonRequestOf(request))
+    );
+  }
+
+  /**
+   * Ends transaction `transaction`: commits it (`commit`) or drops it.
+   * Answers the JSON text of its result.
+   */
+  async end(transaction: unknown, commit: unknown): Promise<string> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    const open = this.#transactionOf(transaction);
+    this.#transactions[Number(transaction)] = undefined;
+    return JSON.stringify(await open.end(commit === true));
+  }
+
+  /**
+   * How many model requests run `run`'s task `task` made, as the test's
+   * model provider counted them (workflows/fixture-calls.ts).
+   */
+  async modelRequestCount(run: unknown, task: unknown): Promise<number> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    return await fixtureModelRequests(this.#env, this.#runOf(run).runId, task);
+  }
+
+  /**
+   * Moves the clock of the test's runs `ms` on: those under way now, whose
+   * sleeps, waits and retries come due by then run at once, and those it
+   * starts later, which start at the time it moved to. Answers the JSON
+   * text of an `OperationResult` holding nothing.
+   */
+  async advanceClock(ms: unknown): Promise<string> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    const requestId = crypto.randomUUID();
+    let result: OperationResult;
+    try {
+      const by = operationErrors.parse(
+        "contract.invalid_args",
+        z.number().int().min(0).max(maxClockAdvanceMs),
+        ms
+      );
+      this.#clockMs += by;
+      await advanceFixtureClocks(
+        this.#env,
+        this.#runs.map(({ runId }) => runId),
+        by
+      );
+      result = { ok: true, value: null };
+    } catch (error) {
+      result = { ok: false, error: refusalOf(error, requestId) };
+    }
+    return JSON.stringify(result);
+  }
+
+  /**
+   * Identity `name`'s live queries: a connection of its own to the
    * realtime manager, as a page's page has (query-subscriptions.ts),
    * read as the principal, with its role, on the session's store, until
    * the session closes. Its reads are the test's own and bounded by its
    * deadline, so none is charged to a budget.
    */
-  #queriesOf(name: string, role: "user" | "builder"): PrincipalQueries {
-    const known = this.#queries.get(name);
+  #queriesOf(identity: TestIdentity): PrincipalQueries {
+    const known = this.#queries.get(identity.name);
     if (known !== undefined) {
       return known;
     }
     // One object for the session's life: the manager's gate is keyed by it.
-    const reader: Reader = Object.freeze({ userId: `fixture-${name}` });
+    const reader: Reader = Object.freeze({ userId: identity.principal });
     const roles = canonicalJson({
       appMember: true,
-      appBuilder: role === "builder",
-      teams: this.#teamsOf(name).toSorted(),
+      appBuilder: identity.role === "builder",
+      teams: [...identity.teams],
     });
     const queries = new QuerySubscriptions<Reader>(this.#env, {
       check: async () => {
@@ -1206,7 +1385,7 @@ class FixtureSession extends TestTarget {
         readBy
       ): Promise<LiveRead> => {
         let reads: LiveRead["reads"];
-        const result = await this.#invoke(name, role, request, {
+        const result = await this.#invoke(identity, request, {
           deadline: readBy,
           observe: (storeId, readSet) => {
             reads = { storeId, readSet };
@@ -1216,7 +1395,7 @@ class FixtureSession extends TestTarget {
       },
     });
     const made = { queries, reader };
-    this.#queries.set(name, made);
+    this.#queries.set(identity.name, made);
     return made;
   }
 
@@ -1241,7 +1420,7 @@ class FixtureSession extends TestTarget {
       if (this.#closed) {
         throw sessionEnded();
       }
-      const role = this.#roleOf(name);
+      const identity = this.#identityOf(name);
       if (
         typeof request !== "string" ||
         request.length > functionRequestMaxBytes ||
@@ -1252,7 +1431,7 @@ class FixtureSession extends TestTarget {
           "A live query is followed with its request and two callbacks."
         );
       }
-      const { queries, reader } = this.#queriesOf(String(name), role);
+      const { queries, reader } = this.#queriesOf(identity);
       const callback = testCallback(onSnapshot, onLost, () => this.#closed);
       // Refused (`page.too_many_queries`), it throws before it holds the
       // callback, which then holds nothing of the test's.
@@ -1288,6 +1467,12 @@ class FixtureSession extends TestTarget {
    */
   async close(): Promise<void> {
     this.#closed = true;
+    // Its open transactions, dropped: nothing they staged commits.
+    await Promise.all(
+      this.#transactions.splice(0).map(async (open) => {
+        await open?.end(false);
+      })
+    );
     // Its runs first: nothing of them runs on against a store discarded.
     const runs = this.#runs.splice(0).map(({ runId }) => runId);
     if (runs.length > 0) {
@@ -1329,16 +1514,14 @@ class FixtureSession extends TestTarget {
 /** Core's side of one suite's run: its sessions, one per test. */
 class FixtureHost extends TestTarget {
   readonly #context: SessionContext;
-  readonly #files: AppFiles;
   readonly #sessions = new Set<FixtureSession>();
   /** The tests the suite opened, by name, in order: what it must report. */
   readonly opened: string[] = [];
   #closed = false;
 
-  constructor(context: SessionContext, files: AppFiles) {
+  constructor(context: SessionContext) {
     super();
     this.#context = context;
-    this.#files = files;
   }
 
   /** Whether the sandbox refused a function a test called, not its code. */
@@ -1346,13 +1529,9 @@ class FixtureHost extends TestTarget {
     return this.#context.sandbox.refused;
   }
 
-  /**
-   * A session for one test, on fixture `fixtures`: one of the App's own
-   * files, whichever the suite names. Throws for one the App doesn't have
-   * or that isn't a fixture, which fails the suite.
-   */
+  /** A session for the test named `name`. */
   // oxlint-disable-next-line require-await
-  async open(fixtures: unknown, name: unknown): Promise<FixtureSession> {
+  async open(name: unknown): Promise<FixtureSession> {
     // A suite past its deadline opens nothing more, and no suite opens
     // more sessions than it may have tests: each may make a store.
     if (this.#closed || this.opened.length >= maxAppTests) {
@@ -1362,14 +1541,7 @@ class FixtureHost extends TestTarget {
       throw new Error("A test is opened by its name.");
     }
     this.opened.push(name);
-    if (typeof fixtures !== "string" || !testNamePattern.test(fixtures)) {
-      throw new Error("A suite names its fixture by a name like `notes`.");
-    }
-    const read = fixtureOf(this.#files, fixtures);
-    if ("error" in read) {
-      throw new Error(read.error);
-    }
-    const session = new FixtureSession(this.#context, fixtures, read.fixture);
+    const session = new FixtureSession(this.#context);
     this.#sessions.add(session);
     return session;
   }
@@ -1390,15 +1562,14 @@ class FixtureHost extends TestTarget {
 const noParent = (): string | undefined => undefined;
 
 /**
- * Core's side of one suite's run of `release`'s tests, with the App's
- * `files` and the stable IDs its schema is applied by (`ids`, apps.ts's
+ * Core's side of one suite's run of `release`'s tests, with the stable
+ * IDs its schema is applied by (`ids`, apps.ts's
  * `releaseIdsOf`): the host the suite's isolate calls (`AppTestHost`),
  * each session's store discarded within `cleanupMs`.
  */
 export const fixtureHostFor = (
   env: Env,
   release: Release,
-  files: AppFiles,
   ids: SchemaIds,
   {
     cleanupMs = defaultLimits.cleanupMs,
@@ -1414,19 +1585,16 @@ export const fixtureHostFor = (
     parent?: () => string | undefined;
   } = {}
 ): FixtureHost =>
-  new FixtureHost(
-    {
-      env,
-      release,
-      ids,
-      cleanupMs,
-      testMs,
-      parent: parent ?? noParent,
-      sandbox: { refused: false },
-      calls: parent === undefined ? undefined : new OneAtATime(),
-    },
-    files
-  );
+  new FixtureHost({
+    env,
+    release,
+    ids,
+    cleanupMs,
+    testMs,
+    parent: parent ?? noParent,
+    sandbox: { refused: false },
+    calls: parent === undefined ? undefined : new OneAtATime(),
+  });
 
 /**
  * One suite's host as a sandbox session passes it: a capability of plain
@@ -1456,15 +1624,55 @@ class NumberedFixtureHost extends TestTarget {
   }
 
   /** A session for one test (`FixtureHost.open`), by its number. */
-  async open(fixtures: unknown, name: unknown): Promise<number> {
-    const session = await this.#host.open(fixtures, name);
+  async open(name: unknown): Promise<number> {
+    const session = await this.#host.open(name);
     const id = this.#sessions.size;
     this.#sessions.set(id, session);
     return id;
   }
 
-  async principal(id: unknown, name: unknown): Promise<string | undefined> {
-    return await this.#session(id).principal(name);
+  async identify(id: unknown, request: unknown): Promise<string | undefined> {
+    return await this.#session(id).identify(request);
+  }
+
+  async begin(id: unknown, name: unknown): Promise<string> {
+    return await this.#session(id).begin(name);
+  }
+
+  async read(
+    id: unknown,
+    transaction: unknown,
+    request: unknown
+  ): Promise<string> {
+    return await this.#session(id).read(transaction, request);
+  }
+
+  async write(
+    id: unknown,
+    transaction: unknown,
+    request: unknown
+  ): Promise<string> {
+    return await this.#session(id).write(transaction, request);
+  }
+
+  async end(
+    id: unknown,
+    transaction: unknown,
+    commit: unknown
+  ): Promise<string> {
+    return await this.#session(id).end(transaction, commit);
+  }
+
+  async modelRequestCount(
+    id: unknown,
+    run: unknown,
+    task: unknown
+  ): Promise<number> {
+    return await this.#session(id).modelRequestCount(run, task);
+  }
+
+  async advanceClock(id: unknown, ms: unknown): Promise<string> {
+    return await this.#session(id).advanceClock(ms);
   }
 
   async call(id: unknown, name: unknown, request: unknown): Promise<string> {
@@ -1503,8 +1711,13 @@ class NumberedFixtureHost extends TestTarget {
     await subscription.release();
   }
 
-  async start(id: unknown, name: unknown, request: unknown): Promise<string> {
-    return await this.#session(id).start(name, request);
+  async start(
+    id: unknown,
+    name: unknown,
+    request: unknown,
+    options: unknown
+  ): Promise<string> {
+    return await this.#session(id).start(name, request, options);
   }
 
   async runOutcome(id: unknown, run: unknown): Promise<string> {
@@ -1536,13 +1749,19 @@ class NumberedFixtureHost extends TestTarget {
 /** The calls of `NumberedFixtureHost` a suite's session passes. */
 const numberedMethods = [
   "open",
-  "principal",
+  "identify",
   "call",
   "subscribe",
   "release",
+  "begin",
+  "read",
+  "write",
+  "end",
   "start",
   "runOutcome",
   "completedCount",
+  "modelRequestCount",
+  "advanceClock",
   "respond",
   "close",
 ] as const;
@@ -1728,7 +1947,7 @@ const suiteFailures = async (
   }
 ): Promise<string[]> => {
   let parent: string | undefined;
-  const host = fixtureHostFor(env, release, files, ids, {
+  const host = fixtureHostFor(env, release, ids, {
     cleanupMs,
     testMs,
     ...(sandboxHost === undefined ? {} : { parent: () => parent }),
@@ -1888,12 +2107,15 @@ export const appTestFailures = async (
   }
   const sdk = await workflowSdkModules(env.ASSETS);
   const ids = release.store === null ? {} : await releaseIdsOf(env, release);
-  // The platform's modules last: no App module takes one's name.
+  // The platform's modules last: no App module takes one's name. The
+  // test harness's own build last of all: the root the suite's schema is
+  // defined with is the one the harness reads it by (imports.ts,
+  // `sdkImports`).
   const modules = {
     ...build.modules,
     ...release.modules,
-    ...sdk.modules,
     ...release.sdk,
+    ...sdk.modules,
   };
   const failures: string[] = [];
   // The suites' time: the build is the compiler's, bounded on its own, its
