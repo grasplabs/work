@@ -108,7 +108,6 @@ import {
   loadWorkflowBuild,
   reviewedTasksOf,
   releaseBuild,
-  requireServedBindingKinds,
   storeBuild,
 } from "./workflow-builds.ts";
 import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
@@ -1243,8 +1242,6 @@ const manifestBindingsSchema = z.object({
 const sealedBindingsOf = (
   row: typeof workflowResourceVersions.$inferSelect
 ): PinnedContract[] => {
-  // A version binding a kind no longer served never gets here: its review
-  // lists it as refused (`removedBindingKindOf`).
   const parsed = manifestBindingsSchema.safeParse(JSON.parse(row.manifest));
   if (!parsed.success) {
     throw corrupt(row.workflowResourceId, row.version);
@@ -1406,30 +1403,6 @@ const versionTasksOf = async (
 };
 
 /**
- * Why version `row` is refused as one to publish again, if it binds a kind
- * no longer served (`requireServedBindingKinds`): a listing shows it so,
- * where its run, start, review and export are refused.
- */
-const removedBindingKindOf = (
-  row: typeof workflowResourceVersions.$inferSelect
-): WorkflowResourceVersion["refused"] => {
-  try {
-    requireServedBindingKinds(parsedJson(row.manifest));
-    return undefined;
-  } catch (error) {
-    if (
-      workflowResourceErrors.codeOf(error) !== "workflow.binding_kind_removed"
-    ) {
-      throw error;
-    }
-    return {
-      code: "workflow.binding_kind_removed",
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
-};
-
-/**
  * A version's row, as the registry answers it: only once its manifest
  * still hashes to what was sealed, since its build is read from it (`workflow.version_corrupt` otherwise).
  */
@@ -1441,24 +1414,6 @@ const versionOf = async (
 ): Promise<WorkflowResourceVersion> => {
   if ((await sha256Hex(row.manifest)) !== row.manifestHash) {
     throw corrupt(row.workflowResourceId, row.version);
-  }
-  const refused = removedBindingKindOf(row);
-  if (refused !== undefined) {
-    return {
-      resourceId: row.workflowResourceId,
-      version: row.version,
-      definitionVersion: row.definitionVersion,
-      profile: row.profileVersion,
-      definitionHash: row.definitionJsonHash,
-      contractHash: row.contractHash,
-      manifestHash: row.manifestHash,
-      bindings,
-      modelSteeredWrites: [],
-      build: null,
-      refused,
-      author: row.authorId,
-      createdAt: row.createdAt.toISOString(),
-    };
   }
   const sealedBindings = sealedBindingsOf(row);
   const modelSteeredWrites = await steeringReview(
@@ -2159,9 +2114,7 @@ export const exportedWorkflowVersion = async (
     version,
     row.manifestHash
   );
-  const manifest = parsedJson(row.manifest);
-  requireServedBindingKinds(manifest);
-  const pinned = manifestBindingsSchema.safeParse(manifest);
+  const pinned = manifestBindingsSchema.safeParse(parsedJson(row.manifest));
   if (!pinned.success) {
     throw corrupt(workflow.id, version);
   }

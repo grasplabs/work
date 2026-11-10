@@ -85,6 +85,7 @@
     "./docs": "./src/docs.ts",
     "./document-places": "./src/document-places.ts",
     "./encoding": "./src/encoding.ts",
+    "./error-categories": "./src/error-categories.ts",
     "./error-namespaces": "./src/error-namespaces.ts",
     "./error-reports": "./src/error-reports.ts",
     "./errors": "./src/errors.ts",

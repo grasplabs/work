@@ -112,10 +112,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "Another branch settled this branch's scope (a race's winner, or an end), so this branch's next step didn't run.",
   "workflow.collection_invalid":
     "A for task's collection isn't a list of at most 1,000 items, so the run failed.",
-  "workflow.item_keys_invalid":
-    "A for task's items don't each have one key, a number or text of at most 256 characters, so the run failed.",
-  "workflow.item_keys_duplicate":
-    "Two items of a for task have the same key, so the run failed before any item ran.",
   "workflow.run_unavailable": "This workflow has no such run.",
   "workflow.run_details_removed":
     "This run ended long enough ago that what it returned is no longer kept.",
@@ -140,8 +136,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "This version was published by an earlier release of the platform that this one doesn't read. Publish it again as a new version.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
-  "workflow.binding_kind_removed":
-    "This version binds an App's store operation (an `operation` binding), which workflows can no longer use. Remove that binding and publish the workflow again as a new version.",
   "workflow.start_invalid":
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
   "workflow.start_held_gone":
@@ -193,8 +187,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "The App function this run calls can't be reached: the App has no current version, that version gives no function this ID, or the person the run acts for has no role in the App.",
   "workflow.app_call_failed":
     "The App function this run called failed, so the run failed. These details name the App's error code.",
-  "workflow.call_release_not_current":
-    "The App release this call's approval pins is no longer the App's current version, so the call can't run. Approve the binding for the App's current release, then start the workflow again.",
   "workflow.decision_timed_out":
     "Nobody answered the run's decision before its deadline, so the run failed.",
   "workflow.model_call_limit":
@@ -857,15 +849,7 @@ export interface WorkflowResourceVersion {
    * whatever their order.
    */
   modelSteeredWrites: SteeredWrite[];
-  /** Its build; null for a version that is refused (`refused`). */
-  build: WorkflowVersionBuild | null;
-  /**
-   * Why the version is refused, when it is: it binds a kind the platform
-   * no longer serves (`workflow.binding_kind_removed`), and is to be
-   * published again. It never runs, starts, is reviewed or exported, so
-   * nothing of its build is shown.
-   */
-  refused?: { code: "workflow.binding_kind_removed"; message: string };
+  build: WorkflowVersionBuild;
   author: string;
   createdAt: string;
 }

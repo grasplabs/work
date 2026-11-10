@@ -1,3 +1,5 @@
+import { errorCategories } from "@grasp-os/shared/error-categories";
+
 import type { FunctionManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
@@ -93,15 +95,7 @@ const runRow = v.union(
 const sanitizedError = v.object({
   code: v.string().min(1).max(256),
   message: plainText,
-  category: v.enum([
-    "source",
-    "contract",
-    "domain",
-    "authorization",
-    "operational",
-    "uncertain",
-    "safety",
-  ]),
+  category: v.enum(errorCategories),
   retryable: v.boolean(),
   requestId: idText.nullable(),
 });

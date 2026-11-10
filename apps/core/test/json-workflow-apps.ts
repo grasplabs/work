@@ -1,13 +1,6 @@
 import { v } from "@grasp-os/runtime/app";
-import {
-  declaredWorkflows,
-  GraspClient,
-  workflowReferenceOf,
-} from "@grasp-os/runtime/host";
-import type {
-  ClientTransport,
-  WorkflowEventContract,
-} from "@grasp-os/runtime/host";
+import { declaredWorkflows, workflowReferenceOf } from "@grasp-os/runtime/host";
+import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -38,8 +31,7 @@ import { routed, signedInApi, unique } from "./sign-in.ts";
 // alias the App's app.ts declares, the App's version made current, its
 // `start` grant asked for by its builder and granted by an admin, and
 // its runs started, followed and controlled by a
-// person or by the App's page over core's function route. What replaces
-// an App's own workflow (workflow-apps.ts) in a test:
+// person or by the App's page over core's function route:
 //
 //   const { signedIn, boundApp } = jsonWorkflowAppsOf(idp);
 //   const { builder, app, workflow, reference } = await boundApp({ hold: "1 hour" });
@@ -699,42 +691,6 @@ export const called = async (
   }
   const payload = errorPayloadSchema.parse(answer);
   throw Object.assign(new Error(payload.message), { code: payload.code });
-};
-
-/**
- * A session client of `person`'s page, as the frame's own: its calls
- * over core's function route, its live queries over its frame
- * (`pages.frame`), as `useQuery` and `useMutation` reach core.
- */
-export const pageClient = (
-  person: Person,
-  app: string,
-  lease: string
-): GraspClient => {
-  const transport: ClientTransport = {
-    call: async (request) => await called(person, app, lease, request),
-    watch: async (request, onSnapshot, onLost) => {
-      const callback = Object.assign(
-        (push: unknown): void => {
-          onSnapshot(push);
-        },
-        {
-          [Symbol.dispose]: (): void => {
-            onLost();
-          },
-        }
-      );
-      const subscription = await person.api.pages
-        .frame(app, lease)
-        .watchQuery(request, callback);
-      return {
-        release: () => {
-          void subscription.release();
-        },
-      };
-    },
-  };
-  return new GraspClient(transport);
 };
 
 /** Follows `request` raw on `person`'s page: what reached the page. */

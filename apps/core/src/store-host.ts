@@ -251,7 +251,7 @@ import {
 //   time; the next alarm continues.
 // - A schema is crafted to break the host, or to pass for another: the
 //   manifest is read as untrusted text (bounded, strict, declared again
-//   through the SDK's own checks, sdk/src/schema-manifest.ts), and its
+//   through the SDK's own checks, runtime/src/schema-manifest.ts), and its
 //   hash is computed here from its canonical text, never taken as given.
 // - A caller bends time or delivery: the object's RPC methods take no
 //   clock, consumers or budget; only tests choose them, through this host

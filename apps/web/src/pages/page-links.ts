@@ -11,7 +11,7 @@ import { msg } from "@lingui/core/macro";
 
 // The page's side of a page's link port (spec 10.7.7): what the page
 // does with a link the frame asks it to open, through core's link channel
-// (`LinkChannel`, the SDK's link-channel.ts), and what it answers. Core
+// (`LinkChannel`, runtime/src/link-channel.ts), and what it answers. Core
 // decides whether the URL may open; the page decides whether the person
 // asked for it (decision 2 on GRA-259), and opens only the URL core
 // answered. The frame hears only whether it was opened.
