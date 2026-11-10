@@ -770,7 +770,13 @@ const planTypeCheck = (project: Plan): void => {
           `${sourceFolder}**/*.tsx`,
           "*.d.ts",
           pageReferences.path,
+          // The release's functions, built into the pages, and the server
+          // code the references' types read, which the server's check
+          // reports.
+          ".grasp/functions.ts",
+          ...serverCodeIncludes.filter((include) => include !== ".grasp/*.ts"),
         ],
+        exclude: ["server/**/*.test.ts"],
       }
     ),
     "app/tsconfig.server.json": kindConfig("server", appCodeTarget, {

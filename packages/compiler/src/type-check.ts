@@ -48,10 +48,18 @@ export const compilerOptions = {
   // diagnostics count, so the kit's declarations' don't (`typeCheck`).
   skipLibCheck: false,
   types: [],
-  // The App's generated references and data model, as its pages import them.
+  // The App's generated modules by their aliases: the references and
+  // data model its pages import, and the constructors and `internal` tree
+  // the server code their references' types read imports.
   paths: {
     [pageReferences.specifier]: [`./${pageReferences.path}`],
     [pageDataModel.specifier]: [`./${pageDataModel.path}`],
+    "@server/_generated/server": [
+      `./${generatedModules["@server/_generated/server"]}`,
+    ],
+    "@server/_generated/internal": [
+      `./${generatedModules["@server/_generated/internal"]}`,
+    ],
   },
 } as const satisfies CompilerOptions;
 
