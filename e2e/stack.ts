@@ -35,9 +35,12 @@ const portOf = (value: string | undefined): number => {
     return hashed;
   }
   const port = Number(value);
-  if (!Number.isInteger(port) || port < 1024 || port > 65_530) {
+  // Its whole block below the ephemeral ports too, so an override can't
+  // bring the race back.
+  const highest = ephemeralPorts - portsEach;
+  if (!Number.isInteger(port) || port < 1024 || port > highest) {
     throw new Error(
-      `E2E_PORT must be a port from 1024 to 65530, not "${value}"`
+      `E2E_PORT must be a port from 1024 to ${highest}, below the ephemeral ports from ${ephemeralPorts}, not "${value}"`
     );
   }
   return port;
