@@ -1,3 +1,5 @@
+import { canonicalText } from "@grasp-os/shared/json";
+
 import type { AppManifest, FunctionManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
 import type { ReleaseIdentity } from "./codegen-contracts.ts";
@@ -79,7 +81,10 @@ export const pageFunctionsText = (
       }
     }
   }
-  return `${banner}export const functions = ${dataOf(pageFunctionsOf(operations), 0)};\n`;
+  // Parsed from JSON text, not written as an object literal: a field a
+  // descriptor names `__proto__` stays a field, never the prototype.
+  const data = JSON.stringify(canonicalText(pageFunctionsOf(operations)));
+  return `${banner}export const functions: unknown = JSON.parse(${data});\n`;
 };
 /** `@server/_generated/api`: the public api and everything else a browser may hold. */
 export const referencesText = async (

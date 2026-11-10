@@ -23,6 +23,7 @@ import type {
 } from "../src/host.ts";
 import type { AnyFunctionReference } from "../src/index.ts";
 import { defineApp, permission, v } from "../src/index.ts";
+import { readPageFunctions } from "../src/page-functions.ts";
 import { runFunction } from "../src/runner.ts";
 import type { FunctionChannel } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
@@ -36,7 +37,7 @@ import notes from "./notes/.grasp/app.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import functionsText from "./notes/.grasp/functions.ts?raw";
-import { functions as releaseFunctions } from "./notes/.grasp/functions.ts";
+import { functions as builtFunctions } from "./notes/.grasp/functions.ts";
 import { archiveNotes, summarizeNote } from "./notes/grasp.config.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import referencesText from "./notes/server/_generated/api.ts?raw";
@@ -202,16 +203,18 @@ describe("generated modules", () => {
   test("give a page the release's public functions by name, its workflows' too, as data a client reads them from", () => {
     const { operations } = notesManifest();
     const create = operations["notes.create"];
-    expect(releaseFunctions["notes.create"]).toStrictEqual({
+    const releaseFunctions = readPageFunctions(builtFunctions);
+    expect(releaseFunctions.get("notes.create")).toStrictEqual({
       kind: "mutation",
       args: create?.args,
       returns: create?.returns,
     });
     // Never an internal function's, and a query without `returns` says so.
     expect({
-      internal: Object.hasOwn(releaseFunctions, "notes.count"),
-      titles: releaseFunctions["notes.titles"].returns,
-      start: releaseFunctions["workflows.summarizeNote.mutations.start"].kind,
+      internal: releaseFunctions.has("notes.count"),
+      titles: releaseFunctions.get("notes.titles")?.returns,
+      start: releaseFunctions.get("workflows.summarizeNote.mutations.start")
+        ?.kind,
     }).toStrictEqual({ internal: false, titles: null, start: "mutation" });
   });
 
