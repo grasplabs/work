@@ -12,10 +12,10 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 | `apps/docs` | SDK docs: how to build with Grasp, for people and the agent; ships with each release |
 | `apps/admin` | Grasp's admin, where staff manage every client (TanStack Start); production runs in grasp-os-ops |
 | `apps/router` | Stateless router: `*.<domain>` to each client's core; production runs in grasp-os-ops |
-| `packages/sdk` | `@grasp-os/sdk`: workflow SDK and screen hooks, the only API App code sees |
+| `packages/sdk` | `@grasp-os/sdk`: the server, page and workflow SDK, the only API App code sees |
 | `packages/runtime` | `@grasp-os/runtime`: what the SDK re-exports, and the hosts, pages and checks only platform code imports |
-| `packages/ui` | `@grasp-os/ui`: shadcn on Base UI, Tailwind v4, shared with App screens |
-| `packages/compiler` | `@grasp-os/compiler`: the screen compiler |
+| `packages/ui` | `@grasp-os/ui`: shadcn on Base UI, Tailwind v4, shared with App pages |
+| `packages/compiler` | `@grasp-os/compiler`: builds and checks App code and pages |
 | `packages/connectors/*` | Native MCP servers, loaded by connect |
 | `packages/connector-kit` | `@grasp-os/connector-kit`: how a native connector is written (manifest, tools, MCP server) |
 | `packages/shared` | `@grasp-os/shared`: types and Zod schemas |
@@ -80,8 +80,8 @@ Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issu
 
 - Every external call goes through connect; every model call through the model gateway in core.
 - Agents and Apps start with access to nothing; every resource needs an explicit permission.
-- Anything that runs on its own is a workflow. Screens never run in the background or register hooks.
-- Workflow code imports only `@grasp-os/sdk`, never the engine.
+- Anything that runs on its own is a workflow. Pages never run in the background or register hooks.
+- Workflow code imports only `@grasp-os/sdk`, never `@grasp-os/runtime`.
 - Only use platform APIs that also run on workerd. Platform services sit behind adapter interfaces so the on-prem profile can swap them.
 - EU jurisdiction is set when a resource is created (R2 `jurisdiction`, Durable Object `jurisdiction("eu")`, D1 location).
 - All React is compiled by the React Compiler, and the build fails on anything it can't compile. Don't write `useMemo`, `useCallback` or `memo` by hand; if the compiler rejects a component, fix the component. The one exception is a `@grasp-os/ui` component that uses a library the compiler itself lists as incompatible: opt out that component alone with `"use no memo"`, say why in a comment, list its file in the compiler's `kitOptOuts`, and turn off `react/incompatible-library` for that file alone. App code never opts out.
@@ -89,11 +89,11 @@ Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issu
 
 ## Design
 
-One design, from `@grasp-os/ui`, in `apps/web`, `apps/admin` and App screens. The theme (`packages/ui/src/styles.css`) is shadcn's: each value stands once, in `:root` and `.dark`, under shadcn's names, mapped to utilities in `@theme inline`. Add a token only for a meaning shadcn has no name for; a surface comes as an `x` / `x-foreground` pair, a signal (a status colour, a chart hue) as one token. Hovers are shadcn's (`hover:bg-x/80`), never a token of their own. Code that draws outside CSS (a canvas) reads the resolved token with `getComputedStyle`, never a copy of the palette.
+One design, from `@grasp-os/ui`, in `apps/web`, `apps/admin` and App pages. The theme (`packages/ui/src/styles.css`) is shadcn's: each value stands once, in `:root` and `.dark`, under shadcn's names, mapped to utilities in `@theme inline`. Add a token only for a meaning shadcn has no name for; a surface comes as an `x` / `x-foreground` pair, a signal (a status colour, a chart hue) as one token. Hovers are shadcn's (`hover:bg-x/80`), never a token of their own. Code that draws outside CSS (a canvas) reads the resolved token with `getComputedStyle`, never a copy of the palette.
 
 - **Colour**: tokens only. Lime (`highlight`, `Button variant="highlight"`) once a page, for the one action it is for. Amber (`status-attention`, `Badge variant="attention"`) for what needs someone; green (`status-agreed`, `variant="passed"`) for what is done. Red (`destructive`) for errors, a form's error or something that failed, and for actions that can't be undone.
 - **Type**: Geist (`font-sans`) for the product; Newsreader (`font-serif`) for page titles (`PageHeaderTitle`), the titles of dialogs, sheets and drawers, key figures (`Stat`) and what Grasp says (`type-display`).
-- **Components own their look.** A new look is a cva variant in the component's file in `@grasp-os/ui`. `@shadcn/lint` (`no-restyle`, `no-arbitrary-values`, `no-raw-colors`, `require-static-classes`) holds every page and App screen to layout classes on a component. Inside `packages/ui/src/components` only `no-restyle`, `no-arbitrary-values` and `require-static-classes` are off; `no-raw-colors`, `no-inline-styles` and `no-unknown-classes` hold there too.
+- **Components own their look.** A new look is a cva variant in the component's file in `@grasp-os/ui`. `@shadcn/lint` (`no-restyle`, `no-arbitrary-values`, `no-raw-colors`, `require-static-classes`) holds every page, App pages included, to layout classes on a component. Inside `packages/ui/src/components` only `no-restyle`, `no-arbitrary-values` and `require-static-classes` are off; `no-raw-colors`, `no-inline-styles` and `no-unknown-classes` hold there too.
 - **Painted fields** (`PaintedField`, always a painting and a pattern) stand only behind the one or two things on a screen that matter most; two side by side never share a painting or a pattern. Like any component it takes layout classes only: its padding and corners are its own props and variants.
 - **Motion**: on the house curve (`ease-house`, the default), each answer over within 300 ms; `grasp/no-slow-motion` holds it for Tailwind's `duration-*` classes and Motion's `transition` and `animate` durations, turned off only for what is seen once or rare, with the reason, in `vite.config.ts`. A stylesheet's own animations and keyframes are checked by review. Under reduced motion nothing slides, grows or glides.
 
@@ -105,7 +105,7 @@ The frontend (`apps/web`) speaks English, German, Dutch, Spanish and French thro
 - Whole sentences only, never glued fragments. Counts go through `plural`. Name placeholders after what they hold: a local `const date = …` gives translators `{date}`, not `{0}`.
 - Lists through `formatList` (`apps/web/src/format.ts`), not `join(", ")` inside a message.
 - Not translated: product and company names, people's names, what someone typed, core's own error messages, and text whose exact words are recorded (the Composio consent).
-- `@grasp-os/ui` stays free of Lingui (App screens and the admin share it): its few words are English props a page passes translated.
+- `@grasp-os/ui` stays free of Lingui (App pages and the admin share it): its few words are English props a page passes translated.
 - Every new message needs all four translations in the same pull request.
 
 ## Testing
