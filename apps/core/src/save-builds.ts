@@ -232,7 +232,7 @@ const inspectionProblem = (
  */
 const checkedDraftCode = async (
   env: Env,
-  { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
+  { app, files }: Pick<SavedSource, "app" | "files">,
   inspection: () => Promise<DraftInspection>
 ): Promise<{ ok: boolean; diagnostics?: Diagnostic[] }> => {
   // Whatever the draft holds under `.grasp/` is the host's to generate.
@@ -268,7 +268,6 @@ const checkedDraftCode = async (
   const { manifest } = inspected;
   const generated = await generateModules(
     manifest,
-    { resourceId: app, resourceVersion: version },
     await boundWorkflowsOf(env, app, manifest)
   );
   return await checkAppCode(env, { ...code, ...generated }, app, options);

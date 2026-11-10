@@ -48,11 +48,7 @@ const sealedServer = async (
   }
   return {
     ...files,
-    ...(await generateModules(
-      inspected.manifest,
-      { resourceId: app, resourceVersion: 1 },
-      []
-    )),
+    ...(await generateModules(inspected.manifest)),
   };
 };
 

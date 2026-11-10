@@ -3,7 +3,6 @@ import type {
   argsType,
   returnType,
 } from "./function-references.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { WorkflowDecisionReference } from "./workflow-decisions.ts";
 import type { WorkflowEventReference } from "./workflow-events.ts";
 import type { WorkflowWait } from "./workflow-runs.ts";
@@ -11,17 +10,18 @@ import type { WorkflowWait } from "./workflow-runs.ts";
 declare const waitType: unique symbol;
 
 /**
- * A generated reference to one of the workflows an App binds: the App
- * and release it belongs to, the binding's alias, the
- * contract it pins (its ID and fingerprint, over its args and returns;
- * each event and decision has its own), the descriptors of its args and
- * returns, its event references under `events` and its decisions' schemas
- * under `decisions`. Its types, the args a run takes,
- * what a completed run returns and the waits it can be held at, live
- * in phantom members only. It holds no binding and grants nothing: the
- * host resolves it against the release and binding in force. Its runs
- * are read and changed through its ordinary `queries` and `mutations`,
- * which `useWorkflow` is built on.
+ * A generated reference to one of the workflows an App declares:
+ * `workflows.<alias>`. Its name, and its events', decisions', queries'
+ * and mutations' references, each a name too; nothing else at run time.
+ * Its types (the args a run takes, what a completed run returns and the
+ * waits it can be held at) live in phantom members only, printed from
+ * the App's own declaration (`permission.workflow`). It holds no binding
+ * and grants nothing: the host resolves each name in the App's release
+ * and the binding in force. What `useWorkflow` needs beyond the names
+ * (each event's type and data, the listen tasks, each decision's value
+ * and context) comes with the page's build (`.grasp/functions.ts`). Its
+ * runs are read and changed through its ordinary `queries` and
+ * `mutations`, which `useWorkflow` is built on.
  */
 export interface WorkflowReference<
   Alias extends string = string,
@@ -33,25 +33,11 @@ export interface WorkflowReference<
   Queries = Readonly<Record<string, AnyFunctionReference>>,
   Mutations = Readonly<Record<string, AnyFunctionReference>>,
 > {
-  readonly kind: "workflow";
-  readonly visibility: "public";
-  readonly resourceId: string;
-  readonly resourceVersion: number;
-  readonly alias: Alias;
-  /** Its registered path, e.g. `workflows.summarizeNote`. */
-  readonly contractId: string;
-  /** The SHA-256 of its exact args and returns contract, in hex. */
-  readonly fingerprint: string;
-  readonly args: ValueDescriptor;
-  readonly returns: ValueDescriptor;
-  /** Its events, by their binding's alias in the workflow. */
+  /** Its name: `workflows.<alias>`. */
+  readonly name: `workflows.${Alias}`;
+  /** Its events, by their alias in the workflow. */
   readonly events: Events;
-  /**
-   * Its listen tasks, by path, with the aliases of the events each listens
-   * for: what an event wait's key may name, and with which event.
-   */
-  readonly listens: Readonly<Record<string, readonly string[]>>;
-  /** Its decisions, by their binding's alias in the workflow. */
+  /** Its decisions, by their alias in the workflow. */
   readonly decisions: Decisions;
   /**
    * Its ordinary queries: `run`, `canStart`, `runs` and `history`, and,
@@ -108,9 +94,9 @@ export type WorkflowWaitOf<Reference> =
     : never;
 
 /**
- * The most a generated workflow reference declares: events, listen tasks
- * and decisions, and the longest listen task's path; an event's type is
- * `isEventType`'s, as a run's inbox takes one. The generator refuses
+ * The most a workflow permission declares: events, listen tasks and
+ * decisions, and the longest listen task's path; an event's type is
+ * `isEventType`'s, as a run's inbox takes one. The declaration refuses
  * more, and the client reads no more, so what one makes the other reads.
  */
 export const workflowReferenceLimits = {

@@ -358,13 +358,7 @@ const workflowReference = async (app: string, alias: string) => {
   if (declared === undefined) {
     throw new Error(`No workflow ${alias}`);
   }
-  return await workflowReferenceOf(
-    {
-      resourceId: sealed.manifest.resourceId,
-      resourceVersion: sealed.manifest.resourceVersion,
-    },
-    declared
-  );
+  return workflowReferenceOf(declared);
 };
 
 /** A workflow reference, as `@server/_generated/api` generates it for a page. */

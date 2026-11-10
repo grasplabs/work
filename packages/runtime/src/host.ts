@@ -76,12 +76,13 @@ export type { CompactDescriptor } from "./value-compact.ts";
 // release answered, and the modules and references it generates from it.
 export { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 export { readAppManifest } from "./app-manifest.ts";
-export { declaredWorkflows } from "./bound-workflows.ts";
+export { declaredWorkflows, sameEventContract } from "./bound-workflows.ts";
 export type {
   BoundWorkflow,
   BoundWorkflowDecision,
   BoundWorkflowEvent,
   WorkflowBindingExtras,
+  WorkflowEventContract,
   WorkflowPin,
 } from "./bound-workflows.ts";
 export { connectorCatalogSource } from "./codegen-connector-catalog.ts";
@@ -90,7 +91,6 @@ export {
   contractFingerprint,
   contractFingerprints,
   contractsFormatVersion,
-  eventFingerprint,
   generatedPaths,
   workflowFingerprint,
 } from "./codegen-contracts.ts";

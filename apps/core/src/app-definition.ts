@@ -475,8 +475,26 @@ const accessSchema = z.strictObject({
 /** A name, a type or a permission, as the tools take it. */
 const text = z.string().min(1).max(20_000);
 
+/**
+ * An operation the definition tools make: one of the definition's own,
+ * but the workflow contract, which only the host sets, from the version
+ * a builder binds (`bindWorkflow`, read by `defineInDraft`).
+ */
+export type DraftOperation =
+  | Exclude<DefinitionOperation, { readonly op: "setWorkflowContract" }>
+  | {
+      /**
+       * Declares, for workflow permission `alias`, the events, listen
+       * tasks and decisions version `version` of workflow `workflow` has.
+       */
+      readonly op: "bindWorkflow";
+      readonly alias: string;
+      readonly workflow: string;
+      readonly version: number;
+    };
+
 /** The operations the definition tools make, as `define` takes them. */
-export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
+export const definitionOperationSchema: z.ZodType<DraftOperation> =
   z.discriminatedUnion("op", [
     z.strictObject({
       op: z.literal("addTable"),
@@ -533,6 +551,12 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
     }),
     z.strictObject({ op: z.literal("removePermission"), alias: text }),
     z.strictObject({
+      op: z.literal("bindWorkflow"),
+      alias: text,
+      workflow: text,
+      version: z.int().min(1),
+    }),
+    z.strictObject({
       op: z.literal("moveField"),
       table: text,
       field: text,
@@ -569,7 +593,7 @@ const singleDetail = (operation: unknown): Record<string, string | null> => {
     alias =
       /["'`](?<alias>[\w-]+)["'`]/u.exec(data.permission)?.groups?.alias ??
       data.permission.slice(0, 64);
-  } else if (data.op === "removePermission") {
+  } else if (data.op === "removePermission" || data.op === "bindWorkflow") {
     alias = data.alias.slice(0, 64);
   }
   return { op: data.op, table, alias };

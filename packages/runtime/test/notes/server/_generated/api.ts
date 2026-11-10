@@ -46,10 +46,10 @@ export const workflows: {
     Record<never, never>,
     null,
     | WorkflowEngineWait
-    | WorkflowEventWait<"do/0/confirm", WorkflowEventReference<"workflows.archiveNotes", "confirmed", "notes.archive.confirmed", { confirmed: boolean }>>
+    | WorkflowEventWait<"do/0/confirm", WorkflowEventReference<"workflows.archiveNotes", "confirmed", { confirmed: boolean }>>
     | WorkflowDecisionWait<"confirmArchive", null>,
     {
-      readonly confirmed: WorkflowEventReference<"workflows.archiveNotes", "confirmed", "notes.archive.confirmed", { confirmed: boolean }>;
+      readonly confirmed: WorkflowEventReference<"workflows.archiveNotes", "confirmed", { confirmed: boolean }>;
     },
     {
       readonly confirmArchive: WorkflowDecisionReference<"workflows.archiveNotes", "confirmArchive", null, null, { count: number }>;
@@ -59,7 +59,7 @@ export const workflows: {
       readonly decision: FunctionReference<"query", "public", { decisionId: string; runId: string }, WorkflowDecisionDetail<"confirmArchive", null, { count: number }> | null>;
       readonly decisions: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId?: string }, WorkflowQueryPage<WorkflowDecisionInboxItem<"confirmArchive", null>>>;
       readonly history: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId: string }, ({ hasMore: false; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "confirmed"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "confirmArchive"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "confirmed"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "confirmArchive"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: string; splitCursor?: string })>;
-      readonly run: FunctionReference<"query", "public", { runId: string }, { compensation?: ({ activity: "running" | "waiting" | "paused"; cause: "failure"; originalError: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean } }) | ({ activity: "running" | "waiting" | "paused"; cause: "cancellation" }); control: { canCancel: boolean; canPause: boolean; canResume: boolean; pendingControl: { kind: "pause" | "resume" | "cancel"; stage: "applying" } | null }; error?: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; finishedAt: number | null; manifestHash: string; result?: null; runId: string; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled"; waits: Array<({ deadline: number; id: string; key: string; kind: "timer"; openedAt: number; purpose: "sleep" | "retry"; taskId: string; title: string }) | ({ canSend: boolean; deadline: number | null; event: { alias: string; fingerprint: string; kind: "workflowEvent" }; id: string; key: string; kind: "event"; openedAt: number; taskId: string; title: string }) | ({ canRespond: boolean; deadline: number | null; id: string; key: string; kind: "decision"; openedAt: number; taskId: string; title: string }) | ({ deadline: number | null; id: string; key: string; kind: "blocked"; message: string; openedAt: number; reason: "policy" | "quota" | "uncertain"; taskId: string; title: string })>; workflowId: string; workflowVersion: number } | null>;
+      readonly run: FunctionReference<"query", "public", { runId: string }, { compensation?: ({ activity: "running" | "waiting" | "paused"; cause: "failure"; originalError: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean } }) | ({ activity: "running" | "waiting" | "paused"; cause: "cancellation" }); control: { canCancel: boolean; canPause: boolean; canResume: boolean; pendingControl: { kind: "pause" | "resume" | "cancel"; stage: "applying" } | null }; error?: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; finishedAt: number | null; manifestHash: string; result?: null; runId: string; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled"; waits: Array<({ deadline: number; id: string; key: string; kind: "timer"; openedAt: number; purpose: "sleep" | "retry"; taskId: string; title: string }) | ({ canSend: boolean; deadline: number | null; event: { alias: string; kind: "workflowEvent" }; id: string; key: string; kind: "event"; openedAt: number; taskId: string; title: string }) | ({ canRespond: boolean; deadline: number | null; id: string; key: string; kind: "decision"; openedAt: number; taskId: string; title: string }) | ({ deadline: number | null; id: string; key: string; kind: "blocked"; message: string; openedAt: number; reason: "policy" | "quota" | "uncertain"; taskId: string; title: string })>; workflowId: string; workflowVersion: number } | null>;
       readonly runs: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; status?: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled" }, ({ hasMore: false; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: string; splitCursor?: string })>;
     },
     {
@@ -75,13 +75,13 @@ export const workflows: {
     { noteId: Id<"notes">; style?: "short" | "long" },
     { summary: string; words: number },
     | WorkflowEngineWait
-    | WorkflowEventWait<"do/0/chooseStyle", WorkflowEventReference<"workflows.summarizeNote", "styleChosen", "notes.summary.style_chosen", { style: "short" | "long" }>>
-    | WorkflowEventWait<"do/2/awaitEdit", WorkflowEventReference<"workflows.summarizeNote", "noteEdited", "notes.note.edited", { noteId: Id<"notes">; title?: string }> | WorkflowEventReference<"workflows.summarizeNote", "styleChosen", "notes.summary.style_chosen", { style: "short" | "long" }>>
+    | WorkflowEventWait<"do/0/chooseStyle", WorkflowEventReference<"workflows.summarizeNote", "styleChosen", { style: "short" | "long" }>>
+    | WorkflowEventWait<"do/2/awaitEdit", WorkflowEventReference<"workflows.summarizeNote", "noteEdited", { noteId: Id<"notes">; title?: string }> | WorkflowEventReference<"workflows.summarizeNote", "styleChosen", { style: "short" | "long" }>>
     | WorkflowDecisionWait<"approveSummary", { comment: string; rating?: number }>
     | WorkflowDecisionWait<"chooseLength", "short" | "long">,
     {
-      readonly noteEdited: WorkflowEventReference<"workflows.summarizeNote", "noteEdited", "notes.note.edited", { noteId: Id<"notes">; title?: string }>;
-      readonly styleChosen: WorkflowEventReference<"workflows.summarizeNote", "styleChosen", "notes.summary.style_chosen", { style: "short" | "long" }>;
+      readonly noteEdited: WorkflowEventReference<"workflows.summarizeNote", "noteEdited", { noteId: Id<"notes">; title?: string }>;
+      readonly styleChosen: WorkflowEventReference<"workflows.summarizeNote", "styleChosen", { style: "short" | "long" }>;
     },
     {
       readonly approveSummary: WorkflowDecisionReference<"workflows.summarizeNote", "approveSummary", { comment: string; rating?: number }, { comment: string; rating?: number }, { noteId: Id<"notes">; summary: string }>;
@@ -92,7 +92,7 @@ export const workflows: {
       readonly decision: FunctionReference<"query", "public", { decisionId: string; runId: string }, WorkflowDecisionDetail<"approveSummary", { comment: string; rating?: number }, { noteId: Id<"notes">; summary: string }> | WorkflowDecisionDetail<"chooseLength", "short" | "long", { words: number }> | null>;
       readonly decisions: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId?: string }, WorkflowQueryPage<WorkflowDecisionInboxItem<"approveSummary", { comment: string; rating?: number }> | WorkflowDecisionInboxItem<"chooseLength", "short" | "long">>>;
       readonly history: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; runId: string }, ({ hasMore: false; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "noteEdited" | "styleChosen"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "approveSummary" | "chooseLength"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ at: number; id: string; kind: "lifecycle"; sequence: number; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled"; taskId: string | null }) | ({ activity: "running" | "waiting" | "paused"; at: number; cause: "failure" | "cancellation"; id: string; kind: "lifecycle"; sequence: number; status: "compensating"; taskId: string | null }) | ({ at: number; attempt: number; id: string; kind: "step"; sequence: number; state: "started" | "completed" | "retrying"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "step"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; deadline: number | null; id: string; kind: "wait"; sequence: number; state: "opened" | "closed"; taskId: string | null; waitId: string; waitKind: "timer" | "event" | "decision" | "blocked" }) | ({ at: number; attempt: number; id: string; kind: "compensation"; sequence: number; state: "started" | "completed"; taskId: string | null }) | ({ at: number; attempt: number; error: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; id: string; kind: "compensation"; sequence: number; state: "failed"; taskId: string | null }) | ({ at: number; eventId: string; id: string; key: "noteEdited" | "styleChosen"; kind: "event"; sequence: number; state: "accepted" | "consumed" | "expired"; taskId: string | null }) | ({ at: number; decisionId: string; id: string; key: "approveSummary" | "chooseLength"; kind: "decision"; sequence: number; state: "opened" | "answered" | "expired" | "cancelled"; taskId: string | null })>; nextCursor: string; splitCursor?: string })>;
-      readonly run: FunctionReference<"query", "public", { runId: string }, { compensation?: ({ activity: "running" | "waiting" | "paused"; cause: "failure"; originalError: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean } }) | ({ activity: "running" | "waiting" | "paused"; cause: "cancellation" }); control: { canCancel: boolean; canPause: boolean; canResume: boolean; pendingControl: { kind: "pause" | "resume" | "cancel"; stage: "applying" } | null }; error?: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; finishedAt: number | null; manifestHash: string; result?: { summary: string; words: number }; runId: string; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled"; waits: Array<({ deadline: number; id: string; key: string; kind: "timer"; openedAt: number; purpose: "sleep" | "retry"; taskId: string; title: string }) | ({ canSend: boolean; deadline: number | null; event: { alias: string; fingerprint: string; kind: "workflowEvent" }; id: string; key: string; kind: "event"; openedAt: number; taskId: string; title: string }) | ({ canRespond: boolean; deadline: number | null; id: string; key: string; kind: "decision"; openedAt: number; taskId: string; title: string }) | ({ deadline: number | null; id: string; key: string; kind: "blocked"; message: string; openedAt: number; reason: "policy" | "quota" | "uncertain"; taskId: string; title: string })>; workflowId: string; workflowVersion: number } | null>;
+      readonly run: FunctionReference<"query", "public", { runId: string }, { compensation?: ({ activity: "running" | "waiting" | "paused"; cause: "failure"; originalError: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean } }) | ({ activity: "running" | "waiting" | "paused"; cause: "cancellation" }); control: { canCancel: boolean; canPause: boolean; canResume: boolean; pendingControl: { kind: "pause" | "resume" | "cancel"; stage: "applying" } | null }; error?: { category: "source" | "contract" | "domain" | "authorization" | "operational" | "uncertain" | "safety"; code: string; message: string; requestId: string | null; retryable: boolean }; finishedAt: number | null; manifestHash: string; result?: { summary: string; words: number }; runId: string; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled"; waits: Array<({ deadline: number; id: string; key: string; kind: "timer"; openedAt: number; purpose: "sleep" | "retry"; taskId: string; title: string }) | ({ canSend: boolean; deadline: number | null; event: { alias: string; kind: "workflowEvent" }; id: string; key: string; kind: "event"; openedAt: number; taskId: string; title: string }) | ({ canRespond: boolean; deadline: number | null; id: string; key: string; kind: "decision"; openedAt: number; taskId: string; title: string }) | ({ deadline: number | null; id: string; key: string; kind: "blocked"; message: string; openedAt: number; reason: "policy" | "quota" | "uncertain"; taskId: string; title: string })>; workflowId: string; workflowVersion: number } | null>;
       readonly runs: FunctionReference<"query", "public", { pagination: { cursor?: string | null; endCursor?: string | null; pageSize?: number }; status?: "queued" | "running" | "waiting" | "paused" | "compensating" | "completed" | "failed" | "cancelled" }, ({ hasMore: false; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: null; splitCursor?: string }) | ({ hasMore: true; items: Array<({ canWatch: boolean; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled" }) | ({ activity: "running" | "waiting" | "paused"; canWatch: boolean; cause: "failure" | "cancellation"; finishedAt: number | null; run: { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }; startedAt: number | null; status: "compensating" })>; nextCursor: string; splitCursor?: string })>;
     },
     {
@@ -105,82 +105,15 @@ export const workflows: {
   >;
 } = frozen({
   archiveNotes: {
-    "alias": "archiveNotes",
-    "args": {
-      "descriptorVersion": 1,
-      "fields": {},
-      "kind": "object",
-      "nullable": false,
-      "presence": "required"
-    },
-    "contractId": "workflows.archiveNotes",
     "decisions": {
       "confirmArchive": {
-        "context": {
-          "descriptorVersion": 1,
-          "fields": {
-            "count": {
-              "descriptorVersion": 1,
-              "integer": true,
-              "kind": "number",
-              "nullable": false,
-              "presence": "required"
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "fingerprint": "aedc501451400797f34a3183c6e99745c352375049c2013b938303cd14cd1d19",
-        "key": "confirmArchive",
-        "kind": "workflowDecision",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
-        "valueSchema": {
-          "descriptor": {
-            "descriptorVersion": 1,
-            "kind": "null",
-            "nullable": false,
-            "presence": "required"
-          },
-          "kind": "descriptor"
-        },
-        "workflow": "workflows.archiveNotes",
-        "workflowFingerprint": "e96644cc53d5d5e535c4d5e4481bba8d901749ed35c3aec26b22a4e67daf75d0"
+        "name": "workflows.archiveNotes.decisions.confirmArchive"
       }
     },
     "events": {
       "confirmed": {
-        "alias": "confirmed",
-        "data": {
-          "descriptorVersion": 1,
-          "fields": {
-            "confirmed": {
-              "descriptorVersion": 1,
-              "kind": "boolean",
-              "nullable": false,
-              "presence": "required"
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "fingerprint": "fdb26a3795a4fe347deda6d7534204de24c9439dc544d5585a7e53d64e39509a",
-        "kind": "workflowEvent",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
-        "type": "notes.archive.confirmed",
-        "workflow": "workflows.archiveNotes",
-        "workflowFingerprint": "e96644cc53d5d5e535c4d5e4481bba8d901749ed35c3aec26b22a4e67daf75d0"
+        "name": "workflows.archiveNotes.events.confirmed"
       }
-    },
-    "fingerprint": "e96644cc53d5d5e535c4d5e4481bba8d901749ed35c3aec26b22a4e67daf75d0",
-    "kind": "workflow",
-    "listens": {
-      "do/0/confirm": [
-        "confirmed"
-      ]
     },
     "mutations": {
       "cancel": {
@@ -199,6 +132,7 @@ export const workflows: {
         "name": "workflows.archiveNotes.mutations.start"
       }
     },
+    "name": "workflows.archiveNotes",
     "queries": {
       "canStart": {
         "name": "workflows.archiveNotes.queries.canStart"
@@ -218,219 +152,24 @@ export const workflows: {
       "runs": {
         "name": "workflows.archiveNotes.queries.runs"
       }
-    },
-    "resourceId": "app_0000000000000000000000notes",
-    "resourceVersion": 1,
-    "returns": {
-      "descriptorVersion": 1,
-      "kind": "null",
-      "nullable": false,
-      "presence": "required"
-    },
-    "visibility": "public"
+    }
   },
   summarizeNote: {
-    "alias": "summarizeNote",
-    "args": {
-      "descriptorVersion": 1,
-      "fields": {
-        "noteId": {
-          "descriptorVersion": 1,
-          "kind": "id",
-          "nullable": false,
-          "presence": "required",
-          "tableName": "notes"
-        },
-        "style": {
-          "defaultValue": "short",
-          "descriptorVersion": 1,
-          "kind": "enum",
-          "nullable": false,
-          "presence": "default",
-          "values": [
-            "short",
-            "long"
-          ]
-        }
-      },
-      "kind": "object",
-      "nullable": false,
-      "presence": "required"
-    },
-    "contractId": "workflows.summarizeNote",
     "decisions": {
       "approveSummary": {
-        "context": {
-          "descriptorVersion": 1,
-          "fields": {
-            "noteId": {
-              "descriptorVersion": 1,
-              "kind": "id",
-              "nullable": false,
-              "presence": "required",
-              "tableName": "notes"
-            },
-            "summary": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "nullable": false,
-              "presence": "required",
-              "trim": false
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "fingerprint": "8f2b2e2a7c25ae8b95c9cec2465b59e44df0236e6555c2772bd708952db904f6",
-        "key": "approveSummary",
-        "kind": "workflowDecision",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
-        "valueSchema": {
-          "descriptor": {
-            "descriptorVersion": 1,
-            "fields": {
-              "comment": {
-                "descriptorVersion": 1,
-                "email": false,
-                "kind": "string",
-                "max": 500,
-                "nullable": false,
-                "presence": "required",
-                "trim": false
-              },
-              "rating": {
-                "descriptorVersion": 1,
-                "integer": true,
-                "kind": "number",
-                "max": 5,
-                "min": 1,
-                "nullable": false,
-                "presence": "optional"
-              }
-            },
-            "kind": "object",
-            "nullable": false,
-            "presence": "required"
-          },
-          "kind": "descriptor"
-        },
-        "workflow": "workflows.summarizeNote",
-        "workflowFingerprint": "de2dde8256ae579b13d6bcd6181b5cd1aee071b3140d0c5f5150bef6c87c6afd"
+        "name": "workflows.summarizeNote.decisions.approveSummary"
       },
       "chooseLength": {
-        "context": {
-          "descriptorVersion": 1,
-          "fields": {
-            "words": {
-              "descriptorVersion": 1,
-              "integer": true,
-              "kind": "number",
-              "nullable": false,
-              "presence": "required"
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "fingerprint": "11867c494798098dc3630fe3da2e414fad6676d406ac1308ed75c7046ac835f5",
-        "key": "chooseLength",
-        "kind": "workflowDecision",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
-        "valueSchema": {
-          "descriptor": {
-            "descriptorVersion": 1,
-            "kind": "enum",
-            "nullable": false,
-            "presence": "required",
-            "values": [
-              "short",
-              "long"
-            ]
-          },
-          "kind": "descriptor"
-        },
-        "workflow": "workflows.summarizeNote",
-        "workflowFingerprint": "de2dde8256ae579b13d6bcd6181b5cd1aee071b3140d0c5f5150bef6c87c6afd"
+        "name": "workflows.summarizeNote.decisions.chooseLength"
       }
     },
     "events": {
       "noteEdited": {
-        "alias": "noteEdited",
-        "data": {
-          "descriptorVersion": 1,
-          "fields": {
-            "noteId": {
-              "descriptorVersion": 1,
-              "kind": "id",
-              "nullable": false,
-              "presence": "required",
-              "tableName": "notes"
-            },
-            "title": {
-              "descriptorVersion": 1,
-              "email": false,
-              "kind": "string",
-              "nullable": false,
-              "presence": "optional",
-              "trim": false
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "fingerprint": "b9df6ffc5dc69bd4031002bed663b82ed39330843e97a04866699682365e2e01",
-        "kind": "workflowEvent",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
-        "type": "notes.note.edited",
-        "workflow": "workflows.summarizeNote",
-        "workflowFingerprint": "de2dde8256ae579b13d6bcd6181b5cd1aee071b3140d0c5f5150bef6c87c6afd"
+        "name": "workflows.summarizeNote.events.noteEdited"
       },
       "styleChosen": {
-        "alias": "styleChosen",
-        "data": {
-          "descriptorVersion": 1,
-          "fields": {
-            "style": {
-              "descriptorVersion": 1,
-              "kind": "enum",
-              "nullable": false,
-              "presence": "required",
-              "values": [
-                "short",
-                "long"
-              ]
-            }
-          },
-          "kind": "object",
-          "nullable": false,
-          "presence": "required"
-        },
-        "fingerprint": "db09de0dbacb5480dfa4d829e241bd167bd44652b9860d2d0d2dab4306afe7e7",
-        "kind": "workflowEvent",
-        "resourceId": "app_0000000000000000000000notes",
-        "resourceVersion": 1,
-        "type": "notes.summary.style_chosen",
-        "workflow": "workflows.summarizeNote",
-        "workflowFingerprint": "de2dde8256ae579b13d6bcd6181b5cd1aee071b3140d0c5f5150bef6c87c6afd"
+        "name": "workflows.summarizeNote.events.styleChosen"
       }
-    },
-    "fingerprint": "de2dde8256ae579b13d6bcd6181b5cd1aee071b3140d0c5f5150bef6c87c6afd",
-    "kind": "workflow",
-    "listens": {
-      "do/0/chooseStyle": [
-        "styleChosen"
-      ],
-      "do/2/awaitEdit": [
-        "noteEdited",
-        "styleChosen"
-      ]
     },
     "mutations": {
       "cancel": {
@@ -449,6 +188,7 @@ export const workflows: {
         "name": "workflows.summarizeNote.mutations.start"
       }
     },
+    "name": "workflows.summarizeNote",
     "queries": {
       "canStart": {
         "name": "workflows.summarizeNote.queries.canStart"
@@ -468,35 +208,9 @@ export const workflows: {
       "runs": {
         "name": "workflows.summarizeNote.queries.runs"
       }
-    },
-    "resourceId": "app_0000000000000000000000notes",
-    "resourceVersion": 1,
-    "returns": {
-      "descriptorVersion": 1,
-      "fields": {
-        "summary": {
-          "descriptorVersion": 1,
-          "email": false,
-          "kind": "string",
-          "nullable": false,
-          "presence": "required",
-          "trim": false
-        },
-        "words": {
-          "descriptorVersion": 1,
-          "integer": true,
-          "kind": "number",
-          "nullable": false,
-          "presence": "required"
-        }
-      },
-      "kind": "object",
-      "nullable": false,
-      "presence": "required"
-    },
-    "visibility": "public"
+    }
   },
-} as const);
+});
 
 export const permissions: {
   readonly files: FilesReference<"files", readonly ["upload", "read", "attach"]>;

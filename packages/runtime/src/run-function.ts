@@ -13,8 +13,8 @@ import { permissionsOf } from "./run-permission-clients.ts";
 import type { FunctionKind } from "./server-function.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue } from "./value-descriptor.ts";
-import { eventReferenceData } from "./workflow-events.ts";
-import type { EventReferenceData } from "./workflow-events.ts";
+import { eventReferenceName } from "./workflow-events.ts";
+import type { EventName } from "./workflow-events.ts";
 
 // How an App's server functions run where its code runs: the runner looks
 // a registered function up by path, builds the context of its kind over
@@ -80,9 +80,9 @@ const calledPath = (
   return path;
 };
 
-/** The generated event reference `event`, read as data, or a refusal. */
-const notifiedEvent = (event: unknown): EventReferenceData => {
-  const read = eventReferenceData(event);
+/** The event the generated reference `event` names, or a refusal. */
+const notifiedEvent = (event: unknown): EventName => {
+  const read = eventReferenceName(event);
   if (read === undefined) {
     throw Object.assign(
       new Error(
@@ -96,7 +96,7 @@ const notifiedEvent = (event: unknown): EventReferenceData => {
 
 /** A notification a mutation's handler staged, sent once it returns. */
 interface StagedNotification {
-  readonly event: EventReferenceData;
+  readonly event: EventName;
   readonly runId: unknown;
   readonly data: unknown;
 }
@@ -129,16 +129,13 @@ const notificationsOf = (channel: FunctionChannel) => {
     flush: async (): Promise<void> => {
       open = false;
       for (const { event, runId, data } of staged) {
-        // In order: each one's place among the commit's intents. The type
-        // and fingerprint pin the contract the reference was generated
-        // for, which the host checks against the release it runs.
+        // In order: each one's place among the commit's intents. The host
+        // resolves the event's alias in the release it runs.
         // oxlint-disable-next-line no-await-in-loop -- see above
         await channel.resource(event.workflow, "notify", [
           event.alias,
           runId,
           data,
-          event.type,
-          event.fingerprint,
         ]);
       }
     },

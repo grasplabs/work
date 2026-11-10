@@ -8,6 +8,21 @@ import { isPlainObject } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
 
+/** `descriptor`, data a manifest holds, as the schema it describes. */
+const schemaFrom = (descriptor: unknown) =>
+  schemaOf(readDescriptor(descriptor, 1, { nodes: 0 }));
+
+/** `record`'s entries each mapped by `map`; anything else as it is. */
+const mappedEntries = (
+  record: unknown,
+  map: (entry: unknown) => unknown
+): unknown =>
+  isPlainObject(record)
+    ? Object.fromEntries(
+        Object.entries(record).map(([key, entry]) => [key, map(entry)])
+      )
+    : record;
+
 /** Refuses `alias` for a permission whose alias is `fixed`. */
 const fixedAlias = (alias: unknown, fixed: string): void => {
   if (alias !== fixed) {
@@ -78,13 +93,28 @@ export const readPermissionDeclaration = (data: unknown): AppPermission => {
     return grasp;
   }
   if (kind === "workflows") {
-    const { args, returns, ...rest } = config;
-    // SAFETY: as above: `workflow` refuses any key but `args` and `returns`.
+    const { args, returns, events, decisions, ...rest } = config;
+    // SAFETY: as above: `workflow` refuses any key it doesn't take, and
+    // checks every event's and decision's shape again.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const workflowConfig = {
       ...rest,
-      args: schemaOf(readDescriptor(args, 1, { nodes: 0 })),
-      returns: schemaOf(readDescriptor(returns, 1, { nodes: 0 })),
+      args: schemaFrom(args),
+      returns: schemaFrom(returns),
+      events: mappedEntries(events, (event) =>
+        isPlainObject(event)
+          ? { ...event, data: schemaFrom(event.data) }
+          : event
+      ),
+      decisions: mappedEntries(decisions, (decision) =>
+        isPlainObject(decision)
+          ? {
+              ...decision,
+              value: schemaFrom(decision.value),
+              context: schemaFrom(decision.context),
+            }
+          : decision
+      ),
     } as never;
     return permission.workflow(alias, workflowConfig);
   }

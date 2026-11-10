@@ -38,12 +38,6 @@ import { compilerAssets, kitModule, typesModule } from "./src/kit.ts";
 import type { TypeCheckRequest } from "./src/type-check.ts";
 import type { CompileTarget } from "./src/worker.ts";
 
-/** The release identity the generated modules name: any will do. */
-const identity = {
-  resourceId: "app_heap0000000000000000000",
-  resourceVersion: 1,
-};
-
 /** A module's namespace, as far as its default export. */
 const defaultExport = z.looseObject({ default: z.unknown() });
 
@@ -133,10 +127,7 @@ const blueprintFiles = async (
     all[name] = {
       ...files,
       // oxlint-disable-next-line no-await-in-loop -- as above
-      ...(await generateModules(
-        inspectApp(registerApp(parts)).manifest,
-        identity
-      )),
+      ...(await generateModules(inspectApp(registerApp(parts)).manifest)),
     };
   }
   return all;

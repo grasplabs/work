@@ -2,7 +2,6 @@ import { canonicalText } from "@grasp-os/shared/json";
 
 import type { AppManifest, FunctionManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
-import type { ReleaseIdentity } from "./codegen-contracts.ts";
 import {
   banner,
   dataOf,
@@ -16,7 +15,7 @@ import {
 } from "./codegen-render.ts";
 import { workflowsExport } from "./codegen-workflows.ts";
 import { declaredPermissions } from "./manifest-permissions.ts";
-import { pageFunctionsOf } from "./page-functions.ts";
+import { pageFunctionsOf, pageWorkflowsOf } from "./page-functions.ts";
 import { workflowFunctions } from "./workflow-functions.ts";
 
 /** A tree of function references as a module's typed, frozen export. */
@@ -63,8 +62,10 @@ export const serverReferencesText = (manifest: AppManifest): string => {
 /**
  * `.grasp/functions.ts`: the release's public functions by name, as data
  * (page-functions.ts), built into its pages beside their route tree: the
- * App's own, and the queries and mutations of each workflow it binds
- * (workflow-functions.ts), which forms and grids take as any other.
+ * App's own, and the queries and mutations of each workflow it declares
+ * (workflow-functions.ts), which forms and grids take as any other; and
+ * each workflow's events, listen tasks and decisions, by alias, which
+ * `useWorkflow` and a decision's form read.
  */
 export const pageFunctionsText = (
   manifest: AppManifest,
@@ -83,18 +84,22 @@ export const pageFunctionsText = (
   }
   // Parsed from JSON text, not written as an object literal: a field a
   // descriptor names `__proto__` stays a field, never the prototype.
-  const data = JSON.stringify(canonicalText(pageFunctionsOf(operations)));
+  const data = JSON.stringify(
+    canonicalText({
+      functions: pageFunctionsOf(operations),
+      workflows: pageWorkflowsOf(workflows),
+    })
+  );
   return `${banner}export const functions: unknown = JSON.parse(${data});\n`;
 };
 /** `@server/_generated/api`: the public api and everything else a browser may hold. */
-export const referencesText = async (
+export const referencesText = (
   manifest: AppManifest,
-  identity: ReleaseIdentity,
   workflows: readonly BoundWorkflow[]
-): Promise<string> => {
+): string => {
   const parts: string[] = [
     referenceExport("api", operationsOf(manifest, "public")),
-    await workflowsExport(identity, workflows),
+    workflowsExport(workflows),
   ];
 
   const resources = [

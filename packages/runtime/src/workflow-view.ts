@@ -147,7 +147,6 @@ type RunWait =
       readonly event: {
         readonly kind: "workflowEvent";
         readonly alias: string;
-        readonly fingerprint: string;
       };
     });
 
@@ -254,8 +253,8 @@ const runView = (snapshot: RunSnapshot): WorkflowRunView<unknown> => {
 };
 
 /**
- * `waits` with each event wait's event the very reference `read` holds
- * under its alias: a run listening for an event its reference doesn't
+ * `waits` with each event wait's event the reference `read` holds under
+ * its alias: a run listening for an event the App's release doesn't
  * declare, or in a task that doesn't listen for it, is an invalid
  * snapshot, as is one held for a decision it doesn't declare; never a
  * wait shown with an event or a response type its key doesn't promise.
@@ -272,15 +271,15 @@ const resolvedWaits = (
       if (wait.kind !== "event") {
         return wait;
       }
-      const event = read.events.get(wait.event.alias);
+      const { alias } = wait.event;
+      const event = read.events.get(alias);
       if (
         event === undefined ||
-        event.fingerprint !== wait.event.fingerprint ||
-        read.listens.get(wait.key)?.has(event.alias) !== true
+        read.listens.get(wait.key)?.has(alias) !== true
       ) {
         throw invalidSnapshot();
       }
-      return { ...wait, event };
+      return { ...wait, event: event.reference };
     })
   );
 

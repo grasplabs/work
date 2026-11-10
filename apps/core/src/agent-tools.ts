@@ -776,6 +776,23 @@ const definitions = (known: Set<string>) => [
       await define(scope, app, { op: "addPermission", permission }),
   }),
   tool({
+    name: "bindWorkflow",
+    label: "Declare a workflow version's events",
+    api: "build",
+    description: `Declares, for the App's workflow permission \`alias\` (added first with \`addPermission\`), the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, exactly as published version \`version\` of workflow \`workflow\` has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them. Use it before binding a version whose events, decisions or listen tasks differ from what the App's current version declares: binding such a version is refused until a version of the App that declares them is current. Then propose the App, and once it is current, bind the version with \`env.workflowBuild.bind\`. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        alias: Type.String({ minLength: 1, maxLength: 64 }),
+        workflow: Type.String({ minLength: 1, maxLength: 256 }),
+        version: Type.Integer({ minimum: 1 }),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "bindWorkflow", ...input }),
+  }),
+  tool({
     name: "moveField",
     label: "Move a field",
     api: "build",

@@ -70,11 +70,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import {
-  generateModules,
-  readAppManifest,
-  readSealedWorkflows,
-} from "@grasp-os/runtime/host";
+import { generateModules, readAppManifest } from "@grasp-os/runtime/host";
 import {
   definitionPackageFormatVersion,
   definitionPackageSchema,
@@ -148,9 +144,6 @@ const projectDevDependencies = [
   "oxfmt",
   "ultracite",
 ] as const;
-
-/** The identity the generated references carry: no deployment's own. */
-const localIdentity = "local";
 
 /** Why packaging refused, naming what, never a file's contents. */
 export class PackagingError extends Error {
@@ -420,28 +413,13 @@ const readDefinition = (definition: unknown): DefinitionPackage => {
 
 /**
  * The App: its source as packaged, and its references generated anew from
- * its sealed registration, with no deployment's identity.
+ * its sealed registration, which names no deployment's workflow.
  */
 const planApp = async (
   project: Plan,
   app: DefinitionPackage["app"]
 ): Promise<void> => {
-  // What the seal resolved of each packaged workflow, read back as
-  // strictly as a release's own contracts are: no pin, so the references
-  // name no deployment's workflow.
-  const bound = readSealedWorkflows(
-    Object.fromEntries(
-      Object.entries(app.workflowContracts).map(([alias, contract]) => [
-        alias,
-        { alias, ...contract },
-      ])
-    )
-  );
-  const generated = await generateModules(
-    readAppManifest(app.manifest),
-    { resourceId: localIdentity, resourceVersion: app.version },
-    bound
-  );
+  const generated = await generateModules(readAppManifest(app.manifest));
   for (const [file, text] of Object.entries(generated)) {
     project.add(`app/${safePath(file, "generated")}`, text);
   }

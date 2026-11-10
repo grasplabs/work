@@ -19,8 +19,8 @@ import type {
   Streaming,
 } from "./function-references.ts";
 import { referenceName } from "./function-references.ts";
-import { readPageFunctions } from "./page-functions.ts";
-import type { PageFunctions } from "./page-functions.ts";
+import { readPageBuild } from "./page-functions.ts";
+import type { PageBuild } from "./page-functions.ts";
 import { Pagers } from "./paginated-query.ts";
 import { fences } from "./refusals.ts";
 import { Streams } from "./streams.ts";
@@ -186,11 +186,13 @@ export class GraspClient {
    */
   readonly #leaveGuards = new Set<object>();
   /**
-   * The release's public functions the page was built with, by name
-   * (page-functions.ts): what a form checks a submission with and a grid
-   * reads its columns from. Replaced as a preview's draft changes.
+   * The release's public functions the page was built with, by name, and
+   * its workflows, by alias (page-functions.ts): what a form checks a
+   * submission with, a grid reads its columns from and `useWorkflow`
+   * reads a workflow's events and decisions from. Replaced as a
+   * preview's draft changes.
    */
-  #functions: PageFunctions;
+  #build: PageBuild;
 
   /**
    * The App's files: downloading and deleting them through a files
@@ -233,7 +235,7 @@ export class GraspClient {
    */
   constructor(transport: ClientTransport, functions?: unknown) {
     this.#transport = transport;
-    this.#functions = readPageFunctions(functions);
+    this.#build = readPageBuild(functions);
     this.#fence = new AccessFence(transport, (refusal) => {
       // Nothing of anyone's is held now: whoever comes next joins no save
       // made before.
@@ -313,10 +315,13 @@ export class GraspClient {
       fileDeleted: (id) => client.#deletedFiles.has(id),
       functionOf: (reference) => {
         const name = referenceName(reference);
-        return name === undefined ? undefined : client.#functions.get(name);
+        return name === undefined
+          ? undefined
+          : client.#build.functions.get(name);
       },
+      workflowOf: (alias) => client.#build.workflows.get(alias),
       useFunctions: (functions) => {
-        client.#functions = readPageFunctions(functions);
+        client.#build = readPageBuild(functions);
       },
     });
   }

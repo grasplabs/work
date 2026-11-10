@@ -3,16 +3,28 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { ActionReference, MutationReference } from "../client-core.ts";
 import { useGraspForm } from "../form.ts";
 import type {
+  DecisionAnswer,
+  DecisionFormOptions,
   FormOptionsInput,
   GraspForm,
   FunctionFormOptions,
   SchemaFormOptions,
 } from "../form.ts";
 import type { FunctionArgs, FunctionReturn } from "../function-references.ts";
+import type {
+  AnyWorkflowDecisionReference,
+  DecisionValueOf,
+} from "../workflow-decisions.ts";
 import { useClient } from "./provider.ts";
 
-/** `useForm`'s two ways in, each typed by what it binds. */
+/** `useForm`'s three ways in, each typed by what it binds. */
 interface UseForm {
+  // First: a decision's reference is no function's, but would pass for
+  // one, whose kind is a type alone.
+  <Decision extends AnyWorkflowDecisionReference, Result>(
+    decision: Decision,
+    options: DecisionFormOptions<Decision, Result>
+  ): GraspForm<DecisionAnswer<DecisionValueOf<Decision>>, Result>;
   <Reference extends MutationReference | ActionReference>(
     reference: Reference,
     options: FunctionFormOptions<Reference>
@@ -26,7 +38,7 @@ interface UseForm {
 }
 
 /**
- * A form, one hook with two ways in:
+ * A form, one hook with three ways in:
  *
  * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
  *   public mutation or action, its input the fields, the argument
@@ -39,6 +51,10 @@ interface UseForm {
  *   changes.
  * - `useForm(schema, { defaultValues, onSubmit })`: a local form, checked
  *   by a native schema, `onSubmit` given its normalized output.
+ * - `useForm(workflows.<wf>.decisions.<key>, { defaultValues, onSubmit })`:
+ *   the form of an answer to that decision, `{ approved, value }`, its
+ *   value checked by the decision's value schema; `onSubmit` passes it to
+ *   the run's `respond`.
  *
  * Render it with `Form`, `TextField`, `TextareaField`, `FormError` and
  * `SubmitButton` from `@grasp-os/ui/form`, or custom controls through

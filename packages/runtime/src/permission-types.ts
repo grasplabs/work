@@ -1,4 +1,8 @@
 import type {
+  BoundWorkflowDecision,
+  BoundWorkflowEvent,
+} from "./bound-workflows.ts";
+import type {
   ConnectorAction,
   ConnectorContract,
 } from "./connector-contracts.ts";
@@ -175,6 +179,14 @@ export const peopleDeclaration: PeoplePermission = Object.freeze({
  * through the App's own `start` permission on that workflow, acting for
  * the person the call acts for, and checks both again as each start is
  * admitted. It never reaches the workflow engine.
+ *
+ * It is the contract the App relies on, as the App declares it: the args
+ * a start takes and what a completed run returns, and the events its
+ * pages and mutations send, the listen tasks waiting on them and the
+ * decisions people answer. Its references (`workflows.<alias>` in
+ * `@server/_generated/api`) are typed from it, and the host resolves what
+ * they name in it; binding a version whose events, decisions or listens
+ * differ is refused until the App declares them (bound-workflows.ts).
  */
 export interface WorkflowPermission<
   Alias extends string = string,
@@ -186,19 +198,37 @@ export interface WorkflowPermission<
    * checks a start's args against before they go anywhere.
    */
   readonly args: ValueDescriptor;
-  /**
-   * The descriptor of what a completed run returns. With the args, it is
-   * the contract the App's pages rely on: they get a reference to it
-   * pinned to that contract's fingerprint (`workflows.<alias>` in
-   * `@server/_generated/api`), and name it in what they ask of the host. The App's own
-   * starts are checked against the bound version's args as they are
-   * admitted, not against this contract.
-   */
+  /** The descriptor of what a completed run returns. */
   readonly returns: ValueDescriptor;
+  /** The events the App sends a run, by their alias in the workflow. */
+  readonly events: Readonly<Record<string, BoundWorkflowEvent>>;
+  /**
+   * The workflow's listen tasks, by path, with the aliases of the events
+   * each listens for, in name order.
+   */
+  readonly listens: Readonly<Record<string, readonly string[]>>;
+  /** The decisions people answer, by their alias in the workflow. */
+  readonly decisions: Readonly<Record<string, BoundWorkflowDecision>>;
   /** The args as a caller passes them, for types only: never set. */
   readonly "~args"?: Args;
   /** What a completed run returns, for types only: never set. */
   readonly "~returns"?: Returns;
+}
+
+/** One event a workflow permission declares. */
+export interface WorkflowEventConfig {
+  /** The CloudEvents type the workflow's event binding admits. */
+  readonly type: string;
+  /** The event's data. */
+  readonly data: AnySchema;
+}
+
+/** One decision a workflow permission declares. */
+export interface WorkflowDecisionConfig {
+  /** The value a response carries. */
+  readonly value: AnySchema;
+  /** The context a person reviews before answering. */
+  readonly context: AnySchema;
 }
 
 /** What a workflow permission says. */
@@ -210,6 +240,12 @@ export interface WorkflowConfig<
   readonly args: Args;
   /** What a completed run returns. */
   readonly returns: Returns;
+  /** The events the App sends a run, by alias; none when left out. */
+  readonly events?: Readonly<Record<string, WorkflowEventConfig>>;
+  /** The listen tasks, by path, with the events each listens for. */
+  readonly listens?: Readonly<Record<string, readonly string[]>>;
+  /** The decisions people answer, by alias; none when left out. */
+  readonly decisions?: Readonly<Record<string, WorkflowDecisionConfig>>;
 }
 
 /** Any permission an action reaches through `ctx`. */

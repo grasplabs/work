@@ -47,11 +47,9 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 //   deployment's resources, are only their hashes. What builders wrote
 //   into source is scanned for known secret formats, and the export is
 //   refused, naming the file, if one turns up: a scan, not a guarantee.
-//   The App's registration as sealed (`app.manifest`) and what its
-//   references type of each packaged workflow (`app.workflowContracts`:
-//   events, listens and decisions, never a pin, and none for a workflow
-//   the package doesn't carry) are no files, but are counted and scanned
-//   as files are.
+//   The App's registration as sealed (`app.manifest`, which declares each
+//   workflow's events, listens and decisions) is no file, but is counted
+//   and scanned as files are.
 // - Someone exports what they can't read: only the App's builders (its
 //   admins among them), never Grasp staff; and only workflows they build,
 //   as for a workflow's source. A workflow they don't is listed as
@@ -261,39 +259,6 @@ export const exportAppDefinition = async (
       workflows[alias] = await versions.pack(alias, pinned);
     }
   }
-  // What the App's references type of each packaged workflow, as sealed;
-  // never its pin, nor anything of one the package doesn't carry.
-  const workflowContracts: DefinitionPackage["app"]["workflowContracts"] = {};
-  for (const sealed of release.workflows) {
-    if (typeof workflows[sealed.alias] === "string") {
-      workflowContracts[sealed.alias] = {
-        events: Object.fromEntries(
-          Object.entries(sealed.events).map(([name, event]) => [
-            name,
-            { type: event.type, data: z.json().parse(event.data) },
-          ])
-        ),
-        listens: Object.fromEntries(
-          Object.entries(sealed.listens).map(([task, events]) => [
-            task,
-            [...events],
-          ])
-        ),
-        decisions: Object.fromEntries(
-          Object.entries(sealed.decisions).map(([name, decision]) => [
-            name,
-            {
-              value: z.json().parse(decision.value),
-              context: z.json().parse(decision.context),
-            },
-          ])
-        ),
-      };
-    }
-  }
-  // Counted and scanned like every file: their descriptors come from
-  // catalog contracts, which the files above don't hold.
-  budget(null, { "app.workflowContracts": canonicalText(workflowContracts) });
   const { store } = release;
   const definitionPackage = definitionPackageSchema.parse({
     formatVersion: definitionPackageFormatVersion,
@@ -325,7 +290,6 @@ export const exportAppDefinition = async (
             },
       bindings,
       workflows,
-      workflowContracts,
     },
     workflows: versions.packaged,
     unresolved: versions.unresolved,

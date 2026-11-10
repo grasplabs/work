@@ -10,7 +10,11 @@ import {
 } from "./definition.ts";
 import type { AppDefinition, DefinedField } from "./definition.ts";
 import { readPermissionDeclaration } from "./permission-read.ts";
-import type { AppPermission, PeoplePermission } from "./permission-types.ts";
+import type {
+  AppPermission,
+  PeoplePermission,
+  WorkflowPermission,
+} from "./permission-types.ts";
 import type { RowRule } from "./table-access.ts";
 import { isSemanticKind } from "./value-descriptor.ts";
 import type { SemanticKind, ValueDescriptor } from "./value-descriptor.ts";
@@ -216,6 +220,54 @@ const fieldsOf = (fields: readonly DefinedField[]): Code =>
 
 const permission = identifier("permission");
 
+/** `record`'s entries in name order, each made by `make`. */
+const sortedEntries = <Entry>(
+  record: Readonly<Record<string, Entry>>,
+  make: (entry: Entry) => Code
+): [string, Code][] =>
+  Object.keys(record)
+    .toSorted()
+    .flatMap((name) => {
+      const entry = record[name];
+      return entry === undefined ? [] : [[name, make(entry)]];
+    });
+
+/**
+ * A workflow permission's config: its args and returns, and the events,
+ * listen tasks and decisions it declares, each only when it has any.
+ */
+const workflowConfigOf = (declared: WorkflowPermission): Code => {
+  const config: [string, Code][] = [
+    ["args", validatorOf(declared.args)],
+    ["returns", validatorOf(declared.returns)],
+  ];
+  const events = sortedEntries(declared.events, (event) =>
+    objectOf([
+      ["type", string(event.type)],
+      ["data", validatorOf(event.data)],
+    ])
+  );
+  if (events.length > 0) {
+    config.push(["events", objectOf(events)]);
+  }
+  const listens = sortedEntries(declared.listens, (listened) =>
+    literal(listened)
+  );
+  if (listens.length > 0) {
+    config.push(["listens", objectOf(listens)]);
+  }
+  const decisions = sortedEntries(declared.decisions, (decision) =>
+    objectOf([
+      ["value", validatorOf(decision.value)],
+      ["context", validatorOf(decision.context)],
+    ])
+  );
+  if (decisions.length > 0) {
+    config.push(["decisions", objectOf(decisions)]);
+  }
+  return objectOf(config);
+};
+
 /** The `permission.*` call that declares `declared`. */
 const permissionOf = (
   declared: Exclude<AppPermission, PeoplePermission>
@@ -245,13 +297,7 @@ const permissionOf = (
       ]);
     }
     case "workflows": {
-      return call(permission, "workflow", [
-        alias,
-        objectOf([
-          ["args", validatorOf(declared.args)],
-          ["returns", validatorOf(declared.returns)],
-        ]),
-      ]);
+      return call(permission, "workflow", [alias, workflowConfigOf(declared)]);
     }
     case "grasp": {
       return call(permission, "grasp");

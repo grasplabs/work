@@ -222,14 +222,12 @@ export interface Release {
 }
 
 /** `contracts.json` as the host reads it back. */
+// It names no release: the release's manifest names it by its hash.
 const contractsSchema = z.strictObject({
   formatVersion: z.literal(contractsFormatVersion),
-  resourceId: z.string(),
-  resourceVersion: z.int(),
   manifest: z.unknown(),
   fingerprints: z.record(z.string(), z.string()),
   workflows: z.record(z.string(), z.unknown()),
-  workflowFingerprints: z.record(z.string(), z.string()),
 });
 
 /** What `contracts` (a release's `contracts.json`) seal of its workflows. */
@@ -412,8 +410,6 @@ const verifiedRelease = async (
     ({ fingerprints } = contracts);
     workflows = readSealedWorkflows(contracts.workflows);
     if (
-      contracts.resourceId !== manifest.resourceId ||
-      contracts.resourceVersion !== manifest.resourceVersion ||
       canonicalText(await contractFingerprints(app)) !==
         canonicalText(fingerprints) ||
       (await schemaHash(app.schema)) !== manifest.schemaHash ||
@@ -1066,7 +1062,6 @@ const inspectForSeal = async (
   // it declares as the App binds them now, sealed with it.
   const generated = await generateModules(
     manifest,
-    { resourceId: key.app, resourceVersion: key.version },
     await boundWorkflowsOf(env, key.app, manifest)
   );
   // Type-checked with them, against the SDK's server side: nothing is

@@ -1,4 +1,3 @@
-import { eventFingerprint } from "@grasp-os/runtime/host";
 import type { BoundWorkflow } from "@grasp-os/runtime/host";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -132,8 +131,8 @@ export interface WaitContext {
   readonly decisionKeys: ReadonlySet<string>;
   /** Its listen tasks, by ID, with the aliases of the events each takes. */
   readonly listens: Readonly<Record<string, readonly string[]>>;
-  /** The release's events of the run's workflow: each alias's fingerprint. */
-  readonly events: ReadonlyMap<string, string>;
+  /** The aliases of the events the release declares for the run's workflow. */
+  readonly events: ReadonlySet<string>;
   /** Whether the person may send the run its events now. */
   readonly canSend: boolean;
   /**
@@ -225,19 +224,18 @@ const awaitedOf = (
   if (task.kind !== "listen") {
     return [];
   }
-  return (context.listens[id] ?? []).flatMap((alias, index) => {
-    const fingerprint = context.events.get(alias);
-    return fingerprint === undefined
-      ? []
-      : [
+  return (context.listens[id] ?? []).flatMap((alias, index) =>
+    context.events.has(alias)
+      ? [
           {
             ...fieldsOf(`wait-${wait.ordinal}-${index}`, id, id, id, wait),
             kind: "event",
-            event: { kind: "workflowEvent", alias, fingerprint },
+            event: { kind: "workflowEvent", alias },
             canSend: context.canSend,
           },
-        ];
-  });
+        ]
+      : []
+  );
 };
 
 /**
@@ -497,11 +495,6 @@ export const runWaits = async (
   if (pending === undefined || pending.length === 0) {
     return [];
   }
-  const fingerprints = await Promise.all(
-    Object.entries(declared.events).map(
-      async ([alias, event]) => [alias, await eventFingerprint(event)] as const
-    )
-  );
   const tasks = await sealedTasks(env, run);
   const keyed = pending.some((wait) => coreWaitStep.test(wait.name))
     ? await keyedTasks(env, run.id, tasks)
@@ -511,7 +504,7 @@ export const runWaits = async (
     ...(keyed === undefined ? {} : { keyed }),
     decisionKeys: new Set(Object.keys(declared.decisions)),
     listens: declared.listens,
-    events: new Map(fingerprints),
+    events: new Set(Object.keys(declared.events)),
     canSend,
   });
 };

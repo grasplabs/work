@@ -170,10 +170,7 @@ const generated = async (dir: string, files: Files): Promise<Files> => {
     migrations: [],
   } as Parameters<typeof registerApp>[0];
   const { manifest } = inspectApp(registerApp(parts));
-  return await generateModules(readAppManifest(JSON.stringify(manifest)), {
-    resourceId: "docs",
-    resourceVersion: 1,
-  });
+  return await generateModules(readAppManifest(JSON.stringify(manifest)));
 };
 
 /** The repo's TypeScript: 7, tsgo (this package has 6, for TypeDoc). */

@@ -7,9 +7,8 @@ import {
 import { seal } from "./descriptor-seal.ts";
 import { descriptorOf, fieldDescriptors } from "./sealed-descriptors.ts";
 import type { DescriptorDraft } from "./sealed-descriptors.ts";
-import { descriptorVersion, isPlainObject } from "./value-descriptor.ts";
+import { descriptorVersion } from "./value-descriptor.ts";
 import type { SemanticKind } from "./value-descriptor.ts";
-import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type {
@@ -20,12 +19,11 @@ import type {
   InferInput,
   MoneyValue,
   NumberSchema,
-  ObjectFields,
   ObjectSchema,
   ScheduleValue,
-  ShapeOf,
   SimpleSchema,
   StringSchema,
+  ValueShape,
 } from "./value-types.ts";
 
 // `v`: how an App states what a value is. A function's arguments and return,
@@ -63,16 +61,6 @@ export type {
   ValueResult,
   ValueSchema,
 } from "./value-descriptor.ts";
-
-/**
- * `field` as a schema: a descriptor schema read back from its descriptor,
- * checked as any stored descriptor is; anything else as it is, for
- * `fieldDescriptors` to accept or refuse.
- */
-const fieldSchema = (field: unknown): unknown =>
-  isPlainObject(field) && field.kind === "descriptor" && !("~standard" in field)
-    ? schemaOf(readDescriptor(field.descriptor, 1, { nodes: 0 }))
-    : field;
 
 /**
  * The schema of a descriptor, as the builder that asked for it types it.
@@ -148,27 +136,9 @@ export const v = Object.freeze({
   /** A finite number; `.integer()` for whole ones. */
   number: (): NumberSchema =>
     schema({ ...required, integer: false, kind: "number" }),
-  /**
-   * An object with exactly these fields. A field may be a generated
-   * descriptor schema, such as a decision's `valueSchema`.
-   */
-  object: <const Fields extends ObjectFields>(
-    shape: Fields
-  ): ObjectSchema<ShapeOf<Fields>> =>
-    schema({
-      ...required,
-      fields: fieldDescriptors(
-        isPlainObject(shape)
-          ? Object.fromEntries(
-              Object.entries(shape).map(([name, field]) => [
-                name,
-                fieldSchema(field),
-              ])
-            )
-          : shape
-      ),
-      kind: "object",
-    }),
+  /** An object with exactly these fields. */
+  object: <const Shape extends ValueShape>(shape: Shape): ObjectSchema<Shape> =>
+    schema({ ...required, fields: fieldDescriptors(shape), kind: "object" }),
   /** A person, by reference. */
   person: semantic<string>("person"),
   /** An object with any string keys, every value of one schema. */

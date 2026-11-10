@@ -272,7 +272,6 @@ const waitSchema = v.union(
     event: v.object({
       kind: v.literal("workflowEvent"),
       alias: v.string().min(1).max(64),
-      fingerprint: v.string().min(64).max(64),
     }),
     canSend: v.boolean(),
   }),

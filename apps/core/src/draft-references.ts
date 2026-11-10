@@ -122,13 +122,7 @@ const referencesOf = async (
 ): Promise<PageModules | undefined> =>
   source === undefined
     ? undefined
-    : pageModulesOf(
-        await generateModules(
-          source.manifest,
-          { resourceId: app, resourceVersion: version },
-          source.workflows
-        )
-      );
+    : pageModulesOf(await generateModules(source.manifest, source.workflows));
 
 /**
  * `files` with the references their pages import as `@server/_generated/api`, generated
