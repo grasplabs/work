@@ -1070,7 +1070,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
 
   it("refuses a test that runs a streaming action as one that answers once", async () => {
     // A streaming action runs only for a page following it (spec
-    // 10.7.6): a test principal's `action` answers once, so its type
+    // 10.7.6): a test identity's `action` answers once, so its type
     // refuses one, as the host does (`function.mode_mismatch`).
     const streamed = withFiles(notesFiles(), {
       "server/streams.ts": `import { v } from "@grasp-os/sdk";
@@ -1092,9 +1092,9 @@ export const progress = action({
     const running = (reference: string): TestApp =>
       withFiles(streamed, {
         "tests/helper.ts": `import type { api } from "@server/_generated/api";
-import type { TestPrincipal } from "@grasp-os/sdk/testing";
+import type { TestIdentity } from "@grasp-os/sdk/testing";
 
-export const run = async (principal: TestPrincipal, refs: typeof api, flag: boolean): Promise<number> =>
+export const run = async (principal: TestIdentity, refs: typeof api, flag: boolean): Promise<number> =>
   await principal.action(${reference}, {});
 `,
       });
