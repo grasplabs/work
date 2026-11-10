@@ -341,13 +341,14 @@ export interface Invocation {
    */
   readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
   /**
-   * The refused uses a live query's subscription kept already, by
-   * `refusalKey`, shared by its reads: each kept once a subscription,
-   * however often a write reads it again, and one a read meets for the
-   * first time (a flag a write set, a role the person lost) kept then.
-   * One already kept is passed over, and leaves the call's one entry
-   * (`keepEvidence`) to the next refusal it meets. None for any other
-   * call: each keeps its own.
+   * The refused uses a live query's subscription kept already, shared by
+   * its reads (`keepEvidence`): each kept once a version of the App
+   * (`refusalKey`), however often a write reads it again, and one a read
+   * meets for the first time (a flag a write set, a role the person lost,
+   * a version published) kept then. One kept already is passed over and
+   * leaves the call's one entry to the next refusal it meets; one whose
+   * keeping rejected is given back, for a later read to keep. None for
+   * any other call: each keeps its own.
    */
   readonly refusalsKept?: Set<string>;
   /**
@@ -2887,8 +2888,11 @@ export const useEvidenceWaitMs = 2000;
 /**
  * Keeps the evidence of a use refused at the host's admission
  * (`refusedUses`) as `fn`'s code asked it: the call's first, through
- * `Invocation.refusedUse`, before the refusal reaches App code. A failure
- * to keep it is logged; the refusal stands either way.
+ * `Invocation.refusedUse`, before the refusal reaches App code. For a
+ * live query, a refusal its subscription kept already in this version is
+ * passed over without taking the call's entry, and one whose keeping
+ * rejects is given back to it (`Invocation.refusalsKept`). A failure to
+ * keep it is logged; the refusal stands either way.
  */
 const keepEvidence = async (
   run: Run,
@@ -2914,7 +2918,9 @@ const keepEvidence = async (
     return;
   }
   // Taken before the write, so a read again meanwhile doesn't write it
-  // twice; given back if the write fails, so a later read keeps it.
+  // twice; given back if the write rejects, so a later read keeps it. A
+  // write that hangs keeps it: it goes on past the wait (`waitUntil`,
+  // app-functions.ts), and a read again would only write it twice.
   refusalsKept?.add(key);
   run.evidence.kept = true;
   const keeping = (async () => {

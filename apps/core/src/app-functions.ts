@@ -151,9 +151,11 @@ const writeUseRefusal = async (
  * the App's server code acting for `principal`, every field core's own.
  * The write is the request's own work until it is kept: the host waits for
  * it only so long (`useEvidenceWaitMs`), and one it stopped waiting for
- * still finishes rather than ending with the call. One that can't be kept
- * rejects, for the host to log (operations.ts, `keepEvidence`); the
- * refusal stands either way.
+ * still finishes rather than ending with the call. One core's database
+ * refuses goes straight to the log, and one the log refuses too is
+ * logged (`keepAuditEvent`); anything else that fails rejects, for the
+ * host to log (operations.ts, `keepEvidence`). The refusal stands either
+ * way.
  */
 const keptUseRefusals =
   (env: Env, context: UseRefusalContext) =>
