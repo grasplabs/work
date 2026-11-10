@@ -241,7 +241,7 @@ const aroundTrigger = async (
 /** A catalog contract of `kind` published by `admin`: its key. */
 const contract = async (
   admin: Identity,
-  kind: "connector" | "model"
+  kind: "connector" | "model" | "knowledge" | "files"
 ): Promise<string> => {
   const key = `${kind}-${unique()}`;
   await publishCatalogContract(

@@ -152,9 +152,9 @@ describe("checking a workflow", () => {
     });
   });
 
-  it("holds a call to a connection and its action", () => {
+  it("holds a call to one member, never none", () => {
     expect(codesOf(followedBy({ id: "neither", type: "call" }))).toStrictEqual([
-      "workflow.missing_property",
+      "workflow.call_kind",
     ]);
   });
 

@@ -245,7 +245,29 @@ const branchKeywords = new Set([
 ]);
 
 /** A schema error the validator reported, where it is. */
-type SchemaError = OutputUnit & { readonly pointer: string };
+type SchemaError = OutputUnit & {
+  readonly pointer: string;
+  /** Whether it is about a `call` step. */
+  readonly calls?: boolean;
+};
+
+/** The `type` of the value at `pointer` of `json`, if it has a string one. */
+const stepTypeAt = (json: unknown, pointer: string): string | undefined => {
+  let value = json;
+  for (const token of pointer.split("/").slice(1)) {
+    const key = token.replaceAll("~1", "/").replaceAll("~0", "~");
+    value =
+      typeof value === "object" && value !== null && Object.hasOwn(value, key)
+        ? Reflect.get(value, key)
+        : undefined;
+  }
+  return typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    typeof value.type === "string"
+    ? value.type
+    : undefined;
+};
 
 /** An `anyOf` branch, as its errors' keyword locations start. */
 const anyOfBranch =
@@ -550,7 +572,14 @@ const shapeProblems = (json: unknown): Problem[] => {
   const problems = new Map<string, Problem>();
   for (const error of meantErrors(validated.errors)) {
     if (!problems.has(error.pointer)) {
-      problems.set(error.pointer, schemaProblem(error));
+      problems.set(
+        error.pointer,
+        schemaProblem({
+          ...error,
+          // Which step's `oneOf` it is, by the step's own type.
+          calls: stepTypeAt(json, error.pointer) === "call",
+        })
+      );
     }
   }
   return [...problems.values()];

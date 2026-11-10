@@ -926,7 +926,7 @@ const bindingProblems = (
       problems.push(...eventTypeProblems(step, pointer, bindings, catalog));
       continue;
     }
-    if (step.type !== "call") {
+    if (step.type !== "call" || !("connection" in step)) {
       continue;
     }
     const binding = bindings[step.connection];
