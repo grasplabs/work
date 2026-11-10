@@ -1,0 +1,25 @@
+{
+  "name": "@grasp-os/embed",
+  "private": true,
+  "description": "The embedder: a Durable Object that runs an embedding model compiled to WebAssembly, text in, vector out",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./embedder": "./src/embedder.ts",
+    "./model-files": "./src/model-files.ts"
+  },
+  "scripts": {
+    "build:wasm": "./build.sh"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "workerd": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

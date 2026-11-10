@@ -1,0 +1,22 @@
+{
+  "tokenizer.bin": {
+    "sha256": "d633ef61176913eab725a8f7d973224f2958468f85617a09f246f3da735aa8c5",
+    "size": 8741
+  },
+  "encoder-float.bin": {
+    "sha256": "07a42c4cc256d754ef451e82241d23817e814d082e0ebb9e3e66ac5ed4ac5e7e",
+    "size": 485488
+  },
+  "tokens-float.bin": {
+    "sha256": "f81a1c6331ad7a4d48b851858b988cf39e3d7923f39c4fb9d5bcd0c1324cf66d",
+    "size": 133920
+  },
+  "encoder-int8.bin": {
+    "sha256": "34930212dc99ec9594a523e69397ea7236515a0049c79ce4f5b24c4b70d435bf",
+    "size": 187504
+  },
+  "tokens-int8.bin": {
+    "sha256": "f83630a0f5b1a4b65c4c0edbcff075f796577ec9af1acaf59518368350df61aa",
+    "size": 35596
+  }
+}

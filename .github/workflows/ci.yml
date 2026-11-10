@@ -352,14 +352,55 @@ jobs:
         with:
           check: true
 
+  # Proves the committed embed.wasm is its source's build, byte for byte:
+  # when packages/embed's Rust, its build or the module changed against the
+  # base (the merge commit's first parent), and on every full run, builds
+  # it again (packages/embed/build.sh, the toolchain rust-toolchain.toml
+  # pins) and fails unless embed.wasm and wasm-sha256.ts come out as
+  # committed. The build is reproducible (no dependencies, paths remapped),
+  # so a module built on a laptop matches. About a minute of Rust on a
+  # pull request that changes it; on the rest, a few seconds of git. On
+  # drafts too, beside static and generated. Part of the required `check`.
+  embed-wasm:
+    name: embed-wasm
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The merge commit and its first parent, the base it compares with.
+          fetch-depth: 2
+      - id: changed
+        run: |
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet HEAD^1 HEAD -- packages/embed/rust packages/embed/build.sh packages/embed/src/embed.wasm packages/embed/src/wasm-sha256.ts; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "embed.wasm and its source are main's: nothing to prove." >> "$GITHUB_STEP_SUMMARY"
+          fi
+        env:
+          EVENT: ${{ github.event_name }}
+      - if: steps.changed.outputs.changed == 'true'
+        run: |
+          packages/embed/build.sh
+          if ! git diff --exit-code -- packages/embed/src/embed.wasm packages/embed/src/wasm-sha256.ts; then
+            echo "::error::packages/embed/src/embed.wasm isn't the build of packages/embed/rust: run packages/embed/build.sh and commit what it writes"
+            exit 1
+          fi
+          echo "packages/embed/src/embed.wasm is this source's build, byte for byte: SHA-256 \`$(sha256sum packages/embed/src/embed.wasm | cut -d ' ' -f 1)\`." >> "$GITHUB_STEP_SUMMARY"
+
   # The one required check (.github/rulesets/main.json), for every job of
   # the run: a job added, split or removed leaves the ruleset as it is, and
   # no runner starts only to report a name the ruleset asks for. It runs
   # however they ended, and passes only if all of them passed: GitHub
   # counts a skipped required check as passing, so this job mustn't be
   # skipped when one of them failed, was cancelled or was skipped. One skip
-  # passes: on a draft, everything but static and generated (a draft
-  # can't be merged; marking it ready runs it all, and this check again).
+  # passes: on a draft, everything but static, generated and embed-wasm (a
+  # draft can't be merged; marking it ready runs it all, and this check
+  # again).
   check:
     name: check
     needs:
@@ -374,14 +415,15 @@ jobs:
         e2e-browsers,
         admin-e2e,
         oxc-wasm,
+        embed-wasm,
       ]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, generated: $GENERATED, test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, e2e-build: $E2E_BUILD, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
-          for fast in "static=$STATIC" "generated=$GENERATED"; do
+          echo "static: $STATIC, generated: $GENERATED, test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, e2e-build: $E2E_BUILD, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, embed-wasm: $EMBED_WASM, draft: $DRAFT, event: $EVENT"
+          for fast in "static=$STATIC" "generated=$GENERATED" "embed-wasm=$EMBED_WASM"; do
             if [ "${fast#*=}" != success ]; then
               echo "::error title=check::${fast%%=*} ended as ${fast#*=}; check passes only when it succeeds."
               exit 1
@@ -413,6 +455,7 @@ jobs:
           E2E_BROWSERS: ${{ needs.e2e-browsers.result }}
           ADMIN_E2E: ${{ needs.admin-e2e.result }}
           OXC_WASM: ${{ needs.oxc-wasm.result }}
+          EMBED_WASM: ${{ needs.embed-wasm.result }}
           DRAFT: ${{ github.event.pull_request.draft == true }}
           EVENT: ${{ github.event_name }}
 
