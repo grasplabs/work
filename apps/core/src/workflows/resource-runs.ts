@@ -1341,7 +1341,8 @@ const projectedOf = (
  * newer than the last the row took changes nothing, and an ended run never
  * changes again. Its end is audited with the change, once. A failed end
  * keeps the engine's error code (`failureCode`), and the task whose step
- * it failed at (`failedTask`), which outlive the engine's record of the
+ * it failed at (`failedTask`, read only for the end it projects), which
+ * outlive the engine's record of the
  * run.
  */
 export const projectResourceRun = async (
@@ -1349,7 +1350,7 @@ export const projectResourceRun = async (
   id: string,
   engine: EngineStatus,
   failureCode: string | null = null,
-  failedTask: string | null = null
+  failedTask?: () => Promise<string | null>
 ): Promise<void> => {
   const row = await runOf(env, id);
   if (row === undefined) {
@@ -1362,6 +1363,8 @@ export const projectResourceRun = async (
     return;
   }
   const { status, failure, compensating } = projectedOf(engine, failureCode);
+  const task =
+    status === "failed" && failedTask !== undefined ? await failedTask() : null;
   const ended = !unended.includes(status);
   const action = endActions[status];
   const db = drizzle(env.DB);
@@ -1380,7 +1383,7 @@ export const projectResourceRun = async (
         ...(status === "failed" && failure !== null
           ? { failureCode: failure }
           : {}),
-        ...(status === "failed" && failedTask !== null ? { failedTask } : {}),
+        ...(task === null ? {} : { failedTask: task }),
         ...(compensating === undefined ? {} : { compensation: compensating }),
       })
       .where(

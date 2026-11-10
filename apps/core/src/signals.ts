@@ -352,8 +352,8 @@ const mostFirst = (counts: ReadonlyMap<string, number>) =>
   [...counts].toSorted(([a, x], [b, y]) => y - x || a.localeCompare(b));
 
 /**
- * Steps failing most: runs that ended failed since `from`, by the task
- * they failed at (`failed_task`, empty for none), with their error codes,
+ * Steps failing most: runs that started and ended failed since `from`, by
+ * the task they failed at (`failed_task`, empty for none), with their error codes,
  * beside the runs of their workflow started in the window. Only the
  * task's ID and the error's code, never its message or what the run read.
  */
@@ -392,6 +392,9 @@ const failingSignals = async (
           and(
             eq(workflowResourceRuns.status, "failed"),
             gte(workflowResourceRuns.endedAt, from),
+            // Started in the window too, as the runs they're counted
+            // beside: never more failures than runs.
+            gte(workflowResourceRuns.createdAt, from),
             pastCursor(
               endedAt,
               workflowResourceRuns.id,

@@ -34,22 +34,31 @@ const coreRoundKey = new RegExp(
 );
 
 /**
- * The task of `tasks` (task steps by name) whose round or wait of core's
- * own step `name` is, by its key; none for any other step.
+ * The task step `name` is of: its own, by `tasks` (task steps by name), or,
+ * for a round or a wait of core's own, the task of the step it is keyed by
+ * (`waitKeyOf` of its name), followed through each such step it is a
+ * round of in turn (a call held inside a retry's round): `steps` is every
+ * step's name of the journal. None for a step of no task.
  */
-const roundTaskOf = async (
+const taskOfStep = async (
   name: string,
-  tasks: ReadonlyMap<string, string>
+  tasks: ReadonlyMap<string, string>,
+  steps: ReadonlySet<string>
 ): Promise<string | null> => {
-  const key = coreRoundKey.exec(name)?.groups?.key;
-  if (key === undefined) {
-    return null;
+  const byKey = new Map<string, string>();
+  for (const step of steps) {
+    // oxlint-disable-next-line no-await-in-loop -- a digest each
+    byKey.set(await waitKeyOf(step), step);
   }
-  for (const [step, task] of tasks) {
-    // oxlint-disable-next-line no-await-in-loop -- a digest each, few
-    if ((await waitKeyOf(step)) === key) {
+  let step: string | undefined = name;
+  // Each step at most once: a key leads only to an earlier step.
+  for (let hops = 0; step !== undefined && hops <= steps.size; hops += 1) {
+    const task = tasks.get(step);
+    if (task !== undefined) {
       return task;
     }
+    const key: string | undefined = coreRoundKey.exec(step)?.groups?.key;
+    step = key === undefined ? undefined : byKey.get(key);
   }
   return null;
 };
@@ -629,7 +638,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           latest.instanceId,
           engine,
           failureCode,
-          failure === undefined ? null : await this.#failedTask(pin, failure)
+          async () =>
+            failure === undefined ? null : await this.#failedTask(pin, failure)
         )
       : projectCandidateRun(this.env, latest.instanceId, engine, failureCode));
     // A page's pause or resume of it settles from where the engine has
@@ -655,7 +665,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   /**
    * The task whose step's failure ended the run, as its row keeps it
    * (`failed_task`): the last step in its own journal that failed with the
-   * very error the run ended with (`failure`), as its build's table of
+   * code the run ended with (`failure`), as its build's table of
    * tasks places it (`sealedStepOf`), or, for a round or a wait of core's
    * own (a retry, a held call timed out: host.ts), the task step it is of,
    * by its key. Read once, as the run ends failed. None when no step of a
@@ -685,8 +695,10 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       });
       return null;
     }
-    // The journal's task steps by name, and the last step that failed
-    // with the run's error: every page in one synchronous turn.
+    // The journal's steps, its task steps by name, and the last step that
+    // failed with the run's error, by its code (its message may come back
+    // cut): every page in one synchronous turn.
+    const names = new Set<string>();
     const tasks = new Map<string, string>();
     let failed: string | undefined;
     let after = 0;
@@ -702,23 +714,21 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           continue;
         }
         const { name } = record.step;
+        names.add(name);
         const placed = sealedStepOf(name, steps);
         if (placed !== undefined) {
           tasks.set(name, placed.task);
         }
         if (
           record.type === "step_errored" &&
-          record.error?.code === failure.code &&
-          record.error?.message === failure.message
+          record.error?.code === failure.code
         ) {
           failed = name;
         }
       }
       ({ more } = page);
     }
-    return failed === undefined
-      ? null
-      : (tasks.get(failed) ?? (await roundTaskOf(failed, tasks)));
+    return failed === undefined ? null : await taskOfStep(failed, tasks, names);
   }
 
   /**
