@@ -1,6 +1,6 @@
 // Vitest's sequencer for this repo (vite.config.ts): shards split by how
 // long each file takes (scripts/test-shards.ts, with the times in
-// scripts/test-durations.json), and in each shard a group's untimed
+// scripts/test-durations.json), and in each shard a project's untimed
 // and longest files first, so none starts last and holds its group up. Vitest's own split,
 // by a hash of each file's path, and its order, by file size on a runner
 // without a cache, knew neither.
@@ -11,7 +11,7 @@ import { BaseSequencer } from "vite-plus/test/node";
 import type { TestSpecification } from "vite-plus/test/node";
 
 import { durationsFile, parseDurations } from "./test-durations.ts";
-import { splitIntoShards, startsFirst } from "./test-shards.ts";
+import { byKey, splitIntoShards, startsFirst } from "./test-shards.ts";
 import type { ShardFile, TimedFile } from "./test-shards.ts";
 
 /** Seconds per file, `<project> <file>`, as the progress logs name them. */
@@ -71,11 +71,13 @@ export default class DurationSequencer extends BaseSequencer {
         (a, b) =>
           a.project.config.sequence.groupOrder -
             b.project.config.sequence.groupOrder ||
-          // Across the group's projects, not project by project: Vitest
-          // hands its workers the files in this order, so a long file of
-          // a project sorted last started only once every file before it
-          // had, and ran on alone (a 97 s build of the scripts' ended a
-          // shard 90 s after the admin's files, November 2026).
+          // Projects one after another, as Vitest's own order has them,
+          // and as the split counts them (scripts/test-shards.ts,
+          // `shardSeconds`). Longest first across a shard's projects
+          // started core's runtime beside the brain's files, and a brain
+          // test that takes under a second alone took 15 s and timed out
+          // (November 2026).
+          byKey(a.project.name, b.project.name) ||
           startsFirst(timed(a), timed(b))
       )
     );
