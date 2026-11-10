@@ -125,7 +125,7 @@ const insert = async (
       binding: null,
       contractId: "notes.create",
       contractVersion: 1,
-      operationKind: "mutation",
+      functionKind: "mutation",
     },
     key: [crypto.randomUUID()],
     inputHash: "c".repeat(64),
@@ -467,7 +467,7 @@ describe("conditions and ranges through the store", () => {
     await insert(
       fixture,
       "ada",
-      // The store keeps what it is handed: defaults are the operation's.
+      // The store keeps what it is handed: defaults are the function's.
       { title: "value", rank: 2, done: false },
       { title: "null", rank: null, done: false },
       { title: "missing", done: false },
@@ -678,7 +678,7 @@ describe("more owners, more tables", () => {
         binding: null,
         contractId: "people.create",
         contractVersion: 1,
-        operationKind: "mutation",
+        functionKind: "mutation",
       },
       key: [crypto.randomUUID()],
       inputHash: "c".repeat(64),

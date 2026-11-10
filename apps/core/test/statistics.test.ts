@@ -206,8 +206,8 @@ const callAs = async (
   input: Record<string, unknown>
 ): Promise<unknown> => {
   const sealed = await loadRelease(env, app, await currentVersion(app));
-  const operation = sealed.app.operations[path];
-  if (operation === undefined) {
+  const fn = sealed.app.functions[path];
+  if (fn === undefined) {
     throw new Error(`No ${path}`);
   }
   const answered = await callAppFunction(
@@ -215,7 +215,7 @@ const callAs = async (
     await callerOf(userId),
     app,
     JSON.stringify({
-      reference: { name: path, kind: operation.kind },
+      reference: { name: path, kind: fn.kind },
       args: input,
     })
   );

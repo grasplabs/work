@@ -24,7 +24,7 @@ import type {
 import type { App } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { jsonOf } from "@grasp-os/shared/operations";
+import { jsonOf } from "@grasp-os/shared/functions";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ReadScope } from "@grasp-os/shared/store-queries";

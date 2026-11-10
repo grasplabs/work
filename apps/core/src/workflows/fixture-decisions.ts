@@ -1,9 +1,9 @@
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, desc, eq, gt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -112,7 +112,7 @@ const decidersOf = async (
     .where(eq(appTestRuns.runId, runId))
     .get();
   if (row === undefined) {
-    throw operationErrors.create("function.cancelled");
+    throw functionErrors.create("function.cancelled");
   }
   const deciders = fixtureDecidersSchema.parse(JSON.parse(row.deciders));
   return Object.hasOwn(deciders, alias) ? (deciders[alias] ?? []) : [];
@@ -229,7 +229,7 @@ export const fixtureDecisionOutcome = async (
   }
   const row = await db.select().from(appTestDecisions).where(mine).get();
   if (row === undefined) {
-    throw operationErrors.create("function.cancelled");
+    throw functionErrors.create("function.cancelled");
   }
   if (
     (row.status === "approved" || row.status === "rejected") &&
@@ -262,7 +262,7 @@ export const fixtureDecisionDeadline = async (
     )
     .get();
   if (row === undefined) {
-    throw operationErrors.create("function.cancelled");
+    throw functionErrors.create("function.cancelled");
   }
   return row.expiresAt.getTime();
 };

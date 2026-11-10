@@ -79,7 +79,6 @@ export const pageTests = [
   "test/brain-app-recall.test.ts",
   "test/resource-connectors*.test.ts",
   "test/http-connections.test.ts",
-  "test/store-operations.test.ts",
   "test/sealed-workflow-starts*.test.ts",
   "test/definition-export.test.ts",
   "test/workflow-query-subscriptions.test.ts",

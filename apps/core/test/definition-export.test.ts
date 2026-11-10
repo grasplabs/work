@@ -190,7 +190,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         "server/_generated/internal.ts",
         "server/_generated/server.ts",
       ],
-      store: ["alias", "operationManifestHash", "schemaHash", "schemaVersion"],
+      store: ["alias", "functionManifestHash", "schemaHash", "schemaVersion"],
       workflow: ["bindings", "files", "provenance"],
       workflowProvenance: [
         "buildHash",

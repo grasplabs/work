@@ -20,11 +20,11 @@ import {
   releaseManifestSchema,
 } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -47,9 +47,9 @@ import { personOf } from "../src/connections.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
+import { hostFunctionCall } from "../src/function-host.ts";
+import type { HostedApp, Runner } from "../src/function-host.ts";
 import { createCollection } from "../src/knowledge/collection-rules.ts";
-import { callOperation } from "../src/operations.ts";
-import type { HostedApp, Runner } from "../src/operations.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
 import type { OutboxConsumer } from "../src/outbox-delivery.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -85,7 +85,7 @@ import { outcome, unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
 
 // Starting independent workflows from an App's server functions
-// (operations.ts, workflow-start-intents.ts): an action's
+// (function-host.ts, workflow-start-intents.ts): an action's
 // `ctx.workflows.<alias>.start` and a mutation's, staged with its commit,
 // from
 // their threat model. App code runs as the SDK's runner runs it, against
@@ -489,7 +489,7 @@ const fixture = async (waits = false): Promise<Fixture> => {
         storeId,
         schemaVersion: 1,
         schemaHash: zeros,
-        operationManifestHash: zeros,
+        functionManifestHash: zeros,
       },
       workflows: [],
     },
@@ -527,7 +527,7 @@ const call = async (
     /** The env the call's host reaches core through: core's own if unset. */
     runEnv?: Env;
   } = {}
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const invocation = await invocationFor(options.runEnv ?? env, fx.release, {
     by,
     requestId: crypto.randomUUID(),
@@ -535,7 +535,7 @@ const call = async (
     ...(options.agent === undefined ? {} : { agent: options.agent }),
   });
   const { gate } = options;
-  return await callOperation(
+  return await hostFunctionCall(
     options.app ?? hosted(),
     gate === undefined
       ? invocation
@@ -564,7 +564,7 @@ const field = (value: Json, key: string): Json | undefined =>
   isRecord(value) ? value[key] : undefined;
 
 /** What a call answered, or the code it failed with. */
-const answerOf = (result: OperationResult): unknown =>
+const answerOf = (result: FunctionResult): unknown =>
   result.ok ? result.value : result.error.code;
 
 interface Receipt {
@@ -1053,7 +1053,7 @@ describe("a mutation starting a workflow after it commits", () => {
         binding: null,
         contractId: "requests.submit",
         contractVersion: 1,
-        operationKind: "mutation" as const,
+        functionKind: "mutation" as const,
       },
       key: ["call", `fenced-${unique()}`],
       inputHash: zeros,
@@ -2041,7 +2041,7 @@ describe("what a start rechecks, and records", () => {
         }
       },
     };
-    let started: OperationResult;
+    let started: FunctionResult;
     try {
       started = await call(
         fx,
@@ -2152,7 +2152,7 @@ describe("what a start rechecks, and records", () => {
       dump: async () => await real.dump(),
       withSession: (constraint) => real.withSession(constraint),
     };
-    let started: OperationResult;
+    let started: FunctionResult;
     try {
       started = await call(
         fx,

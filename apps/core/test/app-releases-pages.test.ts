@@ -357,9 +357,9 @@ export const Route = createFileRoute("/")({ component: Notes });
     ],
     ["the schema", 'import schema from "../../server/schema.ts";'],
     ["the config", 'import notes from "../../grasp.config";'],
-    ["an operation", 'import { create } from "../../server/notes.ts";'],
+    ["a function", 'import { create } from "../../server/notes.ts";'],
     [
-      "an operation in a dotted folder",
+      "a function in a dotted folder",
       'import { create } from "../../server/v1.0/notes.ts";',
     ],
     [

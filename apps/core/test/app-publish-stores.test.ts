@@ -1,8 +1,8 @@
 import { definitionManifest } from "@grasp-os/runtime/definition";
 import { schemaHash } from "@grasp-os/runtime/host";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -94,7 +94,7 @@ export const hello = query({
 );
 
 /**
- * `emptyFiles` over a version of `notesFiles`: its operations replaced,
+ * `emptyFiles` over a version of `notesFiles`: its functions replaced,
  * the notes' file gone with the tables it reads.
  */
 const withoutNotes: TestChanges = changesOf(emptyFiles, {
@@ -117,14 +117,14 @@ const call = async (
   release: Release,
   path: string,
   input: Json
-): Promise<OperationResult> => {
-  const operation = release.app.operations[path];
+): Promise<FunctionResult> => {
+  const fn = release.app.functions[path];
   const { result } = await callAppFunction(
     env,
     by,
     release.manifest.resourceId,
     JSON.stringify({
-      reference: { name: path, kind: operation?.kind },
+      reference: { name: path, kind: fn?.kind },
       args: input,
     })
   );
@@ -666,7 +666,7 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
   it("are recorded once each, numbered, and bound by each version", async () => {
     const { owner, app } = await appWith(notesFiles());
     await publishVersion(env, owner, app, 1);
-    // The same schema and operations under another name: one definition.
+    // The same schema and functions under another name: one definition.
     await commitDefined(env, owner, app, notesFiles("Notes 2"), "Renamed");
     await publishVersion(env, owner, app, 2);
     // Another table: a second definition.
@@ -679,13 +679,13 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
     const definitions = await env.DB.prepare(
-      "SELECT version, schema_hash AS schemaHash, operation_manifest_hash AS operations, source_tree_hash AS tree FROM business_store_versions WHERE store_id = ? ORDER BY version"
+      "SELECT version, schema_hash AS schemaHash, operation_manifest_hash AS functions, source_tree_hash AS tree FROM business_store_versions WHERE store_id = ? ORDER BY version"
     )
       .bind(store)
       .all<{
         version: number;
         schemaHash: string;
-        operations: string;
+        functions: string;
         tree: string;
       }>();
     const bound = await env.DB.prepare(
@@ -702,13 +702,13 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
         {
           version: 1,
           schemaHash: first.store?.schemaHash,
-          operations: first.store?.operationManifestHash,
+          functions: first.store?.functionManifestHash,
           tree: first.manifest.sourceTreeHash,
         },
         {
           version: 2,
           schemaHash: third.store?.schemaHash,
-          operations: third.store?.operationManifestHash,
+          functions: third.store?.functionManifestHash,
           tree: third.manifest.sourceTreeHash,
         },
       ],

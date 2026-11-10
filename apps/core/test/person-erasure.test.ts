@@ -2086,7 +2086,7 @@ describe("erasing a person", () => {
             args: { reason: `${key} of ${userId}` },
           },
           key,
-          operation: "requests.send",
+          path: "requests.send",
           startedAt: Date.now(),
         })
       );

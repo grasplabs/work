@@ -979,8 +979,8 @@ export const startAppBinding = async (
 /**
  * That App `app`'s active binding of `alias` names exactly workflow
  * version `pin`, as SQL: what a page's run, and a run a mutation
- * notifies, are read through (page-workflows.ts,
- * workflow-notifications.ts).
+ * sends an event, are read through (page-workflows.ts,
+ * workflow-event-sends.ts).
  */
 export const bindingPinnedSql = (
   app: AppId,

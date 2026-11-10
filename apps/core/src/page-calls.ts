@@ -5,12 +5,12 @@ import {
   requestErrors,
 } from "@grasp-os/shared/errors";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
+import { functionErrors } from "@grasp-os/shared/functions";
+import type { AppErrorPayload } from "@grasp-os/shared/functions";
 import { readAtMost } from "@grasp-os/shared/http";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
-import type { AppErrorPayload } from "@grasp-os/shared/operations";
 import {
   appFunctionPath,
   jsonBytes,
@@ -420,7 +420,7 @@ const stillTheirs = async (
   }
   // Refuses, too, someone with no role in the App any more.
   if ((await accessOf(env, now, call.id)) !== access) {
-    throw operationErrors.create("function.access_changed");
+    throw functionErrors.create("function.access_changed");
   }
   await requireRuns(env, now, call, operation, stage);
   for (const version of versions) {
@@ -807,7 +807,7 @@ const streamRequestOf = (
   const call = readFunctionRequest(body);
   const key = idempotencyKeySchema.safeParse(call.idempotencyKey);
   if (!key.success || call.reference.kind !== "action") {
-    throw operationErrors.create("contract.invalid_request");
+    throw functionErrors.create("contract.invalid_request");
   }
   return { call, key: key.data };
 };
@@ -833,7 +833,7 @@ const appStreamResponse = async (
 ): Promise<Response> => {
   try {
     if (request.headers.has(pageVisitorHeader)) {
-      throw operationErrors.create("contract.invalid_request");
+      throw functionErrors.create("contract.invalid_request");
     }
     const admittedCall = await admitMember(
       request,

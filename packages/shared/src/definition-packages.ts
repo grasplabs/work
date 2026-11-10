@@ -18,7 +18,7 @@ import { catalogBindingKinds } from "./workflow-resources.ts";
  * refused, to be exported again, rather than read as this one: the
  * schema is strict, so another format's shape would read as no package.
  */
-export const definitionPackageFormatVersion = 7;
+export const definitionPackageFormatVersion = 8;
 
 /** The most workflow versions one package holds. */
 export const definitionPackageMaxWorkflows = 64;
@@ -113,7 +113,7 @@ export const definitionPackageSchema = z.strictObject({
         alias: aliasSchema,
         schemaVersion: z.int().min(1),
         schemaHash: sha256Schema,
-        operationManifestHash: sha256Schema,
+        functionManifestHash: sha256Schema,
       })
       .nullable(),
     /** Each resource the App declares, by alias: its kind. */

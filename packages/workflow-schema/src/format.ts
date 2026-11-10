@@ -1,7 +1,7 @@
 import { memberName } from "@grasp-os/runtime/host";
 import type { CompactDescriptor } from "@grasp-os/runtime/host";
 import { decidersPattern } from "@grasp-os/shared/decisions";
-import { operationPathMaxSegments } from "@grasp-os/shared/function-limits";
+import { functionPathMaxSegments } from "@grasp-os/shared/function-limits";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   maxWorkflowParams,
@@ -758,7 +758,7 @@ export const actionPattern =
  * letters, digits and `_`, so `__proto__` is never one. The hint
  * `ctx.apps.<alias>.<path>` reads by.
  */
-export const functionPathPattern = `^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*){1,${operationPathMaxSegments - 1}}$`;
+export const functionPathPattern = `^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*){1,${functionPathMaxSegments - 1}}$`;
 
 /**
  * The lists of steps a step of each type may hold, each by the path it is

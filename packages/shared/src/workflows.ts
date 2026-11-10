@@ -3,10 +3,10 @@ import { z } from "zod";
 
 import type { ProviderTrouble } from "./ai-providers.ts";
 import { defineErrorFamily } from "./errors.ts";
+import { isRetryableCode } from "./functions.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import type { AppId, RunId, WorkflowId, WorkflowResourceId } from "./ids.ts";
 import type { Json } from "./json.ts";
-import { isRetryableCode } from "./operations.ts";
 import { permissionActionSchema } from "./permissions.ts";
 import { platformLimits } from "./platform-limits.ts";
 import type { RunFilterStatus } from "./run-filter.ts";
@@ -397,7 +397,7 @@ export const runOfStepKey = (key: string): string | undefined => {
 /**
  * Codes of the failures trying again may fix, and can't make happen twice,
  * beside every platform code an App's function may answer that is worth
- * trying again unchanged (`isRetryableCode`, operations.ts): one list, so
+ * trying again unchanged (`isRetryableCode`, functions.ts): one list, so
  * a step retries what a caller of the function would. A connection's
  * server that took nothing (it turned the call away, or its native
  * connector said nothing was done); a call with the same idempotency key

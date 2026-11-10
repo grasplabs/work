@@ -555,8 +555,8 @@ const serverPath = (
  * Why a page may not import `specifier`, or undefined when it may: the
  * platform's own modules but the SDK's entries and `@grasp-os/ui`'s
  * (`platformImportError`), or the App's server code: a server
- * constructor, an internal reference, the schema, the registration or an
- * operation. Pages get the App's server only through the references the
+ * constructor, an internal reference, the schema, the registration or a
+ * function. Pages get the App's server only through the references the
  * host extracts from it, never its code.
  */
 export const pageImportError = (

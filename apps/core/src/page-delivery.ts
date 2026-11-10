@@ -86,7 +86,7 @@ const encoder = new TextEncoder();
  * App's version it was opened from, whose revocation stops it
  * (`standingOf`). It says what core served and to whom, never which code
  * answers: every call of the frame's is answered by the App's current
- * release (app-functions.ts, `publicOperationOf`), so a lease kept from
+ * release (app-functions.ts, `publicFunctionOf`), so a lease kept from
  * an older version reaches only the current code. The same hash can be a
  * page of several versions, so the version is signed with it, never
  * read from the frame.

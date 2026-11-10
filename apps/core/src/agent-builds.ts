@@ -22,9 +22,9 @@ import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { DefinitionPlan } from "@grasp-os/shared/data-model";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
+import { functionErrors } from "@grasp-os/shared/functions";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
 import type { ServerLog } from "@grasp-os/shared/pages";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -308,7 +308,7 @@ const functionCall = (
   if (parsed.data.ok) {
     return {
       ok: true,
-      // SAFETY: an operation's result is plain data, which RPC carries.
+      // SAFETY: a function's result is plain data, which RPC carries.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       answer: parsed.data.value as AppAnswer,
     };
@@ -1665,13 +1665,13 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         let kind: "query" | "mutation" | "action";
         try {
           run = await draftRunOf(this.env, by, id, chatId, workspaceId);
-          const operation = Object.hasOwn(run.release.app.operations, method)
-            ? run.release.app.operations[method]
+          const fn = Object.hasOwn(run.release.app.functions, method)
+            ? run.release.app.functions[method]
             : undefined;
-          if (operation === undefined || operation.visibility !== "public") {
-            throw operationErrors.create("function.not_found");
+          if (fn === undefined || fn.visibility !== "public") {
+            throw functionErrors.create("function.not_found");
           }
-          ({ kind } = operation);
+          ({ kind } = fn);
         } catch (error) {
           // The draft's to fix, as data: a path that names none of its
           // public functions, or code that doesn't seal (doesn't build

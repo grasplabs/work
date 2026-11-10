@@ -59,12 +59,12 @@ import { takesFile } from "./workflows/start-files.ts";
 // may reach is what it declares (its manifest), each binding approved for
 // that declaration: no code is read to say what it calls.
 
-/** The input of a bound workflow version's contract. */
-const boundContractSchema = z.object({ input: z.json() });
+/** The args of a bound workflow version's contract. */
+const boundContractSchema = z.object({ args: z.json() });
 
 /**
  * Whether any workflow version `proposed` of App `app` may bind once
- * current takes a file in its input, as that version's contract says:
+ * current takes a file in its args, as that version's contract says:
  * what its release seals, sealed or not (bound-workflows.ts,
  * `sealedWorkflowPins`), so a binding the version records counts as it
  * will bind, and what the App binds now.
@@ -135,7 +135,7 @@ const boundTakesFile = async (
         : boundContractSchema.safeParse(JSON.parse(row.contract));
     if (
       parsed?.success === true &&
-      takesFile(descriptorFromText(JSON.stringify(parsed.data.input)))
+      takesFile(descriptorFromText(JSON.stringify(parsed.data.args)))
     ) {
       return true;
     }

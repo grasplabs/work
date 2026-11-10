@@ -7,6 +7,7 @@ import { search } from "@grasp-os/brain/search";
 import { read } from "@grasp-os/brain/tools";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
+import { functionErrors } from "@grasp-os/shared/functions";
 import {
   chatIdSchema,
   collectionIdSchema,
@@ -16,7 +17,6 @@ import {
 import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -250,7 +250,7 @@ const pinnedRead = async (
       return { found, pins };
     }
   }
-  throw operationErrors.create("resource.unavailable");
+  throw functionErrors.create("resource.unavailable");
 };
 
 /** One document of the bound collection, by its ID. */
@@ -262,7 +262,7 @@ const document = async (
 ): Promise<Json> => {
   const located = await locatedDocument(env, request.id);
   if (located?.collectionId !== bound.collectionId) {
-    throw operationErrors.create("resource.item_not_found");
+    throw functionErrors.create("resource.item_not_found");
   }
   try {
     const { found, pins } = await readAsDelegate(
@@ -280,7 +280,7 @@ const document = async (
     return { title: found.title, text: found.text };
   } catch (error) {
     if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
-      throw operationErrors.create("resource.item_not_found");
+      throw functionErrors.create("resource.item_not_found");
     }
     throw error;
   }
