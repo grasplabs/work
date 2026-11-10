@@ -4,15 +4,11 @@ import {
   generateModules,
   symbolicModules,
 } from "@grasp-os/runtime/host";
-import type {
-  AppManifest,
-  WorkflowBindingExtras,
-} from "@grasp-os/runtime/host";
+import type { AppManifest } from "@grasp-os/runtime/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 
 import { filesManifest } from "./app-inspection.ts";
-import { boundWorkflowsOf } from "./bound-workflows.ts";
 import type { BuildOptions } from "./pages.ts";
 
 // What an App's pages import as `@server/_generated/api` (spec 8, 10.1): the public
@@ -25,8 +21,9 @@ import type { BuildOptions } from "./pages.ts";
 // checks the arguments with that function's own validator
 // (app-functions.ts, `publicOperationOf`).
 //
-// Generation is deterministic: the same manifest and identity always make
-// the same bytes. This module makes them from files as they are, which is
+// Generation is deterministic: the same manifest always makes the same
+// bytes, whatever the App binds: a binding's pin is sealed only in
+// `.grasp/contracts.json`, which no page imports. This module makes them from files as they are, which is
 // what a save and a draft's check build (save-builds.ts): nothing of them
 // is sealed. A running version's pages get them from its release
 // (page-references.ts).
@@ -108,48 +105,24 @@ export const withReferencesText = async (
   return references === undefined ? files : { ...files, ...references };
 };
 
-/** What references are generated from: a manifest, and its bound workflows. */
-export interface ReferenceSource {
-  readonly manifest: AppManifest;
-  readonly workflows: readonly WorkflowBindingExtras[];
-}
-
-/** The references `source` generates for `app`'s `version`, if any. */
+/** The page modules `manifest` generates. */
 const referencesOf = async (
-  app: AppId,
-  version: number,
-  source: ReferenceSource | undefined
+  manifest: AppManifest
 ): Promise<PageModules | undefined> =>
-  source === undefined
-    ? undefined
-    : pageModulesOf(await generateModules(source.manifest, source.workflows));
+  pageModulesOf(await generateModules(manifest));
 
 /**
- * `files` with the references their pages import as `@server/_generated/api`, generated
- * for `app`'s `version` from what `sourceOf` reads (see
- * `withReferencesText`).
+ * `files` with the references their pages import as
+ * `@server/_generated/api`, generated from the manifest `manifestOf`
+ * reads (see `withReferencesText`).
  */
 export const withReferencesFrom = async (
-  app: AppId,
-  version: number,
   files: Record<string, string>,
-  sourceOf: () => Promise<ReferenceSource | undefined>
+  manifestOf: () => Promise<AppManifest>
 ): Promise<Record<string, string>> =>
   await withReferencesText(
     files,
-    async () => await referencesOf(app, version, await sourceOf())
-  );
-
-/** `withReferencesFrom`, for a source read already. */
-export const withReferencesOf = async (
-  app: AppId,
-  version: number,
-  files: Record<string, string>,
-  source: ReferenceSource | undefined
-): Promise<Record<string, string>> =>
-  await withReferencesText(
-    files,
-    async () => await referencesOf(app, version, source)
+    async () => await referencesOf(await manifestOf())
   );
 
 /**
@@ -190,11 +163,10 @@ export const inspectDraft = async (
 };
 
 /**
- * `files` as saved or drafted, for `app`'s `version` (a draft's base), with
- * the references their own server code generates, from `inspection`
- * (`inspectDraft`, run only when a page imports them): never read from
- * a sealed release, which may hold other code, with the workflows they
- * declare as the App binds them now.
+ * `files` as saved or drafted, for `app`, with the references their own
+ * server code generates, from `inspection` (`inspectDraft`, run only when
+ * a page imports them): never read from a sealed release, which may hold
+ * other code.
  *
  * While that server code doesn't build or register (an expected error),
  * its pages import the symbolic stand-ins inspection loads, typed
@@ -206,7 +178,6 @@ export const inspectDraft = async (
 export const withDraftReferences = async (
   env: Env,
   app: AppId,
-  version: number,
   files: Record<string, string>,
   /** Its build profile: `preview` for a chat's draft. */
   options?: BuildOptions,
@@ -218,10 +189,7 @@ export const withDraftReferences = async (
     const inspected = await inspection();
     if ("manifest" in inspected) {
       try {
-        return await referencesOf(app, version, {
-          manifest: inspected.manifest,
-          workflows: await boundWorkflowsOf(env, app, inspected.manifest),
-        });
+        return await referencesOf(inspected.manifest);
       } catch (error) {
         if (!isExpectedError(error)) {
           throw error;

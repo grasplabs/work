@@ -858,30 +858,6 @@ export const versionManifest = async (
 };
 
 /**
- * What `version` of `app`'s references are generated from: its sealed
- * release's manifest and what its seal resolved of its workflows when it
- * has one, so its pages get the very bytes the release sealed; otherwise
- * its inspected manifest and the workflows as the App binds them now, as a
- * seal would. Throws as {@link versionManifest} does.
- */
-export const versionReferenceSource = async (
-  env: Env,
-  app: AppId,
-  version: number,
-  files: Readonly<Record<string, string>>
-): Promise<{
-  manifest: AppManifest;
-  workflows: readonly WorkflowBindingExtras[];
-}> => {
-  if (await isSealed(env, app, version)) {
-    const release = await loadRelease(env, app, version);
-    return { manifest: release.app, workflows: release.workflows };
-  }
-  const manifest = await filesManifest(env, files, app);
-  return { manifest, workflows: await boundWorkflowsOf(env, app, manifest) };
-};
-
-/**
  * A sealed release's App manifest alone: its release manifest checked
  * against its hash, and its contracts artifact read and checked against
  * the release's hash of it, its other artifacts not read. Refused as

@@ -19,7 +19,6 @@ import { z } from "zod";
 
 import { generatedPaths } from "./app-definition.ts";
 import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
-import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { keepLints, readLints } from "./build-cache.ts";
 import { inspectDraft, withDraftReferences } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
@@ -175,7 +174,6 @@ export const buildOnSave = async (
       const { files: withReferences, standIn } = await withDraftReferences(
         env,
         source.app,
-        source.version,
         files,
         options,
         inspection
@@ -219,8 +217,9 @@ const inspectionProblem = (
  * `files`' server code type-checked as its seal type-checks it
  * (`checkAppCode`, with every gate), against the references the seal
  * generates: from what its registration answers, inspected in the sandbox
- * as a save inspects it for its pages (`filesManifest`), with the
- * workflows it declares as the App binds them now. So what a check passes,
+ * as a save inspects it for its pages (`filesManifest`). What the App
+ * binds changes no type: only the seal's `contracts.json` records a
+ * binding's pin. So what a check passes,
  * the seal's type check passes too. `inspection` is the one its pages'
  * references come from too, when its caller shares one (`inspectDraft`).
  *
@@ -266,10 +265,7 @@ const checkedDraftCode = async (
         };
   }
   const { manifest } = inspected;
-  const generated = await generateModules(
-    manifest,
-    await boundWorkflowsOf(env, app, manifest)
-  );
+  const generated = await generateModules(manifest);
   return await checkAppCode(env, { ...code, ...generated }, app, options);
 };
 

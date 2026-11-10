@@ -2,24 +2,19 @@ import { isPageFile } from "@grasp-os/compiler";
 import type { AppId } from "@grasp-os/shared/ids";
 import { pageErrors } from "@grasp-os/shared/pages";
 
-import {
-  isSealed,
-  sealedPage,
-  versionReferenceSource,
-} from "./app-releases.ts";
+import { isSealed, sealedPage, versionManifest } from "./app-releases.ts";
 import { withReferencesFrom } from "./draft-references.ts";
 import { versionPages } from "./pages.ts";
 import type { BuiltPage } from "./pages.ts";
 
 // The `@server/_generated/api` references a version's pages import (draft-references.ts
 // says what they are). A version's pages get the very bytes its release
-// seals (`sealRelease` generates them from the same manifest, identity and
-// bound workflows), sealed or not yet: a sealed version's manifest and
-// bound workflows are read back from its release, so a binding changed
-// since changes nothing; an unsealed one's come from inspecting its code
-// and reading the App's bindings as sealing would
-// (`versionReferenceSource`). The references become part of the
-// page's built code, so the hash an admin approves covers them.
+// seals (`sealRelease` generates them from the same manifest), sealed or
+// not yet: a sealed version's manifest is read back from its release, an
+// unsealed one's from inspecting its code as sealing would
+// (`versionManifest`). What the App binds is no part of them. The
+// references become part of the page's built code, so the hash an admin
+// approves covers them.
 
 /**
  * `files` (version `version` of `app`), with the references its pages
@@ -33,10 +28,8 @@ export const withPageReferences = async (
   files: Record<string, string>
 ): Promise<Record<string, string>> =>
   await withReferencesFrom(
-    app,
-    version,
     files,
-    async () => await versionReferenceSource(env, app, version, files)
+    async () => await versionManifest(env, app, version, files)
   );
 
 /**

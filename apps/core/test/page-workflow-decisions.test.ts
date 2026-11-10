@@ -1648,7 +1648,6 @@ describe(
         const drafted = await withDraftReferences(
           env,
           fixture.app,
-          1,
           files(pageOf(key)).files
         );
         return await pageErrors(fixture, drafted.files);

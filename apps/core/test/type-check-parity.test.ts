@@ -28,7 +28,7 @@ const blueprintApp = async (
     throw new Error(`No built-in blueprint ${id}`);
   }
   const app = appIdSchema.parse(crypto.randomUUID());
-  const { files, standIn } = await withDraftReferences(env, app, 1, {
+  const { files, standIn } = await withDraftReferences(env, app, {
     ...blueprint.files,
   });
   if (standIn) {
