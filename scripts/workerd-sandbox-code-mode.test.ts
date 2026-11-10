@@ -116,7 +116,7 @@ describe("a Code Mode run on the on-prem sandbox", () => {
   it("refuses an App call's request past what a request may be, as too large", async () => {
     const outcome = await run("tooLargeRequest");
     expect(outcome.status).toBe("threw");
-    expect(outcome.text).toContain("larger than an operation accepts");
+    expect(outcome.text).toContain("larger than a function accepts");
   });
 
   it("runs an App function a run calls on a process of the run's own reserve, in a pool of one", async () => {

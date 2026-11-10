@@ -55,11 +55,11 @@ export class GraspError extends Error {
 /** The client's own failures, by code: their message and category. */
 const clientErrors = {
   "contract.invalid_args": {
-    message: "The arguments don't fit the operation.",
+    message: "The arguments don't fit the function.",
     category: "contract",
   },
   "contract.input_too_large": {
-    message: "The arguments are larger than an operation accepts.",
+    message: "The arguments are larger than a function accepts.",
     category: "contract",
   },
   "contract.invalid_result": {
