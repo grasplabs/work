@@ -27,20 +27,36 @@ const packages = path.join(root, "..");
  */
 interface Watched {
   dir: string;
-  only?: string[];
+  /** Which of its files count, by name: all of them, recursively, without. */
+  only?: (file: string) => boolean;
 }
+
+/** One of `names`. */
+const oneOf =
+  (...names: string[]) =>
+  (file: string): boolean =>
+    names.includes(file);
+
+/** A module of the build's own: any but a test or this watcher. */
+const buildModule = (file: string): boolean =>
+  file.endsWith(".ts") && !file.endsWith(".test.ts") && file !== "watch.ts";
 
 /** What the kit and the compiler are built from, besides their dependencies. */
 const watched: Watched[] = [
   { dir: path.join(packages, "ui/src") },
-  { dir: path.join(packages, "ui"), only: ["components.json", "package.json"] },
+  {
+    dir: path.join(packages, "ui"),
+    only: oneOf("components.json", "package.json"),
+  },
   { dir: path.join(packages, "sdk/src") },
   { dir: path.join(packages, "shared/src") },
   { dir: path.join(root, "src") },
-  // Ultracite's config is worked out as the compiler is built.
-  { dir: root, only: ["build.ts", "ultracite-config.ts"] },
+  // The build's own modules, every one of them, so a module split out of
+  // build.ts (build-package-builder.ts) is watched as build.ts is; and
+  // Ultracite's config, worked out as the compiler is built.
+  { dir: root, only: buildModule },
   // And oxc.wasm read by its pin.
-  { dir: path.join(root, "oxc-wasm"), only: ["pin.json"] },
+  { dir: path.join(root, "oxc-wasm"), only: oneOf("pin.json") },
 ];
 
 /** How long after a watch fails it is started again. */
@@ -106,7 +122,7 @@ const watchOne = ({ dir, only }: Watched): void => {
     dir,
     { recursive: only === undefined },
     (_event, file) => {
-      if (only === undefined || (file !== null && only.includes(file))) {
+      if (only === undefined || (file !== null && only(file))) {
         changed();
       }
     }

@@ -23,9 +23,10 @@ import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import type { SandboxedEnv } from "../../src/sandboxed.ts";
 
 // A seal's inspection and a migration's transform on plain workerd
-// (scripts/workerd-sandbox.test.ts): the same `inspected` a seal runs and
-// `transformBatch` a migration runs, with `SANDBOX_HOST` bound to the
-// sandbox supervisor as on-prem binds it, and no Wrangler or Miniflare.
+// (scripts/workerd-sandbox-inspection.test.ts): the same `inspected` a
+// seal runs and `transformBatch` a migration runs, with `SANDBOX_HOST`
+// bound to the sandbox supervisor as on-prem binds it, and no Wrangler or
+// Miniflare.
 // Each App below is inspected or transformed on request; the test reads
 // how it ended.
 

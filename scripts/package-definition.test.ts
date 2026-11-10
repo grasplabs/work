@@ -1,59 +1,46 @@
-import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { once } from "node:events";
 import {
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
-import { inspectApp, symbolicModules } from "@grasp-os/sdk/host";
-import {
-  definitionPackageFormatVersion,
-  definitionPackageSchema,
-} from "@grasp-os/shared/definition-packages";
+import { definitionPackageFormatVersion } from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
-import { canonicalText } from "@grasp-os/shared/json";
 import { graspLockSchema } from "@grasp-os/shared/packages";
-import { checkWorkflow } from "@grasp-os/workflow-schema/check";
-import {
-  definitionFormat,
-  workflowSchemaUrl,
-} from "@grasp-os/workflow-schema/format";
-import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { parse } from "yaml";
 import { z } from "zod";
 
-import { hostModules } from "../apps/core/src/host-modules.ts";
-import { designCases, designFindings } from "../apps/core/test/design-cases.ts";
 import { steeringCases } from "../apps/core/test/steering-cases.ts";
+import { oxcWasmPin } from "../packages/compiler/oxc-wasm/wasm.ts";
 import {
-  oxcWasmModule,
-  oxcWasmPin,
-} from "../packages/compiler/oxc-wasm/wasm.ts";
-import {
-  serverEntryPath,
-  serverEntrySource,
-} from "../packages/compiler/src/app-code.ts";
-import { pageRuleNames } from "../packages/compiler/src/page-rules.ts";
-import { ultraciteOf } from "../packages/compiler/src/ultracite.ts";
-import { ultraciteConfig } from "../packages/compiler/ultracite-config.ts";
-import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
-import notes from "../packages/sdk/test/notes/.grasp/app.ts";
-import {
-  packageProject,
-  PackagingError,
-  readCatalog,
-} from "./package-definition-lib.ts";
+  ROOT,
+  hash,
+  notesFiles,
+  definitionOf,
+  lockedIntegrity,
+  locked,
+  lockOf,
+  made,
+  scratch,
+  packaged,
+  refusalOf,
+  packageJsonSchema,
+  exactOrPrerelease,
+  sha512,
+  kitIntegrity,
+  lockfileOf,
+  metFor,
+  installIn,
+  platformChecker,
+  platformParser,
+  projectCheck,
+  run,
+} from "./package-definition-fixtures.ts";
+import { PackagingError, readCatalog } from "./package-definition-lib.ts";
 import { projectLockfile } from "./package-definition-lockfile.ts";
 
 // Packaging a definition package into a standalone project
@@ -61,511 +48,65 @@ import { projectLockfile } from "./package-definition-lockfile.ts";
 // App as the product lays it out, and a workflow generated as a version
 // seals it; the project is checked as written, and every refusal leaves
 // nothing behind.
+//
+// The installs and the tidy check, many seconds each, are
+// package-definition-install, -locked-install and -tidy.test.ts, so they
+// run on different workers and shards; what they share is
+// package-definition-fixtures.ts.
 
-const ROOT = path.join(import.meta.dirname, "..");
-const notesDir = path.join(ROOT, "packages/sdk/test/notes");
-const hash = (digit: string): string => digit.repeat(64);
-
-/**
- * A module of the App's own that reads a workflow's event reference, which
- * types only when the references carry what the seal resolved.
- */
-const confirmations = `import { workflows } from "@server/_generated/api";
-
-export const { confirmed } = workflows.archiveNotes.events;
-`;
-
-/** A page, which has the DOM as its frame does. */
-const notesPage = `import { createFileRoute } from "@tanstack/react-router";
-
-const Notes = () => <p>{window.location.pathname}</p>;
-
-export const Route = createFileRoute("/")({ component: Notes });
-`;
-
-/** The Notes fixture's source, as an App version's tree holds it. */
-const notesFiles = (): Record<string, string> => ({
-  ...Object.fromEntries(
-    ["grasp.config.ts", "server/schema.ts", "server/notes.ts"].map((file) => [
-      file,
-      readFileSync(path.join(notesDir, file), "utf-8"),
-    ])
-  ),
-  "server/confirmations.ts": confirmations,
-  "src/routes/index.tsx": notesPage,
-});
-
-/**
- * The TypeScript a greeting workflow's version generates, from its
- * grasp-workflow/2 definition, as publication does.
- */
-const greetingSource = (() => {
-  const checked = checkWorkflow({
-    $schema: workflowSchemaUrl,
-    args: { kind: "object", fields: { who: { kind: "string" } } },
-    returns: { kind: "object", fields: { status: { kind: "string" } } },
-    result: { status: { $expr: '"Hello, " + args.who' } },
-    steps: [{ id: "pause", type: "wait", for: "1 minute" }],
-  });
-  if (!checked.ok) {
-    throw new Error("The greeting workflow isn't valid");
-  }
-  return generateWorkflow(checked.workflow).source;
-})();
-
-/** A greeting workflow's files, as its version seals them. */
-const greeting = (): Record<string, string> => ({
-  ".grasp/workflow.ts": greetingSource,
-  "code/double.ts":
-    "export const double = (value: number): number => value * 2;\n",
-});
-
-/** A definition package of the Notes App binding the greeting workflow. */
-const definitionOf = (
-  files: Record<string, string> = notesFiles()
-): DefinitionPackage => ({
-  formatVersion: definitionPackageFormatVersion,
-  app: {
-    version: 3,
-    provenance: {
-      manifestHash: hash("a"),
-      sourceTreeHash: hash("b"),
-      definitionHash: hash("f"),
-      contractHash: hash("c"),
-      schemaHash: hash("d"),
-      dependencyLockHash: hash("e"),
-      sdkVersion: "sdk-1",
-      uiVersion: "ui-1",
-      compilerVersion: "compiler-1",
-      generated: {},
-    },
-    files,
-    definition: { name: "Notes", permissions: [], tables: [], answers: [] },
-    manifest: canonicalText(inspectApp(notes).manifest),
-    store: null,
-    bindings: {},
-    workflows: {
-      archiveNotes: "workspace/greet/1.0.0",
-      summarizeNote: "workspace/greet/1.0.0",
-    },
-    // As core packages them: plain JSON, read back by the package schema.
-    workflowContracts:
-      definitionPackageSchema.shape.app.shape.workflowContracts.parse(
-        structuredClone(
-          Object.fromEntries(
-            notesWorkflows.map(({ alias, events, listens, decisions }) => [
-              alias,
-              { events, listens, decisions },
-            ])
-          )
-        )
-      ),
-  },
-  workflows: {
-    "workspace/greet/1.0.0": {
-      provenance: {
-        manifestHash: hash("1"),
-        definitionHash: hash("2"),
-        buildHash: hash("4"),
-        profile: definitionFormat,
-      },
-      files: greeting(),
-      bindings: {},
-      packages: null,
-    },
-  },
-  unresolved: [],
-});
-
-/** A locked package, as an App's lock records it. */
-/** The integrity `locked` gives every package. */
-const lockedIntegrity = `sha512-${"A".repeat(86)}==`;
-const locked = (
-  name: string,
-  version: string,
-  license: string | null,
-  dependencies: Record<string, string> = {}
-) => ({
-  name,
-  version,
-  integrity: lockedIntegrity,
-  license,
-  publishedAt: "2026-01-01T00:00:00.000Z",
-  dependencies,
-});
-const lockOf = (
-  direct: Record<string, string>,
-  packages: ReturnType<typeof locked>[]
-) =>
-  JSON.stringify({
-    lockfileVersion: 2,
-    registry: "https://registry.npmjs.org",
-    requested: Object.fromEntries(
-      Object.entries(direct).map(([name, version]) => [name, `^${version}`])
-    ),
-    direct,
-    entries: Object.keys(direct),
-    packages: Object.fromEntries(
-      packages.map((entry) => [`${entry.name}@${entry.version}`, entry])
-    ),
-  });
-
-const made: string[] = [];
-
-/** A new empty directory, and where a project would go inside it. */
-const scratch = (): { dir: string; out: string } => {
-  const dir = mkdtempSync(path.join(tmpdir(), "grasp-package-"));
-  made.push(dir);
-  return { dir, out: path.join(dir, "project") };
-};
-
-const packaged = async (definition: unknown, out: string) =>
-  await packageProject({ definition, out, repo: ROOT, commit: "f".repeat(40) });
-
-/** What packaging refused with, or "ok". */
-const refusalOf = async (promise: Promise<unknown>): Promise<string> => {
-  try {
-    await promise;
-    return "ok";
-  } catch (error) {
-    return error instanceof PackagingError ? "refused" : String(error);
-  }
-};
-
-const packageJsonSchema = z.object({
-  dependencies: z.record(z.string(), z.string()),
-  devDependencies: z.record(z.string(), z.string()),
-});
-
-const exactOrPrerelease =
-  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
-const sha512 = /^sha512-[A-Za-z0-9+/]{86}==$/u;
-
-/** The integrity the checkout's lockfile pins `key` (`name@version`) with. */
-const kitIntegrity = (key: string): string =>
-  z
-    .object({
-      packages: z.record(
-        z.string(),
-        z.object({ resolution: z.object({ integrity: z.string() }) })
-      ),
-    })
-    .parse(parse(readFileSync(path.join(ROOT, "pnpm-lock.yaml"), "utf-8")))
-    .packages[key]?.resolution.integrity ?? "";
-
-/** What a test reads of a project's pnpm-lock.yaml. */
-const lockfileOf = (out: string) =>
-  z
-    .object({
-      importers: z.record(
-        z.string(),
-        z.object({
-          dependencies: z
-            .record(z.string(), z.object({ version: z.string() }))
-            .optional(),
-        })
-      ),
-      packages: z.record(
-        z.string(),
-        z.object({ resolution: z.object({ integrity: z.string() }) })
-      ),
-      snapshots: z.record(
-        z.string(),
-        z.object({ dependencies: z.record(z.string(), z.string()).optional() })
-      ),
-    })
-    .parse(parse(readFileSync(path.join(out, "pnpm-lock.yaml"), "utf-8")));
-
-/** What meets `peer` for the kit's package `name`, at any version. */
-const metFor = (
-  lockfile: ReturnType<typeof lockfileOf>,
-  name: string,
-  peer: string
-): (string | undefined)[] =>
-  Object.entries(lockfile.snapshots)
-    .filter(([key]) => key.startsWith(`${name}@`))
-    .map(([, snapshot]) => snapshot.dependencies?.[peer]);
-
-/**
- * The store the checkout installed into, as its install recorded it. Named
- * to every install here: unnamed, pnpm takes a store on the project's own
- * file system, so a temporary directory on another file system than the
- * checkout's (as on one CI shard) installs from an empty one.
- */
-const checkoutStore = z
-  .object({ storeDir: z.string() })
-  .parse(
-    parse(readFileSync(path.join(ROOT, "node_modules/.modules.yaml"), "utf-8"))
-  ).storeDir;
-
-/**
- * The project's install as a developer runs it, by the checkout's own
- * package manager, from the store the checkout installed into; pnpm's
- * re-check of each pin against the registry's publish times is skipped,
- * as it needs the registry: the checkout made those pins.
- */
-const installIn = async (
-  out: string,
-  args: string[]
-): Promise<{ status: number | null; output: string }> => {
-  // Not a CI run, which pnpm freezes on its own: only the project's own
-  // settings may freeze an install here.
-  const env = {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([name]) => !name.toLowerCase().startsWith("npm_")
-      )
-    ),
-    CI: "false",
-  };
-  const passed = args.includes("--") ? args : [...args, "--"];
-  const child = spawn(
-    path.join(ROOT, "node_modules/.bin/vp"),
-    ["install", ...passed, "--trust-lockfile", `--store-dir=${checkoutStore}`],
-    { cwd: out, env }
-  );
-  let output = "";
-  child.stdout.on("data", (chunk: Buffer) => {
-    output += chunk.toString();
-  });
-  child.stderr.on("data", (chunk: Buffer) => {
-    output += chunk.toString();
-  });
-  const [status] = z
-    .tuple([z.number().nullable()])
-    .rest(z.unknown())
-    .parse(await once(child, "close"));
-  return { status, output };
-};
-
-/** The version of `name` installed at `dir` (from the repo's root). */
-const installedVersion = (dir: string, name: string): string =>
-  z
-    .object({ version: z.string() })
-    .parse(
-      JSON.parse(
-        readFileSync(
-          path.join(ROOT, dir, "node_modules", name, "package.json"),
-          "utf-8"
-        )
-      )
-    ).version;
-
-/** The checker the platform type-checks App code with: the compiler's tsrs. */
-const platformChecker = installedVersion("packages/compiler", "@tsrs/wasm");
-
-/**
- * Grasp's own lint and format of App code (ultracite.ts), on the oxc.wasm
- * its isolate runs.
- */
-const ultracite = ultraciteOf(await oxcWasmModule(), ultraciteConfig());
-const { lintCode } = ultracite;
-
-/** `files` as a write saves them: tidied, or as written where `tidy` keeps them. */
-const tidy = (files: Record<string, string>): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(ultracite.tidy(files)).map(([file, tidied]) => [
-      file,
-      tidied ?? files[file] ?? "",
-    ])
-  );
-
-/** The oxc-parser a project's check parses App files with: the oxc of oxc.wasm. */
-const platformParser = installedVersion("packages/compiler", "oxc-parser");
-
-const problemLine = /^(?<file>[^(:]+)(?:\(\d+,\d+\))?: error (?<code>\S+):/u;
-
-/**
- * The project's own check (`npm run typecheck`), as a developer runs it:
- * its status, and the codes of what it reported, by file.
- */
-const projectCheck = (
-  out: string
-): { status: number | null; problems: Record<string, string[]> } => {
-  const checked = spawnSync(process.execPath, ["grasp/check.ts"], {
-    cwd: out,
-    encoding: "utf-8",
-  });
-  const problems: Record<string, string[]> = {};
-  for (const line of checked.stderr.split("\n")) {
-    const groups = problemLine.exec(line)?.groups;
-    if (groups?.file !== undefined && groups.code !== undefined) {
-      problems[groups.file] = [...(problems[groups.file] ?? []), groups.code];
-    } else if (line.trim() !== "") {
-      problems["(output)"] = [...(problems["(output)"] ?? []), line];
-    }
-  }
-  return { status: checked.status, problems };
-};
-
-/**
- * The project's own script `name` with `args`, as `pnpm run` runs it: in
- * a shell, with the project's installed bins first on its path.
- */
-const run = (
-  out: string,
-  name: string,
-  ...args: string[]
-): { status: number | null; output: string; stdout: string } => {
-  const { scripts } = z
-    .object({ scripts: z.record(z.string(), z.string()) })
-    .parse(JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8")));
-  const script = scripts[name];
-  if (script === undefined) {
-    return { status: null, output: `no script ${name}`, stdout: "" };
-  }
-  const ran = spawnSync([script, ...args].join(" "), {
-    cwd: out,
-    encoding: "utf-8",
-    shell: true,
-    // Outside this test run, as a developer's shell has it: under Vite+
-    // (`VP_VERSION`), oxlint reads Vite+'s config in place of its own.
-    env: {
-      ...Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([variable]) => !/^(?:vp|npm)_/iu.test(variable)
-        )
-      ),
-      PATH: `${path.join(out, "node_modules/.bin")}${path.delimiter}${process.env.PATH ?? ""}`,
-    },
-  });
-  return {
-    status: ran.status,
-    output: `${ran.stdout}${ran.stderr}`,
-    stdout: ran.stdout,
-  };
-};
-
-/** A finding of `rulesOf` of the pages' own rules (the compiler's page-rules.ts). */
-const designFinding = (finding: string): boolean =>
-  pageRuleNames.has(finding.split(" ")[2] ?? "");
-
-/** A rule as oxlint's report codes it: `plugin(rule)`, `eslint(rule)`. */
-const reportCode = /^(?<plugin>[^(]+)\((?<rule>[^)]+)\)$/u;
-
-/**
- * What oxlint's JSON report found: each finding's file, severity and
- * rule, by the name Grasp's lint reports it by (`unicorn/no-array-reduce`).
- */
-const rulesOf = (report: string): string[] =>
-  z
-    .object({
-      diagnostics: z.array(
-        z.object({
-          severity: z.string(),
-          code: z.string(),
-          filename: z.string(),
-        })
-      ),
-    })
-    .parse(JSON.parse(report))
-    .diagnostics.map(({ severity, code, filename }) => {
-      const { plugin = "", rule = code } = reportCode.exec(code)?.groups ?? {};
-      const name = plugin === "eslint" ? rule : `${plugin}/${rule}`;
-      return `${filename} ${severity === "warning" ? "warning" : "error"} ${name}`;
-    })
-    .toSorted();
-
-/**
- * What Grasp's lint of App code (ultracite.ts `lintCode`) finds in
- * `files`, by path in the App, as `rulesOf` reads a project's under `app/`.
- */
-const graspRulesOf = (files: Record<string, string>): string[] =>
-  Object.entries(lintCode(files))
-    .flatMap(([file, found]) =>
-      found.map(({ severity, rule }) => `app/${file} ${severity} ${rule}`)
-    )
-    .toSorted();
-
-/**
- * A component with unused names: an import, a local, a trailing
- * parameter, and one only a type predicate reads (oxlint reports it; it
- * passes a name only a type query reads).
- */
-const unusedNames = `import { Badge } from "@grasp-os/ui/components/badge";
-
-const row = { id: 1 };
-export type Row = typeof row;
-
-export const total = (ctx: number, count: number, spare: number): number => {
-  const left = 1;
-  return count;
-};
-
-export const isNumber = (value: unknown, extra: unknown): extra is number =>
-  typeof value === "number";
-`;
-
-/** A built-in blueprint's App files, by path. */
-const blueprintFiles = (name: string): Record<string, string> => {
-  const dir = path.join(ROOT, "apps/core/blueprints", name, "files");
-  return Object.fromEntries(
-    readdirSync(dir, { recursive: true, withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .map((entry) => {
-        const file = path.join(entry.parentPath, entry.name);
-        return [
-          path.relative(dir, file).split(path.sep).join("/"),
-          readFileSync(file, "utf-8"),
-        ];
-      })
-  );
-};
-
-/**
- * A definition package of an App of `files` that binds no workflow but
- * packages the greeting's version, as core exports one: its files, and
- * the manifest its seal reads first, inspected as core inspects it
- * (app-inspection.ts): its server entry (`serverEntrySource`) over its
- * code, the host's modules and the stand-in references it lends
- * (`symbolicModules`).
- */
-const appDefinition = async (
-  files: Record<string, string>
-): Promise<DefinitionPackage> => {
-  const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprint-"));
-  made.push(dir);
-  const code = {
-    ...files,
-    ...symbolicModules(),
-    ...hostModules,
-    [serverEntryPath]: serverEntrySource(Object.keys(files)),
-    // `@server/_generated/<module>` resolves, as the compiler aliases it,
-    // through a package of that name linked to the folder.
-    "server/_generated/package.json": JSON.stringify({
-      type: "module",
-      exports: { "./*": "./*.ts" },
+/** The Notes App depending on `date-kit`, with `lock` as its lock. */
+const withLock = (lock: string) =>
+  definitionOf({
+    ...notesFiles(),
+    "package.json": JSON.stringify({
+      dependencies: { "date-kit": "^1.2.0" },
     }),
-  };
-  for (const [file, source] of Object.entries(code)) {
-    mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
-    writeFileSync(path.join(dir, file), source);
+    "grasp.lock.json": lock,
+  });
+
+/** The package with workflow `greet` sealing `packages`. */
+const withPackages = (
+  packages: DefinitionPackage["workflows"][string]["packages"],
+  files: Record<string, string> = notesFiles()
+): DefinitionPackage => {
+  const definition = definitionOf(files);
+  const greet = definition.workflows["workspace/greet/1.0.0"];
+  if (greet === undefined) {
+    throw new Error("No greeting workflow");
   }
-  writeFileSync(path.join(dir, "package.json"), '{ "type": "module" }');
-  mkdirSync(path.join(dir, "node_modules/@grasp-os"), { recursive: true });
-  mkdirSync(path.join(dir, "node_modules/@server"), { recursive: true });
-  symlinkSync(
-    path.join(ROOT, "packages/sdk"),
-    path.join(dir, "node_modules/@grasp-os/sdk")
-  );
-  symlinkSync(
-    path.join(dir, "server/_generated"),
-    path.join(dir, "node_modules/@server/_generated")
-  );
-  const loaded: unknown = await import(
-    pathToFileURL(path.join(dir, serverEntryPath)).href
-  );
-  const registered = z.object({ default: z.unknown() }).parse(loaded).default;
   return {
-    ...definitionOf(files),
-    app: {
-      ...definitionOf(files).app,
-      manifest: canonicalText(inspectApp(registered).manifest),
-      workflows: {},
-      workflowContracts: {},
-    },
+    ...definition,
+    workflows: { "workspace/greet/1.0.0": { ...greet, packages } },
   };
 };
+
+const sealed = (lock: string) => ({
+  graphHash: hash("9"),
+  entries: ["date-kit"],
+  lock: graspLockSchema.parse(JSON.parse(lock)),
+});
+
+const dateKit = (version: string) =>
+  lockOf({ "date-kit": version }, [
+    locked("date-kit", version, "MIT", { "tz-data": "2.0.1" }),
+    locked("tz-data", "2.0.1", "Apache-2.0"),
+  ]);
+
+/** The Notes App depending on whatever `lock` locks directly, at any version. */
+const withAnyOfLock = (lock: string) =>
+  definitionOf({
+    ...notesFiles(),
+    "package.json": JSON.stringify({
+      dependencies: Object.fromEntries(
+        Object.keys(
+          z
+            .object({ direct: z.record(z.string(), z.string()) })
+            .parse(JSON.parse(lock)).direct
+        ).map((name) => [name, "*"])
+      ),
+    }),
+    "grasp.lock.json": lock,
+  });
 
 describe(
   "packaging a definition as a standalone project",
@@ -851,90 +392,6 @@ describe(
       });
     });
 
-    it("installs from its lockfile alone, frozen and offline from what the checkout installed, and refuses a manifest that drifted from it", async () => {
-      const { out } = scratch();
-      await packaged(definitionOf(), out);
-      const install = await installIn(out, ["--frozen-lockfile", "--offline"]);
-      // A manifest that names what the lockfile doesn't is refused, not
-      // resolved, by a plain install: the project's own settings freeze
-      // its installs to its lockfile.
-      const manifest = z
-        .looseObject({ dependencies: z.record(z.string(), z.string()) })
-        .parse(
-          JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
-        );
-      writeFileSync(
-        path.join(out, "package.json"),
-        JSON.stringify({
-          ...manifest,
-          dependencies: { ...manifest.dependencies, "left-pad": "1.3.0" },
-        })
-      );
-      const drifted = await installIn(out, ["--offline"]);
-      expect({
-        install: install.status,
-        drifted: {
-          status: drifted.status === 0 ? "installed" : "refused",
-          why: drifted.output.includes("ERR_PNPM_OUTDATED_LOCKFILE"),
-        },
-      }).toStrictEqual({
-        install: 0,
-        drifted: { status: "refused", why: true },
-      });
-    });
-
-    it("refuses at install a tarball other than the one its lockfile pins", async () => {
-      const { out } = scratch();
-      await packaged(definitionOf(), out);
-      // The registry serves something else for one pinned package: here a
-      // registry of the test's own, and a pin to a tarball it doesn't
-      // have, so the install fetches it rather than reusing the store.
-      const served: string[] = [];
-      const registry = createServer((request, response) => {
-        served.push(request.url ?? "");
-        if (request.url?.endsWith(".tgz") === true) {
-          response.end("not the pinned tarball");
-        } else {
-          response.writeHead(404).end();
-        }
-      });
-      registry.listen(0, "127.0.0.1");
-      await once(registry, "listening");
-      const address = registry.address();
-      const port =
-        typeof address === "object" && address !== null ? address.port : 0;
-      const lockText = readFileSync(path.join(out, "pnpm-lock.yaml"), "utf-8");
-      const zodKey = Object.keys(lockfileOf(out).packages).find((key) =>
-        key.startsWith("zod@")
-      );
-      const tampered = lockText.replace(
-        new RegExp(
-          `("${zodKey}": \\{\\n\\s+"resolution": \\{\\n\\s+"integrity": ")[^"]+`,
-          "u"
-        ),
-        `$1sha512-${"A".repeat(86)}==`
-      );
-      writeFileSync(path.join(out, "pnpm-lock.yaml"), tampered);
-      const install = await installIn(out, [
-        "--frozen-lockfile",
-        "--",
-        `--registry=http://127.0.0.1:${port}/`,
-        "--fetch-retries=0",
-      ]);
-      registry.close();
-      expect({
-        tampered: tampered !== lockText,
-        status: install.status === 0 ? "installed" : "refused",
-        why: install.output.includes("ERR_PNPM_TARBALL_INTEGRITY"),
-        fetched: served.filter((url) => url.endsWith(".tgz")),
-      }).toStrictEqual({
-        tampered: true,
-        status: "refused",
-        why: true,
-        fetched: [`/zod/-/${zodKey?.replace("@", "-")}.tgz`],
-      });
-    });
-
     it("refuses a path that leaves its directory, collides once folded, a tool reads, or a file system can't hold, and writes nothing", async () => {
       const paths = [
         "../escape.ts",
@@ -986,14 +443,6 @@ describe(
     });
 
     it("pins the App's locked packages and their dependencies exactly, and refuses a lock that would replace what the project pins", async () => {
-      const withLock = (lock: string) =>
-        definitionOf({
-          ...notesFiles(),
-          "package.json": JSON.stringify({
-            dependencies: { "date-kit": "^1.2.0" },
-          }),
-          "grasp.lock.json": lock,
-        });
       const { out } = scratch();
       await packaged(
         withLock(
@@ -1103,31 +552,6 @@ describe(
     });
 
     it("pins a workflow version's approved packages exactly as its lock resolved them, and refuses one a project can't install", async () => {
-      /** The package with workflow `greet` sealing `packages`. */
-      const withPackages = (
-        packages: DefinitionPackage["workflows"][string]["packages"],
-        files: Record<string, string> = notesFiles()
-      ): DefinitionPackage => {
-        const definition = definitionOf(files);
-        const greet = definition.workflows["workspace/greet/1.0.0"];
-        if (greet === undefined) {
-          throw new Error("No greeting workflow");
-        }
-        return {
-          ...definition,
-          workflows: { "workspace/greet/1.0.0": { ...greet, packages } },
-        };
-      };
-      const sealed = (lock: string) => ({
-        graphHash: hash("9"),
-        entries: ["date-kit"],
-        lock: graspLockSchema.parse(JSON.parse(lock)),
-      });
-      const dateKit = (version: string) =>
-        lockOf({ "date-kit": version }, [
-          locked("date-kit", version, "MIT", { "tz-data": "2.0.1" }),
-          locked("tz-data", "2.0.1", "Apache-2.0"),
-        ]);
       const { out } = scratch();
       await packaged(withPackages(sealed(dateKit("1.2.0"))), out);
       const project = z
@@ -1242,23 +666,9 @@ describe(
     });
 
     it("meets the kit's peers only from the kit, never from an App's own versions", async () => {
-      const withLock = (lock: string) =>
-        definitionOf({
-          ...notesFiles(),
-          "package.json": JSON.stringify({
-            dependencies: Object.fromEntries(
-              Object.keys(
-                z
-                  .object({ direct: z.record(z.string(), z.string()) })
-                  .parse(JSON.parse(lock)).direct
-              ).map((name) => [name, "*"])
-            ),
-          }),
-          "grasp.lock.json": lock,
-        });
       const lockfileFor = async (lock: string) => {
         const { out } = scratch();
-        await packaged(withLock(lock), out);
+        await packaged(withAnyOfLock(lock), out);
         return lockfileOf(out);
       };
       // An App's own versions of packages the kit's packages take as
@@ -1286,357 +696,6 @@ describe(
       }).toStrictEqual({
         dateFns: metFor(kit, "@base-ui/react", "date-fns"),
         supportsColor: metFor(kit, "debug", "supports-color"),
-      });
-    });
-
-    it("installs an App's locked packages as its lock resolved them, and refuses one whose tarball isn't the one pinned", async () => {
-      // The App's packages, as a registry of the test's own serves them.
-      const tarballs = new Map<string, Buffer>();
-      const tarball = (name: string, version: string, index: string) => {
-        const dir = mkdtempSync(path.join(tmpdir(), "grasp-tarball-"));
-        made.push(dir);
-        mkdirSync(path.join(dir, "package"));
-        writeFileSync(
-          path.join(dir, "package/package.json"),
-          JSON.stringify({ name, version, main: "index.js" })
-        );
-        writeFileSync(path.join(dir, "package/index.js"), index);
-        spawnSync("tar", ["-czf", "package.tgz", "-C", dir, "package"], {
-          cwd: dir,
-        });
-        const bytes = readFileSync(path.join(dir, "package.tgz"));
-        tarballs.set(`/${name}/-/${name}-${version}.tgz`, bytes);
-        return `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
-      };
-      const lock = (dateKitIntegrity?: string) =>
-        lockOf({ "date-kit": "1.2.0" }, [
-          {
-            ...locked("date-kit", "1.2.0", "MIT", {
-              "tz-data": "2.0.1",
-              "tz-rules": "3.1.0",
-            }),
-            integrity:
-              dateKitIntegrity ??
-              tarball(
-                "date-kit",
-                "1.2.0",
-                'module.exports = [require("tz-data"), require("tz-rules")];\n'
-              ),
-          },
-          {
-            ...locked("tz-data", "2.0.1", "MIT"),
-            integrity: tarball(
-              "tz-data",
-              "2.0.1",
-              'module.exports = "tz-data";\n'
-            ),
-          },
-          {
-            ...locked("tz-rules", "3.1.0", "MIT"),
-            integrity: tarball(
-              "tz-rules",
-              "3.1.0",
-              'module.exports = "tz-rules";\n'
-            ),
-          },
-        ]);
-      const registry = createServer((request, response) => {
-        const bytes = tarballs.get(request.url ?? "");
-        if (bytes === undefined) {
-          response.writeHead(404).end();
-        } else {
-          response.end(bytes);
-        }
-      });
-      registry.listen(0, "127.0.0.1");
-      await once(registry, "listening");
-      const address = registry.address();
-      const port =
-        typeof address === "object" && address !== null ? address.port : 0;
-      const installed = async (appLock: string) => {
-        const { out } = scratch();
-        await packaged(
-          definitionOf({
-            ...notesFiles(),
-            "package.json": JSON.stringify({
-              dependencies: { "date-kit": "^1.2.0" },
-            }),
-            "grasp.lock.json": appLock,
-          }),
-          out
-        );
-        const install = await installIn(out, [
-          "--frozen-lockfile",
-          "--",
-          `--registry=http://127.0.0.1:${port}/`,
-          "--fetch-retries=0",
-        ]);
-        const loaded = spawnSync(
-          process.execPath,
-          ["-p", 'JSON.stringify(require("date-kit"))'],
-          { cwd: out, encoding: "utf-8" }
-        );
-        return { install, loaded: loaded.stdout.trim() };
-      };
-      const accepted = await installed(lock());
-      const tampered = await installed(
-        lock(`sha512-${createHash("sha512").update("other").digest("base64")}`)
-      );
-      registry.close();
-      expect({
-        accepted: { status: accepted.install.status, loaded: accepted.loaded },
-        tampered: {
-          status: tampered.install.status === 0 ? "installed" : "refused",
-          why: tampered.install.output.includes("ERR_PNPM_TARBALL_INTEGRITY"),
-        },
-      }).toStrictEqual({
-        accepted: {
-          status: 0,
-          loaded: JSON.stringify(["tz-data", "tz-rules"]),
-        },
-        tampered: { status: "refused", why: true },
-      });
-    });
-
-    it("holds the App's code to what Grasp holds it to: what Grasp's tidy wrote passes its typecheck, lint, format and build, and its lint finds what Grasp's finds", async () => {
-      const { out } = scratch();
-      // A blueprint's App as Grasp saves an agent's writes (`tidy`): a
-      // component with imports out of order, which oxfmt sorts, and
-      // classes Tailwind's sorter would reorder, which neither sorts; and
-      // a GraphQL template, whose query both leave as written.
-      const written = tidy({
-        ...blueprintFiles("workflow-map"),
-        "src/components/count.tsx": `import type { ReactNode } from "react";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { api } from "@server/_generated/api";
-
-export const Count = ({ children }: { children: ReactNode }) => (
-  <p className="p-2 flex text-sm bg-primary">
-    <Badge>{children}</Badge>
-    {Object.keys(api).length}
-  </p>
-);
-`,
-        "src/components/query.ts": `const gql = String.raw;
-
-export const query = gql\`
-  query{ teams { name   } }
-\`;
-`,
-      });
-      await packaged(await appDefinition(written), out);
-      const install = await installIn(out, ["--frozen-lockfile", "--offline"]);
-      const fresh = {
-        typecheck: run(out, "typecheck"),
-        lint: run(out, "lint"),
-        format: run(out, "format:check"),
-        build: run(out, "build"),
-      };
-      // What each lint says of the App as it was saved, by file.
-      const saved = {
-        grasp: graspRulesOf(written),
-        project: rulesOf(run(out, "lint", "--format=json").stdout),
-      };
-
-      // What Grasp's lint finds, the project's finds, no more: a debugger,
-      // a forEach, a spread in an accumulator, a comparison that is always
-      // false, a function declaration, and in a test what a preset's
-      // override turns on (vitest's rules). A disable comment holds
-      // whatever plugin it names a rule by (`@typescript-eslint/…`), and
-      // an inline config comment, which oxlint doesn't read, turns nothing
-      // on.
-      const findings = `export const stop = (): void => {
-  debugger;
-};
-
-export const byKey = (pairs: [string, number][]): Record<string, number> => {
-  let all: Record<string, number> = {};
-  for (const [key, value] of pairs) {
-    all = { ...all, [key]: value };
-  }
-  return all;
-};
-
-export const each = (items: number[], seen: number[]): void => {
-  items.forEach((item) => {
-    seen.push(item);
-  });
-};
-
-export const never = (n: number): boolean => n < 1 && n > 2;
-
-export function zero(a: number): number {
-  return a - a;
-}
-`;
-      const found = {
-        "src/components/findings.ts": findings,
-        "src/components/comments.ts": `/* eslint no-ternary: "error" */
-export const label = (on: boolean): string => (on ? "On" : "Off");
-
-// oxlint-disable-next-line @typescript-eslint/no-explicit-any
-export const anything = (value: any): unknown => value;
-`,
-        // An inline config comment over several lines keeps them: the
-        // disable comment above it covers its first line, not the code.
-        "src/components/spanning.ts": `export const stop = (): void => {
-  // oxlint-disable-next-line no-debugger
-  /* eslint
-    no-console: "off"
-  */ debugger;
-};
-`,
-        "tests/count.test.ts": `import { expect, test } from "vitest";
-
-test("counts", () => {
-  expect([1].length).toEqual(1);
-});
-`,
-        // Unused names: an import, a local and a parameter after the last
-        // one used, but not one before it, nor a name a type reads.
-        "src/components/unused.ts": unusedNames,
-        // What only the App's other files say (a default or a name they
-        // lack, a file importing itself), which Grasp's lint, a file at a
-        // time, can't read: neither finds it (`leftOut`).
-        "src/components/imports.ts": `import comments from "./comments";
-import * as spanning from "./spanning";
-import * as imports from "./imports";
-
-export const imported = [comments, spanning.missing, imports];
-`,
-      };
-      const write = (file: string, source: string): void => {
-        mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
-        writeFileSync(path.join(out, file), source);
-      };
-      for (const [file, source] of Object.entries(found)) {
-        write(`app/${file}`, source);
-      }
-      const projectFound = run(out, "lint", "--format=json");
-      for (const file of Object.keys(found)) {
-        rmSync(path.join(out, "app", file));
-      }
-      // Unused names are the lint's, never the typecheck's, as Grasp's
-      // builds pass them: in pages and components, and in server code.
-      const unusedFiles = {
-        "src/components/unused.ts": unusedNames,
-        "server/unused.ts": `import { v } from "@grasp-os/sdk";
-
-export const later = (): number => {
-  const spare = 1;
-  return 2;
-};
-`,
-      };
-      for (const [file, source] of Object.entries(unusedFiles)) {
-        write(`app/${file}`, source);
-      }
-      const unusedChecked = run(out, "typecheck");
-      for (const file of Object.keys(unusedFiles)) {
-        rmSync(path.join(out, "app", file));
-      }
-      // And the pages' own rules, as Grasp's lint runs them
-      // (apps/core/test/page-checks.test.ts, on the same files): a plain
-      // form, an inline style, WebRTC, and its cases (design-cases.ts).
-      const off = `import { Button } from "@grasp-os/ui/components/button";
-
-export const Off = () => (
-  <form>
-    <Button style={{ margin: 0 }}>{typeof RTCPeerConnection}</Button>
-  </form>
-);
-`;
-      write("app/src/components/off.tsx", off);
-      const design = run(out, "lint", "--format=json");
-      rmSync(path.join(out, "app/src/components/off.tsx"));
-      for (const [file, source] of Object.entries(designCases)) {
-        write(`app/${file}`, source);
-      }
-      const casesFound = rulesOf(run(out, "lint", "--format=json").stdout);
-      const cases = {
-        design: casesFound
-          .filter((finding) => designFinding(finding))
-          .map((finding) => {
-            const [file, , rule] = finding.split(" ");
-            return `${file?.slice("app/".length)} ${rule}`;
-          }),
-        // And Grasp's lint of them, the pages' rules among Ultracite's.
-        grasp: graspRulesOf(designCases),
-        project: casesFound.filter((finding) => !designFinding(finding)),
-      };
-      for (const file of Object.keys(designCases)) {
-        rmSync(path.join(out, "app", file));
-      }
-      // And the format: what isn't formatted fails its check.
-      write("app/src/components/spaced.ts", "export const  spaced = 1\n");
-      const unformatted = run(out, "format:check");
-
-      const foundRules = [
-        "app/src/components/findings.ts error func-style",
-        "app/src/components/findings.ts error no-debugger",
-        "app/src/components/findings.ts error oxc/const-comparisons",
-        "app/src/components/findings.ts error oxc/no-accumulating-spread",
-        "app/src/components/findings.ts error unicorn/no-array-for-each",
-        "app/src/components/spanning.ts error no-debugger",
-        "app/src/components/spanning.ts error no-inline-comments",
-        "app/src/components/unused.ts error no-unused-vars",
-        "app/src/components/unused.ts error no-unused-vars",
-        "app/src/components/unused.ts error no-unused-vars",
-        "app/src/components/unused.ts error no-unused-vars",
-        "app/tests/count.test.ts error vitest/prefer-strict-equal",
-        "app/tests/count.test.ts error vitest/prefer-to-be",
-        "app/tests/count.test.ts error vitest/prefer-to-have-length",
-        "app/tests/count.test.ts error vitest/require-top-level-describe",
-      ];
-      expect({
-        install: install.status,
-        fresh: Object.fromEntries(
-          Object.entries(fresh).map(([script, { status, output }]) => [
-            script,
-            status === 0 ? "ok" : output,
-          ])
-        ),
-        saved,
-        found: {
-          grasp: graspRulesOf(found),
-          project: {
-            status: projectFound.status,
-            rules: rulesOf(projectFound.stdout),
-          },
-        },
-        design: { status: design.status, rules: rulesOf(design.stdout) },
-        cases,
-        unformatted: unformatted.status,
-        unused:
-          unusedChecked.status === 0 ? "typechecks" : unusedChecked.output,
-      }).toStrictEqual({
-        install: 0,
-        fresh: { typecheck: "ok", lint: "ok", format: "ok", build: "ok" },
-        // Clean in both, as the blueprint passes Grasp's lint.
-        saved: { grasp: [], project: [] },
-        found: {
-          grasp: foundRules,
-          project: { status: 1, rules: foundRules },
-        },
-        design: {
-          status: 1,
-          rules: [
-            "app/src/components/off.tsx error no-restricted-globals",
-            "app/src/components/off.tsx error react/forbid-component-props",
-            "app/src/components/off.tsx error react/forbid-elements",
-          ],
-        },
-        cases: {
-          design: designFindings,
-          // Grasp's lint finds what the project's does, by the same rules.
-          grasp: designFindings.map((finding) => {
-            const [file, rule] = finding.split(" ");
-            return `app/${file} error ${rule}`;
-          }),
-          project: [],
-        },
-        unformatted: 1,
-        unused: "typechecks",
       });
     });
 

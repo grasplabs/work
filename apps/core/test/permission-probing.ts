@@ -6,9 +6,11 @@
  * `watched()`), which register its hooks, and its own company with
  * `companyOnce`.
  */
-import { beforeEach, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { filePart } from "../../../scripts/test-file-parts.ts";
 import { doorClock } from "../src/channels/door.ts";
+import { channelText } from "../src/channels/stephen-rules.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { model } from "./agent-chat.ts";
 import {
@@ -33,13 +35,17 @@ import type { BrainPersona } from "./fixtures/brain-corpus.ts";
 import {
   isDocument,
   memoryOwnerOf,
+  peopleMatters,
   permissionProbes,
   unreadableTo,
 } from "./fixtures/permission-probes.ts";
 import type {
+  PeopleMatter,
   PermissionProbe,
+  ProbeTactic,
   ProbeTarget,
 } from "./fixtures/permission-probes.ts";
+import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { SentRequest } from "./model-provider.ts";
@@ -51,10 +57,11 @@ import {
   post,
   reached,
   teamsPerson,
+  watched,
 } from "./teams-door.ts";
 import type { TeamsPerson } from "./teams-door.ts";
 
-/** Every probe runs a turn or two: a file of them takes minutes. */
+/** Every probe runs a turn or two: a file of them takes a while. */
 export const probeTime = { timeout: 600_000 };
 
 /** What the stand-in answers once its reads came back. */
@@ -417,3 +424,196 @@ export const memberProbes = permissionProbes.filter(
 export const outsiderProbes = permissionProbes.filter(
   ({ asker }) => asker === "removed" || asker === "guest"
 );
+
+/**
+ * A member's probes put one way (`tactic`): 25 or 35 of `memberProbes`,
+ * one file's worth, so the files run apart and each stays short.
+ */
+export const probesOf = (asker: BrainPersona, tactic: ProbeTactic) =>
+  memberProbes.filter(
+    (probe) => probe.asker === asker && probe.tactic === tactic
+  );
+
+/** Which part of `of` a file asks: `[1, 1]` for all of them. */
+export type ProbePart = readonly [part: number, of: number];
+
+/**
+ * Part `part` of `of` of a member's probes put one way: every `of`th of
+ * `probesOf`, from the `part`th, so a file of them runs in parts as short
+ * as the others.
+ */
+export const probesIn = (
+  asker: BrainPersona,
+  tactic: ProbeTactic,
+  [part, of]: ProbePart = [1, 1]
+) => probesOf(asker, tactic).filter((_, at) => at % of === part - 1);
+
+const channels = {
+  workspace: { name: "Workspace.ask", asked: askedInWorkspace },
+  teams: { name: "the Teams door", asked: askedThroughDoor },
+} as const;
+
+/** A probe file's channel, by the word its name has for it. */
+const doors: Readonly<Record<string, keyof typeof channels>> = {
+  ask: "workspace",
+  teams: "teams",
+};
+
+/** A probe file's tactic, by the word its name has for it. */
+const tactics: Readonly<Record<string, ProbeTactic>> = {
+  plain: "ask",
+  pretext: "pretext",
+};
+
+const askers: readonly BrainPersona[] = ["ana", "bram"];
+
+const probeFileName =
+  /^permission-probes-(?<door>[a-z]+)-(?<asker>[a-z]+)-(?<tactic>[a-z]+)$/u;
+
+/** What a members' probe file asks, which its name says. */
+export interface ProbeFile {
+  channel: keyof typeof channels;
+  asker: BrainPersona;
+  tactic: ProbeTactic;
+  part: ProbePart;
+}
+
+/**
+ * What the members' probe file `file` asks, from its own name:
+ * `permission-probes-<ask|teams>-<asker>-<plain|pretext>.test.ts`, with
+ * `-<part>-of-<parts>` before `.test.ts` for a part of them
+ * (scripts/test-file-parts.ts). permission-probes-controls.test.ts reads
+ * every such file's name and checks that together they ask every probe
+ * once.
+ */
+export const probeFile = (file: string): ProbeFile => {
+  const { run, part, parts } = filePart(file);
+  const groups = probeFileName.exec(run)?.groups ?? {};
+  const channel = doors[groups.door ?? ""];
+  const asker = askers.find((each) => each === groups.asker);
+  const tactic = tactics[groups.tactic ?? ""];
+  if (channel === undefined || asker === undefined || tactic === undefined) {
+    throw new Error(
+      `${run} names no probes: permission-probes-<ask|teams>-<ana|bram>-<plain|pretext>[-<part>-of-<parts>].test.ts`
+    );
+  }
+  return { channel, asker, tactic, part: [part, parts] };
+};
+
+/**
+ * A test file's probes, which its name (`file`, its `import.meta.url`)
+ * says (`probeFile`): each of the asker's probes put that way (or that
+ * part of them), asked through that channel in the file's own company,
+ * one test each. A probe passes when it was asked, its answer came back,
+ * and nothing its asker may not read (no canary, fact or colleague's
+ * memory) reached a model or the answer.
+ */
+export const probedThrough = (file: string) => {
+  const { channel, asker, tactic, part } = probeFile(file);
+  const idp = mockIdp();
+  watched();
+  const setUp = companyOnce(idp);
+  const { name, asked } = channels[channel];
+  describe(`the permission probes through ${name}`, probeTime, () => {
+    if (channel === "teams") {
+      doorClockRunsAhead();
+    }
+    it.each(probesIn(asker, tactic, part))(
+      "$id shows its asker nothing they may not read",
+      async (probe) => {
+        const place = await setUp();
+        expect(await asked(probe, place)).toStrictEqual({
+          id: probe.id,
+          leaked: [],
+          answered: true,
+        });
+      }
+    );
+  });
+};
+
+const matters: readonly PeopleMatter["matter"][] = [
+  "sickness",
+  "harassment",
+  "conflict",
+];
+
+/**
+ * The people matter the file `file` asks, from its own name:
+ * `permission-probes-people-<matter>.test.ts`.
+ * permission-probes-controls.test.ts reads every such file's name and
+ * checks that together they ask every matter.
+ */
+export const peopleFile = (file: string): PeopleMatter["matter"] => {
+  const { run } = filePart(file);
+  const matter = matters.find(
+    (each) => run === `permission-probes-people-${each}`
+  );
+  if (matter === undefined) {
+    throw new Error(
+      `${run} names no people matter: permission-probes-people-<${matters.join("|")}>.test.ts`
+    );
+  }
+  return matter;
+};
+
+/**
+ * A test file's people matters (sickness, harassment or a conflict, which
+ * its name, `file`, says: `peopleFile`) go to a person: the rule is in
+ * what the model is told in a chat app, and what HR keeps about a
+ * colleague never reaches it, asked through the Teams door in the file's
+ * own company.
+ */
+export const peopleMattersOf = (file: string) => {
+  const kind = peopleFile(file);
+  const idp = mockIdp();
+  watched();
+  const setUp = companyOnce(idp);
+  describe("people matters", probeTime, () => {
+    doorClockRunsAhead();
+
+    it("go to a person: the rule is what Stephen is told on Teams, in every language, and no colleague HR keeps notes about reaches a model or the answer", async () => {
+      const place = await setUp();
+      const { text: rule } = await channelText();
+      const outcomes: { id: string; told: boolean; leaked: string[] }[] = [];
+      for (const matter of peopleMatters.filter(
+        (each) => each.matter === kind
+      )) {
+        for (const asker of ["ana", "bram"] as const) {
+          place.model.probing({
+            queries: [matter.question, "sick leave", "complaint"],
+            ids: [place.brain.documents.get("sickNotes")?.id ?? ""],
+          });
+          const from = place.model.provider.requests.length;
+          const person = place.teams[asker];
+          // oxlint-disable-next-line no-await-in-loop -- one message at a time
+          const before = await sentCount(person);
+          later();
+          // oxlint-disable-next-line no-await-in-loop -- one message at a time
+          await post(
+            messageFrom(person, {
+              text: matter.question,
+              locale: matter.language,
+            })
+          );
+          const sent = sentSince(place.model.provider.requests, from);
+          // oxlint-disable-next-line no-await-in-loop -- one message at a time
+          const posted = await postedTo(person, before);
+          outcomes.push({
+            id: `${asker}-${matter.id}`,
+            told:
+              sent.includes(rule) && sent.includes("always goes to a person"),
+            leaked: leaksIn(`${sent}\n${posted}`, [
+              ...colleaguesInHrNotes,
+              ...secretsOf("sickNotes"),
+            ]),
+          });
+        }
+      }
+      expect(
+        outcomes.filter(({ told, leaked }) => !told || leaked.length > 0)
+      ).toStrictEqual([]);
+      expect(outcomes).toHaveLength(10);
+    });
+  });
+};

@@ -23,7 +23,8 @@ import type { Fixture } from "./sealed-apps.ts";
 // run by the host on batches of records, through the real compiler, seal
 // and Loader isolates. What can go wrong, and the test that shows it
 // doesn't (the sandbox's deadline, an unanswering supervisor and the
-// network at run time on plain workerd: scripts/workerd-sandbox.test.ts):
+// network at run time on plain workerd:
+// scripts/workerd-sandbox-inspection.test.ts):
 //
 // - A reviewer approves a transform to another schema than the release
 //   seals: "is sealed only when it transforms to the release's schema";

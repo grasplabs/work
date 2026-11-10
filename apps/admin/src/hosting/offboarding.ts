@@ -15,7 +15,7 @@
  * - Each resource deleted is audited as it's recorded deleted, so a
  *   deletion that stops part way leaves a record of what it did.
  *
- * Threat model, each tried in test/client-provision-operation.test.ts:
+ * Threat model, each tried in test/client-provision-releases.test.ts:
  * - Deleting a live client's data: refused unless offboarded, and the
  *   retention window over.
  * - Deleting what isn't the client's: only inventory rows its deployment

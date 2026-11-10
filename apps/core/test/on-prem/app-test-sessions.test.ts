@@ -1,24 +1,14 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { publishVersion } from "../../src/app-publish.ts";
-import { loadRelease, sealRelease } from "../../src/app-releases.ts";
 import type { Release } from "../../src/app-releases.ts";
 import {
   appTestOwnerOf,
   fixtureHostFor,
   suiteCapability,
 } from "../../src/app-tests.ts";
-import { createApp, findApp, releaseIdsOf } from "../../src/apps.ts";
-import { platformPlaceWaitMs } from "../../src/platform-sandbox.ts";
-import {
-  sandboxOwnerHeader,
-  sandboxSubOwnerHeader,
-} from "../../src/sandbox-headers.ts";
+import { releaseIdsOf } from "../../src/apps.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
-import { SandboxUnavailableError } from "../../src/sandboxed.ts";
-import { commitDefined } from "../apps.ts";
-import { person } from "../sealed-apps.ts";
 import {
   activation,
   appFiles,
@@ -28,63 +18,17 @@ import {
   host,
   passing,
   suiteOf,
-  supervisor,
 } from "./app-test-harness.ts";
+import {
+  notesRelease,
+  requestFor,
+  slowToAdmit,
+} from "./app-test-sessions-harness.ts";
 
 // An App's tests on-prem, as in app-tests.test.ts: here a suite waiting
 // for its place in the sandbox supervisor, and the session a suite's code
 // runs in. Apart from app-tests.test.ts so the two can run on different
 // runners.
-
-/**
- * The supervisor, but answering each ask for a session of `owner`'s only
- * `ms` later: a place granted that long after it was asked for, however
- * fast or slow the machine. Says how many asks it held back.
- */
-const slowToAdmit = (
-  owner: string,
-  ms: number
-): { host: Fetcher; delayed: () => number } => {
-  let delayed = 0;
-  return {
-    host: {
-      ...supervisor(),
-      fetch: async (input, init) => {
-        const headers: unknown = init?.headers;
-        const of: unknown =
-          typeof headers === "object" && headers !== null
-            ? Reflect.get(headers, sandboxOwnerHeader)
-            : undefined;
-        if (
-          of === owner &&
-          new URL(input instanceof Request ? input.url : input).pathname ===
-            "/session"
-        ) {
-          delayed += 1;
-          await scheduler.wait(ms);
-        }
-        return await supervisor().fetch(input, init);
-      },
-    },
-    delayed: () => delayed,
-  };
-};
-
-/** The Notes App made current with no suites: a release to open hosts on. */
-const notesRelease = async (): Promise<Release> => {
-  const owner = await person("builder");
-  const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitDefined(env, owner, id, appFiles, "First version");
-  await publishVersion(env, owner, id, 1);
-  return await loadRelease(env, id, 1);
-};
-
-/** `release`'s function `path` called with `input`, as a test's call names it. */
-const requestFor = (release: Release, path: string, input: unknown): string =>
-  JSON.stringify({
-    reference: { name: path, kind: release.app.operations[path]?.kind },
-    input,
-  });
 
 /**
  * What `body` answers, run as a suite's code would be in a session of its
@@ -170,135 +114,6 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
       )
     ).resolves.toBe(1);
     expect(admitting.delayed()).toBe(1);
-  });
-
-  it("run no suite that got its place after the run's time was up", async () => {
-    const built = await appWith(suiteOf("t.equal(1, 1);"));
-    // The sandbox answers the suite's ask for a place only once the run's
-    // time is surely up: the run starts before the suite asks, so its
-    // second is over a second after the ask, whatever the build took.
-    const runMs = 1000;
-    const admitting = slowToAdmit(appTestOwnerOf(built.app), runMs + 1000);
-    await expect(
-      activation(
-        built,
-        envWith({
-          APP_TEST_LIMITS_MS: `20000/60000/${runMs}`,
-          SANDBOX_HOST: admitting.host,
-        })
-      )
-    ).resolves.toBe("unavailable");
-    expect(admitting.delayed()).toBe(1);
-  });
-
-  it("ask again for the builder's place while the App's builds hold it past one build's wait", async () => {
-    // Files no build was made of yet, sealed before the builder is held.
-    const built = await appWith(
-      suiteOf(`t.equal(1, 1); // ${crypto.randomUUID()}`)
-    );
-    await sealRelease(env, { app: built.app, version: 1, by: built.owner });
-    // The App's builds hold its part of the builder's share. It frees
-    // only once the test build asked again after one build's own asks
-    // for a place were over: asked again by activation, not by the build.
-    const giveUp = new AbortController();
-    const { ended: held } = await heldPlace(
-      "platform:builder",
-      giveUp.signal,
-      built.app
-    );
-    let firstAsk: number | undefined;
-    const askedAgain = Promise.withResolvers<null>();
-    const watching: Fetcher = {
-      ...supervisor(),
-      fetch: async (input, init) => {
-        const headers: unknown = init?.headers;
-        const of: unknown =
-          typeof headers === "object" && headers !== null
-            ? Reflect.get(headers, sandboxSubOwnerHeader)
-            : undefined;
-        if (of === built.app) {
-          firstAsk ??= Date.now();
-          if (Date.now() - firstAsk > platformPlaceWaitMs) {
-            askedAgain.resolve(null);
-          }
-        }
-        return await supervisor().fetch(input, init);
-      },
-    };
-    const activating = (async (): Promise<unknown> => {
-      try {
-        await publishVersion(
-          envWith({ SANDBOX_HOST: watching }),
-          built.owner,
-          built.app,
-          1
-        );
-        const found = await findApp(env, built.app);
-        return found?.currentVersion;
-      } catch (error) {
-        return error instanceof SandboxUnavailableError
-          ? "unavailable"
-          : String(error);
-      }
-    })();
-    // Never asked again: freed anyway, the activation having given up.
-    await Promise.race([
-      askedAgain.promise,
-      activating,
-      scheduler.wait(60_000),
-    ]);
-    giveUp.abort();
-    await expect(held).resolves.toBe("given up");
-    await expect(activating).resolves.toBe(1);
-  });
-
-  it("start no ask for a suite's place that could still wait past the run's time", async () => {
-    const built = await appWith(suiteOf("t.equal(1, 1);"));
-    // Every ask for the suite's place refused at once (`busy`), each
-    // one's start noted: an ask may wait up to 6 s in the supervisor
-    // (2 × its 3 s), so none may start later than 6 s before the end.
-    const runMs = 20_000;
-    const askMs = 6000;
-    const asks: number[] = [];
-    const refusing: Fetcher = {
-      ...supervisor(),
-      fetch: async (input, init) => {
-        const headers: unknown = init?.headers;
-        const of: unknown =
-          typeof headers === "object" && headers !== null
-            ? Reflect.get(headers, sandboxOwnerHeader)
-            : undefined;
-        if (
-          of === appTestOwnerOf(built.app) &&
-          new URL(input instanceof Request ? input.url : input).pathname ===
-            "/session"
-        ) {
-          asks.push(Date.now());
-          return new Response(null, { status: 429 });
-        }
-        return await supervisor().fetch(input, init);
-      },
-    };
-    const outcome = await activation(
-      built,
-      envWith({
-        APP_TEST_LIMITS_MS: `20000/60000/${runMs}`,
-        SANDBOX_HOST: refusing,
-      })
-    );
-    const [first = 0] = asks;
-    const last = asks.at(-1) ?? 0;
-    expect({
-      outcome,
-      askedAgain: asks.length > 1,
-      lastStartedInTime: last - first <= runMs - askMs,
-      gaveUpInTime: Date.now() - first < runMs,
-    }).toStrictEqual({
-      outcome: "unavailable",
-      askedAgain: true,
-      lastStartedInTime: true,
-      gaveUpInTime: true,
-    });
   });
 
   it("refuse a session a suite wasn't answered: forged, or no number", async () => {

@@ -296,8 +296,11 @@ const enveloped = (text: string): string =>
     document: z.unknown().parse(JSON.parse(text)),
   });
 
-/** The proofs, where they run (Cloudflare's runtime, or plain workerd). */
-export const profileProofs = (where: string): void => {
+/**
+ * The proofs of the steps that call nothing outside, where they run
+ * (Cloudflare's runtime, or plain workerd).
+ */
+export const stepProofs = (where: string): void => {
   describe(
     `grasp-workflow/2's steps and calls, end to end ${where}`,
     {
@@ -306,7 +309,7 @@ export const profileProofs = (where: string): void => {
     () => {
       // The identity provider people sign in through, faked as the outside
       // system it is.
-      const idp = mockIdp();
+      mockIdp();
 
       it("output: answers its value as the run's output", async () => {
         const by = await person("builder");
@@ -420,6 +423,24 @@ export const profileProofs = (where: string): void => {
           code: "invoice.conflict",
         });
       });
+    }
+  );
+};
+
+/**
+ * The proofs of the steps that call a provider or a connector, where they
+ * run: in a file of their own on plain workerd, where they take longest.
+ */
+export const callProofs = (where: string): void => {
+  describe(
+    `grasp-workflow/2's steps and calls, end to end ${where}`,
+    {
+      timeout: 180_000,
+    },
+    () => {
+      // The identity provider people sign in through, faked as the outside
+      // system it is.
+      const idp = mockIdp();
 
       it("agent: asks the provider once for the task's structured output, and nothing again after a restart", async () => {
         const admin = await person("admin");
@@ -595,4 +616,10 @@ export const profileProofs = (where: string): void => {
       });
     }
   );
+};
+
+/** The proofs, where they run (Cloudflare's runtime, or plain workerd). */
+export const profileProofs = (where: string): void => {
+  stepProofs(where);
+  callProofs(where);
 };

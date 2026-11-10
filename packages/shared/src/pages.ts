@@ -8,6 +8,7 @@ import type {
 } from "./decisions.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { AppId } from "./ids.ts";
+import { loweredLimit } from "./lowered-limit.ts";
 import {
   pageFrameMounted,
   pageFrameReady,
@@ -91,6 +92,7 @@ export {
   pageVisitorHeader,
   streamCallActions,
 } from "./page-limits.ts";
+
 export type { PageLanguage, StreamCallAction } from "./page-limits.ts";
 
 /** A value the page or core made up: never longer than a hash in hex. */
@@ -343,6 +345,23 @@ export const querySubscriptionLimits = {
    */
   unsentBytes: 512 * 1024,
 } as const;
+
+/**
+ * The live-read budget (`querySubscriptionLimits.liveReads`), or a lower
+ * one a test sets as `burst/perMinute` (core's `LIVE_READ_LIMITS`), so it
+ * spends the budget in dozens of sandboxed reads instead of hundreds;
+ * never higher.
+ */
+export const liveReadLimitsOf = (
+  value: string | undefined
+): { burst: number; perMinute: number } => {
+  const [burst, perMinute] = (value ?? "").split("/").map(Number);
+  const { liveReads } = querySubscriptionLimits;
+  return {
+    burst: loweredLimit(burst, liveReads.burst),
+    perMinute: loweredLimit(perMinute, liveReads.perMinute),
+  };
+};
 
 /**
  * What core pushes to a page following a query (`watchQuery`): the

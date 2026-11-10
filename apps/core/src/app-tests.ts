@@ -27,6 +27,7 @@ import {
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { loweredLimit } from "@grasp-os/shared/lowered-limit";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
@@ -237,20 +238,23 @@ interface TestLimits {
   runMs: number;
   /** How long a suite's cleanup may take: discarding its stores. */
   cleanupMs: number;
+  /** The CPU time a suite's isolate may use. */
+  cpuMs: number;
 }
 
 /**
  * The limits on an App's tests: one test the SDK's `appTestTimeoutMs`,
  * one suite 2 minutes, and all of a version's suites 10 minutes, checked
  * before each suite starts; after each suite, discarding its stores 10
- * seconds, so at most 20 suites add 200 s to the run. `APP_TEST_LIMITS_MS`
- * (tests only) lowers them.
+ * seconds, so at most 20 suites add 200 s to the run; a suite's isolate
+ * its sandbox's CPU time. `APP_TEST_LIMITS_MS` (tests only) lowers them.
  */
 const defaultLimits: TestLimits = {
   testMs: appTestTimeoutMs,
   suiteMs: 120_000,
   runMs: 10 * 60_000,
   cleanupMs: 10_000,
+  cpuMs: testSandbox.limits.cpuMs,
 };
 
 /**
@@ -264,22 +268,19 @@ const fixtureLeftAfterMs = 60 * 60_000;
 /** The most workflow runs one test may start (`FixtureSession.start`). */
 const maxRunsPerTest = 10;
 
-/** `set` where it is a whole number of milliseconds below `most`, else `most`. */
-const lower = (set: number | undefined, most: number): number =>
-  set !== undefined && Number.isInteger(set) && set > 0 && set < most
-    ? set
-    : most;
-
 /** The limits in force: the defaults, or lower ones where tests set them. */
 const limitsOf = (env: Pick<Env, "APP_TEST_LIMITS_MS">): TestLimits => {
-  const [testMs, suiteMs, runMs, cleanupMs] = (env.APP_TEST_LIMITS_MS ?? "")
+  const [testMs, suiteMs, runMs, cleanupMs, cpuMs] = (
+    env.APP_TEST_LIMITS_MS ?? ""
+  )
     .split("/")
     .map(Number);
   return {
-    testMs: lower(testMs, defaultLimits.testMs),
-    suiteMs: lower(suiteMs, defaultLimits.suiteMs),
-    runMs: lower(runMs, defaultLimits.runMs),
-    cleanupMs: lower(cleanupMs, defaultLimits.cleanupMs),
+    testMs: loweredLimit(testMs, defaultLimits.testMs),
+    suiteMs: loweredLimit(suiteMs, defaultLimits.suiteMs),
+    runMs: loweredLimit(runMs, defaultLimits.runMs),
+    cleanupMs: loweredLimit(cleanupMs, defaultLimits.cleanupMs),
+    cpuMs: loweredLimit(cpuMs, defaultLimits.cpuMs),
   };
 };
 
@@ -1599,6 +1600,7 @@ const runInSuiteSession = async (
     testMs,
     suiteMs,
     runMs,
+    cpuMs,
     runEndsAt,
     opened,
   }: {
@@ -1607,6 +1609,7 @@ const runInSuiteSession = async (
     modules: Record<string, string>;
     testMs: number;
     suiteMs: number;
+    cpuMs: number;
     /** The version's whole test run's limit, for what an overrun says. */
     runMs: number;
     /** When the version's test run is over: the suite runs no later. */
@@ -1631,7 +1634,7 @@ const runInSuiteSession = async (
           method: "run",
           args: [{ capability: suiteCapability(host) }],
           owner,
-          cpuMs: testSandbox.limits.cpuMs,
+          cpuMs,
           wallMs: Math.min(suiteMs, runEndsAt - Date.now()),
         },
         {
@@ -1717,6 +1720,7 @@ const suiteFailures = async (
     suiteMs,
     runMs,
     cleanupMs,
+    cpuMs,
     runEndsAt,
   }: TestLimits & {
     /** When the version's whole test run is over (a time in milliseconds). */
@@ -1749,6 +1753,7 @@ const suiteFailures = async (
       const entry = quietLoader(env.LOADER)
         .get(null, () => ({
           ...testSandbox,
+          limits: { cpuMs },
           mainModule,
           modules: { ...modules, [mainModule]: testsMain(path, testMs) },
           env: {},
@@ -1764,6 +1769,7 @@ const suiteFailures = async (
         testMs,
         suiteMs,
         runMs,
+        cpuMs,
         runEndsAt,
         opened: (callId) => {
           parent = callId;

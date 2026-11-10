@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema } from "./ids.ts";
+import { loweredLimit } from "./lowered-limit.ts";
 import { platformMeasures } from "./platform-measures.ts";
 
 // The platform's statistics: the measures the platform publishes
@@ -37,12 +38,6 @@ export const dimensionsSchema = z
   .default({});
 export type Dimensions = z.infer<typeof dimensionsSchema>;
 
-/** `set` if it is a bound lower than `most`, else `most`. */
-const lower = (set: number | undefined, most: number): number =>
-  set !== undefined && Number.isInteger(set) && set > 0 && set < most
-    ? set
-    : most;
-
 /**
  * Most reads one call of an App's method makes: a board page's snapshot
  * makes a few, as one read counts many Apps (`apps`).
@@ -62,8 +57,8 @@ export const statisticReadLimitsOf = (
 ): { perCall: number; perMinute: number } => {
   const [perCall, perMinute] = (value ?? "").split("/").map(Number);
   return {
-    perCall: lower(perCall, statisticReadsPerCall),
-    perMinute: lower(perMinute, statisticReadsPerMinute),
+    perCall: loweredLimit(perCall, statisticReadsPerCall),
+    perMinute: loweredLimit(perMinute, statisticReadsPerMinute),
   };
 };
 

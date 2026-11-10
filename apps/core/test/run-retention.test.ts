@@ -69,9 +69,10 @@ import { unique } from "./sign-in.ts";
 // no JSON counterpart: a JSON run's cancel ends its row only as the engine
 // confirms, or owes the engine its termination (resource-runs.ts), and its
 // details go in one batch. Covered elsewhere for JSON runs:
-// workflow-resource-runs.test.ts (a live run's receipt kept; attempt
-// receipts removed, one still held settled; reads past retention, swept
-// or not) and workflow-bindings.test.ts (a swept start sent again is the
+// workflow-resource-runs.test.ts (a live run's receipt kept),
+// workflow-resource-run-quotas.test.ts (attempt receipts removed, one
+// still held settled), workflow-resource-run-clock.test.ts (reads past
+// retention, swept or not) and workflow-bindings.test.ts (a swept start sent again is the
 // same start). The sweep found by an index with nothing read whole:
 // covered by GRA-1460's tests.
 

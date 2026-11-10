@@ -734,6 +734,9 @@ const documentsOf = async (person: Person, collectionId: string) => {
   }
 };
 
+/** How many documents the full-context arm reads at once. */
+const documentReadBatch = 32;
+
 /**
  * Every section of the collections `person` may read and `granted` holds,
  * in path order, leaving out what doesn't fit in {@link fullContextChars}.
@@ -743,14 +746,27 @@ const fullContextOf = async (
   granted: ReadonlySet<string>
 ): Promise<{ sources: Source[]; truncated: boolean }> => {
   const readable = await person.api.knowledge.listCollections();
+  // The documents in path order, then read a batch at a time: one read
+  // after another was most of the arm's time at scale, and all at once
+  // held every text of the corpus until the last arrived. Each batch's
+  // sections are taken, in order, as it arrives.
+  const listed = await Promise.all(
+    readable
+      .filter(({ id }) => granted.has(id))
+      .map(async (collection) => await documentsOf(person, collection.id))
+  );
+  const documents = listed.flat();
   const sources: Source[] = [];
   let chars = 0;
   let truncated = false;
-  for (const collection of readable.filter(({ id }) => granted.has(id))) {
-    // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    for (const document of await documentsOf(person, collection.id)) {
-      // oxlint-disable-next-line no-await-in-loop -- one document at a time
-      const read = await person.api.knowledge.read(document.id);
+  for (let at = 0; at < documents.length; at += documentReadBatch) {
+    // oxlint-disable-next-line no-await-in-loop -- a batch at a time, in order
+    const reads = await Promise.all(
+      documents
+        .slice(at, at + documentReadBatch)
+        .map(async (document) => await person.api.knowledge.read(document.id))
+    );
+    for (const read of reads) {
       for (const section of sectionsOf(read.path, read.text)) {
         if (chars + section.text.length <= fullContextChars) {
           chars += section.text.length;
@@ -2201,8 +2217,12 @@ export interface RunIdentity {
   split: BrainSplit;
   repeats: number;
   seed: number;
-  /** The arms and controls, in order: they shape the seeded schedule. */
+  /**
+   * The tasks measured, the arms and controls, in order: they shape the
+   * seeded schedule.
+   */
   schedule: {
+    tasks: readonly string[];
     arms: readonly BrainArm[];
     controls: readonly BrainControl[];
     controlTasks: readonly string[];
@@ -2253,6 +2273,14 @@ export interface BrainBuild {
 export interface BrainRunOptions {
   split: BrainSplit;
   repeats: number;
+  /**
+   * The tasks of the split whose trials are measured, by ID: all of them
+   * by default. A run of some (one file's part of the baseline, which in
+   * CI runs in parts so that no file takes minutes) still loads, updates
+   * and pins the whole suite and runs its controls and durability cases;
+   * its trials, coverage and statistics are those tasks'.
+   */
+  tasks?: readonly string[];
   arms?: readonly BrainArm[];
   /**
    * Controls to run on `controlTasks`, once each, after the measured
@@ -2376,6 +2404,23 @@ const checkRun = (
   }
 };
 
+/** The tasks of the split a run measures: those `ids` names, or all. */
+const measuredOf = (
+  tasks: readonly BrainTask[],
+  ids: readonly string[] | undefined
+): readonly BrainTask[] => {
+  if (ids === undefined) {
+    return tasks;
+  }
+  const unknown = ids.filter((id) => !tasks.some((task) => task.id === id));
+  if (unknown.length > 0) {
+    throw new RangeError(
+      `Not tasks of this split to measure: ${unknown.join(", ")}`
+    );
+  }
+  return tasks.filter(({ id }) => ids.includes(id));
+};
+
 /** Every durability case: each kind, in each arm, on each task. */
 const runDurability = async (
   company: BrainCompany,
@@ -2461,6 +2506,7 @@ export const runBrainBaseline = async (
   {
     split,
     repeats,
+    tasks: measuredIds,
     arms = brainArms,
     controls = [],
     controlTasks = [],
@@ -2475,6 +2521,7 @@ export const runBrainBaseline = async (
   }: BrainRunOptions
 ): Promise<BrainReport> => {
   const tasks = tasksOf(split, { openSealed });
+  const measuredTasks = measuredOf(tasks, measuredIds);
   checkRun(tasks, repeats, controls, controlTasks, durabilityTasks);
   // Another provider names itself: the stub's name is the stub's only.
   if (respond !== stubReader && providerName === undefined) {
@@ -2512,7 +2559,7 @@ export const runBrainBaseline = async (
     sources[window] = snapshot.digest;
     // oxlint-disable-next-line no-await-in-loop -- windows in order
     retrieval[window] = await retrievalDigest(company, tasks);
-    const inWindow = tasks.filter((task) => task.window === window);
+    const inWindow = measuredTasks.filter((task) => task.window === window);
     const plans: TrialPlan[] = [];
     for (let repeat = 1; repeat <= repeats; repeat += 1) {
       // Odd repeats start each trial in a just-evicted object: cold.
@@ -2636,11 +2683,17 @@ export const runBrainBaseline = async (
       split,
       repeats,
       seed,
-      schedule: { arms, controls, controlTasks, durabilityTasks },
+      schedule: {
+        tasks: measuredTasks.map(({ id }) => id),
+        arms,
+        controls,
+        controlTasks,
+        durabilityTasks,
+      },
     },
     coverage: {
-      families: counts(tasks.map(({ family }) => family)),
-      languages: counts(tasks.map(({ language }) => language)),
+      families: counts(measuredTasks.map(({ family }) => family)),
+      languages: counts(measuredTasks.map(({ language }) => language)),
       unsupported: [
         {
           requires: "interview-admission",
