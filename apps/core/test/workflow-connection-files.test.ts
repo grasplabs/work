@@ -394,7 +394,7 @@ const ran = async (
     id,
     {
       version: 1,
-      input: { attach: "", ...input },
+      args: { attach: "", ...input },
       key: unique(),
     }
   );
@@ -413,7 +413,7 @@ const ran = async (
     runId,
     end:
       run.status === "completed"
-        ? { status: run.status, output: run.output }
+        ? { status: run.status, output: run.result }
         : { status: run.status, code: run.error?.code },
   };
 };

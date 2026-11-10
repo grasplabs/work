@@ -275,7 +275,7 @@ const ranOn = async (
     id,
     {
       version: 1,
-      input: { doc: "", query: "leave", ...input },
+      args: { doc: "", query: "leave", ...input },
       key: unique(),
     }
   );
@@ -294,7 +294,7 @@ const ranOn = async (
     runId,
     end:
       run.status === "completed"
-        ? { status: run.status, output: run.output }
+        ? { status: run.status, output: run.result }
         : { status: run.status, code: run.error?.code },
   };
 };
@@ -445,7 +445,7 @@ describe("a workflow's steps on a Brain collection", () => {
       env,
       { type: "person", person: ada },
       workflow.id,
-      { version: 1, input: { doc: "", query: "leave" }, key: unique() }
+      { version: 1, args: { doc: "", query: "leave" }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start admitted no run");
