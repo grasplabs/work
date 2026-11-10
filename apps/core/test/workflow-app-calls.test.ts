@@ -437,6 +437,77 @@ export const create = mutation({
     });
   });
 
+  it("reads the Apps a draft names only once it passes the format's check and limits", async () => {
+    const { acting, app, workflow, create, titles } = await setUp();
+    // Core's database, counting each read of the Apps table.
+    let appReads = 0;
+    const counting: D1Database = {
+      prepare: (query) => {
+        if (/from "apps"/u.test(query)) {
+          appReads += 1;
+        }
+        return env.DB.prepare(query);
+      },
+      batch: async (statements) => await env.DB.batch(statements),
+      exec: async (query) => await env.DB.exec(query),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await env.DB.dump(),
+      withSession: (constraint) => env.DB.withSession(constraint),
+    };
+    const saved = async (text: string) => {
+      appReads = 0;
+      const { revision } = await workflowDraft(env, acting, workflow.id);
+      const draft = await editWorkflowDraft(
+        { ...env, DB: counting },
+        acting,
+        workflow.id,
+        { expectedRevision: revision, source: text }
+      );
+      return { codes: draft.problems.map(({ code }) => code), appReads };
+    };
+    const document = z
+      .looseObject({
+        permissions: z.object({ apps: z.record(z.string(), z.unknown()) }),
+      })
+      .parse(JSON.parse(writingNotes(app, create, titles)));
+    // Past the limit: 64 event permissions beside the App's functions.
+    const overLimit = JSON.stringify({
+      ...document,
+      permissions: {
+        ...document.permissions,
+        events: Object.fromEntries(
+          Array.from({ length: 64 }, (_, index) => [
+            `replies${index}`,
+            { contract: "grasp.replies@1" },
+          ])
+        ),
+      },
+    });
+    // The same App under a second alias.
+    const repeated = JSON.stringify({
+      ...document,
+      permissions: {
+        apps: {
+          ...document.permissions.apps,
+          again: { app, functions: { [titles]: "notes.titles" } },
+        },
+      },
+    });
+
+    const valid = await saved(JSON.stringify(document));
+    expect({
+      over: await saved(overLimit),
+      repeated: await saved(repeated),
+      validRead: valid.appReads > 0,
+      validCodes: valid.codes,
+    }).toStrictEqual({
+      over: { codes: ["workflow.out_of_bounds"], appReads: 0 },
+      repeated: { codes: ["workflow.duplicate"], appReads: 0 },
+      validRead: true,
+      validCodes: [],
+    });
+  });
+
   it("names a renamed function by its new path when the draft is saved again", async () => {
     const { builder, acting, app, workflow, create, titles, source } =
       await setUp();

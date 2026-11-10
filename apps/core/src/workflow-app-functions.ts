@@ -1,5 +1,6 @@
 import type { FunctionManifest } from "@grasp-os/sdk/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import type { Permissions } from "@grasp-os/workflow-schema/format";
 
 import { loadRelease } from "./app-releases.ts";
@@ -58,6 +59,33 @@ const callableFunctionsOf = async (
   }
 };
 
+/**
+ * Each App permission's callable functions, by its alias, as `by` may use
+ * them: each App read once, however many aliases name it.
+ */
+export const permittedFunctionsOf = async (
+  env: Env,
+  by: Acting | undefined,
+  apps: Permissions["apps"]
+): Promise<ReadonlyMap<string, ReadonlyMap<string, FunctionManifest>>> => {
+  const reads = new Map<
+    string,
+    Promise<ReadonlyMap<string, FunctionManifest>>
+  >();
+  const readOf = async (app: string) => {
+    const read = reads.get(app) ?? callableFunctionsOf(env, by, app);
+    reads.set(app, read);
+    return await read;
+  };
+  return new Map(
+    await Promise.all(
+      Object.entries(apps ?? {}).map(
+        async ([alias, { app }]) => [alias, await readOf(app)] as const
+      )
+    )
+  );
+};
+
 /** Whether `value` is a JSON object, as parsed. */
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -73,6 +101,11 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
  * deep: drafts are written by the canvas and the chat, never kept for
  * their layout, and JSON keeps every value (a number as it reads back),
  * so only the layout of hand-typed text changes, and only on a rename.
+ *
+ * Only a document that passes the format's check is read for its Apps:
+ * one of another shape, or past its limits (64 permissions and App
+ * functions in all, one alias an App), reads none, and its save answers
+ * its problems. Each App is read once.
  */
 export const withCurrentFunctionNames = async (
   env: Env,
@@ -85,26 +118,26 @@ export const withCurrentFunctionNames = async (
   } catch {
     return source;
   }
+  const checked = checkWorkflow(parsed);
   const apps =
     isObject(parsed) && isObject(parsed.permissions)
       ? parsed.permissions.apps
       : undefined;
-  if (!isObject(apps)) {
+  if (!checked.ok || !isObject(apps)) {
     return source;
   }
+  const permitted = await permittedFunctionsOf(
+    env,
+    by,
+    checked.workflow.document.permissions?.apps
+  );
   let renamed = false;
-  for (const permission of Object.values(apps)) {
+  for (const [alias, permission] of Object.entries(apps)) {
     const functions = isObject(permission) ? permission.functions : undefined;
-    if (
-      !isObject(permission) ||
-      typeof permission.app !== "string" ||
-      !isObject(functions)
-    ) {
+    if (!isObject(functions)) {
       continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- a few Apps, one at a time
-    const callable = await callableFunctionsOf(env, by, permission.app);
-    for (const [id, operation] of callable) {
+    for (const [id, operation] of permitted.get(alias) ?? []) {
       if (Object.hasOwn(functions, id) && functions[id] !== operation.path) {
         functions[id] = operation.path;
         renamed = true;
@@ -113,18 +146,3 @@ export const withCurrentFunctionNames = async (
   }
   return renamed ? JSON.stringify(parsed, null, 2) : source;
 };
-
-/** Each App permission's callable functions, by its alias, as `by` may use them. */
-export const permittedFunctionsOf = async (
-  env: Env,
-  by: Acting | undefined,
-  apps: Permissions["apps"]
-): Promise<ReadonlyMap<string, ReadonlyMap<string, FunctionManifest>>> =>
-  new Map(
-    await Promise.all(
-      Object.entries(apps ?? {}).map(
-        async ([alias, { app }]) =>
-          [alias, await callableFunctionsOf(env, by, app)] as const
-      )
-    )
-  );
