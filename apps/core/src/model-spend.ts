@@ -12,6 +12,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  or,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -147,9 +148,18 @@ export const spendKeysOf = (input: SpendInput): SpendKeys => {
 /** Micros in a US dollar: what the platform's spend is reported in. */
 const microsPerDollar = 1_000_000;
 
-/** The organization's own spend: never Grasp's features on Grasp's key. */
+/**
+ * The organization's own spend: its calls on its own key, and on Grasp's
+ * AI, which it pays Grasp for. Never Grasp's features on Grasp's key.
+ */
 const organizationIn = (month: string) =>
-  and(eq(modelUsage.period, month), eq(modelUsage.credential, "organization"));
+  and(
+    eq(modelUsage.period, month),
+    or(
+      eq(modelUsage.credential, "organization"),
+      eq(modelUsage.feature, "organization")
+    )
+  );
 
 /** A workflow whose spend is counted: an App's, in its App; or an independent one (`appId` null). */
 interface SpendWorkflow {

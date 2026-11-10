@@ -21,6 +21,7 @@ import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {
   aiProviderIdSchema,
   aiProviders,
+  graspAi,
   platformRouteOf,
 } from "@grasp-os/shared/ai-providers";
 import type {
@@ -65,8 +66,9 @@ import { z } from "zod";
 
 import {
   aiRoutesOf,
-  chosenModels,
+  readAiSource,
   readModelChoice,
+  usableModels,
 } from "./ai-model-choice.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { catalogWindowOf, parseModelRef } from "./model-catalog.ts";
@@ -194,8 +196,12 @@ export interface ModelsNow {
  * (a role's model, a chat's choices, a binding's approval).
  */
 export const modelSettings = async (env: Env): Promise<ModelsNow> => {
-  const routes = await aiRoutesOf(env);
-  return { models: chosenModels(routes, await readModelChoice(env)) };
+  const [routes, choice, source] = await Promise.all([
+    aiRoutesOf(env),
+    readModelChoice(env),
+    readAiSource(env),
+  ]);
+  return { models: usableModels(routes, choice, source) };
 };
 
 /**
@@ -1239,6 +1245,17 @@ const platformFeatureOf = ({
     ? { feature: "conversion" }
     : {};
 
+/**
+ * What a call on Grasp's key is recorded as: one of Grasp's own features
+ * (`platformFeatureOf`), or, let through as the organization's own call
+ * (`chosen`), its own AI on Grasp's AI, which it pays Grasp for.
+ */
+const keyFeatureOf = (
+  call: Session,
+  via: Via
+): { feature: PlatformAiFeature } | object =>
+  via.kind === "chosen" ? { feature: "organization" } : platformFeatureOf(call);
+
 /** Whether `entry` makes an event the audit log takes. */
 const fitsAuditLog = (entry: AuditEntry): boolean => {
   try {
@@ -1585,7 +1602,8 @@ const connectRouting = async (
   call: Session,
   ref: ModelRef,
   target: ConnectTarget,
-  fallbacks: readonly string[]
+  fallbacks: readonly string[],
+  via: Via
 ): Promise<Routing> => {
   const endpoint = connectRoute(env, target, ref);
   if (endpoint === undefined) {
@@ -1598,7 +1616,7 @@ const connectRouting = async (
       provider: target.provider,
       region: target.platform?.region ?? aiProviders[target.provider].region,
       credential: target.credential,
-      ...(target.credential === "platform" ? platformFeatureOf(call) : {}),
+      ...(target.credential === "platform" ? keyFeatureOf(call, via) : {}),
     },
     fallbacks,
   };
@@ -1661,7 +1679,10 @@ const routingOf = async (
       baseUrl: null,
       platform,
     } as const;
-    return { ref, routing: await connectRouting(env, call, ref, target, []) };
+    return {
+      ref,
+      routing: await connectRouting(env, call, ref, target, [], via),
+    };
   }
   const connected = routes.organization.find(
     (route) => route.provider === provider
@@ -1675,14 +1696,43 @@ const routingOf = async (
       return await refuse(env, call, { code: "model.not_allowed" });
     }
     const target = { credential: "organization" as const, ...connected };
-    return { ref, routing: await connectRouting(env, call, ref, target, []) };
+    return {
+      ref,
+      routing: await connectRouting(env, call, ref, target, [], via),
+    };
   }
-  const chosen = chosenModels(routes, await readModelChoice(env));
+  const [choice, source] = await Promise.all([
+    readModelChoice(env),
+    readAiSource(env),
+  ]);
+  const chosen = usableModels(routes, choice, source);
   if (chosen.length === 0) {
     return await refuse(env, call, {
       code: "model.no_provider",
       because: "model",
     });
+  }
+  if (source === "grasp") {
+    // Grasp's AI: its one model, on Grasp's key, and nothing else. The
+    // organization's own key is never used in its place, nor Grasp's for
+    // any model but this one.
+    const platform = platformRouteOf(graspAi.provider);
+    if (ref === undefined || call.model !== graspAi.model) {
+      return await refuse(env, call, { code: "model.not_allowed" });
+    }
+    if (platform === undefined) {
+      throw modelErrors.create("model.unconfigured");
+    }
+    const target = {
+      credential: "platform",
+      provider: graspAi.provider,
+      baseUrl: null,
+      platform,
+    } as const;
+    return {
+      ref,
+      routing: await connectRouting(env, call, ref, target, [], via),
+    };
   }
   const at = chosen.indexOf(call.model);
   if (at === -1 || ref === undefined || connected === undefined) {
@@ -1696,7 +1746,8 @@ const routingOf = async (
       call,
       ref,
       target,
-      mayFallBack(call) ? chosen.slice(at + 1) : []
+      mayFallBack(call) ? chosen.slice(at + 1) : [],
+      via
     ),
   };
 };

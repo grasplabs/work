@@ -493,8 +493,40 @@ export const featuredModels: Readonly<
   "openai-compatible": [],
 };
 
+/**
+ * Whose key the organization's AI runs on: its `own`, a provider's it
+ * connected, with the models its admins chose; or `grasp`, Grasp's own
+ * key, on the one model Grasp runs it on (`graspAi`), paid for by use.
+ */
+export const aiSources = ["own", "grasp"] as const;
+export const aiSourceSchema = z.enum(aiSources);
+export type AiSource = z.infer<typeof aiSourceSchema>;
+
+/**
+ * Grasp's AI: the provider whose key of Grasp's it runs on, and its one
+ * model. Nothing to choose: changing either is a change here, released as
+ * any change is.
+ */
+export const graspAi = {
+  provider: "anthropic",
+  model: "anthropic/claude-sonnet-5-5",
+} as const satisfies { provider: AiProviderId; model: string };
+
+/** Grasp's AI, as an organization's admins see it. */
+export interface GraspAiListed {
+  /** Whether this deployment has Grasp's key for it: without one it can't be chosen. */
+  available: boolean;
+  model: AiProviderModel;
+  /** Where its calls run, in plain words. */
+  whereItRuns: string;
+}
+
 /** The organization's AI providers and its choice of models. */
 export interface AiProvidersListing {
+  /** Whose key its AI runs on. */
+  source: AiSource;
+  /** Grasp's AI, which it can run on in place of a provider of its own. */
+  grasp: GraspAiListed;
   providers: AiProviderListed[];
   /** Every provider an admin can add, with where it runs. */
   offered: {
@@ -526,6 +558,8 @@ export const aiProviderErrors = defineErrorFamily({
   "ai_provider.not_connected": "That AI provider isn't connected.",
   "ai_provider.model_unavailable":
     "That model isn't one of a connected AI provider's.",
+  "ai_provider.grasp_unavailable":
+    "Grasp's AI isn't available on this deployment. Ask Grasp to check it.",
   "ai_provider.vault_unavailable":
     "Keys can't be stored safely right now, so it wasn't saved. Ask Grasp to check the deployment.",
   "ai_provider.failed":
@@ -551,6 +585,8 @@ export interface AiProvidersApi {
   setModels: (choice: z.input<typeof aiModelChoiceSchema>) => Promise<void>;
   /** Removes the provider's key; connect deletes it. */
   remove: (provider: OrganizationProviderId) => Promise<void>;
+  /** Sets whose key the organization's AI runs on: its own, or Grasp's. */
+  setSource: (source: AiSource) => Promise<void>;
 }
 
 /** A key core hands connect to keep, as an admin gave it. */
