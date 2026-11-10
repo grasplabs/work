@@ -1016,9 +1016,8 @@ export const appVersions = sqliteTable(
      * text (`definitionText`): its name, tables with their stable IDs, access and
      * permissions, from which its `grasp.config.ts` and `server/schema.ts`
      * were generated as it was committed. Written once, never changed (a
-     * trigger refuses it). Null for a version committed before
-     * definitions left the tree, which this release refuses: commit
-     * again.
+     * trigger refuses it). Null only while the column is nullable
+     * (expand, then contract); a version without one is refused.
      */
     definition: text(),
     /** The SHA-256 of `definition`, which its sealed release names. */
@@ -1032,9 +1031,8 @@ export const appVersions = sqliteTable(
      * permissions to change things with (permissions.ts, `authorize`): 1
      * once an admin made it current or granted a permission while it was,
      * or it is an App's first version copied from a blueprint; 0 once
-     * someone who couldn't grant made it current, until then. Null for a
-     * version made current before this column, which counts as approved,
-     * and for one never made current, which never runs.
+     * someone who couldn't grant made it current, until then. Null for one
+     * never made current, which never runs.
      */
     approved: integer(),
     /**

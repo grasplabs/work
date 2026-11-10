@@ -59,8 +59,7 @@ export type { ManifestTable, SchemaManifest } from "./schema-manifest.ts";
 export { readSchemaManifest } from "./schema-manifest-read.ts";
 export type { ReadManifest } from "./schema-manifest-read.ts";
 
-// What a host reads a descriptor from its JSON text with: one reader,
-// which a workflow's run uses too (`fittedValue`).
+// What a host reads a descriptor from its JSON text with: one reader.
 export { descriptorFromText, schemaFromDescriptor } from "./descriptor-text.ts";
 // A descriptor's compact form, as a workflow's JSON and an App's definition
 // hold it: its one reader and writer, and its JSON Schema for editors.
@@ -100,7 +99,7 @@ export { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 export { symbolicModules } from "./codegen-stand-ins.ts";
 export { workflowReferenceOf } from "./codegen-workflows.ts";
 export { generateModules } from "./generate.ts";
-export { workflowFunctions } from "./workflow-functions.ts";
+export { workflowFunctions, workflowQueryNames } from "./workflow-functions.ts";
 export type {
   WorkflowFunctions,
   WorkflowMutationName,

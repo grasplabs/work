@@ -532,7 +532,7 @@ const bindingAgrees = (
  * `version.format_unsupported` or `version.manifest_corrupt` as
  * `loadRelease` says.
  */
-export const checkedManifest = async (
+const checkedManifest = async (
   env: Env,
   app: AppId,
   version: number,
@@ -596,21 +596,6 @@ export const checkedManifest = async (
     throw versionErrors.create("version.manifest_corrupt");
   }
   return { manifest, hash };
-};
-
-/**
- * Refuses `app`'s `version` unless it loads as a release (`loadRelease`'s
- * own manifest checks): sealed, not revoked, its manifest intact
- * (`version.not_sealed`, `version.revoked`, `version.manifest_corrupt`).
- * For what names a release to call later, such as a workflow binding's
- * approval: its artifacts are verified when it is loaded to run.
- */
-export const requireReleaseLoads = async (
-  env: Env,
-  app: AppId,
-  version: number
-): Promise<void> => {
-  await checkedManifest(env, app, version);
 };
 
 /**
