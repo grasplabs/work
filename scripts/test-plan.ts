@@ -437,7 +437,7 @@ export const journeyConfigs: Readonly<Record<JourneySuite, string>> = {
  * Whether one of `files` (absolute, outside every package) is imported,
  * directly or not, by `suite`'s config in the repository at `root`: a
  * file both configs import (e2e/stack.ts, which the admin's takes
- * `corePort` from) runs both suites, wherever it sits.
+ * `adminPort` from) runs both suites, wherever it sits.
  */
 export const configImports = (root: string) => {
   // One walk of the repository for both suites' configs, per set of files.

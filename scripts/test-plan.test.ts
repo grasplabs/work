@@ -548,7 +548,7 @@ describe("choosing which journey suites a change reaches", () => {
 
   it("finds what each config imports: a helper both take for both, a journey for neither", () => {
     // Shaped as this repository is: both configs take e2e/stack.ts, the
-    // admin's for `corePort`. A small repository of its own, as walking
+    // admin's for `adminPort`. A small repository of its own, as walking
     // this one's every file is too slow for a unit test under load.
     const repo = realpathSync(mkdtempSync(path.join(tmpdir(), "configs-")));
     try {

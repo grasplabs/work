@@ -9,14 +9,22 @@ import path from "node:path";
 const root = path.join(import.meta.dirname, "..");
 
 /**
- * Ports from 20000 up, five per checkout, picked by its path: parallel
+ * Ports from 20000 up, six per checkout, picked by its path: parallel
  * worktrees each get their own, and none is dev's (8787 and 8788). Two
- * checkouts that land on the same five fail loudly, as Playwright never
+ * checkouts that land on the same six fail loudly, as Playwright never
  * reuses a server (playwright.config.ts); `E2E_PORT` then moves one.
+ *
+ * All below 32768, where Linux starts handing out ephemeral ports (the
+ * local end of an outgoing connection, or a port 0 a process listens on):
+ * the stack's own servers start at once and connect to each other, and
+ * one took the fake AI providers' port as its local end before they
+ * listened on it (EADDRINUSE on a CI runner, November 2026). macOS starts
+ * at 49152.
  */
 const firstPort = 20_000;
-const portBlocks = 3000;
-const portsEach = 5;
+const ephemeralPorts = 32_768;
+const portsEach = 6;
+const portBlocks = Math.floor((ephemeralPorts - firstPort) / portsEach);
 const hashed =
   firstPort +
   portsEach *
@@ -27,9 +35,12 @@ const portOf = (value: string | undefined): number => {
     return hashed;
   }
   const port = Number(value);
-  if (!Number.isInteger(port) || port < 1024 || port > 65_531) {
+  // Its whole block below the ephemeral ports too, so an override can't
+  // bring the race back.
+  const highest = ephemeralPorts - portsEach;
+  if (!Number.isInteger(port) || port < 1024 || port > highest) {
     throw new Error(
-      `E2E_PORT must be a port from 1024 to 65531, not "${value}"`
+      `E2E_PORT must be a port from 1024 to ${highest}, below the ephemeral ports from ${ephemeralPorts}, not "${value}"`
     );
   }
   return port;
@@ -54,6 +65,11 @@ export const modelFakePort = corePort + 2;
  */
 export const coreInspectorPort = corePort + 3;
 export const idpInspectorPort = corePort + 4;
+/**
+ * The admin's dev server (playwright.admin.config.ts), on a stack of its
+ * own, in this checkout's block like the rest.
+ */
+export const adminPort = corePort + 5;
 
 export const origin = `http://localhost:${corePort}`;
 export const idpOrigin = `http://localhost:${idpPort}`;
