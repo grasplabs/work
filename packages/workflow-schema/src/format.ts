@@ -786,6 +786,54 @@ export const retriesByGuard = (step: TryStep): boolean =>
   step.catch.retry !== undefined &&
   (step.catch.when !== undefined || step.catch.retry.when !== undefined);
 
+/**
+ * The name the generated code gives the guard of a try inside a retrying
+ * one whose catch takes a failure by its `when` (`<try>Takes`): whether
+ * it takes a failure, which the isolate alone can say. A call in its list
+ * retries only when it doesn't: the innermost catch that takes a failure
+ * has it before any retry further out.
+ */
+export const takesOf = (id: string): string => `${id}Takes`;
+
+/**
+ * Whether a try, inside a retrying one when `retrying`, takes a failure
+ * through a guard (`takesOf`): it doesn't retry itself, and its catch's
+ * `when` decides. A catch with no `when` the host decides by its code.
+ */
+export const takesByGuard = (step: TryStep, retrying: boolean): boolean =>
+  retrying && step.catch.retry === undefined && step.catch.when !== undefined;
+
+/**
+ * The names the generated code gives the tries' guards of `steps`
+ * (`retriesOf`, `takesOf`), inside a retrying try when `retrying`: the
+ * check keeps them from every step's ID, as one scope would hold both.
+ */
+export const guardNamesOf = (
+  steps: readonly Step[],
+  retrying = false
+): string[] =>
+  steps.flatMap((step) => {
+    const names: string[] = [];
+    let inner = retrying;
+    if (step.type === "try") {
+      if (retriesByGuard(step)) {
+        names.push(retriesOf(step.id));
+      }
+      if (takesByGuard(step, retrying)) {
+        names.push(takesOf(step.id));
+      }
+      inner = retrying || step.catch.retry !== undefined;
+    }
+    return [
+      ...names,
+      ...stepListsOf(step).flatMap((list) =>
+        // Only a try's own list is what its retry covers; its catch's
+        // steps stand where the try does.
+        guardNamesOf(list.steps, list.path === "try" ? inner : retrying)
+      ),
+    ];
+  });
+
 /** A connector contract's group: `mail` of `google-workspace.mail@1`. */
 const contractGroup = /\.(?<group>[^.@]+)@[^@]*$/u;
 

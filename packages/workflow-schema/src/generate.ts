@@ -15,6 +15,8 @@ import {
   resultStepTypes,
   retriesByGuard,
   retriesOf,
+  takesByGuard,
+  takesOf,
 } from "./format.ts";
 import type {
   Json,
@@ -259,11 +261,28 @@ const contextRoots = ["params", "run", "state", inboxRoot] as const;
 /**
  * The `try` around the code being generated that retries, if any: what a
  * call in its list passes as `retry`, `true` or the name of its `when`'s
- * function, which the try declares where it is written (`retriesOf`).
+ * function, which the try declares where it is written (`retriesOf`);
+ * and the guards of the tries between it and the call whose catch takes
+ * a failure by its `when` (`takesOf`), each declared where its try is.
+ * The innermost catch that takes a failure has it before any retry
+ * further out, so the call retries only when none of them takes it.
  */
 interface Retrying {
   readonly retry: string;
+  readonly unless: readonly string[];
 }
+
+/** What a call passes as `retry` under `retrying`. */
+const retryCode = ({ retry, unless }: Retrying): string => {
+  if (unless.length === 0) {
+    return retry;
+  }
+  const holds = [
+    ...unless.map((takes) => `!${takes}(error)`),
+    ...(retry === "true" ? [] : [`${retry}(error)`]),
+  ];
+  return `(error: CaughtError) => ${holds.join(" && ")}`;
+};
 
 /** A call's options: its step, its retry, and what it keeps. */
 const callOptions = (
@@ -273,7 +292,7 @@ const callOptions = (
 ): string => {
   const options: (readonly [string, string])[] = [["step", literal(step.id)]];
   if (retrying !== undefined) {
-    options.push(["retry", retrying.retry]);
+    options.push(["retry", retryCode(retrying)]);
   }
   if (state.length > 0) {
     options.push(["state", `(output) => (${objectCode(state)})`]);
@@ -925,9 +944,18 @@ class Generator {
       ...(retryWhen === undefined ? [] : [retryWhen]),
     ];
     const guard = retriesByGuard(step);
+    const takes = takesByGuard(step, retrying !== undefined);
+    const conditions = [
+      ...(step.catch.code === undefined
+        ? []
+        : [`error.code === ${literal(step.catch.code)}`]),
+      ...(when === undefined ? [] : [when]),
+    ];
     let inner = retrying;
     if (retry !== undefined) {
-      inner = { retry: guard ? retriesOf(step.id) : "true" };
+      inner = { retry: guard ? retriesOf(step.id) : "true", unless: [] };
+    } else if (retrying !== undefined && takes) {
+      inner = { ...retrying, unless: [...retrying.unless, takesOf(step.id)] };
     }
     this.#guarded(step, depth, (at) => {
       if (guard) {
@@ -937,14 +965,17 @@ class Generator {
           `const ${retriesOf(step.id)} = (error: CaughtError) => Boolean(${retryHolds.length === 1 ? bare(retryHolds[0] ?? "") : retryHolds.join(" && ")});`
         );
       }
+      if (takes) {
+        // Whether this catch takes a failure: its code and its `when`, as
+        // its `catch` below decides, read where the try is written.
+        this.#imports.add("type CaughtError");
+        this.#line(
+          at,
+          `const ${takesOf(step.id)} = (error: CaughtError) => Boolean(${conditions.join(" && ")});`
+        );
+      }
       this.#line(at, "try {");
       this.#list(step.try, `${step.pointer}/try`, inner, at + 1);
-      const conditions = [
-        ...(step.catch.code === undefined
-          ? []
-          : [`error.code === ${literal(step.catch.code)}`]),
-        ...(when === undefined ? [] : [when]),
-      ];
       // `caughtError` throws on what no catch may take, so even a catch of
       // everything ends the run with it.
       this.#generatedImports.add("caughtError");

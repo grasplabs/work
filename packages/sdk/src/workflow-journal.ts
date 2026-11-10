@@ -479,7 +479,11 @@ export const journaledCtx = (
       // host holds the record to is the sealed template, whose literals
       // are exactly the document's, never the schema's defaults filled in.
       fitted(schema, value, `State "${key}"`);
-      record[key] = jsonValue(value);
+      // `undefined`, as JSON leaves it out of an object (`jsonValue`):
+      // nothing written, as the host takes a slot's value left out.
+      if (value !== undefined) {
+        record[key] = jsonValue(value);
+      }
     }
     return record;
   };

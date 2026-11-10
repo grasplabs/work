@@ -29,8 +29,7 @@ import {
   memberPathsOf,
   pointerJoin,
   resultStepTypes,
-  retriesByGuard,
-  retriesOf,
+  guardNamesOf,
   stateStepTypes,
 } from "./format.ts";
 import type {
@@ -1381,22 +1380,18 @@ const checkSteps = (
 
 /**
  * Refuses a step whose ID is the name the generated code gives a try's
- * retry guard (`retriesOf`, wherever `retriesByGuard` holds): the two
- * would be one name in one scope.
+ * guard (`guardNamesOf`: its retry's, or whether it takes a failure
+ * before a retry further out): the two would be one name in one scope.
  */
 const checkRetryNames = (walk: Walk): void => {
-  const taken = new Set(
-    eachStep(walk.document.steps).flatMap(({ step }) =>
-      step.type === "try" && retriesByGuard(step) ? [retriesOf(step.id)] : []
-    )
-  );
+  const taken = new Set(guardNamesOf(walk.document.steps));
   for (const { step, pointer } of eachStep(walk.document.steps)) {
     if (taken.has(step.id)) {
       problem(
         walk,
         join(pointer, "id"),
         "workflow.duplicate_id",
-        `\`${step.id}\` is the name of a retrying try's guard.`,
+        `\`${step.id}\` is the name of a try's guard.`,
         "Give the step another ID."
       );
     }

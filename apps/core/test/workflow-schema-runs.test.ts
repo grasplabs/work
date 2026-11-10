@@ -1,13 +1,8 @@
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
 import { countedStep } from "../src/workflows/host.ts";
 import type { HostedSealedRun } from "../src/workflows/sealed-run.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
@@ -24,7 +19,6 @@ import {
   failedWith,
   hello,
   journalingEngine,
-  person,
   ranAs,
   retryingEngine,
   reviewRun,
@@ -37,10 +31,13 @@ import type {
   Reviewed,
   Sealed,
 } from "./sealed-run-harness.ts";
-import { unique } from "./sign-in.ts";
 import {
   declared,
+  fail,
   generated,
+  guardedRan,
+  local,
+  localWorkflow,
   objectOf,
   rowsOf,
 } from "./workflow-schema-runs.ts";
@@ -70,100 +67,7 @@ const evictedBefore = (engine: Engine, name: string): Engine => ({
   },
 });
 
-/**
- * What an engine ran of try `guarded` around step `fail`, by `tries`:
- * the retry rounds its policy decided and ran, and whether the catch took
- * the failure and ran its `tell`.
- */
-const guardedRan = (tries: ReadonlyMap<string, number>) => {
-  const keys = [...tries.keys()];
-  // In a loop's items, a task's later runs go on with their count.
-  const of = (step: string): string | undefined =>
-    keys.find((key) => key === step || key.startsWith(`${step}@`));
-  return {
-    decided: keys.filter((key) => key.endsWith(":decide")).length,
-    retried: keys.filter((key) => key.endsWith(":run")).length,
-    failed: tries.get(of("key:fail:task") ?? ""),
-    // Its catch ran its `do`: it took the failure.
-    told: of("key:tell:task") !== undefined,
-  };
-};
-
 const greeting = { kind: "object", fields: { line: { kind: "string" } } };
-
-/** A module of calculations: `total` sums, `broken` always fails. */
-const totalModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-export const total = compute({
-  input: v.array(v.number()).max(100),
-  output: v.number(),
-  handler: (amounts) => amounts.reduce((all, amount) => all + amount, 0),
-});
-
-export const broken = compute({
-  input: v.number(),
-  output: v.number(),
-  handler: () => {
-    throw new Error("Never adds up");
-  },
-});
-`;
-
-/** An action that answers whom it noted, reaching nothing. */
-const noteModule = `import { action, v } from "@grasp-os/sdk/action";
-
-export const note = action({
-  args: { to: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [],
-  handler: async (_ctx, { to }) => ({ status: \`noted \${to}\` }),
-});
-`;
-
-/** The permissions of `localWorkflow`'s workflow, as grasp-workflow/2 declares them. */
-const local = {
-  modules: {
-    total: { kind: "compute", contract: "local:code/total.ts#total" },
-    broken: { kind: "compute", contract: "local:code/total.ts#broken" },
-    note: { kind: "action", contract: "local:code/note.ts#note" },
-  },
-};
-
-/**
- * A workflow of a builder's whose bindings reach its own modules, compute
- * `total` and `broken` and action `note`, published with them: after an
- * hour's wait, it calls each.
- */
-const localWorkflow = async () => {
-  const by = await person("builder");
-  const workflow = await createWorkflowResource(env, by, `local-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
-      $schema: workflowSchemaUrl,
-      args: objectOf({ who: { kind: "string" } }),
-      returns: objectOf({ status: { kind: "string" } }),
-      result: { status: "done" },
-      permissions: local,
-      steps: [
-        { id: "linger", type: "wait", for: "1 hour" },
-        { id: "add", type: "call", module: "total", args: [1, 2, 3] },
-        { id: "fail", type: "call", module: "broken", args: 1 },
-        {
-          id: "tell",
-          type: "call",
-          module: "note",
-          args: { to: { $expr: "args.who" } },
-        },
-      ],
-    }),
-    basedOn: null,
-    modules: { "code/total.ts": totalModule, "code/note.ts": noteModule },
-  });
-  return { by, workflow };
-};
-
-/** A step calling `broken`, which always fails. */
-const fail = { id: "fail", type: "call", module: "broken", args: 1 };
 
 /** Try `guarded` around `inside`: its catch takes, and retries, while these hold. */
 const guarded = (

@@ -249,9 +249,12 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   catch retries (the format's check allows one), whose code the failure
 //   has, and where no catch further in takes it first whatever the code
 //   says (`retryingTry`). The isolate only says whether that retry's
-//   `when` holds (a boolean); the host computes the backoff and the
-//   limits itself, recorded (`retryDecided`). Declining a retry only
-//   fails the step sooner.
+//   `when` holds and no catch further in takes the failure by its own
+//   `when` (a boolean: the innermost catch that takes a failure has it
+//   before any retry further out, and only the isolate can evaluate a
+//   `when`); the host computes the backoff and the limits itself,
+//   recorded (`retryDecided`). Declining a retry only fails the step
+//   sooner, to the catch that takes it.
 // - A raise forged. A raise is the workflow's own `AppError`, thrown by
 //   its code: the run fails with it only when its code is one a raise of
 //   the build seals, with that raise's sealed message (`raisedFailure`);
@@ -990,7 +993,9 @@ const scheduled = (
  * catch retries (the format's check allows one), when its code filter
  * has the error and no catch further in takes it first whatever the
  * code says (one whose filter has it, with no `when`); undefined when
- * none retries it.
+ * none retries it. A catch further in with a `when` is the isolate's to
+ * decide: its retry choice is false when one takes the failure
+ * (workflow-schema's generate.ts, `takesOf`).
  */
 export const retryingTry = (
   tries: readonly Extract<SealedTask, { kind: "try" }>[],
@@ -1157,8 +1162,19 @@ const deepestSent = (template: Template): number => {
 };
 
 /**
+ * Whether an object's entry of `template` may be missing from what the
+ * isolate sent: only a slot's, whose expression gave `undefined`, which
+ * JSON leaves out of an object (the SDK's `jsonValue`, as
+ * `JSON.stringify` does), as an optional field of a value's schema may
+ * be left out. A literal, a sensitive parameter, an object or a list is
+ * always there: the code writes each as it is sealed.
+ */
+const mayBeLeftOut = (template: Template): boolean => "slot" in template;
+
+/**
  * `sent`, the arguments the isolate sent, matched against `template` at
- * `path`: each literal exactly, an object's keys exactly, an array's
+ * `path`: each literal exactly, an object's keys exactly (but a slot's,
+ * which may be left out: `mayBeLeftOut`), an array's
  * length exactly, a slot any JSON within a value's depth (the host
  * fills in no slot, so what looks like a placeholder there is data), and
  * a sensitive parameter's place only that parameter's placeholder, its value put in
@@ -1214,8 +1230,10 @@ const matched = (
   const keys = new Set(template.object.map(([key]) => key));
   if (
     !isRecord(sent) ||
-    Object.keys(sent).length !== keys.size ||
-    Object.keys(sent).some((key) => !keys.has(key))
+    Object.keys(sent).some((key) => !keys.has(key)) ||
+    template.object.some(
+      ([key, item]) => !(Object.hasOwn(sent, key) || mayBeLeftOut(item))
+    )
   ) {
     throw tampering(`${path} hasn't exactly the keys the build sealed.`);
   }
@@ -1223,6 +1241,9 @@ const matched = (
   // included, is anything else.
   const object: Record<string, Json> = {};
   for (const [key, item] of template.object) {
+    if (!Object.hasOwn(sent, key)) {
+      continue;
+    }
     Object.defineProperty(object, key, {
       value: matched(
         item,
@@ -1813,7 +1834,8 @@ class SealedRun implements SealedRunKind {
   /**
    * A state step's record, `value`, of task `task`, which keeps `kept`
    * (`keepsOf`): its record with `state` beside (`stateRecordSchema`),
-   * `state` with exactly the sealed keys, each value held to its template
+   * `state` with exactly the sealed keys (but one whose value is a slot
+   * that gave `undefined`, left out and not written), each value held to its template
    * as a call's arguments are (`matched`, no sensitive parameter
    * anywhere) and to its sealed descriptor, by the SDK's validator, no
    * marker of core's in any. Anything else is tampering. More than a
@@ -1826,11 +1848,16 @@ class SealedRun implements SealedRunKind {
     value: unknown
   ): Promise<Settled<unknown>> {
     const record = stateRecordSchema.safeParse(value);
-    const sealed = Object.keys(kept);
     const given = record.success ? Object.entries(record.data.state) : [];
+    const state = record.success ? record.data.state : {};
     if (
       !record.success ||
-      given.length !== sealed.length ||
+      // Every sealed key, but one whose value is a slot that gave
+      // `undefined` (`mayBeLeftOut`): nothing written to it.
+      Object.entries(kept).some(
+        ([key, shape]) =>
+          !(Object.hasOwn(state, key) || mayBeLeftOut(shape.template))
+      ) ||
       given.some(
         ([key, each]) => !Object.hasOwn(kept, key) || isCoreMarker(each)
       )

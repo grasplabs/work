@@ -377,6 +377,34 @@ describe("checking a workflow", () => {
         )
       )
     ).toStrictEqual({ "/steps/6/id": "workflow.duplicate_id" });
+    // A try inside a retrying one whose catch takes a failure by its
+    // `when`: whether it takes it is `innerTakes`, which only such a try
+    // declares.
+    const aroundInner = (id: string, retry?: unknown) =>
+      followedBy(
+        {
+          id: "outer",
+          type: "try",
+          try: [
+            {
+              id: "inner",
+              type: "try",
+              try: [mailing("deep", "x")],
+              catch: { when: { $expr: "true" } },
+            },
+          ],
+          catch: retry === undefined ? {} : { retry },
+        },
+        mailing(id, "x")
+      );
+    const retry = { attempts: 2, delay: "1 minute", backoff: "constant" };
+    expect({
+      retrying: codesAt(aroundInner("innerTakes", retry)),
+      notRetrying: codesOf(aroundInner("innerTakes")),
+    }).toStrictEqual({
+      retrying: { "/steps/6/id": "workflow.duplicate_id" },
+      notRetrying: "ok",
+    });
   });
 
   it("allows one retrying try around a step, never one inside another", () => {
