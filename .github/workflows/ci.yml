@@ -771,17 +771,24 @@ jobs:
             ) > "$RUNNER_TEMP/admin-build.log" 2>&1 &
             admin=$!
           fi
-          vp run release:build --out release-out
+          # Both builds end and print before the step fails, whichever
+          # failed: a failed release still shows the admin's log.
+          release_status=0
+          vp run release:build --out release-out || release_status=$?
+          admin_status=0
           if [ -n "$admin" ]; then
-            status=0
-            wait "$admin" || status=$?
+            wait "$admin" || admin_status=$?
             echo "::group::The admin's builds"
             cat "$RUNNER_TEMP/admin-build.log"
             echo "::endgroup::"
-            if [ "$status" != 0 ]; then
-              echo "::error::The admin didn't build (exit $status): its log is above."
-              exit "$status"
-            fi
+          fi
+          if [ "$release_status" != 0 ]; then
+            echo "::error::The release didn't build (exit $release_status): its log is above."
+            exit "$release_status"
+          fi
+          if [ "$admin_status" != 0 ]; then
+            echo "::error::The admin didn't build (exit $admin_status): its log is above."
+            exit "$admin_status"
           fi
         env:
           EVENT: ${{ github.event_name }}
