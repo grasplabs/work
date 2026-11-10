@@ -190,35 +190,6 @@ export const delegateActorOf = (
   }
 };
 
-/**
- * A workflow run, acting on its own, as the audit log names it, with the
- * root of its lineage when another run started it.
- */
-export const runActorOf = ({
-  runId,
-  app,
-  workflow,
-  rootRunId,
-  accountRunId,
-}: {
-  runId: string;
-  app: string;
-  workflow: string;
-  rootRunId?: string | null | undefined;
-  accountRunId?: string | null | undefined;
-}): AuditActor => ({
-  type: "workflow",
-  appId: appIdSchema.parse(app),
-  workflowId: workflowIdSchema.parse(workflow),
-  runId: runIdSchema.parse(runId),
-  ...(rootRunId === null || rootRunId === undefined || rootRunId === runId
-    ? {}
-    : { rootRunId: runIdSchema.parse(rootRunId) }),
-  ...(accountRunId === null || accountRunId === undefined
-    ? {}
-    : { accountRunId: runIdSchema.parse(accountRunId) }),
-});
-
 /** The Workers that send audit events. */
 export const auditSourceSchema = z.enum(["core", "connect"]);
 export type AuditSource = z.infer<typeof auditSourceSchema>;

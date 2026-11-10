@@ -127,11 +127,11 @@ import { snapshotOf } from "./state-snapshots.ts";
 //   instance a late start makes runs nothing of an ended run.
 // - Once the engine has it, the engine decides: the row takes the
 //   engine's notifications, each with the engine's sequence and time
-//   (`projectResourceRun`), as an App run's row does. Core's repair, which
+//   (`projectResourceRun`). Core's repair, which
 //   asks the engine's status, only moves a row off `starting`, never ends
 //   it: the status says nothing of when, and the end's own notification
 //   follows. A terminate asks the engine, and takes the end the engine
-//   confirms in answer, at once, as a cancel of an App run does.
+//   confirms in answer, at once.
 // - Readers go by the row and the run retention (`detailsRemoved`),
 //   never by what the engine still holds.
 //
@@ -154,7 +154,7 @@ import { snapshotOf } from "./state-snapshots.ts";
 // - Output the workflow doesn't declare. The run's result must match its
 //   version's output schema, by the SDK's own validator, or the run fails
 //   (`workflow.output_invalid`).
-// - A run getting past the quotas an App's run is held to. Each run is the
+// - A run getting past the quotas. Each run is the
 //   root of its own lineage (quotas.ts), in the same tables, and each of
 //   its steps' attempts is admitted by the same admission, against the
 //   lineage's active time, host calls, age and steps and the client's
@@ -189,7 +189,7 @@ const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
 /**
  * Whose runs a run's isolate is among, for the sandbox's share; and whose
  * App slots of the attempts running at once its attempts take
- * (admission.ts): the workflow's own, as an App's runs take their App's.
+ * (admission.ts): the workflow's own.
  */
 export const workflowOwnerOf = (workflow: string): string =>
   `workflow-resource:${workflow}`;

@@ -204,6 +204,13 @@
       "when": 1793711589911,
       "tag": "0028_http_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794344581846,
+      "tag": "0029_app_run_holds_removed",
+      "breakpoints": true
     }
   ]
 }

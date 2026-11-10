@@ -1049,9 +1049,9 @@ const waitingScanMax = 2000;
 
 /**
  * The open decisions `by` may answer now, latest first, at most
- * {@link maxWaitingDecisions}: an App's run's and an independent run's
- * alike, so a person asked by a JSON workflow, which has no App code of
- * its own to tell them, finds it waiting for them (their inbox). Read by
+ * {@link maxWaitingDecisions}, so a person asked by a JSON workflow,
+ * which has no App code of its own to tell them, finds it waiting for
+ * them (their inbox). Read by
  * the deciders that could name them (themselves, their role, their teams),
  * a page at a time, then held to who may answer each now (`answerableBy`),
  * as answering is; none for Grasp staff.

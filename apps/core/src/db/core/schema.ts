@@ -2145,12 +2145,12 @@ export const runMailStampRefusals = sqliteTable(
 );
 
 /**
- * An App's accounts in a run lineage (src/workflows/quotas.ts,
- * `accountClaimed`): at most two per App, each the first run of its kind
- * in the lineage of `root_run_id`, claimed once, so every run charged to
- * it (`workflow_runs.account_run_id`) is charged to the one account, whose
- * `run_lineages` row counts its attempts and host calls. Never changed
- * or deleted (migration 0112's triggers).
+ * A workflow's account in a run lineage (src/workflows/quotas.ts,
+ * `triggeredAccountClaimed`): the first run its triggers started in the
+ * lineage of `root_run_id`, claimed once, so every run charged to it is
+ * charged to the one account, whose `run_lineages` row counts its
+ * attempts and host calls. Never changed or deleted (migration 0112's
+ * triggers).
  */
 export const runLineageAccounts = sqliteTable(
   "run_lineage_accounts",
@@ -2158,16 +2158,11 @@ export const runLineageAccounts = sqliteTable(
     rootRunId: text("root_run_id")
       .notNull()
       .references(() => runLineages.rootRunId),
-    /**
-     * The App whose runs it is charged; for a `triggered` account, the
-     * independent workflow's ID instead.
-     */
+    /** The independent workflow whose runs it is charged. */
     appId: text("app_id").notNull(),
     /**
-     * `joined` for an App's runs in a lineage another App started,
-     * `rejoined` for the root's App's runs under another App's run,
-     * `triggered` for an independent workflow's runs its triggers started
-     * in the lineage (quotas.ts, `triggeredAccountClaimed`).
+     * `triggered`, for an independent workflow's runs its triggers started
+     * in the lineage. `joined` and `rejoined` were App runs' accounts.
      */
     kind: text({ enum: ["joined", "rejoined", "triggered"] }).notNull(),
     accountRunId: text("account_run_id").notNull(),
