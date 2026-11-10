@@ -1,7 +1,11 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { OnboardingView, Roster } from "@grasp-os/shared/onboarding";
 import { noContext } from "@grasp-os/shared/onboarding-context";
-import { defaultFlow } from "@grasp-os/shared/onboarding-flow";
+import {
+  defaultFlow,
+  flowPresets,
+  setupSteps,
+} from "@grasp-os/shared/onboarding-flow";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -300,6 +304,114 @@ describe("Grasp's go", () => {
       threshold: 70,
       // A command the admin couldn't have made is refused whole.
       refused: "request.forbidden",
+    });
+  });
+});
+
+/** Why the gate opened, and as whom, from what was on record meanwhile. */
+const openings = (events: AuditEvent[]) =>
+  events
+    .filter(({ action }) => action === "onboarding.gate.opened")
+    .map(({ actor, detail }) => [actor.type, detail.reason]);
+
+// How a company's Grasp opens by its flow (`openAsFlowSays`). The ways it
+// can go wrong, tried here:
+//
+// - Opening to the whole company before its admin finished an onboarding
+//   that interviews nobody, or at all while people are still to be
+//   interviewed, without Grasp's go.
+// - A flow closing a Grasp that is open, or leaving one closed that goes
+//   through no onboarding.
+// - An opening with no trace of who caused it, or why.
+describe("a company's Grasp opening by its flow", { timeout: 60_000 }, () => {
+  afterEach(async () => {
+    await adminCommands().setFlow(null);
+    await reopen();
+  });
+
+  /** The configured admin, on a connection of their own. */
+  const asAdmin = async () => {
+    const session = await signedIn(idp, "microsoft", configuredAdmin());
+    const { core } = await openRpc(session);
+    return await core.authenticate();
+  };
+
+  it("opens once its admin finished the last screen of an onboarding that interviews nobody, and not a screen sooner", async () => {
+    const commands = adminCommands();
+    await commands.close();
+    await commands.setFlow(flowPresets.setup);
+    const admin = await asAdmin();
+    const afterFlow = await gateNow();
+
+    const events = await auditedDuring(async () => {
+      await admin.onboarding.finishSteps([
+        "welcome",
+        "ai",
+        "company",
+        "sources",
+      ]);
+    });
+    const oneLeft = await gateNow();
+    const last = await auditedDuring(async () => {
+      await admin.onboarding.finishSteps(["documents"]);
+    });
+    const finished = await gateNow();
+    const member = await signIn(idp, "microsoft", entraPerson(acmeTenant));
+
+    expect({
+      afterFlow: afterFlow.open,
+      oneLeft: oneLeft.open,
+      finished: finished.open,
+      openings: openings([...events, ...last]),
+      member: member.session !== undefined,
+    }).toStrictEqual({
+      afterFlow: false,
+      oneLeft: false,
+      finished: true,
+      openings: [["person", "finished"]],
+      member: true,
+    });
+  });
+
+  it("stays closed until Grasp's go while people are to be interviewed, whatever its admin finished", async () => {
+    const commands = adminCommands();
+    await commands.close();
+    const admin = await asAdmin();
+    await admin.onboarding.finishSteps([...setupSteps]);
+    const closed = await gateNow();
+    const member = await signIn(idp, "microsoft", entraPerson(acmeTenant));
+    const events = await auditedDuring(async () => {
+      await commands.open();
+    });
+    expect({
+      closed: closed.open,
+      member: member.session,
+      openings: openings(events),
+    }).toStrictEqual({
+      closed: false,
+      member: undefined,
+      openings: [["staff", "go"]],
+    });
+  });
+
+  it("opens at once where the company goes through no onboarding, and a flow never closes an open one", async () => {
+    const commands = adminCommands();
+    await commands.close();
+    const events = await auditedDuring(async () => {
+      await commands.setFlow(flowPresets.none);
+    });
+    const opened = await gateNow();
+    // The whole onboarding again, for a company that is open: it stays open.
+    await commands.setFlow(null);
+    const still = await gateNow();
+    expect({
+      opened: opened.open,
+      still: still.open,
+      openings: openings(events),
+    }).toStrictEqual({
+      opened: true,
+      still: true,
+      openings: [["staff", "no_onboarding"]],
     });
   });
 });
