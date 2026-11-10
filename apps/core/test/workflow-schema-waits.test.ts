@@ -30,7 +30,6 @@ import {
   deadlinePasses,
   descriptorOf,
   echoingMail,
-  engineStep,
   failedWith,
   journalingEngine,
   newerEngine,
@@ -80,14 +79,15 @@ const eventWorkflow = async () => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { kind: "string" } }),
-      bindings: { replies: { kind: "event", contract } },
+      args: objectOf({ who: { kind: "string" } }),
+      permissions: { events: { replies: { contract } } },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "reply",
-          type: "wait",
-          event: { from: "replies", type: [received, bounced] },
+          type: "waitForEvent",
+          events: "replies",
+          eventType: [received, bounced],
           timeout: "3 days",
         },
       ],
@@ -105,15 +105,14 @@ const eventWorkflow = async () => {
 type Listening = Awaited<ReturnType<typeof eventWorkflow>>;
 
 /** `eventWorkflow`'s event binding, as a document declares it. */
-const replies = {
-  replies: { kind: "event", contract: "grasp.replies@1" },
-};
+const replies = { events: { replies: { contract: "grasp.replies@1" } } };
 
 /** An event wait for a reply or a bounce through `replies`. */
 const replyWait = (change: Record<string, unknown> = {}) => ({
   id: "reply",
-  type: "wait",
-  event: { from: "replies", type: [received, bounced] },
+  type: "waitForEvent",
+  events: "replies",
+  eventType: [received, bounced],
   timeout: "3 days",
   ...change,
 });
@@ -127,10 +126,10 @@ const replied = {
     source: { kind: "string" },
   }),
   value: {
-    timedOut: { $expr: "steps.reply.output.timedOut" },
-    type: { $expr: 'steps.reply.output.event?.type ?? ""' },
-    from: { $expr: 'steps.reply.output.event?.data.from ?? ""' },
-    source: { $expr: 'steps.reply.output.event?.source ?? ""' },
+    timedOut: { $expr: "reply.timedOut" },
+    type: { $expr: 'reply.timedOut ? "" : reply.event.type' },
+    from: { $expr: 'reply.timedOut ? "" : reply.event.data.from ?? ""' },
+    source: { $expr: 'reply.timedOut ? "" : reply.event.source' },
   },
 };
 
@@ -299,23 +298,24 @@ const replyingWorkflow = async () => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectOf({ who: { kind: "string" } }),
-      bindings: {
-        ask: { kind: "action", contract: "local:code/ask.ts#ask" },
-        replies: { kind: "event", contract: reply.contract.key },
+      args: objectOf({ who: { kind: "string" } }),
+      permissions: {
+        modules: { ask: { kind: "action", contract: "local:code/ask.ts#ask" } },
+        events: { replies: { contract: reply.contract.key } },
       },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "ask",
-          type: "do",
-          binding: "ask",
-          arguments: { to: { $expr: "input.who" }, replyTo: "x" },
+          type: "call",
+          module: "ask",
+          args: { to: { $expr: "args.who" }, replyTo: "x" },
         },
         {
           id: "reply",
-          type: "wait",
-          event: { from: "replies", type: reply.type },
+          type: "waitForEvent",
+          events: "replies",
+          eventType: reply.type,
           timeout: "7 days",
         },
       ],
@@ -365,11 +365,11 @@ const stateWrites = async (runId: string): Promise<number> => {
 /** A mail to the run's person, its subject what the state kept, or "none". */
 const remember = {
   id: "remember",
-  type: "do",
-  binding: "mail",
-  operation: "mail.send",
-  arguments: {
-    to: { $expr: "input.who" },
+  type: "call",
+  connection: "mail",
+  action: "mail.send",
+  args: {
+    to: { $expr: "args.who" },
     subject: { $expr: 'state.last ?? "none"' },
   },
   state: {
@@ -396,7 +396,7 @@ const readState = {
   },
 };
 
-describe("a grasp-workflow/1 event wait's generated code on the run host", () => {
+describe("a grasp-workflow/2 event wait's generated code on the run host", () => {
   let listening: Listening;
 
   beforeAll(async () => {
@@ -420,12 +420,13 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
       await publishWorkflowVersion(env, by, workflow.id, {
         definition: JSON.stringify({
           $schema: workflowSchemaUrl,
-          bindings: { replies: { kind: "event", contract } },
+          permissions: { events: { replies: { contract } } },
           steps: [
             {
               id: "reply",
-              type: "wait",
-              event: { from: "replies", type: types },
+              type: "waitForEvent",
+              events: "replies",
+              eventType: types,
               timeout: "3 days",
             },
           ],
@@ -448,8 +449,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
         .parse(JSON.parse(stored?.contract ?? "{}")).listens,
     }).toStrictEqual({
       // A wait for a type it can never be sent would end only by timing out.
-      refused: ["event.unknown_type /steps/0/event/type/1"],
-      single: ["event.unknown_type /steps/0/event/type"],
+      refused: ["event.unknown_type /steps/0/eventType/1"],
+      single: ["event.unknown_type /steps/0/eventType"],
       listens: { reply: { alias: "replies", types: [received] } },
     });
   });
@@ -486,7 +487,7 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
       },
       asked: [
         {
-          step: engineStep("reply", "task"),
+          step: "reply:task",
           types: await keysOf(received, bounced),
         },
       ],
@@ -500,7 +501,7 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
         {
           id: "chase",
           type: "wait",
-          if: { $expr: "steps.reply.output.timedOut" },
+          if: { $expr: "reply.timedOut" },
           for: "1 hour",
         },
       ],
@@ -541,7 +542,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
           do: [
             replyWait({
               id: "each",
-              event: { from: "replies", type: received },
+              events: "replies",
+              eventType: received,
             }),
           ],
         },
@@ -576,8 +578,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
     }).toStrictEqual({
       ran: { ended: null, tampered: [] },
       asked: [
-        { step: engineStep("each", "task@0"), types: await keysOf(received) },
-        { step: engineStep("each", "task@1"), types: await keysOf(received) },
+        { step: "each:task", types: await keysOf(received) },
+        { step: "each:task@1", types: await keysOf(received) },
       ],
       sent: 2,
     });
@@ -585,10 +587,10 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
 
   it("skips a wait whose own `if` doesn't hold, at the top level and in an item, and the next item's wait takes its event", async () => {
     const skipped = await generated(
-      [replyWait({ if: { $expr: 'input.who !== "Ada"' } })],
+      [replyWait({ if: { $expr: 'args.who !== "Ada"' } })],
       {
         schema: objectOf({ skipped: { kind: "boolean" } }),
-        value: { skipped: { $expr: "steps.reply.output === null" } },
+        value: { skipped: { $expr: "reply === null" } },
       },
       replies
     );
@@ -602,7 +604,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
             replyWait({
               id: "each",
               if: { $expr: 'item === "take"' },
-              event: { from: "replies", type: received },
+              events: "replies",
+              eventType: received,
             }),
           ],
         },
@@ -644,8 +647,10 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
     }).toStrictEqual({
       top: { ended: { skipped: true }, tampered: [] },
       items: { ended: null, tampered: [] },
-      steps: { reply: ["enter", "task"], each: ["enter", "task"] },
-      asked: [engineStep("each", "task@1")],
+      // An `if` is the code's: no step records it.
+      steps: { reply: ["task"], each: ["task"] },
+      // The first run of `each`, in item 1.
+      asked: ["each:task"],
       sent: 1,
     });
   });
@@ -679,7 +684,8 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
       // Refused before it waits: the engine is asked for nothing.
       asked,
     }).toStrictEqual({
-      // No catch takes it: the host checks the binding again on replay.
+      // No catch takes it: its catch of everything throws it on, so the
+      // run ends with it, never as code that went on past it.
       caught: failedWith("workflow.event_denied"),
       bare: failedWith("workflow.event_denied"),
       asked: [],
@@ -742,11 +748,11 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
       first: { ended: null, tampered: [] },
       replayed: { ended: null, tampered: [] },
       ranAgain: [],
-      // The path the run took is gone: its catch is asked, and takes
-      // nothing, so it never takes a path the run never took.
+      // The path the run took is gone: its code's catch can't take the
+      // failure, so the run ends with it, never on a path it never took.
       afterRevoking: failedWith("workflow.event_denied"),
-      ranRevoked: [engineStep("guarded", "catch")],
-      asked: [engineStep("reply", "task")],
+      ranRevoked: [],
+      asked: ["reply:task"],
     });
   });
 });
@@ -755,7 +761,7 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
 // binding `replies`, which its mail gives as its Reply-To, sealed as any
 // argument the isolate fills in, and the wait on `replies` after it,
 // which takes the reply.
-describe("a grasp-workflow/1 run's inbox on the run host", () => {
+describe("a grasp-workflow/2 run's inbox on the run host", () => {
   afterAll(endLiveResourceRuns);
 
   it("mails its reply address as the Reply-To, and its wait on that binding takes the reply", async () => {
@@ -764,18 +770,19 @@ describe("a grasp-workflow/1 run's inbox on the run host", () => {
       [
         {
           id: "ask",
-          type: "do",
-          binding: "ask",
+          type: "call",
+          module: "ask",
           if: { $expr: 'typeof inbox.replies === "string"' },
-          arguments: {
-            to: { $expr: "input.who" },
+          args: {
+            to: { $expr: "args.who" },
             replyTo: { $expr: "inbox.replies" },
           },
         },
         {
           id: "reply",
-          type: "wait",
-          event: { from: "replies", type: replying.replyType },
+          type: "waitForEvent",
+          events: "replies",
+          eventType: replying.replyType,
           timeout: "7 days",
         },
       ],
@@ -787,18 +794,20 @@ describe("a grasp-workflow/1 run's inbox on the run host", () => {
           dmarc: { kind: "string" },
         }),
         value: {
-          mailed: { $expr: 'steps.ask.output?.replyTo ?? ""' },
+          mailed: { $expr: 'ask?.replyTo ?? ""' },
           replyTo: { $expr: 'inbox.replies ?? ""' },
-          from: { $expr: 'steps.reply.output.event?.data.from.address ?? ""' },
+          from: {
+            $expr: 'reply.timedOut ? "" : reply.event.data.from.address ?? ""',
+          },
           dmarc: {
             $expr:
-              'steps.reply.output.event?.data.authentication.dmarc?.result ?? ""',
+              'reply.timedOut ? "" : reply.event.data.authentication.dmarc?.result ?? ""',
           },
         },
       },
       {
-        ask: { kind: "action", contract: "local:code/ask.ts#ask" },
-        replies: { kind: "event", contract: "grasp/email-reply" },
+        modules: { ask: { kind: "action", contract: "local:code/ask.ts#ask" } },
+        events: { replies: { contract: "grasp/email-reply" } },
       }
     );
     const runId = await waitingRun(replying);
@@ -842,7 +851,7 @@ describe("a grasp-workflow/1 run's inbox on the run host", () => {
       },
       asked: [
         {
-          step: engineStep("reply", "task"),
+          step: "reply:task",
           types: [await eventTypeKey("replies", replying.replyType)],
         },
       ],
@@ -855,7 +864,7 @@ describe("a grasp-workflow/1 run's inbox on the run host", () => {
 // succeeded, and read by the workflow's next run as `state.<key>`, the
 // snapshot its start froze. Each test has a workflow of its own, so its
 // state starts empty.
-describe("a grasp-workflow/1 workflow's state on the run host", () => {
+describe("a grasp-workflow/2 workflow's state on the run host", () => {
   // Its workflows bind a model, as every sealed workflow does: approved
   // only once the organization has one, whichever tests ran before.
   beforeAll(async () => {
@@ -874,11 +883,11 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
         remember,
         {
           id: "never",
-          type: "do",
-          if: { $expr: 'input.who === "nobody"' },
-          binding: "mail",
-          operation: "mail.send",
-          arguments: { to: { $expr: "input.who" }, subject: "skipped" },
+          type: "call",
+          if: { $expr: 'args.who === "nobody"' },
+          connection: "mail",
+          action: "mail.send",
+          args: { to: { $expr: "args.who" }, subject: "skipped" },
           state: { never: true },
         },
       ],
@@ -1062,7 +1071,7 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
           schema: objectOf({ read: { kind: "string" } }),
           value: { read: { $expr: "typeof state.count" } },
         },
-        declared.bindings,
+        declared.permissions,
         { count: schema }
       );
     const v1 = await version({ kind: "string" }, "many");
@@ -1093,11 +1102,11 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               ...remember,
-              arguments: { to: { $expr: "item" }, subject: "row" },
+              args: { to: { $expr: "item" }, subject: "row" },
               state: { last: { $expr: "item" } },
             },
           ],
@@ -1107,7 +1116,7 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
         schema: objectOf({ last: { kind: "string" } }),
         value: { last: { $expr: 'state.last ?? "none"' } },
       },
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );

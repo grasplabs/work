@@ -52,7 +52,7 @@ describe("decisions past their deadline", { timeout: 60_000 }, () => {
       end: { status: run.status, code: run.error?.code },
       decision: status,
     }).toStrictEqual({
-      end: { status: "failed", code: "workflow.raised" },
+      end: { status: "failed", code: "test.unanswered" },
       decision: "timed_out",
     });
   });

@@ -47,25 +47,25 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-/** A definition calling action `notify`, with `bindings` besides. */
-const definitionOf = (bindings: Record<string, unknown> = {}): string =>
+/** A definition calling action `notify`, with `permissions` besides. */
+const definitionOf = (permissions: Record<string, unknown> = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: "steps.notify.output.status" } },
-    },
-    bindings: {
-      notify: { kind: "action", contract: "local:code/notify.ts#notify" },
-      ...bindings,
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: "notify.status" } },
+    permissions: {
+      modules: {
+        notify: { kind: "action", contract: "local:code/notify.ts#notify" },
+      },
+      ...permissions,
     },
     steps: [
       {
         id: "notify",
-        type: "do",
-        binding: "notify",
-        arguments: { to: { $expr: "input.who" } },
+        type: "call",
+        module: "notify",
+        args: { to: { $expr: "args.who" } },
       },
     ],
   });
@@ -91,7 +91,7 @@ describe("a JSON workflow's own action on-prem", () => {
     });
     const workflow = await createWorkflowResource(env, ada, `act-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ mail: { kind: "connector", contract: key } }),
+      definition: definitionOf({ connections: { mail: { contract: key } } }),
       basedOn: null,
       modules: {
         "code/notify.ts": `import { action, resource, v } from "@grasp-os/sdk/action";

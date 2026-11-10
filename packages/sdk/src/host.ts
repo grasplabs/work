@@ -36,7 +36,8 @@ export {
   declaredPermissions,
   isActionPermission,
 } from "./manifest-permissions.ts";
-export { appErrorDetailsOf } from "./app-error.ts";
+export { appErrorDetailsOf, appErrorProblemOf } from "./app-error.ts";
+export type { AppErrorProblem } from "./app-error.ts";
 // Whether a function still serves what a workflow bound it as.
 export { functionBreak } from "./function-change.ts";
 export { migrationPlatformMessages } from "./migration.ts";
@@ -140,3 +141,6 @@ export { fileChannel } from "./file-channel.ts";
 export { linkChannel } from "./link-channel.ts";
 export type { LinkChannel, LinkDecision } from "./link-channel.ts";
 export type { FileChannel } from "./file-channel.ts";
+
+// How a declared name becomes a member of a client (`ctx.connections.<alias>.<action>`).
+export { memberName } from "./member-names.ts";

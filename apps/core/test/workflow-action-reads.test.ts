@@ -163,22 +163,22 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { $expr: "steps.look.output" },
-    },
-    bindings: {
-      look: { kind: "action", contract: "local:code/look.ts#look" },
-      docs: { kind: "brain", contract: keys.knowledge },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { $expr: "look" },
+    permissions: {
+      modules: {
+        look: { kind: "action", contract: "local:code/look.ts#look" },
+      },
+      brain: { docs: { contract: keys.knowledge } },
     },
     steps: [
       ...before,
       {
         id: "look",
-        type: "do",
-        binding: "look",
-        arguments: { doc: { $expr: "input.who" } },
+        type: "call",
+        module: "look",
+        args: { doc: { $expr: "args.who" } },
       },
     ],
   });
@@ -642,21 +642,24 @@ describe("a workflow action's knowledge uses", () => {
       kind: "knowledge",
     });
     await publishCatalogContract(env, admin, { key: files, kind: "files" });
-    /** What publishing `docs` as `binding` comes to: "ok", or its problems by pointer. */
-    const publishing = async (binding: { kind: string; contract: string }) => {
+    /** What publishing `docs` under permission kind `kind` comes to: "ok", or its problems by pointer. */
+    const publishing = async (kind: string, contract: string) => {
       const workflow = await createWorkflowResource(
         env,
         ada,
         `read-${unique()}`
       );
       const document = z
-        .looseObject({ bindings: z.record(z.string(), z.unknown()) })
+        .looseObject({
+          permissions: z.looseObject({ brain: z.unknown() }),
+        })
         .parse(JSON.parse(definitionOf({ knowledge })));
+      const { brain: _brain, ...others } = document.permissions;
       const error = await refusal(
         publishWorkflowVersion(env, ada, workflow.id, {
           definition: JSON.stringify({
             ...document,
-            bindings: { ...document.bindings, docs: binding },
+            permissions: { ...others, [kind]: { docs: { contract } } },
           }),
           basedOn: null,
           modules: { "code/look.ts": looksEverywhere },
@@ -681,18 +684,22 @@ describe("a workflow action's knowledge uses", () => {
       ]);
     };
     expect({
-      brain: await publishing({ kind: "brain", contract: knowledge }),
+      brain: await publishing("brain", knowledge),
       // The run's own files passed off as the collection.
-      filesContract: await publishing({ kind: "brain", contract: files }),
-      filesBinding: await publishing({ kind: "files", contract: files }),
-      connector: await publishing({ kind: "connector", contract: knowledge }),
+      filesContract: await publishing("brain", files),
+      filesBinding: await publishing("files", files),
+      connector: await publishing("connections", knowledge),
     }).toStrictEqual({
       brain: "ok",
-      filesContract: [["/bindings/docs/contract", "binding.unknown_contract"]],
-      filesBinding: [["/bindings/look/contract", "binding.use_undeclared"]],
+      filesContract: [
+        ["/permissions/brain/docs/contract", "binding.unknown_contract"],
+      ],
+      filesBinding: [
+        ["/permissions/modules/look/contract", "binding.use_undeclared"],
+      ],
       connector: [
-        ["/bindings/look/contract", "binding.use_undeclared"],
-        ["/bindings/docs/contract", "binding.unknown_contract"],
+        ["/permissions/connections/docs/contract", "binding.unknown_contract"],
+        ["/permissions/modules/look/contract", "binding.use_undeclared"],
       ],
     });
   });

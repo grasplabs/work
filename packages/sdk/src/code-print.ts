@@ -19,7 +19,7 @@ export type Code =
   | { type: "Number"; value: number }
   | { type: "Boolean"; value: boolean }
   | { type: "Null" }
-  /** `quasis` as written (raw), one more than `expressions`. */
+  /** `quasis` as they read (cooked), one more than `expressions`. */
   | {
       type: "Template";
       quasis: readonly string[];
@@ -32,8 +32,10 @@ export type Code =
   | { type: "Logical"; operator: string; left: Code; right: Code }
   | { type: "Conditional"; test: Code; consequent: Code; alternate: Code }
   | { type: "Call"; callee: Code; arguments: readonly Code[] }
-  /** `.property` where it is a name, `["property"]` otherwise. */
-  | { type: "Member"; object: Code; property: string }
+  /** `.property` where it is a name, `["property"]` otherwise; `?.` when optional. */
+  | { type: "Member"; object: Code; property: string; optional?: boolean }
+  /** `[index]`; `?.[index]` when optional. */
+  | { type: "Index"; object: Code; index: number; optional?: boolean }
   | { type: "Arrow"; params: readonly string[]; body: Code }
   | { type: "Parenthesized"; expression: Code };
 
@@ -126,14 +128,17 @@ const escaped = /[^ !#-[\]-~]/gu;
 const digit = /[0-9]/u;
 
 /**
- * `value` as a string literal in double quotes, in ASCII: `\0` (unless a
- * digit follows), the usual single escapes, `\xHH` below U+0100 and
- * `\uHHHH` above (each half of a surrogate pair, and a lone one): the
- * generated code is ASCII, whatever its strings hold.
+ * `value` with what `pattern` matches escaped, in ASCII: `singles` by
+ * their own escape, `\0` (unless a digit follows), `\xHH` below U+0100
+ * and `\uHHHH` above (each half of a surrogate pair, and a lone one).
  */
-const quoted = (value: string): string =>
-  `"${value.replaceAll(escaped, (char, offset: number) => {
-    const single = singleEscapes[char];
+const asciiEscaped = (
+  value: string,
+  pattern: RegExp,
+  singles: Readonly<Record<string, string>>
+): string =>
+  value.replaceAll(pattern, (char, offset: number) => {
+    const single = singles[char];
     if (single !== undefined) {
       return single;
     }
@@ -148,7 +153,15 @@ const quoted = (value: string): string =>
       units += unit > 0xff ? `\\u${hex(unit, 4)}` : `\\x${hex(unit, 2)}`;
     }
     return units;
-  })}"`;
+  });
+
+/**
+ * `value` as a string literal in double quotes, in ASCII
+ * (`asciiEscaped`): the generated code is ASCII, whatever its strings
+ * hold.
+ */
+const quoted = (value: string): string =>
+  `"${asciiEscaped(value, escaped, singleEscapes)}"`;
 
 /** How tightly each binary and logical operator binds. */
 const precedence: ReadonlyMap<string, number> = new Map([
@@ -228,6 +241,13 @@ const groupsApart = (
   );
 };
 
+/**
+ * Whether `place` reads a member of what stands there: a number there
+ * takes parentheses, as `1.at(0)` is a malformed number, `(1).at(0)` not.
+ */
+const readFrom = (place: Place): boolean =>
+  place === "object" || place === "callee";
+
 /** Whether `node`, at `place` in `parent`, needs parentheses. */
 const needsParentheses = (
   node: Code,
@@ -235,11 +255,7 @@ const needsParentheses = (
   place: Place
 ): boolean => {
   // Called, read from, an operand or spread: no operator's expression.
-  const bound =
-    place === "callee" ||
-    place === "object" ||
-    place === "operand" ||
-    place === "spread";
+  const bound = readFrom(place) || place === "operand" || place === "spread";
   if (node.type === "Binary" || node.type === "Logical") {
     return bound || groupsApart(node, parent, place);
   }
@@ -253,14 +269,13 @@ const needsParentheses = (
   }
   if (node.type === "Unary") {
     return (
-      place === "callee" ||
-      place === "object" ||
+      readFrom(place) ||
       (parent?.type === "Binary" &&
         parent.operator === "**" &&
         place === "left")
     );
   }
-  return false;
+  return node.type === "Number" && readFrom(place);
 };
 
 const indentOf = (depth: number): string => "  ".repeat(depth);
@@ -276,6 +291,26 @@ interface Context {
    */
   arrowBody: boolean;
 }
+
+/** What a template's text escapes: what a string's does, a backtick and `$`. */
+const templateEscapes = /[^ !#-[\]-~]|[`$]/gu;
+
+const templateSingleEscapes: Readonly<Record<string, string>> = {
+  ...singleEscapes,
+  "`": "\\`",
+  $: "\\$",
+};
+
+/**
+ * A template's text, from what it reads (cooked), escaped anew as a
+ * string's is (`asciiEscaped`), a backtick and `$` too: no text closes the
+ * template or opens a placeholder, no line break breaks the code's lines,
+ * and the code stays ASCII. Printed from the cooked value, never the raw,
+ * no escape or line continuation as written can change what the code
+ * reads.
+ */
+const templateText = (cooked: string): string =>
+  asciiEscaped(cooked, templateEscapes, templateSingleEscapes);
 
 /** `node` printed (see the header). */
 // One case per node type: its length is the tree's, not complexity.
@@ -319,9 +354,9 @@ const printed = (node: Code, context: Context): string => {
     case "Template": {
       const parts = node.expressions.map(
         (expression, at) =>
-          `${node.quasis[at] ?? ""}\${${child(expression, "other")}}`
+          `${templateText(node.quasis[at] ?? "")}\${${child(expression, "other")}}`
       );
-      return `\`${parts.join("")}${node.quasis.at(-1) ?? ""}\``;
+      return `\`${parts.join("")}${templateText(node.quasis.at(-1) ?? "")}\``;
     }
     case "Array": {
       const elements = node.elements.map((element) =>
@@ -385,10 +420,18 @@ const printed = (node: Code, context: Context): string => {
     }
     case "Member": {
       const object = child(node.object, "object", true);
+      const optional = node.optional === true ? "?." : "";
       // A reserved word is a name after a dot: `.default`.
       return identifierName.test(node.property)
-        ? `${object}.${node.property}`
-        : `${object}[${quoted(node.property)}]`;
+        ? `${object}${optional === "" ? "." : optional}${node.property}`
+        : `${object}${optional}[${quoted(node.property)}]`;
+    }
+    case "Index": {
+      const object = child(node.object, "object", true);
+      if (!Number.isInteger(node.index) || node.index < 0) {
+        throw new TypeError("A printed index is a whole number.");
+      }
+      return `${object}${node.optional === true ? "?." : ""}[${String(node.index)}]`;
     }
     case "Arrow": {
       const params =

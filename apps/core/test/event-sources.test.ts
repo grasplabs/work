@@ -74,13 +74,11 @@ const mailFields = { id: { kind: "string" }, subject: { kind: "string" } };
 /** The inbox workflow: it hands back the mail's ID and subject it started with. */
 const inbox = JSON.stringify({
   $schema: workflowSchemaUrl,
-  input: objectSchema(mailFields),
-  output: {
-    schema: objectSchema(mailFields),
-    value: {
-      id: { $expr: "input.id" },
-      subject: { $expr: "input.subject" },
-    },
+  args: objectSchema(mailFields),
+  returns: objectSchema(mailFields),
+  result: {
+    id: { $expr: "args.id" },
+    subject: { $expr: "args.subject" },
   },
   steps: [],
 });

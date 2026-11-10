@@ -71,9 +71,6 @@ describe("whose word a run's row takes, and whose clock", () => {
     if (row === undefined) {
       throw new Error("No run");
     }
-    const revision = async (): Promise<unknown> =>
-      await runColumn(runId, "summary_revision");
-    const before = await revision();
     // Both settlers read the same clock: the page's apply and the
     // engine's notification, landing together.
     vi.useFakeTimers({ toFake: ["Date"], now });
@@ -101,16 +98,12 @@ describe("whose word a run's row takes, and whose clock", () => {
       .bind(control)
       .first<{ state: string }>();
     const audited = await runEvents(runId, "workflow.run.control_applied");
-    const after = await revision();
     expect({
       state: settled?.state,
       audited: audited.length,
-      // The snapshot moved on once, by the settler that changed the row.
-      revisions: Number(after) - Number(before),
     }).toStrictEqual({
       state: "applied",
       audited: 1,
-      revisions: 1,
     });
   });
 

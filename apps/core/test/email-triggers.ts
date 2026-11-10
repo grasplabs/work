@@ -214,19 +214,17 @@ export const objectOf = (fields: Record<string, unknown>) => ({
  * A workflow taking a message's `subject`, and what else its trigger
  * maps, and ending with its subject: `subject`, if given, says how.
  */
-export const definitionOf = (subject = "input.subject"): string =>
+export const definitionOf = (subject = "args.subject"): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectOf({
+    args: objectOf({
       subject: { kind: "string" },
       from: { kind: "string" },
       stored: stringOrNull,
       attachments: { kind: "array", item: attachment },
     }),
-    output: {
-      schema: objectOf({ subject: { kind: "string" } }),
-      value: { subject: { $expr: subject } },
-    },
+    returns: objectOf({ subject: { kind: "string" } }),
+    result: { subject: { $expr: subject } },
     steps: [],
   });
 
@@ -374,11 +372,9 @@ const messageFields = {
 const messageDefinitionOf = (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectOf(messageFields),
-    output: {
-      schema: objectOf({ subject: { kind: "string" } }),
-      value: { subject: { $expr: "input.subject" } },
-    },
+    args: objectOf(messageFields),
+    returns: objectOf({ subject: { kind: "string" } }),
+    result: { subject: { $expr: "args.subject" } },
     steps: [],
   });
 

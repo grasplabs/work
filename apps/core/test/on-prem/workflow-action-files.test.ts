@@ -86,21 +86,21 @@ describe("a workflow action's run files on-prem", () => {
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: JSON.stringify({
         $schema: workflowSchemaUrl,
-        input: objectSchema({ text: { kind: "string" } }),
-        output: {
-          schema: objectSchema({ status: { kind: "string" } }),
-          value: { $expr: "steps.keep.output" },
-        },
-        bindings: {
-          keep: { kind: "action", contract: "local:code/keep.ts#keep" },
-          files: { kind: "files", contract: key },
+        args: objectSchema({ text: { kind: "string" } }),
+        returns: objectSchema({ status: { kind: "string" } }),
+        result: { $expr: "keep" },
+        permissions: {
+          modules: {
+            keep: { kind: "action", contract: "local:code/keep.ts#keep" },
+          },
+          files: { files: { contract: key } },
         },
         steps: [
           {
             id: "keep",
-            type: "do",
-            binding: "keep",
-            arguments: { text: { $expr: "input.text" } },
+            type: "call",
+            module: "keep",
+            args: { text: { $expr: "args.text" } },
           },
         ],
       }),

@@ -7,7 +7,7 @@ import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import { stepListsOf } from "@grasp-os/workflow-schema/format";
 import type { Step } from "@grasp-os/workflow-schema/format";
 
-// A workflow's diagram, drawn from its checked grasp-workflow/1 document:
+// A workflow's diagram, drawn from its checked grasp-workflow/2 document:
 // each step by its stable ID, in order, with every list of steps it holds,
 // whether a run takes it or not. It reads the document's structure only:
 // nothing is evaluated, and what a step says through an expression is
@@ -17,24 +17,36 @@ import type { Step } from "@grasp-os/workflow-schema/format";
 
 /** What a step does, as its literal fields say it. */
 const detailOf = (step: Step): string | null => {
-  if (step.type === "do") {
-    return step.operation === undefined
-      ? step.binding
-      : `${step.binding} · ${step.operation}`;
-  }
-  if (step.type === "agent" || step.type === "decision") {
-    return step.binding;
-  }
-  if (step.type === "wait") {
-    if ("event" in step) {
-      return step.event.from;
+  switch (step.type) {
+    case "call": {
+      return "connection" in step
+        ? `${step.connection} · ${step.action}`
+        : step.module;
     }
-    return "for" in step ? step.for : null;
+    case "generate": {
+      return "ai";
+    }
+    case "decide": {
+      return step.decision;
+    }
+    case "waitForEvent": {
+      return step.events;
+    }
+    case "wait": {
+      return "for" in step ? step.for : null;
+    }
+    case "raise": {
+      return step.error.code;
+    }
+    case "forEach":
+    case "if":
+    case "try": {
+      return null;
+    }
+    default: {
+      return step satisfies never;
+    }
   }
-  if (step.type === "raise") {
-    return step.error.title ?? step.error.type;
-  }
-  return null;
 };
 
 /** A list a step holds, by its path, as the diagram names its scope. */

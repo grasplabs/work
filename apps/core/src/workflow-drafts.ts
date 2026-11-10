@@ -42,7 +42,7 @@ import { applyStepEdit } from "./workflow-steps.ts";
 
 // The draft of an independent workflow's next definition, as its builders
 // and their agent edit it (platform specification 13.10 and 22.7). The
-// draft is grasp-workflow/1 text and nothing runs it: only a published
+// draft is grasp-workflow/2 text and nothing runs it: only a published
 // version runs, and only the latest draft that passed, its checkpoint, can
 // be published (`publishWorkflowDraft`). The editor's diagram is drawn
 // from that checkpoint's JSON, never from anything else.

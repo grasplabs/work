@@ -2445,7 +2445,7 @@ export const workflowRunWakes = sqliteTable(
 );
 
 /**
- * Every decision a workflow run waits for (`step.decision`, src/decisions/),
+ * Every decision a workflow run waits for (`ctx.decisions.<alias>.ask`, src/decisions/),
  * one per run and step: who answers it (`deciders`: `person:<id>`,
  * `role:<role>` or `team:<id>`), until when (`expires_at`), and how it
  * ended. `status` moves from `open` once, in one conditional update, to an
@@ -3660,7 +3660,7 @@ export const workflowResources = sqliteTable(
  * unique per workflow, so a semantic version always names the same
  * content. `definition` is the workflow.json exactly as published (at
  * most the format's 1 MiB), `profile_version` its format
- * (`grasp-workflow/1`), `contract` the canonical JSON of its input, output
+ * (`grasp-workflow/2`), `contract` the canonical JSON of its input, output
  * and parameter schemas, and `manifest` the canonical JSON of what the
  * version pins: its definition, contract, build and the exact versions its
  * bindings resolved to (also in `sdk_resource_bindings`), each with its

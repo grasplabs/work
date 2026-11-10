@@ -35,7 +35,7 @@ import {
   started,
 } from "./workflow-calls.ts";
 
-// The calls of grasp-workflow/1 workflows on the run host (sealed-run.ts,
+// The calls of grasp-workflow/2 workflows on the run host (sealed-run.ts,
 // resource-calls.ts and resource-authority.ts), from their threat model:
 // a call reaches only the target its start froze; authority revoked while
 // a run runs stops its next call; a replay repeats no effect; a sensitive
@@ -307,7 +307,7 @@ describe("connector calls", () => {
     const ada = await person("builder");
     // `to` is text in the contract; this one is a number.
     const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
-      to: { $expr: "input.who.length" },
+      to: { $expr: "args.who.length" },
     });
     const runId = await started(ada, workflow.id, serving);
     const run = await ended(ada, workflow.id, runId);
@@ -331,12 +331,12 @@ describe("a step's own timeout", () => {
     const key = `summary-${unique()}`;
     await publishCatalogContract(env, admin, { key, kind: "model" });
     const { workflow } = await published(by, {
-      bindings: { summary: { kind: "model", contract: key } },
+      permissions: { ai: { contract: key } },
       steps: [greetStep("greet", "2 seconds")],
-      status: "steps.greet.output.line",
+      status: "greet.line",
     });
     await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "summary",
+      alias: "ai",
       target: { kind: "model", model: allowedModel },
       reviewed: { version: 1 },
     });

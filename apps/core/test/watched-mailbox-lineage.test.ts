@@ -187,28 +187,26 @@ const echoInput = {
 const echoOf = (key: string, from: string, to: string) => (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema(echoInput),
-    output: {
-      schema: objectSchema({
-        id: { kind: "string" },
-        stamp: { kind: "string" },
-      }),
-      value: {
-        id: { $expr: "input.id" },
-        stamp: { $expr: "input.stamp" },
-      },
+    args: objectSchema(echoInput),
+    returns: objectSchema({
+      id: { kind: "string" },
+      stamp: { kind: "string" },
+    }),
+    result: {
+      id: { $expr: "args.id" },
+      stamp: { $expr: "args.stamp" },
     },
-    bindings: { mail: { kind: "connector", contract: key } },
+    permissions: { connections: { mail: { contract: key } } },
     steps: [
       {
         id: "send",
-        type: "do",
-        binding: "mail",
-        operation: "mail.send",
-        arguments: {
+        type: "call",
+        connection: "mail",
+        action: "mail.send",
+        args: {
           mailbox: from,
           to: [to],
-          subject: { $expr: "input.subject" },
+          subject: { $expr: "args.subject" },
           body: "Again.",
         },
       },

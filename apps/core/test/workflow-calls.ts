@@ -1,5 +1,5 @@
 /**
- * What the tests of grasp-workflow/1 workflows' calls share
+ * What the tests of grasp-workflow/2 workflows' calls share
  * (workflow-calls.test.ts and the workflow-*.test.ts beside it): people,
  * permissions and published workflows of their own, their runs, and what
  * those runs' calls left behind.
@@ -116,7 +116,7 @@ export const granted = async (
 };
 
 export interface Draft {
-  bindings?: Record<string, { kind: string; contract: string }>;
+  permissions?: Record<string, unknown>;
   params?: Record<string, unknown>;
   steps: readonly unknown[];
   /** What the run's `status` ends as: an expression, the text `done` if none. */
@@ -127,20 +127,18 @@ export interface Draft {
 
 /** A definition: its input `{ who }`, its output `{ status }`. */
 export const definitionOf = ({
-  bindings = {},
+  permissions = {},
   params = {},
   steps,
   status,
 }: Draft): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: status === undefined ? "done" : { $expr: status } },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: status === undefined ? "done" : { $expr: status } },
     params,
-    bindings,
+    permissions,
     steps,
   });
 
@@ -320,7 +318,7 @@ export const mailingWorkflow = async (
   admin: Identity,
   {
     before = [],
-    to = { $expr: "input.who" },
+    to = { $expr: "args.who" },
     plan = [],
     sharing,
     plain = false,
@@ -348,21 +346,21 @@ export const mailingWorkflow = async (
   const key = await mailContract(admin, input);
   const send = {
     id: "send",
-    type: "do",
-    binding: "mail",
-    operation: "mail.send",
-    arguments: {
+    type: "call",
+    connection: "mail",
+    action: "mail.send",
+    args: {
       to,
       subject: { $expr: "params.token" },
       ...(attachments === undefined ? {} : { attachments }),
     },
   };
   const { workflow, executable } = await published(by, {
-    bindings: {
-      mail: { kind: "connector", contract: key },
-      ...(sharing === undefined
-        ? {}
-        : { [sharing]: { kind: "connector", contract: key } }),
+    permissions: {
+      connections: {
+        mail: { contract: key },
+        ...(sharing === undefined ? {} : { [sharing]: { contract: key } }),
+      },
     },
     params: { token: { label: "Token", type: { kind: "string" } } },
     steps: [
@@ -373,11 +371,11 @@ export const mailingWorkflow = async (
         : [
             {
               id: "skipped",
-              type: "do",
+              type: "call",
               if: { $expr: "false" },
-              binding: sharing,
-              operation: "mail.send",
-              arguments: { to: "Nobody", subject: "Never" },
+              connection: sharing,
+              action: "mail.send",
+              args: { to: "Nobody", subject: "Never" },
             },
           ]),
       retry === undefined
@@ -386,7 +384,7 @@ export const mailingWorkflow = async (
       ...(plain ? [] : [pause]),
     ],
     // A step in a try is read by nothing after it: a catch may take it.
-    status: retry === undefined ? "steps.send.output.messageId" : '"sent"',
+    status: retry === undefined ? "send.messageId" : '"sent"',
   });
   await setWorkflowParams(env, by, workflow.id, {
     values: { token },
@@ -429,11 +427,10 @@ export const providerAnswering = async (...replies: ProviderReply[]) =>
 /** An agent step asking binding `summary` to greet the run's `who`. */
 export const greetStep = (id = "greet", timeout?: string) => ({
   id,
-  type: "agent",
-  binding: "summary",
+  type: "generate",
   instructions: "Greet them.",
-  input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { kind: "string" } }),
+  input: { who: { $expr: "args.who" } },
+  returns: objectSchema({ line: { kind: "string" } }),
   ...(timeout === undefined ? {} : { timeout }),
 });
 
@@ -450,12 +447,12 @@ export const greetingWorkflow = async (
   const key = `summary-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "model" });
   const { workflow, executable } = await published(by, {
-    bindings: { summary: { kind: "model", contract: key } },
+    permissions: { ai: { contract: key } },
     steps: [...before, greetStep(), pause],
-    status: "steps.greet.output.line",
+    status: "greet.line",
   });
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "summary",
+    alias: "ai",
     target: { kind: "model", model: allowedModel },
     reviewed: { version: 1 },
   });

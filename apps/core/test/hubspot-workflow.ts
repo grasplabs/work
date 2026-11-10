@@ -109,24 +109,21 @@ export const crmWorkflow = async (by: Admin, connectionId: string) => {
     by.identity,
     `crm-${unique()}`
   );
-  const binding = (alias: string) => ({
-    [alias]: { kind: "connector", contract: key },
-  });
   await publishWorkflowVersion(env, by.identity, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({}),
-      output: {
-        schema: objectSchema({ status: { kind: "string" } }),
-        value: { status: "done" },
+      args: objectSchema({}),
+      returns: objectSchema({ status: { kind: "string" } }),
+      result: { status: "done" },
+      permissions: {
+        connections: { crm: { contract: key }, mail: { contract: key } },
       },
-      bindings: { ...binding("crm"), ...binding("mail") },
       steps: ["crm", "mail"].map((alias) => ({
         id: alias,
-        type: "do",
-        binding: alias,
-        operation: "HUBSPOT_LIST_CONTACTS",
-        arguments: {},
+        type: "call",
+        connection: alias,
+        action: "HUBSPOT_LIST_CONTACTS",
+        args: {},
       })),
     }),
     basedOn: null,

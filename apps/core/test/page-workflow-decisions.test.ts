@@ -135,20 +135,18 @@ const objectDocument = (fields: Record<string, unknown>) => ({
 const definitionOf = (contract: string, looped = false): string => {
   const ask = {
     id: "ask",
-    type: "decision",
-    binding: "approval",
+    type: "decide",
+    decision: "approval",
     recipients: ["role:admin"],
     prompt: "Approve this invoice?",
-    input: { amount: { $expr: "input.amount" } },
+    input: { amount: { $expr: "args.amount" } },
   };
   return JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectDocument({ amount: { kind: "number" } }),
-    output: {
-      schema: objectDocument({ status: { kind: "string" } }),
-      value: { status: "done" },
-    },
-    bindings: { approval: { kind: "decision", contract } },
+    args: objectDocument({ amount: { kind: "number" } }),
+    returns: objectDocument({ status: { kind: "string" } }),
+    result: { status: "done" },
+    permissions: { decisions: { approval: { contract } } },
     steps: looped
       ? [
           {
@@ -227,21 +225,20 @@ const jobEvents = {
   },
 };
 
-/** A workflow waiting, in `await-job`, for the job event a page sends. */
+/** A workflow waiting, in `awaitJob`, for the job event a page sends. */
 const eventDefinitionOf = (contract: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectDocument({ amount: { kind: "number" } }),
-    output: {
-      schema: objectDocument({ status: { kind: "string" } }),
-      value: { status: "done" },
-    },
-    bindings: { jobEvents: { kind: "event", contract } },
+    args: objectDocument({ amount: { kind: "number" } }),
+    returns: objectDocument({ status: { kind: "string" } }),
+    result: { status: "done" },
+    permissions: { events: { jobEvents: { contract } } },
     steps: [
       {
-        id: "await-job",
-        type: "wait",
-        event: { from: "jobEvents", type: "grasp.job.completed" },
+        id: "awaitJob",
+        type: "waitForEvent",
+        events: "jobEvents",
+        eventType: "grasp.job.completed",
         timeout: "24 hours",
       },
     ],
@@ -735,16 +732,16 @@ describe(
     it("list and answer a decision asked in a loop's item, as the run host names its step", async () => {
       const { fixture, opened, reviewer, runAsking, ask } =
         await decisionInbox(true);
-      // As the SDK names the item's step: its key, `task@0`, URI-encoded.
+      // As the SDK names its task's second run in a loop's items.
       const looped = await runAsking(fixture.app, opened, {
-        step: "ask:task%400",
+        step: "ask:task@1",
       });
-      // Its key in no encoding the SDK writes, and a part of a decision.
+      // A count in a form the SDK never writes, and a part of a decision.
       const unencoded = await runAsking(fixture.app, opened + 1000, {
-        step: "ask:task@0",
+        step: "ask:task%401",
       });
       const part = await runAsking(fixture.app, opened + 2000, {
-        step: "ask:task%400#answer",
+        step: "ask:task@1#answer",
       });
       const list = await ask(reviewer, "decisions", { pagination: {} });
       const listed =
@@ -1696,7 +1693,7 @@ describe(
         events: sealed?.events,
         listens: sealed?.listens,
         typedWait: references.includes(
-          'WorkflowEventWait<"await-job", WorkflowEventReference<"workflows.review", "jobEvents", "grasp.job.completed"'
+          'WorkflowEventWait<"awaitJob", WorkflowEventReference<"workflows.review", "jobEvents", "grasp.job.completed"'
         ),
         page: await pageErrors(
           fixture,
@@ -1714,7 +1711,7 @@ describe(
             data: v.object({ jobId: v.string() }).descriptor,
           },
         },
-        listens: { "await-job": ["jobEvents"] },
+        listens: { awaitJob: ["jobEvents"] },
         typedWait: true,
         page: [],
       });

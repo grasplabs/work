@@ -34,11 +34,9 @@ const objectSchema = (fields: Record<string, unknown>) => ({
  */
 const definition = JSON.stringify({
   $schema: workflowSchemaUrl,
-  input: objectSchema({ who: { kind: "string" } }),
-  output: {
-    schema: objectSchema({ status: { kind: "string" } }),
-    value: { status: { $expr: '"Hello, " + input.who' } },
-  },
+  args: objectSchema({ who: { kind: "string" } }),
+  returns: objectSchema({ status: { kind: "string" } }),
+  result: { status: { $expr: '"Hello, " + args.who' } },
   steps: [{ id: "hold", type: "wait", for: "1 hour" }],
 });
 

@@ -191,7 +191,7 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const definitionOf = (mail: string, files: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({
+    args: objectSchema({
       mailbox: { kind: "string" },
       from: { kind: "string" },
       count: { kind: "number" },
@@ -199,27 +199,27 @@ const definitionOf = (mail: string, files: string): string =>
       reuse: { kind: "string" },
       twice: { kind: "string" },
     }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { $expr: "steps.send.output" },
-    },
-    bindings: {
-      send: { kind: "action", contract: "local:code/send.ts#send" },
-      mail: { kind: "connector", contract: mail },
-      files: { kind: "files", contract: files },
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { $expr: "send" },
+    permissions: {
+      modules: {
+        send: { kind: "action", contract: "local:code/send.ts#send" },
+      },
+      connections: { mail: { contract: mail } },
+      files: { files: { contract: files } },
     },
     steps: [
       {
         id: "send",
-        type: "do",
-        binding: "send",
-        arguments: {
-          mailbox: { $expr: "input.mailbox" },
-          from: { $expr: "input.from" },
-          count: { $expr: "input.count" },
-          size: { $expr: "input.size" },
-          reuse: { $expr: "input.reuse" },
-          twice: { $expr: "input.twice" },
+        type: "call",
+        module: "send",
+        args: {
+          mailbox: { $expr: "args.mailbox" },
+          from: { $expr: "args.from" },
+          count: { $expr: "args.count" },
+          size: { $expr: "args.size" },
+          reuse: { $expr: "args.reuse" },
+          twice: { $expr: "args.twice" },
         },
       },
     ],

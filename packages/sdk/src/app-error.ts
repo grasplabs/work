@@ -86,9 +86,54 @@ export const appErrorDetailsOf = (details: unknown): JsonValue | undefined => {
     : undefined;
 };
 
-/** Why an `AppError` couldn't be built. */
-const invalidError = (message: string): TypeError =>
-  new TypeError(`An AppError ${message}`);
+/** Which part of an `AppError` can't be as given, and why. */
+export interface AppErrorProblem {
+  readonly part: "code" | "message" | "details";
+  readonly reason: string;
+}
+
+/**
+ * Why `new AppError(code, message, details)` would throw, or undefined
+ * when it builds: the one set of rules an error is held to, by its
+ * constructor and by whatever accepts an error before it is thrown (a
+ * workflow's raise, checked when it is published).
+ */
+export const appErrorProblemOf = (
+  code: unknown,
+  message: unknown,
+  details?: unknown
+): AppErrorProblem | undefined => {
+  if (!isAppErrorCode(code)) {
+    const namespace =
+      typeof code === "string" ? code.slice(0, code.indexOf(".")) : "";
+    return {
+      part: "code",
+      reason:
+        typeof code === "string" &&
+        appErrorCodePattern.test(code) &&
+        reservedErrorNamespaces.has(namespace)
+          ? `code can't be in the platform's \`${namespace}\` namespace.`
+          : "code is two or more dotted lower-case segments, e.g. `note.not_found`.",
+    };
+  }
+  if (
+    typeof message !== "string" ||
+    message.length === 0 ||
+    message.length > appErrorMessageMaxLength
+  ) {
+    return {
+      part: "message",
+      reason: `message is between 1 and ${appErrorMessageMaxLength} characters.`,
+    };
+  }
+  if (details !== undefined && appErrorDetailsOf(details) === undefined) {
+    return {
+      part: "details",
+      reason: `details are JSON of at most ${appErrorDetailsMaxBytes} bytes, ${valueLimits.depth} levels deep.`,
+    };
+  }
+  return undefined;
+};
 
 /**
  * A server function's domain failure: `code` is stable and dotted, e.g.
@@ -108,34 +153,12 @@ export class AppError extends Error {
 
   constructor(code: string, message: string, details?: JsonValue) {
     // Typed loosely: JavaScript callers pass anything.
-    const given: unknown = code;
-    if (!isAppErrorCode(given)) {
-      const namespace =
-        typeof given === "string" ? given.slice(0, given.indexOf(".")) : "";
-      throw invalidError(
-        typeof given === "string" &&
-          appErrorCodePattern.test(given) &&
-          reservedErrorNamespaces.has(namespace)
-          ? `code can't be in the platform's \`${namespace}\` namespace.`
-          : "code is two or more dotted lower-case segments, e.g. `note.not_found`."
-      );
-    }
-    if (
-      typeof message !== "string" ||
-      message.length === 0 ||
-      message.length > appErrorMessageMaxLength
-    ) {
-      throw invalidError(
-        `message is between 1 and ${appErrorMessageMaxLength} characters.`
-      );
+    const problem = appErrorProblemOf(code, message, details);
+    if (problem !== undefined) {
+      throw new TypeError(`An AppError ${problem.reason}`);
     }
     const copied =
       details === undefined ? undefined : appErrorDetailsOf(details);
-    if (details !== undefined && copied === undefined) {
-      throw invalidError(
-        `details are JSON of at most ${appErrorDetailsMaxBytes} bytes.`
-      );
-    }
     super(message);
     this.name = "AppError";
     this.code = code;

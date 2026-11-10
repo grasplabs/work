@@ -106,27 +106,25 @@ const replyWorkflow = async (aliases: readonly string[] = ["replies"]) => {
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({}),
-      output: {
-        schema: objectSchema({ subject: { kind: "string" } }),
-        value: {
-          subject: {
-            $expr: `steps.reply${aliases.length}.output.event?.data.subject ?? ""`,
-          },
+      args: objectSchema({}),
+      returns: objectSchema({ subject: { kind: "string" } }),
+      result: {
+        subject: {
+          $expr: `reply${aliases.length}.timedOut ? "" : reply${aliases.length}.event.data.subject`,
         },
       },
-      bindings: Object.fromEntries(
-        aliases.map((alias) => [
-          alias,
-          { kind: "event", contract: emailReplyContract },
-        ])
-      ),
+      permissions: {
+        events: Object.fromEntries(
+          aliases.map((alias) => [alias, { contract: emailReplyContract }])
+        ),
+      },
       steps: [
         { id: "hold", type: "wait", for: "1 hour" },
         ...aliases.map((alias, index) => ({
           id: `reply${index + 1}`,
-          type: "wait",
-          event: { from: alias, type: emailReplyType },
+          type: "waitForEvent",
+          events: alias,
+          eventType: emailReplyType,
           timeout: "5 minutes",
         })),
       ],

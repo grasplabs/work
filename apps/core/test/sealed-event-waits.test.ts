@@ -1,4 +1,3 @@
-import { kitModuleName } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
@@ -43,11 +42,13 @@ import {
 } from "../src/workflows/sealed-run.ts";
 import type {
   HostedSealedRun,
+  SealedRunKind,
   SealedRunMemory,
 } from "../src/workflows/sealed-run.ts";
 import { endLiveResourceRuns, objectSchema } from "./json-workflow-apps.ts";
 import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus, runObject } from "./runs.ts";
+import { moduleOf as harnessModuleOf } from "./sealed-run-harness.ts";
 import { unique } from "./sign-in.ts";
 
 // A sealed run's event waits on the run host (sealed-run.ts, host.ts's
@@ -116,16 +117,17 @@ const listen = (
   binding = "jobEvents"
 ) => ({
   id,
-  type: "wait",
-  event: { from: binding, type },
+  type: "waitForEvent",
+  events: binding,
+  eventType: type,
   timeout: "5 minutes",
 });
 
 /**
  * A workflow on input `{ jobId }` whose run waits out its hour, then has
- * event waits `await-job` (a job's completion or failure through
- * `jobEvents`), `await-again` (its completion), `await-guarded` (its
- * completion, in a try whose catch takes anything) and `await-other` (a
+ * event waits `awaitJob` (a job's completion or failure through
+ * `jobEvents`), `awaitAgain` (its completion), `awaitGuarded` (its
+ * completion, in a try whose catch takes anything) and `awaitOther` (a
  * completion through `otherEvents`). Its bindings `jobEvents` and
  * `otherEvents` are of one job event contract, each approved.
  */
@@ -149,23 +151,22 @@ const eventWorkflow = async () => {
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({ jobId: { kind: "string" } }),
-      bindings: {
-        jobEvents: { kind: "event", contract },
-        otherEvents: { kind: "event", contract },
+      args: objectSchema({ jobId: { kind: "string" } }),
+      permissions: {
+        events: { jobEvents: { contract }, otherEvents: { contract } },
       },
       steps: [
         { id: "linger", type: "wait", for: "1 hour" },
-        listen("await-job", [completed, failed]),
-        listen("await-again", completed),
+        listen("awaitJob", [completed, failed]),
+        listen("awaitAgain", completed),
         {
           id: "guarded",
           type: "try",
-          try: [listen("await-guarded", completed)],
+          try: [listen("awaitGuarded", completed)],
           // Takes any error a catch may take.
           catch: {},
         },
-        listen("await-other", completed, "otherEvents"),
+        listen("awaitOther", completed, "otherEvents"),
       ],
     }),
     basedOn: null,
@@ -223,15 +224,11 @@ const sealedRunOf = async (runId: string): Promise<HostedSealedRun> => {
   return sealedRunFrom(run);
 };
 
-const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
-
-/** A module of the test's own whose run on input `{ jobId }` is `body`. */
-const moduleOf = (body: string): string => `
-import { workflow, v } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: v.object({ jobId: v.string() }) }, async (step, { input }) => {
-${body}
-});
-`;
+/**
+ * A module of the test's own whose run on input `{ jobId }` is `body`, on
+ * the run host's engine by the names the test gives (sealed-run-harness.ts).
+ */
+const moduleOf = (body: string): string => harnessModuleOf(body);
 
 /** Task `id`'s event wait, as generated code waits. */
 const wait = (id: string): string =>
@@ -430,10 +427,14 @@ const ranAs = async (
     ...(maxSleepMs === undefined ? {} : { maxSleepMs }),
   };
   const tampered: string[] = [];
+  let kind: SealedRunKind | undefined;
   const host = new RunHost(
     env,
     engine.step,
-    (controls) => sealedRun(env, run, memoryOfTest())(controls),
+    (controls) => {
+      kind = sealedRun(env, run, memoryOfTest())(controls);
+      return kind;
+    },
     {
       stepFailed: () => {
         // The run's end says what failed.
@@ -470,6 +471,10 @@ const ranAs = async (
   return {
     ended: settled.ok ? settled.value : settled.error.code,
     tampered,
+    // A failure no catch may take, as the run's code ended well past it.
+    ...(settled.ok && kind?.failureUntaken !== undefined
+      ? { untaken: kind.failureUntaken.code }
+      : {}),
   };
 };
 
@@ -509,7 +514,7 @@ describe(
       const ran = await ranAs(
         runId,
         moduleOf(
-          `return [${wait("await-job")}, ${wait("await-again")}, ${wait("await-other")}];`
+          `return [${wait("awaitJob")}, ${wait("awaitAgain")}, ${wait("awaitOther")}];`
         ),
         { engine: inboxEngine(runId, keptOfTest(), asked) }
       );
@@ -544,18 +549,18 @@ describe(
         },
         asked: [
           {
-            name: "await-job:task",
+            name: "awaitJob:task",
             match: [
               { type: await eventTypeKey("jobEvents", completed) },
               { type: await eventTypeKey("jobEvents", failed) },
             ],
           },
           {
-            name: "await-again:task",
+            name: "awaitAgain:task",
             match: [{ type: await eventTypeKey("jobEvents", completed) }],
           },
           {
-            name: "await-other:task",
+            name: "awaitOther:task",
             match: [{ type: await eventTypeKey("otherEvents", completed) }],
           },
         ],
@@ -581,7 +586,7 @@ describe(
       const before = Date.now();
       const first = await ranAs(
         runId,
-        moduleOf(`return ${wait("await-job")};`),
+        moduleOf(`return ${wait("awaitJob")};`),
         {
           engine: inboxEngine(runId, kept, asked),
         }
@@ -589,7 +594,7 @@ describe(
       const after = Date.now();
       const replay = await ranAs(
         runId,
-        moduleOf(`return ${wait("await-job")};`),
+        moduleOf(`return ${wait("awaitJob")};`),
         { engine: inboxEngine(runId, kept, asked) }
       );
       const reachedStep: unknown = expect.stringMatching(
@@ -629,14 +634,14 @@ describe(
       const noteOf = (id: string) => `(${wait(id)}).event?.data.note`;
       const first = await ranAs(
         runId,
-        moduleOf(`return [${noteOf("await-job")}];`),
+        moduleOf(`return [${noteOf("awaitJob")}];`),
         {
           engine: inboxEngine(runId, kept),
         }
       );
       const resumed = await ranAs(
         runId,
-        moduleOf(`return [${noteOf("await-job")}, ${noteOf("await-again")}];`),
+        moduleOf(`return [${noteOf("awaitJob")}, ${noteOf("awaitAgain")}];`),
         { engine: inboxEngine(runId, kept) }
       );
       expect({ first, resumed }).toStrictEqual({
@@ -658,15 +663,15 @@ describe(
         });
       expect({
         recorded: await run(
-          `return await step.do("await-job", { key: "task", description: "Its event" }, async () => (${forged}));`
+          `return await step.do("awaitJob", { key: "task", description: "Its event" }, async () => (${forged}));`
         ),
         notAWait: await run(
           `return await step.listen("linger", { key: "task", description: "Its event" });`
         ),
         itsEnter: await run(
-          `return await step.listen("await-job", { key: "enter", description: "Its event" });`
+          `return await step.listen("awaitJob", { key: "enter", description: "Its event" });`
         ),
-        noStep: await run(`return ${wait("await-none")};`),
+        noStep: await run(`return ${wait("awaitNone")};`),
       }).toStrictEqual({
         recorded: refused,
         notAWait: refused,
@@ -679,8 +684,8 @@ describe(
       const twice = await ranAs(
         runId,
         `export default { run: async (engine) => {
-  await engine.listen("await-job:task");
-  try { await engine.listen("await-job:task"); } catch (error) { return error.code; }
+  await engine.listen("awaitJob:task");
+  try { await engine.listen("awaitJob:task"); } catch (error) { return error.code; }
   return "waited twice";
 } };`,
         { engine: inboxEngine(runId, keptOfTest(), asked) }
@@ -697,7 +702,7 @@ describe(
       const { workflow, admin, approvals } = revoking;
       const runId = await waitingRun(revoking);
       await admitRunEvent(env, delivery(workflow.id, runId, { note: "sent" }));
-      const waiting = moduleOf(`return ${wait("await-job")};`);
+      const waiting = moduleOf(`return ${wait("awaitJob")};`);
       const unfrozen = await ranAs(runId, waiting, {
         calling: (frozen) => ({
           ...frozen,
@@ -710,14 +715,12 @@ describe(
         calling: (frozen) => ({ ...frozen, candidate: new Map() }),
       });
       // A wait inside a try whose catch takes any error, as generated code
-      // runs it: the catch is asked only if it may take it.
+      // runs it: its code's catch may take the failure, but no catch may.
       const guarded = moduleOf(`
 try {
-  return (${wait("await-guarded")}).event?.data.note;
+  return (${wait("awaitGuarded")}).event?.data.note;
 } catch (thrown) {
-  const error = await step.caught("guarded", { key: "catch", description: "Its catch" }, async () => true);
-  if (error === undefined) throw thrown;
-  return { caught: error.type };
+  return { caught: thrown.code };
 }`);
       const kept = keptOfTest();
       const took = await ranAs(runId, guarded, {
@@ -732,17 +735,26 @@ try {
         unfrozen: { ended: "workflow.event_denied", tampered: [] },
         unfixtured: { ended: "workflow.event_denied", tampered: [] },
         took: { ended: "sent", tampered: [] },
-        // The replay after the revocation fails the run: it never goes on
-        // past its wait, nor down a catch the run never took.
-        replayed: { ended: "workflow.event_denied", tampered: [] },
-        fresh: { ended: "workflow.event_denied", tampered: [] },
+        // The replay after the revocation fails the run: its code's catch
+        // took it, but no catch may, so the run ends with it, never on a
+        // path it never took.
+        replayed: {
+          ended: { caught: "workflow.event_denied" },
+          tampered: [],
+          untaken: "workflow.event_denied",
+        },
+        fresh: {
+          ended: { caught: "workflow.event_denied" },
+          tampered: [],
+          untaken: "workflow.event_denied",
+        },
       });
     });
 
     it("holds a test run's wait to its wait limit, measured from its start", async () => {
       const runId = await waitingRun(sealed);
       await expect(
-        ranAs(runId, moduleOf(`return ${wait("await-job")};`), {
+        ranAs(runId, moduleOf(`return ${wait("awaitJob")};`), {
           maxSleepMs: timeoutMs - 1,
         })
       ).resolves.toStrictEqual({

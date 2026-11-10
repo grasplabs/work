@@ -44,12 +44,14 @@ describe("an independent JSON workflow's run on-prem", () => {
     );
     await builder.api.workflowResources.publish(workflow.id, {
       definition: definitionOf(
-        [{ id: "fill", type: "do", binding: "fill", arguments: [1, 2, 3] }],
+        [{ id: "fill", type: "call", module: "fill", args: [1, 2, 3] }],
         {
-          bindings: {
-            fill: { kind: "compute", contract: "local:code/fill.ts#fill" },
+          permissions: {
+            modules: {
+              fill: { kind: "compute", contract: "local:code/fill.ts#fill" },
+            },
           },
-          status: { $expr: '"" + steps.fill.output' },
+          status: { $expr: '"" + fill' },
         }
       ),
       basedOn: null,

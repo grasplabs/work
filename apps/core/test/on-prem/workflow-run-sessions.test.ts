@@ -45,16 +45,15 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
         [
           {
             id: "extract",
-            type: "agent",
-            binding: "extractor",
+            type: "generate",
             instructions: "Read the total in cents.",
             input: { text: "Total 12.34 EUR" },
-            output: objectSchema({ total: { kind: "number", integer: true } }),
+            returns: objectSchema({ total: { kind: "number", integer: true } }),
           },
         ],
         {
-          bindings: { extractor: { kind: "model", contract: key } },
-          status: { $expr: '"Total " + steps.extract.output.total * 2' },
+          permissions: { ai: { contract: key } },
+          status: { $expr: '"Total " + extract.total * 2' },
         }
       )
     );
@@ -66,7 +65,7 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
       outputTokens: 5,
     });
     await admin.api.workflowResources.approveBinding(id, {
-      alias: "extractor",
+      alias: "ai",
       target: { kind: "model", model: extractionModel },
       reviewed: { version: 1 },
     });

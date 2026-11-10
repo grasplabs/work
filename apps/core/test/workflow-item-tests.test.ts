@@ -61,18 +61,18 @@ const person = async (role: Role): Promise<Identity> => {
 };
 
 /**
- * A definition: its bindings, its input `{ who }` (`who`'s schema), its
+ * A definition: its permissions, its input `{ who }` (`who`'s schema), its
  * steps (one titled `label` unless given), and its output `{ status }`.
  */
 const definitionOf = (
   label: string,
   {
-    bindings,
+    permissions,
     who = { kind: "string" },
     steps = [passing("echo", label)],
-    status = { $expr: "input.who" },
+    status = { $expr: "args.who" },
   }: {
-    bindings?: Record<string, unknown>;
+    permissions?: Record<string, unknown>;
     who?: Record<string, unknown>;
     steps?: unknown[];
     status?: unknown;
@@ -80,12 +80,10 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
-    ...(bindings === undefined ? {} : { bindings }),
+    args: objectSchema({ who }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
+    ...(permissions === undefined ? {} : { permissions }),
     steps,
   });
 
@@ -117,17 +115,17 @@ const mailContract = async (admin: Identity): Promise<string> => {
 
 /** The draft's way with an item: it mails who it is for, through `mail`. */
 const mailing = (key: string) => ({
-  bindings: { mail: { kind: "connector", contract: key } },
+  permissions: { connections: { mail: { contract: key } } },
   steps: [
     {
       id: "send",
-      type: "do",
-      binding: "mail",
-      operation: "mail.send",
-      arguments: { to: { $expr: "input.who" }, subject: "Hello" },
+      type: "call",
+      connection: "mail",
+      action: "mail.send",
+      args: { to: { $expr: "args.who" }, subject: "Hello" },
     },
   ],
-  status: { $expr: 'input.who + " " + steps.send.output.messageId' },
+  status: { $expr: 'args.who + " " + send.messageId' },
 });
 
 /**

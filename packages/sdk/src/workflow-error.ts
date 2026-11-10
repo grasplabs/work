@@ -8,6 +8,7 @@ const workflowErrorCodes = [
   "workflow.invalid_input",
   "workflow.invalid_param",
   "workflow.invalid_model_output",
+  "workflow.collection_invalid",
 ] as const;
 type WorkflowErrorCode = (typeof workflowErrorCodes)[number];
 

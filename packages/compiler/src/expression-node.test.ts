@@ -21,15 +21,13 @@ describe("the expression check under plain Node", () => {
         "--input-type=module",
         "-e",
         `const { checkExpression } = await import(${JSON.stringify(entry)});
-const checked = checkExpression("input.lines.map((line) => line.total)");
+const checked = checkExpression("args.lines.map((line) => line.total)");
 console.log(JSON.stringify(checked.ok && checked.code));`,
       ],
       { encoding: "utf-8" }
     ).trim();
     expect(printed).toBe(
-      JSON.stringify(
-        '($call($read(input, "lines"), "map", [line => $read(line, "total")]))'
-      )
+      JSON.stringify("(args.lines.map(line => line.total))")
     );
   });
 });

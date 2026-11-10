@@ -29,10 +29,10 @@ const context: WaitContext = {
     ["hold", { kind: "wait", ...ownStep }],
     ["send", { kind: "call", ...ownStep }],
     ["ask", { kind: "call", decision: "approval", ...ownStep }],
-    ["await-job", { kind: "listen", ...ownStep }],
+    ["awaitJob", { kind: "listen", ...ownStep }],
   ]),
   decisionKeys: new Set(["approval"]),
-  listens: { "await-job": ["jobEvents"] },
+  listens: { awaitJob: ["jobEvents"] },
   events: new Map([["jobEvents", "f".repeat(64)]]),
   canSend: true,
 };
@@ -40,28 +40,29 @@ const context: WaitContext = {
 const times = { openedAt, deadline };
 
 /**
- * A build generated for the run host: a fixed wait, a deadline's wait, a
- * call its catch retries, a decision, and in loop `rows` a wait and, in
- * loop `cells` inside it, a call.
+ * A build generated for the run host: a fixed wait, a deadline's wait (a
+ * `grasp.sleepUntil` call), a call its catch retries, a decision, and in
+ * loop `rows` a wait and, in loop `cells` inside it, a call. A loop has no
+ * steps of its own: its flow is the code's.
  */
 const sealedContext: WaitContext = {
   ...context,
   tasks: new Map([
     ["linger", { kind: "wait", steps: ["task"], scope: [] }],
-    ["pause", { kind: "wait", steps: ["enter", "task"], scope: [] }],
+    ["pause", { kind: "call", steps: ["enter", "task"], scope: [] }],
     ["fetch", { kind: "call", steps: ["task"], scope: [] }],
     [
       "approve",
       {
         kind: "call",
         decision: "approval",
-        steps: ["enter", "task", "leave"],
+        steps: ["enter", "task"],
         scope: [],
       },
     ],
-    ["rows", { kind: "for", steps: ["enter", "item"], scope: [] }],
+    ["rows", { kind: "for", steps: [], scope: [] }],
     ["nap", { kind: "wait", steps: ["task"], scope: ["rows"] }],
-    ["cells", { kind: "for", steps: ["enter"], scope: ["rows"] }],
+    ["cells", { kind: "for", steps: [], scope: ["rows"] }],
     ["send", { kind: "call", steps: ["task"], scope: ["rows", "cells"] }],
   ]),
 };
@@ -74,8 +75,9 @@ describe("the waits a page is shown of a run on the run host", () => {
           pendingOf(1, "linger:task"),
           // A deadline's `until` is recorded in its enter step, then slept.
           pendingOf(2, "pause:task"),
-          pendingOf(3, "nap:task%403"),
-          pendingOf(4, "send:task%402%2F5", "retry"),
+          // A task's run in a loop's items again, by its count of runs.
+          pendingOf(3, "nap:task@3"),
+          pendingOf(4, "send:task@5", "retry"),
           pendingOf(5, "pause:enter", "retry"),
         ],
         sealedContext
@@ -130,10 +132,10 @@ describe("the waits a page is shown of a run on the run host", () => {
   });
 
   it("shows a catch's retry backing off, and its round's run again, as retries of the task whose step has the key", async () => {
-    const journal = ["linger:task", "fetch:task", "nap:task%403"];
+    const journal = ["linger:task", "fetch:task", "nap:task@3"];
     const keyed = await tasksByKey(journal, sealedContext.tasks);
     const fetch = waitStep(await waitKeyOf("fetch:task"), "retry", 2);
-    const nap = waitStep(await waitKeyOf("nap:task%403"), "retry", 1);
+    const nap = waitStep(await waitKeyOf("nap:task@3"), "retry", 1);
     const unknown = waitStep("f".repeat(16), "retry", 2);
     expect(
       shownWaits(
@@ -182,7 +184,13 @@ describe("the waits a page is shown of a run on the run host", () => {
     const decision = crypto.randomUUID();
     const answer = "approve:task#answer";
     const keyed = await tasksByKey(
-      ["approve:enter", "approve:task", "approve:task#ask", answer],
+      [
+        "approve:enter",
+        "approve:task",
+        "approve:task#ask",
+        "approve:task#asked",
+        answer,
+      ],
       sealedContext.tasks
     );
     const again = `$grasp:wait:${await waitKeyOf(answer)}:again:1`;
@@ -228,19 +236,21 @@ describe("the waits a page is shown of a run on the run host", () => {
           // Names the run host never gives a step.
           pendingOf(20, "task:linger"),
           pendingOf(21, "task:linger:retry:2:wait"),
-          // No such task, or no such step of it.
+          // No such task, or no such step of it: a loop has none.
           pendingOf(22, "ghost:task"),
           pendingOf(23, "linger:enter"),
-          // Items of a task in no loop, none of one in a loop, too many.
-          pendingOf(24, "linger:task%400"),
-          pendingOf(25, "nap:task"),
-          pendingOf(26, "nap:task%400%2F1"),
-          // An index another way than the SDK encodes it.
-          pendingOf(27, "nap:task@3"),
-          pendingOf(28, "nap:task%4003"),
+          pendingOf(24, "rows:enter"),
+          // A run again of a task in no loop.
+          pendingOf(25, "linger:task@1"),
+          // A count another way than the journal writes it: a first
+          // run's, a loop's indexes, escaped, padded.
+          pendingOf(26, "nap:task@0"),
+          pendingOf(27, "send:task@1/0"),
+          pendingOf(28, "nap:task%403"),
+          pendingOf(29, "nap:task@03"),
           // A sleep of a decision's own step, of a deadline's enter step.
-          pendingOf(29, "approve:task#ask"),
-          pendingOf(30, "pause:enter"),
+          pendingOf(30, "approve:task#ask"),
+          pendingOf(31, "pause:enter"),
         ],
         sealedContext
       )

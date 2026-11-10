@@ -93,14 +93,15 @@ describe("a JSON workflow run's history", () => {
   it("tells a failure only by a code the platform defines, and nothing the run read or made", async () => {
     const builder = await signedIn("builder");
     const secret = `secret-${crypto.randomUUID()}`;
-    // Greets with the input, then fails on it.
+    // Greets with the input, then fails on it: a deadline further
+    // ahead than a year, which its enter step refuses.
     const workflow = await publishedWorkflow(builder, [
       passing("greet"),
       {
         id: "mark",
-        type: "raise",
-        if: { $expr: 'input.who.startsWith("secret-")' },
-        error: { type: "urn:grasp:error:marked", status: 422 },
+        type: "wait",
+        if: { $expr: 'args.who.startsWith("secret-")' },
+        until: { $expr: "8640000000000000" },
       },
     ]);
     const runId = await startedBy(builder, workflow.id, {
@@ -111,7 +112,7 @@ describe("a JSON workflow run's history", () => {
 
     expect({ status: run.status, steps: told(trace) }).toStrictEqual({
       status: "failed",
-      steps: ["greet reached -", "mark failed workflow.raised"],
+      steps: ["greet reached -", "mark failed workflow.call_invalid"],
     });
     expect(JSON.stringify(trace)).not.toContain(secret);
   });

@@ -234,7 +234,7 @@ export const copyOf = async (
     await admin.api.workflowResources.approveBinding(
       await workflowOf(admin, appIdSchema.parse(made.app.id)),
       {
-        alias: "extractor",
+        alias: "ai",
         target: { kind: "model", model: intakeModel },
         reviewed: { version: 1 },
       }

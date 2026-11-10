@@ -72,32 +72,30 @@ const person = async (role: Role, staff = false): Promise<Identity> => {
 };
 
 /**
- * A definition: its bindings, parameters and steps, and what its `status`
- * ends as (an expression), `input.who` by default.
+ * A definition: its permissions, parameters and steps, and what its `status`
+ * ends as (an expression), `args.who` by default.
  */
 interface Definition {
-  readonly bindings?: Record<string, unknown>;
+  readonly permissions?: Record<string, unknown>;
   readonly params?: Record<string, unknown>;
   readonly steps?: readonly unknown[];
   readonly status?: string;
 }
 
-/** `definition` as a grasp-workflow/1 document. */
+/** `definition` as a grasp-workflow/2 document. */
 const definitionOf = ({
-  bindings = {},
+  permissions = {},
   params = {},
   steps = [],
-  status = "input.who",
+  status = "args.who",
 }: Definition): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: status } },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: status } },
     params,
-    bindings,
+    permissions,
     steps,
   });
 
@@ -270,20 +268,19 @@ const contract = async (
 /** A step sending mail through binding `mail`, its subject `subject`. */
 const send = (subject = "Hello") => ({
   id: "send",
-  type: "do",
-  binding: "mail",
-  operation: "mail.send",
-  arguments: { to: { $expr: "input.who" }, subject },
+  type: "call",
+  connection: "mail",
+  action: "mail.send",
+  args: { to: { $expr: "args.who" }, subject },
 });
 
 /** A step asking binding `summary` to greet. */
 const greet = {
   id: "greet",
-  type: "agent",
-  binding: "summary",
+  type: "generate",
   instructions: "Greet them.",
-  input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { kind: "string" } }),
+  input: { who: { $expr: "args.who" } },
+  returns: objectSchema({ line: { kind: "string" } }),
 };
 
 /** A step waiting `span`. */
@@ -305,19 +302,21 @@ export const notify = action({
 
 /** A definition calling action `notify`, which sends through `mail`. */
 const notifying = (key: string): Definition => ({
-  bindings: {
-    notify: { kind: "action", contract: "local:code/notify.ts#notify" },
-    mail: { kind: "connector", contract: key },
+  permissions: {
+    modules: {
+      notify: { kind: "action", contract: "local:code/notify.ts#notify" },
+    },
+    connections: { mail: { contract: key } },
   },
   steps: [
     {
       id: "notify",
-      type: "do",
-      binding: "notify",
-      arguments: { to: { $expr: "input.who" } },
+      type: "call",
+      module: "notify",
+      args: { to: { $expr: "args.who" } },
     },
   ],
-  status: "steps.notify.output.status",
+  status: "notify.status",
 });
 
 /** The module of action `listFiles`, listing the run's own files. */
@@ -363,29 +362,32 @@ export const look = action({
 `;
 
 /**
- * A definition calling action `action` through binding `act`, with the
- * run's input, beside `bindings`: its status the action's.
+ * A definition calling action `action` through module `act`, with the
+ * run's args, beside `permissions`: its status the action's.
  */
 const acting = (
   action: string,
-  bindings: Record<string, unknown>
+  permissions: Record<string, unknown>
 ): Definition => ({
-  bindings: { act: { kind: "action", contract: action }, ...bindings },
+  permissions: {
+    modules: { act: { kind: "action", contract: action } },
+    ...permissions,
+  },
   steps: [
     {
       id: "act",
-      type: "do",
-      binding: "act",
-      arguments: { who: { $expr: "input.who" } },
+      type: "call",
+      module: "act",
+      args: { who: { $expr: "args.who" } },
     },
   ],
-  status: "steps.act.output.status",
+  status: "act.status",
 });
 
 /** A definition calling action `look`, which reads the Brain binding `docs`. */
 const reading = (knowledge: string): Definition =>
   acting("local:code/look.ts#look", {
-    docs: { kind: "brain", contract: knowledge },
+    brain: { docs: { contract: knowledge } },
   });
 
 /**
@@ -395,7 +397,7 @@ const reading = (knowledge: string): Definition =>
 const listing = (
   key: string,
   action = "local:code/list-files.ts#listFiles"
-): Definition => acting(action, { files: { kind: "files", contract: key } });
+): Definition => acting(action, { files: { files: { contract: key } } });
 
 describe("test runs of a workflow's draft", () => {
   it("answers each kind of call from its fixture, checked as a real answer is, and fails at a call it has no answer for, calling nothing", async () => {
@@ -418,9 +420,9 @@ describe("test runs of a workflow's draft", () => {
       {
         kind: "connector",
         definition: {
-          bindings: { mail: { kind: "connector", contract: keys.connector } },
+          permissions: { connections: { mail: { contract: keys.connector } } },
           steps: [send()],
-          status: "steps.send.output.messageId",
+          status: "send.messageId",
         },
         modules: {},
         alias: "mail",
@@ -431,12 +433,12 @@ describe("test runs of a workflow's draft", () => {
       {
         kind: "model",
         definition: {
-          bindings: { summary: { kind: "model", contract: keys.model } },
+          permissions: { ai: { contract: keys.model } },
           steps: [greet],
-          status: "steps.greet.output.line",
+          status: "greet.line",
         },
         modules: {},
-        alias: "summary",
+        alias: "ai",
         answer: { line: "Hello, Ada" },
         status: "Hello, Ada",
         shaped: true,
@@ -508,7 +510,7 @@ describe("test runs of a workflow's draft", () => {
     const { workflow, revision } = await drafted(
       ada,
       {
-        bindings: { mail: { kind: "connector", contract: key } },
+        permissions: { connections: { mail: { contract: key } } },
         params: {
           greeting: {
             label: "Greeting",
@@ -523,10 +525,10 @@ describe("test runs of a workflow's draft", () => {
         steps: [
           {
             id: "send",
-            type: "do",
-            binding: "mail",
-            operation: "mail.send",
-            arguments: { to: "Ada", subject: { $expr: "params.token" } },
+            type: "call",
+            connection: "mail",
+            action: "mail.send",
+            args: { to: "Ada", subject: { $expr: "params.token" } },
           },
         ],
         status: "params.greeting",
@@ -598,9 +600,9 @@ describe("test runs of a workflow's draft", () => {
     const ada = await person("builder");
     const key = await contract(admin, "connector");
     const { workflow, revision } = await drafted(ada, {
-      bindings: { mail: { kind: "connector", contract: key } },
+      permissions: { connections: { mail: { contract: key } } },
       steps: [send()],
-      status: "steps.send.output.messageId",
+      status: "send.messageId",
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
@@ -754,14 +756,14 @@ describe("test runs of a workflow's draft", () => {
     const ada = await person("builder");
     const key = await contract(admin, "model");
     const { workflow, revision } = await drafted(ada, {
-      bindings: { summary: { kind: "model", contract: key } },
+      permissions: { ai: { contract: key } },
       steps: [greet],
-      status: "steps.greet.output.line",
+      status: "greet.line",
     });
     const start = {
       revision,
       input: { who: "Ada" },
-      fixtures: { summary: { output: { line: "Hi" } } },
+      fixtures: { ai: { output: { line: "Hi" } } },
     };
     // The output after its call is stopped once its code returned: tried
     // again, it reads the call's answer as recorded, and the call isn't

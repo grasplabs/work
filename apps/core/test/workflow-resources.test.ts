@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/sdk";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
@@ -80,25 +81,23 @@ const newTeam = async (): Promise<string> => {
 
 interface Draft {
   status?: string;
-  bindings?: Record<string, { kind: string; contract: string }>;
+  permissions?: Record<string, unknown>;
   steps?: unknown[];
   instructions?: string;
 }
 
-/** A grasp-workflow/1 definition's text: a greeting, by default. */
+/** A grasp-workflow/2 definition's text: a greeting, by default. */
 const definitionOf = ({
   status = "done",
-  bindings = {},
+  permissions = {},
   steps = [],
   instructions = "Greet the person.",
 }: Draft = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
     params: {
       instructions: {
         label: "Instructions",
@@ -106,9 +105,30 @@ const definitionOf = ({
         sensitive: false,
       },
     },
-    bindings,
+    permissions,
     steps,
   });
+
+/** A new admin, signed in as the catalog's publications need. */
+const catalogAdmin = async () => {
+  const admin = await person("admin");
+  return {
+    ...admin,
+    email: `${admin.userId}@acme.test`,
+    name: "Admin",
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+};
+
+/** A model contract of the catalog's, published by an admin: its key. */
+const modelContract = async (): Promise<string> => {
+  const key = `model-${unique()}`;
+  await publishCatalogContract(env, await catalogAdmin(), {
+    key,
+    kind: "model",
+  });
+  return key;
+};
 
 /** A workflow `by` created, under a name of its own. */
 const workflowOf = async (by: Acting, prefix = "greet") =>
@@ -181,7 +201,7 @@ describe("publishing a version", () => {
       resourceId: workflow.id,
       version: 1,
       definitionVersion: "1.0.0",
-      profile: "grasp-workflow/1",
+      profile: "grasp-workflow/2",
       bindings: [],
       // No actions of its own: an empty list, recorded as such.
       actions: [],
@@ -289,7 +309,7 @@ describe("publishing a version", () => {
     const secret = `secret-${unique()}`;
     const definition = definitionOf({
       instructions: secret,
-      steps: [{ id: "finish", type: "do", binding: secret }],
+      steps: [{ id: "finish", type: "call", module: secret }],
     });
     const error = await refusal(publish(ada, workflow.id, definition));
     expect(error).toMatchObject({ code: "workflow.definition_invalid" });
@@ -300,6 +320,46 @@ describe("publishing a version", () => {
     await expect(workflowVersions(env, ada, workflow.id)).resolves.toHaveLength(
       0
     );
+  });
+
+  it("resolves every permission of the most a definition holds, all kinds together, and refuses one more", async () => {
+    const admin = await catalogAdmin();
+    const model = await modelContract();
+    // The model and 63 events, each its own contract, are the most (64);
+    // a 64th event is one more.
+    const events = Array.from({ length: 64 }, () => `events-${unique()}`);
+    for (const key of events) {
+      // oxlint-disable-next-line no-await-in-loop -- one admin's publications, in order
+      await publishCatalogContract(env, admin, {
+        key,
+        kind: "event",
+        events: {
+          "grasp.job.completed": {
+            data: JSON.stringify(v.object({ note: v.string() }).descriptor),
+            browser: false,
+          },
+        },
+      });
+    }
+    const holding = (count: number) =>
+      definitionOf({
+        permissions: {
+          ai: { contract: model },
+          events: Object.fromEntries(
+            events
+              .slice(0, count)
+              .map((key, index) => [`events${index}`, { contract: key }])
+          ),
+        },
+      });
+    const workflow = await workflowOf(admin);
+    const published = await publish(admin, workflow.id, holding(63));
+    await expect(
+      problemCodes(publish(admin, workflow.id, holding(64), 1))
+    ).resolves.toStrictEqual(["workflow.too_many_permissions /permissions"]);
+    expect(
+      published.bindings.map(({ contractId }) => contractId).toSorted()
+    ).toStrictEqual([model, ...events.slice(0, 63)].toSorted());
   });
 });
 
@@ -481,36 +541,18 @@ describe("Apps and workflows", () => {
   });
 });
 
-/** A model contract of the catalog's, published by an admin: its key. */
-const modelContract = async (): Promise<string> => {
-  const admin = await person("admin");
-  const key = `model-${unique()}`;
-  await publishCatalogContract(
-    env,
-    {
-      ...admin,
-      email: `${admin.userId}@acme.test`,
-      name: "Admin",
-      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    },
-    { key, kind: "model" }
-  );
-  return key;
-};
-
 /** A definition asking model `key` through binding `greeting`. */
 const bindingDefinition = (key: string, status = "done") =>
   definitionOf({
     status,
-    bindings: { greeting: { kind: "model", contract: key } },
+    permissions: { ai: { contract: key } },
     steps: [
       {
         id: "greet",
-        type: "agent",
-        binding: "greeting",
+        type: "generate",
         instructions: "Greet them.",
-        input: { who: { $expr: "input.who" } },
-        output: objectSchema({ line: { kind: "string" } }),
+        input: { who: { $expr: "args.who" } },
+        returns: objectSchema({ line: { kind: "string" } }),
       },
     ],
   });
@@ -851,7 +893,7 @@ describe("stored versions", () => {
       contract: await problemCodes(publish(ada, workflow.id, big)),
     }).toStrictEqual({
       definition: "workflow.resource_invalid",
-      contract: ["contract.too_large /input"],
+      contract: ["contract.too_large /args"],
     });
   });
 });

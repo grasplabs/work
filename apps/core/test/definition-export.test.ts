@@ -94,11 +94,9 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const definitionOf = (params: Record<string, unknown>): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: "done" },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "done" },
     params,
     steps: [],
   });
@@ -116,15 +114,15 @@ const published = async (by: Acting, params: Record<string, unknown>) => {
 /** A definition that totals [1, 2, 3] with its own module. */
 const computingDefinition = JSON.stringify({
   $schema: workflowSchemaUrl,
-  input: objectSchema({ who: { kind: "string" } }),
-  output: {
-    schema: objectSchema({ status: { kind: "string" } }),
-    value: { status: "counted" },
+  args: objectSchema({ who: { kind: "string" } }),
+  returns: objectSchema({ status: { kind: "string" } }),
+  result: { status: "counted" },
+  permissions: {
+    modules: {
+      total: { kind: "compute", contract: "local:code/total.ts#total" },
+    },
   },
-  bindings: {
-    total: { kind: "compute", contract: "local:code/total.ts#total" },
-  },
-  steps: [{ id: "add", type: "do", binding: "total", arguments: [1, 2, 3] }],
+  steps: [{ id: "add", type: "call", module: "total", args: [1, 2, 3] }],
 });
 
 /** A calculation doubling the sum with `pkg`'s `double`. */

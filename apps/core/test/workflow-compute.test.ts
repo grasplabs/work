@@ -101,19 +101,17 @@ const definitionOf = ({
 }: { contract?: string; args?: unknown; version?: string } = {}): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: '"" + steps.add.output' } },
-    },
-    bindings: { total: { kind: "compute", contract } },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: '"" + add' } },
+    permissions: { modules: { total: { kind: "compute", contract } } },
     steps: [
       {
         id: "add",
         title: `Version ${version}`,
-        type: "do",
-        binding: "total",
-        arguments: args,
+        type: "call",
+        module: "total",
+        args,
       },
     ],
   });
@@ -482,7 +480,7 @@ describe("a JSON workflow's compute modules", () => {
     const { workflow } = await published(
       by,
       { "code/total.ts": moduleAnswering("return amounts.length;") },
-      { args: [{ $expr: "input.who" }] }
+      { args: [{ $expr: "args.who" }] }
     );
     await expect(ran(by, workflow.id)).resolves.toStrictEqual({
       status: "failed",

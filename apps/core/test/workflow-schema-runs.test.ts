@@ -1,13 +1,8 @@
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
 import { countedStep } from "../src/workflows/host.ts";
 import type { HostedSealedRun } from "../src/workflows/sealed-run.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
@@ -21,15 +16,13 @@ import {
   decidingEngine,
   decisionsOf,
   decisionWorkflow,
-  engineStep,
+  failedWith,
   hello,
   journalingEngine,
-  person,
   ranAs,
   retryingEngine,
   reviewRun,
   sealedWorkflow,
-  standardErrors,
   waitingRun,
 } from "./sealed-run-harness.ts";
 import type {
@@ -38,13 +31,24 @@ import type {
   Reviewed,
   Sealed,
 } from "./sealed-run-harness.ts";
-import { unique } from "./sign-in.ts";
 import {
   declared,
+  fail,
   generated,
+  guardedRan,
+  local,
+  localWorkflow,
   objectOf,
   rowsOf,
 } from "./workflow-schema-runs.ts";
+
+/** Step `id` calling `action` of `mail`, in a try that takes any failure. */
+const calling = (id: string, action: string) => ({
+  id: `${id}Tried`,
+  type: "try",
+  try: [{ id, type: "call", connection: "mail", action, args: {} }],
+  catch: {},
+});
 
 /**
  * `engine`, its activation evicted as step `name` was to start: nothing
@@ -63,100 +67,7 @@ const evictedBefore = (engine: Engine, name: string): Engine => ({
   },
 });
 
-/**
- * What an engine ran of try `guarded` around step `fail`, by `tries`:
- * the retry rounds its policy decided and ran, and whether the catch took
- * the failure and ran its `tell`.
- */
-const guardedRan = (tries: ReadonlyMap<string, number>) => {
-  const keys = [...tries.keys()];
-  // In a loop's item, a step's key goes on with the item's indexes.
-  const of = (step: string): string | undefined =>
-    keys.find((key) => key === step || key.startsWith(`${step}%40`));
-  return {
-    decided: keys.filter((key) => key.endsWith(":decide")).length,
-    retried: keys.filter((key) => key.endsWith(":run")).length,
-    failed: tries.get(of("key:fail:task") ?? ""),
-    caught: of("key:guarded:catch") !== undefined,
-    told: of("key:tell:task") !== undefined,
-  };
-};
-
 const greeting = { kind: "object", fields: { line: { kind: "string" } } };
-
-/** A module of calculations: `total` sums, `broken` always fails. */
-const totalModule = `import { compute, v } from "@grasp-os/sdk/compute";
-
-export const total = compute({
-  input: v.array(v.number()).max(100),
-  output: v.number(),
-  handler: (amounts) => amounts.reduce((all, amount) => all + amount, 0),
-});
-
-export const broken = compute({
-  input: v.number(),
-  output: v.number(),
-  handler: () => {
-    throw new Error("Never adds up");
-  },
-});
-`;
-
-/** An action that answers whom it noted, reaching nothing. */
-const noteModule = `import { action, v } from "@grasp-os/sdk/action";
-
-export const note = action({
-  args: { to: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [],
-  handler: async (_ctx, { to }) => ({ status: \`noted \${to}\` }),
-});
-`;
-
-/** The bindings of `localWorkflow`'s workflow, as grasp-workflow/1 declares them. */
-const local = {
-  total: { kind: "compute", contract: "local:code/total.ts#total" },
-  broken: { kind: "compute", contract: "local:code/total.ts#broken" },
-  note: { kind: "action", contract: "local:code/note.ts#note" },
-};
-
-/**
- * A workflow of a builder's whose bindings reach its own modules, compute
- * `total` and `broken` and action `note`, published with them: after an
- * hour's wait, it calls each.
- */
-const localWorkflow = async () => {
-  const by = await person("builder");
-  const workflow = await createWorkflowResource(env, by, `local-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
-      $schema: workflowSchemaUrl,
-      input: objectOf({ who: { kind: "string" } }),
-      output: {
-        schema: objectOf({ status: { kind: "string" } }),
-        value: { status: "done" },
-      },
-      bindings: local,
-      steps: [
-        { id: "linger", type: "wait", for: "1 hour" },
-        { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
-        { id: "fail", type: "do", binding: "broken", arguments: 1 },
-        {
-          id: "tell",
-          type: "do",
-          binding: "note",
-          arguments: { to: { $expr: "input.who" } },
-        },
-      ],
-    }),
-    basedOn: null,
-    modules: { "code/total.ts": totalModule, "code/note.ts": noteModule },
-  });
-  return { by, workflow };
-};
-
-/** A step calling `broken`, which always fails. */
-const fail = { id: "fail", type: "do", binding: "broken", arguments: 1 };
 
 /** Try `guarded` around `inside`: its catch takes, and retries, while these hold. */
 const guarded = (
@@ -177,9 +88,9 @@ const guarded = (
     do: [
       {
         id: "tell",
-        type: "do",
-        binding: "note",
-        arguments: { to: { $expr: "error.type" } },
+        type: "call",
+        module: "note",
+        args: { to: { $expr: "error.code" } },
       },
     ],
   },
@@ -212,9 +123,7 @@ const inPages = (when: { catch: string; retry?: string }) => [
 ];
 
 /** `decisionWorkflow`'s decision binding, as a document declares it. */
-const approval = {
-  approval: { kind: "decision", contract: "grasp.approvals@1" },
-};
+const approval = { decisions: { approval: { contract: "grasp.approvals@1" } } };
 
 /** `decisionWorkflow`'s input: who reviews, and which invoice. */
 const reviewing = objectOf({
@@ -225,11 +134,11 @@ const reviewing = objectOf({
 /** A decision of binding `approval` on input `{ reviewer, invoice }`. */
 const review = (change: Record<string, unknown> = {}) => ({
   id: "review",
-  type: "decision",
-  binding: "approval",
-  recipients: [{ $expr: "input.reviewer" }, "role:builder"],
+  type: "decide",
+  decision: "approval",
+  recipients: [{ $expr: "args.reviewer" }, "role:builder"],
   prompt: "Approve the invoice",
-  input: { invoice: { $expr: "input.invoice" } },
+  input: { invoice: { $expr: "args.invoice" } },
   timeout: "7 days",
   ...change,
 });
@@ -243,14 +152,14 @@ const decided = {
     comment: { kind: "string" },
   }),
   value: {
-    timedOut: { $expr: "steps.review.output.timedOut" },
-    approved: { $expr: "steps.review.output.approved === true" },
-    by: { $expr: 'steps.review.output.by ?? ""' },
-    comment: { $expr: 'steps.review.output.payload?.comment ?? ""' },
+    timedOut: { $expr: "review.timedOut" },
+    approved: { $expr: "!review.timedOut && review.approved" },
+    by: { $expr: 'review.timedOut ? "" : review.by' },
+    comment: { $expr: 'review.timedOut ? "" : review.payload?.comment ?? ""' },
   },
 };
 
-describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
+describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
   let sealed: Sealed;
 
   beforeAll(async () => {
@@ -269,33 +178,32 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "send",
-          type: "do",
-          binding: "mail",
-          operation: "mail.send",
-          arguments: {
-            to: { $expr: "input.who" },
+          type: "call",
+          connection: "mail",
+          action: "mail.send",
+          args: {
+            to: { $expr: "args.who" },
             subject: { $expr: "params.token" },
           },
         },
         {
           id: "greet",
-          type: "agent",
-          binding: "summary",
+          type: "generate",
           instructions: "Greet them.",
-          input: { who: { $expr: "input.who" } },
-          output: greeting,
+          input: { who: { $expr: "args.who" } },
+          returns: greeting,
         },
         {
           id: "known",
           type: "if",
-          condition: { $expr: 'steps.greet.output.line === "Hello Ada"' },
+          condition: { $expr: 'greet.line === "Hello Ada"' },
           // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
           then: [{ id: "pause", type: "wait", until: { $expr: "0" } }],
           else: [
             {
               id: "stop",
               type: "raise",
-              error: { type: "urn:grasp:error:stop", status: 422 },
+              error: { code: "test.stop", message: "Failed." },
             },
           ],
         },
@@ -305,14 +213,13 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
           try: [
             {
               id: "fetch",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "input.who" }, subject: "x" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "args.who" }, subject: "x" },
             },
           ],
           catch: {
-            errors: { status: 500 },
             retry: { attempts: 3, delay: "1 second", backoff: "constant" },
           },
         },
@@ -323,8 +230,8 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
           sent: { kind: "string" },
         }),
         value: {
-          line: { $expr: "steps.greet.output.line" },
-          sent: { $expr: "typeof steps.send.output.messageId" },
+          line: { $expr: "greet.line" },
+          sent: { $expr: "typeof send.messageId" },
         },
       }
     );
@@ -354,7 +261,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       ],
       checked: [
         { step: "send:task", call: "grasp.connector", binding: "mail" },
-        { step: "greet:task", call: "grasp.model", binding: "summary" },
+        { step: "greet:task", call: "grasp.model", binding: "ai" },
         { step: "fetch:task", call: "grasp.connector", binding: "mail" },
       ],
     });
@@ -366,15 +273,15 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           while: { $expr: 'item !== "stop"' },
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "row" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "row" },
             },
             {
               id: "guard",
@@ -384,16 +291,16 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
                   id: "check",
                   type: "raise",
                   if: { $expr: 'item === "b"' },
-                  error: { type: "urn:grasp:error:bad", status: 409 },
+                  error: { code: "test.bad", message: "Failed." },
                 },
               ],
-              catch: { errors: { status: 409 } },
+              catch: { code: "test.bad" },
             },
           ],
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );
@@ -412,15 +319,92 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       checked: checked.map(({ step }) => step),
     }).toStrictEqual({
       ran: { ended: null, tampered: [] },
-      // Item 2 is "stop": its item step records `while: false`, and no
-      // step of it, nor of item 3, runs.
+      // Item 2 is "stop": its `while` doesn't hold, and no step of it, nor
+      // of item 3, runs. Item 1's raise its catch takes in the code.
       sent: [
         { to: "a", subject: "row" },
         { to: "b", subject: "row" },
       ],
+      checked: ["notify:task", "notify:task@1"],
+    });
+  });
+
+  it("runs a nested loop of any ID, its items reading a field named like a built-in's method", async () => {
+    const { source, sealed: withTable } = await generated(
+      [
+        {
+          id: "pages",
+          type: "forEach",
+          items: { $expr: "args.rows" },
+          do: [
+            {
+              // `own`: the generated code reads such a field by `$own`.
+              id: "own",
+              type: "forEach",
+              items: { $expr: "item.rows" },
+              do: [
+                {
+                  id: "notify",
+                  type: "call",
+                  connection: "mail",
+                  action: "mail.send",
+                  args: { to: { $expr: "item.at" }, subject: "nested" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      undefined,
+      declared.permissions,
+      declared.state,
+      rowsOf(
+        objectOf({
+          rows: { kind: "array", item: objectOf({ at: { kind: "string" } }) },
+        })
+      )
+    );
+    const runId = await waitingRun(sealed);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: (run) =>
+        withTable({
+          ...run,
+          input: { rows: [{ rows: [{ at: "nestedA" }, { at: "nestedB" }] }] },
+        }),
+    });
+    const { sent } = await sealed.mail.did();
+    expect({
+      ran,
+      sent: sent.filter(({ subject }) => subject === "nested"),
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
+      sent: [
+        { to: "nestedA", subject: "nested" },
+        { to: "nestedB", subject: "nested" },
+      ],
+    });
+  });
+
+  it("calls each action of a connection by its own member, two that read alike without their group each by its whole name", async () => {
+    const { source, sealed: withTable } = await generated([
+      calling("grouped", "mail.readX"),
+      calling("bare", "read-x"),
+    ]);
+    const runId = await waitingRun(sealed);
+    const ran = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    const checked = await checkedCalls(runId);
+    expect({
+      ran,
+      checked: checked.map(({ step, operation }) => ({ step, operation })),
+    }).toStrictEqual({
+      ran: { ended: null, tampered: [] },
       checked: [
-        `notify:${encodeURIComponent("task@0")}`,
-        `notify:${encodeURIComponent("task@1")}`,
+        { step: "grouped:task", operation: "mail.readX" },
+        { step: "bare:task", operation: "read-x" },
       ],
     });
   });
@@ -431,23 +415,23 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "replayed row" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "replayed row" },
             },
           ],
         },
       ],
       {
         schema: { kind: "array", item: { kind: "string" } },
-        value: { $expr: "input.rows" },
+        value: { $expr: "args.rows" },
       },
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );
@@ -455,7 +439,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
     const rows = (run: HostedSealedRun) =>
       withTable({ ...run, input: { rows: ["a", "b"] } });
     const journal = new Map<string, Journaled>();
-    const second = engineStep("notify", "task@1");
+    const second = "notify:task@1";
     const first = await ranAs(runId, source, {
       engine: evictedBefore(journalingEngine(journal, []), second),
       sealed: rows,
@@ -475,7 +459,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       first: [],
       replayed: { ended: ["a", "b"], tampered: [] },
       // Its items and its first item's call are the journal's.
-      ranAgain: [second, engineStep("workflow", "output")],
+      ranAgain: [second, "workflow:output"],
       sent: [
         { to: "a", subject: "replayed row" },
         { to: "b", subject: "replayed row" },
@@ -489,15 +473,15 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               id: "notify",
-              type: "do",
+              type: "call",
               if: { $expr: 'item !== "skip"' },
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "passed over" },
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "passed over" },
             },
             {
               id: "late",
@@ -509,7 +493,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );
@@ -528,17 +512,18 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       // Item 0 ran no step; item 1 starts past it, nothing refused.
       ran: { ended: null, tampered: [] },
       sent: [{ to: "a", subject: "passed over" }],
-      checked: [`notify:${encodeURIComponent("task@1")}`],
+      // The first run of `notify`, in item 1.
+      checked: ["notify:task"],
     });
   });
 
-  it("fails the step of an `if` that throws as an item's first, which a catch in the item takes, refusing nothing", async () => {
+  it("takes an `if` that throws in an item in the item's own catch, as its code's failure, refusing nothing", async () => {
     const { source, sealed: withTable } = await generated(
       [
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               id: "guard",
@@ -546,24 +531,26 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
               try: [
                 {
                   id: "notify",
-                  type: "do",
+                  type: "call",
                   // Item 0 is null: reading its `to` throws.
                   if: { $expr: 'item.to !== ""' },
-                  binding: "mail",
-                  operation: "mail.send",
-                  arguments: { to: { $expr: "item.to" }, subject: "throwing" },
+                  connection: "mail",
+                  action: "mail.send",
+                  args: { to: { $expr: "item.to" }, subject: "throwing" },
                 },
               ],
               catch: {
                 do: [
                   {
                     id: "report",
-                    type: "do",
-                    binding: "mail",
-                    operation: "mail.send",
-                    arguments: {
+                    type: "call",
+                    connection: "mail",
+                    action: "mail.send",
+                    args: {
                       to: "ops",
-                      subject: { $expr: 'error.type + " | " + error.title' },
+                      subject: {
+                        $expr: 'error.code + " | " + error.message',
+                      },
                     },
                   },
                 ],
@@ -573,7 +560,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({
         kind: "object",
@@ -597,20 +584,14 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       checked: checked.map(({ step }) => step),
     }).toStrictEqual({
       ran: { ended: null, tampered: [] },
-      // The failure the host recorded of item 0's step: an expression's
-      // (`expression.failed`), its type and the code's words; then item 1
-      // runs. (Its guard's own message once the host keeps it.)
+      // Item 0's `if` threw in its code, before any step: its catch takes
+      // it as an expression's failure, in the platform's words; then item
+      // 1's `notify` runs, its first.
       sent: [
-        {
-          to: "ops",
-          subject: `${standardErrors}expression | The expression failed.`,
-        },
+        { to: "ops", subject: "expression.failed | The expression failed." },
         { to: "a", subject: "throwing" },
       ],
-      checked: [
-        `report:${encodeURIComponent("task@0")}`,
-        `notify:${encodeURIComponent("task@1")}`,
-      ],
+      checked: ["report:task", "notify:task"],
     });
   });
 
@@ -620,15 +601,15 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          // `input.missing` isn't there: the list's item is `null`.
-          items: { $expr: "[input.first, input.missing]" },
+          // `args.missing` isn't there: the list's item is `null`.
+          items: { $expr: "[args.first, args.missing]" },
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: {
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: {
                 to: { $expr: 'item ?? "nobody"' },
                 subject: "listed",
               },
@@ -637,7 +618,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       objectOf({
         first: { kind: "string" },
@@ -667,27 +648,27 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         {
           id: "rows",
           type: "forEach",
-          items: { $expr: "input.rows" },
+          items: { $expr: "args.rows" },
           do: [
             {
               id: "notify",
-              type: "do",
-              binding: "mail",
-              operation: "mail.send",
-              arguments: { to: { $expr: "item" }, subject: "ceiling" },
+              type: "call",
+              connection: "mail",
+              action: "mail.send",
+              args: { to: { $expr: "item" }, subject: "ceiling" },
             },
           ],
         },
       ],
       undefined,
-      declared.bindings,
+      declared.permissions,
       declared.state,
       rowsOf({ kind: "string" })
     );
     const engine = retryingEngine();
     const ran = await ranAs(await waitingRun(sealed), source, {
-      // A ceiling of 3 steps in place of the platform's: the loop's
-      // enter step and two items' mail fit, the third item's doesn't.
+      // A ceiling of 3 steps in place of the platform's: three items'
+      // mail fit, the fourth item's doesn't.
       engine: { ...engine, step: countedStep(engine.step, 3) },
       sealed: (run) =>
         withTable({ ...run, input: { rows: ["a", "b", "c", "d"] } }),
@@ -704,26 +685,26 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         why: workflowErrors.create("workflow.too_many_steps").message,
         tampered: [],
       },
-      sent: ["a", "b"],
+      sent: ["a", "b", "c"],
     });
   });
 
-  it("fails a raise with its sealed error, which its catch takes, and skips a step whose `if` doesn't hold", async () => {
+  it("raises its sealed error, which its catch takes, and skips a step whose `if` doesn't hold", async () => {
     const { source, sealed: withTable } = await generated(
       [
         {
           id: "skipped",
-          type: "do",
-          if: { $expr: 'input.who === "Bob"' },
-          binding: "mail",
-          operation: "mail.send",
-          arguments: { to: "bob", subject: "never" },
+          type: "call",
+          if: { $expr: 'args.who === "Bob"' },
+          connection: "mail",
+          action: "mail.send",
+          args: { to: "bob", subject: "never" },
         },
         {
           id: "unraised",
           type: "raise",
-          if: { $expr: 'input.who === "Bob"' },
-          error: { type: "urn:grasp:error:bob", status: 409 },
+          if: { $expr: 'args.who === "Bob"' },
+          error: { code: "test.bob", message: "Failed." },
         },
         {
           id: "guarded",
@@ -732,24 +713,20 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
             {
               id: "stop",
               type: "raise",
-              error: {
-                type: "urn:grasp:error:stop",
-                status: 422,
-                title: "Stopped.",
-              },
+              error: { code: "test.stop", message: "Stopped." },
             },
           ],
           catch: {
-            errors: { status: 422 },
+            code: "test.stop",
             do: [
               {
                 id: "notice",
-                type: "do",
-                binding: "mail",
-                operation: "mail.send",
-                arguments: {
-                  to: { $expr: "input.who" },
-                  subject: { $expr: "error.type" },
+                type: "call",
+                connection: "mail",
+                action: "mail.send",
+                args: {
+                  to: { $expr: "args.who" },
+                  subject: { $expr: "error.code" },
                 },
               },
             ],
@@ -758,7 +735,7 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       ],
       {
         schema: objectOf({ skipped: { kind: "boolean" } }),
-        value: { skipped: { $expr: "steps.skipped.output === null" } },
+        value: { skipped: { $expr: "skipped === null" } },
       }
     );
     const ran = await ranAs(await waitingRun(sealed), source, {
@@ -768,24 +745,27 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
     const { sent } = await sealed.mail.did();
     expect({ ran, notice: sent.at(-1) }).toStrictEqual({
       ran: { ended: { skipped: true }, tampered: [] },
-      notice: { to: "Ada", subject: "urn:grasp:error:stop" },
+      notice: { to: "Ada", subject: "test.stop" },
     });
   });
 
-  it("fails the run with a raise no catch takes", async () => {
+  it("fails the run with a raise no catch takes, its error as long as an `AppError`'s may be", async () => {
+    // 250 emoji: the most code units an `AppError`'s message holds.
+    const message = "\u{1F600}".repeat(250);
     const { source, sealed: withTable } = await generated([
       {
         id: "stop",
         type: "raise",
-        error: { type: "urn:grasp:error:stop", status: 422 },
+        error: { code: "test.stop", message, details: { note: "x" } },
       },
     ]);
     const ran = await ranAs(await waitingRun(sealed), source, {
       engine: retryingEngine(),
       sealed: withTable,
     });
-    expect({ ended: ran.ended, tampered: ran.tampered }).toStrictEqual({
-      ended: "workflow.raised",
+    expect(ran).toStrictEqual({
+      ended: "test.stop",
+      why: message,
       tampered: [],
     });
   });
@@ -797,15 +777,15 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
         id: "guarded",
         type: "try",
         try: [
-          // Reads past a field that isn't there: it throws.
-          { id: "pause", type: "wait", until: { $expr: "input.missing.at" } },
+          // Reads past a key no run kept: it throws, in the code.
+          { id: "pause", type: "wait", until: { $expr: "state.never.at" } },
         ],
         catch: {
           retry: {
             attempts: 2,
             delay: "1 second",
             backoff: "constant",
-            when: { $expr: "error.status >= 400" },
+            when: { $expr: 'error.code !== ""' },
           },
         },
       },
@@ -819,19 +799,19 @@ describe("a grasp-workflow/1 workflow's generated code on the run host", () => {
       ran,
       decided: keys.filter((key) => key.endsWith(":decide")).length,
       retried: keys.filter((key) => key.endsWith(":run")).length,
-      caught: tries.has("key:guarded:catch"),
+      paused: keys.some((key) => key.startsWith("key:pause:")),
     }).toStrictEqual({
-      // An expression's failure (`expression.failed`) isn't one trying
-      // again may fix: no round is offered, and the catch takes it.
+      // Its deadline threw in its code, before its step: no step failed,
+      // nothing is retried, and its catch takes it in the code.
       ran: { ended: null, tampered: [] },
       decided: 0,
       retried: 0,
-      caught: true,
+      paused: false,
     });
   });
 });
 
-describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
+describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
   let owned: Awaited<ReturnType<typeof localWorkflow>>;
 
   beforeAll(async () => {
@@ -846,15 +826,15 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
         { id: "linger", type: "wait", for: "1 hour" },
         {
           id: "add",
-          type: "do",
-          binding: "total",
-          arguments: [1, { $expr: "input.who.length" }, 3],
+          type: "call",
+          module: "total",
+          args: [1, { $expr: "args.who.length" }, 3],
         },
         {
           id: "tell",
-          type: "do",
-          binding: "note",
-          arguments: { to: { $expr: "input.who" } },
+          type: "call",
+          module: "note",
+          args: { to: { $expr: "args.who" } },
         },
       ],
       {
@@ -863,8 +843,8 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
           told: { kind: "string" },
         }),
         value: {
-          total: { $expr: "steps.add.output" },
-          told: { $expr: "steps.tell.output.status" },
+          total: { $expr: "add" },
+          told: { $expr: "tell.status" },
         },
       },
       local
@@ -916,7 +896,6 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
         decided: 2,
         retried: 2,
         failed: 1,
-        caught: true,
         told: true,
       },
     };
@@ -924,18 +903,25 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
       // A number: the choice the host reads takes a boolean.
       booleans: await ranWith([
         guarded([fail], {
-          catch: "error.status >= 400",
-          retry: "error.status",
+          catch: 'error.code !== ""',
+          retry: "error.code.length",
         }),
       ]),
       retryReadsThePage: await ranWith(
-        inPages({ catch: "error.status >= 400", retry: "item.again" })
+        inPages({ catch: 'error.code !== ""', retry: "item.again" })
       ),
       catchReadsThePage: await ranWith(inPages({ catch: "item.again" })),
+      // Its retry would hold, but its catch wouldn't take the failure: no
+      // round is tried first, and the run fails with it.
+      catchDeclines: await ranWith(inPages({ catch: "!item.again" })),
     }).toStrictEqual({
       booleans: retriedThenCaught,
       retryReadsThePage: retriedThenCaught,
       catchReadsThePage: retriedThenCaught,
+      catchDeclines: {
+        ran: failedWith("workflow.compute_failed"),
+        guarded: { decided: 1, retried: 0, failed: 1, told: false },
+      },
     });
   });
 
@@ -946,21 +932,21 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
         {
           id: "guarded",
           type: "try",
-          try: [{ id: "fail", type: "do", binding: "broken", arguments: 1 }],
+          try: [{ id: "fail", type: "call", module: "broken", args: 1 }],
           catch: {
             retry: {
               attempts: 3,
               delay: "1 second",
               backoff: "constant",
-              // Reads past a field that isn't there: it throws.
-              when: { $expr: "error.missing.deeper === 1" },
+              // Reads past details the host never gives: it throws.
+              when: { $expr: "error.details.deeper === 1" },
             },
             do: [
               {
                 id: "tell",
-                type: "do",
-                binding: "note",
-                arguments: { to: { $expr: "error.type" } },
+                type: "call",
+                module: "note",
+                args: { to: { $expr: "error.code" } },
               },
             ],
           },
@@ -981,7 +967,6 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
         decided: 1,
         retried: 0,
         failed: 1,
-        caught: true,
         told: true,
       },
     });
@@ -992,7 +977,7 @@ describe("a grasp-workflow/1 workflow's own modules on the run host", () => {
 // enter step records, `from` exactly the first of them, the run's own
 // person never answering, a timeout answering `{ timedOut: true }`, and
 // a decision in each item of a loop under that item's keys.
-describe("a grasp-workflow/1 decision's generated code on the run host", () => {
+describe("a grasp-workflow/2 decision's generated code on the run host", () => {
   let reviewed: Reviewed;
 
   beforeAll(async () => {
@@ -1099,11 +1084,11 @@ describe("a grasp-workflow/1 decision's generated code on the run host", () => {
       [
         {
           id: "review",
-          type: "decision",
-          binding: "approval",
-          recipients: [{ $expr: "input.reviewer" }],
+          type: "decide",
+          decision: "approval",
+          recipients: [{ $expr: "args.reviewer" }],
           prompt,
-          input: { invoice: { $expr: "input.invoice" } },
+          input: { invoice: { $expr: "args.invoice" } },
         },
       ],
       decided,
@@ -1237,12 +1222,12 @@ describe("a grasp-workflow/1 decision's generated code on the run host", () => {
       ran: { ended: null, tampered: [] },
       decisions: [
         {
-          step: `sign:${encodeURIComponent("task@0")}`,
+          step: "sign:task",
           input: JSON.stringify({ invoice: "INV-1" }),
           status: "approved",
         },
         {
-          step: `sign:${encodeURIComponent("task@1")}`,
+          step: "sign:task@1",
           input: JSON.stringify({ invoice: "INV-2" }),
           status: "approved",
         },

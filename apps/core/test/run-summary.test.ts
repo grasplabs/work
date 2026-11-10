@@ -202,7 +202,7 @@ describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
       // Fails on its input, which it reads: a name has no 10,000th letter.
       definition: () =>
         definitionOf([], {
-          status: { $expr: 'input.who.split("")[9999].toUpperCase()' },
+          status: { $expr: 'args.who.split("")[9999].toUpperCase()' },
         }),
     });
     const lease = await pageOf(builder, app);

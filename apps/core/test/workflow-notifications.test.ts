@@ -252,7 +252,7 @@ const person = async (role: Role): Promise<Identity> => {
 /**
  * A workflow waiting, in `job`, for its job's completion through
  * `jobEvents`, then ending with the event's source and job; with `more`
- * bindings, when given.
+ * event permissions, when given.
  */
 const definitionOf = (
   contract: string,
@@ -260,22 +260,21 @@ const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ jobId: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: {
-        status: {
-          $expr:
-            '(steps.job.output.event?.source ?? "") + " " + (steps.job.output.event?.data.jobId ?? "")',
-        },
+    args: objectSchema({ jobId: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: {
+      status: {
+        $expr:
+          'job.timedOut ? "" : job.event.source + " " + job.event.data.jobId',
       },
     },
-    bindings: { jobEvents: { kind: "event", contract }, ...more },
+    permissions: { events: { jobEvents: { contract }, ...more } },
     steps: [
       {
         id: "job",
-        type: "wait",
-        event: { from: "jobEvents", type: completed },
+        type: "waitForEvent",
+        events: "jobEvents",
+        eventType: completed,
         timeout: "1 hour",
       },
     ],
@@ -708,7 +707,7 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
     });
     await publishWorkflowVersion(env, fx.ada, fx.workflowId, {
       definition: definitionOf(contract, {
-        laterEvents: { kind: "event", contract },
+        laterEvents: { contract },
       }),
       basedOn: 1,
     });

@@ -21,7 +21,7 @@
  *   (`catalogContractSchema`), which the install publishes if their keys
  *   aren't taken; and `"workflows"`: the independent workflows each App
  *   created from it gets, as `[{ "alias": …, "binding": …, "definition":
- *   "workflows/<alias>.json" }]`, each a grasp-workflow/1 definition
+ *   "workflows/<alias>.json" }]`, each a grasp-workflow/2 definition
  *   in the folder (not in `files/`: it is no file of the App), which the
  *   copy binds under its alias and asks to start under its binding name;
  * - `definition.json`: the App's definition (@grasp-os/sdk's

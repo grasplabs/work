@@ -60,7 +60,7 @@ export const builder = async (role: Role = "builder"): Promise<Acting> => {
 export const statusOutput = { status: { kind: "string" } };
 
 /**
- * A grasp-workflow/1 definition running `steps` on input `{ who }`, its
+ * A grasp-workflow/2 definition running `steps` on input `{ who }`, its
  * output `value` of `output`'s fields: `{ status: "done" }` unless said.
  */
 export const definitionOf = (
@@ -72,8 +72,9 @@ export const definitionOf = (
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: { schema: objectSchema(output), value },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema(output),
+    result: value,
     params: {
       greeting: {
         label: "Greeting",
@@ -84,8 +85,8 @@ export const definitionOf = (
     steps,
   });
 
-/** The greeting `params.greeting + ", " + input.who`, as an expression. */
-export const greeting = { $expr: 'params.greeting + ", " + input.who' };
+/** The greeting `params.greeting + ", " + args.who`, as an expression. */
+export const greeting = { $expr: 'params.greeting + ", " + args.who' };
 
 /** A run that waits an hour, then ends with `{ status: "done" }`. */
 export const waitingDefinition = definitionOf([
@@ -97,7 +98,7 @@ export const waitingDefinition = definitionOf([
  * `who` hasn't.
  */
 export const failingDefinition = definitionOf([], {
-  value: { status: { $expr: 'input.who.split("")[9999].toUpperCase()' } },
+  value: { status: { $expr: 'args.who.split("")[9999].toUpperCase()' } },
 });
 
 /** A workflow of `by`'s, published once from `definition`. */
@@ -415,13 +416,15 @@ export const loadWaitsOf = async (id: string | null): Promise<number> =>
         .one().waits
   );
 
-/** An `if` step `id` deciding on its input: one step, and no call. */
+/**
+ * A step `id` that records one thing and calls nothing: a wait until a
+ * deadline long past, its enter step one attempt (an `if` has no step of
+ * its own).
+ */
 export const deciding = (id: string) => ({
   id,
-  type: "if",
-  condition: { $expr: 'input.who !== ""' },
-  // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
-  then: [],
+  type: "wait",
+  until: { $expr: "0" },
 });
 
 /**
@@ -431,7 +434,7 @@ export const deciding = (id: string) => ({
 export const greetThenCall = definitionOf(
   [deciding("greet"), deciding("call")],
   {
-    value: { status: { $expr: 'params.greeting + ", " + input.who + "!"' } },
+    value: { status: { $expr: 'params.greeting + ", " + args.who + "!"' } },
   }
 );
 
@@ -441,13 +444,13 @@ export const greetThenCall = definitionOf(
  * engine fences it.
  */
 export const hangingModule = moduleOf(`
-await step.do("finish", { key: "task", description: "finish" }, async () => await new Promise(() => {}));
+await step.do("finish", { key: "enter", description: "finish" }, async () => await new Promise(() => {}));
 return { status: "never" };`);
 
 /** The receipt of run `id`'s attempt at `hangingModule`'s step. */
 export const heldBy = async (id: string | null) => {
   const receipts = await receiptsOf(id);
-  return receipts.find(({ key }) => stepOfKey(key) === "finish:task");
+  return receipts.find(({ key }) => stepOfKey(key) === "finish:enter");
 };
 
 /**

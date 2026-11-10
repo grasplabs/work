@@ -783,12 +783,18 @@ export const repairResourceStarts = async (
   }
 };
 
-/** How the run's code ended: as it reports it, or as loading it failed. */
+/**
+ * How the run's code ended: as it reports it (`reported`), or as the host
+ * failed it (loading it, or stopping it past its CPU time), which is the
+ * host's own word, never held to what the build seals.
+ */
 const settledRun = async (
   run: () => Promise<unknown>
-): Promise<Settled<unknown>> => {
+): Promise<{ result: Settled<unknown>; reported: boolean }> => {
   const outer = await settle(run);
-  return outer.ok ? fromIsolate(outer.value) : outer;
+  return outer.ok
+    ? { result: fromIsolate(outer.value), reported: true }
+    : { result: outer, reported: false };
 };
 
 /** What an activation of a run is given by its object (run-object.ts). */
@@ -1000,14 +1006,33 @@ export interface SealedActivation {
 }
 
 /**
+ * What a run whose code ended as `result` fails with, if it failed: what
+ * its code reported as the build may fail it (a raise it seals, a failure
+ * no catch took, else the platform's: `SealedRunKind.runFailure`); what
+ * the host failed it with (`reported` false) as the host did.
+ */
+const codeFailure = (
+  result: Settled<unknown>,
+  reported: boolean,
+  kind: SealedRunKind | undefined
+): StepError | undefined => {
+  if (result.ok) {
+    return undefined;
+  }
+  return reported && kind !== undefined
+    ? kind.runFailure(result.error)
+    : result.error;
+};
+
+/**
  * Runs one activation of a sealed build's run, `activation.run`: its
  * modules (`modules`, its verified build's: `sealedRunModules`) in an
  * isolate of its own, on the run host as a sealed run (sealed-run.ts),
  * whose sent calls and model calls its object keeps across activations
  * (run-object.ts). It fails with the refusal that caught its isolate
- * tampering; with the failure no catch took, should its code end well
- * past one (`SealedRunKind.failureUntaken`), as the build's code, which
- * rethrows it, ends; or as its code failed. Its end is the engine's,
+ * tampering; with the failure no catch may take, should its code end
+ * well past one (`SealedRunKind.failureUntaken`); or as its code failed,
+ * a raise only as its build seals it (`SealedRunKind.runFailure`). Its end is the engine's,
  * recorded and audited as any run's (`projectResourceRun`). Answers the
  * run's output, once it matches its version's output schema.
  */
@@ -1077,7 +1102,7 @@ export const sealedActivation = async (
       ...(memory.current === undefined ? {} : { current: memory.current }),
     }
   );
-  const result = await settledRun(async () => {
+  const { result, reported } = await settledRun(async () => {
     try {
       return await code.run(host, await sealedRunStart(env, run));
     } catch (error) {
@@ -1097,7 +1122,7 @@ export const sealedActivation = async (
     evidenceRefused ??
     tampered ??
     untaken ??
-    (result.ok ? undefined : result.error);
+    codeFailure(result, reported, kind);
   if (failed !== undefined) {
     throw namedError(failed.name, failed.message, failed.code);
   }

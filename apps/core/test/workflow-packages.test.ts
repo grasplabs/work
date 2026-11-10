@@ -30,19 +30,19 @@ import { auditedDuring, outcome, unique } from "./sign-in.ts";
 const definitionOf = (linger?: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: '"" + steps.add.output' } },
-    },
-    bindings: {
-      total: { kind: "compute", contract: "local:code/total.ts#total" },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: '"" + add' } },
+    permissions: {
+      modules: {
+        total: { kind: "compute", contract: "local:code/total.ts#total" },
+      },
     },
     steps: [
       ...(linger === undefined
         ? []
         : [{ id: "linger", type: "wait", for: linger }]),
-      { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
+      { id: "add", type: "call", module: "total", args: [1, 2, 3] },
     ],
   });
 

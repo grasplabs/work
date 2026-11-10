@@ -153,15 +153,17 @@ describe(
       });
     });
 
-    it("words any failure the platform doesn't define as a step's, whatever the workflow said", () => {
+    it("words a failure the platform doesn't define as a step's, but a raise as the workflow declares it", () => {
       const stepFailed = {
         code: "workflow.step_failed",
         message: expectedMessageOf("workflow.step_failed"),
       };
       expect({
-        ownCode: failureShown({
-          code: "test.secret",
-          message: "The secret is 42.",
+        // A run fails with a code of the workflow's own only as a raise
+        // its build seals, with that raise's sealed words.
+        raised: failureShown({
+          code: "invoice.rejected",
+          message: "The invoice was rejected.",
         }),
         inANamespace: failureShown({
           code: "workflow.secret_42",
@@ -173,7 +175,10 @@ describe(
           message: "It read Ada's salary.",
         }),
       }).toStrictEqual({
-        ownCode: stepFailed,
+        raised: {
+          code: "invoice.rejected",
+          message: "The invoice was rejected.",
+        },
         inANamespace: stepFailed,
         none: stepFailed,
         platform: {

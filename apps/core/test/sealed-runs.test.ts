@@ -50,7 +50,6 @@ import {
   decisionsOf,
   decisionWorkflow,
   echoingMail,
-  engineStep,
   failedWith,
   greet,
   greeting,
@@ -65,7 +64,6 @@ import {
   refusedAs,
   retryingEngine,
   reviewRun,
-  sdkWorkflow,
   sealedRunOf,
   sealedWorkflow,
   seenOfCall,
@@ -81,7 +79,7 @@ import type {
   Sealed,
   Tries,
 } from "./sealed-run-harness.ts";
-import { taskStep } from "./sealed-runs.ts";
+import { failingStep, taskStep } from "./sealed-runs.ts";
 import { unique } from "./sign-in.ts";
 
 // A run of a sealed build of a generated JSON workflow on the run host
@@ -259,12 +257,7 @@ const activated = async (
 // short, an answer after the deadline, and a replay asking again.
 
 /** A module of the test's own whose run on input `{ reviewer, invoice }` is `body`. */
-const reviewModuleOf = (body: string): string => `
-import { workflow, v } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: v.object({ reviewer: v.string(), invoice: v.string() }) }, async (step, { input }) => {
-${body}
-});
-`;
+const reviewModuleOf = (body: string): string => moduleOf(body);
 
 /** Task `review`'s enter step, recording `record` (code) as what it asks. */
 const enterReview = (record: string): string =>
@@ -304,29 +297,17 @@ const refusedPastTheSdk = (step: string) => ({
 
 /**
  * A run of loop `batch` over two invoices whose code is `body`, with
- * `ask(at)` and `decide(at)` of task `sign` in item `at`.
+ * `ask(at)` and `decide(at)` of task `sign` in its run `at`.
  */
 const signed = (body: string): string => `
-const { items } = await step.do("batch", { key: "enter", description: "Its items" }, async () => ({ items: ["INV-1", "INV-2"] }));
+const items = ["INV-1", "INV-2"];
 const ask = (at) => step.do("sign", { key: "enter@" + at, description: "Its ask" }, async () => ({ recipients: [input.reviewer], prompt: "Approve this one", input: { invoice: items[at] } }));
 const decide = (at) => step.decision("sign", { key: "task@" + at, description: "Approve this one", from: input.reviewer, timeout: "365 days" });
 ${body}`;
 
-/** Loop `rows`'s enter step, recording `items`, as `items`. */
-const enterRows = (items: string): string =>
-  `const { items } = await step.do("rows", { key: "enter", description: "Its items" }, async () => ({ items: ${items} }));`;
-
-/** Task `notify`'s call in item `at` of `rows`, mailing `items[at]`. */
-const notifyAt = (at: string): string =>
-  `await step.do("notify", { key: "task@" + ${at}, description: "Its task" }, async () => typeof (await env.mail.call("mail.send", { to: items[${at}], subject: "loop" })).messageId)`;
-
-/** Task `check`'s raise in item `at` of `rows`, recording `record`. */
-const checkAt = (at: string, record = "{ output: null }"): string =>
-  `await step.do("check", { key: "task@" + ${at}, description: "Its raise" }, async () => (${record}))`;
-
-/** Try `guard`'s catch in item `at` of `rows`, taking what it is offered. */
-const guardAt = (at: string): string =>
-  `await step.caught("guard", { key: "catch@" + ${at}, description: "Its catch" }, async () => true)`;
+/** Task `notify`'s call in its run `at`, mailing `to`. */
+const notifyAt = (at: string, to = '"a"'): string =>
+  `await step.do("notify", { key: "task@" + ${at}, description: "Its task" }, async () => typeof (await env.mail.call("mail.send", { to: ${to}, subject: "loop" })).messageId)`;
 
 /** Step `finish`, after the loop. */
 const finishStep =
@@ -413,7 +394,7 @@ describe("a sealed build's run on the run host", () => {
       await waitingRun(sealed),
       moduleOf(
         send(
-          'return await env.summary.call("mail.send", { to: input.who, subject: sensitiveParam("token") });'
+          'return await env.ai.call("mail.send", { to: input.who, subject: sensitiveParam("token") });'
         )
       )
     );
@@ -543,7 +524,7 @@ describe("a sealed build's run on the run host", () => {
     const retried = await ranAs(
       await waitingRun(sealed),
       moduleOf(
-        `return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => await env.summary.call("grasp.model", ${greeting}));`
+        `return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => await env.ai.call("grasp.model", ${greeting}));`
       ),
       { engine: retryingEngine(tries, new Map(), (attempt) => attempt === 1) }
     );
@@ -585,7 +566,7 @@ describe("a sealed build's run on the run host", () => {
     const ran = await ranAs(
       await waitingRun(sealed),
       moduleOf(
-        `return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => await env.summary.call("grasp.model", ${greeting}));`
+        `return await step.do("greet", { key: "task", description: "Its task", retries: { limit: 2 } }, async () => await env.ai.call("grasp.model", ${greeting}));`
       ),
       {
         engine: retryingEngine(),
@@ -823,12 +804,12 @@ return { before, after: await late };
       .bind(workflow.id)
       .first<{ definition: string }>();
     const definition = z
-      .looseObject({ output: z.looseObject({ value: z.json() }) })
+      .looseObject({ result: z.json() })
       .parse(JSON.parse(first?.definition ?? "{}"));
     await publishWorkflowVersion(env, by, workflow.id, {
       definition: JSON.stringify({
         ...definition,
-        output: { ...definition.output, value: { status: "done again" } },
+        result: { status: "done again" },
       }),
       basedOn: 1,
     });
@@ -894,7 +875,7 @@ describe("a sealed run's activations", () => {
     });
     const runId = await waitingRun(sealed);
     const source = moduleOf(
-      `const { line } = ${taskStep("greet", `await env.summary.call("grasp.model", ${greeting})`)}; return { status: line };`
+      `const { line } = ${taskStep("greet", `await env.ai.call("grasp.model", ${greeting})`)}; return { status: line };`
     );
     const journal = new Map<string, unknown>();
     const evicted = await activated(
@@ -929,7 +910,7 @@ describe("a sealed run's activations", () => {
     const ended = await activated(
       runId,
       moduleOf(
-        `const { line } = ${taskStep("greet", `await env.summary.call("grasp.model", ${greeting})`)}; return { status: line };`
+        `const { line } = ${taskStep("greet", `await env.ai.call("grasp.model", ${greeting})`)}; return { status: line };`
       ),
       activationEngine(new Map())
     );
@@ -954,7 +935,7 @@ describe("a sealed run's activations", () => {
     const runId = await waitingRun(sealed);
     const source = moduleOf(`
 ${greet(greeting).replace("return await", "await")}
-const { line } = ${taskStep("again", `await env.summary.call("grasp.model", ${greeting})`)};
+const { line } = ${taskStep("again", `await env.ai.call("grasp.model", ${greeting})`)};
 return { status: line };`);
     const journal = new Map<string, unknown>();
     const evicted = await activated(
@@ -980,25 +961,29 @@ return { status: line };`);
     });
   });
 
-  it("fails a run whose code ends well past a failure no catch took with that failure, as its code rethrowing it does", async () => {
+  it("fails a run whose code ends well past a failure no catch may take with that failure, as its code rethrowing it does, and with a raise only as its build seals it", async () => {
     const run = async (body: string) =>
       await activated(
         await waitingRun(sealed),
         moduleOf(body),
         activationEngine(new Map())
       );
-    const raise = taskStep("stop", "{ output: null }");
+    const failing = failingStep("send");
     expect({
       swallowed: await run(
-        `try { ${raise}; } catch {} return { status: "done" };`
+        `try { ${failing}; } catch {} return { status: "done" };`
       ),
       rethrown: await run(
-        `try { ${raise}; } catch (thrown) { throw thrown; } return { status: "done" };`
+        `try { ${failing}; } catch (thrown) { throw thrown; } return { status: "done" };`
       ),
+      raised: await run('throw new AppError("test.stop", "Not its words.");'),
+      notRaised: await run('throw new AppError("test.other", "Not sealed.");'),
       ended: await run('return { status: "done" };'),
     }).toStrictEqual({
-      swallowed: { failed: "workflow.raised" },
-      rethrown: { failed: "workflow.raised" },
+      swallowed: { failed: "workflow.task_data_invalid" },
+      rethrown: { failed: "workflow.task_data_invalid" },
+      raised: { failed: "test.stop" },
+      notRaised: { failed: anyText },
       ended: { status: "done" },
     });
   });
@@ -1407,7 +1392,7 @@ describe("a sealed run's decisions on the run host", () => {
       { engine: answering(runId) }
     );
     const decisions = await decisionsOf(runId);
-    // Item 1 opens its decision without its own ask: item 0's isn't its.
+    // Run 1 opens its decision without its own ask: run 0's isn't its.
     const otherRunId = await reviewRun(reviewed, `person:${reviewer.userId}`);
     const otherAsk = await ranAs(
       otherRunId,
@@ -1428,31 +1413,28 @@ describe("a sealed run's decisions on the run host", () => {
       ran: { ended: [true, false], tampered: [] },
       decisions: [
         {
-          step: engineStep("sign", "task@0"),
+          step: "sign:task",
           input: { invoice: "INV-1" },
           status: "approved",
         },
         {
-          step: engineStep("sign", "task@1"),
+          step: "sign:task@1",
           input: { invoice: "INV-2" },
           status: "rejected",
         },
       ],
       otherAsk: refusedAs(
-        'Task "sign" opens its decision as its enter step recorded it.'
+        'Run 1 of task "sign" doesn\'t run now: its runs go in increasing order, each once.'
       ),
     });
   });
 });
 
-// A forged or miscompiled module's ways past a loop's items, each refused
-// by the host (sealed-run.ts, `#loopRefusal` and `itemsUnfit`): a step
-// the table doesn't have in items, or a key in another form; an item its
-// loop's enter step never recorded, past its count, of a loop it never
-// entered or skipped; items gone back to, reordered, run after the run
-// left their loop, or run over by entering the loop again; a loop past the
-// platform's 1,000 items; a step past a failure pending in an item; and a
-// catch moving a failure on to the next item.
+// A forged or miscompiled module's ways past a task's runs in a loop's
+// items, each refused by the host (sealed-run.ts, `#runRefusal`): a count
+// on a task in no loop, or in another form; a run skipped, repeated or
+// gone back to; a step of a loop of its own; and a step past a failure
+// pending in a run whose task no try takes it around.
 describe("a sealed run's loop items on the run host", () => {
   let sealed: Sealed;
 
@@ -1468,113 +1450,53 @@ describe("a sealed run's loop items on the run host", () => {
   const run = async (body: string) =>
     await ranAs(await waitingRun(sealed), moduleOf(body));
 
-  it("refuses a step in items the table doesn't have, and an item its loop never recorded", async () => {
+  it("runs a task inside a loop's items once a run, in order, and a task in no loop once", async () => {
     expect({
-      noItem: await run(
-        `${enterRows('["a"]')} return await step.do("notify", { key: "task", description: "Its task" }, async () => null);`
+      inOrder: await run(
+        `const sent = []; for (let at = 0; at < 3; at += 1) sent.push(${notifyAt("at")}); ${finishStep}; return sent;`
+      ),
+      skipped: await run(
+        `const sent = []; sent.push(${notifyAt("0")}); return ${notifyAt("2")};`
+      ),
+      again: await run(
+        `const sent = []; sent.push(${notifyAt("0")}); return ${notifyAt("0")};`
+      ),
+      backAgain: await run(
+        `const sent = []; sent.push(${notifyAt("0")}); sent.push(${notifyAt("1")}); return ${notifyAt("0")};`
+      ),
+      outsideLoop: await run(
+        `return await step.do("send", { key: "task@1", description: "Its task" }, async () => null);`
       ),
       leadingZero: await run(
-        `${enterRows('["a"]')} return ${checkAt('"00"')};`
+        `const sent = []; sent.push(${notifyAt("0")}); return await step.do("notify", { key: "task@01", description: "Its task" }, async () => null);`
       ),
-      pastCount: await run(
-        `${enterRows('["a"]')} const sent = []; sent.push(${notifyAt("0")}); return ${checkAt("1")};`
-      ),
-      neverEntered: await run(`const items = ["a"]; return ${notifyAt("0")};`),
-      skippedLoop: await run(
-        `await step.do("rows", { key: "enter", description: "Its items" }, async () => ({ skipped: true })); const items = ["a"]; return ${notifyAt("0")};`
-      ),
-      // Past the SDK: the key unencoded, as no SDK names it.
-      otherEncoding: await ranAs(
-        await waitingRun(sealed),
-        `export default { run: async (engine) => {
-  await engine.do("rows:enter", {}, async () => ({ items: ["a"] }));
-  try { await engine.do("check:task@0", {}, async () => ({ output: null })); return "ran"; } catch (error) { return error.code; }
-} };`
+      loopStep: await run(
+        `return await step.do("rows", { key: "enter", description: "Its items" }, async () => ({ items: ["a"] }));`
       ),
     }).toStrictEqual({
-      noItem: refusedAs(`Step "notify:task" isn't one the build seals.`),
+      inOrder: { ended: ["string", "string", "string"], tampered: [] },
+      skipped: refusedAs(
+        'Run 2 of task "notify" doesn\'t run now: its runs go in increasing order, each once.'
+      ),
+      again: refusedAs(`Step "notify:task" runs once.`),
+      backAgain: refusedAs(`Step "notify:task" runs once.`),
+      outsideLoop: refusedAs(`Step "send:task@1" isn't one the build seals.`),
       leadingZero: refusedAs(
-        `Step "${engineStep("check", "task@00")}" isn't one the build seals.`
+        `Step "notify:task@01" isn't one the build seals.`
       ),
-      pastCount: refusedAs(`Loop "rows" has no item 1 here.`),
-      neverEntered: refusedAs(`Loop "rows" has no item 0 here.`),
-      skippedLoop: refusedAs(`Loop "rows" has no item 0 here.`),
-      otherEncoding: {
-        ended: "workflow.invalid",
-        tampered: ["workflow.invalid"],
-      },
+      loopStep: refusedAs(`Step "rows:enter" isn't one the build seals.`),
     });
   });
 
-  it("runs items in increasing order, past items that ran no step, and refuses one gone back to, run after the run left its loop, or run over by entering it again", async () => {
-    const inRows = async (body: string) =>
-      await run(`${enterRows('["a", "b", "c"]')} const sent = []; ${body}`);
+  it("holds a run's failure to the tries around its task", async () => {
     expect({
-      // Items whose work was all skipped run no step: the next goes on.
-      emptyFirst: await inRows(`sent.push(${notifyAt("1")}); return sent;`),
-      backAfterSkip: await inRows(
-        `sent.push(${notifyAt("2")}); return ${notifyAt("1")};`
-      ),
-      reordered: await inRows(
-        `sent.push(${notifyAt("0")}); sent.push(${notifyAt("1")}); return ${checkAt("0")};`
-      ),
-      afterLeaving: await inRows(
-        `sent.push(${notifyAt("0")}); ${finishStep}; return ${notifyAt("1")};`
-      ),
-      // Past the SDK, which would refuse a name it ran: the loop entered
-      // again to run its items over.
-      enteredAgain: await ranAs(
-        await waitingRun(sealed),
-        `export default { run: async (engine) => {
-  await engine.do("rows:enter", {}, async () => ({ items: ["a"] }));
-  await engine.do(${JSON.stringify(engineStep("check", "task@0"))}, {}, async () => ({ skipped: true }));
-  try { await engine.do("rows:enter", {}, async () => ({ items: ["a"] })); return "entered"; } catch (error) { return error.code; }
-} };`
-      ),
-    }).toStrictEqual({
-      emptyFirst: { ended: ["string"], tampered: [] },
-      backAfterSkip: refusedAs(
-        `Item 1 of loop "rows" doesn't run now: its items run in increasing order, each once.`
-      ),
-      reordered: refusedAs(
-        `Item 0 of loop "rows" doesn't run now: its items run in increasing order, each once.`
-      ),
-      afterLeaving: refusedAs(`Loop "rows" has no item 1 here.`),
-      enteredAgain: {
-        ended: "workflow.invalid",
-        tampered: ["workflow.invalid"],
-      },
-    });
-  });
-
-  it("holds a loop to 1,000 items, and each item's failure and catch to that item", async () => {
-    expect({
-      atMost: await run(
-        `${enterRows("Array.from({ length: 1000 }, (_, at) => at)")} return items.length;`
-      ),
-      tooMany: await run(
-        `${enterRows("Array.from({ length: 1001 }, (_, at) => at)")} return items.length;`
-      ),
-      notAList: await run(
-        'await step.do("rows", { key: "enter", description: "Its items" }, async () => ({ output: ["a"] })); return "entered";'
-      ),
-      // Item 0's raise, swallowed: item 1 doesn't start.
+      // `notify` is in no try: its run 0's failure, swallowed, holds run 1 back.
       pastFailure: await run(
-        `${enterRows('["a", "b"]')} const sent = []; sent.push(${notifyAt("0")}); try { ${checkAt("0")}; } catch {} return ${notifyAt("1")};`
-      ),
-      // Item 0's raise, offered to item 1's catch.
-      otherCatch: await run(
-        `${enterRows('["a", "b"]')} try { ${checkAt("0")}; } catch { return ${guardAt("1")}; }`
+        `try { await step.do("notify", { key: "task", description: "Its task" }, async () => { throw new Error("down"); }); } catch {} return ${notifyAt("1")};`
       ),
     }).toStrictEqual({
-      atMost: { ended: 1000, tampered: [] },
-      tooMany: failedWith("workflow.collection_invalid"),
-      notAList: failedWith("workflow.collection_invalid"),
       pastFailure: refusedAs(
-        "A run goes on past a failure only once a catch took it."
-      ),
-      otherCatch: refusedAs(
-        `Item 1 of loop "rows" doesn't run now: its items run in increasing order, each once.`
+        "A run goes on past a failure only where a catch around its step takes it."
       ),
     });
   });

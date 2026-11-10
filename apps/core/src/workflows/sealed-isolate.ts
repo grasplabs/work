@@ -254,7 +254,6 @@ export class Run extends WorkerEntrypoint {
         do: async (name, options, fn, retry) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)), ...(typeof retry === "function" ? [async (error) => await settled(async () => await retry(error))] : []))),
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),
         sleepUntil: async (name, until) => unwrapped(await host.sleepUntil(name, until)),
-        caught: async (name, options, takes) => unwrapped(await host.caught(name, options, async (attempt, error) => await inAttempt(attempt, async () => await settled(async () => await takes(error))))),
         listen: async (name) => unwrapped(await host.listen(name)),
         openDecision: async (request) => unwrapped(await currentAttempt().openDecision(request)),
         askDecision: async (decision) => { unwrapped(await currentAttempt().askDecision(decision)); },
@@ -299,12 +298,6 @@ export interface IsolateHostCalls<Attempt = AttemptHost> {
     retry?: (error: Json) => Promise<unknown>
   ) => Promise<Settled<unknown>>;
   sleep: (name: unknown, duration: unknown) => Promise<Settled<null>>;
-  /** A `try` task's catch step (host.ts, `RunHost.caught`). */
-  caught?: (
-    name: unknown,
-    options: unknown,
-    fn: (attempt: Attempt, error: Json) => Promise<unknown>
-  ) => Promise<Settled<unknown>>;
   /** A durable sleep until a deadline its step recorded (host.ts). */
   sleepUntil?: (name: unknown, until: unknown) => Promise<Settled<null>>;
   /** A listen task's events, as the host's event wait takes them (host.ts). */
@@ -538,28 +531,6 @@ export const sessionHostCalls = <Attempt extends object = AttemptHost>(
         : undefined
     );
   },
-  caught: async (name, options, fn) => {
-    if (host.caught === undefined) {
-      return {
-        ok: false,
-        error: { name: "Error", message: "This run has no catches." },
-      };
-    }
-    if (typeof fn !== "function") {
-      return await host.caught(name, options, fn);
-    }
-    return await host.caught(
-      name,
-      options,
-      async (attempt, error) =>
-        await inSession(
-          session,
-          methods,
-          attempt,
-          async (passed) => await fn(passed, error)
-        )
-    );
-  },
   sleep: async (name, duration) => await host.sleep(name, duration),
   sleepUntil: async (name, until) =>
     host.sleepUntil === undefined
@@ -711,14 +682,7 @@ export const loadSealedIsolate = <Attempt extends object = AttemptHost>(
                 session,
                 methods
               ),
-              [
-                "do",
-                "sleep",
-                "sleepUntil",
-                "caught",
-                "listen",
-                "waitForDecision",
-              ]
+              ["do", "sleep", "sleepUntil", "listen", "waitForDecision"]
             ),
           },
           { value: start },

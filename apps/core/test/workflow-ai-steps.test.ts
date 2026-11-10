@@ -47,11 +47,10 @@ const { signedIn } = jsonWorkflowAppsOf(idp);
 const readTasks = [
   {
     id: "read",
-    type: "agent",
-    binding: "reader",
+    type: "generate",
     instructions: "Read the total in cents, and who sent it.",
     input: { text: "Total 12.34 EUR" },
-    output: objectSchema({
+    returns: objectSchema({
       total: { kind: "number", integer: true },
       from: { kind: "string", email: true },
     }),
@@ -60,7 +59,7 @@ const readTasks = [
 
 /** What the workflow reading `readTasks` ends with. */
 const readStatus = {
-  $expr: '"" + steps.read.output.total + " " + steps.read.output.from',
+  $expr: '"" + read.total + " " + read.from',
 };
 
 describe("a JSON workflow's model task", { timeout: 60_000 }, () => {
@@ -116,20 +115,19 @@ describe("a JSON workflow's model task", { timeout: 60_000 }, () => {
 const checkedTasks = [
   {
     id: "draft",
-    type: "agent",
-    binding: "writer",
+    type: "generate",
     instructions: "Write a one-line greeting for them.",
-    input: { who: { $expr: "input.who" } },
-    output: objectSchema({ line: { kind: "string" } }),
+    input: { who: { $expr: "args.who" } },
+    returns: objectSchema({ line: { kind: "string" } }),
   },
   {
     id: "check",
-    type: "decision",
-    binding: "check",
+    type: "decide",
+    decision: "check",
     recipients: ["role:admin"],
     prompt: "Send this greeting?",
     input: {
-      draft: { line: { $expr: "steps.draft.output.line" }, tags: ["greeting"] },
+      draft: { line: { $expr: "draft.line" }, tags: ["greeting"] },
     },
   },
 ];
@@ -137,7 +135,7 @@ const checkedTasks = [
 /** The greeting with the check's comment, or `declined`. */
 const checkedStatus = {
   $expr:
-    'steps.check.output.approved ? steps.draft.output.line + " / " + steps.check.output.payload.comment : "declined"',
+    '!check.timedOut && check.approved ? draft.line + " / " + check.payload.comment : "declined"',
 };
 
 describe("the release's general contracts", { timeout: 60_000 }, () => {
@@ -150,14 +148,14 @@ describe("the release's general contracts", { timeout: 60_000 }, () => {
     const workflow = await publishedWorkflow(builder, () =>
       definitionOf(checkedTasks, {
         status: checkedStatus,
-        bindings: {
-          writer: { kind: "model", contract: modelStepContract },
-          check: { kind: "decision", contract: approvalContract },
+        permissions: {
+          ai: { contract: modelStepContract },
+          decisions: { check: { contract: approvalContract } },
         },
       })
     );
     await admin.api.workflowResources.approveBinding(workflow.id, {
-      alias: "writer",
+      alias: "ai",
       target: { kind: "model", model: askedModel },
       reviewed: { version: 1 },
     });

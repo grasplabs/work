@@ -1,4 +1,3 @@
-import { kitModuleName } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
@@ -56,6 +55,7 @@ import { allEvents } from "./audit-events.ts";
 import { endLiveResourceRuns, objectSchema } from "./json-workflow-apps.ts";
 import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus, runObject } from "./runs.ts";
+import { moduleOf as harnessModuleOf } from "./sealed-run-harness.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // Waits on an event source's events by a match (event-waits.ts), from
@@ -117,13 +117,11 @@ const paymentData = JSON.stringify(
 
 /** A wait for a payment of the run's own invoice, five minutes at most. */
 const awaitPaid = {
-  id: "await-paid",
-  type: "wait",
-  event: {
-    from: "payments",
-    type: paid,
-    match: { field: "/invoice", equals: { $expr: "input.invoice" } },
-  },
+  id: "awaitPaid",
+  type: "waitForEvent",
+  events: "payments",
+  eventType: paid,
+  match: { field: "/invoice", equals: { $expr: "args.invoice" } },
   timeout: "5 minutes",
 };
 
@@ -158,8 +156,8 @@ const paymentWorkflow = async (on?: {
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
       $schema: workflowSchemaUrl,
-      input: objectSchema({ invoice: { kind: "string" } }),
-      bindings: { payments: { kind: "event", contract } },
+      args: objectSchema({ invoice: { kind: "string" } }),
+      permissions: { events: { payments: { contract } } },
       steps: [{ id: "linger", type: "wait", for: "1 hour" }, awaitPaid],
     }),
     basedOn: null,
@@ -252,22 +250,17 @@ const sealedRunOf = async (runId: string): Promise<HostedSealedRun> => {
   return sealedRunFrom(run);
 };
 
-const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
-
 /**
  * The run's wait, as generated code runs it: its enter step records the
  * value it matches (`key`, as code: its input's invoice unless given),
  * then it waits; the run answers the invoice of the event it took, or
  * that none came.
  */
-const waiting = (key = "input.invoice"): string => `
-import { workflow, v } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: v.object({ invoice: v.string() }) }, async (step, { input }) => {
-  await step.do("await-paid", { key: "enter", description: "Its match" }, async () => ({ key: ${key} }));
-  const waited = await step.listen("await-paid", { key: "task", description: "Its payment" });
-  return waited.timedOut ? "none" : waited.event.data.invoice;
-});
-`;
+const waiting = (key = "args.invoice"): string =>
+  harnessModuleOf(`
+  await step.do("awaitPaid", { key: "enter", description: "Its match" }, async () => ({ key: ${key} }));
+  const waited = await step.listen("awaitPaid", { key: "task", description: "Its payment" });
+  return waited.timedOut ? "none" : waited.event.data.invoice;`);
 
 /** The engine's own record of a run, as a later activation finds it. */
 interface Kept {
@@ -1043,8 +1036,8 @@ describe(
       const unsealed = await ranAs(
         otherRun,
         waiting().replace(
-          "({ key: input.invoice })",
-          "({ value: input.invoice })"
+          "({ key: args.invoice })",
+          "({ value: args.invoice })"
         )
       );
 
@@ -1073,14 +1066,15 @@ describe("publishing and approving a wait on a webhook source's events", () => {
       admin,
       `pay-${unique()}`
     );
-    const publishing = async (event: unknown) => {
+    /** Publishing `awaitPaid` changed by `change`: "published", or its problems' codes. */
+    const publishing = async (change: Record<string, unknown>) => {
       try {
         await publishWorkflowVersion(env, admin, workflow.id, {
           definition: JSON.stringify({
             $schema: workflowSchemaUrl,
-            input: objectSchema({ invoice: { kind: "string" } }),
-            bindings: { payments: { kind: "event", contract } },
-            steps: [{ ...awaitPaid, event }],
+            args: objectSchema({ invoice: { kind: "string" } }),
+            permissions: { events: { payments: { contract } } },
+            steps: [{ ...awaitPaid, ...change }],
           }),
           basedOn: null,
         });
@@ -1096,12 +1090,9 @@ describe("publishing and approving a wait on a webhook source's events", () => {
           .details.problems.map(({ code }) => code);
       }
     };
-    const unmatched = await publishing({ from: "payments", type: paid });
-    const unsourced = await publishing({
-      ...awaitPaid.event,
-      type: "payment.noted",
-    });
-    const published = await publishing(awaitPaid.event);
+    const unmatched = await publishing({ match: undefined });
+    const unsourced = await publishing({ eventType: "payment.noted" });
+    const published = await publishing({});
     const source = await sourceOf(admin);
     const approving = async (target: unknown) => {
       try {

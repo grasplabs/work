@@ -7,13 +7,13 @@ import { stepFieldsAt } from "./step-body.ts";
 // that isn't JSON or a key reached only through a prototype.
 
 const source = JSON.stringify({
-  $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+  $schema: "https://grasp.work/schemas/grasp-workflow/2.json",
   steps: [
     { id: "first", type: "wait", for: "1 minute" },
     {
       id: "check",
       type: "try",
-      try: [{ id: "inner", type: "do", binding: "http", operation: "get" }],
+      try: [{ id: "inner", type: "call", connection: "http", action: "get" }],
       catch: { do: [] },
     },
   ],
@@ -26,7 +26,7 @@ describe("a step's fields", () => {
       inner: stepFieldsAt(source, "/steps/1/try/0"),
     }).toStrictEqual({
       first: { type: "wait", for: "1 minute" },
-      inner: { type: "do", binding: "http", operation: "get" },
+      inner: { type: "call", connection: "http", action: "get" },
     });
   });
 

@@ -18,12 +18,11 @@ import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { resumed, runInstance, sleeping, stopped, woken } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 
-// Typed failures of grasp-workflow/1 runs, published and started as a
+// Typed failures of grasp-workflow/2 runs, published and started as a
 // builder would, from their threat model. A catch takes only a failure
-// of a step in its own `try` list, decided by the host from its own
-// record of the run (never from what the isolate threw), filtered by the
-// error's type and status and its `when`; anything it doesn't take goes
-// on unchanged, to the catch around it. A wait or a cancellation is never
+// of a step in its own `try` list, or a raise there, filtered by the
+// error's code and its `when`; anything it doesn't take goes on
+// unchanged, to the catch around it. A wait or a cancellation is never
 // a failure a catch sees. Its `do` runs as ordinary recorded steps, so a
 // crash during it replays what ran and binds the caught error again from
 // the journal. That a raise fails its run, a catch takes it, and a retry
@@ -54,9 +53,8 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 
 /** A domain error a raise raises: of the workflow's own type. */
 const conflict = {
-  type: "urn:grasp:error:invoice.conflict",
-  status: 409,
-  title: "The invoice changed meanwhile.",
+  code: "invoice.conflict",
+  message: "The invoice changed meanwhile.",
 };
 
 /** A raise of the domain conflict, as step `deny`. */
@@ -76,11 +74,9 @@ const guarded = (
 const definitionOf = (steps: unknown[]) =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: "done" },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "done" },
     steps,
   });
 
@@ -186,11 +182,11 @@ describe("raise and catch", () => {
   it("lets a failure a catch's filter doesn't name go on unchanged, to the catch around it", async () => {
     const inner = guarded(
       [deny],
-      { errors: { status: 404 }, do: [mark("inner")] },
-      "inner-guard"
+      { code: "invoice.missing", do: [mark("inner")] },
+      "innerGuard"
     );
     const outer = guarded([inner], {
-      errors: { type: conflict.type, status: 409 },
+      code: conflict.code,
       do: [mark("outer")],
     });
     expect({
@@ -202,7 +198,7 @@ describe("raise and catch", () => {
         output: { status: "done" },
         marks: ["outer"],
       },
-      alone: { status: "failed", code: "workflow.raised", marks: [] },
+      alone: { status: "failed", code: "invoice.conflict", marks: [] },
     });
   });
 
@@ -212,15 +208,15 @@ describe("raise and catch", () => {
         guarded([deny], { when: { $expr: when }, do: [mark("caught")] }),
       ]);
     expect({
-      holds: await caughtWhen("error.status === 409"),
-      doesnt: await caughtWhen("error.status === 500"),
+      holds: await caughtWhen('error.code === "invoice.conflict"'),
+      doesnt: await caughtWhen('error.code === "invoice.missing"'),
     }).toStrictEqual({
       holds: {
         status: "completed",
         output: { status: "done" },
         marks: ["caught"],
       },
-      doesnt: { status: "failed", code: "workflow.raised", marks: [] },
+      doesnt: { status: "failed", code: "invoice.conflict", marks: [] },
     });
   });
 
@@ -235,9 +231,8 @@ describe("raise and catch", () => {
               id: "undo",
               type: "raise",
               error: {
-                type: "urn:grasp:error:invoice.undo_failed",
-                status: 500,
-                title: "The invoice couldn't be put back.",
+                code: "invoice.undo_failed",
+                message: "The invoice couldn't be put back.",
               },
             },
           ],
@@ -251,18 +246,18 @@ describe("raise and catch", () => {
     );
     expect({ ...endOf(run), message: run.error?.message }).toStrictEqual({
       status: "failed",
-      code: "workflow.raised",
+      code: "invoice.undo_failed",
       message: "The invoice couldn't be put back.",
     });
   });
 
-  it("doesn't retry a failure its catch doesn't take", async () => {
+  it("doesn't retry a raise, which has no step to run again", async () => {
     const by = await builder();
     const workflow = await published(
       by,
       definitionOf([
         guarded([deny], {
-          errors: { status: 500 },
+          code: "connect.server_unavailable",
           retry: { attempts: 3, delay: "1 second", backoff: "constant" },
         }),
       ])
@@ -273,8 +268,8 @@ describe("raise and catch", () => {
       end: endOf(run),
       attempts: await attemptsOf(runId, ["deny:"]),
     }).toStrictEqual({
-      end: { status: "failed", code: "workflow.raised" },
-      attempts: { "deny:": 1 },
+      end: { status: "failed", code: "invoice.conflict" },
+      attempts: { "deny:": 0 },
     });
   });
 });
@@ -298,11 +293,9 @@ describe("what a catch never takes", () => {
     const run = await endedRun(by, workflow.id, runId);
     expect({
       status: run.status,
-      caught: await attemptsOf(runId, ["guard:catch"]),
       marks: await marksOf(runId),
     }).toStrictEqual({
       status: "cancelled",
-      caught: { "guard:catch": 0 },
       marks: ["pause"],
     });
   });
@@ -310,14 +303,14 @@ describe("what a catch never takes", () => {
 
 /**
  * A recovery step `id` that fails the run unless `error` is the conflict
- * caught, as `when` says it isn't: so a replay that didn't bind it again
- * from the journal fails.
+ * caught, as `when` says it isn't, by a code of its own (one code is one
+ * raise): so a replay that didn't bind it again from the journal fails.
  */
 const unlessCaught = (id: string, when: string) => ({
   id,
   type: "raise",
   if: { $expr: when },
-  error: { type: "urn:grasp:error:not.caught", status: 500 },
+  error: { code: `not_caught.${id}`, message: "Failed." },
 });
 
 describe("a caught failure's recovery, through a crash", () => {
@@ -330,11 +323,14 @@ describe("a caught failure's recovery, through a crash", () => {
       definitionOf([
         guarded([deny], {
           do: [
-            unlessCaught("note", "error.status !== 409"),
+            unlessCaught(
+              "note",
+              `error.code !== ${JSON.stringify(conflict.code)}`
+            ),
             { id: "pause", type: "wait", for: "1 hour" },
             unlessCaught(
               "report",
-              `error.title !== ${JSON.stringify(conflict.title)}`
+              `error.message !== ${JSON.stringify(conflict.message)}`
             ),
           ],
         }),
@@ -343,23 +339,19 @@ describe("a caught failure's recovery, through a crash", () => {
     const runId = await startFor(by, workflow.id);
     await sleeping(runId, "pause:task");
     // A crash while the recovery waits; then its wait ends: the next
-    // activation, in a fresh isolate, replays the raise's failure, the
-    // catch and `note`, and reads `error` again.
+    // activation, in a fresh isolate, runs the code again, which raises
+    // and catches the same error, and reads `error` again: a raise and
+    // a catch have no steps.
     await stopped(runId);
     await resumed(runId);
     await woken(runId, "pause:task");
     const run = await endedRun(by, workflow.id, runId);
     expect({
       end: endOf(run),
-      attempts: await attemptsOf(runId, [
-        "deny:",
-        "guard:catch",
-        "note:",
-        "report:",
-      ]),
+      attempts: await attemptsOf(runId, ["deny:", "note:", "report:"]),
     }).toStrictEqual({
       end: { status: "completed", output: { status: "done" } },
-      attempts: { "deny:": 1, "guard:catch": 1, "note:": 1, "report:": 1 },
+      attempts: { "deny:": 0, "note:": 0, "report:": 0 },
     });
   });
 });

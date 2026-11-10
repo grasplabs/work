@@ -47,31 +47,28 @@ interface Flow {
 /** A workflow of `flow`, its input `who` and output `status`. */
 const definitionOf = (
   { steps, status }: Flow,
-  bindings: Record<string, unknown>
+  permissions: Record<string, unknown>
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
-    bindings,
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
+    permissions,
     steps,
   });
 
 /** Asks the `summary` model binding for a line about the input's `who`. */
 const summarize = {
   id: "summarize",
-  type: "agent",
-  binding: "summary",
+  type: "generate",
   instructions: "Greet them.",
-  input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { kind: "string" } }),
+  input: { who: { $expr: "args.who" } },
+  returns: objectSchema({ line: { kind: "string" } }),
 };
 
 /** The line `summarize` answered. */
-const line = { $expr: "steps.summarize.output.line" };
+const line = { $expr: "summarize.line" };
 
 /** A wait of `duration` (`"1 second"`) in step `hold`. */
 const hold = (duration: string) => ({
@@ -162,9 +159,7 @@ const requestsApp = async (
     `greet-${unique()}`
   );
   await publishWorkflowVersion(env, builder, resource.id, {
-    definition: definitionOf(flow, {
-      summary: { kind: "model", contract: model },
-    }),
+    definition: definitionOf(flow, { ai: { contract: model } }),
     basedOn: null,
   });
   await bindWorkflowToApp(env, builder, resource.id, {
@@ -313,7 +308,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
     const provider = await watchedProvider();
     const app = await requestsApp(
       { steps: [summarize], status: line },
-      { models: { summary: { line: "Hello from the fixture" } } },
+      { models: { ai: { line: "Hello from the fixture" } } },
       {
         "tests/greet.test.ts": suiteOf(`
       const run = await owner.start(workflows.followUp, { who: "Ada" });
@@ -355,7 +350,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
         await requestsApp(tasks, { models: { elsewhere: { line: "Hi" } } })
       ),
       wrongShape: await endedIn(
-        await requestsApp(tasks, { models: { summary: { words: 3 } } })
+        await requestsApp(tasks, { models: { ai: { words: 3 } } })
       ),
       asked: provider.requests.length,
     }).toMatchObject({
@@ -391,9 +386,9 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
               steps: [
                 {
                   id: "save",
-                  type: "do",
-                  binding: "save",
-                  arguments: { who: { $expr: "input.who" } },
+                  type: "call",
+                  module: "save",
+                  args: { who: { $expr: "args.who" } },
                 },
               ],
               status: "saved",
@@ -413,7 +408,7 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
     const provider = await watchedProvider();
     const app = await requestsApp(
       { steps: [summarize, hold("2 seconds")], status: line },
-      { models: { summary: { line: "Hello" } } }
+      { models: { ai: { line: "Hello" } } }
     );
     const { session, run, runId } = await runningIn(app);
     await sleeping(runId, "hold:task");

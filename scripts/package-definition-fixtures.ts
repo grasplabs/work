@@ -83,22 +83,20 @@ export const notesFiles = (): Record<string, string> => ({
 
 /**
  * The TypeScript a greeting workflow's version generates, from its
- * grasp-workflow/1 definition, as publication does.
+ * grasp-workflow/2 definition, as publication does.
  */
 export const greetingSource = (() => {
   const checked = checkWorkflow({
     $schema: workflowSchemaUrl,
-    input: { kind: "object", fields: { who: { kind: "string" } } },
-    output: {
-      schema: { kind: "object", fields: { status: { kind: "string" } } },
-      value: { status: { $expr: '"Hello, " + input.who' } },
-    },
+    args: { kind: "object", fields: { who: { kind: "string" } } },
+    returns: { kind: "object", fields: { status: { kind: "string" } } },
+    result: { status: { $expr: '"Hello, " + args.who' } },
     steps: [{ id: "pause", type: "wait", for: "1 minute" }],
   });
   if (!checked.ok) {
     throw new Error("The greeting workflow isn't valid");
   }
-  return generateWorkflow(checked.workflow, "workflow").source;
+  return generateWorkflow(checked.workflow).source;
 })();
 
 /** A greeting workflow's files, as its version seals them. */

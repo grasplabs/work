@@ -4,11 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { withCpuKills } from "./cpu-kills.ts";
-import { endLiveResourceRuns, passing } from "./json-workflow-apps.ts";
+import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { moduleOf } from "./sealed-run-harness.ts";
 import { outcome } from "./sign-in.ts";
 import {
   builder,
+  deciding,
   definitionOf,
   published,
   forgedModule,
@@ -96,16 +97,19 @@ describe(
         startedWithRun: true,
         usedAsSettled: true,
         // Its parameters' step, each of its own, and its output's.
-        receipts: ["$params", "greet:task", "call:task", "workflow:output"].map(
-          (step) => ({
-            step,
-            attempt: 1,
-            root: runId,
-            settled: 1,
-            hostCalls: 0,
-            resource: `workflow-resource:${workflow.id}`,
-          })
-        ),
+        receipts: [
+          "$params",
+          "greet:enter",
+          "call:enter",
+          "workflow:output",
+        ].map((step) => ({
+          step,
+          attempt: 1,
+          root: runId,
+          settled: 1,
+          hostCalls: 0,
+          resource: `workflow-resource:${workflow.id}`,
+        })),
       });
     });
 
@@ -113,7 +117,7 @@ describe(
       const by = await builder();
       const workflow = await published(by, greetThenCall);
       const result = await withCpuKills(
-        "greet:task",
+        "greet:enter",
         () => true,
         async () => {
           const { runId } = await start(by, workflow.id);
@@ -199,7 +203,7 @@ describe(
       const admittedAt = Date.now();
       await env.DB.batch([
         env.DB.prepare(
-          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'call:task', 9, 1, ?, ?, ?, ?)"
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'call:enter', 9, 1, ?, ?, ?, ?)"
         ).bind(runId, runId, reserved, admittedAt + reserved, admittedAt),
         env.DB.prepare(
           "UPDATE run_lineages SET active_held_ms = active_held_ms + ? WHERE root_run_id = ?"
@@ -221,7 +225,7 @@ describe(
 
     it("holds an attempt while every slot is taken, and runs it once a stopped run's attempt gives its slot back, charged up to its deadline", async () => {
       const by = await builder();
-      const hanging = await published(by, definitionOf([passing("finish")]));
+      const hanging = await published(by, definitionOf([deciding("finish")]));
       await forgedModule(hanging.id, hangingModule);
       const workflow = await published(by, greetThenCall);
       const result = await withQuotas(
@@ -312,11 +316,11 @@ describe(
 
     it("fails a task that answers a value shaped as core's wait for load, rather than wait on it", async () => {
       const by = await builder();
-      const workflow = await published(by, definitionOf([passing("finish")]));
+      const workflow = await published(by, definitionOf([deciding("finish")]));
       await forgedModule(
         workflow.id,
         moduleOf(
-          'return await step.do("finish", { key: "task", description: "finish" }, async () => ({ "$grasp:busy": 1, "$grasp:busyMaxMs": 86400000 }));'
+          'return await step.do("finish", { key: "enter", description: "finish" }, async () => ({ "$grasp:busy": 1, "$grasp:busyMaxMs": 86400000 }));'
         )
       );
       const { runId } = await start(by, workflow.id);

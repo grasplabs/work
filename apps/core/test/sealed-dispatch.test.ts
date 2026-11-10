@@ -60,70 +60,67 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 });
 
 /**
- * A definition of `steps` with `bindings`: input `who`, output `status`,
+ * A definition of `steps` with `permissions`: input `who`, output `status`,
  * `status` its value.
  */
 const definitionOf = (
   steps: unknown[],
-  bindings: Record<string, unknown>,
+  permissions: Record<string, unknown>,
   status: unknown
 ): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status },
-    },
-    bindings,
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status },
+    permissions,
     steps,
   });
 
 /** A wait long enough that the run's own engine leaves it waiting. */
 const linger = { id: "linger", type: "wait", for: "10 minutes" };
 
-/** Asks the `summary` model binding to greet the input's `who`. */
+/** Asks the model, `ai`, to greet the input's `who`. */
 const summarize = {
   id: "summarize",
-  type: "agent",
-  binding: "summary",
+  type: "generate",
   instructions: "Greet them.",
-  input: { who: { $expr: "input.who" } },
-  output: objectSchema({ line: { kind: "string" } }),
+  input: { who: { $expr: "args.who" } },
+  returns: objectSchema({ line: { kind: "string" } }),
 };
 
 /** The greeting `summarize` answered, as a run's status. */
-const greeting = { $expr: "steps.summarize.output.line" };
+const greeting = { $expr: "summarize.line" };
 
 /** Mails the input's `who` through the `mail` connector binding. */
 const send = {
   id: "send",
-  type: "do",
-  binding: "mail",
-  operation: "mail.send",
-  arguments: { to: { $expr: "input.who" }, subject: "Hello" },
+  type: "call",
+  connection: "mail",
+  action: "mail.send",
+  args: { to: { $expr: "args.who" }, subject: "Hello" },
 };
 
 /** Asks `recipients` to approve the input's `who`, through binding `approval`. */
 const reviewOf = (recipients: unknown[]) => ({
   id: "review",
-  type: "decision",
-  binding: "approval",
+  type: "decide",
+  decision: "approval",
   recipients,
   prompt: "Approve?",
-  input: { who: { $expr: "input.who" } },
+  input: { who: { $expr: "args.who" } },
 });
 
 /** Asks the fixture's `approver` to approve. */
 const review = reviewOf(["person:approver"]);
 
 /** Asks whom the input's `who` names to approve. */
-const reviewWho = reviewOf([{ $expr: "input.who" }]);
+const reviewWho = reviewOf([{ $expr: "args.who" }]);
 
 /** How `review` was answered, and by whom, as a run's status. */
 const reviewed = {
   $expr:
-    '(steps.review.output.approved ? "approved" : "rejected") + " by " + steps.review.output.by',
+    'review.timedOut ? "timed out" : (review.approved ? "approved" : "rejected") + " by " + review.by',
 };
 
 /** Asks the fixture's `approver` about each of two items, in turn. */
@@ -134,8 +131,8 @@ const batch = {
   do: [
     {
       id: "sign",
-      type: "decision",
-      binding: "approval",
+      type: "decide",
+      decision: "approval",
       recipients: ["person:approver"],
       prompt: "Approve this one?",
       input: { who: { $expr: "item" } },
@@ -316,8 +313,8 @@ const drafted = async (by: Identity, steps: unknown[], status: unknown) => {
     source: definitionOf(
       steps,
       {
-        summary: { kind: "model", contract: model },
-        approval: { kind: "decision", contract: approval },
+        ai: { contract: model },
+        decisions: { approval: { contract: approval } },
       },
       status
     ),
@@ -411,7 +408,7 @@ export const list = query({
 
 /**
  * The Requests App binding a workflow of `steps` ending in `status` as
- * `followUp` (model binding `summary`, connector binding `mail`),
+ * `followUp` (the model `ai`, connector binding `mail`),
  * `fixture` its test's.
  */
 const requestsApp = async (
@@ -433,9 +430,9 @@ const requestsApp = async (
     definition: definitionOf(
       steps,
       {
-        summary: { kind: "model", contract: keys.model },
-        mail: { kind: "connector", contract: keys.mail },
-        approval: { kind: "decision", contract: keys.approval },
+        ai: { contract: keys.model },
+        connections: { mail: { contract: keys.mail } },
+        decisions: { approval: { contract: keys.approval } },
       },
       status
     ),
@@ -505,7 +502,7 @@ describe(
       const { runId } = await startCandidateRun(env, ada, workflow.id, {
         revision,
         input: { who: "Ada" },
-        fixtures: { summary: { output: { line: "Hello Ada" } } },
+        fixtures: { ai: { output: { line: "Hello Ada" } } },
       });
       // Its own engine leaves it waiting out its linger.
       await candidateOnce(
@@ -527,7 +524,7 @@ describe(
 
     it("counts each step an App test's run completed on the run host once, by the step's ID", async () => {
       const app = await requestsApp([summarize], greeting, {
-        models: { summary: { line: "Hello from the fixture" } },
+        models: { ai: { line: "Hello from the fixture" } },
       });
       const host = fixtureHostFor(
         env,
@@ -561,7 +558,7 @@ describe(
         outputTokens: 1,
       });
       const app = await requestsApp([linger, summarize], greeting, {
-        models: { summary: { line: "Hello from the fixture" } },
+        models: { ai: { line: "Hello from the fixture" } },
       });
       const host = fixtureHostFor(
         env,
@@ -584,7 +581,7 @@ describe(
 
     it("answers an App test's model call once on the run host, whatever its step's attempts: an evicted activation's successor fails as tried", async () => {
       const app = await requestsApp([linger, summarize], greeting, {
-        models: { summary: { line: "Hello" } },
+        models: { ai: { line: "Hello" } },
       });
       const host = fixtureHostFor(
         env,
@@ -805,7 +802,7 @@ describe(
                 await session.respond(
                   "approver",
                   started.value.run,
-                  JSON.stringify({ task: "sign", approved: at === 0, at: [at] })
+                  JSON.stringify({ task: "sign", approved: at === 0, run: at })
                 )
               )
             );
@@ -832,7 +829,7 @@ describe(
           { ok: true, value: null },
         ],
         kept: [
-          { step: "sign:task@0", status: "approved" },
+          { step: "sign:task", status: "approved" },
           { step: "sign:task@1", status: "rejected" },
         ],
       });

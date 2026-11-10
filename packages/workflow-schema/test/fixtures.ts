@@ -1,14 +1,39 @@
 import { checkWorkflow } from "../src/check.ts";
 import type { CheckedWorkflow } from "../src/check.ts";
+import { workflowSchemaUrl } from "../src/format.ts";
 
 /** A workflow with every step kind of the format, as a builder writes it. */
 export const everyStep = () => ({
-  $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
-  input: { kind: "object", fields: { who: { kind: "string" } } },
-  output: {
-    schema: { kind: "object", fields: { line: { kind: "string" } } },
-    value: { line: { $expr: "steps.greet.output.line" } },
+  $schema: workflowSchemaUrl,
+  args: {
+    kind: "object",
+    fields: {
+      who: { kind: "string" },
+      deadline: { kind: "number" },
+      // What the loops and event waits after its own steps read.
+      pages: {
+        kind: "array",
+        item: {
+          kind: "object",
+          fields: {
+            rows: {
+              kind: "array",
+              item: {
+                kind: "object",
+                fields: { name: { kind: "string" }, due: { kind: "number" } },
+              },
+            },
+            open: { kind: "boolean" },
+            owner: { kind: "string" },
+            marks: { kind: "array", item: { kind: "number" } },
+          },
+        },
+      },
+      rounds: { kind: "array", item: { kind: "number" } },
+    },
   },
+  returns: { kind: "object", fields: { line: { kind: "string" } } },
+  result: { line: { $expr: "greet.line" } },
   params: {
     greeting: {
       label: "Greeting",
@@ -18,9 +43,9 @@ export const everyStep = () => ({
     // Sensitive, as every parameter not marked otherwise.
     token: { label: "Token", type: { kind: "string" } },
   },
-  bindings: {
-    mail: { kind: "connector", contract: "composio.mail@1" },
-    summary: { kind: "model", contract: "summary" },
+  permissions: {
+    ai: { contract: "summary" },
+    connections: { mail: { contract: "composio.mail@1" } },
   },
   // What it keeps between runs: what `keeping` and its kin write.
   state: {
@@ -29,55 +54,49 @@ export const everyStep = () => ({
     runs: { kind: "number", integer: true, min: 0 },
     kept: { kind: "array", item: { kind: "string" } },
     marked: { kind: "boolean" },
-    row: { kind: "string" },
-    summary: { kind: "object", fields: { line: { kind: "string" } } },
   },
   steps: [
     { id: "linger", type: "wait", for: "1 hour" },
     {
       id: "send",
-      type: "do",
+      type: "call",
       title: "Mail them",
-      binding: "mail",
-      operation: "mail.send",
-      arguments: {
-        to: { $expr: "input.who" },
+      connection: "mail",
+      action: "mail.send",
+      args: {
+        to: { $expr: "args.who" },
         subject: { $expr: "params.token" },
         // Every shape an expression comes in: a literal, a list, an
         // object, a conditional and a call.
         priority: { $expr: "1" },
-        cc: { $expr: "[input.who]" },
-        headers: { $expr: "({ from: input.who })" },
-        tone: { $expr: 'input.who === "Ada" ? "warm" : "plain"' },
-        shout: { $expr: "input.who.toUpperCase()" },
+        cc: { $expr: "[args.who]" },
+        headers: { $expr: "({ from: args.who })" },
+        tone: { $expr: 'args.who === "Ada" ? "warm" : "plain"' },
+        shout: { $expr: "args.who.toUpperCase()" },
       },
     },
     {
       id: "greet",
-      type: "agent",
-      binding: "summary",
+      type: "generate",
       instructions: "Greet them.",
       input: {
-        who: { $expr: "input.who" },
-        tags: ["vip", { $expr: "input.who" }],
+        who: { $expr: "args.who" },
+        sent: { $expr: "send.id" },
+        tags: ["vip", { $expr: "args.who" }],
       },
-      output: { kind: "object", fields: { line: { kind: "string" } } },
+      returns: { kind: "object", fields: { line: { kind: "string" } } },
     },
     {
       id: "known",
       type: "if",
-      condition: { $expr: 'input.who === "Ada"' },
+      condition: { $expr: 'args.who === "Ada"' },
       // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
-      then: [{ id: "pause", type: "wait", until: { $expr: "input.deadline" } }],
+      then: [{ id: "pause", type: "wait", until: { $expr: "args.deadline" } }],
       else: [
         {
           id: "stop",
           type: "raise",
-          error: {
-            type: "urn:grasp:error:stop",
-            status: 422,
-            title: "Stopped.",
-          },
+          error: { code: "greeting.stopped", message: "Stopped." },
         },
       ],
     },
@@ -87,31 +106,31 @@ export const everyStep = () => ({
       try: [
         {
           id: "fetch",
-          type: "do",
-          binding: "mail",
-          operation: "mail.send",
-          arguments: { to: { $expr: "input.who" }, subject: "x" },
+          type: "call",
+          connection: "mail",
+          action: "mail.send",
+          args: { to: { $expr: "args.who" }, subject: "x" },
         },
       ],
       catch: {
-        errors: { status: 500 },
-        when: { $expr: 'error.type !== "urn:grasp:error:final"' },
+        code: "connect.unavailable",
+        when: { $expr: 'error.message !== "final"' },
         retry: {
           attempts: 3,
           delay: "1 second",
           backoff: "constant",
           // Not a boolean on its own: the generated choice makes it one.
-          when: { $expr: "error.title" },
+          when: { $expr: "error.details" },
         },
         do: [
           {
             id: "notice",
-            type: "do",
-            binding: "mail",
-            operation: "mail.send",
-            arguments: {
-              to: { $expr: "input.who" },
-              subject: { $expr: "error.type" },
+            type: "call",
+            connection: "mail",
+            action: "mail.send",
+            args: {
+              to: { $expr: "args.who" },
+              subject: { $expr: "error.code" },
             },
           },
         ],
@@ -120,28 +139,31 @@ export const everyStep = () => ({
   ],
 });
 
-/** A workflow calling a binding of every kind a `do` step calls. */
-export const everyBinding = () => ({
-  $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
-  bindings: {
-    mail: { kind: "connector", contract: "composio.mail@1" },
-    total: { kind: "compute", contract: "local:code/total.ts#total" },
-    note: { kind: "action", contract: "local:code/note.ts#note" },
+/** A workflow calling a permission of every kind a `call` step calls. */
+export const everyCall = () => ({
+  $schema: workflowSchemaUrl,
+  args: { kind: "object", fields: { who: { kind: "string" } } },
+  permissions: {
+    connections: { mail: { contract: "composio.mail@1" } },
+    modules: {
+      total: { kind: "compute", contract: "local:code/total.ts#total" },
+      note: { kind: "action", contract: "local:code/note.ts#note" },
+    },
   },
   steps: [
     {
       id: "send",
-      type: "do",
-      binding: "mail",
-      operation: "mail.send",
-      arguments: { to: { $expr: "input.who" }, subject: "Hi" },
+      type: "call",
+      connection: "mail",
+      action: "mail.send",
+      args: { to: { $expr: "args.who" }, subject: "Hi" },
     },
-    { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
+    { id: "add", type: "call", module: "total", args: [1, 2, 3] },
     {
       id: "tell",
-      type: "do",
-      binding: "note",
-      arguments: { to: { $expr: "input.who" } },
+      type: "call",
+      module: "note",
+      args: { to: { $expr: "args.who" } },
       timeout: "30 seconds",
     },
   ],
@@ -152,40 +174,55 @@ export const everyBinding = () => ({
  * read: arithmetic, comparisons, logic, conditionals and callbacks.
  */
 export const everyOperator = () => ({
-  $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
-  bindings: { mail: { kind: "connector", contract: "composio.mail@1" } },
+  $schema: workflowSchemaUrl,
+  args: {
+    kind: "object",
+    fields: {
+      at: { kind: "number" },
+      count: { kind: "number" },
+      who: { kind: "string" },
+      total: { kind: "number" },
+      lines: {
+        kind: "array",
+        item: { kind: "object", fields: { total: { kind: "number" } } },
+      },
+      note: { kind: "string", optional: true },
+      unknown: { kind: "boolean", optional: true },
+    },
+  },
+  permissions: { connections: { mail: { contract: "composio.mail@1" } } },
   steps: [
     {
       id: "later",
       type: "wait",
-      until: { $expr: "input.at + 60 * 1000" },
+      until: { $expr: "args.at + 60 * 1000" },
     },
     {
       id: "sized",
       type: "if",
-      condition: { $expr: "input.count > 2 && input.count * 2 <= 10" },
+      condition: { $expr: "args.count > 2 && args.count * 2 <= 10" },
       // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
       then: [
         {
           id: "send",
-          type: "do",
-          binding: "mail",
-          operation: "mail.send",
-          arguments: {
-            to: { $expr: "input.who" },
-            subject: { $expr: '"Order " + (input.count + 1)' },
-            share: { $expr: "input.total / input.count - 1" },
-            negative: { $expr: "-input.count" },
-            rest: { $expr: "input.count % 3" },
-            large: { $expr: "input.total >= 100 ? 'large' : 'small'" },
+          type: "call",
+          connection: "mail",
+          action: "mail.send",
+          args: {
+            to: { $expr: "args.who" },
+            subject: { $expr: '"Order " + (args.count + 1)' },
+            share: { $expr: "args.total / args.count - 1" },
+            negative: { $expr: "-args.count" },
+            rest: { $expr: "args.count % 3" },
+            large: { $expr: "args.total >= 100 ? 'large' : 'small'" },
             long: {
-              $expr: "input.lines.filter((line) => line.total > 10).length",
+              $expr: "args.lines.filter((line) => line.total > 10).length",
             },
             sum: {
-              $expr: "input.lines.map((line) => line.total * 2)",
+              $expr: "args.lines.map((line) => line.total * 2)",
             },
-            missing: { $expr: "input.note ?? 'none'" },
-            known: { $expr: "!input.unknown || input.count < 0" },
+            missing: { $expr: "args.note ?? 'none'" },
+            known: { $expr: "!args.unknown || args.count < 0" },
           },
         },
       ],
@@ -194,43 +231,43 @@ export const everyOperator = () => ({
 });
 
 /**
- * `everyStep` with a decision binding, `approvers`, and `steps` after its
- * own: the first of them is at `/steps/5`.
+ * `everyStep` with a decision permission, `approvers`, and `steps` after
+ * its own: the first of them is at `/steps/5`.
  */
 export const withDecisions = (...steps: unknown[]) => {
   const document = everyStep();
   return {
     ...document,
-    bindings: {
-      ...document.bindings,
-      approvers: { kind: "decision", contract: "grasp.approvals@1" },
+    permissions: {
+      ...document.permissions,
+      decisions: { approvers: { contract: "grasp.approvals@1" } },
     },
     steps: [...document.steps, ...steps],
   };
 };
 
-/** A decision step asking a person and someone of the input. */
+/** A decision step asking a person and someone of the args. */
 export const decision = (change: Record<string, unknown> = {}) => ({
   id: "approve",
-  type: "decision",
-  binding: "approvers",
-  recipients: ["person:ada", { $expr: "input.who" }],
+  type: "decide",
+  decision: "approvers",
+  recipients: ["person:ada", { $expr: "args.who" }],
   prompt: "Approve this?",
-  input: { who: { $expr: "input.who" } },
+  input: { who: { $expr: "args.who" } },
   ...change,
 });
 
 /**
- * `everyStep` with an event binding, `replies`, and `steps` after its own:
- * the first of them is at `/steps/5`.
+ * `everyStep` with an event permission, `replies`, and `steps` after its
+ * own: the first of them is at `/steps/5`.
  */
 export const withEventWaits = (...steps: unknown[]) => {
   const document = everyStep();
   return {
     ...document,
-    bindings: {
-      ...document.bindings,
-      replies: { kind: "event", contract: "grasp.replies@1" },
+    permissions: {
+      ...document.permissions,
+      events: { replies: { contract: "grasp.replies@1" } },
     },
     steps: [...document.steps, ...steps],
   };
@@ -245,8 +282,9 @@ export const emojiType = (count: number): string => "\u{1F600}".repeat(count);
 /** An event wait for a reply through `replies`, for at most 3 days. */
 export const eventWait = (change: Record<string, unknown> = {}) => ({
   id: "reply",
-  type: "wait",
-  event: { from: "replies", type: "grasp.reply.received" },
+  type: "waitForEvent",
+  events: "replies",
+  eventType: "grasp.reply.received",
   timeout: "3 days",
   ...change,
 });
@@ -258,17 +296,17 @@ export const followedBy = (...steps: unknown[]) => {
 };
 
 /**
- * A connector call keeping in state what it answered (`output`), what an
+ * A connection call keeping in state what it answered (`output`), what an
  * earlier run kept, a count of the runs that kept it, a list and a
  * literal, its subject read from the state.
  */
 export const keeping = (change: Record<string, unknown> = {}) => ({
   id: "remember",
-  type: "do",
-  binding: "mail",
-  operation: "mail.send",
-  arguments: {
-    to: { $expr: "input.who" },
+  type: "call",
+  connection: "mail",
+  action: "mail.send",
+  args: {
+    to: { $expr: "args.who" },
     subject: { $expr: 'state.last ?? "none"' },
   },
   state: {
@@ -284,7 +322,7 @@ export const keeping = (change: Record<string, unknown> = {}) => ({
 /**
  * `everyStep` with `steps` after its own (the first at `/steps/5`): pages
  * of rows, the rows of each page mailed while they have a name, a deadline
- * waited for and a failure caught in each row.
+ * waited for and a failure retried in each row.
  */
 export const withLoops = (...steps: unknown[]) => ({
   ...everyStep(),
@@ -293,7 +331,7 @@ export const withLoops = (...steps: unknown[]) => ({
     {
       id: "pages",
       type: "forEach",
-      items: { $expr: "input.pages" },
+      items: { $expr: "args.pages" },
       do: [
         {
           id: "rows",
@@ -307,14 +345,11 @@ export const withLoops = (...steps: unknown[]) => ({
               type: "try",
               try: [
                 {
-                  id: "mail",
-                  type: "do",
-                  binding: "mail",
-                  operation: "mail.send",
-                  arguments: {
-                    to: { $expr: "item.name" },
-                    subject: { $expr: "steps.hold.output" },
-                  },
+                  id: "mailed",
+                  type: "call",
+                  connection: "mail",
+                  action: "mail.send",
+                  args: { to: { $expr: "item.name" }, subject: "Due" },
                 },
               ],
               catch: {
@@ -338,4 +373,12 @@ export const checked = (document: unknown): CheckedWorkflow => {
     );
   }
   return result.workflow;
+};
+
+/** The problems `document` has, as `[pointer, code]` pairs. */
+export const problemsOf = (document: unknown): [string, string][] => {
+  const result = checkWorkflow(document);
+  return result.ok
+    ? []
+    : result.problems.map(({ pointer, code }) => [pointer, code]);
 };

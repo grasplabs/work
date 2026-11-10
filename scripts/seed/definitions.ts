@@ -1,6 +1,6 @@
 /**
  * The pieces the seed's workflows are made of, as core publishes them:
- * independent grasp-workflow/1 documents and their compute modules,
+ * independent grasp-workflow/2 documents and their compute modules,
  * which each App binds under an alias. A definition is written
  * here as data and sent as JSON text.
  */
@@ -39,21 +39,21 @@ export type DefinitionParts = Omit<WorkflowDocument, "$schema">;
 export const definitionText = (parts: DefinitionParts): string =>
   JSON.stringify({ $schema: workflowSchemaUrl, ...parts });
 
-/** A compute binding to export `name` of the workflow's module `file`. */
+/** A compute module permission to export `name` of the workflow's module `file`. */
 export const computeBinding = (file: string, name: string) =>
   ({ kind: "compute", contract: `local:code/${file}.ts#${name}` }) as const;
 
 /**
- * Step `id` calling compute binding `binding` on the expression `args`,
- * its answer read later as `steps.<id>.output`.
+ * Step `id` calling compute module `module` on the expression `args`,
+ * its answer read later as `<id>`.
  */
 export const computeStep = (
   id: string,
-  binding: string,
+  module: string,
   args: string
 ): Step => ({
   id,
-  type: "do",
-  binding,
-  arguments: { $expr: args },
+  type: "call",
+  module,
+  args: { $expr: args },
 });

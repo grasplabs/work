@@ -197,6 +197,9 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
   });
 });
 
+/** Any value of a history entry the engine sets, as a matcher. */
+const anyValue: unknown = expect.anything();
+
 const pageOf = (result: OperationResult) =>
   historySchema.parse(result.ok ? result.value : result);
 
@@ -316,8 +319,25 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       told: [
         { taskId: null, kind: "lifecycle", status: "queued" },
         { taskId: null, kind: "lifecycle", status: "running" },
+        // Its enter step, recording its deadline, then its timer.
         { taskId: "greet", kind: "step", state: "started", attempt: 1 },
         { taskId: "greet", kind: "step", state: "completed", attempt: 1 },
+        {
+          taskId: "greet",
+          kind: "wait",
+          waitId: anyValue,
+          waitKind: "timer",
+          state: "opened",
+          deadline: anyValue,
+        },
+        {
+          taskId: "greet",
+          kind: "wait",
+          waitId: anyValue,
+          waitKind: "timer",
+          state: "closed",
+          deadline: null,
+        },
         // The output's own step, of no task.
         { taskId: null, kind: "step", state: "started", attempt: 1 },
         { taskId: null, kind: "step", state: "completed", attempt: 1 },
@@ -380,7 +400,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ownBadCursor: "data.invalid_cursor",
       lastCursor: 0,
       pastCursor: "data.invalid_cursor",
-      carolOwn: 7,
+      carolOwn: 9,
       unknownCode: "workflow.run_unavailable",
     });
 
@@ -496,14 +516,9 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     }).toStrictEqual({
       throughOld: unknown,
       oldRunThroughNext: unknown,
-      // The engine's code and words, never what the expression read.
-      failedStep: {
-        code: "expression.failed",
-        message: "A step of the workflow failed.",
-        category: "operational",
-        retryable: false,
-        requestId: null,
-      },
+      // Its expression failed in its code, before any step: no step of
+      // it failed, and nothing of what it read is told.
+      failedStep: undefined,
       leaks: false,
       removed: { items: [], nextCursor: null, hasMore: false },
     });
@@ -521,11 +536,9 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     await publishWorkflowVersion(env, owner, workflow.id, {
       definition: JSON.stringify({
         $schema: workflowSchemaUrl,
-        input: objectSchema({ who: { kind: "string" } }),
-        output: {
-          schema: objectSchema({ status: { kind: "string" } }),
-          value: { status: "done" },
-        },
+        args: objectSchema({ who: { kind: "string" } }),
+        returns: objectSchema({ status: { kind: "string" } }),
+        result: { status: "done" },
         steps: [
           {
             id: "each",

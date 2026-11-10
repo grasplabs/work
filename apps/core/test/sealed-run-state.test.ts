@@ -300,7 +300,7 @@ describe("a sealed run's state between runs on the run host", () => {
       runId,
       moduleOf(`
 let rounds = 0;
-return ${taskStep("fetch", '(() => { rounds += 1; const record = { output: null, state: { count: rounds, seen: input.who, kind: "visit" } }; if (rounds < 3) throw new Error("not yet"); return record; })()', ', retry: async () => ({ by: "guarded", retry: true })')};`),
+return ${taskStep("fetch", '(() => { rounds += 1; const record = { output: null, state: { count: rounds, seen: input.who, kind: "visit" } }; if (rounds < 3) throw new Error("not yet"); return record; })()', ", retry: async () => true")};`),
       { sealed: keepsFetch, engine: retryingEngine(tries) }
     );
     // A step that fails for good, its code going on past it: no write.
@@ -309,7 +309,7 @@ return ${taskStep("fetch", '(() => { rounds += 1; const record = { output: null,
       failed,
       moduleOf(`
 try {
-  ${taskStep("fetch", '(() => { throw new Error("never"); })()')};
+  ${taskStep("fetch", '(() => { throw new Error("never"); })()', ", retry: async () => false")};
 } catch {}
 return null;`),
       { sealed: keepsFetch, engine: retryingEngine() }
@@ -461,8 +461,14 @@ return null;`),
       { sealed: keepsFetch }
     );
     const reads = `
-import { v, workflow } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: v.object({ who: v.string() }) }, async (step, { state }) => ({ state, frozen: Object.isFrozen(state) && Object.isFrozen(state.seen) }));
+import { defineWorkflow, v } from ${sdkWorkflow};
+const seen = v.object({ who: v.string() });
+export default defineWorkflow({
+  args: v.object({ who: v.string() }),
+  returns: v.object({ state: v.object({ count: v.number(), seen, kind: v.string() }), frozen: v.boolean() }),
+  state: { count: v.number(), seen: v.union(v.string(), seen), kind: v.string() },
+  handler: async (ctx) => ({ state: ctx.state, frozen: Object.isFrozen(ctx.state) && Object.isFrozen(ctx.state.seen) }),
+});
 `;
     // Two activations, each loading the run afresh, as after a restart.
     const first = await ranAs(reader, reads);

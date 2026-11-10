@@ -346,11 +346,9 @@ const definitionOf = (waits: boolean): string =>
         sensitive: false,
       },
     },
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: 'params.greeting + ", " + input.who' } },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: 'params.greeting + ", " + args.who' } },
     steps: waits ? [{ id: "pause", type: "wait", for: "1 hour" }] : [],
   });
 

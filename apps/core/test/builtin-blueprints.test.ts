@@ -200,20 +200,17 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const greeter = (contract: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ line: { kind: "string" } }),
-      value: { line: { $expr: "steps.greet.output.line" } },
-    },
-    bindings: { model: { kind: "model", contract } },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ line: { kind: "string" } }),
+    result: { line: { $expr: "greet.line" } },
+    permissions: { ai: { contract } },
     steps: [
       {
         id: "greet",
-        type: "agent",
-        binding: "model",
+        type: "generate",
         instructions: "Greet them.",
-        input: { who: { $expr: "input.who" } },
-        output: objectSchema({ line: { kind: "string" } }),
+        input: { who: { $expr: "args.who" } },
+        returns: objectSchema({ line: { kind: "string" } }),
       },
     ],
   });
@@ -1040,7 +1037,7 @@ describe("the built-in blueprints", () => {
       outputTokens: 1,
     });
     await admin.api.workflowResources.approveBinding(workflow.id, {
-      alias: "model",
+      alias: "ai",
       target: { kind: "model", model: testModel },
       reviewed: { version: 1 },
     });

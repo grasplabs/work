@@ -7,6 +7,7 @@ import type {
   ExpressionRead,
 } from "@grasp-os/sdk/expression-check";
 import {
+  appErrorProblemOf,
   CompactDescriptorError,
   descriptorFromCompact,
   schemaFromDescriptor,
@@ -15,14 +16,20 @@ import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { passedBound, plainDataBounds } from "@grasp-os/shared/value-bounds";
 
 import {
+  aiAlias,
+  aliasedPermissions,
+  bindingsOf,
   durationMs,
-  errorTypeBase,
+  eachStep,
   expressionRoots,
   formatLimits,
   inboxRoot,
   isSensitive,
   isValueList,
+  memberPathsOf,
   pointerJoin,
+  resultStepTypes,
+  guardNamesOf,
   stateStepTypes,
 } from "./format.ts";
 import type {
@@ -38,19 +45,25 @@ import type {
 } from "./format.ts";
 import { stepTypes, workflowSchema } from "./schema.ts";
 
-// Checking a workflow in grasp-workflow/1: first its depth, without
+// Checking a workflow in grasp-workflow/2: first its depth, without
 // recursion, then against its JSON Schema with a standard validator
 // (@cfworker/json-schema), then for what no schema says, and nothing more:
 //
 // - step IDs unique in the workflow, each step's engine names its own;
 // - every expression checked where it stands (`@grasp-os/sdk/expression-check`): it reads
-//   only steps that ran before it, declared parameters that aren't
-//   sensitive, `error` only in a catch, `inbox.<alias>` only of a
-//   declared event binding (whether its contract takes email replies is
-//   publication's to check, against the catalog), and `output` (the
-//   step's own result) only in a step's `state`; `state` it reads
-//   anywhere, a key no run kept yet `undefined` (`readMember`'s
-//   `Json | undefined`);
+//   only the results of steps that ran before it, in its own list or a
+//   list around it (exactly what JavaScript's block scope gives the
+//   generated `const`s) and that have one (`resultStepTypes`), declared
+//   parameters that aren't sensitive, `error` only in a catch,
+//   `inbox.<alias>` only of a declared event permission (whether its
+//   contract takes email replies is publication's to check, against the
+//   catalog), and `output` (the step's own result) only in a step's
+//   `state`; `state` it reads anywhere, a key no run kept yet
+//   `undefined`;
+// - each permission's alias once, whatever its kind, and never `ai` but
+//   for the workflow's one model;
+// - at most one `try` whose catch retries around any step, so the host
+//   knows which policy a failure is retried by;
 // - `state` only on a step that keeps it (`stateStepTypes`), writing only
 //   keys the workflow declares, a literal value of its key's schema (an
 //   expression's value the generated code checks as the step records
@@ -58,8 +71,9 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 //   only a run can reach;
 // - a sensitive parameter only as a whole argument of a connector call,
 //   which the host fills in and the run's code never sees;
-// - each step's binding declared, of a kind the step calls;
-// - every value's schema (input, output, answers, state, parameters) a
+// - each step's permission declared, of the kind the step calls;
+// - a raise's code the workflow's own, never in a platform namespace;
+// - every value's schema (args, returns, answers, state, parameters) a
 //   compact descriptor the SDK reads (`descriptorFromCompact`), defaults
 //   included;
 // - lists nested at most `formatLimits.depth` deep, and at most
@@ -69,8 +83,8 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 //   number, and every duration at most a year.
 //
 // What it answers is what the generator needs (generate.ts): the document,
-// each expression's code, each sensitive placeholder and each agent's
-// answer descriptor, by JSON Pointer.
+// each expression's code, each sensitive placeholder and each generate
+// step's answer descriptor, by JSON Pointer.
 
 /** Why a value's schema was refused. */
 type SchemaProblemCode =
@@ -98,8 +112,8 @@ export type ProblemCode =
   | "workflow.invalid_event_type"
   | "workflow.invalid_duration"
   | "workflow.invalid_contract"
-  | "workflow.invalid_uri"
   | "workflow.wait_kind"
+  | "workflow.call_kind"
   | "workflow.state_not_allowed"
   | "workflow.invalid_state_key"
   | "workflow.undeclared_state_key"
@@ -109,10 +123,12 @@ export type ProblemCode =
   | "workflow.duplicate"
   | "workflow.too_many_steps"
   | "workflow.lists_too_deep"
-  | "workflow.unknown_binding"
-  | "workflow.binding_kind"
-  | "workflow.missing_operation"
-  | "workflow.operation_not_allowed"
+  | "workflow.unknown_permission"
+  | "workflow.permission_kind"
+  | "workflow.duplicate_alias"
+  | "workflow.too_many_permissions"
+  | "workflow.no_result"
+  | "workflow.retry_nested"
   | "workflow.unreadable"
   | "workflow.sensitive"
   | "workflow.expression_too_long"
@@ -120,8 +136,8 @@ export type ProblemCode =
   | "workflow.arguments_too_deep"
   | "workflow.too_many_expressions"
   | "workflow.duration_too_long"
-  | "workflow.reserved_error_type"
-  | "workflow.reserved_error_status";
+  | "workflow.reserved_error_code"
+  | "workflow.invalid_error";
 
 /** A problem with a workflow: what, where it is, and how to fix it. */
 export interface Problem {
@@ -138,17 +154,17 @@ export interface CheckedWorkflow {
   readonly code: ReadonlyMap<string, string>;
   /** Each sensitive parameter a connector call passes, by its pointer. */
   readonly placeholders: ReadonlyMap<string, string>;
-  /** Each agent step's answer, as an SDK descriptor, by its step's pointer. */
+  /** Each generate step's answer, as an SDK descriptor, by its step's pointer. */
   readonly answers: ReadonlyMap<string, ValueDescriptor>;
   /**
    * What a caller relies on, as SDK descriptors: what starts a run (an
-   * empty object when the document declares no `input`), what it ends
-   * with (null when it declares no `output`), and each parameter's value,
+   * empty object when the document declares no `args`), what it ends
+   * with (null when it declares no `returns`), and each parameter's value,
    * its default in it.
    */
   readonly contract: {
-    readonly input: ValueDescriptor;
-    readonly output: ValueDescriptor;
+    readonly args: ValueDescriptor;
+    readonly returns: ValueDescriptor;
     readonly params: ReadonlyMap<string, ValueDescriptor>;
   };
   /**
@@ -157,6 +173,8 @@ export interface CheckedWorkflow {
    * a literal one.
    */
   readonly state: ReadonlyMap<string, ValueDescriptor>;
+  /** Every root its expressions read: what the generated handler binds. */
+  readonly roots: ReadonlySet<string>;
 }
 
 export type CheckResult =
@@ -189,12 +207,12 @@ const parentOf = (pointer: string): string =>
   pointer.slice(0, pointer.lastIndexOf("/"));
 
 /**
- * An event wait's filter's `from` or `type` (or one of its types), as a
+ * An event wait's `events` or `eventType` (or one of its types), as a
  * step in any list of steps has it: never a property of that name
- * elsewhere, such as a call's arguments.
+ * elsewhere, such as a call's args.
  */
 const eventFilterAt =
-  /^\/steps\/\d+(?:\/(?:then|else|try|do|catch\/do)\/\d+)*\/event\/(?<part>from|type)(?:\/\d+)?$/u;
+  /^\/steps\/\d+(?:\/(?:then|else|try|do|catch\/do)\/\d+)*\/(?<part>events|eventType)(?:\/\d+)?$/u;
 
 /** Which part of an event wait's filter `pointer` is, if it is one. */
 const eventFilterPart = (pointer: string): string | undefined =>
@@ -224,7 +242,29 @@ const branchKeywords = new Set([
 ]);
 
 /** A schema error the validator reported, where it is. */
-type SchemaError = OutputUnit & { readonly pointer: string };
+type SchemaError = OutputUnit & {
+  readonly pointer: string;
+  /** Whether it is about a `call` step. */
+  readonly calls?: boolean;
+};
+
+/** The `type` of the value at `pointer` of `json`, if it has a string one. */
+const stepTypeAt = (json: unknown, pointer: string): string | undefined => {
+  let value = json;
+  for (const token of pointer.split("/").slice(1)) {
+    const key = token.replaceAll("~1", "/").replaceAll("~0", "~");
+    value =
+      typeof value === "object" && value !== null && Object.hasOwn(value, key)
+        ? Reflect.get(value, key)
+        : undefined;
+  }
+  return typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    typeof value.type === "string"
+    ? value.type
+    : undefined;
+};
 
 /** An `anyOf` branch, as its errors' keyword locations start. */
 const anyOfBranch =
@@ -272,6 +312,9 @@ const meantErrors = (errors: readonly OutputUnit[]): SchemaError[] => {
 
 const durationProperties = new Set(["for", "timeout", "delay"]);
 
+/** The properties of a step that name a permission by its alias. */
+const aliasProperties = new Set(["connection", "module", "decision"]);
+
 /** What a bound error's remedy says, by the keyword it failed. */
 const boundRemedies: Readonly<Record<string, string>> = {
   maxLength: "Shorten it to the length the message gives.",
@@ -295,22 +338,22 @@ const patternProblem = ({
       ? {
           code: "workflow.reserved_id",
           message:
-            "An expression can't read a step of this ID (`constructor`, `prototype`).",
-          remedy: "Choose another ID.",
+            "A step can't take this ID: it is a JavaScript reserved word, or a name the workflow's code reads already (`args`, `params`, `run`, `state`, `inbox`, `error`, `item`, `output`, `ctx`).",
+          remedy: "Choose another ID, e.g. `sendInvoice`.",
         }
       : {
           code: "workflow.invalid_id",
           message: "Not a step ID.",
           remedy:
-            "Write lower-case words and digits joined by dashes, starting with a letter, e.g. `send-invoice`.",
+            "Write an identifier of letters and digits, starting with a lower-case letter, e.g. `sendInvoice`.",
         };
   }
   if (last === "contract") {
     return {
       code: "workflow.invalid_contract",
-      message: "Not a contract this binding's kind takes.",
+      message: "Not a contract this permission's kind takes.",
       remedy:
-        "Name a compute or action binding's module and export, `local:code/<file>.ts#<export>`; any other binding names a catalog contract, never `local:`.",
+        "Name a module's file and export, `local:code/<file>.ts#<export>`; any other permission names a catalog contract, never `local:`.",
     };
   }
   if (parent.endsWith("/state")) {
@@ -330,19 +373,39 @@ const patternProblem = ({
     };
   }
   const filterPart = eventFilterPart(pointer);
-  if (parent === "/bindings" || last === "binding" || filterPart === "from") {
+  if (
+    parent.startsWith("/permissions/") ||
+    aliasProperties.has(last) ||
+    filterPart === "events"
+  ) {
     return {
       code: "workflow.invalid_alias",
-      message: "Not a binding's alias.",
+      message: "Not a permission's alias.",
       remedy: "Start with a letter, then letters, digits and `_` only.",
     };
   }
-  if (filterPart === "type") {
+  if (last === "action") {
+    return {
+      code: "workflow.invalid_name",
+      message: "Not a connection's action.",
+      remedy:
+        "Name the action as its connection does: dotted names of letters, digits, `_` and `-`, e.g. `mail.send`.",
+    };
+  }
+  if (last === "code") {
+    return {
+      code: "workflow.invalid_name",
+      message: "Not an error code.",
+      remedy:
+        "Write two or more dotted lower-case segments, e.g. `invoice.rejected`.",
+    };
+  }
+  if (filterPart === "eventType") {
     return {
       code: "workflow.invalid_event_type",
       message: "Not an event type.",
       remedy:
-        "Name a type the binding's contract admits, on one line, with no space before or after it, e.g. `invoice.approved`.",
+        "Name a type the permission's contract admits, on one line, with no space before or after it, e.g. `invoice.approved`.",
     };
   }
   if (durationProperties.has(last)) {
@@ -366,7 +429,8 @@ const propertyProblem = (
     return {
       code: "workflow.state_not_allowed",
       message: `Only a ${stateStepTypes.map((type) => `\`${type}\``).join(" or ")} step keeps state: no other records a result of its own to write it with.`,
-      remedy: "Move `state` to the `do` or `agent` step whose result it keeps.",
+      remedy:
+        "Move `state` to the `call` or `generate` step whose result it keeps.",
     };
   }
   if (keyword === "false") {
@@ -387,7 +451,7 @@ const propertyProblem = (
   if (keyword === "const" && pointer === "/$schema") {
     return {
       code: "workflow.version",
-      message: "Not a grasp-workflow/1 document.",
+      message: "Not a grasp-workflow/2 document.",
       remedy: `Set \`$schema\` to "${String(workflowSchema.$id)}".`,
     };
   }
@@ -415,27 +479,27 @@ const schemaProblem = (error: SchemaError): Problem => {
   if (named !== undefined) {
     return as(named);
   }
+  if (keyword === "oneOf" && error.calls === true) {
+    return as({
+      code: "workflow.call_kind",
+      message:
+        "A call calls a connection's action, or one of the workflow's own modules.",
+      remedy: "Give it `connection` and `action`, or `module`.",
+    });
+  }
   if (keyword === "oneOf") {
     return as({
       code: "workflow.wait_kind",
-      message:
-        "A wait waits for a time span, until a deadline, or for an event.",
-      remedy: "Give it one of `for`, `until` and `event`.",
+      message: "A wait waits for a time span or until a deadline.",
+      remedy:
+        "Give it one of `for` and `until`; to wait for an event, write a `waitForEvent` step.",
     });
   }
-  if (keyword === "uniqueItems" && eventFilterPart(pointer) === "type") {
+  if (keyword === "uniqueItems" && eventFilterPart(pointer) === "eventType") {
     return as({
       code: "workflow.duplicate",
       message: "It names the same type twice.",
       remedy: "Name each type once.",
-    });
-  }
-  if (keyword === "format") {
-    return as({
-      code: "workflow.invalid_uri",
-      message: "Not a URI.",
-      remedy:
-        "Name the error's kind with a URI, e.g. `urn:acme:error:rejected`.",
     });
   }
   if (keyword === "type") {
@@ -504,7 +568,14 @@ const shapeProblems = (json: unknown): Problem[] => {
   const problems = new Map<string, Problem>();
   for (const error of meantErrors(validated.errors)) {
     if (!problems.has(error.pointer)) {
-      problems.set(error.pointer, schemaProblem(error));
+      problems.set(
+        error.pointer,
+        schemaProblem({
+          ...error,
+          // Which step's `oneOf` it is, by the step's own type.
+          calls: stepTypeAt(json, error.pointer) === "call",
+        })
+      );
     }
   }
   return [...problems.values()];
@@ -512,15 +583,35 @@ const shapeProblems = (json: unknown): Problem[] => {
 
 interface Walk {
   readonly document: WorkflowDocument;
+  /** Every permission, by alias, as the host binds it. */
+  readonly bindings: Readonly<Record<string, Binding>>;
+  /** Every step's ID, nested ones included: an expression's roots. */
+  readonly stepIds: readonly string[];
+  /** The steps with a result, by ID. */
+  readonly resultSteps: ReadonlySet<string>;
   readonly params: ReadonlySet<string>;
   readonly sensitive: ReadonlySet<string>;
   readonly ids: Set<string>;
+  /**
+   * Each raise's code: a run fails with the raise its code names, so one
+   * code is one raise (a run's trace marks that raise).
+   */
+  readonly raises: Set<string>;
+  /**
+   * Each connection's actions by the member path a call reads them by
+   * (`memberPathsOf`, as the generated code does), so no two read alike.
+   */
+  readonly members: Map<string, Map<string, string>>;
+  /** `memberPathsOf` the document: each connection's actions' member paths. */
+  readonly memberPaths: ReadonlyMap<string, ReadonlyMap<string, string>>;
   readonly problems: Problem[];
   readonly code: Map<string, string>;
   readonly placeholders: Map<string, string>;
   readonly answers: Map<string, ValueDescriptor>;
   /** How many array and object literals each expression nests, by pointer. */
   readonly literals: Map<string, number>;
+  /** Every root an expression reads, anywhere. */
+  readonly roots: Set<string>;
   /** Each declared key of the state, by its compiled schema. */
   readonly state: Map<string, ValueSchema<unknown, unknown>>;
   count: number;
@@ -528,13 +619,15 @@ interface Walk {
 
 /**
  * Where an expression stands: the steps that ran, a catch's error, a
- * loop's item, and a step's own result in its `state`.
+ * loop's item, a step's own result in its `state`, and whether a `try`
+ * around it retries.
  */
 interface Place {
   readonly steps: ReadonlySet<string>;
   readonly error: boolean;
   readonly item: boolean;
   readonly output: boolean;
+  readonly retrying: boolean;
 }
 
 const problem = (
@@ -549,41 +642,40 @@ const problem = (
 
 /**
  * Why `read` may not be read where it stands, if it may not: a step that
- * didn't run before it, or read otherwise than as `steps.<id>.output`, or
- * a parameter not declared or sensitive. (Once GRA-1536's type check
- * lands, a read the steps' schemas don't have is refused there.)
+ * has no result, or didn't run before it in its list or a list around it,
+ * or a parameter not declared or sensitive, or an inbox of no event
+ * permission.
  */
 const refusalOf = (
   walk: Walk,
   read: ExpressionRead,
   place: Place
 ): { message: string; remedy: string } | undefined => {
-  const [first, second] = read.path;
-  if (read.root === "steps") {
-    if (typeof first !== "string" || !place.steps.has(first)) {
+  const [first] = read.path;
+  if (walk.stepIds.includes(read.root)) {
+    if (!walk.resultSteps.has(read.root)) {
       return {
-        message: "`steps.<id>` reads only a step that has run before it.",
-        remedy: "Read a step earlier in its list, or in a list around it.",
+        message: `\`${read.root}\` has no result to read: only a call, generate, decide or waitForEvent step has one.`,
+        remedy: "Read the result of a step that has one.",
       };
     }
-    if (second !== "output") {
+    if (!place.steps.has(read.root)) {
       return {
-        message: "A step is read as `steps.<id>.output`.",
-        remedy: "Read its `output`.",
+        message: `\`${read.root}\` reads only a step that ran before it, in its own list or a list around it.`,
+        remedy: "Read a step earlier in its list, or in a list around it.",
       };
     }
   }
   if (read.root === inboxRoot) {
-    const bindings = walk.document.bindings ?? {};
     const binding =
-      typeof first === "string" && Object.hasOwn(bindings, first)
-        ? bindings[first]
+      typeof first === "string" && Object.hasOwn(walk.bindings, first)
+        ? walk.bindings[first]
         : undefined;
     if (binding?.kind !== "event") {
       return {
         message:
-          "`inbox.<alias>` reads the reply address of a declared event binding.",
-        remedy: "Name an event binding the workflow declares.",
+          "`inbox.<alias>` reads the reply address of a declared event permission.",
+        remedy: "Name an event permission the workflow declares.",
       };
     }
   }
@@ -595,7 +687,7 @@ const refusalOf = (
       message:
         "`params.<name>` reads a declared parameter that isn't sensitive.",
       remedy:
-        "Declare the parameter with `sensitive: false`, or pass a sensitive one whole as a connector call's argument.",
+        "Declare the parameter with `sensitive: false`, or pass a sensitive one whole as a connection call's argument.",
     };
   }
   return undefined;
@@ -627,7 +719,10 @@ const checkExpressionAt = (
     output: place.output,
   };
   const checked = checkExpression(expression.$expr, {
-    roots: expressionRoots.filter((root) => inScope[root]),
+    roots: [
+      ...expressionRoots.filter((root) => inScope[root]),
+      ...walk.stepIds,
+    ],
   });
   if (!checked.ok) {
     for (const { code, message, fix } of checked.errors) {
@@ -636,6 +731,9 @@ const checkExpressionAt = (
     return;
   }
   walk.literals.set(pointer, checked.literalDepth);
+  for (const read of checked.reads) {
+    walk.roots.add(read.root);
+  }
   const refusals = new Map(
     checked.reads.flatMap((read) => {
       const refusal = refusalOf(walk, read, place);
@@ -686,8 +784,8 @@ const checkValue = (
           walk,
           join(pointer, "$expr"),
           "workflow.sensitive",
-          `\`params.${named}\` is sensitive: only a connector call's argument may pass it, as a whole value.`,
-          "Pass it whole as a connector call's argument, or declare the parameter with `sensitive: false`."
+          `\`params.${named}\` is sensitive: only a connection call's argument may pass it, as a whole value.`,
+          "Pass it whole as a connection call's argument, or declare the parameter with `sensitive: false`."
         );
       }
       return;
@@ -772,22 +870,27 @@ const checkDuration = (
   }
 };
 
-/** The binding `alias`, at `pointer`, names, if it is of one of `kinds`. */
-const bindingFor = (
+/**
+ * The permission `alias`, at `pointer`, names, if it is of one of
+ * `kinds`; `under` says where the step's kind is declared.
+ */
+const permissionFor = (
   walk: Walk,
   alias: string,
   kinds: readonly Binding["kind"][],
+  under: string,
   pointer: string
 ): Binding | undefined => {
-  const bindings = walk.document.bindings ?? {};
-  const binding = Object.hasOwn(bindings, alias) ? bindings[alias] : undefined;
+  const binding = Object.hasOwn(walk.bindings, alias)
+    ? walk.bindings[alias]
+    : undefined;
   if (binding === undefined) {
     problem(
       walk,
       pointer,
-      "workflow.unknown_binding",
-      `No binding is named \`${alias}\`.`,
-      "Declare it under `bindings`, or name one that is."
+      "workflow.unknown_permission",
+      `No permission is named \`${alias}\`.`,
+      `Declare it under \`permissions.${under}\`, or name one that is.`
     );
     return undefined;
   }
@@ -795,20 +898,20 @@ const bindingFor = (
     problem(
       walk,
       pointer,
-      "workflow.binding_kind",
-      `\`${alias}\` is a ${binding.kind} binding; this step calls ${kinds.join(" or ")}.`,
-      `Name a ${kinds.join(" or ")} binding.`
+      "workflow.permission_kind",
+      `\`${alias}\` is a ${binding.kind} permission; this step calls ${kinds.join(" or ")}.`,
+      `Name a permission under \`permissions.${under}\`.`
     );
     return undefined;
   }
   return binding;
 };
 
-/** What a workflow that declares no `input` takes: an object of no fields. */
-const noInput: Descriptor = { kind: "object", fields: {} };
+/** What a workflow that declares no `args` takes: an object of no fields. */
+const noArgs: Descriptor = { kind: "object", fields: {} };
 
-/** What a workflow that declares no `output` ends with: null. */
-const noOutput: Descriptor = { kind: "null" };
+/** What a workflow that declares no `returns` ends with: null. */
+const noReturns: Descriptor = { kind: "null" };
 
 /** Why a descriptor was refused, as `descriptorFromCompact` said it. */
 const schemaProblemOf = (
@@ -937,88 +1040,125 @@ const checkState = (
 };
 
 /**
- * A raise's error must be the workflow's own: not one of the host's kinds
- * (`errorTypeBase`), which a catch reads as the platform's, and not 401
- * or 403, which say a person wasn't allowed when nobody was asked.
+ * A raise's error must be one `AppError` builds, by `AppError`'s own rules:
+ * its code in no platform namespace (`connect.*`, `workflow.*`, ...),
+ * which a catch reads as the platform's, its message and details within
+ * their bounds. One it can't build would throw a `TypeError` in the run
+ * instead of the declared error, which no catch of its code takes.
  */
 const checkRaise = (
   walk: Walk,
   step: Extract<Step, { type: "raise" }>,
   pointer: string
 ): void => {
-  if (step.error.type.startsWith(errorTypeBase)) {
+  const { code, message, details } = step.error;
+  const invalid = appErrorProblemOf(code, message, details);
+  if (invalid?.part === "code") {
     problem(
       walk,
-      join(pointer, "error", "type"),
-      "workflow.reserved_error_type",
-      "A raise names an error kind of the platform's own.",
-      "Name the workflow's own kind, such as `urn:acme:error:rejected`."
+      join(pointer, "error", "code"),
+      "workflow.reserved_error_code",
+      "A raise names an error code in one of the platform's namespaces.",
+      "Name the workflow's own code, such as `invoice.rejected`."
     );
-  }
-  if (step.error.status === 401 || step.error.status === 403) {
+  } else if (invalid !== undefined) {
     problem(
       walk,
-      join(pointer, "error", "status"),
-      "workflow.reserved_error_status",
-      "A raise can't answer 401 or 403: nobody was asked to sign in.",
-      "Use another status, such as 400 or 422."
+      join(pointer, "error", invalid.part),
+      "workflow.invalid_error",
+      `A raise's error ${invalid.reason}`,
+      invalid.part === "message"
+        ? "Shorten the message: it is counted in UTF-16 code units, so an emoji counts as two."
+        : "Keep only what a catch needs to decide, as plain JSON."
     );
   }
+  if (walk.raises.has(code)) {
+    problem(
+      walk,
+      join(pointer, "error", "code"),
+      "workflow.duplicate",
+      `Another raise names \`${code}\`: a run that fails with \`${code}\` could be either.`,
+      "Give each raise its own code."
+    );
+  }
+  walk.raises.add(code);
 };
 
-const checkDo = (
+const checkCall = (
   walk: Walk,
-  step: Extract<Step, { type: "do" }>,
+  step: Extract<Step, { type: "call" }>,
   pointer: string,
   place: Place
 ): void => {
-  const binding = bindingFor(
-    walk,
-    step.binding,
-    ["connector", "compute", "action"],
-    join(pointer, "binding")
-  );
-  if (binding?.kind === "connector" && step.operation === undefined) {
-    problem(
+  const connection = "connection" in step;
+  if (connection) {
+    permissionFor(
       walk,
-      pointer,
-      "workflow.missing_operation",
-      "A connector call names its `operation`.",
-      "Add the connector's operation, e.g. `mail.send`."
+      step.connection,
+      ["connector"],
+      "connections",
+      join(pointer, "connection")
     );
-  }
-  if (
-    binding !== undefined &&
-    binding.kind !== "connector" &&
-    step.operation !== undefined
-  ) {
-    problem(
+    const member =
+      walk.memberPaths.get(step.connection)?.get(step.action) ?? step.action;
+    const actions =
+      walk.members.get(step.connection) ?? new Map<string, string>();
+    const other = actions.get(member);
+    if (other !== undefined && other !== step.action) {
+      problem(
+        walk,
+        join(pointer, "action"),
+        "workflow.duplicate",
+        `\`${step.action}\` and \`${other}\` read as the same member of \`${step.connection}\`.`,
+        "Call one of them only, or through a connection of its own."
+      );
+    }
+    // A member is a function or holds others, never both: `notes` and
+    // `notes.add` can't both be members of one connection.
+    const nesting = [...actions].find(
+      ([path]) => path.startsWith(`${member}.`) || member.startsWith(`${path}.`)
+    );
+    if (nesting !== undefined) {
+      problem(
+        walk,
+        join(pointer, "action"),
+        "workflow.duplicate",
+        `\`${step.action}\` and \`${nesting[1]}\` read as a member of \`${step.connection}\` and a member of that member.`,
+        "Call one of them only, or through a connection of its own."
+      );
+    }
+    actions.set(member, step.action);
+    walk.members.set(step.connection, actions);
+  } else {
+    permissionFor(
       walk,
-      join(pointer, "operation"),
-      "workflow.operation_not_allowed",
-      "Only a connector call names an `operation`.",
-      "Remove `operation`."
+      step.module,
+      ["compute", "action"],
+      "modules",
+      join(pointer, "module")
     );
   }
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
-  checkValue(
-    walk,
-    step.arguments,
-    join(pointer, "arguments"),
-    place,
-    binding?.kind === "connector"
-  );
-  checkCallDepth(walk, step.arguments, join(pointer, "arguments"), 0);
+  checkValue(walk, step.args, join(pointer, "args"), place, connection);
+  checkCallDepth(walk, step.args, join(pointer, "args"), 0);
   checkState(walk, step.state, pointer, place);
 };
 
-const checkAgent = (
+const checkGenerate = (
   walk: Walk,
-  step: Extract<Step, { type: "agent" }>,
+  step: Extract<Step, { type: "generate" }>,
   pointer: string,
   place: Place
 ): void => {
-  bindingFor(walk, step.binding, ["model"], join(pointer, "binding"));
+  if (walk.document.permissions?.ai === undefined) {
+    problem(
+      walk,
+      pointer,
+      "workflow.unknown_permission",
+      "A generate step asks the workflow's model, and it declares none.",
+      "Declare its model under `permissions.ai`."
+    );
+  }
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
   checkValue(
     walk,
@@ -1031,7 +1171,7 @@ const checkAgent = (
   // A model call sends `{ instructions, input }`: one object around each.
   checkCallDepth(walk, step.instructions, join(pointer, "instructions"), 1);
   checkCallDepth(walk, step.input, join(pointer, "input"), 1);
-  const answer = checkSchema(walk, step.output, join(pointer, "output"));
+  const answer = checkSchema(walk, step.returns, join(pointer, "returns"));
   if (answer !== undefined) {
     walk.answers.set(pointer, answer);
   }
@@ -1052,7 +1192,20 @@ const checkTry = (
   place: Place,
   list: ListCheck
 ): void => {
-  list(step.try, join(pointer, "try"), place);
+  const retries = step.catch.retry !== undefined;
+  if (retries && place.retrying) {
+    problem(
+      walk,
+      join(pointer, "catch", "retry"),
+      "workflow.retry_nested",
+      "A try that retries stands inside another that retries: a failure would have two policies.",
+      "Retry in one of them only, the inner or the outer."
+    );
+  }
+  list(step.try, join(pointer, "try"), {
+    ...place,
+    retrying: place.retrying || retries,
+  });
   const caught: Place = { ...place, error: true };
   const at = join(pointer, "catch");
   if (step.catch.when !== undefined) {
@@ -1095,18 +1248,24 @@ const checkStep = (
     checkExpressionAt(walk, step.if, join(pointer, "if"), place);
   }
   switch (step.type) {
-    case "do": {
-      checkDo(walk, step, pointer, place);
+    case "call": {
+      checkCall(walk, step, pointer, place);
       break;
     }
-    case "agent": {
-      checkAgent(walk, step, pointer, place);
+    case "generate": {
+      checkGenerate(walk, step, pointer, place);
       break;
     }
-    case "decision": {
+    case "decide": {
       // The schema holds the recipients' and prompt's literals to their
       // shapes; what an expression gives the host holds as it decides.
-      bindingFor(walk, step.binding, ["decision"], join(pointer, "binding"));
+      permissionFor(
+        walk,
+        step.decision,
+        ["decision"],
+        "decisions",
+        join(pointer, "decision")
+      );
       for (const field of ["recipients", "prompt", "input"] as const) {
         checkValue(walk, step[field], join(pointer, field), place, false);
       }
@@ -1116,28 +1275,31 @@ const checkStep = (
     case "wait": {
       if ("until" in step) {
         checkExpressionAt(walk, step.until, join(pointer, "until"), place);
-      } else if ("event" in step) {
-        // Whether its contract admits each type is publication's to check,
-        // against the catalog, as every binding's contract is.
-        bindingFor(
-          walk,
-          step.event.from,
-          ["event"],
-          join(pointer, "event", "from")
-        );
-        if (step.event.match !== undefined) {
-          checkValue(
-            walk,
-            step.event.match.equals,
-            join(pointer, "event", "match", "equals"),
-            place,
-            false
-          );
-        }
-        checkDuration(walk, step.timeout, join(pointer, "timeout"));
       } else {
         checkDuration(walk, step.for, join(pointer, "for"));
       }
+      break;
+    }
+    case "waitForEvent": {
+      // Whether its contract admits each type is publication's to check,
+      // against the catalog, as every permission's contract is.
+      permissionFor(
+        walk,
+        step.events,
+        ["event"],
+        "events",
+        join(pointer, "events")
+      );
+      if (step.match !== undefined) {
+        checkValue(
+          walk,
+          step.match.equals,
+          join(pointer, "match", "equals"),
+          place,
+          false
+        );
+      }
+      checkDuration(walk, step.timeout, join(pointer, "timeout"));
       break;
     }
     case "if": {
@@ -1210,7 +1372,64 @@ const checkSteps = (
         checkSteps(walk, inner, at, around, depth + 1);
       }
     );
-    ran.add(step.id);
+    if (resultStepTypes.has(step.type)) {
+      ran.add(step.id);
+    }
+  }
+};
+
+/**
+ * Refuses a step whose ID is the name the generated code gives a try's
+ * guard (`guardNamesOf`: its retry's, or whether it takes a failure
+ * before a retry further out): the two would be one name in one scope.
+ */
+const checkRetryNames = (walk: Walk): void => {
+  const taken = new Set(guardNamesOf(walk.document.steps));
+  for (const { step, pointer } of eachStep(walk.document.steps)) {
+    if (taken.has(step.id)) {
+      problem(
+        walk,
+        join(pointer, "id"),
+        "workflow.duplicate_id",
+        `\`${step.id}\` is the name of a try's guard.`,
+        "Give the step another ID."
+      );
+    }
+  }
+};
+
+/**
+ * Refuses an alias declared under two kinds, and `ai` under any kind but
+ * the workflow's one model: each alias is one member of `ctx` and one
+ * binding of the run.
+ */
+const checkAliases = (walk: Walk): void => {
+  const permissions = walk.document.permissions ?? {};
+  const seen = new Set<string>(permissions.ai === undefined ? [] : [aiAlias]);
+  const aliased = aliasedPermissions(permissions);
+  // The schema bounds each kind; the run binds them all together, and the
+  // host looks up no more contracts than this for one document.
+  const count = aliased.length + seen.size;
+  if (count > formatLimits.bindings) {
+    problem(
+      walk,
+      "/permissions",
+      "workflow.too_many_permissions",
+      `The workflow declares ${count} permissions, every kind's together (\`ai\` is one); at most ${formatLimits.bindings} are allowed.`,
+      "Drop the permissions its steps don't use, or split the workflow."
+    );
+  }
+  for (const { kind, alias } of aliased) {
+    if (seen.has(alias) || alias === aiAlias) {
+      problem(
+        walk,
+        join("/permissions", kind, alias),
+        "workflow.duplicate_alias",
+        `\`${alias}\` names another permission already${alias === aiAlias ? ": `ai` is the workflow's model" : ""}.`,
+        "Give each permission an alias of its own."
+      );
+    }
+    seen.add(alias);
   }
 };
 
@@ -1256,8 +1475,16 @@ export const checkWorkflow = (json: unknown): CheckResult => {
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const document = json as WorkflowDocument;
   const params = document.params ?? {};
+  const ids = eachStep(document.steps).map(({ step }) => step.id);
   const walk: Walk = {
     document,
+    bindings: bindingsOf(document),
+    stepIds: [...new Set(ids)],
+    resultSteps: new Set(
+      eachStep(document.steps).flatMap(({ step }) =>
+        resultStepTypes.has(step.type) ? [step.id] : []
+      )
+    ),
     params: new Set(
       Object.entries(params)
         .filter(([, param]) => !isSensitive(param))
@@ -1269,11 +1496,15 @@ export const checkWorkflow = (json: unknown): CheckResult => {
         .map(([name]) => name)
     ),
     ids: new Set(),
+    raises: new Set(),
+    members: new Map(),
+    memberPaths: memberPathsOf(document),
     problems: [],
     code: new Map(),
     placeholders: new Map(),
     answers: new Map(),
     literals: new Map(),
+    roots: new Set(),
     state: new Map(),
     count: 0,
   };
@@ -1300,7 +1531,9 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       paramDescriptors.set(name, descriptor);
     }
   }
-  const input = checkSchema(walk, document.input ?? noInput, "/input");
+  checkAliases(walk);
+  checkRetryNames(walk);
+  const args = checkSchema(walk, document.args ?? noArgs, "/args");
   for (const [key, schema] of Object.entries(document.state ?? {})) {
     const compiled = compiledSchema(walk, schema, join("/state", key));
     if (compiled !== undefined) {
@@ -1312,6 +1545,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
     error: false,
     item: false,
     output: false,
+    retrying: false,
   };
   checkSteps(walk, document.steps, "/steps", top, 1);
   if (walk.count > formatLimits.steps) {
@@ -1323,20 +1557,26 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       "Split it into workflows of their own."
     );
   }
-  const output =
-    document.output === undefined
-      ? checkSchema(walk, noOutput, "/output")
-      : checkSchema(walk, document.output.schema, "/output/schema");
-  if (document.output !== undefined) {
+  const returns = checkSchema(
+    walk,
+    document.returns ?? noReturns,
+    document.returns === undefined ? "" : "/returns"
+  );
+  if (document.result !== undefined) {
     checkValue(
       walk,
-      document.output.value,
-      "/output/value",
+      document.result,
+      "/result",
       {
-        steps: new Set(document.steps.map(({ id }) => id)),
+        steps: new Set(
+          document.steps.flatMap(({ id, type }) =>
+            resultStepTypes.has(type) ? [id] : []
+          )
+        ),
         error: false,
         item: false,
         output: false,
+        retrying: false,
       },
       false
     );
@@ -1350,7 +1590,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       "Compute a list in one expression rather than each of its items."
     );
   }
-  if (walk.problems.length > 0 || input === undefined || output === undefined) {
+  if (walk.problems.length > 0 || args === undefined || returns === undefined) {
     return { ok: false, problems: walk.problems.slice(0, maxProblems) };
   }
   return {
@@ -1360,10 +1600,11 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       code: walk.code,
       placeholders: walk.placeholders,
       answers: walk.answers,
-      contract: { input, output, params: paramDescriptors },
+      contract: { args, returns, params: paramDescriptors },
       state: new Map(
         [...walk.state].map(([key, schema]) => [key, schema.descriptor])
       ),
+      roots: walk.roots,
     },
   };
 };

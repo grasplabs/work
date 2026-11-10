@@ -71,14 +71,14 @@ export const objectSchema = (fields: Record<string, unknown>) => ({
 });
 
 /**
- * A step `id` that runs and ends at once: a raise its `if` skips for
- * anyone with a name, so the run's history has a step of it.
+ * A step `id` that runs and ends at once: a wait until a deadline long
+ * past, whose enter step records it, so the run's history has a step of
+ * it.
  */
 export const passing = (id: string) => ({
   id,
-  type: "raise",
-  if: { $expr: 'input.who === ""' },
-  error: { type: "urn:grasp:error:nameless", status: 422 },
+  type: "wait",
+  until: { $expr: "0" },
 });
 
 /**
@@ -88,11 +88,9 @@ export const passing = (id: string) => ({
 export const definitionOf = (wait?: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: '"Hello, " + input.who' } },
-    },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: '"Hello, " + args.who' } },
     steps: [
       ...(wait === undefined ? [] : [{ id: "pause", type: "wait", for: wait }]),
       passing("greet"),
@@ -253,14 +251,10 @@ export const pinnedApp = async (
 export const longDefinitionOf = (tasks: number): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: "done" },
-    },
-    steps: Array.from({ length: tasks }, (_, index) =>
-      passing(`step-${index}`)
-    ),
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "done" },
+    steps: Array.from({ length: tasks }, (_, index) => passing(`step${index}`)),
   });
 
 /**
@@ -269,15 +263,13 @@ export const longDefinitionOf = (tasks: number): string =>
  */
 export const failingDefinition = JSON.stringify({
   $schema: workflowSchemaUrl,
-  input: objectSchema({ who: { kind: "string" } }),
-  output: {
-    schema: objectSchema({ status: { kind: "string" } }),
-    value: { status: "done" },
-  },
+  args: objectSchema({ who: { kind: "string" } }),
+  returns: objectSchema({ status: { kind: "string" } }),
+  result: { status: "done" },
   steps: [
     {
       ...passing("greet"),
-      if: { $expr: 'input.who.split("")[9999].toUpperCase() === ""' },
+      if: { $expr: 'args.who.split("")[9999].toUpperCase() === ""' },
     },
   ],
 });

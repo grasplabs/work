@@ -49,7 +49,7 @@ import {
   started,
 } from "./workflow-calls.ts";
 
-// The calls of grasp-workflow/1 workflows on the run host (sealed-run.ts,
+// The calls of grasp-workflow/2 workflows on the run host (sealed-run.ts,
 // resource-calls.ts and resource-authority.ts), from their threat model:
 // a call reaches only the target its start froze; authority revoked while
 // a run runs stops its next call; a replay repeats no effect; a sensitive
@@ -131,7 +131,7 @@ describe("model calls", () => {
       requests: 1,
       receipts: ["started", "done"].map((outcome) => ({
         call: "grasp.model",
-        binding: "summary",
+        binding: "ai",
         person: ada.userId,
         outcome,
       })),

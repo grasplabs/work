@@ -53,15 +53,15 @@ export const count = compute({
 const definitionOf = (): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ who: { kind: "string" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { status: { $expr: '"" + steps.add.output' } },
+    args: objectSchema({ who: { kind: "string" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: { $expr: '"" + add' } },
+    permissions: {
+      modules: {
+        count: { kind: "compute", contract: "local:code/count.ts#count" },
+      },
     },
-    bindings: {
-      count: { kind: "compute", contract: "local:code/count.ts#count" },
-    },
-    steps: [{ id: "add", type: "do", binding: "count", arguments: [1, 2, 3] }],
+    steps: [{ id: "add", type: "call", module: "count", args: [1, 2, 3] }],
   });
 
 /** Publishes and runs a workflow calling `count` of `module`: how it ended. */

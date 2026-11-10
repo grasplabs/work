@@ -1,6 +1,7 @@
 import { isExpectedCode } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
+  DiagramTask,
   TraceState,
   TraceStep,
   WorkflowRunTrace,
@@ -21,7 +22,7 @@ import {
   requireWorkflowRole,
   workflowDefinition,
 } from "../workflow-resources.ts";
-import { runObjectOf } from "./engine.ts";
+import { runEngine, runObjectOf } from "./engine.ts";
 import { waitKeyOf, waitStepPrefix } from "./host.ts";
 import { resourceRunFor } from "./resource-runs.ts";
 import { detailsRemoved } from "./retention.ts";
@@ -32,12 +33,13 @@ import type { SealedSteps } from "./sealed-steps.ts";
 // (platform specification 13.10): the tasks its journal reached, read from
 // the engine's own history (workerflow's `history`), never inferred from
 // the diagram, the run's status or its code. The run host (sealed-run.ts)
-// names a task's steps `<task>:<kind>`, a loop item's indices after `@`,
-// each placed by its build's table of tasks (sealed-steps.ts), and core
+// names a task's steps `<task>:<kind>`, from a task's second run in a
+// loop's items on its count after `@`, each placed by its build's table
+// of tasks (sealed-steps.ts), and core
 // adds steps of its own to a step of a task, by the step's key under its
 // prefix (`$grasp:wait:<key>:…`, host.ts), read here as part of that step:
 //
-// - a catch's retry of a failed step runs it again
+// - a try's retry of a failed step runs it again
 //   (`…:retry:<n>:run`), after a backoff sleep (`…:retry:<n>:wait`) it
 //   decided in a step of its own (`…:decide`): each round more attempts of
 //   the same step, waiting while it backs off, its state the latest
@@ -55,7 +57,7 @@ import type { SealedSteps } from "./sealed-steps.ts";
 //
 // Any other step adds nothing. A failure a catch took still shows as its
 // task's: it happened. Each step is shown too, in the order the run
-// reached it, with its loop item, attempts and times (GRA-513): a run's
+// reached it, with its run in a loop, attempts and times (GRA-513): a run's
 // step detail. Records are metadata: no value of the run's reaches the
 // trace, and a failure only by a code the platform defines. For the
 // workflow's builders, who read its definitions.
@@ -491,6 +493,53 @@ export const tracedSteps = async (
 };
 
 /**
+ * Marks reached, in `tasks`, each of `diagram`'s tasks that hold a list of
+ * steps (an `if`, a `try`, a loop) one of whose tasks the run reached:
+ * such a task has no steps of its own, its flow the run's code, so the
+ * tasks inside it are what tell that the run reached it. Answers whether
+ * any of `diagram`'s tasks, or a task inside one, was reached.
+ */
+const reachedAround = (
+  diagram: readonly DiagramTask[],
+  tasks: Map<string, WorkflowRunTrace["tasks"][number]>
+): boolean => {
+  let any = false;
+  for (const task of diagram) {
+    const inside = task.scopes
+      .map((scope) => reachedAround(scope.tasks, tasks))
+      .some(Boolean);
+    if (inside && !tasks.has(task.id)) {
+      tasks.set(task.id, { task: task.id, state: "reached", attempts: 0 });
+    }
+    any ||= inside || tasks.has(task.id);
+  }
+  return any;
+};
+
+/**
+ * The raise task that failed run `runId`, by the code the engine kept of
+ * its failure: the one raise of its build that seals that code, if any.
+ * A raise's code is the build's own literal, never what the run read.
+ */
+const raiseThatEnded = async (
+  env: Env,
+  runId: string,
+  built: () => Promise<LoadedBuild>
+): Promise<string | undefined> => {
+  const status = await runEngine(env).status(runId);
+  const code =
+    status?.status === "errored" ? (status.error.code ?? undefined) : undefined;
+  if (code === undefined) {
+    return undefined;
+  }
+  const build = await built();
+  const raises = build.tasks.filter(
+    (task) => task.kind === "raise" && task.error.code === code
+  );
+  return raises.length === 1 ? raises[0]?.id : undefined;
+};
+
+/**
  * The trace of run `runId` of workflow `id`, for `by`, who must build it:
  * its version's diagram and the tasks its journal reached.
  */
@@ -533,11 +582,12 @@ export const resourceRunTrace = async (
       detailsRemoved: true,
     };
   }
-  const { steps, truncated } = await tracedSteps(
-    env,
-    run.id,
-    async () => await loadWorkflowBuild(env, workflow.id, run.version)
-  );
+  let build: LoadedBuild | undefined;
+  const builtOnce = async (): Promise<LoadedBuild> => {
+    build ??= await loadWorkflowBuild(env, workflow.id, run.version);
+    return build;
+  };
+  const { steps, truncated } = await tracedSteps(env, run.id, builtOnce);
   // A task's steps together: the most telling of their states, the most
   // attempts any made.
   const tasks = new Map<string, WorkflowRunTrace["tasks"][number]>();
@@ -552,6 +602,16 @@ export const resourceRunTrace = async (
       attempts: Math.max(step.attempts, known?.attempts ?? 0),
     });
   }
+  // A raise has no step: the one whose sealed code the run failed with
+  // is what ended it (the check holds each code to one raise).
+  const raise =
+    run.status === "failed"
+      ? await raiseThatEnded(env, run.id, builtOnce)
+      : undefined;
+  if (raise !== undefined) {
+    tasks.set(raise, { task: raise, state: "failed", attempts: 0 });
+  }
+  reachedAround(diagram.tasks, tasks);
   return {
     runId: run.id,
     version: run.version,

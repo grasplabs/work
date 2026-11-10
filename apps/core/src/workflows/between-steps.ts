@@ -252,23 +252,6 @@ export class BoundedRunHost<Attempt extends object>
     );
   }
 
-  async caught(
-    name: unknown,
-    options: unknown,
-    fn: (attempt: Attempt, error: Json) => Promise<unknown>
-  ): Promise<Settled<unknown>> {
-    const { caught } = this.#host;
-    if (caught === undefined) {
-      return {
-        ok: false,
-        error: { name: "Error", message: "This run has no catches." },
-      };
-    }
-    return await this.#bounded(
-      async () => await caught.call(this.#host, name, options, fn)
-    );
-  }
-
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await this.#bounded(
       async () => await this.#host.sleep(name, duration)

@@ -261,7 +261,7 @@ const createShippedWorkflows = async (
   blueprint: string,
   shipped: readonly BlueprintWorkflow[]
 ): Promise<ShippedWorkflow[]> => {
-  // A grasp-workflow/1 document names no workflow: each copy's is
+  // A grasp-workflow/2 document names no workflow: each copy's is
   // published as the release wrote it, under a name of its own.
   const named = shipped.map(({ alias, binding, definition }) => ({
     alias,

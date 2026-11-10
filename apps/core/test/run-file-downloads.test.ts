@@ -75,21 +75,24 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const definitionOf = (key: string): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
-    input: objectSchema({ size: { kind: "number" } }),
-    output: {
-      schema: objectSchema({ status: { kind: "string" } }),
-      value: { $expr: "steps.write.output" },
-    },
-    bindings: {
-      writeFile: { kind: "action", contract: "local:code/files.ts#writeFile" },
-      files: { kind: "files", contract: key },
+    args: objectSchema({ size: { kind: "number" } }),
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { $expr: "write" },
+    permissions: {
+      modules: {
+        writeFile: {
+          kind: "action",
+          contract: "local:code/files.ts#writeFile",
+        },
+      },
+      files: { files: { contract: key } },
     },
     steps: [
       {
         id: "write",
-        type: "do",
-        binding: "writeFile",
-        arguments: { size: { $expr: "input.size" } },
+        type: "call",
+        module: "writeFile",
+        args: { size: { $expr: "args.size" } },
       },
     ],
   });
