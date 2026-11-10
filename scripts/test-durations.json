@@ -619,7 +619,6 @@
   "@grasp-os/sdk test/file-port.test.ts": 0,
   "@grasp-os/sdk test/form.test.ts": 0.1,
   "@grasp-os/sdk test/function-change.test.ts": 0,
-  "@grasp-os/sdk test/invoice-workflow.test.ts": 0,
   "@grasp-os/sdk test/json-schema.test.ts": 0,
   "@grasp-os/sdk test/leave-guard.test.ts": 0,
   "@grasp-os/sdk test/migration.test.ts": 0,
