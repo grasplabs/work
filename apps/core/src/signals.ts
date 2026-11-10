@@ -325,31 +325,26 @@ const waitingSignals = async (
   return [...rows, ...waitingForPeople([...groups.values()], waited)];
 };
 
-/** A workflow's runs started in the window, with its name. */
-interface Started {
-  name: string;
-  runs: number;
-}
-
-/** How many runs of each workflow started since `from`, by its ID. */
+/**
+ * How many runs of each workflow started since `from`, by its name: what
+ * its signals are kept under, as its decisions' are, so a workflow that
+ * took a deleted one's released name counts with it, never beside it
+ * under the same key.
+ */
 const runsSince = async (
   db: DrizzleD1Database,
   from: Date
-): Promise<Map<string, Started>> => {
+): Promise<Map<string, number>> => {
   const rows = await db
-    .select({
-      id: workflowResourceRuns.workflowResourceId,
-      name: workflowResources.name,
-      runs: count(),
-    })
+    .select({ name: workflowResources.name, runs: count() })
     .from(workflowResourceRuns)
     .innerJoin(
       workflowResources,
       eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
     )
     .where(gte(workflowResourceRuns.createdAt, from))
-    .groupBy(workflowResourceRuns.workflowResourceId);
-  return new Map(rows.map(({ id, ...started }) => [id, started]));
+    .groupBy(workflowResources.name);
+  return new Map(rows.map(({ name, runs }) => [name, runs]));
 };
 
 /** The entries of `counts`, most first, then by name. */
@@ -357,20 +352,19 @@ const mostFirst = (counts: ReadonlyMap<string, number>) =>
   [...counts].toSorted(([a, x], [b, y]) => y - x || a.localeCompare(b));
 
 /**
- * Steps failing most: runs that failed since `from`, by the task they
- * failed at (`failed_task`, empty for none), with their error codes. Only
- * the task's ID and the error's code, never its message or what the run
- * read.
+ * Steps failing most: runs that ended failed since `from`, by the task
+ * they failed at (`failed_task`, empty for none), with their error codes,
+ * beside the runs of their workflow started in the window. Only the
+ * task's ID and the error's code, never its message or what the run read.
  */
 const failingSignals = async (
   db: DrizzleD1Database,
   from: Date,
-  runs: ReadonlyMap<string, Started>
+  runs: ReadonlyMap<string, number>
 ): Promise<SignalRow[]> => {
   const groups = new Map<
     string,
     {
-      workflow: string;
       name: string;
       step: string;
       failures: number;
@@ -384,7 +378,6 @@ const failingSignals = async (
       await db
         .select({
           id: workflowResourceRuns.id,
-          workflow: workflowResourceRuns.workflowResourceId,
           name: workflowResources.name,
           endedAt: workflowResourceRuns.endedAt,
           step: workflowResourceRuns.failedTask,
@@ -413,10 +406,9 @@ const failingSignals = async (
         )
         .limit(pageRows),
     (row) => {
-      const step = stepName(row.step);
-      const key = JSON.stringify([row.workflow, step]);
+      const step = row.step ?? "";
+      const key = JSON.stringify([row.name, step]);
       const group = groups.get(key) ?? {
-        workflow: row.workflow,
         name: row.name,
         step,
         failures: 0,
@@ -440,7 +432,7 @@ const failingSignals = async (
       group.failures,
       {
         failures: group.failures,
-        runs: runs.get(group.workflow)?.runs ?? 0,
+        runs: runs.get(group.name) ?? 0,
         errors: mostFirst(group.codes)
           .slice(0, samples)
           .map(([code, times]) => ({ code, count: times })),
@@ -455,41 +447,42 @@ const dollars = (amount: number): number => Math.round(amount * 1e6) / 1e6;
 
 /**
  * Cost per run, for each workflow with runs started in the window: what
- * the model calls of those runs' lineages made in the window cost
- * (`model_usage`, by the lineage's root and the workflow each call was
- * made for: model-spend.ts, `spendKeysOf`), over them. A lineage whose
- * root started before the window counts for nothing, so the cost and
- * `costliest` name the same runs. The window rolls (the last
+ * its model calls cost in the window (`model_usage`, by the workflow each
+ * call was made for and its lineage: model-spend.ts, `spendKeysOf`), over
+ * those runs. A call is charged to its lineage's account, the root unless
+ * a trigger started the run in another run's lineage, so `costliest`
+ * names lineages, by that run; a lineage whose run started before the
+ * window counts for nothing. The window rolls (the last
  * `signalWindowDays` days), while model spend counts a UTC calendar
  * month: the two don't match.
  */
 const costSignals = async (
   db: DrizzleD1Database,
   from: Date,
-  runs: ReadonlyMap<string, Started>
+  runs: ReadonlyMap<string, number>
 ): Promise<SignalRow[]> => {
   // Each workflow's total, and its costliest lineages, ranked in the
   // query: never every lineage of the window in memory.
   const rows = await db.all<{
-    workflow: string;
+    name: string;
     run: string;
     cost: number;
     total: number;
-  }>(sql`SELECT workflow, run, cost, total FROM (
-      SELECT ${modelUsage.workflowId} AS workflow, ${modelUsage.runId} AS run,
+  }>(sql`SELECT name, run, cost, total FROM (
+      SELECT ${workflowResources.name} AS name, ${modelUsage.runId} AS run,
         sum(${modelUsage.cost}) AS cost,
-        sum(sum(${modelUsage.cost})) OVER (PARTITION BY ${modelUsage.workflowId}) AS total,
-        row_number() OVER (PARTITION BY ${modelUsage.workflowId} ORDER BY sum(${modelUsage.cost}) DESC, ${modelUsage.runId}) AS place
+        sum(sum(${modelUsage.cost})) OVER (PARTITION BY ${workflowResources.name}) AS total,
+        row_number() OVER (PARTITION BY ${workflowResources.name} ORDER BY sum(${modelUsage.cost}) DESC, ${modelUsage.runId}) AS place
       FROM ${modelUsage}
+      INNER JOIN ${workflowResources} ON ${workflowResources.id} = ${modelUsage.workflowId}
       INNER JOIN ${workflowResourceRuns} ON ${workflowResourceRuns.id} = ${modelUsage.runId}
       WHERE ${modelUsage.createdAt} >= ${from.getTime()}
         AND ${workflowResourceRuns.createdAt} >= ${from.getTime()}
-        AND ${modelUsage.workflowId} IS NOT NULL
-      GROUP BY ${modelUsage.workflowId}, ${modelUsage.runId}
+      GROUP BY ${workflowResources.name}, ${modelUsage.runId}
     ) WHERE place <= ${samples}`);
-  const costs = Map.groupBy(rows, ({ workflow }) => workflow);
-  return [...runs].map(([workflow, { name, runs: started }]) => {
-    const lineages = costs.get(workflow) ?? [];
+  const costs = Map.groupBy(rows, ({ name }) => name);
+  return [...runs].map(([name, started]) => {
+    const lineages = costs.get(name) ?? [];
     const cost = lineages[0]?.total ?? 0;
     return signalRow(
       "cost_per_run",

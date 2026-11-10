@@ -3,14 +3,17 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   DefinitionIdentity,
   WorkflowDefinition,
+  WorkflowError,
 } from "@grasp-os/workerflow/contracts";
 import { WorkflowRun } from "@grasp-os/workerflow/run";
 import type { RunNotification } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
+import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { projectCandidateRun } from "./candidate-runs.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
+import type { PinnedResourceRun, RunPin } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
@@ -18,17 +21,26 @@ import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import type { StepError } from "./sealed-isolate.ts";
 import type { RunModelCalls, SentCalls } from "./sealed-run.ts";
+import { sealedStepOf, sealedStepsOf } from "./sealed-steps.ts";
+import type { SealedSteps } from "./sealed-steps.ts";
 
 /**
- * A step name's task: its name up to the first `:`, `#` or `@`
- * (`<task>:<kind>`, `<task>:task#ask`, `<task>:task@2`, sealed-steps.ts).
- * A step of core's own (`$grasp:…`) has none.
+ * The task engine step `name` is a step of, as the run's build places it
+ * (`sealedStepOf`): the step itself, or the task step it is a part of
+ * (`<task>:<kind>:retry:<n>:run`, a held call's round, host.ts), by its
+ * longest name the build has a step of. None for a step of core's own
+ * (`$grasp:…`).
  */
-const stepTask = /^[A-Za-z][\w-]{0,63}(?=$|[:#@])/u;
-
-/** The task step `step` of a sealed build's run is of, if any. */
-const taskOfStep = (step: string): string | undefined =>
-  stepTask.exec(step)?.[0];
+const taskOfStep = (name: string, steps: SealedSteps): string | undefined => {
+  const parts = name.split(":");
+  for (let end = parts.length; end >= 2; end -= 1) {
+    const placed = sealedStepOf(parts.slice(0, end).join(":"), steps);
+    if (placed !== undefined) {
+      return placed.task;
+    }
+  }
+  return undefined;
+};
 
 /** The most records one page of the run's history holds (workerflow's). */
 const historyPage = 500;
@@ -556,7 +568,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       version: latest.version,
     });
     if (pin?.type === "resource" || pin?.type === "candidate") {
-      await this.#independentNotified(pin.type, latest);
+      await this.#independentNotified(pin, latest);
     }
   }
 
@@ -567,9 +579,10 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * them, below.
    */
   async #independentNotified(
-    type: "resource" | "candidate",
+    pin: Extract<RunPin, { type: "resource" | "candidate" }>,
     latest: RunNotification
   ): Promise<void> {
+    const { type } = pin;
     // Why it failed, from its own journal: kept on its row, so the code
     // outlives the engine's record of the run.
     const live = this.status();
@@ -591,15 +604,16 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       sequence: latest.sequence,
       ...this.#compensationOf(latest.status),
     } as const;
-    const failed = live?.status === "errored" && !stoppedEnd;
-    const failureCode = failed ? (live.error.code ?? null) : null;
-    await (type === "resource"
+    const failure =
+      live?.status === "errored" && !stoppedEnd ? live.error : undefined;
+    const failureCode = failure?.code ?? null;
+    await (pin.type === "resource"
       ? projectResourceRun(
           this.env,
           latest.instanceId,
           engine,
           failureCode,
-          failed ? this.#failedTask() : null
+          failure === undefined ? null : await this.#failedTask(pin, failure)
         )
       : projectCandidateRun(this.env, latest.instanceId, engine, failureCode));
     // A page's pause or resume of it settles from where the engine has
@@ -623,11 +637,35 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   }
 
   /**
-   * The task whose step failed last in the run's own journal, as its row
-   * keeps it (`failed_task`): read once, as the run ends failed. None for
-   * a run no task's step failed in.
+   * The task whose step's failure ended the run, as its row keeps it
+   * (`failed_task`): the last step of a task in its own journal that
+   * failed with the very error the run ended with (`failure`), placed by
+   * its build's table of tasks. Read once, as the run ends failed. None
+   * when no such step did: a raise ended it, say, after a step whose
+   * failure a catch took. A build that can't be read names none, logged.
    */
-  #failedTask(): string | null {
+  async #failedTask(
+    pin: PinnedResourceRun,
+    failure: WorkflowError
+  ): Promise<string | null> {
+    let steps: SealedSteps;
+    try {
+      steps = sealedStepsOf(
+        await loadWorkflowBuild(
+          this.env,
+          pin.workflow,
+          pin.version,
+          pin.manifest
+        )
+      );
+    } catch (error) {
+      log.error("workflow.failed_task_unread", {
+        runId: this.instanceId(),
+        ...errorFields(error),
+      });
+      return null;
+    }
+    // Every page in one synchronous turn: nothing lands in between.
     let task: string | null = null;
     let after = 0;
     for (;;) {
@@ -640,9 +678,11 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         if (
           !record.unreadable &&
           record.type === "step_errored" &&
-          record.step !== null
+          record.step !== null &&
+          record.error?.code === failure.code &&
+          record.error?.message === failure.message
         ) {
-          task = taskOfStep(record.step.name) ?? task;
+          task = taskOfStep(record.step.name, steps) ?? task;
         }
       }
       if (!page.more) {

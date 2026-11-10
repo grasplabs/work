@@ -36,9 +36,9 @@ import { latestComputation, peopleSubject } from "./signals.ts";
 // and no person a decision waits for (`forBuilders`, and `waitsFor`,
 // which gives them each workflow's waits for people added up instead of
 // each person's). Independent workflows' signals, of no App, and the
-// deployment's own (people's unanswered questions) stay with admins. No evidence holds what a run read, returned or failed with.
-// Every read is audited, never refused for it (the outbox keeps the
-// event).
+// deployment's own (people's unanswered questions) stay with admins. No
+// evidence holds what a run read, returned or failed with. Every read is
+// audited, never refused for it (the outbox keeps the event).
 
 type Row = typeof improvementSignals.$inferSelect;
 
