@@ -189,7 +189,8 @@ const runAs =
     try {
       value = await Reflect.apply(fn, undefined, [Object.freeze({ db })]);
     } catch (error) {
-      unwrapped(await session.end(transaction, false));
+      // Its own error is what the test hears, whatever dropping it said.
+      await session.end(transaction, false).catch(() => null);
       throw error;
     }
     unwrapped(await session.end(transaction, true));

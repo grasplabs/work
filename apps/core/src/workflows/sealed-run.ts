@@ -1099,9 +1099,9 @@ export const retryDecided = (
  * What a deadline's enter step whose record is `value` fails with, if its
  * deadline isn't one: a time in ms since the epoch, at most a year ahead.
  */
-const deadlineUnfit = (value: unknown): StepError | undefined => {
+const deadlineUnfit = (value: unknown, now: number): StepError | undefined => {
   const until = deadlineRecordSchema.safeParse(value).data?.until;
-  return until !== undefined && until - Date.now() <= maxDeadlineMs
+  return until !== undefined && until - now <= maxDeadlineMs
     ? undefined
     : forIsolate(
         workflowResourceErrors.create("workflow.call_invalid", {
@@ -1879,7 +1879,9 @@ class SealedRun implements SealedRunKind {
     if (matchesBy(task)) {
       return await this.#matchKeyChecked(attempt, task, value);
     }
-    const unfit = sleepsUntil(task) ? deadlineUnfit(value) : undefined;
+    const unfit = sleepsUntil(task)
+      ? deadlineUnfit(value, this.#host.now())
+      : undefined;
     return unfit === undefined ? undefined : { ok: false, error: unfit };
   }
 

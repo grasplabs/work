@@ -173,9 +173,9 @@ export const fixtureCall = async (
     }
     // Answered: marked as it is, as a real model call is as it goes out,
     // and counted as the provider's request, in the run's record.
+    await countModelRequest(env, run.runId, task);
     effect.requireHolds();
     effect.sending?.();
-    await countModelRequest(env, run.runId, task);
     return requireShape(JSON.stringify(call.outputSchema), answer, "output");
   }
   throw operationErrors.create("resource.unavailable");

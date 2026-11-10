@@ -213,7 +213,8 @@ export const startFixtureRun = async (
       deciders: JSON.stringify(test.deciders),
       models: JSON.stringify(test.models),
       restartAfterStep: test.restartAfterStep ?? null,
-      createdAt: new Date(),
+      // At the time its test's clock is at: its age is its runs' time.
+      createdAt: new Date(Date.now() + test.clockMs),
       deadline: new Date(test.deadline),
     });
   test.recorded();

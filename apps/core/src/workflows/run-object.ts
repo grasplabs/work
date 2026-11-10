@@ -494,12 +494,15 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * moves or whose activation is restarted (workerflow's `testsRun`). One
    * not created yet is the test's to create next: its test moved its
    * clock before it started (engine.ts, `createFixture`), under an ID core
-   * minted for it.
+   * minted for it: an object that never held a run, never one whose run
+   * was removed.
    */
   // oxlint-disable-next-line grasp/no-unbounded-rpc-target -- the engine's hook, as `definition`
   protected override testsRun(): boolean {
     const identity = this.runIdentity();
-    return identity === undefined || pinOf(identity)?.type === "fixture";
+    return identity === undefined
+      ? this.neverRan()
+      : pinOf(identity)?.type === "fixture";
   }
 
   /** Records that the run's cancel is done (`markCancelled`). */

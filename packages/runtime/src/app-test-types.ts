@@ -92,9 +92,11 @@ export interface TestStartOptions {
     Record<string, readonly Pick<TestIdentity, "respond">[]>
   >;
   /**
-   * A fault: once task `restartAfterStep`'s step is journaled the first
-   * time, the run's activation ends there, as if its process died, and
-   * the engine runs it again from its journal, a generation later.
+   * A fault: once task `restartAfterStep`'s step first succeeds, its
+   * result journaled, the run's activation ends there, as if its process
+   * died, and the engine runs it again from its journal, a generation
+   * later. Only a task whose step keeps its result (a call: a model's, an
+   * App function's) takes one; a start naming any other is refused.
    */
   readonly restartAfterStep?: string;
 }

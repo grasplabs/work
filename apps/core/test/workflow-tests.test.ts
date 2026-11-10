@@ -1189,6 +1189,18 @@ export default appTest(schema, {
     const after = await wakeOf();
     const status = await liveStatus(runId);
     await runEngine(env).terminate(runId);
+    // Removed, its object holds the tombstone of its start: still no run
+    // of a test's whose clock may move.
+    await runEngine(env).remove(runId);
+    const movedOnceRemoved = await runObjectOf(env, runId)
+      .advanceFixtureClock(60 * 60 * 1000)
+      .then(() => "moved")
+      .catch((error: unknown) =>
+        error instanceof Error ? error.message : "thrown"
+      );
+    expect(movedOnceRemoved).toBe(
+      "Only a run a host's test runs moves its time or restarts."
+    );
     expect({ asked, moved, wakeKept: after, status }).toStrictEqual({
       asked: {
         negative: "contract.invalid_args",

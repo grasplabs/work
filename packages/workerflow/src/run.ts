@@ -974,7 +974,11 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   #extraObligation(): number | null {
     try {
       const at = this.extraAlarm();
-      return at !== null && Number.isFinite(at) ? at : null;
+      // The host's own work is on the wall clock; the engine's alarms are
+      // set in the run's time (run-time.ts).
+      return at !== null && Number.isFinite(at)
+        ? at + clockOffsetOf(this.ctx.storage)
+        : null;
     } catch (error) {
       warnRecovered("workflow_extra_alarm_failed", error);
       return null;
@@ -1388,6 +1392,18 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   // oxlint-disable-next-line class-methods-use-this -- the seam a subclass overrides
   protected testsRun(): boolean {
     return false;
+  }
+
+  /**
+   * Whether this object never held a run: no journal, and no tombstone
+   * of one removed. Only such an object is one a host may treat as a run
+   * still to be created (`testsRun`).
+   */
+  protected neverRan(): boolean {
+    return (
+      this.#run() === undefined &&
+      nextTombstoneExpiry(this.ctx.storage.sql, 0) === null
+    );
   }
 
   /** Refuses unless the run is a host's test's own (`testsRun`). */
