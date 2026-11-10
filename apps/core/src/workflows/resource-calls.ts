@@ -836,26 +836,16 @@ const callModel = async (
 const namesFileSchema = z.object({ file: runFileIdSchema });
 
 /**
- * The files operations that publish what a run hands them: a file's name
- * as it opens, its bytes as it's appended to, both once it's finished.
- */
-const filesWrites: ReadonlySet<string> = new Set([
-  "open",
-  "append",
-  "finish",
-  "write",
-]);
-
-/**
  * Whether `call` may hand out what its run recalled: a connector call, a
- * model call, or a file it writes (`filesWrites`).
+ * model call, or a file it writes, whose name and bytes are shown outside
+ * the run once it's finished.
  */
 const handsOut = (call: BuiltCall): boolean =>
   call.name === "grasp.connector" ||
   // Its arguments are the App's to keep.
   call.name === "grasp.app" ||
   call.name === "grasp.model" ||
-  (call.name === "grasp.files" && filesWrites.has(call.operation));
+  (call.name === "grasp.files" && call.operation === "write");
 
 /**
  * What every receipt of a files call says before its answer: the
@@ -958,9 +948,9 @@ const requireCallAllowed = async (
 ): Promise<void> => {
   await requireCallAuthority(env, run, binding);
   // What the run recalled leaves with a connector call or a model call,
-  // and with a file it writes: a file's name and its
-  // bytes are shown outside the run once it's finished (run-files.ts), so
-  // opening, appending to and finishing one are gated too. Not once the
+  // and with a file it writes: a file's name and its bytes are shown
+  // outside the run once it's finished (run-files.ts), so a step's write
+  // is gated too. Not once the
   // run may no longer read it (resource-reads.ts), refused with its
   // receipt kept as `brain.revoked`. Reading, listing or deleting its own
   // files hands nothing out.

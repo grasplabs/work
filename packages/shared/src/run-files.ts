@@ -313,12 +313,12 @@ export interface RunFileListing {
 export const runFileErrors = defineErrorFamily({
   "file.run_too_large": `A run's file is at most ${runFileLimits.fileBytes / mib} MB.`,
   "file.run_full": `A run keeps at most ${runFileLimits.runFiles} files and ${runFileLimits.runBytes / mib} MB of them.`,
-  "file.writes_open": `A run writes at most ${runFileLimits.openWrites} files at once: finish one first.`,
+  "file.writes_open": `A run writes at most ${runFileLimits.openWrites} files at once.`,
   "file.workflow_quota": `This workflow's runs keep at most ${runFileLimits.workflowBytes / gib} GB of files: older runs' files go with their details.`,
   "file.run_type_unsupported":
     "A run's file is a PNG, JPEG, GIF or WebP image, a PDF, a Word or Excel document, or plain text, CSV, Markdown or JSON.",
   "file.not_writable":
-    "That file isn't being written by this task: only the task that started it writes it, until it is finished.",
+    "That file isn't being written by this step: only the step that started it writes it.",
   "file.not_finished": "That file isn't finished yet.",
   "file.not_readable": `A workflow reads a run's file whole only when it is plain text, CSV, Markdown or JSON of at most ${runFileLimits.callBytes / kib} KB, as a step records it.`,
   "file.start_files": `A start hands its run at most ${runFileLimits.startFiles} files, each only from the App's page that starts it.`,
