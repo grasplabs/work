@@ -80,7 +80,7 @@ import {
   sharePlaceFile,
 } from "./document-places.ts";
 import { shareDocument } from "./documents.ts";
-import { gateView } from "./gate.ts";
+import { gateView, openAsFlowSays } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
 import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
@@ -382,10 +382,14 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         setupPlaceSchema,
         { done: steps }
       );
-      return await onboardingStore(this.#env).finishSteps(
+      const place = await onboardingStore(this.#env).finishSteps(
         parsed.done,
         actorOf(person)
       );
+      // The last screen of an onboarding that interviews nobody opens the
+      // company's Grasp, as its admin.
+      await openAsFlowSays(this.#env, actorOf(person));
+      return place;
     });
   }
 

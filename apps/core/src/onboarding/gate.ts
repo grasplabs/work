@@ -5,6 +5,7 @@ import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import { flowOpening, flowScreens } from "@grasp-os/shared/onboarding-flow";
 import {
   gateThresholdDefault,
   gateThresholds,
@@ -328,8 +329,22 @@ export const endStaffAccess = async (
   ]);
 };
 
-/** Grasp's go: opens the gate to everyone in the company. */
-export const openGate = async (env: Env, by: AuditActor): Promise<void> => {
+/**
+ * Why the gate opened: Grasp's `go`; the admin `finished` the last screen
+ * of an onboarding that interviews nobody; or the company goes through
+ * `no_onboarding` at all.
+ */
+export type GateOpening = "go" | "finished" | "no_onboarding";
+
+/**
+ * Opens the gate to everyone in the company: on Grasp's go, unless
+ * `reason` says the company's flow opened it. On record with why.
+ */
+export const openGate = async (
+  env: Env,
+  by: AuditActor,
+  reason: GateOpening = "go"
+): Promise<void> => {
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
@@ -347,7 +362,7 @@ export const openGate = async (env: Env, by: AuditActor): Promise<void> => {
       actor: by,
       action: "onboarding.gate.opened",
       target: { type: "deployment", id: gateRow },
-      detail: {},
+      detail: { reason },
     }),
   ]);
 };
@@ -375,4 +390,35 @@ export const setGateThreshold = async (
       detail: { threshold },
     }),
   ]);
+};
+
+/**
+ * Opens the gate where the company's flow says it opens by itself, as
+ * `by`, who just changed the flow or finished a screen: at once where it
+ * goes through no onboarding; and where nobody is interviewed, once its
+ * admin finished every screen the flow has. A flow with interviews opens
+ * only on Grasp's go. Opening is all it does: a flow never closes the
+ * gate, which stays staff's to do, and an open gate is left as it is.
+ */
+export const openAsFlowSays = async (
+  env: Env,
+  by: AuditActor
+): Promise<void> => {
+  const store = onboardingStore(env);
+  const { flow } = await store.flow();
+  const opening = flowOpening(flow);
+  if (opening === "go") {
+    return;
+  }
+  if (opening === "finished") {
+    const { done } = await store.place();
+    if (!flowScreens(flow).every((screen) => done.includes(screen))) {
+      return;
+    }
+  }
+  await openGate(
+    env,
+    by,
+    opening === "finished" ? "finished" : "no_onboarding"
+  );
 };
