@@ -14,7 +14,7 @@
 //! Two builds (build.sh): oxc.wasm, all of it, a wasm32-wasip1 module the
 //! compiler's isolates load (packages/compiler/src/oxc.ts); and
 //! oxc-parse.wasm, the parser alone, a wasm32-unknown-unknown module with
-//! no imports, which core's Worker loads (packages/sdk/src/oxc-parse.ts).
+//! no imports, which core's Worker loads (packages/runtime/src/oxc-parse.ts).
 //!
 //! Delete this crate once oxc publishes threadless WebAssembly builds of
 //! its linter, formatter, React transform and parser that start small.
