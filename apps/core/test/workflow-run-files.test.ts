@@ -1,9 +1,12 @@
-import { sha256HexOfBytes, toBase64 } from "@grasp-os/shared/encoding";
+import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runFileLimits } from "@grasp-os/shared/run-files";
+import type { RunFileType } from "@grasp-os/shared/run-files";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -16,18 +19,21 @@ import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import {
   callFiles,
   keepFile,
+  runFilesRemoved,
   sweepGraceMs,
   sweepRunFiles,
 } from "../src/workflows/run-files.ts";
-import type { FilesCaller } from "../src/workflows/run-files.ts";
+import type { FilesAnswer, FilesCaller } from "../src/workflows/run-files.ts";
 import { startFilesOf } from "./run-file-starts.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // A workflow run's own files (GRA-724, workflows/run-files.ts), from its
-// threat model, through the files host itself: only the task that opened
-// a file writes it, and a replay writes nothing twice; its bytes are what
-// its type says; every limit holds before bytes are stored; it goes with
-// its run's details, and what R2 refuses is deleted on the next sweep.
+// threat model, through the files host itself: what a step asks of them
+// (`callFiles`: read, write, list, delete) and what a connector read keeps
+// as a file (`keepFile`). A replay writes nothing twice; a stale attempt
+// stores and seals nothing; a file's bytes are what its type says; every
+// limit holds before bytes are stored; a file is its run's alone; it goes
+// with its run's details, and what R2 refuses is deleted on the next sweep.
 
 const identityOf = (userId: string, role: Role): Identity => ({
   userId,
@@ -60,6 +66,8 @@ const person = async (role: Role): Promise<Identity> => {
 const bodyOf = (size: number): string =>
   "abcdefghij".repeat(Math.ceil(size / 10)).slice(0, size);
 
+const utf8 = new TextEncoder();
+
 /** A workflow taking a file, whose run says which file it was handed. */
 const definition = JSON.stringify({
   $schema: workflowSchemaUrl,
@@ -79,7 +87,7 @@ const handedRun = async (by: Identity): Promise<string> => {
   const handed = await startFilesOf({
     name: "a.csv",
     type: "text/csv",
-    chunks: [new TextEncoder().encode(bodyOf(10))],
+    chunks: [utf8.encode(bodyOf(10))],
   });
   const { runId } = await startWorkflow(
     env,
@@ -107,7 +115,7 @@ const handedRun = async (by: Identity): Promise<string> => {
 /** An attempt that still holds its lease. */
 const holds = (): void => undefined;
 
-/** A caller of the files host for a run of its own (`callFiles`). */
+/** A caller of the files host for a run of its own, as a task's step is. */
 const callerOf = (
   run = crypto.randomUUID(),
   workflowId = crypto.randomUUID(),
@@ -146,6 +154,18 @@ const staleFrom = (nth: number): (() => void) => {
       throw new Error("The attempt went stale");
     }
   };
+};
+
+/**
+ * Lease checks `keepFile` makes of `pieces` pieces before it seals: one
+ * as it opens, three a piece (before it reserves, again as it reserves,
+ * again before its put), one as it finishes; the next is the one before
+ * its seal.
+ */
+const checksBefore = {
+  piece: (n: number): number => 2 + 3 * n,
+  finish: (pieces: number): number => 2 + 3 * pieces,
+  seal: (pieces: number): number => 3 + 3 * pieces,
 };
 
 /**
@@ -200,340 +220,352 @@ const failingOn = (method: "put" | "delete"): R2Bucket =>
         : Reflect.get(target, property),
   });
 
-const base64Of = (text: string): string =>
-  toBase64(new TextEncoder().encode(text));
-
 /** The R2 objects run `runId`'s files are kept in. */
 const objectsOf = async (runId: string): Promise<number> => {
   const listed = await env.FILES.list({ prefix: `run-files/${runId}/` });
   return listed.objects.length;
 };
 
-/** The rows of run `runId`'s files, by state. */
+/** The states of run `runId`'s files, in order of state. */
 const rowsOf = async (runId: string) => {
   const { results } = await env.DB.prepare(
-    "SELECT state FROM workflow_run_files WHERE run_id = ? ORDER BY created_at"
+    "SELECT state FROM workflow_run_files WHERE run_id = ? ORDER BY state"
   )
     .bind(runId)
     .all<{ state: string }>();
   return results.map(({ state }) => state);
 };
 
-/** Opens, appends `text` to and finishes a file of `caller`'s run. */
+/** The ID and size of the file run `runId` is still writing. */
+const writingOf = async (runId: string) => {
+  const row = await env.DB.prepare(
+    "SELECT id, size FROM workflow_run_files WHERE run_id = ? AND state = 'writing'"
+  )
+    .bind(runId)
+    .first<{ id: string; size: number }>();
+  if (row === null) {
+    throw new Error("The run writes no file");
+  }
+  return row;
+};
+
+/** What a files call answered. */
+const outputOf = async (pending: Promise<FilesAnswer>): Promise<unknown> => {
+  const { output } = await pending;
+  return output;
+};
+
+/** The size of the file run `runId` is still writing. */
+const writingSizeOf = async (runId: string): Promise<number> => {
+  const { size } = await writingOf(runId);
+  return size;
+};
+
+/** The ID of the file run `runId` is still writing. */
+const writingIdOf = async (runId: string): Promise<string> => {
+  const { id } = await writingOf(runId);
+  return id;
+};
+
+/** Marks run `runId`'s files deleted, as its details going does. */
+const detailsGone = async (runId: string): Promise<void> => {
+  await runFilesRemoved(drizzle(env.DB), sql`(SELECT ${runId})`);
+};
+
+/** A step's whole write of `text` to a file of `caller`'s run. */
 const written = async (
   caller: ReturnType<typeof callerOf>,
   text: string,
-  type = "text/plain"
+  name = "a.txt"
 ) => {
-  const opened = await callFiles(env, caller.next(), "open", {
-    name: "a.txt",
-    type,
+  const done = await callFiles(env, caller.next(), "write", {
+    name,
+    type: "text/plain",
+    text,
   });
-  const file = String(fieldOf(opened.output, "file"));
-  await callFiles(env, caller.next(), "append", {
-    file,
-    content: base64Of(text),
-  });
-  const done = await callFiles(env, caller.next(), "finish", { file });
-  return { file, ref: done.output };
+  return { file: String(fieldOf(done.output, "file")), ref: done.output };
 };
 
-describe("a workflow run's own files", () => {
-  it("take only the task that opened a file as its writer, and a replay writes nothing twice", async () => {
-    const caller = callerOf();
-    const opened = await callFiles(env, caller.next(), "open", {
-      name: "a.txt",
-      type: "text/plain",
-    });
-    const file = String(fieldOf(opened.output, "file"));
-    await callFiles(env, caller.next(), "append", {
-      file,
-      content: base64Of("half"),
-    });
-    // The attempt died here; its replay opens and adds the same again.
-    const reopened = await callFiles(env, caller.again(1), "open", {
-      name: "a.txt",
-      type: "text/plain",
-    });
-    const replayed = await callFiles(env, caller.again(2), "append", {
-      file,
-      content: base64Of("half"),
-    });
-    // A piece whose put failed is stored by the same append again.
-    const failing = { ...env, FILES: failingOn("put") };
-    const third = caller.next();
-    const putFailed = await outcome(
-      callFiles(failing, third, "append", { file, content: base64Of(" way") })
-    );
-    await callFiles(env, third, "append", { file, content: base64Of(" way") });
-    const finishing = caller.next();
-    const done = await callFiles(env, finishing, "finish", { file });
-    // The whole attempt again, after it finished the file: each call
-    // answers what it did the first time.
-    const afterFinish = {
-      open: await outcome(
-        callFiles(env, caller.again(1), "open", {
-          name: "a.txt",
-          type: "text/plain",
-        })
-      ),
-      append: await outcome(
-        callFiles(env, caller.again(2), "append", {
-          file,
-          content: base64Of("half"),
-        })
-      ),
-      finish: await callFiles(env, finishing, "finish", { file }),
-    };
-    // An empty text file is one; an empty binary one isn't what it says.
-    const empty = async (type: string) => {
-      const emptyFile = await callFiles(env, caller.next(), "open", {
-        name: "empty",
-        type,
-      });
-      return await outcome(
-        callFiles(env, caller.next(), "finish", {
-          file: String(fieldOf(emptyFile.output, "file")),
-        })
-      );
-    };
-    const emptyText = await empty("text/plain");
-    const emptyPng = await empty("image/png");
-    // Another task of the same run neither adds to it nor finishes it.
-    const other = callerOf(caller.run, caller.workflowId);
-    const secondFile = await callFiles(env, caller.next(), "open", {
-      name: "b.txt",
-      type: "text/plain",
-    });
-    const second = String(fieldOf(secondFile.output, "file"));
-    const read = await callFiles(env, caller.next(), "read", {
-      file,
-      offset: 0,
-      length: 100,
-    });
-    expect({
-      sameFile: fieldOf(reopened.output, "file") === file,
-      replayedSize: replayed.output,
-      putFailed,
-      done: done.output,
-      read: atob(String(fieldOf(read.output, "content"))),
-      afterFinish: { ...afterFinish, finish: afterFinish.finish.output },
-      emptyText,
-      emptyPng,
-      otherAppends: await outcome(
-        callFiles(env, other.next(), "append", {
-          file: second,
-          content: base64Of("x"),
-        })
-      ),
-      otherFinishes: await outcome(
-        callFiles(env, other.next(), "finish", { file: second })
-      ),
-    }).toStrictEqual({
-      sameFile: true,
-      replayedSize: { size: 4 },
-      putFailed: "Error: R2 is down",
-      done: {
-        file,
-        name: "a.txt",
-        type: "text/plain",
-        size: 8,
-        sha256: await sha256HexOfBytes(new TextEncoder().encode("half way")),
-      },
-      read: "half way",
-      afterFinish: {
-        open: "ok",
-        append: "ok",
-        finish: {
-          file,
-          name: "a.txt",
-          type: "text/plain",
-          size: 8,
-          sha256: await sha256HexOfBytes(new TextEncoder().encode("half way")),
-        },
-      },
-      emptyText: "ok",
-      emptyPng: "file.content_mismatch",
-      otherAppends: "file.not_writable",
-      otherFinishes: "file.not_writable",
-    });
-  });
+/** A CSV file named `name`, as a connector read keeps one. */
+const csvOf = (name: string) => ({ name, type: "text/csv" as const });
 
-  it("answer a replayed delete as done, refuse a replayed open that asks for another file, and refuse a stale attempt before anything is stored", async () => {
+const note = { name: "notes.md", type: "text/markdown", text: "# Notes" };
+
+/** What a run's file is, as a step is handed it. */
+const refOf = async (file: string, name: string, text: string) => ({
+  file,
+  name,
+  type: name.endsWith(".md") ? "text/markdown" : "text/plain",
+  size: utf8.encode(text).length,
+  sha256: await sha256HexOfBytes(utf8.encode(text)),
+});
+
+describe("a workflow run's own files", () => {
+  it("write a file once however often its call is made again, storing a piece whose put failed by the same call again", async () => {
     const caller = callerOf();
-    const { file } = await written(caller, "gone");
-    const deleting = caller.next();
-    const deleted = await outcome(callFiles(env, deleting, "delete", { file }));
-    const deletedAgain = await outcome(
-      callFiles(env, deleting, "delete", { file })
+    const writing = caller.next();
+    // Its piece reserved, its put refused: the same call again stores it.
+    const putFailed = await outcome(
+      callFiles({ ...env, FILES: failingOn("put") }, writing, "write", note)
     );
-    const opening = caller.next();
-    const opened = await callFiles(env, opening, "open", {
-      name: "b.txt",
-      type: "text/plain",
-    });
-    const openFile = String(fieldOf(opened.output, "file"));
+    const first = await callFiles(env, writing, "write", note);
+    const file = String(fieldOf(first.output, "file"));
+    const replayed = await callFiles(env, writing, "write", note);
+    // The same call again asking for another file, or other text.
     const otherName = await outcome(
-      callFiles(env, opening, "open", { name: "c.txt", type: "text/plain" })
+      callFiles(env, writing, "write", { ...note, name: "other.md" })
     );
-    const otherType = await outcome(
-      callFiles(env, opening, "open", { name: "b.txt", type: "text/csv" })
+    const otherText = await outcome(
+      callFiles(env, writing, "write", { ...note, text: "# Other" })
     );
-    // Stale from its first check: refused before anything is decided.
-    const staleCall = await outcome(
-      callFiles(env, caller.next(staleFrom(1)), "append", {
-        file: openFile,
-        content: base64Of("late"),
-      })
+    // The lease lost once the file is open, before its text is added: the
+    // next attempt writes the file the first opened.
+    const lost = caller.next(staleFrom(3));
+    const died = await outcome(callFiles(env, lost, "write", note));
+    const retried = await callFiles(
+      env,
+      { ...lost, requireHolds: holds },
+      "write",
+      note
     );
-    // Stale by the time it would reserve its bytes: nothing reserved.
-    const staleReserve = await outcome(
-      callFiles(env, caller.next(staleFrom(2)), "append", {
-        file: openFile,
-        content: base64Of("late"),
-      })
-    );
-    const reservedSize = await env.DB.prepare(
-      "SELECT size FROM workflow_run_files WHERE id = ?"
-    )
-      .bind(openFile)
-      .first<{ size: number }>();
-    // Stale by the time its bytes would go to R2.
-    const stalePut = await outcome(
-      callFiles(env, caller.next(staleFrom(3)), "append", {
-        file: openFile,
-        content: base64Of("late"),
-      })
-    );
-    // Stale by the time it would mark the file deleted: still there.
-    const staleDelete = await outcome(
-      callFiles(env, caller.next(staleFrom(2)), "delete", { file: openFile })
-    );
-    // Stale by the time a file not of its type would be deleted, after
-    // hashing it: refused, the file left as it was.
-    const mismatched = caller.next();
-    const wrong = await callFiles(env, mismatched, "open", {
-      name: "w.txt",
-      type: "text/plain",
-    });
-    const wrongFile = String(fieldOf(wrong.output, "file"));
-    await callFiles(env, caller.next(), "append", {
-      file: wrongFile,
-      content: toBase64(Uint8Array.of(0x61, 0xff)),
-    });
-    const staleMismatch = await outcome(
-      callFiles(env, caller.next(staleFrom(2)), "finish", { file: wrongFile })
-    );
-    const rowsAfterStale = await rowsOf(caller.run);
     expect({
-      deleted,
-      deletedAgain,
+      putFailed,
+      first: first.output,
+      replayed: replayed.output,
       otherName,
-      otherType,
-      staleDelete,
-      staleMismatch,
-      rowsAfterStale: rowsAfterStale.slice(1),
-      staleCall,
-      staleReserve,
-      reserved: reservedSize?.size,
-      stalePut,
-      stored: await objectsOf(caller.run),
+      otherText,
+      died,
+      retried: fieldOf(retried.output, "file") !== file,
+      rows: await rowsOf(caller.run),
+      objects: await objectsOf(caller.run),
     }).toStrictEqual({
-      deleted: "ok",
-      deletedAgain: "ok",
+      putFailed: "Error: R2 is down",
+      first: await refOf(file, "notes.md", note.text),
+      replayed: await refOf(file, "notes.md", note.text),
       otherName: "workflow.call_invalid",
-      otherType: "workflow.call_invalid",
-      staleDelete: "Error: The attempt went stale",
-      staleMismatch: "Error: The attempt went stale",
-      // The open file and the mismatched one, both still being written.
-      rowsAfterStale: ["writing", "writing"],
-      staleCall: "Error: The attempt went stale",
-      staleReserve: "Error: The attempt went stale",
-      reserved: 0,
-      stalePut: "Error: The attempt went stale",
-      // The deleted file's bytes, which the sweep takes later, and the
-      // mismatched file's, still being written.
-      stored: 2,
+      otherText: "workflow.call_invalid",
+      died: "Error: The attempt went stale",
+      retried: true,
+      rows: ["done", "done"],
+      objects: 2,
     });
   });
 
   it("answer an attempt's calls again as they answered, once its own later call deleted the file, storing nothing again", async () => {
     const caller = callerOf();
-    const opened = await callFiles(env, caller.next(), "open", {
-      name: "short.txt",
-      type: "text/plain",
-    });
-    const file = String(fieldOf(opened.output, "file"));
-    const appended = await callFiles(env, caller.next(), "append", {
-      file,
-      content: base64Of("hello"),
-    });
-    const finished = await callFiles(env, caller.next(), "finish", { file });
-    await callFiles(env, caller.next(), "delete", { file });
+    const { file, ref } = await written(caller, "hello");
+    const read = await callFiles(env, caller.next(), "read", { file });
+    const deleted = await callFiles(env, caller.next(), "delete", { file });
     const stored = await objectsOf(caller.run);
     // The attempt cut off after its delete: its calls, replayed in order.
-    const openAgain = await callFiles(env, caller.again(1), "open", {
-      name: "short.txt",
-      type: "text/plain",
-    });
-    const appendAgain = await callFiles(env, caller.again(2), "append", {
-      file,
-      content: base64Of("hello"),
-    });
-    const finishAgain = await callFiles(env, caller.again(3), "finish", {
-      file,
-    });
     const replayed = {
-      open: openAgain.output,
-      append: appendAgain.output,
-      finish: finishAgain.output,
-      delete: await outcome(
-        callFiles(env, caller.again(4), "delete", { file })
+      write: await outputOf(
+        callFiles(env, caller.again(1), "write", {
+          name: "a.txt",
+          type: "text/plain",
+          text: "hello",
+        })
+      ),
+      delete: await outputOf(
+        callFiles(env, caller.again(3), "delete", { file })
       ),
     };
     // A new call finds it gone.
-    const later = await outcome(
-      callFiles(env, caller.next(), "append", {
-        file,
-        content: base64Of("more"),
-      })
-    );
+    const later = {
+      read: await outcome(callFiles(env, caller.next(), "read", { file })),
+      delete: await outcome(callFiles(env, caller.next(), "delete", { file })),
+      list: await outputOf(callFiles(env, caller.next(), "list", {})),
+    };
     expect({
+      read: read.output,
+      deleted: deleted.output,
       replayed,
       later,
       storedAgain: (await objectsOf(caller.run)) - stored,
     }).toStrictEqual({
-      replayed: {
-        open: opened.output,
-        append: appended.output,
-        finish: finished.output,
-        delete: "ok",
-      },
-      later: "file.not_found",
+      read: { file: ref, text: "hello" },
+      deleted: null,
+      replayed: { write: ref, delete: null },
+      // A delete again answers as done: the file is gone either way.
+      later: { read: "file.not_found", delete: "ok", list: [] },
       storedAgain: 0,
     });
   });
 
-  it("leave no bytes behind when a delete and a sweep land while an append is under way, and finish only the file as hashed", async () => {
-    // The file deleted, and swept within the grace, while its append's put
+  it("are their run's alone: another run finds, lists and deletes none of them", async () => {
+    const workflowId = crypto.randomUUID();
+    const owner = callerOf(crypto.randomUUID(), workflowId);
+    const { file, ref } = await written(owner, "mine");
+    // Another run of the same workflow, holding the file's ID.
+    const other = callerOf(crypto.randomUUID(), workflowId);
+    expect({
+      read: await outcome(callFiles(env, other.next(), "read", { file })),
+      delete: await outcome(callFiles(env, other.next(), "delete", { file })),
+      list: await outputOf(callFiles(env, other.next(), "list", {})),
+      owners: await outputOf(callFiles(env, owner.next(), "list", {})),
+    }).toStrictEqual({
+      read: "file.not_found",
+      delete: "file.not_found",
+      list: [],
+      owners: [ref],
+    });
+  });
+
+  it("delete a finished file only, never one a task is still writing, nor list or read one", async () => {
+    const caller = callerOf();
+    const done = await written(caller, "kept");
+    // A file whose write went stale before it was sealed.
+    await outcome(
+      callFiles(
+        env,
+        caller.next(staleFrom(checksBefore.seal(1) + 1)),
+        "write",
+        {
+          name: "draft.txt",
+          type: "text/plain",
+          text: "draft",
+        }
+      )
+    );
+    const draft = await writingOf(caller.run);
+    expect({
+      deleteDraft: await outcome(
+        callFiles(env, caller.next(), "delete", { file: draft.id })
+      ),
+      readDraft: await outcome(
+        callFiles(env, caller.next(), "read", { file: draft.id })
+      ),
+      listed: await outputOf(callFiles(env, caller.next(), "list", {})),
+      deleteDone: await outputOf(
+        callFiles(env, caller.next(), "delete", { file: done.file })
+      ),
+      rows: await rowsOf(caller.run),
+    }).toStrictEqual({
+      deleteDraft: "file.not_finished",
+      readDraft: "file.not_finished",
+      listed: [done.ref],
+      deleteDone: null,
+      rows: ["deleted", "writing"],
+    });
+  });
+
+  it("read only a text file whole, within a call's bytes and as its step records it", async () => {
+    const caller = callerOf();
+    const readOf = async (
+      bytes: Uint8Array,
+      type: RunFileType = "text/plain"
+    ) => {
+      const kept = await keepFile(env, caller.next(), {
+        name: "f.txt",
+        type,
+        bytes,
+      });
+      return await outcome(
+        callFiles(env, caller.next(), "read", {
+          file: String(fieldOf(kept.output, "file")),
+        })
+      );
+    };
+    expect({
+      plain: await readOf(utf8.encode("a".repeat(256 * 1024))),
+      // Within one call's bytes, but six times as long as JSON escapes it.
+      escaped: await readOf(utf8.encode("\u0001".repeat(256 * 1024))),
+      pastCall: await readOf(utf8.encode(bodyOf(runFileLimits.callBytes + 1))),
+      png: await readOf(
+        Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0),
+        "image/png"
+      ),
+    }).toStrictEqual({
+      plain: "ok",
+      escaped: "file.not_readable",
+      pastCall: "file.not_readable",
+      png: "file.not_readable",
+    });
+  });
+
+  it("refuse a stale attempt before anything is stored or sealed, and leave a file it would have deleted", async () => {
+    const write = { name: "b.txt", type: "text/plain", text: "late" };
+    // Stale from its first check: refused before anything is decided.
+    const atCall = callerOf();
+    const staleCall = await outcome(
+      callFiles(env, atCall.next(staleFrom(1)), "write", write)
+    );
+    // Stale by the time it would reserve its bytes: nothing reserved.
+    const atReserve = callerOf();
+    const staleReserve = await outcome(
+      callFiles(
+        env,
+        atReserve.next(staleFrom(checksBefore.piece(0) + 2)),
+        "write",
+        write
+      )
+    );
+    // Stale by the time its bytes would go to R2: reserved, never stored.
+    const atPut = callerOf();
+    const stalePut = await outcome(
+      callFiles(
+        env,
+        atPut.next(staleFrom(checksBefore.piece(0) + 3)),
+        "write",
+        write
+      )
+    );
+    // Stale by the time it would mark a file deleted: still there.
+    const atDelete = callerOf();
+    const { file } = await written(atDelete, "kept");
+    const staleDelete = await outcome(
+      callFiles(env, atDelete.next(staleFrom(2)), "delete", { file })
+    );
+    // Stale by the time a file not of its type would be deleted, after
+    // hashing it: refused, the file left as it was.
+    const atMismatch = callerOf();
+    const staleMismatch = await outcome(
+      keepFile(env, atMismatch.next(staleFrom(checksBefore.seal(1))), {
+        name: "w.txt",
+        type: "text/plain",
+        bytes: Uint8Array.of(0x61, 0xff),
+      })
+    );
+    expect({
+      staleCall,
+      callRows: await rowsOf(atCall.run),
+      staleReserve,
+      reserved: await writingSizeOf(atReserve.run),
+      stalePut,
+      put: {
+        reserved: await writingSizeOf(atPut.run),
+        objects: await objectsOf(atPut.run),
+      },
+      staleDelete,
+      deleteRows: await rowsOf(atDelete.run),
+      staleMismatch,
+      mismatchRows: await rowsOf(atMismatch.run),
+    }).toStrictEqual({
+      staleCall: "Error: The attempt went stale",
+      callRows: [],
+      staleReserve: "Error: The attempt went stale",
+      reserved: 0,
+      stalePut: "Error: The attempt went stale",
+      put: { reserved: 4, objects: 0 },
+      staleDelete: "Error: The attempt went stale",
+      deleteRows: ["done"],
+      staleMismatch: "Error: The attempt went stale",
+      mismatchRows: ["writing"],
+    });
+  });
+
+  it("leave no bytes behind when its run's details go and a sweep lands while a write is under way, and finish only the file as hashed", async () => {
+    const write = { name: "a.txt", type: "text/plain", text: "racing" };
+    // The file deleted, and swept within the grace, while its write's put
     // is under way: the sweep leaves the chunk, the put lands and finds its
     // file gone, so deletes its object again; a later sweep takes the row.
     const graced = callerOf();
-    const gracedOpen = await callFiles(env, graced.next(), "open", {
-      name: "a.txt",
-      type: "text/plain",
-    });
-    const gracedFile = String(fieldOf(gracedOpen.output, "file"));
-    const deleter = graced.next();
     const sweptDuring = runningBefore("put", async () => {
-      await callFiles(env, deleter, "delete", { file: gracedFile });
+      await detailsGone(graced.run);
       await sweepRunFiles(env, new Date());
     });
-    const gracedAppend = await outcome(
-      callFiles({ ...env, FILES: sweptDuring }, graced.next(), "append", {
-        file: gracedFile,
-        content: base64Of("racing"),
-      })
+    const gracedWrite = await outcome(
+      callFiles({ ...env, FILES: sweptDuring }, graced.next(), "write", write)
     );
     const gracedDuring = await objectsOf(graced.run);
     await sweepRunFiles(env, new Date(Date.now() + sweepGraceMs + 1000));
@@ -544,31 +576,16 @@ describe("a workflow run's own files", () => {
     // A put that lands after its chunk was swept all the same (an attempt
     // past the grace): its object is deleted again.
     const late = callerOf();
-    const lateOpen = await callFiles(env, late.next(), "open", {
-      name: "a.txt",
-      type: "text/plain",
-    });
-    const lateFile = String(fieldOf(lateOpen.output, "file"));
-    const lateDeleter = late.next();
     const sweptPast = runningBefore("put", async () => {
-      await callFiles(env, lateDeleter, "delete", { file: lateFile });
+      await detailsGone(late.run);
       await sweepRunFiles(env, new Date(Date.now() + sweepGraceMs + 1000));
     });
-    const lateAppend = await outcome(
-      callFiles({ ...env, FILES: sweptPast }, late.next(), "append", {
-        file: lateFile,
-        content: base64Of("racing"),
-      })
+    const lateWrite = await outcome(
+      callFiles({ ...env, FILES: sweptPast }, late.next(), "write", write)
     );
     // A put that lands after the sweep deleted the chunk's object from R2,
     // but before it deleted the chunk's row: kept by neither.
     const between = callerOf();
-    const betweenOpen = await callFiles(env, between.next(), "open", {
-      name: "a.txt",
-      type: "text/plain",
-    });
-    const betweenFile = String(fieldOf(betweenOpen.output, "file"));
-    const betweenDeleter = between.next();
     const { promise: held, resolve: release } =
       Promise.withResolvers<boolean>();
     const { promise: atPut, resolve: reachedPut } =
@@ -577,15 +594,12 @@ describe("a workflow run's own files", () => {
       reachedPut(true);
       await held;
     });
-    const betweenAppend = outcome(
-      callFiles({ ...env, FILES: putHeld }, between.next(), "append", {
-        file: betweenFile,
-        content: base64Of("racing"),
-      })
+    const betweenWrite = outcome(
+      callFiles({ ...env, FILES: putHeld }, between.next(), "write", write)
     );
     await atPut;
-    await callFiles(env, betweenDeleter, "delete", { file: betweenFile });
-    // The sweep's R2 delete lets the put land, and waits for the append to
+    await detailsGone(between.run);
+    // The sweep's R2 delete lets the put land, and waits for the write to
     // end, before the sweep goes on to the chunk's row.
     const deleteThenPut = new Proxy(env.FILES, {
       get: (target, property): unknown => {
@@ -597,7 +611,7 @@ describe("a workflow run's own files", () => {
           ? async (...args: unknown[]) => {
               const result: unknown = await Reflect.apply(value, target, args);
               release(true);
-              await betweenAppend;
+              await betweenWrite;
               return result;
             }
           : (...args: unknown[]): unknown => Reflect.apply(value, target, args);
@@ -607,46 +621,35 @@ describe("a workflow run's own files", () => {
       { ...env, FILES: deleteThenPut },
       new Date(Date.now() + sweepGraceMs + 1000)
     );
-    const betweenResult = await betweenAppend;
-    // An append that grows the file while it is being hashed.
+    const betweenResult = await betweenWrite;
+    // A write that grows the file while it is being hashed.
     const grown = callerOf();
-    const grownOpen = await callFiles(env, grown.next(), "open", {
-      name: "a.txt",
-      type: "text/plain",
-    });
-    const grownFile = String(fieldOf(grownOpen.output, "file"));
-    await callFiles(env, grown.next(), "append", {
-      file: grownFile,
-      content: base64Of("abc"),
-    });
     const growing = runningBefore("get", async () => {
-      await grow(1, grownFile);
+      await grow(1, await writingIdOf(grown.run));
     });
-    const grownFinish = await outcome(
-      callFiles({ ...env, FILES: growing }, grown.next(), "finish", {
-        file: grownFile,
-      })
+    const grownWrite = await outcome(
+      callFiles({ ...env, FILES: growing }, grown.next(), "write", write)
     );
     expect({
-      gracedAppend,
+      gracedWrite,
       gracedDuring,
       gracedAfter,
-      lateAppend,
+      lateWrite,
       lateObjects: await objectsOf(late.run),
       betweenResult,
       betweenObjects: await objectsOf(between.run),
-      grownFinish,
+      grownWrite,
       grownRows: await rowsOf(grown.run),
     }).toStrictEqual({
       // Its file deleted while it was under way: nothing kept.
-      gracedAppend: "file.not_found",
+      gracedWrite: "file.not_found",
       gracedDuring: 0,
       gracedAfter: { objects: 0, rows: [] },
-      lateAppend: "file.not_found",
+      lateWrite: "file.not_found",
       lateObjects: 0,
       betweenResult: "file.not_found",
       betweenObjects: 0,
-      grownFinish: "file.incomplete",
+      grownWrite: "file.incomplete",
       grownRows: ["writing"],
     });
   });
@@ -683,21 +686,21 @@ describe("a workflow run's own files", () => {
   it("check a file's bytes against its type: a signature for a binary type, UTF-8 for text", async () => {
     const caller = callerOf();
     const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
-    const asType = async (bytes: number[] | string, type: string) => {
-      const opened = await callFiles(env, caller.next(), "open", {
-        name: type.includes("officedocument") ? "f.docx" : "f",
-        type,
-      });
-      const file = String(fieldOf(opened.output, "file"));
-      await callFiles(env, caller.next(), "append", {
-        file,
-        content:
-          typeof bytes === "string"
-            ? base64Of(bytes)
-            : toBase64(Uint8Array.from(bytes)),
-      });
-      return await outcome(callFiles(env, caller.next(), "finish", { file }));
-    };
+    const asType = async (bytes: number[] | string, type: RunFileType) =>
+      await outcome(
+        keepFile(env, caller.next(), {
+          name: type.includes("officedocument") ? "f.docx" : "f",
+          type,
+          bytes:
+            typeof bytes === "string"
+              ? utf8.encode(bytes)
+              : Uint8Array.from(bytes),
+        })
+      );
+    const writing = async (type: string) =>
+      await outcome(
+        callFiles(env, caller.next(), "write", { name: "f", type, text: "x" })
+      );
     expect({
       png: await asType(png, "image/png"),
       pngAsText: await asType(png, "text/plain"),
@@ -709,9 +712,14 @@ describe("a workflow run's own files", () => {
         [0x50, 0x4b, 0x03, 0x04, 1],
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ),
-      unlisted: await outcome(
-        callFiles(env, caller.next(), "open", { name: "x", type: "text/html" })
-      ),
+      // An empty text file is one; an empty binary one isn't what it says.
+      emptyText: await asType([], "text/plain"),
+      emptyPng: await asType([], "image/png"),
+      // A step writes text of a text type only.
+      writtenPng: await writing("image/png"),
+      writtenUnlisted: await writing("text/html"),
+      // Not what it says it is: none holds a place in the run.
+      rows: await rowsOf(caller.run),
     }).toStrictEqual({
       png: "ok",
       pngAsText: "file.content_mismatch",
@@ -720,7 +728,21 @@ describe("a workflow run's own files", () => {
       notUtf8: "file.content_mismatch",
       nul: "file.content_mismatch",
       docx: "ok",
-      unlisted: "workflow.call_invalid",
+      emptyText: "ok",
+      emptyPng: "file.content_mismatch",
+      writtenPng: "workflow.call_invalid",
+      writtenUnlisted: "workflow.call_invalid",
+      rows: [
+        "deleted",
+        "deleted",
+        "deleted",
+        "deleted",
+        "deleted",
+        "done",
+        "done",
+        "done",
+        "done",
+      ],
     });
   });
 
@@ -728,7 +750,7 @@ describe("a workflow run's own files", () => {
     const caller = callerOf();
     // Past one call's bytes: written in pieces.
     const text = bodyOf(runFileLimits.callBytes * 2 + 10);
-    const bytes = new TextEncoder().encode(text);
+    const bytes = utf8.encode(text);
     const keeping = caller.next();
     const kept = await keepFile(env, keeping, {
       name: "report.csv",
@@ -746,60 +768,38 @@ describe("a workflow run's own files", () => {
       keepFile(env, keeping, {
         name: "report.csv",
         type: "text/csv",
-        bytes: new TextEncoder().encode(bodyOf(10)),
+        bytes: utf8.encode(bodyOf(10)),
       })
     );
-    const read = await callFiles(env, caller.next(), "read", {
-      file,
-      offset: 0,
-      length: runFileLimits.callBytes,
-    });
-    // Not text it says it is: refused, and it holds no place in the run.
-    const notText = await outcome(
-      keepFile(env, caller.next(), {
-        name: "x.txt",
-        type: "text/plain",
-        bytes: Uint8Array.from([0x61, 0xff, 0xfe]),
-      })
-    );
+    const listed = await callFiles(env, caller.next(), "list", {});
     expect({
-      ref: {
-        file: file.length > 0,
-        name: fieldOf(kept.output, "name"),
-        type: fieldOf(kept.output, "type"),
-        size: fieldOf(kept.output, "size"),
-        sha256: fieldOf(kept.output, "sha256"),
-      },
-      again: fieldOf(again.output, "file") === file,
+      ref: kept.output,
+      again: again.output,
       other,
-      size: fieldOf(read.output, "size"),
-      notText,
+      listed: listed.output,
       rows: await rowsOf(caller.run),
     }).toStrictEqual({
       ref: {
-        file: true,
+        file,
         name: "report.csv",
         type: "text/csv",
         size: bytes.length,
         sha256: await sha256HexOfBytes(bytes),
       },
-      again: true,
+      again: kept.output,
       other: "workflow.call_invalid",
-      size: bytes.length,
-      notText: "file.content_mismatch",
-      rows: ["done", "deleted"],
+      listed: [kept.output],
+      rows: ["done"],
     });
   });
 
-  it("name a Word or Excel document with its own extension: refused otherwise when written, renamed when kept", async () => {
+  it("name a kept Word or Excel document with its own extension", async () => {
     const caller = callerOf();
     const docx =
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     const xlsx =
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     const zip = Uint8Array.of(0x50, 0x4b, 0x03, 0x04, 1);
-    const opening = async (name: string, type: string) =>
-      await outcome(callFiles(env, caller.next(), "open", { name, type }));
     const kept = async (name: string, type: typeof docx | typeof xlsx) => {
       const answer = await keepFile(env, caller.next(), {
         name,
@@ -809,60 +809,38 @@ describe("a workflow run's own files", () => {
       return fieldOf(answer.output, "name");
     };
     expect({
-      written: {
-        docm: await opening("letter.docm", docx),
-        xlsxAsDocx: await opening("sheet.xlsx", docx),
-        kelvin: await opening("letter.doc\u212Ax", docx),
-        upperCase: await opening("LETTER.DOCX", docx),
-        xlsx: await opening("sheet.xlsx", xlsx),
-      },
-      kept: {
-        docm: await kept("letter.docm", docx),
-        none: await kept("letter", docx),
-        onlyExtension: await kept(".xlsm", xlsx),
-        fits: await kept("Sheet.XLSX", xlsx),
-      },
+      docm: await kept("letter.docm", docx),
+      xlsxAsDocx: await kept("sheet.xlsx", docx),
+      none: await kept("letter", docx),
+      onlyExtension: await kept(".xlsm", xlsx),
+      upperCase: await kept("LETTER.DOCX", docx),
+      fits: await kept("Sheet.XLSX", xlsx),
     }).toStrictEqual({
-      written: {
-        docm: "workflow.call_invalid",
-        xlsxAsDocx: "workflow.call_invalid",
-        kelvin: "workflow.call_invalid",
-        upperCase: "ok",
-        xlsx: "ok",
-      },
-      kept: {
-        docm: "letter.docx",
-        none: "letter.docx",
-        onlyExtension: "document.xlsx",
-        fits: "Sheet.XLSX",
-      },
+      docm: "letter.docx",
+      xlsxAsDocx: "sheet.docx",
+      none: "letter.docx",
+      onlyExtension: "document.xlsx",
+      upperCase: "LETTER.DOCX",
+      fits: "Sheet.XLSX",
     });
   });
 
   it("keep nothing of a longer first attempt for a shorter retried read, sealed or not", async () => {
     const piece = runFileLimits.callBytes;
-    const longer = new TextEncoder().encode(bodyOf(piece * 3));
+    const longer = utf8.encode(bodyOf(piece * 3));
     const shorter = longer.subarray(0, piece * 2);
     const csv = { name: "report.csv", type: "text/csv" } as const;
     // A first attempt that wrote all its pieces, then lost its lease before
     // sealing: the retry's own pieces replay, the first attempt's third stays.
     const unsealed = callerOf();
-    const first = unsealed.next();
-    const as = (suffix: string): FilesCaller => ({
-      ...first,
-      effectKey: `${first.effectKey}#${suffix}`,
-    });
-    const opened = await callFiles(env, as("open"), "open", csv);
-    const id = String(fieldOf(opened.output, "file"));
-    for (let at = 0; at < 3; at += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- in order, as keepFile writes
-      await callFiles(env, as(`piece${String(at)}`), "append", {
-        file: id,
-        content: toBase64(longer.subarray(at * piece, (at + 1) * piece)),
-      });
-    }
+    const first = unsealed.next(staleFrom(checksBefore.finish(3)));
+    const lost = await outcome(keepFile(env, first, { ...csv, bytes: longer }));
     const retried = await outcome(
-      keepFile(env, first, { ...csv, bytes: shorter })
+      keepFile(
+        env,
+        { ...first, requireHolds: holds },
+        { ...csv, bytes: shorter }
+      )
     );
     // A first attempt that sealed the longer file: the retry can't answer it.
     const sealed = callerOf();
@@ -872,30 +850,34 @@ describe("a workflow run's own files", () => {
       keepFile(env, once, { ...csv, bytes: shorter })
     );
     expect({
+      lost,
       retried,
-      unsealedRows: await rowsOf(unsealed.run),
+      unsealed: await writingSizeOf(unsealed.run),
       again,
     }).toStrictEqual({
+      lost: "Error: The attempt went stale",
       retried: "workflow.call_invalid",
-      unsealedRows: ["writing"],
+      unsealed: longer.length,
       again: "workflow.call_invalid",
     });
   });
 
   it("keep nothing of a connector read whose attempt went stale while it was answered, and seal nothing once it goes stale mid-write", async () => {
     const csv = { name: "report.csv", type: "text/csv" } as const;
-    const bytes = new TextEncoder().encode(bodyOf(runFileLimits.callBytes * 2));
+    const bytes = utf8.encode(bodyOf(runFileLimits.callBytes * 2));
     // Stale before the answer is kept: no file, no reserved byte.
     const expired = callerOf();
     const before = await outcome(
       keepFile(env, expired.next(staleFrom(1)), { ...csv, bytes })
     );
     // Stale after its pieces are written and hashed, just before it is
-    // sealed (open, then three checks a piece, then finish's two): never
-    // sealed, swept as unfinished.
+    // sealed: never sealed, swept as unfinished.
     const late = callerOf();
     const midway = await outcome(
-      keepFile(env, late.next(staleFrom(9)), { ...csv, bytes })
+      keepFile(env, late.next(staleFrom(checksBefore.seal(2))), {
+        ...csv,
+        bytes,
+      })
     );
     // No row, so none of the run's limits (summed from its rows) moved.
     expect({
@@ -914,82 +896,67 @@ describe("a workflow run's own files", () => {
   });
 
   it("hold every limit before bytes are stored: per call, open files, files and bytes per run, bytes per file, bytes per workflow", async () => {
-    // Open at once: the ninth is refused.
+    // Being written at once: the ninth is refused.
     const opener = callerOf();
     for (let at = 0; at < runFileLimits.openWrites; at += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
-      await callFiles(env, opener.next(), "open", {
-        name: `f${at}`,
-        type: "text/plain",
-      });
+      await outcome(
+        keepFile(env, opener.next(staleFrom(checksBefore.finish(0))), {
+          name: `f${String(at)}`,
+          type: "text/plain",
+          bytes: new Uint8Array(),
+        })
+      );
     }
-    const ninth = await outcome(
-      callFiles(env, opener.next(), "open", { name: "f", type: "text/plain" })
-    );
+    const ninth = await outcome(written(opener, "x"));
     // A run's files: the hundred and first is refused.
     const many = callerOf();
     for (let at = 0; at < runFileLimits.runFiles; at += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
       await written(many, "x");
     }
-    const hundredFirst = await outcome(
-      callFiles(env, many.next(), "open", { name: "f", type: "text/plain" })
-    );
-    // A piece past a call's bytes is refused as it is asked.
-    const big = callerOf();
-    const opened = await callFiles(env, big.next(), "open", {
-      name: "big",
-      type: "text/plain",
-    });
-    const file = String(fieldOf(opened.output, "file"));
+    const hundredFirst = await outcome(written(many, "x"));
+    // A step's text past a call's bytes is refused as it is asked.
     const pastCall = await outcome(
-      callFiles(env, big.next(), "append", {
-        file,
-        content: base64Of("x".repeat(runFileLimits.callBytes + 1)),
-      })
+      written(callerOf(), "x".repeat(runFileLimits.callBytes + 1))
     );
-    // A file, a run and a workflow already near their limits.
-    await grow(runFileLimits.fileBytes - 1, file);
+    // A file near its limit: its first piece kept, then it went stale; the
+    // retry's next piece passes the limit.
+    const big = callerOf();
+    const bigWrite = big.next(staleFrom(checksBefore.piece(1)));
+    const bigBytes = utf8.encode(bodyOf(runFileLimits.callBytes + 2));
+    await outcome(
+      keepFile(env, bigWrite, { ...csvOf("big.csv"), bytes: bigBytes })
+    );
+    const bigFile = await writingOf(big.run);
+    await grow(runFileLimits.fileBytes - bigFile.size - 1, bigFile.id);
     const pastFile = await outcome(
-      callFiles(env, big.next(), "append", { file, content: base64Of("xx") })
+      keepFile(
+        env,
+        { ...bigWrite, requireHolds: holds },
+        { ...csvOf("big.csv"), bytes: bigBytes }
+      )
     );
+    // A run and a workflow already near their limits.
     const run = callerOf();
     const runFile = await written(run, "x");
     await grow(runFileLimits.runBytes - 2, runFile.file);
-    const runOpened = await callFiles(env, run.next(), "open", {
-      name: "more",
-      type: "text/plain",
-    });
-    const pastRun = await outcome(
-      callFiles(env, run.next(), "append", {
-        file: String(fieldOf(runOpened.output, "file")),
-        content: base64Of("xx"),
-      })
-    );
+    const pastRun = await outcome(written(run, "xx"));
     const workflowId = crypto.randomUUID();
     const earlier = callerOf(crypto.randomUUID(), workflowId);
     const earlierFile = await written(earlier, "x");
     await grow(runFileLimits.workflowBytes - 2, earlierFile.file);
     const later = callerOf(crypto.randomUUID(), workflowId);
-    const laterOpened = await callFiles(env, later.next(), "open", {
-      name: "later",
-      type: "text/plain",
-    });
-    const laterFile = String(fieldOf(laterOpened.output, "file"));
+    const laterWrite = later.next();
+    const laterText = { name: "later.txt", type: "text/plain", text: "xx" };
     const pastWorkflow = await outcome(
-      callFiles(env, later.next(), "append", {
-        file: laterFile,
-        content: base64Of("xx"),
-      })
+      callFiles(env, laterWrite, "write", laterText)
     );
     // Deleted, though not yet swept: only live files count, so its space
-    // is back at once (GRA-950).
+    // is back at once (GRA-950), and the refused write goes again.
     await callFiles(env, earlier.next(), "delete", { file: earlierFile.file });
     const afterDelete = await outcome(
-      callFiles(env, later.next(), "append", {
-        file: laterFile,
-        content: base64Of("xx"),
-      })
+      callFiles(env, laterWrite, "write", laterText)
     );
     expect({
       ninth,
@@ -999,7 +966,7 @@ describe("a workflow run's own files", () => {
       pastRun,
       pastWorkflow,
       afterDelete,
-      // Refused before anything reached R2.
+      // Refused before its bytes reached R2: only the first piece's are.
       storedPastFile: await objectsOf(big.run),
     }).toStrictEqual({
       ninth: "file.writes_open",
@@ -1009,7 +976,7 @@ describe("a workflow run's own files", () => {
       pastRun: "file.run_full",
       pastWorkflow: "file.workflow_quota",
       afterDelete: "ok",
-      storedPastFile: 0,
+      storedPastFile: 1,
     });
   }, 120_000);
 
@@ -1046,18 +1013,21 @@ describe("a workflow run's own files", () => {
       objects: await objectsOf(runId),
       rows: await rowsOf(runId),
     };
-    // One opened, added to, and never finished.
+    // One opened, added to, and never finished: its write went stale.
     const orphan = callerOf();
-    const opened = await callFiles(env, orphan.next(), "open", {
-      name: "left",
-      type: "text/plain",
-    });
-    await callFiles(env, orphan.next(), "append", {
-      file: String(fieldOf(opened.output, "file")),
-      content: base64Of("left"),
-    });
+    await outcome(
+      callFiles(
+        env,
+        orphan.next(staleFrom(checksBefore.finish(1) + 1)),
+        "write",
+        { name: "left.txt", type: "text/plain", text: "left" }
+      )
+    );
     await sweepRunFiles(env, new Date(Date.now() + runFileLimits.orphanMs / 2));
-    const halfDay = await rowsOf(orphan.run);
+    const halfDay = {
+      objects: await objectsOf(orphan.run),
+      rows: await rowsOf(orphan.run),
+    };
     const orphaned = Date.now() + runFileLimits.orphanMs + 1000;
     await sweepRunFiles(env, new Date(orphaned));
     await sweepRunFiles(env, new Date(orphaned + sweepGraceMs + 1000));
@@ -1080,7 +1050,7 @@ describe("a workflow run's own files", () => {
       refused: "Error: R2 is down",
       afterRefusal: { objects: 1, rows: ["deleted"] },
       swept: { objects: 0, rows: [] },
-      halfDay: ["writing"],
+      halfDay: { objects: 1, rows: ["writing"] },
       orphan: { objects: 0, rows: [] },
     });
   }, 120_000);

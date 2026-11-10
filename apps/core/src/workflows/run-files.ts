@@ -5,7 +5,7 @@ import type {
   AttachmentBytes,
   AttachmentEntry,
 } from "@grasp-os/shared/connector-attachments";
-import { sha256HexOfBytes, toBase64, toHex } from "@grasp-os/shared/encoding";
+import { sha256HexOfBytes, toHex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
@@ -21,6 +21,7 @@ import {
 } from "@grasp-os/shared/run-files";
 import type { RunFileRef, RunFileType } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import type { FilesAction } from "@grasp-os/workflow-schema/format";
 import {
   and,
   asc,
@@ -40,123 +41,94 @@ import { z } from "zod";
 import { workflowRunFileChunks, workflowRunFiles } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 
-// A workflow run's own files (GRA-724): what its actions write through a
-// `files` binding and read back in later steps of the same run, each call
-// one of the run's named calls (resource-calls.ts, `makeCall`), with its
-// authority decided again and its receipts kept. Threat model, written
-// before code on GRA-724, and how each is closed:
+// A workflow run's own files (GRA-724): what a workflow's steps write
+// through a files permission (`ctx.files.<alias>`) and read back in later
+// steps of the same run, and what a connector read keeps as a file
+// (`keepFile`, GRA-886). Each step's call is one of the run's named calls
+// (resource-calls.ts, `makeCall`), with its authority decided again and
+// its receipts kept. Threat model, written before code on GRA-724 and
+// narrowed to what a step sends (GRA-1669), and how each is closed:
 //
+// - What a run may ask of its files: only a step's four calls
+//   (`FilesCallOperation`, the workflow format's `filesActions`). A step
+//   reads a file whole, only text of `runFileTextTypes` of at most
+//   `callBytes`, as its step records it within a step's payload (`read`);
+//   writes one whole, of text of those types (`write`); lists the run's
+//   finished files (`list`); and deletes only a finished one (`delete`),
+//   never one a task is still writing. A run never opens, adds to or
+//   finishes a file itself, never reads part of one, and never names a
+//   binary type: only `keepFile` does those, under the call's own key.
 // - A file read, listed or deleted by another run, workflow, App or
 //   person: every lookup is by the file's ID *and* the calling run's,
 //   and anything else answers `file.not_found`, as a file that isn't
 //   there does. A file's ID is a random UUID; holding one grants nothing
-//   outside its run. Nothing serves a run file's bytes outside its run's
-//   actions: no route, no RPC, no download. What a file is (its name,
-//   type and size) is listed only to whom its run's results are shown:
-//   the person it acted for, and admins (workflow-own.ts).
+//   outside its run. What a file is (its name, type and size) is listed
+//   only to whom its run's results are shown: the person it acted for,
+//   and admins (workflow-own.ts). A run's files permissions all reach
+//   all of its files: the permission says that the workflow works on its
+//   runs' files, and the run, never the alias, is what scopes them.
 // - Data leaving through a file: it has no way out but the run's own
 //   bindings, each approved and decided again on every call; a restricted
 //   run's actions still make no connector call (resource-calls.ts). A
 //   file is its run's alone, and a run's restricted mode is fixed at its
 //   start, so data a restricted run read and wrote to a file stays there.
-// - Two writers of one file, or a write mixed into another task's: only
-//   the task whose step opened a file adds to or finishes it
-//   (`openedBy`); every other caller is refused (`file.not_writable`).
-// - A replay or retry writing twice: the effect key of each call
-//   (`<step key>:<ordinal>`) makes opening, adding and finishing again
-//   answer what the first did. A chunk reserved but not stored (its put
-//   failed, or the attempt died) is stored by the same append again, or
-//   swept with its file.
+// - Two writers of one file, or a write mixed into another task's: a file
+//   is opened, written and finished by one `keepFile` alone, each piece
+//   under a key of its call's (`openedBy`); every other key is refused
+//   (`file.not_writable`).
+// - A replay or retry writing twice: `keepFile` opens, adds and finishes
+//   under keys of the call's effect key (`<step key>:<ordinal>`), so the
+//   same call again answers the same file, and its bytes must be the
+//   same, all of them: never a prefix of them. A chunk reserved but not
+//   stored (its put failed, or the attempt died) is stored by the same
+//   call again, or swept with its file.
 // - A file outliving its run's retention: its run's details going marks
 //   it deleted in the same batch (retention.ts), and `sweepRunFiles`
 //   deletes its chunks, then its row, retrying what R2 refused on the
 //   next clock run. A file never finished is swept a day after it opened.
 //   A deleted file's chunks are swept only after `sweepGraceMs`, longer
-//   than any attempt, so an append under way finishes its put first; a
-//   put that still lands after its chunk went deletes its object again
+//   than any attempt, so a write under way finishes its put first; a put
+//   that still lands after its chunk went deletes its object again
 //   (`store`), so no object outlives every record.
-// - A stale attempt writing: every call, and every put, first checks the
-//   attempt still holds its lease (`requireHolds`).
+// - A stale attempt writing: every call, every step of `keepFile` and
+//   every put first checks the attempt still holds its lease
+//   (`requireHolds`).
 // - Bytes that aren't what their type says: finishing checks the type
 //   against the bytes (a binary type by its signature, a text type as
 //   UTF-8 with no NUL and no signature) and the whole file's SHA-256; a
-//   file that fails is deleted. Core parses nothing else of a file, and
-//   serves none.
+//   file that fails is deleted. Core parses nothing else of a file.
 // - Size and cost: each limit (`runFileLimits`) is checked in the same
 //   statement that reserves a chunk, before its bytes reach R2, so two
-//   calls at once can't both take the last of a limit. One call moves at
-//   most `callBytes`, within the step payload and the attempt's 32 calls.
+//   writes at once can't both take the last of a limit. One step's call
+//   moves at most `callBytes`, within the step payload and the attempt's
+//   32 calls.
 // - The audit log, kept longer than a run's details, holding a file's
 //   name: receipts carry the file's ID, type, size and SHA-256, never its
 //   name or content. A tiny file's SHA-256 can be guessed from a short
 //   list of likely contents, so a receipt's digest says as much of such a
 //   file as its content would; the audit log is read by admins only.
-// - A workflow's own step reaching more than its run's files (GRA-1662,
-//   `ctx.files.<alias>`): its reads and writes are this module's, by the
-//   same lookups (a file's ID *and* the run's), under the same limits. A
-//   step reads a file whole only when it is text of `runFileTextTypes` of
-//   at most `callBytes`, as its step records it within a step's payload
-//   (`readText`), writes one whole, of text of those types (`write`, as
-//   `keepFile` keeps a connector's read: opened, written and finished
-//   under the step's own key, so the same call again answers the same
-//   file), and deletes only a finished one (`deleteFinished`), never one a
-//   task is still writing. A run's files permissions all reach all of its
-//   files: the permission says that the workflow works on its runs' files,
-//   and the run, never the alias, is what scopes them.
 // - Typing by signature only: a binary type's bytes are checked by their
-//   first bytes alone. Nothing serves a run file yet; before downloads
-//   (phase 2) serve one, check this again (a polyglot file passes).
-
-/** What each call on a files binding asks of it. */
-export const filesCallOperations = {
-  open: "write",
-  append: "write",
-  finish: "write",
-  read: "read",
-  list: "list",
-  delete: "delete",
-  readText: "read",
-  write: "write",
-  deleteFinished: "delete",
-} as const;
-export type FilesCallOperation = keyof typeof filesCallOperations;
+//   first bytes alone, so a polyglot file passes; a download serves one
+//   only as an attachment, under `nosniff` (run-file-downloads.ts).
 
 /**
- * The files call each action of a workflow's step makes
+ * What a workflow's step asks of its run's files
  * (`ctx.files.<alias>.<action>`): a text file read whole, a text file
- * written whole, the run's files listed, one deleted.
+ * written whole, the run's files listed, a finished one deleted.
  */
-export const stepFilesOperations = {
-  read: "readText",
-  write: "write",
-  list: "list",
-  delete: "deleteFinished",
-} as const satisfies Readonly<Record<string, FilesCallOperation>>;
+export type FilesCallOperation = FilesAction;
 
 const utf8 = new TextEncoder();
 
-/** Base64 characters `callBytes` take at most. */
-const contentChars = Math.ceil(runFileLimits.callBytes / 3) * 4;
+// A Word or Excel document is named with its extension, never another's.
+const keptFileSchema = z
+  .strictObject({ name: runFileNameSchema, type: runFileTypeSchema })
+  .refine(({ name, type }) => runFileNameFits(name, type));
 
 const argumentSchemas = {
-  // A Word or Excel document is named with its extension, never another's.
-  open: z
-    .strictObject({ name: runFileNameSchema, type: runFileTypeSchema })
-    .refine(({ name, type }) => runFileNameFits(name, type)),
-  append: z.strictObject({
-    file: runFileIdSchema,
-    content: z.base64().min(1).max(contentChars),
-  }),
-  finish: z.strictObject({ file: runFileIdSchema }),
-  read: z.strictObject({
-    file: runFileIdSchema,
-    offset: z.int().min(0),
-    length: z.int().min(1).max(runFileLimits.callBytes),
-  }),
+  read: z.strictObject({ file: runFileIdSchema }),
   list: z.strictObject({}),
   delete: z.strictObject({ file: runFileIdSchema }),
-  readText: z.strictObject({ file: runFileIdSchema }),
-  deleteFinished: z.strictObject({ file: runFileIdSchema }),
   // Text of a text type, named as that type's file is.
   write: z
     .strictObject({
@@ -168,7 +140,7 @@ const argumentSchemas = {
         .refine((text) => utf8.encode(text).length <= runFileLimits.callBytes),
     })
     .refine(({ name, type }) => runFileNameFits(name, type)),
-} as const;
+} as const satisfies Readonly<Record<FilesCallOperation, z.ZodType>>;
 
 /** The run a files call is made for, and the effect it is. */
 export interface FilesCaller {
@@ -185,16 +157,6 @@ export interface FilesAnswer {
   readonly output: Json;
   readonly detail: Readonly<Record<string, string | number>>;
 }
-
-/** The bytes `text`, standard base64 the schema checked, holds. */
-const bytesOfBase64 = (text: string): Uint8Array => {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let at = 0; at < binary.length; at += 1) {
-    bytes[at] = binary.codePointAt(at) ?? 0;
-  }
-  return bytes;
-};
 
 /** The step an effect key is of: its key without the call's ordinal. */
 const stepOf = (effectKey: string): string =>
@@ -275,7 +237,7 @@ const requireWriter = (row: FileRow, caller: FilesCaller): void => {
 const open = async (
   env: Env,
   caller: FilesCaller,
-  args: z.infer<typeof argumentSchemas.open>
+  args: z.infer<typeof keptFileSchema>
 ): Promise<FilesAnswer> => {
   const db = drizzle(env.DB);
   const opened = async () =>
@@ -421,16 +383,13 @@ const appendedAgain = async (
   };
 };
 
-/** Adds up to `callBytes` to a file the calling task writes. */
+/** Adds `bytes`, at most `callBytes`, to a file the calling task writes. */
 const append = async (
   env: Env,
   caller: FilesCaller,
-  args: z.infer<typeof argumentSchemas.append>
+  args: { readonly file: string; readonly bytes: Uint8Array }
 ): Promise<FilesAnswer> => {
-  const bytes = bytesOfBase64(args.content);
-  if (bytes.length === 0 || bytes.length > runFileLimits.callBytes) {
-    throw workflowResourceErrors.create("workflow.call_invalid");
-  }
+  const { bytes } = args;
   const db = drizzle(env.DB);
   const earlier = await db
     .select()
@@ -552,7 +511,7 @@ const finishedBefore = (row: FileRow): FilesAnswer | undefined => {
 const finish = async (
   env: Env,
   caller: FilesCaller,
-  args: z.infer<typeof argumentSchemas.finish>
+  args: { readonly file: string }
 ): Promise<FilesAnswer> => {
   const db = drizzle(env.DB);
   const row = await fileOf(env, caller, args.file, true);
@@ -654,60 +613,50 @@ const finish = async (
   return { output: refJson(done), detail: detailOf(done) };
 };
 
-/** Up to `length` bytes of a finished file of the run, from `offset`. */
-const read = async (
+/** All the bytes of a finished file, whole, as stored and as hashed. */
+const wholeFile = async (
   env: Env,
-  caller: FilesCaller,
-  args: z.infer<typeof argumentSchemas.read>
-): Promise<FilesAnswer> => {
-  const row = await fileOf(env, caller, args.file);
-  if (row === undefined) {
-    throw notFound();
-  }
-  if (row.state !== "done") {
-    throw runFileErrors.create("file.not_finished");
-  }
-  const end = Math.min(row.size, args.offset + args.length);
+  row: FileRow
+): Promise<Uint8Array<ArrayBuffer>> => {
   const chunks = await drizzle(env.DB)
     .select()
     .from(workflowRunFileChunks)
     .where(eq(workflowRunFileChunks.fileId, row.id))
     .orderBy(asc(workflowRunFileChunks.index));
-  const bytes = new Uint8Array(Math.max(0, end - args.offset));
+  const bytes = new Uint8Array(row.size);
   let at = 0;
-  let start = 0;
   for (const chunk of chunks) {
-    const from = Math.max(args.offset, start);
-    const to = Math.min(end, start + chunk.size);
-    if (from < to) {
-      // oxlint-disable-next-line no-await-in-loop -- in order: each part follows the last
-      const object = await env.FILES.get(chunk.key, {
-        range: { offset: from - start, length: to - from },
-      });
-      if (object === null) {
-        throw fileErrors.create("file.incomplete");
-      }
-      // oxlint-disable-next-line no-await-in-loop -- in order, as above
-      bytes.set(new Uint8Array(await object.arrayBuffer()), at);
-      at += to - from;
+    // oxlint-disable-next-line no-await-in-loop -- in order: each part follows the last
+    const object = await env.FILES.get(chunk.key);
+    if (object === null || at + chunk.size > bytes.length) {
+      throw fileErrors.create("file.incomplete");
     }
-    start += chunk.size;
+    // oxlint-disable-next-line no-await-in-loop -- in order, as above
+    const part = new Uint8Array(await object.arrayBuffer());
+    if (part.length !== chunk.size) {
+      throw fileErrors.create("file.incomplete");
+    }
+    bytes.set(part, at);
+    at += part.length;
   }
-  return {
-    output: { content: toBase64(bytes), size: row.size },
-    detail: detailOf(row),
-  };
+  // Exactly what was finished: its size and its digest, read again, so a
+  // chunk that is not what it was when the file was sealed is never sent.
+  if (at !== row.size || (await sha256HexOfBytes(bytes)) !== row.sha256) {
+    throw fileErrors.create("file.incomplete");
+  }
+  return bytes;
 };
 
 /**
  * A finished text file of the run, read whole: its reference and its
  * text. Any other file (binary, larger than one call's bytes) is
- * `file.not_readable`; one that isn't the run's, `file.not_found`.
+ * `file.not_readable`; one still being written, `file.not_finished`; one
+ * that isn't the run's, `file.not_found`.
  */
-const readText = async (
+const read = async (
   env: Env,
   caller: FilesCaller,
-  args: z.infer<typeof argumentSchemas.readText>
+  args: z.infer<typeof argumentSchemas.read>
 ): Promise<FilesAnswer> => {
   const row = await fileOf(env, caller, args.file);
   if (row === undefined) {
@@ -721,16 +670,13 @@ const readText = async (
   ) {
     throw runFileErrors.create("file.not_readable");
   }
-  const whole = await read(env, caller, {
-    file: row.id,
-    offset: 0,
-    length: Math.max(row.size, 1),
-  });
-  const { content } = z.object({ content: z.string() }).parse(whole.output);
+  if (row.state !== "done") {
+    throw runFileErrors.create("file.not_finished");
+  }
   const text = new TextDecoder("utf-8", {
     fatal: true,
     ignoreBOM: false,
-  }).decode(bytesOfBase64(content));
+  }).decode(await wholeFile(env, row));
   const output = { file: refJson(row), text };
   // As the step records it: JSON, its text escaped, within a step's
   // payload, which escaping can take a text of `callBytes` past.
@@ -739,7 +685,7 @@ const readText = async (
   ) {
     throw runFileErrors.create("file.not_readable");
   }
-  return { output, detail: whole.detail };
+  return { output, detail: detailOf(row) };
 };
 
 /** The run's finished files, oldest first. */
@@ -758,15 +704,13 @@ const list = async (env: Env, caller: FilesCaller): Promise<FilesAnswer> => {
 };
 
 /**
- * Deletes a file of the run: its chunks go with the next sweep. A step's
- * delete (`finishedOnly`) takes only a finished file, never one a task is
- * still writing (`file.not_finished`).
+ * Deletes a finished file of the run: its chunks go with the next sweep.
+ * Never one a task is still writing (`file.not_finished`).
  */
 const remove = async (
   env: Env,
   caller: FilesCaller,
-  args: z.infer<typeof argumentSchemas.delete>,
-  finishedOnly = false
+  args: z.infer<typeof argumentSchemas.delete>
 ): Promise<FilesAnswer> => {
   const row = await fileOf(env, caller, args.file, true);
   if (row === undefined) {
@@ -776,7 +720,7 @@ const remove = async (
   if (row.state === "deleted") {
     return { output: null, detail: detailOf(row) };
   }
-  if (finishedOnly && row.state !== "done") {
+  if (row.state !== "done") {
     throw runFileErrors.create("file.not_finished");
   }
   caller.requireHolds();
@@ -813,78 +757,18 @@ export const requireFilesArguments = (
   operation: FilesCallOperation,
   args: Json
 ): void => {
-  const checked = parsed(argumentSchemas[operation], args);
-  if (operation === "append" && "content" in checked) {
-    const size = bytesOfBase64(checked.content).length;
-    if (size === 0 || size > runFileLimits.callBytes) {
-      throw workflowResourceErrors.create("workflow.call_invalid");
-    }
-  }
-};
-
-/**
- * One files call for `caller`'s run that touches one file or the list:
- * `operation`, its `args` checked here against that operation's schema,
- * the caller's lease checked first.
- */
-const callFile = async (
-  env: Env,
-  caller: FilesCaller,
-  operation: Exclude<FilesCallOperation, "write">,
-  args: Json
-): Promise<FilesAnswer> => {
-  caller.requireHolds();
-  switch (operation) {
-    case "open": {
-      return await open(env, caller, parsed(argumentSchemas.open, args));
-    }
-    case "append": {
-      return await append(env, caller, parsed(argumentSchemas.append, args));
-    }
-    case "finish": {
-      return await finish(env, caller, parsed(argumentSchemas.finish, args));
-    }
-    case "read": {
-      return await read(env, caller, parsed(argumentSchemas.read, args));
-    }
-    case "list": {
-      parsed(argumentSchemas.list, args);
-      return await list(env, caller);
-    }
-    case "delete": {
-      return await remove(env, caller, parsed(argumentSchemas.delete, args));
-    }
-    case "readText": {
-      return await readText(
-        env,
-        caller,
-        parsed(argumentSchemas.readText, args)
-      );
-    }
-    case "deleteFinished": {
-      return await remove(
-        env,
-        caller,
-        parsed(argumentSchemas.deleteFinished, args),
-        true
-      );
-    }
-    default: {
-      return operation satisfies never;
-    }
-  }
+  parsed(argumentSchemas[operation], args);
 };
 
 /**
  * Keeps `bytes` as a finished file of `caller`'s run, named `name` and of
  * `type`, for a connector read an action or a step asked to have as a
  * file (GRA-886), and for a step's whole write (`write`): opened, written
- * in pieces of `callBytes` and finished as an action's own writes are,
- * each under a key of the call's own effect key, so the same call again
- * (a replay, a retry) answers the same file, and its bytes must be the
- * same, all of them: never a prefix of them. Every limit, the lease
- * check, the type check against the bytes and the SHA-256 apply as they
- * do to an action's writes.
+ * in pieces of `callBytes` and finished, each under a key of the call's
+ * own effect key, so the same call again (a replay, a retry) answers the
+ * same file, and its bytes must be the same, all of them: never a prefix
+ * of them. Every limit, the lease check, the type check against the bytes
+ * and the SHA-256 apply to every file kept.
  */
 export const keepFile = async (
   env: Env,
@@ -892,20 +776,23 @@ export const keepFile = async (
   file: { name: string; type: RunFileType; bytes: Uint8Array }
 ): Promise<FilesAnswer> => {
   // Keys of the call's own step: `<step key>:<ordinal>#…`, so the task
-  // that opens the file is the one that writes and finishes it.
-  const as = (suffix: string): FilesCaller => ({
-    ...caller,
-    effectKey: `${caller.effectKey}#${suffix}`,
-  });
-  // Each through `callFile`, as an action's own calls are: its lease
-  // checked before every one, so an attempt that went stale while Connect
+  // that opens the file is the one that writes and finishes it. The lease
+  // is checked before each, so an attempt that went stale while Connect
   // was answering opens, reserves and seals nothing.
+  const as = (suffix: string): FilesCaller => {
+    caller.requireHolds();
+    return { ...caller, effectKey: `${caller.effectKey}#${suffix}` };
+  };
   // Named with its type's extension: a document typed docx is never
   // kept as `.docm`.
-  const opened = await callFile(env, as("open"), "open", {
-    name: runFileNamed(file.name, file.type),
-    type: file.type,
-  });
+  const opened = await open(
+    env,
+    as("open"),
+    parsed(keptFileSchema, {
+      name: runFileNamed(file.name, file.type),
+      type: file.type,
+    })
+  );
   const id = runFileIdSchema.parse(
     z.object({ file: z.string() }).parse(opened.output).file
   );
@@ -915,9 +802,9 @@ export const keepFile = async (
     at += runFileLimits.callBytes, piece += 1
   ) {
     // oxlint-disable-next-line no-await-in-loop -- in order: each piece follows the last
-    await callFile(env, as(`piece${String(piece)}`), "append", {
+    await append(env, as(`piece${String(piece)}`), {
       file: id,
-      content: toBase64(file.bytes.subarray(at, at + runFileLimits.callBytes)),
+      bytes: file.bytes.subarray(at, at + runFileLimits.callBytes),
     });
   }
   // Every piece above replays only with its own bytes, but a shorter
@@ -928,7 +815,7 @@ export const keepFile = async (
   if (written?.state === "writing" && written.size !== file.bytes.length) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
-  const finished = await callFile(env, as("finish"), "finish", { file: id });
+  const finished = await finish(env, as("finish"), { file: id });
   const sealed = z.object({ sha256: z.string() }).parse(finished.output);
   if (sealed.sha256 !== (await sha256HexOfBytes(file.bytes))) {
     throw workflowResourceErrors.create("workflow.call_invalid");
@@ -937,11 +824,11 @@ export const keepFile = async (
 };
 
 /**
- * Makes one files call for `caller`'s run: `operation`, its `args`
- * checked here against that operation's schema. The action host, or the
- * sealed table for a step, has already decided the operation may be made.
- * A step's whole write (`write`) is kept as a connector's read is
- * (`keepFile`), of text of a text type.
+ * Makes one files call of a workflow's step for `caller`'s run:
+ * `operation`, its `args` checked here against that operation's schema,
+ * the caller's lease checked first. The sealed table has already decided
+ * the operation may be made. A step's whole write (`write`) is kept as a
+ * connector's read is (`keepFile`), of text of a text type.
  */
 export const callFiles = async (
   env: Env,
@@ -949,50 +836,30 @@ export const callFiles = async (
   operation: FilesCallOperation,
   args: Json
 ): Promise<FilesAnswer> => {
-  if (operation !== "write") {
-    return await callFile(env, caller, operation, args);
-  }
   caller.requireHolds();
-  const { name, type, text } = parsed(argumentSchemas.write, args);
-  return await keepFile(env, caller, {
-    name,
-    type: runFileTypeSchema.parse(type),
-    bytes: utf8.encode(text),
-  });
-};
-
-/** All the bytes of a finished file, whole, as stored and as hashed. */
-const wholeFile = async (
-  env: Env,
-  row: FileRow
-): Promise<Uint8Array<ArrayBuffer>> => {
-  const chunks = await drizzle(env.DB)
-    .select()
-    .from(workflowRunFileChunks)
-    .where(eq(workflowRunFileChunks.fileId, row.id))
-    .orderBy(asc(workflowRunFileChunks.index));
-  const bytes = new Uint8Array(row.size);
-  let at = 0;
-  for (const chunk of chunks) {
-    // oxlint-disable-next-line no-await-in-loop -- in order: each part follows the last
-    const object = await env.FILES.get(chunk.key);
-    if (object === null || at + chunk.size > bytes.length) {
-      throw fileErrors.create("file.incomplete");
+  switch (operation) {
+    case "read": {
+      return await read(env, caller, parsed(argumentSchemas.read, args));
     }
-    // oxlint-disable-next-line no-await-in-loop -- in order, as above
-    const part = new Uint8Array(await object.arrayBuffer());
-    if (part.length !== chunk.size) {
-      throw fileErrors.create("file.incomplete");
+    case "write": {
+      const { name, type, text } = parsed(argumentSchemas.write, args);
+      return await keepFile(env, caller, {
+        name,
+        type: runFileTypeSchema.parse(type),
+        bytes: utf8.encode(text),
+      });
     }
-    bytes.set(part, at);
-    at += part.length;
+    case "list": {
+      parsed(argumentSchemas.list, args);
+      return await list(env, caller);
+    }
+    case "delete": {
+      return await remove(env, caller, parsed(argumentSchemas.delete, args));
+    }
+    default: {
+      return operation satisfies never;
+    }
   }
-  // Exactly what was finished: its size and its digest, read again, so a
-  // chunk that is not what it was when the file was sealed is never sent.
-  if (at !== row.size || (await sha256HexOfBytes(bytes)) !== row.sha256) {
-    throw fileErrors.create("file.incomplete");
-  }
-  return bytes;
 };
 
 /** A file attached to a write, as its entry, and its bytes. */

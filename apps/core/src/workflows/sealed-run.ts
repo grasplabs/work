@@ -97,7 +97,6 @@ import {
   retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
-import { stepFilesOperations } from "./run-files.ts";
 import { inboxOf } from "./run-inboxes.ts";
 import { sealedMainModules } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
@@ -402,7 +401,7 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   isn't there does; a name is a run file's name for its type or is
 //   refused; a file is read whole only when it is text of a run file's
 //   text types, at most one call's bytes; a write is text of those types
-//   only, checked against its type as an action's writes are, under the
+//   only, checked against its type as a connector's kept read is, under the
 //   run's and the workflow's limits; a delete takes only a finished file.
 //   Every files permission of a run reaches all of the run's files, never
 //   another run's: the run scopes them, not the alias. Each call is one of the run's named
@@ -3008,7 +3007,7 @@ class SealedRun implements SealedRunKind {
           {
             name: call.name,
             binding: call.binding,
-            operation: stepFilesOperations[call.operation],
+            operation: call.operation,
             arguments: value,
           },
           effect
