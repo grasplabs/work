@@ -213,6 +213,10 @@ msgstr "{changeCount, plural, one {# modification à publier} other {# modificat
 msgid "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgstr "Ce sera donc en {chosen}. Cela prend environ {minutes} minutes. On commence ?"
 
+#: src/settings/agents-settings.tsx
+msgid "{className}, for {name}"
+msgstr "{className}, pour {name}"
+
 #: src/apps/resource-bindings.tsx
 msgid "{collection}: {name}"
 msgstr "{collection} : {name}"
@@ -767,6 +771,10 @@ msgstr "{name} est cité, mais pas encore vu en usage."
 #: src/apps/field-editor.tsx
 msgid "{name} is now at place {place}."
 msgstr "{name} est maintenant à la place {place}."
+
+#: src/settings/agents-settings.tsx
+msgid "{name} is on"
+msgstr "{name} est actif"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
@@ -2028,6 +2036,12 @@ msgstr "Agent {agentId} pour {person}, dans {app}"
 msgid "Agent for {person}"
 msgstr "Agent pour {person}"
 
+#: src/routes/_shell.settings.agents.tsx
+#: src/routes/_shell.settings.tsx
+#: src/settings/agents-settings.tsx
+msgid "Agents"
+msgstr "Agents"
+
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
 msgstr "Les agents lisent ceci avant de regarder à l’intérieur."
@@ -2635,6 +2649,10 @@ msgstr "Au {date}."
 #: src/apps/access-view.tsx
 msgid "As the App's code sets it"
 msgstr "Comme le code de l’App le définit"
+
+#: src/settings/agents-settings.tsx
+msgid "As the company has it"
+msgstr "Comme dans l’entreprise"
 
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
@@ -3712,6 +3730,7 @@ msgstr "Effacer les filtres"
 #: src/onboarding/place-picker.tsx
 #: src/pages/app-panel.tsx
 #: src/routes/_shell.index.tsx
+#: src/settings/agents-settings.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
 #: src/shown-once.tsx
@@ -4877,6 +4896,10 @@ msgstr "A abandonné un événement qu’aucun workflow n’a pu recevoir"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/settings/agents-settings.tsx
+msgid "Each agent has its own name and job, answers only the people you choose, and does only what you let it. A new agent starts with nobody and nothing."
+msgstr "Chaque agent a son propre nom et sa propre mission, ne répond qu’aux personnes que vous choisissez et ne fait que ce que vous lui permettez. Un nouvel agent commence sans personne et sans rien."
+
 #: src/connections/http-connections.tsx
 msgid "Each allows everything under it; / allows all paths."
 msgstr "Chacun autorise tout ce qui se trouve en dessous ; / autorise tous les chemins."
@@ -4884,6 +4907,10 @@ msgstr "Chacun autorise tout ce qui se trouve en dessous ; / autorise tous les c
 #: src/settings/erasures.tsx
 msgid "Each area is erased on its own. One that fails is tried again until it is done, even after you close this."
 msgstr "Chaque domaine est effacé à part. Un domaine qui échoue est réessayé jusqu’à ce qu’il soit terminé, même après la fermeture de cette fenêtre."
+
+#: src/settings/agents-settings.tsx
+msgid "Each as the company has it, or for fewer people. Never for more."
+msgstr "Chacune comme dans l’entreprise, ou pour moins de personnes. Jamais pour plus."
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Each event of this type from the source starts a run, with its data as the input."
@@ -6498,6 +6525,10 @@ msgstr "Entrée"
 msgid "Input, as JSON"
 msgstr "Entrée, en JSON"
 
+#: src/settings/agents-settings.tsx
+msgid "Instructions"
+msgstr "Instructions"
+
 #: src/apps/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
@@ -6739,6 +6770,10 @@ msgstr "Il ne démarre plus d’exécutions. Celles qu’il a déjà démarrées
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "It starts nothing until an admin allows it to start this workflow."
 msgstr "Il ne lance rien tant qu'un administrateur ne l'autorise pas à lancer ce workflow."
+
+#: src/settings/agents-settings.tsx
+msgid "It starts on, reaching nobody and with nothing it may do. Say whom it answers once it is made."
+msgstr "Il démarre actif, sans atteindre personne et sans rien pouvoir faire. Indiquez à qui il répond une fois créé."
 
 #: src/knowledge/new-document.tsx
 msgid "It starts with its name as a heading; write the rest in the editor."
@@ -7514,6 +7549,10 @@ msgstr "En faire un workflow"
 msgid "Make admin"
 msgstr "Faire admin"
 
+#: src/settings/agents-settings.tsx
+msgid "Make agent"
+msgstr "Créer l’agent"
+
 #: src/apps/app-versions.tsx
 msgid "Make current"
 msgstr "Rendre actuelle"
@@ -7839,6 +7878,7 @@ msgstr "Micro coupé"
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/agents-settings.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Name"
@@ -7939,6 +7979,10 @@ msgstr "Nouveau"
 msgctxt "make something in a project"
 msgid "New"
 msgstr "Nouveau"
+
+#: src/settings/agents-settings.tsx
+msgid "New agent"
+msgstr "Nouvel agent"
 
 #: src/apps/apps-overview.tsx
 #: src/routes/_shell.apps.new.tsx
@@ -8458,6 +8502,10 @@ msgstr "Personne de ce nom."
 msgid "Nobody yet"
 msgstr "Personne pour l’instant"
 
+#: src/settings/agents-settings.tsx
+msgid "Nobody yet, until you choose. People outside it can't ask it anything."
+msgstr "Personne pour l’instant, tant que vous n’avez pas choisi. Les autres ne peuvent rien lui demander."
+
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/settings/ai-providers.tsx
 msgid "None"
@@ -8917,6 +8965,7 @@ msgctxt "inbox sort"
 msgid "Oldest first"
 msgstr "Plus anciens d’abord"
 
+#: src/settings/agents-settings.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
 msgid "On"
@@ -9009,6 +9058,10 @@ msgstr "Dès qu'elle a une version, elle peut être copiée."
 #: src/knowledge/purge.tsx
 msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
 msgstr "Un par ligne, jusqu’à {most} : un nom, chacune de ses autres formes, une adresse e-mail. Un terme est supprimé comme mot entier, sans tenir compte de la casse : listez les formes accolées comme termes à part entière."
+
+#: src/settings/agents-settings.tsx
+msgid "One line, such as: chases unpaid invoices."
+msgstr "Une ligne, par exemple : relance les factures impayées."
 
 #: src/interview/voice-bar.tsx
 msgid "One moment"
@@ -9229,6 +9282,10 @@ msgstr "Ouvrir dans l'espace de travail de l'App"
 #: src/dashboard/in-inbox.tsx
 msgid "Open in the inbox: {title}"
 msgstr "Ouvrir dans la boîte de réception : {title}"
+
+#: src/settings/agents-settings.tsx
+msgid "Open its settings"
+msgstr "Ouvrir ses réglages"
 
 #: src/chat/answer-markdown.tsx
 msgid "Open link"
@@ -9571,6 +9628,7 @@ msgstr "Le mettre en pause"
 msgid "Pause Stephen outside Grasp?"
 msgstr "Mettre Stephen en pause en dehors de Grasp ?"
 
+#: src/settings/agents-settings.tsx
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "En pause"
@@ -9590,9 +9648,17 @@ msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "En pause"
 
+#: src/settings/agents-settings.tsx
+msgid "Paused · answers nobody"
+msgstr "En pause · ne répond à personne"
+
 #: src/settings/stephen-card.tsx
 msgid "Paused outside Grasp"
 msgstr "En pause en dehors de Grasp"
+
+#: src/settings/agents-settings.tsx
+msgid "Paused, it answers nobody anywhere."
+msgstr "En pause, il ne répond à personne, nulle part."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
@@ -11187,6 +11253,7 @@ msgstr "Sam, comme tous ceux qui utilisent l’App, voit tous les enregistrement
 #: src/chat/chat-more.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
+#: src/settings/agents-settings.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Enregistrer"
@@ -14843,10 +14910,18 @@ msgstr "Ce à quoi il est lié ne peut plus le servir : son autorisation a été
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Ce à quoi elle est liée a changé depuis l'approbation de la liaison. Liez-la à nouveau une fois que vous avez vérifié que cela convient toujours."
 
+#: src/settings/agents-settings.tsx
+msgid "What it is for"
+msgstr "À quoi il sert"
+
 #: src/apps/app-settings.tsx
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "À quoi elle sert"
+
+#: src/settings/agents-settings.tsx
+msgid "What it may do"
+msgstr "Ce qu’il peut faire"
 
 #: src/apps/app-access-requests.tsx
 msgid "What it needs"
@@ -14863,6 +14938,10 @@ msgstr "Ce qu’elle a renvoyé"
 #: src/brain/share-record.tsx
 msgid "What it says"
 msgstr "Ce qu’il dit"
+
+#: src/settings/agents-settings.tsx
+msgid "What it should know and how it should work. Grasp's own rules always hold over these."
+msgstr "Ce qu’il doit savoir et comment il doit travailler. Les règles de Grasp priment toujours sur celles-ci."
 
 #: src/brain/memory-page.tsx
 msgid "What it should say"
@@ -15289,6 +15368,18 @@ msgstr "Qui la dirige ?"
 msgid "Who may read it"
 msgstr "Qui peut la lire"
 
+#: src/settings/agents-settings.tsx
+msgid "Who may use {name}"
+msgstr "Qui peut utiliser {name}"
+
+#: src/settings/agents-settings.tsx
+msgid "Who may use it"
+msgstr "Qui peut l’utiliser"
+
+#: src/settings/agents-settings.tsx
+msgid "Who may use it, and what it may do"
+msgstr "Qui peut l’utiliser et ce qu’il peut faire"
+
 #: src/apps/app-settings.tsx
 msgid "Who opens the App besides you, and as what."
 msgstr "Qui ouvre l'App en plus de vous, et à quel titre."
@@ -15320,6 +15411,10 @@ msgstr "Qui est qui dans votre entreprise ?"
 #: src/chat/builds.tsx
 msgid "whoever added the row"
 msgstr "la personne qui a ajouté la ligne"
+
+#: src/settings/agents-settings.tsx
+msgid "Whom the company's first agent reaches, and what it may do, is set in one place."
+msgstr "Qui le premier agent de l’entreprise atteint, et ce qu’il peut faire, se règle à un seul endroit."
 
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx
