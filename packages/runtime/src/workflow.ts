@@ -99,8 +99,7 @@ export { AppError } from "./app-error.ts";
 export { WorkflowError } from "./workflow-error.ts";
 export { sensitiveParam } from "./workflow-params.ts";
 // What only the code generated from a grasp-workflow/2 document calls
-// (workflow-generated.ts): never the SDK's, as no workflow is written
-// against them.
+// (workflow-generated.ts), which the SDK re-exports for it.
 export { caughtError, itemsOf, own, parse } from "./workflow-generated.ts";
 export type { Json } from "@grasp-os/shared/json";
 export type { Param, ParamMetadata } from "./workflow-params.ts";

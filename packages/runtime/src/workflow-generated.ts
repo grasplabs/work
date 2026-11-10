@@ -10,8 +10,8 @@ import {
 import type { CaughtError, Read } from "./workflow-steps.ts";
 
 // What only the code generated from a grasp-workflow/2 document calls
-// (@grasp-os/workflow-schema's generate.ts), from `@grasp-os/runtime/workflow`.
-// Not the SDK's API: no workflow is written against it.
+// (@grasp-os/workflow-schema's generate.ts), from `@grasp-os/sdk/workflow`:
+// no workflow is written against them.
 
 /**
  * A field of a name a built-in prototype has as a function, as an

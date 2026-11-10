@@ -1,7 +1,7 @@
 {
   "name": "@grasp-os/workflow-schema",
   "private": true,
-  "description": "grasp-workflow/2: the JSON form of a workflow on @grasp-os/runtime/workflow, its JSON Schema, its checks, and its translation to TypeScript on defineWorkflow and the sealed table the run host holds it to",
+  "description": "grasp-workflow/2: the JSON form of a workflow on @grasp-os/sdk/workflow, its JSON Schema, its checks, and its translation to TypeScript on defineWorkflow and the sealed table the run host holds it to",
   "license": "AGPL-3.0-only",
   "type": "module",
   "sideEffects": false,

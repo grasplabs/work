@@ -101,8 +101,8 @@ import type {
 //   `forEach`'s `for … of` over its items (`itemsOf`: a list of at most
 //   the platform's 1,000), each item's steps one at a time and every one
 //   counted against the run's step ceiling. The module imports
-//   `@grasp-os/sdk/workflow` and its helpers for generated code
-//   (`@grasp-os/runtime/workflow`) and nothing else (the compiler
+//   `@grasp-os/sdk/workflow`, its helpers for generated code included,
+//   and nothing else (the compiler
 //   refuses any other import of generated code all the same).
 // - A sensitive value reaching the run's code. A sensitive parameter is
 //   only ever `sensitiveParam(<name>)` in a connection call's arguments,
@@ -156,12 +156,6 @@ import type {
 
 /** The SDK the generated module imports. */
 export const generatedImport = "@grasp-os/sdk/workflow";
-
-/**
- * The helpers only generated code calls (`own`, `caughtError`, `itemsOf`),
- * which the module imports besides, and nothing else: not the SDK's API.
- */
-export const generatedHelpersImport = "@grasp-os/runtime/workflow";
 
 /**
  * The generator, as a build names what made it. A build seals the SDK its
@@ -1275,12 +1269,7 @@ class Generator {
     // A declaration in `v` may take lines of its own: each counts.
     const prelude = [
       "// Generated from a grasp-workflow/2 document on every save: not edited by hand.",
-      `import { ${[...this.#imports].toSorted().join(", ")} } from ${literal(generatedImport)};`,
-      ...(this.#generatedImports.size === 0
-        ? []
-        : [
-            `import { ${[...this.#generatedImports].toSorted().join(", ")} } from ${literal(generatedHelpersImport)};`,
-          ]),
+      `import { ${[...this.#imports, ...this.#generatedImports].toSorted().join(", ")} } from ${literal(generatedImport)};`,
       "",
       "export default defineWorkflow({",
       indented(`args: ${validatorSource(contract.args)},`, 1),

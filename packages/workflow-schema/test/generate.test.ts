@@ -263,7 +263,7 @@ describe("generating a workflow", () => {
       nodes
         .filter(({ type }) => type === "ImportDeclaration")
         .map((node) => (isNode(node.source) ? node.source.value : undefined))
-    ).toStrictEqual(["@grasp-os/sdk/workflow", "@grasp-os/runtime/workflow"]);
+    ).toStrictEqual(["@grasp-os/sdk/workflow"]);
     const types = new Set(nodes.map(({ type }) => type));
     for (const loop of [
       "ForStatement",

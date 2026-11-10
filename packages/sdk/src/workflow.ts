@@ -9,6 +9,8 @@ export {
   v,
   WorkflowError,
 } from "@grasp-os/runtime/workflow";
+// What only the code generated from a grasp-workflow/2 document calls.
+export { caughtError, itemsOf, own, parse } from "@grasp-os/runtime/workflow";
 export type {
   AiMembers,
   BrainActions,
