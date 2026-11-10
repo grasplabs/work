@@ -257,6 +257,80 @@ const ownValue = (holder: unknown, key: string): unknown =>
 const generatedKey = (): unknown =>
   crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
 
+/** Keys as module code could keep them, made before a transform runs. */
+const ecdsaKeys = await crypto.subtle.generateKey(
+  { name: "ECDSA", namedCurve: "P-256" },
+  false,
+  ["sign", "verify"]
+);
+const rsaPssKeys = await crypto.subtle.generateKey(
+  {
+    name: "RSA-PSS",
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: "SHA-256",
+  },
+  false,
+  ["sign", "verify"]
+);
+const rsaOaepKeys = await crypto.subtle.generateKey(
+  {
+    name: "RSA-OAEP",
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: "SHA-256",
+  },
+  false,
+  ["encrypt", "decrypt", "wrapKey"]
+);
+const wrappedKey = await crypto.subtle.importKey(
+  "raw",
+  new Uint8Array(16),
+  "AES-GCM",
+  true,
+  ["encrypt"]
+);
+const signed = new Uint8Array([1, 2, 3]);
+
+// The cases below that answer a promise only start it: a handler answers
+// its row, so never sees one settle, but the runner refuses the call.
+
+/** Starts reading a multipart form, with a file in it, from a body. */
+const multipartFormRead = (): void => {
+  void new Response(
+    '--b\r\nContent-Disposition: form-data; name="f"; filename="n"\r\n\r\nx\r\n--b--\r\n',
+    { headers: { "content-type": "multipart/form-data; boundary=b" } }
+  ).formData();
+};
+
+/** The time of the file a form makes of a blob it is given by `key`. */
+const formFileTime = (key: "append" | "set"): unknown => {
+  const form = new FormData();
+  form[key]("f", new Blob(["x"]), "n");
+  const file = form.get("f");
+  return file instanceof File ? file.lastModified : file;
+};
+
+/** A timed class, as the global's prototype holds it. */
+const globalClass = (name: string): unknown =>
+  Reflect.get(Reflect.getPrototypeOf(globalThis) ?? {}, name);
+
+/** A file made by `File` as the global's prototype holds it. */
+const fileByGlobalPrototype = (): unknown => {
+  const PlatformFile: unknown = globalClass("File");
+  return typeof PlatformFile === "function"
+    ? Reflect.get(Reflect.construct(PlatformFile, [[], "a"]), "lastModified")
+    : undefined;
+};
+
+/** A mark made by `PerformanceMark` as the global's prototype holds it. */
+const markByGlobalPrototype = (): unknown => {
+  const PlatformMark: unknown = globalClass("PerformanceMark");
+  return typeof PlatformMark === "function"
+    ? Reflect.get(Reflect.construct(PlatformMark, ["a"]), "startTime")
+    : undefined;
+};
+
 /** `Date.now` read through its descriptor, which a proxy's `get` never sees. */
 const nowByDescriptor = (): unknown => called(ownValue(Date, "now"), Date);
 
@@ -447,6 +521,63 @@ describe("the runner", () => {
     ["a mark's time", "the clock", () => new PerformanceMark("a").startTime],
     ["a marked time", "the clock", () => performance.mark("a").startTime],
     ["a measure", "the clock", () => performance.measure("a").duration],
+    ["a file past the global", "the clock", fileByGlobalPrototype],
+    ["a mark past the global", "the clock", markByGlobalPrototype],
+    ["an appended file's time", "the clock", () => formFileTime("append")],
+    ["a set file's time", "the clock", () => formFileTime("set")],
+    ["a read form's files", "the clock", multipartFormRead],
+    [
+      "a form body's boundary",
+      "randomness",
+      () => new Response(new FormData()).headers.get("content-type"),
+    ],
+    [
+      "a form request's boundary",
+      "randomness",
+      () =>
+        new Request("https://example.test", {
+          method: "POST",
+          body: new FormData(),
+        }).headers.get("content-type"),
+    ],
+    [
+      "an ECDSA signature",
+      "randomness",
+      () => {
+        void crypto.subtle.sign(
+          { name: "ECDSA", hash: "SHA-256" },
+          ecdsaKeys.privateKey,
+          signed
+        );
+      },
+    ],
+    [
+      "an RSA-PSS signature",
+      "randomness",
+      () => {
+        void crypto.subtle.sign(
+          { name: "rsa-pss", saltLength: 32 },
+          rsaPssKeys.privateKey,
+          signed
+        );
+      },
+    ],
+    [
+      "RSA-OAEP encryption",
+      "randomness",
+      () => {
+        void crypto.subtle.encrypt("RSA-OAEP", rsaOaepKeys.publicKey, signed);
+      },
+    ],
+    [
+      "an RSA-OAEP wrapped key",
+      "randomness",
+      () => {
+        void crypto.subtle.wrapKey("raw", wrappedKey, rsaOaepKeys.publicKey, {
+          name: "RSA-OAEP",
+        });
+      },
+    ],
   ])(
     "takes away %s while a handler runs, and gives it back after",
     (_case, refused, impurity) => {
@@ -467,6 +598,61 @@ describe("the runner", () => {
       expect(impurity).not.toThrow();
     }
   );
+
+  test("leaves a handler what draws neither, and gives the platform a request's body as checked", async () => {
+    const hmacKey = await crypto.subtle.importKey(
+      "raw",
+      new Uint8Array(32),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const aesKey = await crypto.subtle.importKey(
+      "raw",
+      new Uint8Array(16),
+      "AES-GCM",
+      false,
+      ["encrypt"]
+    );
+    let bodyReads = 0;
+    // A plain body to the check, a form to whatever reads it after.
+    const init: RequestInit = {
+      method: "POST",
+      get body(): BodyInit {
+        bodyReads += 1;
+        return bodyReads === 1 ? "plain" : new FormData();
+      },
+    };
+    const pure = looseMigration({
+      ...declaration,
+      name: "pure",
+      handler: (_ctx: unknown, row: object) => {
+        const form = new FormData();
+        form.append("a", "b");
+        // Started only: a handler answers its row, not a promise.
+        void crypto.subtle.sign("HMAC", hmacKey, signed);
+        void crypto.subtle.encrypt(
+          { name: "AES-GCM", iv: new Uint8Array(12) },
+          aesKey,
+          signed
+        );
+        const request = new Request("https://example.test", init);
+        return {
+          ...row,
+          category: `${String(form.has("a"))}:${request.headers.get("content-type") ?? ""}`,
+        };
+      },
+    });
+    expect(
+      runMigration(notes([pure]), {
+        name: "pure",
+        rows: [{ id: "n1", fields: { title: "Plan" } }],
+      })
+    ).toMatchObject({
+      ok: true,
+      rows: [{ title: "Plan", category: "true:text/plain;charset=UTF-8" }],
+    });
+  });
 
   test.each([
     [

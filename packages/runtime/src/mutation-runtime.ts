@@ -16,18 +16,11 @@ import { replaceClockAndRandomness } from "./clock-and-randomness.ts";
 // functions, and for good, through what a workflow's calculation is locked
 // down with (clock-and-randomness.ts), so it can't put them back. Besides
 // those: the performance timeline's clock, and `File`'s and
-// `PerformanceMark`'s times; generating a key and measuring the timeline
-// are refused, as no seed reaches them. Until the host starts a mutation
+// `PerformanceMark`'s times; what no seed reaches (measuring the
+// timeline, a form's files and body, generating a key, randomized
+// signatures and encryption) is refused. Until the host starts a mutation
 // each answers as the platform's does. The isolate runs one invocation and
 // is thrown away, so nothing reaches another call.
-
-/**
- * The intrinsic the replacements call while App code runs, taken as this
- * module loads, before any App module does: a replacement never looks it
- * up again, so App code replacing `Reflect.apply` is never handed the
- * platform's `generateKey` or `measure`.
- */
-const { apply } = Reflect;
 
 /** When a mutation started, and the seed of its randomness (64 hex digits). */
 export interface MutationStart {
@@ -110,12 +103,7 @@ export const installMutationRuntime = (): ((start: MutationStart) => void) => {
   const platformRandom = Math.random.bind(Math);
   const platformRandomValues = crypto.getRandomValues.bind(crypto);
   const platformRandomUUID = crypto.randomUUID.bind(crypto);
-  const platformGenerateKey: unknown = Reflect.get(
-    crypto.subtle,
-    "generateKey"
-  );
   const platformPerformanceNow = performance.now.bind(performance);
-  const platformMeasure: unknown = Reflect.get(performance, "measure");
   const { timeOrigin } = performance;
 
   const now = (): number => fixed?.time ?? platformNow();
@@ -125,14 +113,6 @@ export const installMutationRuntime = (): ((start: MutationStart) => void) => {
   const sealed = replaceClockAndRandomness({
     now,
     performanceNow,
-    // Refused in a mutation, as no seed reaches the timeline it measures.
-    measure(this: unknown, ...args: unknown[]): unknown {
-      if (fixed !== undefined || typeof platformMeasure !== "function") {
-        throw unavailable("performance.measure");
-      }
-      const measured: unknown = apply(platformMeasure, this, args);
-      return measured;
-    },
     random: () =>
       fixed === undefined ? platformRandom() : unitInterval(fixed.bytes(8)),
     getRandomValues: (array) => {
@@ -156,13 +136,11 @@ export const installMutationRuntime = (): ((start: MutationStart) => void) => {
     },
     randomUUID: () =>
       fixed === undefined ? platformRandomUUID() : uuidOf(fixed.bytes(16)),
-    // A key from the platform's randomness, which no seed reaches.
-    generateKey(this: unknown, ...args: unknown[]): unknown {
-      if (fixed !== undefined || typeof platformGenerateKey !== "function") {
-        throw unavailable("generating a key");
+    // Refused in a mutation: no seed reaches it.
+    unseeded: (what) => {
+      if (fixed !== undefined) {
+        throw unavailable(what);
       }
-      const generated: unknown = apply(platformGenerateKey, this, args);
-      return generated;
     },
   });
   if (!sealed) {

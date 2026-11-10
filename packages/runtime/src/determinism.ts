@@ -15,13 +15,18 @@ import { impureMessage } from "./migration.ts";
 // - Calls them plainly (`Math.random()`, `Date.now()`, `new Date()`,
 //   `Date()`, `crypto.randomUUID()`, `performance.now()`, a formatter
 //   given no date), or generates a key (an extractable key's bytes are
-//   randomness): each is shadowed with a refusal.
+//   randomness), signs or encrypts with randomness: each is shadowed
+//   with a refusal.
 // - Reads the time through what records it: a `File`'s `lastModified`, a
 //   `PerformanceMark`'s or `performance.mark`'s `startTime` (each unless
-//   given), `performance.measure`: shadowed with refusals too.
+//   given), `performance.measure`, a file a form makes of a blob or reads
+//   from a body: shadowed with refusals too.
+// - Reads a form body's boundary, the platform's randomness: making a
+//   response or request with a form body is shadowed with a refusal.
 // - Reaches them past the object: `crypto`'s, `crypto.subtle`'s and
 //   `performance`'s methods on their prototypes, `Date` and the timed
-//   classes as their prototype's `constructor`: shadowed there too.
+//   classes as their prototype's `constructor` or on the global's
+//   prototype: shadowed there too.
 // - Gives `performance`, `crypto` or `crypto.subtle` an own `now`,
 //   `randomUUID` or the like as it loads, which the platform keeps only
 //   on their prototypes: each is shadowed on the object too, and the
@@ -46,6 +51,8 @@ import { impureMessage } from "./migration.ts";
 //   descriptors and records without a prototype.
 // - Replaces a global before the transform runs: what is shadowed, and
 //   what it passes on to, is taken as these modules load.
+// Every source, and what each is checked for, is listed in
+// clock-and-randomness.ts.
 // Not stopped, and not a boundary: a reference App code kept from before,
 // or a value computed as its modules loaded, still differs between calls,
 // and the isolate has no capability for it to misuse either way. So a
@@ -69,11 +76,11 @@ const refuseRandomness = unavailable("randomness");
 const refused = clockAndRandomnessFrom({
   now: refuseClock,
   performanceNow: refuseClock,
-  measure: refuseClock,
   random: refuseRandomness,
   getRandomValues: refuseRandomness,
   randomUUID: refuseRandomness,
-  generateKey: refuseRandomness,
+  unseeded: (_what, reads) =>
+    reads === "randomness" ? refuseRandomness() : refuseClock(),
 });
 
 /** Puts back what each of `refused` up to `count` held (`saved`). */
@@ -129,11 +136,7 @@ export const deterministically = <Result>(
       }
       if (!isInPlace(replacement)) {
         restore(saved, index + 1);
-        return refuse(
-          impureMessage(
-            replacement.value === refuseRandomness ? "randomness" : "the clock"
-          )
-        );
+        return refuse(impureMessage(replacement.reads));
       }
     }
   }
