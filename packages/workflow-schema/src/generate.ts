@@ -129,6 +129,30 @@ import type {
 //   are sealed too: the code names the same ones, and the host refuses a
 //   call that names others, or names any where the action's contract
 //   doesn't answer or take files.
+//
+// Calls of an App's functions (`ctx.apps.<alias>.<path>`, GRA-1663) add:
+//
+// - A workflow reaching a function it didn't declare. The member path is
+//   only a name for the call: the module maps each path to the function's
+//   stable ID, the isolate sends that ID, and the host holds it to the
+//   sealed `grasp.app` call of the step, whose App and function IDs come
+//   from the document, never from the code. The App's ID never crosses
+//   into the isolate at all. The host then needs the workflow's own
+//   active grant on exactly that function (core's workflows/app-calls.ts).
+// - A rename racing a publish, or a rollback. Nothing that runs names a
+//   function by its path: the sealed call carries its ID, which resolves
+//   in the App's current release, so a rename, before, during or after a
+//   publish, reaches the same function; the path, the document's hint,
+//   only names the member, so a build is the document's alone, the same
+//   whatever the App is called now. Saving the document names it afresh.
+// - An App deleted, or a function removed, while runs wait. The call
+//   resolves when it is made, so the next call fails
+//   (`workflow.call_denied`, `workflow.app_function_unavailable`), which
+//   no catch mistakes for the App's own answer; publication refuses a
+//   function the App no longer gives.
+// - A path becoming code. A path is held to an App's function path
+//   (`functionPathPattern`: identifiers, so never `__proto__`), each
+//   segment a member after a dot; the IDs are literals.
 
 /** The SDK the generated module imports. */
 export const generatedImport = "@grasp-os/sdk/workflow";
@@ -146,9 +170,9 @@ export const generatedHelpersImport = "@grasp-os/sdk/workflow-generated";
  * this one, and an older build is refused, to publish again
  * (`workflow.format_unsupported`), never half run. Version 6: no
  * workflow modules (`ctx.modules`), `JSON.parse` through `$parse`, and
- * `run.startedAt`.
+ * `run.startedAt`; 7: `ctx.apps`, an App's functions called by their IDs.
  */
-export const generatorVersion = "grasp-workflow-ts/6";
+export const generatorVersion = "grasp-workflow-ts/7";
 
 /** A task as its generator writes it: the loops around it are added. */
 type Unscoped<Task> = Task extends unknown ? Omit<Task, "scope"> : never;
@@ -337,6 +361,8 @@ class Generator {
   /** The actions each files and brain permission's steps take. */
   readonly #files = new Map<string, Set<string>>();
   readonly #brain = new Map<string, Set<string>>();
+  /** Each App's functions its steps call, member path to function ID. */
+  readonly #apps = new Map<string, Map<string, string>>();
   #ai = false;
 
   constructor(workflow: CheckedWorkflow) {
@@ -551,6 +577,26 @@ class Generator {
       member = `ctx.connections${memberOf(step.connection)}${path
         .map((segment) => memberOf(segment))
         .join("")}`;
+    } else if ("app" in step) {
+      const permission = this.#workflow.document.permissions?.apps?.[step.app];
+      if (permission === undefined) {
+        throw new Error(`No App permission ${step.app}`);
+      }
+      call = {
+        name: "grasp.app",
+        binding: step.app,
+        app: permission.app,
+        function: step.function,
+        arguments: args.template,
+      };
+      const path = permission.functions[step.function] ?? "";
+      const functions = this.#apps.get(step.app) ?? new Map<string, string>();
+      functions.set(path, step.function);
+      this.#apps.set(step.app, functions);
+      member = `ctx.apps${memberOf(step.app)}${path
+        .split(".")
+        .map((segment) => memberOf(segment))
+        .join("")}`;
     } else {
       ({ call, member } = this.#resourceCall(step, args.template));
     }
@@ -578,7 +624,10 @@ class Generator {
    * of the format's own fixed list, sealed as its call, and declared.
    */
   #resourceCall(
-    step: Exclude<Extract<Step, { type: "call" }>, { connection: string }>,
+    step: Exclude<
+      Extract<Step, { type: "call" }>,
+      { connection: string } | { app: string }
+    >,
     args: Template
   ): { call: SealedCall; member: string } {
     const [kind, alias, actions] =
@@ -1150,6 +1199,17 @@ class Generator {
                 literal(operation),
               ])
             ),
+          ])
+        ),
+      ]);
+    }
+    if (this.#apps.size > 0) {
+      kinds.push([
+        "apps",
+        objectCode(
+          [...this.#apps].map(([alias, functions]) => [
+            alias,
+            objectCode([...functions].map(([path, id]) => [path, literal(id)])),
           ])
         ),
       ]);

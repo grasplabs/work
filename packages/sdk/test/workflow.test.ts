@@ -148,6 +148,7 @@ const engineOf = ({
       ai: binding("ai"),
       runFiles: binding("runFiles"),
       handbook: binding("handbook"),
+      notes: binding("notes"),
     },
     do: async (name, _options, fn) => await journaled(name, fn),
     sleep: async (name) => {
@@ -396,6 +397,9 @@ const probes: readonly (readonly string[])[] = [
   ["connections", "__proto__"],
   ["decisions", "__proto__"],
   ["decisions", "finance"],
+  ["apps", "notes"],
+  ["apps", "constructor"],
+  ["apps", "__proto__"],
   ["ai"],
   ["files", "runFiles"],
   ["files", "__proto__"],
@@ -472,6 +476,48 @@ describe("a workflow's ctx", () => {
         },
       ],
       names: ["$params", "read:task", "summary:task"],
+    });
+  });
+
+  it("calls an App's function by its stable ID through its alias, its path a path of members", async () => {
+    let apps: unknown;
+    const workflow = defineWorkflow({
+      permissions: {
+        apps: {
+          notes: { "notes.create": "fn-create", "notes.titles": "fn-titles" },
+        },
+      },
+      handler: async (ctx) => {
+        ({ apps } = ctx);
+        await ctx.apps.notes.notes.create({ title: "Hi" }, { step: "made" });
+        return null;
+      },
+    });
+    const { engine, made, names } = engineOf();
+    await workflow.run(engine, {});
+    expect({
+      made,
+      names,
+      // Only what was declared, frozen, with no prototype: no other
+      // function, and nothing inherited.
+      frozen: [
+        isFrozenData(read(apps, "notes")),
+        isFrozenData(read(apps, "notes", "notes")),
+      ],
+      functions: keysOf(read(apps, "notes", "notes")),
+      undeclared: [
+        read(apps, "notes", "notes", "remove"),
+        read(apps, "notes", "constructor"),
+        read(apps, "crm"),
+      ],
+    }).toStrictEqual({
+      made: [
+        { binding: "notes", operation: "fn-create", args: { title: "Hi" } },
+      ],
+      names: ["$params", "made:task"],
+      frozen: [true, true],
+      functions: ["create", "titles"],
+      undeclared: [undefined, undefined, undefined],
     });
   });
 

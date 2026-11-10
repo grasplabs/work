@@ -65,12 +65,14 @@ import type {
  *   data, never something inherited, and nothing changes it. The check of
  *   expressions (`@grasp-os/sdk/expression-check`) is the first layer, the
  *   isolate's frozen intrinsics the third.
- * - Members exposing undeclared names. `ctx.connections`, `ctx.decisions`,
- *   `ctx.events` and `ctx.ai` are built only from
+ * - Members exposing undeclared names. `ctx.connections`, `ctx.apps`,
+ *   `ctx.decisions`, `ctx.events` and `ctx.ai` are built only from
  *   `permissions`, as frozen objects with no prototype (`membersOf`),
- *   never a `Proxy`: an alias or action nobody declared, `constructor`
- *   and `__proto__` included, is `undefined`, and calling it is a
- *   `TypeError` before anything is journaled.
+ *   never a `Proxy`: an alias, action or function nobody declared,
+ *   `constructor` and `__proto__` included, is `undefined`, and calling
+ *   it is a `TypeError` before anything is journaled. An App's function
+ *   sends only its stable ID: which App it is, the host takes from the
+ *   sealed call, never from the code.
  * - Replay determinism without enter steps. A call's journal name is its
  *   step's ID and part, and from its second run in a loop on, the count
  *   of its earlier runs (`<step>:task@2`): deterministic as long as the
@@ -130,6 +132,13 @@ export type {
  */
 export interface WorkflowPermissions {
   readonly ai?: true;
+  /**
+   * Each App's functions it calls, by the App permission's alias: each
+   * function's path (`notes.create`) and the stable ID its App's
+   * definition gives it, which the call sends; the host resolves the ID
+   * in the App's current version, so a rename reaches the same function.
+   */
+  readonly apps?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   readonly connections?: Readonly<
     Record<string, Readonly<Record<string, string>>>
   >;
@@ -226,6 +235,13 @@ export interface WorkflowCtx<
       Alias in keyof NonNullable<Permissions["connections"]>
     ]: ConnectionMembers<
       Extract<keyof NonNullable<Permissions["connections"]>[Alias], string>
+    >;
+  };
+  readonly apps: {
+    readonly [
+      Alias in keyof NonNullable<Permissions["apps"]>
+    ]: ConnectionMembers<
+      Extract<keyof NonNullable<Permissions["apps"]>[Alias], string>
     >;
   };
   readonly decisions: Readonly<

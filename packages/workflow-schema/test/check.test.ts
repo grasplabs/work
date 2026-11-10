@@ -45,6 +45,25 @@ const mailing = (id: string, subject: unknown) => ({
   args: { to: "ada@example.com", subject },
 });
 
+/**
+ * `everyStep` with an App permission `alias` listing `functions`, then a
+ * call with `call`'s fields.
+ */
+const callingApp = (
+  functions: Record<string, string>,
+  call: Record<string, unknown>,
+  alias = "notes"
+) => {
+  const document = followedBy({ id: "noted", type: "call", ...call });
+  return {
+    ...document,
+    permissions: {
+      ...document.permissions,
+      apps: { [alias]: { app: "app-1", functions } },
+    },
+  };
+};
+
 /** `everyStep` followed by a call whose subject is expression `source`. */
 const reading = (source: string) =>
   followedBy(mailing("probe", { $expr: source }));
@@ -179,6 +198,120 @@ describe("checking a workflow", () => {
     }).toStrictEqual({
       most: "ok",
       over: { "/permissions": "workflow.too_many_permissions" },
+    });
+  });
+
+  it("calls an App's function only by an ID its App permission lists, never a prototype's name", () => {
+    const listed = { "fn-create": "notes.create", "fn-list": "notes.list" };
+    expect({
+      listed: codesOf(
+        callingApp(listed, { app: "notes", function: "fn-create" })
+      ),
+      unlisted: codesAt(
+        callingApp(listed, { app: "notes", function: "fn-remove" })
+      ),
+      undeclaredApp: codesAt(
+        callingApp(listed, { app: "crm", function: "fn-create" })
+      ),
+      // A connection's alias is no App's.
+      connection: codesAt(
+        callingApp(listed, { app: "mail", function: "fn-create" })
+      ),
+      prototypeId: codesAt(
+        callingApp(
+          { constructor: "notes.create" },
+          { app: "notes", function: "constructor" }
+        )
+      ),
+      prototypePath: codesAt(
+        callingApp(
+          { "fn-create": "notes.__proto__" },
+          { app: "notes", function: "fn-create" }
+        )
+      ),
+      // Two functions one member, or one a member of the other.
+      sameMember: codesAt(
+        callingApp(
+          { "fn-a": "notes.create", "fn-b": "notes.create" },
+          { app: "notes", function: "fn-a" }
+        )
+      ),
+      shadowed: codesAt(
+        callingApp(
+          { "fn-a": "notes.create", "fn-b": "notes.create.fast" },
+          { app: "notes", function: "fn-a" }
+        )
+      ),
+      sensitive: codesAt(
+        callingApp(listed, {
+          app: "notes",
+          function: "fn-create",
+          args: { title: { $expr: "params.token" } },
+        })
+      ),
+      sharedAlias: codesAt(
+        callingApp(listed, { app: "mail", function: "fn-create" }, "mail")
+      ),
+    }).toStrictEqual({
+      listed: "ok",
+      unlisted: { "/steps/5/function": "workflow.unknown_permission" },
+      undeclaredApp: { "/steps/5/app": "workflow.unknown_permission" },
+      connection: { "/steps/5/app": "workflow.unknown_permission" },
+      prototypeId: {
+        "/permissions/apps/notes/functions/constructor":
+          "workflow.invalid_name",
+        "/steps/5/function": "workflow.invalid_name",
+      },
+      prototypePath: {
+        "/permissions/apps/notes/functions/fn-create": "workflow.invalid_name",
+      },
+      sameMember: {
+        "/permissions/apps/notes/functions/fn-b": "workflow.duplicate",
+      },
+      shadowed: {
+        "/permissions/apps/notes/functions/fn-b": "workflow.duplicate",
+      },
+      sensitive: { "/steps/5/args/title/$expr": "workflow.sensitive" },
+      sharedAlias: {
+        "/permissions/connections/mail": "workflow.duplicate_alias",
+      },
+    });
+  });
+
+  it("names an App under one alias, and calls at most as many functions as a test run answers", () => {
+    const listed = callingApp(
+      { "fn-create": "notes.create" },
+      { app: "notes", function: "fn-create" }
+    );
+    const twice = {
+      ...listed,
+      permissions: {
+        ...listed.permissions,
+        apps: {
+          ...listed.permissions.apps,
+          others: { app: "app-1", functions: { "fn-list": "notes.list" } },
+        },
+      },
+    };
+    /** 33 functions, each its own member. */
+    const functions = Object.fromEntries(
+      Array.from({ length: 33 }, (_, index) => [
+        `fn-${index}`,
+        `notes.call${index}`,
+      ])
+    );
+    const one = callingApp(functions, { app: "notes", function: "fn-0" });
+    // 66 in all, across two Apps.
+    const many = {
+      ...one,
+      permissions: {
+        ...one.permissions,
+        apps: { ...one.permissions.apps, crm: { app: "app-2", functions } },
+      },
+    };
+    expect({ twice: codesAt(twice), many: codesAt(many) }).toStrictEqual({
+      twice: { "/permissions/apps/others/app": "workflow.duplicate" },
+      many: { "/permissions/apps": "workflow.out_of_bounds" },
     });
   });
 

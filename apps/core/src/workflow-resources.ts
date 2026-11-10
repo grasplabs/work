@@ -1,6 +1,7 @@
 import { generatedWorkflowEntry } from "@grasp-os/compiler";
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import type { FunctionManifest } from "@grasp-os/sdk/host";
 import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
@@ -98,6 +99,7 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { MemberRef } from "./sharing.ts";
+import { permittedFunctionsOf } from "./workflow-app-functions.ts";
 import {
   buildOf,
   buildSummary,
@@ -956,6 +958,35 @@ const bindingProblems = (
   return problems;
 };
 
+/**
+ * Each function `checked`'s App permissions list that its App's current
+ * version doesn't give as a query or mutation (`permitted`, by alias):
+ * one never given, removed since, an action, or of an App that is gone.
+ * A workflow names a function by its ID alone, so nothing it publishes
+ * calls what isn't there to call; a removal after publication fails the
+ * next call instead (workflows/app-calls.ts).
+ */
+const appFunctionProblems = (
+  checked: CheckedWorkflow,
+  permitted: ReadonlyMap<string, ReadonlyMap<string, FunctionManifest>>
+): WorkflowDefinitionProblem[] =>
+  Object.entries(checked.document.permissions?.apps ?? {}).flatMap(
+    ([alias, { functions }]) =>
+      Object.keys(functions).flatMap((id) =>
+        permitted.get(alias)?.has(id) === true
+          ? []
+          : [
+              {
+                code: "workflow.app_function_unavailable",
+                message: `\`${alias}\`'s App gives no query or mutation with this ID now.`,
+                pointer: `/permissions/apps/${alias}/functions/${id}`,
+                remedy:
+                  "Name a function the App's current version gives an ID to, or remove the call.",
+              },
+            ]
+      )
+  );
+
 /** A string literal in a type checker's message: possibly the author's data. */
 const quotedLiteral = /"(?:[^"\\]|\\.)*"/gu;
 
@@ -972,11 +1003,12 @@ const expressionTypeProblems = async (
   env: Env,
   checked: CheckedWorkflow,
   catalog: ReadonlyMap<string, ResolvedCatalogContract>,
+  permitted: ReadonlyMap<string, ReadonlyMap<string, FunctionManifest>>,
   whose: string
 ): Promise<WorkflowDefinitionProblem[]> => {
   const bindings = documentBindings(checked.document);
   // A `call` step's result, as its call's contract answers it.
-  const outputOf = (step: Step) => {
+  const contractOutputOf = (step: Step) => {
     const called =
       step.type === "call" && "connection" in step ? step : undefined;
     const text =
@@ -996,6 +1028,12 @@ const expressionTypeProblems = async (
     }
     return descriptor;
   };
+  // An App's function's, as its App's current version declares what it
+  // returns (untyped where it declares nothing).
+  const outputOf = (step: Step) =>
+    step.type === "call" && "app" in step
+      ? (permitted.get(step.app)?.get(step.function)?.returns ?? undefined)
+      : contractOutputOf(step);
   const { scope, expressions } = expressionTypeRequest(checked, outputOf);
   if (Object.keys(expressions).length === 0) {
     return [];
@@ -1049,6 +1087,8 @@ const expressionTypeProblems = async (
  */
 const inspectDefinition = async (
   env: Env,
+  /** Who saves or publishes it: the Apps it names are read as they may use them. */
+  by: Acting | undefined,
   definition: string,
   /** Whose definition it is: the workflow's ID, or a blueprint's. */
   whose: string,
@@ -1112,7 +1152,22 @@ const inspectDefinition = async (
     });
   }
   bindings.sort((a, b) => (a.alias < b.alias ? -1 : 1));
-  const mistyped = await expressionTypeProblems(env, checked, catalog, whose);
+  const permitted = await permittedFunctionsOf(
+    env,
+    by,
+    checked.document.permissions?.apps
+  );
+  const unoffered = appFunctionProblems(checked, permitted);
+  if (unoffered.length > 0) {
+    return { ok: false, problems: unoffered };
+  }
+  const mistyped = await expressionTypeProblems(
+    env,
+    checked,
+    catalog,
+    permitted,
+    whose
+  );
   if (mistyped.length > 0) {
     return { ok: false, problems: mistyped };
   }
@@ -1125,6 +1180,7 @@ const inspectDefinition = async (
  */
 const checkDefinition = async (
   env: Env,
+  by: Acting,
   definition: string,
   whose: string,
   parsed: unknown
@@ -1132,7 +1188,7 @@ const checkDefinition = async (
   checked: CheckedWorkflow;
   bindings: PinnedBinding[];
 }> => {
-  const inspected = await inspectDefinition(env, definition, whose, parsed);
+  const inspected = await inspectDefinition(env, by, definition, whose, parsed);
   if (!inspected.ok) {
     throw definitionInvalid(inspected.problems);
   }
@@ -1806,6 +1862,7 @@ const publish = async (
   }
   const { checked, bindings } = await checkDefinition(
     env,
+    by,
     definition,
     workflow.id,
     parsed
@@ -1868,6 +1925,7 @@ export const candidateBuildOf = async (
   const parsed = parsedJson(definition);
   const { checked, bindings } = await checkDefinition(
     env,
+    by,
     definition,
     workflow.id,
     parsed
@@ -1891,11 +1949,13 @@ export const candidateBuildOf = async (
  */
 export const definitionProblems = async (
   env: Env,
+  /** Who saves it; none for a blueprint, which names no App. */
+  by: Acting | undefined,
   definition: string,
   /** Whose definition it is: the workflow's ID, or a blueprint's. */
   whose: string
 ): Promise<WorkflowDefinitionProblem[]> => {
-  const inspected = await inspectDefinition(env, definition, whose);
+  const inspected = await inspectDefinition(env, by, definition, whose);
   return inspected.ok ? [] : inspected.problems;
 };
 

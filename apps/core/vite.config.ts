@@ -86,6 +86,7 @@ export const pageTests = [
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
   "test/workflow-app-functions.test.ts",
+  "test/workflow-app-calls.test.ts",
   "test/agent-builds*.test.ts",
   "test/app-chat-build.test.ts",
   "test/app-preview.test.ts",

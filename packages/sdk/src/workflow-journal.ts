@@ -309,17 +309,17 @@ const overlapping = (name: string): WorkflowError =>
   );
 
 /**
- * Members of `names`, each a path of members (`mail.send` is
- * `.mail.send`, each segment through `memberName`), its leaf `leafOf` the
- * declared name: frozen objects with no prototype. Two names whose paths
- * meet where one ends are refused.
+ * Members of `declared`, each name a path of members (`mail.send` is
+ * `.mail.send`, each segment through `memberName`) to the leaf
+ * `leafOf` makes of what it is declared as: frozen objects with no
+ * prototype. Two names whose paths meet where one ends are refused.
  */
 const pathMembers = (
-  names: readonly string[],
-  leafOf: (name: string) => unknown
+  declared: Readonly<Record<string, string>>,
+  leafOf: (target: string) => unknown
 ): Readonly<Record<string, unknown>> => {
   const root: MemberNode = { children: new Map() };
-  for (const name of names) {
+  for (const [name, target] of Object.entries(declared)) {
     let node = root;
     for (const segment of name.split(".")) {
       const member = memberName(segment);
@@ -333,7 +333,7 @@ const pathMembers = (
     if (node.children.size > 0) {
       throw overlapping(name);
     }
-    node.leaf = leafOf(name);
+    node.leaf = leafOf(target);
   }
   return builtMembers(root);
 };
@@ -565,9 +565,17 @@ export const journaledCtx = (
   const connections = membersOf(
     Object.entries(permissions.connections ?? {}).map(([alias, actions]) => [
       alias,
-      pathMembers(Object.keys(actions), (path) =>
-        call(alias, actions[path] ?? path)
-      ),
+      pathMembers(actions, (operation) => call(alias, operation)),
+    ])
+  );
+
+  // An App's functions, each by its path, each call sending the function's
+  // stable ID through the App permission's alias: the host holds it to
+  // the sealed call, whose App and function the document gave.
+  const apps = membersOf(
+    Object.entries(permissions.apps ?? {}).map(([alias, functions]) => [
+      alias,
+      pathMembers(functions, (id) => call(alias, id)),
     ])
   );
 
@@ -748,6 +756,7 @@ export const journaledCtx = (
     ["state", frozenData(snapshot)],
     ["inbox", frozenData(engine.inbox ?? {})],
     ["connections", connections],
+    ["apps", apps],
     ["decisions", decisions],
     ["events", events],
     ["files", files],

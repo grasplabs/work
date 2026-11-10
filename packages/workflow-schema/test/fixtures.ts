@@ -144,6 +144,12 @@ export const everyCall = () => ({
   $schema: workflowSchemaUrl,
   args: { kind: "object", fields: { who: { kind: "string" } } },
   permissions: {
+    apps: {
+      notes: {
+        app: "app-notes",
+        functions: { "fn-create": "notes.create" },
+      },
+    },
     connections: { mail: { contract: "composio.mail@1" } },
   },
   steps: [
@@ -153,6 +159,13 @@ export const everyCall = () => ({
       connection: "mail",
       action: "mail.send",
       args: { to: { $expr: "args.who" }, subject: "Hi" },
+    },
+    {
+      id: "noted",
+      type: "call",
+      app: "notes",
+      function: "fn-create",
+      args: { title: { $expr: "args.who" } },
     },
     {
       id: "tell",

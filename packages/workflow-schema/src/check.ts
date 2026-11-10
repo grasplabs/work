@@ -14,6 +14,7 @@ import {
 } from "@grasp-os/sdk/host";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { passedBound, plainDataBounds } from "@grasp-os/shared/value-bounds";
+import { maxCandidateFixtures } from "@grasp-os/shared/workflow-resources";
 
 import {
   aiAlias,
@@ -316,7 +317,7 @@ const meantErrors = (errors: readonly OutputUnit[]): SchemaError[] => {
 const durationProperties = new Set(["for", "timeout", "delay"]);
 
 /** The properties of a step that name a permission by its alias. */
-const aliasProperties = new Set(["connection", "decision"]);
+const aliasProperties = new Set(["connection", "app", "decision"]);
 
 /** What a bound error's remedy says, by the keyword it failed. */
 const boundRemedies: Readonly<Record<string, string>> = {
@@ -373,6 +374,17 @@ const patternProblem = ({
       message: "Not a parameter's name.",
       remedy:
         "Start with a lower-case letter, then letters and digits only, e.g. `apiKey`.",
+    };
+  }
+  if (
+    last === "function" ||
+    /^\/permissions\/apps\/[^/]+\/functions(?:\/[^/]+)?$/u.test(pointer)
+  ) {
+    return {
+      code: "workflow.invalid_name",
+      message: "Not an App function's ID and path.",
+      remedy:
+        'Name the function by the ID its App\'s definition gives it, with its path as the App names it, e.g. `{ "fn_1": "notes.create" }`.',
     };
   }
   const filterPart = eventFilterPart(pointer);
@@ -486,9 +498,9 @@ const schemaProblem = (error: SchemaError): Problem => {
     return as({
       code: "workflow.call_kind",
       message:
-        "A call calls one member: a connection's action, or an action on the run's files or a Brain collection.",
+        "A call calls one member: a connection's action, an action on the run's files or a Brain collection, or an App's function.",
       remedy:
-        "Give it `connection` and `action` (with `into` or `from` if it keeps or attaches files), `files` and one of read, write, list and delete, or `brain` and one of search, read and recall.",
+        "Give it `connection` and `action` (with `into` or `from` if it keeps or attaches files), `files` and one of read, write, list and delete, `brain` and one of search, read and recall, or `app` and `function`.",
     });
   }
   if (keyword === "oneOf") {
@@ -1088,6 +1100,102 @@ const checkRaise = (
   walk.raises.add(code);
 };
 
+/**
+ * A call of an App's function: its App declared under `permissions.apps`,
+ * and the function one that permission lists by its ID, so a run calls
+ * only what the document declares and an admin may grant.
+ */
+const checkAppCall = (
+  walk: Walk,
+  step: Extract<Step, { type: "call"; app: string }>,
+  pointer: string
+): void => {
+  const apps = walk.document.permissions?.apps ?? {};
+  const permission = Object.hasOwn(apps, step.app) ? apps[step.app] : undefined;
+  if (permission === undefined) {
+    problem(
+      walk,
+      join(pointer, "app"),
+      "workflow.unknown_permission",
+      `No App permission is named \`${step.app}\`.`,
+      "Declare the App under `permissions.apps`, or name one that is."
+    );
+    return;
+  }
+  if (!Object.hasOwn(permission.functions, step.function)) {
+    problem(
+      walk,
+      join(pointer, "function"),
+      "workflow.unknown_permission",
+      `\`${step.app}\` lists no function \`${step.function}\`.`,
+      `List the function by its ID under \`permissions.apps.${step.app}.functions\`.`
+    );
+  }
+};
+
+/**
+ * Refuses two functions of one App permission whose paths are one
+ * member, or one a member of the other (`notes` and `notes.create`), as
+ * `ctx.apps.<alias>` reads them: each function is one member; two App
+ * permissions of one App, whose functions would then be two members of
+ * one grant; and more functions in all than a test run answers.
+ */
+const checkAppMembers = (walk: Walk): void => {
+  const apps = walk.document.permissions?.apps ?? {};
+  const aliasOf = new Map<string, string>();
+  // What a test run answers: each permission of every other kind (`ai`
+  // among them), and each App function, so a workflow that publishes can
+  // always be test-run.
+  const bound = Object.keys(walk.bindings).length;
+  let count = bound;
+  for (const [alias, { app, functions }] of Object.entries(apps)) {
+    count += Object.keys(functions).length;
+    const first = aliasOf.get(app);
+    if (first === undefined) {
+      aliasOf.set(app, alias);
+    } else {
+      problem(
+        walk,
+        join("/permissions/apps", alias, "app"),
+        "workflow.duplicate",
+        `\`${first}\` names this App already.`,
+        `List every function of the App under \`${first}\`.`
+      );
+    }
+  }
+  // Past it on the other permissions alone, `checkAliases` says so.
+  if (count > maxCandidateFixtures && bound <= maxCandidateFixtures) {
+    problem(
+      walk,
+      "/permissions/apps",
+      "workflow.out_of_bounds",
+      `A workflow holds at most ${maxCandidateFixtures} permissions and App functions in all, as a test run answers them.`,
+      "Call fewer functions, or split the work across workflows."
+    );
+  }
+  for (const [alias, { functions }] of Object.entries(apps)) {
+    const seen = new Set<string>();
+    for (const [id, path] of Object.entries(functions)) {
+      const clashes = [...seen].some(
+        (other) =>
+          other === path ||
+          other.startsWith(`${path}.`) ||
+          path.startsWith(`${other}.`)
+      );
+      if (clashes) {
+        problem(
+          walk,
+          join("/permissions/apps", alias, "functions", id),
+          "workflow.duplicate",
+          `Two of \`${alias}\`'s functions would be the same member, \`${path}\`.`,
+          "List each function once, by its own path."
+        );
+      }
+      seen.add(path);
+    }
+  }
+};
+
 const checkCall = (
   walk: Walk,
   step: Extract<Step, { type: "call" }>,
@@ -1162,6 +1270,8 @@ const checkCall = (
         `Name one of ${actions.join(", ")}.`
       );
     }
+  } else if ("app" in step) {
+    checkAppCall(walk, step, pointer);
   }
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
   checkValue(walk, step.args, join(pointer, "args"), place, connection);
@@ -1462,7 +1572,11 @@ const checkAliases = (walk: Walk): void => {
       "Drop the permissions its steps don't use, or split the workflow."
     );
   }
-  for (const { kind, alias } of aliased) {
+  const apps = Object.keys(permissions.apps ?? {}).map((alias) => ({
+    kind: "apps",
+    alias,
+  }));
+  for (const { kind, alias } of [...apps, ...aliased]) {
     if (seen.has(alias) || alias === aiAlias) {
       problem(
         walk,
@@ -1575,6 +1689,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
     }
   }
   checkAliases(walk);
+  checkAppMembers(walk);
   checkRetryNames(walk);
   const args = checkSchema(walk, document.args ?? noArgs, "/args");
   for (const [key, schema] of Object.entries(document.state ?? {})) {
