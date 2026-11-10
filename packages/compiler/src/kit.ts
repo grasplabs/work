@@ -74,9 +74,9 @@ export const compilerAssets = {
   kitModules: "kit-modules.json",
   /** The preview kit's modules (`KitModules`), which only previews load. */
   kitPreviewModules: "kit-preview-modules.json",
-  /** The SDK modules a workflow's or an App test's isolate loads (`sdkImports`). */
+  /** The SDK's and the runtime's modules a workflow's or an App test's isolate loads (`sdkImports`). */
   workflowSdkModules: "sdk-workflow-modules.json",
-  /** The SDK modules an App's server isolate loads (`serverSdkImports`). */
+  /** The SDK's and the runtime's modules an App's server isolate loads (`serverSdkImports`). */
   serverSdkModules: "sdk-server-modules.json",
   /** The package builder's module (src/packages/worker.ts). */
   packageBuilder: "package-builder.js",
