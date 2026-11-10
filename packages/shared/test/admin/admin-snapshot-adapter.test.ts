@@ -44,6 +44,13 @@ const text = (value: unknown): string =>
     return each;
   });
 
+/** The screen the company's admin is on, as the admin's model says it of the screens `done`; of a core that says none where left out. */
+const stepOf = (done?: string[]) =>
+  adminOrgOf(
+    { ...snapshot, ...(done === undefined ? {} : { place: { done } }) },
+    client
+  ).org.adminStep;
+
 describe("an organization from core's admin snapshot", () => {
   it("is told, nine days in, with the agreements in and its leads named", () => {
     const { view } = shown();
@@ -66,6 +73,37 @@ describe("an organization from core's admin snapshot", () => {
       ["assessment", "signed", "2026-09-29"],
       ["council", "none", null],
     ]);
+  });
+
+  it("says which screen the company's admin is on in their own onboarding, from the ones core says they finished", () => {
+    expect({
+      // A core that keeps no place yet, and an admin who finished nothing.
+      notSaid: stepOf(),
+      notStarted: stepOf([]),
+      partWay: stepOf(["welcome", "ai", "about"]),
+      // One finished out of order doesn't hide the first they haven't.
+      apart: stepOf(["welcome", "leads"]),
+      all: stepOf([
+        "welcome",
+        "ai",
+        "about",
+        "company",
+        "sources",
+        "documents",
+        "pulse",
+        "leads",
+        "team",
+        "listening",
+        "review",
+        "open",
+      ]),
+    }).toStrictEqual({
+      notSaid: undefined,
+      notStarted: undefined,
+      partWay: "company",
+      apart: "ai",
+      all: "done",
+    });
   });
 
   it("shows where everyone stands, who is talking now, and who has no link yet", () => {

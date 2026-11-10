@@ -4,9 +4,11 @@ import { defaultFlow, flowSteps } from "@grasp-os/shared/onboarding-flow";
 import type {
   FlowStep,
   OnboardingFlow,
+  SetupStepId,
 } from "@grasp-os/shared/onboarding-flow";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import {
@@ -17,8 +19,9 @@ import {
   envelopeOf,
   postCommand,
 } from "./admin-command.ts";
+import { mockIdp } from "./idp.ts";
 import { team } from "./onboarding-team.ts";
-import { auditedDuring, outcome } from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
 // How much onboarding a company goes through (`onboarding.flow`, a
 // command from Grasp's admin; src/admin-command.ts tries who may give a
@@ -205,6 +208,51 @@ describe("a company's onboarding flow", { timeout: 60_000 }, () => {
       noOnboarding: "onboarding.interviews_kept",
       otherSteps: "ok",
       interviewsKept: { id: "interviews", on: true },
+    });
+  });
+});
+
+describe("where the company's admin is in their onboarding", () => {
+  const idp = mockIdp();
+
+  it("is kept by core as they finish screens, never taken back, for its admins only, and shown to Grasp's admin", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const { api: member } = await signedInApi(idp, "user");
+
+    const before = await api.onboarding.place();
+    const events = await auditedDuring(async () => {
+      await api.onboarding.finishSteps(["welcome", "ai"]);
+      // Told again, with the next one: only the new one is new.
+      await api.onboarding.finishSteps(["welcome", "ai", "about"]);
+      await api.onboarding.finishSteps(["welcome"]);
+    });
+    // Another admin, on another device, reads the same place.
+    const { api: other } = await signedInApi(idp, "admin");
+    const kept = await other.onboarding.place();
+    const snapshot = await adminSnapshot();
+    const unknown = await outcome(
+      api.onboarding.finishSteps(z.custom<SetupStepId[]>().parse(["payroll"]))
+    );
+
+    expect({
+      before,
+      kept,
+      shown: snapshot.place,
+      finished: events
+        .filter(({ action }) => action === "onboarding.place.set")
+        .map(({ detail }) => detail.finished),
+      unknown,
+      byMember: [
+        await outcome(member.onboarding.place()),
+        await outcome(member.onboarding.finishSteps(["welcome"])),
+      ],
+    }).toStrictEqual({
+      before: { done: [] },
+      kept: { done: ["welcome", "ai", "about"] },
+      shown: { done: ["welcome", "ai", "about"] },
+      finished: ["welcome ai", "about"],
+      unknown: "onboarding.invalid",
+      byMember: ["role.forbidden", "role.forbidden"],
     });
   });
 });

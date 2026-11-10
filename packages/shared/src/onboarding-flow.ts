@@ -25,6 +25,48 @@ export const flowSteps = [
 ] as const;
 export type FlowStep = (typeof flowSteps)[number];
 
+/**
+ * The screens the admin's onboarding has, in the order they come while
+ * nobody set another. The interviews' four come with the flow's one
+ * `interviews` step.
+ */
+export const setupSteps = [
+  "welcome",
+  "ai",
+  "about",
+  "company",
+  "sources",
+  "documents",
+  "pulse",
+  "leads",
+  "team",
+  "listening",
+  "review",
+  "open",
+] as const;
+export type SetupStepId = (typeof setupSteps)[number];
+
+/**
+ * Where the company's admin is in their onboarding: the screens they
+ * finished, by name and never by place, so it holds when the order
+ * changes. Kept by core, so they go on from it on any device, and
+ * Grasp's staff see how far they are.
+ */
+export const setupPlaceSchema = z.strictObject({
+  done: z.array(z.enum(setupSteps)).max(setupSteps.length),
+});
+export type SetupPlace = z.infer<typeof setupPlaceSchema>;
+
+/** `place` with `steps` finished too: each once, in the screens' order. */
+export const withDone = (
+  place: SetupPlace,
+  steps: readonly SetupStepId[]
+): SetupPlace => ({
+  done: setupSteps.filter(
+    (step) => place.done.includes(step) || steps.includes(step)
+  ),
+});
+
 /** The agreements Grasp can ask of a company before its interviews. */
 export const flowAgreements = ["processing", "assessment", "council"] as const;
 export type FlowAgreement = (typeof flowAgreements)[number];
