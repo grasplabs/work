@@ -24,8 +24,10 @@ import {
   steps,
   teamNumbersOf,
   teamsOf,
+  waysFrom,
+  wizardOf,
 } from "./setup.ts";
-import type { Kept } from "./setup.ts";
+import type { Kept, SetupPath } from "./setup.ts";
 
 // From the prototype's `lib/onboarding.test.ts`, on what core keeps.
 
@@ -371,6 +373,81 @@ describe("how far the admin went, as core keeps it", () => {
       start: finishedAt(0),
       company: finishedAt(stepIndex("company")),
     }).toStrictEqual({ start: [], company: ["welcome", "ai", "about"] });
+  });
+});
+
+describe("a company's own path of screens", () => {
+  // A short flow: no story, nowhere documents live, no documents, no tools.
+  const short: SetupPath = [
+    "welcome",
+    "ai",
+    "company",
+    "leads",
+    "team",
+    "listening",
+    "review",
+    "open",
+  ];
+  // Setting up only: nobody is interviewed, and the AI is set in Settings.
+  const setup: SetupPath = ["welcome", "company", "documents"];
+
+  it("counts every place on the path: where they are, how far they went, and what they finished", () => {
+    expect({
+      at: stepIndex("leads", short),
+      notOnIt: stepIndex("about", short),
+      // A screen finished that the flow no longer has counts for nothing.
+      reached: reachedByPlace({ done: ["welcome", "ai", "about"] }, short),
+      finished: finishedAt(3, short),
+      // A plan saved: the team is being listened to, where the flow has that.
+      planned: [
+        reachedOf(0, { plan: { start: "2026-10-12", days: 14 } }, short),
+        reachedOf(1, { plan: { start: "2026-10-12", days: 14 } }, setup),
+      ],
+      dots: [wizardOf(short), wizardOf(setup)],
+    }).toStrictEqual({
+      at: 3,
+      notOnIt: -1,
+      reached: 2,
+      finished: ["welcome", "ai", "company"],
+      planned: [5, 1],
+      dots: [["welcome", "ai", "company", "leads", "team"], [...setup]],
+    });
+  });
+
+  it("goes back and on along the path, never to a screen the flow doesn't have", () => {
+    const { back, on } = waysFrom(2, 4, short);
+    expect({
+      back,
+      on,
+      // Asked for by its address, a screen off the path gives where they were.
+      offPath: stepShown("about", 3, { ready: true }, short),
+      onPath: stepShown("company", 3, { ready: true }, short),
+      nothingKept: stepShown(undefined, 0, null, setup),
+    }).toStrictEqual({
+      back: "ai",
+      on: "leads",
+      offPath: "leads",
+      onPath: "company",
+      nothingKept: "welcome",
+    });
+  });
+
+  it("holds an admin at the AI step only where the flow has it, and goes on from it to the next screen of the path", () => {
+    expect({
+      held: heldAt(4, { ready: false }, short),
+      // No AI step in this flow: its admin sets it in Settings, and nothing holds them.
+      notAsked: heldAt(2, { ready: false }, setup),
+      next: afterAi(1, short),
+      sentBack: afterAi(5, short),
+      // The AI step as the last screen: nothing after it.
+      last: afterAi(1, ["welcome", "ai"]),
+    }).toStrictEqual({
+      held: 1,
+      notAsked: 2,
+      next: "company",
+      sentBack: "listening",
+      last: undefined,
+    });
   });
 });
 
