@@ -315,6 +315,12 @@ describe("model spend", { timeout: 60_000 }, () => {
         .filter(({ workflowId }) => workflowId === id)
         .map(({ runId }) => runId)
     ).toHaveLength(1);
+    // Only the agent's call names an agent, so each agent's use can be
+    // told from a person's own and a workflow's.
+    expect({
+      byAgent: rows.filter(({ agentId }) => agentId === "chat").length,
+      byNone: rows.filter(({ agentId }) => agentId === null).length,
+    }).toStrictEqual({ byAgent: 1, byNone: 2 });
   });
 
   it("charge what a model thought, as the provider counts it in the answer's output", async () => {
