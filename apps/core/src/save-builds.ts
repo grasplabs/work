@@ -11,7 +11,6 @@ import {
   undeclaredFunctions,
 } from "@grasp-os/runtime/definition";
 import { generateModules, symbolicModules } from "@grasp-os/runtime/host";
-import { versionErrors } from "@grasp-os/shared/app-releases";
 import type {
   BuildDiagnostic,
   CommittedVersion,
@@ -282,9 +281,10 @@ const checkedDraftCode = async (
   // the check says first, by name.
   const undeclared = undeclaredFunctions(manifest, functions).map(
     (path): Diagnostic => ({
+      file: `server/${path.split(".").slice(0, -1).join("/")}.ts`,
       rule: "server",
       severity: "error",
-      message: `\`${path}\`: ${versionErrors.create("version.function_undeclared").message}`,
+      message: `\`${path}\` isn't declared as its code registers it: declare it as \`export const ${path.split(".").at(-1) ?? path} = query({ … })\`, with the builder of its kind and visibility from @server/_generated/server called by name, never an alias of one or a wrapper, in a file that parses. Its App can't be published until it is.`,
     })
   );
   return undeclared.length === 0

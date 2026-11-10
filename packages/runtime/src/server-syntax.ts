@@ -31,6 +31,9 @@ const parsed = new Map<string, ReadonlyMap<string, Declared>>();
 /** The characters of `parsed`'s sources together. */
 let parsedLength = 0;
 
+/** What an entry of `parsed` weighs beside its source: its map and slot. */
+const entryWeight = 256;
+
 /** The functions the TypeScript module `source` declares; none of one that doesn't parse. */
 const declaredFunctionsOf = (source: string): ReadonlyMap<string, Declared> => {
   const kept = parsed.get(source);
@@ -59,13 +62,13 @@ const declaredFunctionsOf = (source: string): ReadonlyMap<string, Declared> => {
     declared = new Map();
   }
   parsed.set(source, declared);
-  parsedLength += source.length;
+  parsedLength += source.length + entryWeight;
   for (const oldest of parsed.keys()) {
     if (parsedLength <= parsedMaxLength) {
       break;
     }
     parsed.delete(oldest);
-    parsedLength -= oldest.length;
+    parsedLength -= oldest.length + entryWeight;
   }
   return declared;
 };
