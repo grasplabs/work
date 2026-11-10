@@ -1,6 +1,5 @@
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { valueDepth } from "@grasp-os/shared/value-depth";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";

@@ -36,10 +36,10 @@ import {
   fail,
   generated,
   guardedRan,
-  local,
-  localWorkflow,
   objectOf,
   rowsOf,
+  tell,
+  unavailable,
 } from "./workflow-schema-runs.ts";
 
 /** Step `id` calling `action` of `mail`, in a try that takes any failure. */
@@ -85,14 +85,7 @@ const guarded = (
       backoff: "constant",
       ...(when.retry === undefined ? {} : { when: { $expr: when.retry } }),
     },
-    do: [
-      {
-        id: "tell",
-        type: "call",
-        module: "note",
-        args: { to: { $expr: "error.code" } },
-      },
-    ],
+    do: [tell],
   },
 });
 
@@ -811,91 +804,41 @@ describe("a grasp-workflow/2 workflow's generated code on the run host", () => {
   });
 });
 
-describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
-  let owned: Awaited<ReturnType<typeof localWorkflow>>;
+// A try's retry around a call that fails each time it is tried: its mail
+// server is unavailable. The catch's and the retry's `when` decide on the
+// run host, where the try is written.
+describe("a grasp-workflow/2 workflow's retries on the run host", () => {
+  let failing: Sealed;
 
   beforeAll(async () => {
-    owned = await localWorkflow();
+    await connectModels(`test-model-key-${crypto.randomUUID()}`, [
+      allowedModel,
+    ]);
+    failing = await sealedWorkflow();
+    await unavailable(failing);
   });
 
   afterAll(endLiveResourceRuns);
 
-  it("calls a compute and an action binding as sealed, refusing none", async () => {
-    const { source, sealed: withTable } = await generated(
-      [
-        { id: "linger", type: "wait", for: "1 hour" },
-        {
-          id: "add",
-          type: "call",
-          module: "total",
-          args: [1, { $expr: "args.who.length" }, 3],
-        },
-        {
-          id: "tell",
-          type: "call",
-          module: "note",
-          args: { to: { $expr: "args.who" } },
-        },
-      ],
-      {
-        schema: objectOf({
-          total: { kind: "number" },
-          told: { kind: "string" },
-        }),
-        value: {
-          total: { $expr: "add" },
-          told: { $expr: "tell.status" },
-        },
-      },
-      local
-    );
-    const runId = await waitingRun(owned);
-    const ran = await ranAs(runId, source, {
-      engine: retryingEngine(),
-      sealed: withTable,
-    });
-    const checked = await checkedCalls(runId);
-    expect({
-      ran,
-      checked: checked.map(({ step, call, binding }) => ({
-        step,
-        call,
-        binding,
-      })),
-    }).toStrictEqual({
-      // Ada's name is 3 long.
-      ran: {
-        ended: { total: 7, told: "noted Ada" },
-        tampered: [],
-      },
-      checked: [
-        { step: "add:task", call: "grasp.compute", binding: "total" },
-        { step: "tell:task", call: "grasp.action", binding: "note" },
-      ],
-    });
-  });
-
   it("decides a catch's and a retry's `when` as booleans where the try is written, retrying while the retry's holds", async () => {
     const ranWith = async (steps: unknown[]) => {
       const tries = new Map<string, number>();
-      const { source, sealed: withTable } = await generated(
-        steps,
-        undefined,
-        local
-      );
-      const ran = await ranAs(await waitingRun(owned), source, {
+      const { source, sealed: withTable } = await generated(steps);
+      const ran = await ranAs(await waitingRun(failing), source, {
         engine: retryingEngine(tries),
         sealed: withTable,
       });
       return { ran, guarded: guardedRan(tries) };
     };
-    // Rounds 2 and 3 of its 3 attempts, each decided, then caught.
+    // Rounds 2 and 3 of its 3 attempts, each decided, then caught; the
+    // last round's step tried three times by the engine, as every call
+    // that may work when tried again.
     const retriedThenCaught = {
       ran: { ended: null, tampered: [] },
       guarded: {
         decided: 2,
         retried: 2,
-        failed: 1,
+        failed: 3,
         told: true,
       },
     };
@@ -928,35 +871,24 @@ describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
 
   it("takes a retry `when` that throws as not retrying, the failure recorded and caught", async () => {
     const tries = new Map<string, number>();
-    const { source, sealed: withTable } = await generated(
-      [
-        {
-          id: "guarded",
-          type: "try",
-          try: [{ id: "fail", type: "call", module: "broken", args: 1 }],
-          catch: {
-            retry: {
-              attempts: 3,
-              delay: "1 second",
-              backoff: "constant",
-              // Reads past details the host never gives: it throws.
-              when: { $expr: "error.details.deeper === 1" },
-            },
-            do: [
-              {
-                id: "tell",
-                type: "call",
-                module: "note",
-                args: { to: { $expr: "error.code" } },
-              },
-            ],
+    const { source, sealed: withTable } = await generated([
+      {
+        id: "guarded",
+        type: "try",
+        try: [fail],
+        catch: {
+          retry: {
+            attempts: 3,
+            delay: "1 second",
+            backoff: "constant",
+            // Reads past details the host never gives: it throws.
+            when: { $expr: "error.details.deeper === 1" },
           },
+          do: [tell],
         },
-      ],
-      undefined,
-      local
-    );
-    const ran = await ranAs(await waitingRun(owned), source, {
+      },
+    ]);
+    const ran = await ranAs(await waitingRun(failing), source, {
       engine: retryingEngine(tries),
       sealed: withTable,
     });
@@ -967,7 +899,7 @@ describe("a grasp-workflow/2 workflow's own modules on the run host", () => {
       guarded: {
         decided: 1,
         retried: 0,
-        failed: 1,
+        failed: 3,
         told: true,
       },
     });

@@ -26,7 +26,7 @@ import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
-import { appWith, failure, person, seal } from "./sealed-apps.ts";
+import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // What resource-bindings*.test.ts share: the Apps whose resources an

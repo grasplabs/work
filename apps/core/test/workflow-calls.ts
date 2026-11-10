@@ -121,8 +121,6 @@ export interface Draft {
   steps: readonly unknown[];
   /** What the run's `status` ends as: an expression, the text `done` if none. */
   status?: string;
-  /** The workflow's own code modules, by path. */
-  modules?: Record<string, string>;
 }
 
 /** A definition: its input `{ who }`, its output `{ status }`. */
@@ -148,7 +146,6 @@ export const published = async (by: Identity, draft: Draft) => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: definitionOf(draft),
     basedOn: null,
-    ...(draft.modules === undefined ? {} : { modules: draft.modules }),
   });
   const [version] = await workflowVersions(env, by, workflow.id);
   return { workflow, executable: version?.build?.hash !== undefined };
@@ -437,18 +434,18 @@ export const greetStep = (id = "greet", timeout?: string) => ({
 /**
  * A workflow of `by`'s asking binding `summary` (the allowed model,
  * approved by `admin`) to greet its input's `who`, `before` its steps
- * before the call.
+ * before the call, `after` its steps after the pause that follows it.
  */
 export const greetingWorkflow = async (
   by: Identity,
   admin: Identity,
-  { before = [] }: { before?: unknown[] } = {}
+  { before = [], after = [] }: { before?: unknown[]; after?: unknown[] } = {}
 ) => {
   const key = `summary-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "model" });
   const { workflow, executable } = await published(by, {
     permissions: { ai: { contract: key } },
-    steps: [...before, greetStep(), pause],
+    steps: [...before, greetStep(), pause, ...after],
     status: "greet.line",
   });
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
