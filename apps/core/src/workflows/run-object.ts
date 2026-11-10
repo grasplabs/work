@@ -467,11 +467,29 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * next, and starts at that time.
    */
   async advanceFixtureClock(ms: number): Promise<void> {
-    const identity = this.runIdentity();
-    if (identity !== undefined && pinOf(identity)?.type !== "fixture") {
-      throw new Error("Only a run an App's test started has its clock moved.");
-    }
     await this.advanceClock(ms);
+  }
+
+  /**
+   * Whether the run waits for something now, its wake not due (workerflow's
+   * `waitsNow`): what an App's test waits for before moving its clock
+   * past a sleep (`t.runs.untilWaiting`).
+   */
+  async fixtureWaits(): Promise<boolean> {
+    return await this.waitsNow();
+  }
+
+  /**
+   * Whether this is a run an App's test started, the only kind whose clock
+   * moves or whose activation is restarted (workerflow's `testsRun`). One
+   * not created yet is the test's to create next: its test moved its
+   * clock before it started (engine.ts, `createFixture`), under an ID core
+   * minted for it.
+   */
+  // oxlint-disable-next-line grasp/no-unbounded-rpc-target -- the engine's hook, as `definition`
+  protected override testsRun(): boolean {
+    const identity = this.runIdentity();
+    return identity === undefined || pinOf(identity)?.type === "fixture";
   }
 
   /** Records that the run's cancel is done (`markCancelled`). */

@@ -496,6 +496,35 @@ describe("a workflow test's model calls", { timeout: 180_000 }, () => {
     });
   });
 
+  it("refuse a fault after a task the workflow doesn't have, which would never fire", async () => {
+    const app = await requestsApp(
+      { steps: [summarize], status: line },
+      { models: { ai: { line: "Hello" } }, restartAfterStep: "summarise" }
+    );
+    const host = fixtureHostFor(
+      env,
+      app.release,
+      await releaseIdsOf(env, app.release)
+    );
+    const session = await host.open(`test-${unique()}`);
+    await session.identify(
+      JSON.stringify({ name: "desk-user", role: "user", teams: [] })
+    );
+    const answer: unknown = JSON.parse(
+      await session.start(
+        "desk-user",
+        await startOf(app.release, { who: "Ada" }),
+        JSON.stringify(app.options)
+      )
+    );
+    const left = await leftOf(app.app);
+    await session.close();
+    expect({ answer, left }).toMatchObject({
+      answer: { ok: false, error: { code: "contract.invalid_args" } },
+      left: { runs: 0 },
+    });
+  });
+
   it("count each task's model requests as the test's provider answered them, apart", async () => {
     const provider = await watchedProvider();
     const again = { ...summarize, id: "again" };

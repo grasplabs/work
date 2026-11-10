@@ -176,6 +176,19 @@ export const startFixtureRun = async (
   const found = await pinned(env, workflow, pin.version);
   const input = acceptedInput(found.inputDescriptor, declared);
   const params = await fixtureParams(env, workflow, pin.version, test.params);
+  // A fault after a task the version doesn't have would never fire, and
+  // its test would pass on a run that never restarted.
+  if (test.restartAfterStep !== undefined) {
+    const build = await loadWorkflowBuild(
+      env,
+      workflow,
+      pin.version,
+      found.manifestHash
+    );
+    if (!build.tasks.some(({ id }) => id === test.restartAfterStep)) {
+      throw operationErrors.create("contract.invalid_args");
+    }
+  }
   const runId = crypto.randomUUID();
   // Recorded before the engine hears of it, so nothing runs unrecorded.
   await drizzle(env.DB)
@@ -482,9 +495,8 @@ export const fixtureRunOutcome = async (
   }
 };
 
-/** The engine's statuses of a run that waits for something, or has ended. */
-const waitsOrEnded: ReadonlySet<string> = new Set([
-  "waiting",
+/** The engine's statuses of a run that has ended. */
+const ended: ReadonlySet<string> = new Set([
   "complete",
   "errored",
   "terminated",
@@ -509,7 +521,15 @@ export const fixtureRunWaits = async (
     if (stopped()) {
       return false;
     }
-    if (status !== undefined && waitsOrEnded.has(status.status)) {
+    if (status !== undefined && ended.has(status.status)) {
+      return true;
+    }
+    // Waiting, and nothing due to wake it at once: settled where it waits.
+    if (
+      status?.status === "waiting" &&
+      // oxlint-disable-next-line no-await-in-loop -- one look after another
+      (await engine.fixtureWaits(run.runId))
+    ) {
       return true;
     }
     if (Date.now() + pollMs > until) {

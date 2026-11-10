@@ -1463,6 +1463,12 @@ export class TestRuns extends WorkflowRun {
   }
 
   /** The tests' way to `advanceClock`, which only a host's test calls. */
+  /** Every test run here is the tests' own. */
+  // oxlint-disable-next-line class-methods-use-this -- the seam it overrides
+  protected override testsRun(): boolean {
+    return true;
+  }
+
   async advanceClockBy(ms: number): Promise<void> {
     await this.advanceClock(ms);
   }

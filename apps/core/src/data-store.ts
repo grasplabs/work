@@ -196,6 +196,7 @@ export class DataStore extends DurableObject<Env> {
     storeId: StoreId,
     landing: ImportApply
   ): Promise<{ inserted: number }> {
+    await this.#admitScope(storeId, landing.roles);
     return await this.#live().applyImport(storeId, landing);
   }
 
@@ -384,6 +385,7 @@ export class DataStore extends DurableObject<Env> {
     resource: string,
     fileId: string
   ): Promise<FileContent> {
+    await this.#admitScope(storeId, reader.roles);
     return await this.#live().files.content(storeId, reader, resource, fileId);
   }
 
@@ -394,6 +396,7 @@ export class DataStore extends DurableObject<Env> {
     fileId: string,
     resources: string[]
   ): Promise<FileContent> {
+    await this.#admitScope(storeId, reader.roles);
     return await this.#live().files.readableThrough(
       storeId,
       reader,
@@ -409,6 +412,7 @@ export class DataStore extends DurableObject<Env> {
     fileIds: string[],
     resources: string[]
   ): Promise<void> {
+    await this.#admitScope(storeId, reader.roles);
     await this.#live().files.usable(storeId, reader, fileIds, resources);
   }
 

@@ -1095,17 +1095,42 @@ export default appTest(schema, {
     await expect(activated(builder, app)).resolves.toBe("current");
   });
 
-  it("move the clock from an App's own test past a sleep its run has reached", async () => {
+  it("move the clock from an App's own test past each sleep its run has reached, and keep the runs that ended", async () => {
     const { builder, app } = await requestsApp(
-      async (by) => await workflowOf(by, greeting([hold("1 hour")])),
+      async (by) =>
+        await workflowOf(
+          by,
+          greeting([
+            hold("1 hour"),
+            { id: "again", type: "wait", for: "1 hour" },
+          ])
+        ),
       {
         "tests/clock.test.ts": suiteOf(`
+      const hour = 60 * 60 * 1000;
       const run = await owner.start(workflows.followUp, { who: "Ada" });
+      // Each sleep once the run has reached it: the second only after the
+      // first woke, so the advance after it isn't taken by the first.
       await t.runs.untilWaiting(run);
-      await t.clock.advance(60 * 60 * 1000);
+      await t.clock.advance(hour);
+      await t.runs.untilWaiting(run);
+      await t.clock.advance(hour);
       expect(await t.runs.untilTerminal(run)).toEqual({
         status: "completed",
         result: { status: "Hello, Ada" },
+      });
+      // Two days on, past what the engine keeps of an ended run: the
+      // first run is still there to ask about.
+      const later = await owner.start(workflows.followUp, { who: "Bo" });
+      await t.runs.untilWaiting(later);
+      await t.clock.advance(48 * hour);
+      expect(await t.runs.untilTerminal(run)).toMatchObject({ status: "completed" });
+      expect(await t.effects.completedCount(run, "greet")).toBe(1);
+      await t.runs.untilWaiting(later);
+      await t.clock.advance(hour);
+      expect(await t.runs.untilTerminal(later)).toEqual({
+        status: "completed",
+        result: { status: "Hello, Bo" },
       });`),
       }
     );
@@ -1172,7 +1197,7 @@ export default appTest(schema, {
           text: "contract.invalid_args",
           tooFar: "contract.invalid_args",
         },
-        moved: "Only a run an App's test started has its clock moved.",
+        moved: "Only a run a host's test runs moves its time or restarts.",
         alarmKept: true,
         status: "waiting",
       }

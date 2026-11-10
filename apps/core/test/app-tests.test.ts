@@ -188,6 +188,9 @@ export default appTest(schema, {
     t.withIdentity({ name: "Ada" });
     t.withIdentity({ name: "Ada", role: "builder" });
   },
+  "fails for a name no decision could ask": async (t) => {
+    t.withIdentity({ name: "Ada Lovelace" });
+  },
   "passes": async () => {
     expect(1).toBe(1);
   },
@@ -389,6 +392,7 @@ export default appTest(schema, {
         /^tests\/failing\.test\.ts, "fails when an expected refusal never comes": promise resolved .* instead of rejecting/u
       ),
       'tests/failing.test.ts, "fails for one name given two roles": "Ada" is already someone with role user in no team: the same name is the same person.',
+      'tests/failing.test.ts, "fails for a name no decision could ask": t.withIdentity takes { name, role?: "user" | "builder", teams?: ["<team ID>"] }: A name is letters, digits, _ and -, at most 64: as a decision\'s recipients name someone.',
     ]);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: null,
@@ -462,6 +466,22 @@ export default appTest(schema, {
         await ctx.db.insert("notes", { title: "" });
       })
     ).rejects.toMatchObject({ code: expect.stringMatching(/invalid/u) });
+  },
+  "refuses a run whose reads a write changed before it committed, never dropping its own writes": async (t) => {
+    const ada = t.withIdentity({ name: "Ada" });
+    await expect(
+      t.run(async (ctx) => {
+        await ctx.db.query("notes").take(10);
+        // Committed while the run is open, to what it read.
+        await ada.mutation(api.notes.create, { title: "Meanwhile" });
+        await ctx.db.insert("notes", { title: "Seeded" });
+      })
+    ).rejects.toMatchObject({ code: "mutation.concurrent_change" });
+    const titles = await t.run(async (ctx) => {
+      const notes = await ctx.db.query("notes").take(10);
+      return notes.map((note) => note.title);
+    });
+    expect(titles).toEqual(["Meanwhile"]);
   },
 });
 `,

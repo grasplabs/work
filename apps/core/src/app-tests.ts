@@ -397,10 +397,20 @@ const maxIdentitiesPerTest = 20;
 /** A binding's alias, as a workflow declares it. */
 const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
 
+/**
+ * How a test's identity is named: as a workflow's decision names its
+ * recipients (`person:<name>`, resource-decisions.ts), so any identity
+ * can be asked one.
+ */
+const identityNamePattern = /^[\w-]{1,64}$/u;
+
 /** Who a test acts as, as `t.withIdentity` registers them (`identify`). */
 const identitySchema = z.strictObject({
   /** Their name: the same name in one test is the same person. */
-  name: z.string().trim().min(1).max(64),
+  name: z.string().regex(identityNamePattern, {
+    message:
+      "A name is letters, digits, _ and -, at most 64: as a decision's recipients name someone.",
+  }),
   role: z.enum(["user", "builder"]),
   /** The teams they are in (team IDs, as a table's `team` rules match them). */
   teams: z.array(identifierSchema).max(20),
@@ -427,7 +437,7 @@ interface TestIdentity {
 const startOptionsSchema = z.strictObject({
   params: z.record(z.string(), z.json()).optional(),
   deciders: z
-    .record(aliasSchema, z.array(z.string().trim().min(1).max(64)).max(20))
+    .record(aliasSchema, z.array(z.string().regex(identityNamePattern)).max(20))
     .optional(),
   models: z
     .record(aliasSchema, z.json())
@@ -773,7 +783,7 @@ const sandboxRefusals: ReadonlySet<string> = new Set([
   "function.ended",
 ]);
 
-/** The furthest a test moves its runs' clock on at once: a year. */
+/** The furthest a test moves its runs' clock on, in all: a year. */
 const maxClockAdvanceMs = 366 * 24 * 60 * 60 * 1000;
 
 /**
@@ -1260,6 +1270,10 @@ class FixtureSession extends TestTarget {
       });
       if ("refused" in opened) {
         result = opened.refused;
+      } else if (this.#closed) {
+        // Closed meanwhile: nothing would end it but its deadline.
+        await opened.transaction.end(false);
+        throw sessionEnded();
       } else {
         this.#transactions.push(opened.transaction);
         result = {
@@ -1347,12 +1361,16 @@ class FixtureSession extends TestTarget {
         z.number().int().min(0).max(maxClockAdvanceMs),
         ms
       );
-      this.#clockMs += by;
+      if (this.#clockMs + by > maxClockAdvanceMs) {
+        throw operationErrors.create("contract.invalid_args");
+      }
       await advanceFixtureClocks(
         this.#env,
         this.#runs.map(({ runId }) => runId),
         by
       );
+      // Once its runs moved: a start after it starts at the time they're at.
+      this.#clockMs += by;
       result = { ok: true, value: null };
     } catch (error) {
       result = { ok: false, error: refusalOf(error, requestId) };

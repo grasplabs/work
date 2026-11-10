@@ -289,6 +289,11 @@ export interface RunEngine {
    */
   advanceFixtureClock: (id: string, ms: number) => Promise<void>;
   /**
+   * Whether test run `id` waits for something now, its wake not due:
+   * what an App's test waits for before moving its clock.
+   */
+  fixtureWaits: (id: string) => Promise<boolean>;
+  /**
    * How many steps named `name` run `id` completed, each once however it
    * was replayed; nothing when the engine has no such run.
    */
@@ -509,6 +514,7 @@ export const runEngine = (env: Env): RunEngine => ({
   advanceFixtureClock: async (id, ms) => {
     await runObjectOf(env, id).advanceFixtureClock(ms);
   },
+  fixtureWaits: async (id) => await runObjectOf(env, id).fixtureWaits(),
   succeededSteps: async (id, name) =>
     await runStub(env, id).succeededSteps(name),
   createInternal: async ({ id, workflow, input }) => {

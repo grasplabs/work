@@ -1358,14 +1358,50 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * run's time.
    */
   protected async advanceClock(ms: number): Promise<void> {
+    this.#requireTestsRun();
     if (!Number.isSafeInteger(ms) || ms < 0) {
       throw new RangeError("A run's clock moves on by whole milliseconds.");
     }
     moveClockOn(this.ctx.storage, ms);
     const run = this.#run();
-    if (run !== undefined && run.status !== "paused") {
+    // An ended run keeps its alarm, its purge: moving its clock on purges
+    // nothing sooner than the wall clock would.
+    if (run !== undefined && run.status !== "paused" && !hasEnded(run)) {
       await this.#store.setAlarm(ownWake(run, this.#now()));
     }
+  }
+
+  /**
+   * Whether the run is one a host's test runs (an App's test's run), the
+   * only kind whose time moves (`advanceClock`) or whose activation is
+   * restarted (`restartActivation`). None, unless the host says so.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the seam a subclass overrides
+  protected testsRun(): boolean {
+    return false;
+  }
+
+  /** Refuses unless the run is a host's test's own (`testsRun`). */
+  #requireTestsRun(): void {
+    if (!this.testsRun()) {
+      throw new Error(
+        "Only a run a host's test runs moves its time or restarts."
+      );
+    }
+  }
+
+  /**
+   * Whether the run waits for something now (a sleep, a wait, a retry not
+   * due): `waiting`, its alarm not due, so nothing wakes it at once. A run
+   * an event or a moved clock woke but no activation ran yet doesn't.
+   */
+  protected async waitsNow(): Promise<boolean> {
+    const run = this.#run();
+    if (run?.status !== "waiting") {
+      return false;
+    }
+    const alarm = await this.#store.getAlarm();
+    return alarm === null || alarm > this.#now();
   }
 
   /**
@@ -1377,6 +1413,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * test's `restartAfterStep`): nothing else of the engine's asks it.
    */
   protected async restartActivation(): Promise<void> {
+    this.#requireTestsRun();
     const now = this.#now();
     this.#store.transactionSync(() => {
       supersedeIn(this.#store.sql, now);

@@ -33,8 +33,15 @@ import type { Invocation, Runner } from "./operations.ts";
 // - Writing what the schema refuses: each write is staged and checked as
 //   any mutation's (`stagingFor`), and the store checks the commit again.
 // - A transaction left open: it is the operation's own, so it ends at the
-//   invocation's deadline, as a mutation does, its writes dropped; and as
-//   its test's session closes (`end`).
+//   invocation's deadline (the test's), as a mutation does, its writes
+//   dropped; and as its test's session closes (`end`). How many a test
+//   opens is bounded by that deadline alone, as its calls are: each holds
+//   only its own test's store and staging, and nothing of it outlives the
+//   test.
+// - A commit whose reads changed under it: a mutation's handler runs
+//   again then, but the test's writes were staged in the first run, so
+//   the transaction is refused (`mutation.concurrent_change`) rather
+//   than commit nothing as if it had.
 
 /**
  * The path of the mutation a test's transaction is: one no App function
@@ -121,8 +128,17 @@ export const openTestTransaction = async (
   const entered = Promise.withResolvers<FunctionChannel>();
   const done = Promise.withResolvers<null>();
   // The mutation's "handler": it lends the test its channel, and returns
-  // once the test ends the transaction, which then commits.
+  // once the test ends the transaction, which then commits. A mutation
+  // whose reads changed before it committed runs its handler again, but
+  // what the test staged went with the first run: the second stages
+  // nothing, so commits nothing, and the transaction's end says it was
+  // refused rather than that it committed (`end`).
+  let entries = 0;
   const run: Runner = async (_path, _args, channel) => {
+    entries += 1;
+    if (entries > 1) {
+      return null;
+    }
     entered.resolve(channel);
     return await done.promise;
   };
@@ -186,6 +202,13 @@ export const openTestTransaction = async (
           done.reject(dropped());
         }
         const result = await outcome;
+        if (commit && result.ok && entries > 1) {
+          return await resultOf(async () => {
+            await Promise.reject(
+              operationErrors.create("mutation.concurrent_change")
+            );
+          });
+        }
         // Dropped on purpose: nothing committed, as asked.
         return commit || result.ok ? result : { ok: true, value: null };
       },
