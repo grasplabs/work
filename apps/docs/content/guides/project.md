@@ -161,4 +161,4 @@ The App's Pages aren't listed anywhere: the files in `src/routes/` are its route
 
 A reference holds only the function's name (`{ name: "tasks.list" }`). Its types come from the function's own code, as in Convex, so renaming an argument shows up in every Page that passes it.
 
-Never edit them: Grasp refuses changes to `server/_generated/`, writes it again on every save, and refuses to publish a version whose copy isn't what it generates.
+Never edit them: Grasp refuses changes to `server/_generated/` and writes it again on every save. Publishing generates it again from the version's code and definition, so a release always holds what Grasp generates.

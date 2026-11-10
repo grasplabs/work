@@ -62,15 +62,16 @@ import type { SchemaIds } from "./schema-changes.ts";
 //   path schema, shared's apps.ts; `refuseGeneratedFiles`), and every
 //   write generates it again anyway, dropping anything else there.
 // - A copy that is stale or forged in storage (a tree written another
-//   way, or by an earlier generator): sealing a version compares its
-//   copy with what the seal generates, byte for byte, and refuses it
-//   (`version.generated_stale`, app-releases.ts); a page is only ever
-//   built with what the seal generated. A draft's preview generates its
-//   own and never reads the copy.
+//   way, or by an earlier generator): nothing builds from it. A seal
+//   generates what is generated again from the version's files and
+//   definition and seals that (app-releases.ts, `sealedSource`); pages,
+//   previews and checks build with what they generate themselves
+//   (draft-references.ts). A stale copy is only ever an earlier
+//   generator's, which is no reason to refuse a version.
 // - A definition change not reflected in it (a workflow's events, a
 //   files or links permission): it is generated from the very
-//   definition each write saves, and a seal holds the copy to the
-//   release's own.
+//   definition each write saves, and again from it as a version is
+//   sealed.
 // - A function the syntax doesn't read (an alias of a builder, a
 //   wrapper): it has no reference, and a seal refuses it by name
 //   (`version.function_undeclared`), so a page never misses one a
@@ -102,16 +103,16 @@ export const refuseGeneratedFiles = (paths: Iterable<string>): void => {
 };
 
 /** Where Grasp generates `server/_generated/` among an App's files. */
-export const serverGeneratedPaths: readonly string[] = [
+const serverGeneratedPaths: ReadonlySet<string> = new Set([
   hostGeneratedPaths.api,
   hostGeneratedPaths.dataModel,
   hostGeneratedPaths.internal,
   hostGeneratedPaths.server,
-];
+]);
 
 /** Whether `path` is one of `server/_generated/`'s, as Grasp generates them. */
 export const isServerGenerated = (path: string): boolean =>
-  serverGeneratedPaths.includes(path);
+  serverGeneratedPaths.has(path);
 
 /**
  * The App's server modules among `files`, each one's source by its path
@@ -147,9 +148,9 @@ export const serverFunctionsIn = (
 /**
  * `server/_generated/`, by path, as `definition` and `files`' own server
  * modules generate it: what every write puts among them
- * (`withGeneratedCode`), and what a seal holds their copy to.
+ * (`withGeneratedCode`).
  */
-export const generatedServerFiles = (
+const generatedServerFiles = (
   files: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
   definition: AppDefinition
 ): Record<string, string> =>

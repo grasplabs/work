@@ -5,25 +5,42 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { sealRelease } from "../src/app-releases.ts";
+import type { Release } from "../src/app-releases.ts";
 import { createApp, findVersion, readTree, versionFiles } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { definitionOf, redefined, withFiles } from "./app-definitions.ts";
 import { notesFiles } from "./app-releases-harness.ts";
 import { commitDefined } from "./apps.ts";
-import { appWith, failure, person, seal } from "./sealed-apps.ts";
+import { appWith, artifactKey, failure, person, seal } from "./sealed-apps.ts";
 
 // `server/_generated/` as part of an App's own files (app-definition.ts
 // says how each way it could fail is closed), written first as the ways
 // it can fail: a builder writes it to reference what the code doesn't
 // declare, or hide what it does; a stale or forged copy in storage
-// reaches a release; a definition change isn't reflected in it; and a
-// function the references can't name reaches a release. Through the
+// reaches a release (a release is sealed with what Grasp generates from
+// the version's files and definition, never the copy); a definition
+// change isn't reflected in it; and a function the references can't
+// name reaches a release. Through the
 // real commit, compiler, sandbox, R2 and D1. The agent's own writes are
 // agent-builds-files.test.ts's.
 
 const api = "server/_generated/api.ts";
 const internal = "server/_generated/internal.ts";
+
+/** The text `release` sealed at `path`, or undefined for none. */
+const sealedText = async (
+  release: Release,
+  path: string
+): Promise<string | undefined> => {
+  const entry = release.manifest.artifacts.find(
+    (artifact) => artifact.path === path
+  );
+  if (entry === undefined) {
+    return undefined;
+  }
+  const stored = await env.FILES.get(await artifactKey(entry.sha256));
+  return await stored?.text();
+};
 
 /** A version's files, as stored. */
 const filesOf = async (app: AppId, version: number) =>
@@ -156,7 +173,7 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
     }
   );
 
-  it("refuses to publish a version whose copy was forged or written by an earlier generator, and publishes it once saved again", async () => {
+  it("seals what Grasp generates, never the copy a version holds: forged, missing, or with a module of its own there", async () => {
     const fixture = await appWith(notesFiles());
     const { owner, app } = fixture;
     const files = await filesOf(app, 1);
@@ -170,50 +187,48 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
     const { [internal]: _gone, ...without } = files;
     await storedAsIs(app, owner, 3, without, 1);
     // With a module of its own there, which no write could put.
+    const extra = "server/_generated/extra.ts";
     await storedAsIs(
       app,
       owner,
       4,
-      { ...files, "server/_generated/extra.ts": "export const x = 1;\n" },
+      { ...files, [extra]: 'export const leaked = "secret";\n' },
       1
     );
-    const refusals = await Promise.all([
-      failure(async () => await seal(fixture, 2)),
-      failure(async () => await seal(fixture, 3)),
-      failure(async () => await seal(fixture, 4)),
-    ]);
-    // Saved again, it is generated anew, and publishes.
-    await commitDefined(
-      env,
-      owner,
-      app,
-      { "AGENTS.md": "# Notes\n" },
-      "Saved again"
+    const sealed = await Promise.all(
+      [2, 3, 4].map(async (version) => {
+        const release = await seal(fixture, version);
+        return {
+          api: await sealedText(release, api),
+          internal: await sealedText(release, internal),
+          extra: release.manifest.artifacts.some(({ path }) =>
+            path.includes("extra")
+          ),
+          leaked: Object.values(release.modules).some((code) =>
+            code.includes("leaked")
+          ),
+        };
+      })
     );
-    const saved = await filesOf(app, 5);
-    const { manifest } = await sealRelease(env, { app, version: 5, by: owner });
-    expect({
-      refusals,
-      regenerated:
-        saved[api] === files[api] && saved[internal] === files[internal],
-      sealed: manifest.resourceVersion,
-    }).toStrictEqual({
-      refusals: [
-        "version.generated_stale",
-        "version.generated_stale",
-        "version.generated_stale",
-      ],
-      regenerated: true,
-      sealed: 5,
+    // The version's tree stays as it was stored.
+    const kept = await filesOf(app, 2);
+    expect({ sealed, kept: kept[api] === forged }).toStrictEqual({
+      sealed: [2, 3, 4].map(() => ({
+        api: files[api],
+        internal: files[internal],
+        extra: false,
+        leaked: false,
+      })),
+      kept: true,
     });
   });
 
-  it("refuses to publish a version whose definition changed past its copy", async () => {
+  it("seals the references a version's definition gives, whatever its copy says", async () => {
     const fixture = await appWith(notesFiles());
     const { owner, app } = fixture;
     const files = await filesOf(app, 1);
     // The definition's links permission, which `permissions.links` in the
-    // api names, stored with the first version's copy.
+    // api names, stored with the first version's copy (and config).
     const changed = definitionOf({
       name: "Notes",
       permissions: [
@@ -241,9 +256,12 @@ export const hello = query({ args: {}, returns: v.string(), handler: () => "hell
         owner.userId
       )
       .run();
-    await expect(failure(async () => await seal(fixture, 2))).resolves.toBe(
-      "version.generated_stale"
-    );
+    const release = await seal(fixture, 2);
+    const sealed = await sealedText(release, api);
+    expect({
+      copy: files[api]?.includes("https://help.example.com"),
+      sealed: sealed?.includes("https://help.example.com"),
+    }).toStrictEqual({ copy: false, sealed: true });
   });
 
   it("refuses to publish a function made through an alias of a builder, or of another visibility than its syntax says, naming each", async () => {

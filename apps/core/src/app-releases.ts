@@ -50,11 +50,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import {
-  generatedServerFiles,
-  serverFunctionsIn,
-  serverGeneratedPaths,
-} from "./app-definition.ts";
+import { serverFunctionsIn, withGeneratedCode } from "./app-definition.ts";
 import {
   builtCode,
   checkedCode,
@@ -1043,34 +1039,21 @@ const requireDeclaredFunctions = (
 };
 
 /**
- * Refuses sealing a version whose `server/_generated/` (`files`' copy)
- * isn't, byte for byte, `expected`: what its code and definition generate
- * (app-definition.ts, `generatedServerFiles`), checked before anything is
- * inspected, and what its seal generated from what it registers, checked
- * after. One written by an earlier generator, changed in storage, or from
- * another definition than the version's is refused
- * (`version.generated_stale`, naming each path). Its builder's editor and
- * its pages then read the same references.
+ * `files`, a version's or a draft's, as a seal reads them: with what is
+ * generated among them (the config, the schema and `server/_generated/`)
+ * generated again from them and `definition` (app-definition.ts,
+ * `withGeneratedCode`), whatever their own copy holds. A release never
+ * takes the copy: one written by an earlier generator, or changed in
+ * storage, seals as if it were current. The version's tree stays as it
+ * was committed.
  */
-const requireGeneratedCurrent = (
+const sealedSource = (
   files: Readonly<Record<string, string>>,
-  expected: Readonly<Record<string, string>>
-): void => {
-  // And nothing else there: no write makes one, so only storage could.
-  const others = Object.keys(files).filter(
-    (path) =>
-      path.toLowerCase().startsWith("server/_generated/") &&
-      !serverGeneratedPaths.includes(path)
-  );
-  const stale = [
-    ...serverGeneratedPaths.filter(
-      (path) => !Object.hasOwn(files, path) || files[path] !== expected[path]
-    ),
-    ...others,
-  ];
-  if (stale.length > 0) {
-    throw versionErrors.create("version.generated_stale", { paths: stale });
-  }
+  definition: AppDefinition
+): Record<string, string> => {
+  const source = new Map(Object.entries(files));
+  withGeneratedCode(source, definition);
+  return Object.fromEntries(source);
 };
 
 /**
@@ -1302,7 +1285,7 @@ export const sealDraftRelease = async (
   const built = await inspectForSeal(
     env,
     key,
-    Object.fromEntries(files),
+    sealedSource(Object.fromEntries(files), definition),
     definition,
     "preview"
   );
@@ -1379,8 +1362,7 @@ export const sealRelease = async (
   // Checked against its hash, and refused for a version with none: its
   // release names the definition its schema is applied by (app-schema.ts).
   const { hash: definition, definition: defined } = await readStored(row);
-  const files = await versionFiles(env, app, version);
-  requireGeneratedCurrent(files, generatedServerFiles(files, defined));
+  const files = sealedSource(await versionFiles(env, app, version), defined);
   const built = await inspectForSeal(
     env,
     { app, version },
@@ -1388,7 +1370,6 @@ export const sealRelease = async (
     defined,
     "production"
   );
-  requireGeneratedCurrent(files, built.generated);
   await requireFunctionIds(env, app, files, defined);
   const store = await boundStore(env, request, built.manifest, built.schema);
   // Every page built and sealed with the release, so none is compiled
