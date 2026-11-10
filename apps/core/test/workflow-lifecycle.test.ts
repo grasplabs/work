@@ -106,7 +106,7 @@ const workflowOf = async (owner: Identity, versions = 1) => {
 const startBy = async (who: Identity, id: string) =>
   await startWorkflow(env, { type: "person", person: who }, id, {
     version: 1,
-    input: { who: "Ada" },
+    args: { who: "Ada" },
     key: `key-${unique()}`,
   });
 
@@ -419,7 +419,7 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
       env,
       { type: "person", person: workflow.user },
       workflow.id,
-      { version: 1, input: { who: "Ada" }, key: `key-${unique()}` }
+      { version: 1, args: { who: "Ada" }, key: `key-${unique()}` }
     );
     if ("start" in decided) {
       throw new Error("A new start was answered as one already admitted");

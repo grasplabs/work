@@ -154,7 +154,7 @@ const cases: Record<
   },
   // An App call, its request a stream, as AppsApi.call documents it.
   streamedRequest: {
-    code: "export default async (self, env) => await env.apps.call('app', new Blob([JSON.stringify({ reference: { kind: 'query' }, input: { n: 1 } })]).stream());",
+    code: "export default async (self, env) => await env.apps.call('app', new Blob([JSON.stringify({ reference: { kind: 'query' }, args: { n: 1 } })]).stream());",
   },
   tooLargeRequest: {
     code: "export default async (self, env) => await env.apps.call('app', new Blob(['x'.repeat(140_000)]).stream());",

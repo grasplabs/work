@@ -339,7 +339,7 @@ const call = async (
     app,
     JSON.stringify({
       reference: { ...referenceTo(release, path), ...reference },
-      input,
+      args: input,
     })
   );
 
@@ -572,7 +572,7 @@ describe("another App's store", { timeout: 120_000 }, () => {
       first.app,
       JSON.stringify({
         reference: referenceTo(first.release, "notes.get"),
-        input: { id: "0" },
+        args: { id: "0" },
         store: first.store,
       })
     );
@@ -620,7 +620,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
                 ...referenceTo(notes.release, "notes.get"),
                 ...forged,
               },
-              input: { id: 1 },
+              args: { id: 1 },
             })
           )
         )
@@ -665,7 +665,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
         env,
         notes.owner,
         notes.app,
-        JSON.stringify({ reference: { name, kind: "query" }, input: {} })
+        JSON.stringify({ reference: { name, kind: "query" }, args: {} })
       );
       codes.set(name, codeOf(answer));
     }
@@ -715,7 +715,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
         notes.app,
         JSON.stringify({
           reference: { name: "notes.create", kind: "mutation" },
-          input: { title: "Kept" },
+          args: { title: "Kept" },
           idempotencyKey: "save-once",
         })
       );
@@ -795,7 +795,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
           env,
           notes.owner,
           notes.app,
-          JSON.stringify({ reference, input }),
+          JSON.stringify({ reference, args: input }),
           Date.now() + 30_000
         )
       );
@@ -1108,7 +1108,7 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
         dice.app,
         JSON.stringify({
           reference: { name: "dice.roll", kind: "mutation" },
-          input: {},
+          args: {},
           idempotencyKey: key,
         })
       );
@@ -1268,7 +1268,7 @@ describe("a call past its deadline", { timeout: 120_000 }, () => {
       notes.app,
       JSON.stringify({
         reference: referenceTo(notes.release, "notes.lateWrite"),
-        input: {},
+        args: {},
       }),
       started + 1000
     );
@@ -1483,10 +1483,10 @@ describe("a request", { timeout: 120_000 }, () => {
   it.each([
     ["isn't text", { reference: {} }],
     ["isn't JSON", "{"],
-    ["lacks its reference", JSON.stringify({ input: {} })],
+    ["lacks its reference", JSON.stringify({ args: {} })],
     [
       "has a key no request has",
-      JSON.stringify({ reference: {}, input: {}, principal: "someone" }),
+      JSON.stringify({ reference: {}, args: {}, principal: "someone" }),
     ],
   ])("is refused when it %s", async (_case, request) => {
     const notes = await sealedNotes();
@@ -1499,7 +1499,7 @@ describe("a request", { timeout: 120_000 }, () => {
     const notes = await sealedNotes();
     const request = JSON.stringify({
       reference: referenceTo(notes.release, "notes.bump"),
-      input: {},
+      args: {},
       frameGeneration: "1",
     });
     expect(

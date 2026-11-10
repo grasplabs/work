@@ -19,7 +19,7 @@ export interface Reading {
 type ExtractView = WorkflowViewOf<typeof workflows.extract>;
 
 /** What a finished reading found: the claims in the notes. */
-export type Found = Extract<ExtractView, { status: "completed" }>["output"];
+export type Found = Extract<ExtractView, { status: "completed" }>["result"];
 
 /** What a reading of notes is doing, in words. */
 const statusOf = (run: ExtractView): string => {
@@ -79,7 +79,7 @@ const ReadingItem = ({
           variant="outline"
           aria-label={`Review the statements from ${read.title}`}
           onClick={() => {
-            onReview(read, run.output);
+            onReview(read, run.result);
           }}
         >
           Review

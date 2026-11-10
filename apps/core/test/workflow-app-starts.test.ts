@@ -103,8 +103,8 @@ const schema = defineSchema({
 /** The workflow the App declares, by the alias its builders bind. */
 const followUp = permission.workflow("followUp", {
   // Started with no input, it takes its declared default.
-  input: v.object({ who: v.string().trim().min(1) }).default({ who: "Anyone" }),
-  output: v.object({ status: v.string() }),
+  args: v.object({ who: v.string().trim().min(1) }).default({ who: "Anyone" }),
+  returns: v.object({ status: v.string() }),
 });
 
 /** The App's config: the one workflow it declares. */
@@ -932,7 +932,7 @@ describe("an action starting a workflow", () => {
     });
   });
 
-  it("refuses input the declaration doesn't take before anything starts", async () => {
+  it("refuses args the declaration doesn't take before anything starts", async () => {
     const fx = await fixture();
     const blank = await call(fx, fx.bob, "requests.kickOff", { who: "   " });
     expect({
@@ -1016,7 +1016,7 @@ describe("a mutation starting a workflow after it commits", () => {
           afterCommit: idempotency_key.startsWith("grasp:after-commit:"),
         })
       ),
-      run: { status: run.status, output: run.output },
+      run: { status: run.status, output: run.result },
     }).toStrictEqual({
       sameOutcome: true,
       staged: 1,
@@ -1555,7 +1555,7 @@ describe("what a start rechecks, and records", () => {
     expect({
       status: run.status,
       code: run.status === "failed" ? (run.error?.code ?? null) : null,
-      output: run.output ?? null,
+      output: run.result ?? null,
     }).toStrictEqual({
       // Revoked mid-run: what its input may carry never leaves it.
       status: "failed",
@@ -1752,7 +1752,7 @@ describe("what a start rechecks, and records", () => {
     });
   });
 
-  it("starts with the workflow's declared default when an action or a commit gives no input", async () => {
+  it("starts with the workflow's declared default when an action or a commit gives no args", async () => {
     const fx = await fixture();
     const started = await call(fx, fx.bob, "requests.kickOffPlain", {});
     const staged = await call(fx, fx.bob, "requests.submitPlain", {});
@@ -2192,7 +2192,7 @@ describe("what a start rechecks, and records", () => {
     const taken = await outcome(
       startWorkflow(env, { type: "person", person: fx.ada }, fx.workflowId, {
         version: 1,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         key: `grasp:after-commit:${unique()}`,
       })
     );

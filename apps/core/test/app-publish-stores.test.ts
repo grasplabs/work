@@ -129,7 +129,7 @@ const call = async (
     release.manifest.resourceId,
     JSON.stringify({
       reference: { name: path, kind: operation?.kind },
-      input,
+      args: input,
     })
   );
   return result;

@@ -62,7 +62,7 @@ test("a builder sees their workflows on the board, and opens them in full", asyn
     }
     const { runId } = await api.workflowResources.start(counted.id, {
       version: 1,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       key: `count-${tag}`,
     });
     await expect(async () => {

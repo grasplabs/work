@@ -110,14 +110,14 @@ export class WorkflowCalls {
     this.#retired = true;
   };
 
-  /** Starts a run with `input`: its handle, once the host admitted it. */
-  readonly start = async (input: unknown): Promise<RunHandle> => {
+  /** Starts a run with `args`: its handle, once the host admitted it. */
+  readonly start = async (args: unknown): Promise<RunHandle> => {
     this.#startSeq += 1;
     const seq = this.#startSeq;
     this.#set({ starting: this.#local.starting + 1 });
     try {
       const handle = await this.#client.mutation(this.#read.functions.start, {
-        input,
+        args,
       });
       if (seq > this.#admittedSeq) {
         this.#admittedSeq = seq;

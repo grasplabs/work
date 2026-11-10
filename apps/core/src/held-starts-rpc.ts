@@ -35,10 +35,10 @@ export class HeldStartsRpc extends CoreRpcTarget implements HeldStartsApi {
     );
   }
 
-  async confirm(id: string, inputHash: string): Promise<ConfirmedStart> {
+  async confirm(id: string, argsHash: string): Promise<ConfirmedStart> {
     return await withPerson(
       this.#check,
-      async (by) => await confirmHeldStart(this.#env, by, id, inputHash)
+      async (by) => await confirmHeldStart(this.#env, by, id, argsHash)
     );
   }
 

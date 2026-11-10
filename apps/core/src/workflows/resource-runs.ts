@@ -1200,14 +1200,14 @@ export const runResourceWorkflow = async (
     await loadedActivation(env, pin, runId)
   );
 
-/** Where the engine has a run's result: its output, or why it failed. */
+/** Where the engine has a run's result: what it returned, or why it failed. */
 export const engineResultOf = async (
   env: Env,
   id: string
-): Promise<Pick<WorkflowResourceRun, "output" | "error">> => {
+): Promise<Pick<WorkflowResourceRun, "result" | "error">> => {
   const live = await runEngine(env).status(id);
   if (live?.status === "complete") {
-    return { output: live.output };
+    return { result: live.output };
   }
   if (live?.status === "errored") {
     return {
@@ -1246,7 +1246,7 @@ export const keptFailureOf = (code: string): WorkflowResourceRun["error"] => {
 export const resultOf = async (
   env: Env,
   row: RunRow
-): Promise<Pick<WorkflowResourceRun, "output" | "error">> => {
+): Promise<Pick<WorkflowResourceRun, "result" | "error">> => {
   // The sweep's mark on its receipt too: details removed once stay removed,
   // whatever the retention says after.
   const receipt = await drizzle(env.DB)
@@ -1275,7 +1275,7 @@ export const resultOf = async (
   if (removed) {
     return { error: { code: row.failureCode, message: removedText } };
   }
-  let engine: Pick<WorkflowResourceRun, "output" | "error">;
+  let engine: Pick<WorkflowResourceRun, "result" | "error">;
   try {
     engine = await engineResultOf(env, row.id);
   } catch (error) {
@@ -1287,7 +1287,7 @@ export const resultOf = async (
     throw error;
   }
   if (row.status === "completed") {
-    return engine.output === undefined ? {} : { output: engine.output };
+    return engine.result === undefined ? {} : { result: engine.result };
   }
   // Core's reason for a run it ended, or the engine's code once the engine
   // no longer has the run: as the row keeps it.

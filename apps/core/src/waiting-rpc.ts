@@ -528,7 +528,7 @@ export class WaitingRpc extends CoreRpcTarget implements WaitingApi {
       }
       case "heldStart": {
         await (verdict.verdict === "confirm"
-          ? sources.heldStarts.confirm(verdict.id, verdict.inputHash)
+          ? sources.heldStarts.confirm(verdict.id, verdict.argsHash)
           : sources.heldStarts.decline(verdict.id));
         return { kind: verdict.kind };
       }

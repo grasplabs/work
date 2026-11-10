@@ -70,7 +70,7 @@ const portalFiles = (marker = "1"): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("followUp", {\n  input: v.object({ who: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("followUp", {\n  args: v.object({ who: v.string() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {
@@ -324,7 +324,7 @@ const call = async (
       name: path,
       kind: release.app.operations[path]?.kind ?? "query",
     },
-    input,
+    args: input,
   });
   return await answered(await postCall(who, request, app));
 };
@@ -343,7 +343,7 @@ const read = async (
       who,
       JSON.stringify({
         reference: { name: reference.name, kind: "query" },
-        input,
+        args: input,
       })
     )
   );
@@ -352,7 +352,7 @@ const read = async (
 const add = (text: string): string =>
   JSON.stringify({
     reference: { name: "portal.add", kind: "mutation" },
-    input: { text },
+    args: { text },
   });
 
 /** A visitor caller a function answered as JSON text, its session left out. */

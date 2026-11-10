@@ -217,8 +217,8 @@ describe("the session client's paginated list", () => {
       watch: async (request, onSnapshot) => {
         const sent: unknown = JSON.parse(request);
         followed.push(
-          typeof sent === "object" && sent !== null && "input" in sent
-            ? { input: sent.input }
+          typeof sent === "object" && sent !== null && "args" in sent
+            ? { input: sent.args }
             : {}
         );
         await Promise.resolve();
@@ -283,7 +283,7 @@ const titleOf = (cursor: string): string =>
 const askedOf = (request: string): Asked => {
   const sent: unknown = JSON.parse(request);
   const input: unknown =
-    typeof sent === "object" && sent !== null ? Reflect.get(sent, "input") : {};
+    typeof sent === "object" && sent !== null ? Reflect.get(sent, "args") : {};
   const pagination: unknown =
     typeof input === "object" && input !== null
       ? Reflect.get(input, "pagination")

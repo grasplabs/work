@@ -279,7 +279,7 @@ const windowRequest = (
   );
   return JSON.stringify({
     reference: { name: reference.name, kind: "query" },
-    input,
+    args: input,
     window,
   });
 };

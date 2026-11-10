@@ -99,7 +99,7 @@ export const calledAs = async (
     env,
     by,
     app,
-    JSON.stringify({ reference: { name, kind }, input })
+    JSON.stringify({ reference: { name, kind }, args: input })
   );
   return answered.result;
 };

@@ -204,7 +204,7 @@ const requestOf = (release: Release, path: string, input: unknown): string =>
       name: path,
       kind: release.app.operations[path]?.kind ?? "query",
     },
-    input,
+    args: input,
   });
 
 /** What `by` gets calling `path` of the App with `input`, as a page sends it. */
@@ -233,7 +233,7 @@ const readRequestOf = (
 ): string =>
   JSON.stringify({
     reference: { name: reference.name, kind: "query", ...forged },
-    input,
+    args: input,
   });
 
 /** What a page's `useUser` or `usePeople` read answers `by`. */

@@ -150,7 +150,7 @@ const requestFor = (
 ): string =>
   JSON.stringify({
     reference: { name: path, kind: release.app.operations[path]?.kind },
-    input,
+    args: input,
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
   });
 
@@ -645,7 +645,7 @@ describe(
                   name: "workflows.followUp.mutations.start",
                   kind: "mutation",
                 },
-                input: { input: {} },
+                args: { args: {} },
                 idempotencyKey: "preview-start",
               }),
               { as: served.builder, lease: own.lease }

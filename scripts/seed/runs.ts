@@ -348,7 +348,7 @@ export const seedRuns = async ({
       workflowId,
       {
         version: 1,
-        input: run.plan.input,
+        args: run.plan.input,
         key: crypto.randomUUID(),
       }
     );

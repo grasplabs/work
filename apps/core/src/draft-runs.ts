@@ -515,7 +515,7 @@ const draftWorkflowQuery = (
   if (query.name !== "run" && query.name !== "canStart") {
     throw operationErrors.create("resource.unavailable");
   }
-  checkedValue(query.args, call.input, "contract.invalid_args");
+  checkedValue(query.args, call.args, "contract.invalid_args");
   return { ok: true, value: query.name === "run" ? null : false };
 };
 
@@ -543,7 +543,7 @@ const operationOf = async (
       ? invocation
       : { ...invocation, observeReads: observe },
     reference,
-    call.input,
+    call.args,
     call.idempotencyKey === undefined
       ? {}
       : { idempotencyKey: call.idempotencyKey }
@@ -594,7 +594,7 @@ export const callDraft = async (
           requestId,
         }),
         peopleReadOf(call.reference),
-        call.input
+        call.args
       );
       return answerOf({ ok: true, value }, run);
     }
@@ -688,7 +688,7 @@ export const invokeDraftAction = async (
       hosted(env, run),
       invocation,
       { path, kind: call.reference.kind },
-      call.input,
+      call.args,
       {
         ...(call.idempotencyKey === undefined
           ? {}

@@ -160,7 +160,7 @@ const ranFor = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, input: { who }, key: unique() }
+    { version: 1, args: { who }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start made a run");
@@ -198,7 +198,7 @@ const settled = async (
 /** How an item's test run ended: its output, or its failure's code. */
 const endOf = (run: WorkflowCandidateRun) =>
   run.status === "completed"
-    ? { status: run.status, output: run.output }
+    ? { status: run.status, output: run.result }
     : { status: run.status, code: run.error?.code };
 
 /** Each item of `test`: the run it took, and how the draft did on it. */
@@ -232,7 +232,7 @@ const callsOf = async (runId: string) => {
 };
 
 /** The fixtures every test here starts with: the mail is never sent. */
-const held = { mail: { output: { messageId: "held" } } };
+const held = { mail: { result: { messageId: "held" } } };
 
 describe("a test of a draft over recent real items", () => {
   it("runs the draft once on each of the tester's newest runs, newest first, every call answered from its fixtures and none made", async () => {

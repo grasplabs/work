@@ -301,7 +301,7 @@ describe("an App's tests", { timeout: 180_000 }, () => {
       built.app,
       JSON.stringify({
         reference: { name: "notes.titles", kind: "query" },
-        input: {},
+        args: {},
       })
     );
     expect(answer.result).toStrictEqual({ ok: true, value: [] });

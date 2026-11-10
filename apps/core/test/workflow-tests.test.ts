@@ -51,7 +51,7 @@ const objectSchema = (fields: Record<string, unknown>) => ({
 const greetingStatus = { $expr: '"Hello, " + args.who' };
 
 /**
- * A grasp-workflow/2 workflow of `steps`, its input `who` and output
+ * A grasp-workflow/2 workflow of `steps`, its args `who` and its result
  * `status` (a greeting unless said), with `permissions` and `params`.
  */
 const definitionOf = (
@@ -102,7 +102,7 @@ const filesWith = (
         },
       },
       permissions: [
-        'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("followUp", {\n  args: v.object({ who: v.string().trim().min(1) }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {
@@ -175,10 +175,10 @@ const requestsApp = async (
   return { builder, app: fixture.app, workflowId, release };
 };
 
-/** A start of `followUp` with `input`, as the SDK sends it. */
+/** A start of `followUp` with `args`, as the SDK sends it. */
 const startOf = async (
   release: Release,
-  input: unknown,
+  args: unknown,
   change: (reference: Record<string, unknown>) => void = () => {
     // As generated.
   }
@@ -194,7 +194,7 @@ const startOf = async (
     kind: "mutation",
   };
   change(reference);
-  return await Promise.resolve(JSON.stringify({ reference, input: { input } }));
+  return await Promise.resolve(JSON.stringify({ reference, args: { args } }));
 };
 
 const resultSchema = z.union([
@@ -327,7 +327,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       const run = await owner.start(workflows.followUp, { who: "Ada" });
       t.equal(await t.runs.untilTerminal(run), {
         status: "completed",
-        output: { status: "Hello, Ada" },
+        result: { status: "Hello, Ada" },
       });
       t.equal(await t.effects.completedCount(run, "greet"), 1);
       t.equal(await t.effects.completedCount(run, "hold"), 1);
@@ -373,7 +373,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     ]);
   });
 
-  it("refuse a start of what the release doesn't bind, or with input it doesn't take", async () => {
+  it("refuse a start of what the release doesn't bind, or with args it doesn't take", async () => {
     const { release, app } = await requestsApp(
       async (by) => await workflowOf(by, greeting())
     );
@@ -409,7 +409,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       notAStart: startedAs(
         await session.start(
           "desk-user",
-          JSON.stringify({ reference: {}, input: {} })
+          JSON.stringify({ reference: {}, args: {} })
         )
       ),
     };
@@ -938,7 +938,7 @@ export default workflowTest({
     });
   });
 
-  it("refuse a run's output that is more than the App declares, as a page is shown it", async () => {
+  it("refuse a run's result that is more than the App declares, as a page is shown it", async () => {
     const { release } = await requestsApp(async (by) => {
       const workflow = await createWorkflowResource(
         env,
@@ -1014,8 +1014,8 @@ export default workflowTest({
       fixture: await ended({ followUp: { params: { greeting: "Fixture" } } }),
       unknown: await ended({ followUp: { params: { colour: "red" } } }),
     }).toStrictEqual({
-      defaults: { status: "completed", output: { status: "Hello, Ada" } },
-      fixture: { status: "completed", output: { status: "Fixture, Ada" } },
+      defaults: { status: "completed", result: { status: "Hello, Ada" } },
+      fixture: { status: "completed", result: { status: "Fixture, Ada" } },
       unknown: "workflow.params_invalid",
     });
   });

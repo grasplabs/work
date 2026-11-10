@@ -228,7 +228,7 @@ const ended = async (
 const ranWith = async (builder: Builder, id: string, title: string) => {
   const { runId } = await builder.api.workflowResources.start(id, {
     version: 1,
-    input: { title },
+    args: { title },
     key: unique(),
   });
   const run = await ended(builder, id, runId);
@@ -238,7 +238,7 @@ const ranWith = async (builder: Builder, id: string, title: string) => {
   // The note's ID is the App's to choose: only that it answered one.
   const output = z
     .object({ note: z.string().min(1), titles: z.array(z.string()) })
-    .parse(run.output);
+    .parse(run.result);
   return { status: run.status, titles: output.titles };
 };
 
@@ -295,7 +295,7 @@ const waitingRun = async () => {
   );
   const { runId } = await set.builder.api.workflowResources.start(
     set.workflow.id,
-    { version: 1, input: { title: "Later" }, key: unique() }
+    { version: 1, args: { title: "Later" }, key: unique() }
   );
   return { ...set, grant, runId };
 };
@@ -398,10 +398,10 @@ export const create = mutation({
     );
     const { runId } = await startCandidateRun(env, acting, workflow.id, {
       revision,
-      input: { title: "Never written" },
+      args: { title: "Never written" },
       fixtures: {
-        [`notes/${create}`]: { output: noteId },
-        [`notes/${titles}`]: { output: ["From the test"] },
+        [`notes/${create}`]: { result: noteId },
+        [`notes/${titles}`]: { result: ["From the test"] },
       },
     });
     const run = await vi.waitFor(
@@ -425,7 +425,7 @@ export const create = mutation({
 
     expect({
       problems,
-      tested: { status: run.status, output: run.output },
+      tested: { status: run.status, output: run.result },
       real,
     }).toStrictEqual({
       problems: [],
@@ -614,7 +614,7 @@ export const create = mutation({
     await requestGranted(idp, builder, callRequest(workflow.id, app, titles));
     const { runId } = await builder.api.workflowResources.start(workflow.id, {
       version: 1,
-      input: { title: "Once" },
+      args: { title: "Once" },
       key: unique(),
     });
     const code = moduleOf(`
@@ -671,7 +671,7 @@ return { note: made.output, titles: listed.output };`);
     const tampered = async (fn: string) => {
       const { runId } = await builder.api.workflowResources.start(workflow.id, {
         version: 1,
-        input: { title: "Forged" },
+        args: { title: "Forged" },
         key: unique(),
       });
       return await ranAs(

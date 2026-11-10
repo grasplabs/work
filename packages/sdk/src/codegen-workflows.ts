@@ -181,8 +181,8 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
   });
   const parts = [
     JSON.stringify(workflow.alias),
-    valueTypeOf(workflow.input, "input"),
-    valueTypeOf(workflow.output, "output"),
+    valueTypeOf(workflow.args, "input"),
+    valueTypeOf(workflow.returns, "output"),
     waitTypeOf(workflow, 2),
     recordType(events),
     recordType(decisions),
@@ -249,8 +249,8 @@ export const workflowReferenceOf = async (
     alias: workflow.alias,
     contractId,
     fingerprint,
-    input: workflow.input,
-    output: workflow.output,
+    args: workflow.args,
+    returns: workflow.returns,
     events,
     listens: sortedListens(workflow.listens),
     decisions,

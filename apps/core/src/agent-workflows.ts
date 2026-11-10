@@ -246,19 +246,19 @@ workflows: {
   /**
    * Workflows the person may ask you to start for them: those they could
    * start themselves whose owners allow asking, each at the version a start
-   * runs, with the JSON Schema its input must match. Only in a chat app
+   * runs, with the JSON Schema its args must match. Only in a chat app
    * (Microsoft Teams); empty or refused elsewhere.
    */
-  askable(): Promise<{ id: string; name: string; version: number; input: unknown }[]>;
+  askable(): Promise<{ id: string; name: string; version: number; args: unknown }[]>;
   /**
-   * Offers to start one of \`askable()\`'s workflows with \`input\`: a card
+   * Offers to start one of \`askable()\`'s workflows with \`args\`: a card
    * under your answer shows the person its values and a Start button. Nothing
    * starts until they press it; then it runs as them, and they are told here
    * when it ends. Offer only what they asked for, with values from what they
    * said; say in your answer that the card is there. At most 10 values,
    * shown whole. Refused in a chat that read restricted data.
    */
-  offer(workflow: string, input: unknown): Promise<{ offer: string; workflow: string; version: number }>;
+  offer(workflow: string, args: unknown): Promise<{ offer: string; workflow: string; version: number }>;
   /**
    * The independent workflows (env.workflowBuild) you may follow, of those
    * the person has a role in.
@@ -280,7 +280,7 @@ workflows: {
     endedAt: string | null;
   }[]>;
   /**
-   * Asks to start independent workflow \`workflow\` (its ID) with \`input\`,
+   * Asks to start independent workflow \`workflow\` (its ID) with \`args\`,
    * as the person you act for, at its current version. Nothing runs yet: it
    * waits for them to confirm it in Grasp, and \`status\` says "waiting";
    * say in your answer that it waits for them. Call again with the same
@@ -291,7 +291,7 @@ workflows: {
    * chat app (Microsoft Teams, Slack) it is refused: use \`offer\` there.
    * Ask only for what the person asked for.
    */
-  start(workflow: string, input: unknown, key: string): Promise<
+  start(workflow: string, args: unknown, key: string): Promise<
     | { status: "waiting"; held: string; workflow: string; version: number; expiresAt: string }
     | { status: "started"; held: string; workflow: string; version: number; start: string }
     | { status: "refused"; held: string; workflow: string; version: number; code: string }

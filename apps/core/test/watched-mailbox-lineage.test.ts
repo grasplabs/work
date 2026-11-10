@@ -533,7 +533,7 @@ describe(
             // The stamp is a header core made, never the run's input.
             stamped: /^[0-9a-f]{32}$/u.test(stampOf(sent)),
             handed: runs
-              .map(({ output }) => output)
+              .map(({ result: output }) => output)
               .filter(
                 (output) =>
                   z.object({ stamp: z.string() }).parse(output).stamp !==
@@ -597,7 +597,7 @@ describe(
       const started = await startedRuns(watching.workflow);
       const children = started.filter(({ depth }) => depth > 0);
       const outputs = new Map(
-        runs.map(({ id, output }) => [
+        runs.map(({ id, result: output }) => [
           id,
           z.object({ id: z.string(), stamp: z.string() }).parse(output),
         ])

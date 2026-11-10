@@ -1,6 +1,6 @@
 // Compile-time guarantees of the workflow references the host generates
 // (spec 10.4.1, 10.4.5, 10.4.6, 10.7.2, 10.7.9), checked against the
-// Notes fixture's generated `workflows`: a workflow's input, output,
+// Notes fixture's generated `workflows`: a workflow's args, result,
 // waits, events and decisions are inferred from its reference alone, and
 // after narrowing a wait by its kind and key, its event and that event's
 // data, or its decision's response value, without a cast or a generic
@@ -22,8 +22,8 @@ import type {
   WorkflowDecisionWait,
   WorkflowEventReference,
   WorkflowEventsOf,
-  WorkflowInputOf,
-  WorkflowOutputOf,
+  WorkflowArgsOf,
+  WorkflowReturnOf,
   WorkflowWaitOf,
 } from "../src/index.ts";
 import { useMutation, usePaginatedQuery, useQuery } from "../src/react.ts";
@@ -50,19 +50,19 @@ declare const runId: string;
 const summarize = workflows.summarizeNote;
 const archive = workflows.archiveNotes;
 
-// A run's input and output, from the reference alone.
-expectTypeOf<WorkflowInputOf<typeof summarize>>().toEqualTypeOf<{
+// A run's args and result, from the reference alone.
+expectTypeOf<WorkflowArgsOf<typeof summarize>>().toEqualTypeOf<{
   noteId: Id<"notes">;
   style?: "short" | "long";
 }>();
-expectTypeOf<WorkflowOutputOf<typeof summarize>>().toEqualTypeOf<{
+expectTypeOf<WorkflowReturnOf<typeof summarize>>().toEqualTypeOf<{
   summary: string;
   words: number;
 }>();
-expectTypeOf<WorkflowInputOf<typeof archive>>().toEqualTypeOf<
+expectTypeOf<WorkflowArgsOf<typeof archive>>().toEqualTypeOf<
   Record<never, never>
 >();
-expectTypeOf<WorkflowOutputOf<typeof archive>>().toEqualTypeOf<null>();
+expectTypeOf<WorkflowReturnOf<typeof archive>>().toEqualTypeOf<null>();
 expectTypeOf(summarize.alias).toEqualTypeOf<"summarizeNote">();
 
 // Data and events only: no children that act, and no phantom names.
@@ -74,8 +74,8 @@ expectTypeOf<Extract<keyof typeof summarize, string>>().toEqualTypeOf<
   | "alias"
   | "contractId"
   | "fingerprint"
-  | "input"
-  | "output"
+  | "args"
+  | "returns"
   | "events"
   | "listens"
   | "decisions"
@@ -281,7 +281,7 @@ export const useQueryChecks = (): void => {
   // @ts-expect-error -- a query, never a command
   void useMutation(queries.runs);
 
-  // Runs: a status filter, paged; rows without output or error.
+  // Runs: a status filter, paged; rows without result or error.
   const runs = usePaginatedQuery(queries.runs, {}, { initialPageSize: 25 });
   void usePaginatedQuery(
     queries.runs,
@@ -305,8 +305,8 @@ export const useQueryChecks = (): void => {
     if (row.status === "compensating") {
       expectTypeOf(row.cause).toEqualTypeOf<"failure" | "cancellation">();
     }
-    // @ts-expect-error -- a run's row never carries its output
-    void row.output;
+    // @ts-expect-error -- a run's row never carries its result
+    void row.result;
   }
 
   // History: one run's rows, narrowed by kind to their declared keys.
@@ -380,8 +380,8 @@ export const useMutationChecks = (): void => {
     "start" | "pause" | "resume" | "cancel" | "send"
   >();
   const start = useMutation(mutations.start);
-  void start({ input: { noteId } });
-  // @ts-expect-error -- the workflow's input goes under `input`
+  void start({ args: { noteId } });
+  // @ts-expect-error -- the workflow's args go under `args`
   void start({ noteId });
   void useMutation(mutations.cancel)({ runId: "run-1" });
   const sent = useMutation(mutations.send);
@@ -391,5 +391,5 @@ export const useMutationChecks = (): void => {
   // @ts-expect-error -- an event the workflow doesn't declare
   void sent({ runId: "run-1", event: "documentUploaded", data: {} });
   // @ts-expect-error -- a mutation, never a query
-  void useQuery(mutations.start, { input: { noteId } });
+  void useQuery(mutations.start, { args: { noteId } });
 };

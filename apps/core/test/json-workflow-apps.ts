@@ -89,8 +89,8 @@ export const greetingTasks = (hold?: string, title?: string): unknown[] => [
 ];
 
 /**
- * A grasp-workflow/2 definition running `steps`, input `{ who }` and
- * output `{ status }` (`status`, a greeting unless said), with the
+ * A grasp-workflow/2 definition running `steps`, args `{ who }` and
+ * result `{ status }` (`status`, a greeting unless said), with the
  * catalog `permissions` it declares (a model's, say).
  */
 export const definitionOf = (
@@ -146,7 +146,7 @@ export const startedBy = async (
 ): Promise<string> => {
   const { runId } = await by.api.workflowResources.start(id, {
     version: 1,
-    input: input ?? { who: "Ada" },
+    args: input ?? { who: "Ada" },
     key: unique(),
   });
   return z.string().parse(runId);
@@ -327,7 +327,7 @@ const boundAppFiles = (alias: string): TestApp =>
         },
       },
       permissions: [
-        `permission.workflow(${JSON.stringify(alias)}, { input: v.object({ who: v.string().trim().min(1) }), output: v.object({ status: v.string() }) })`,
+        `permission.workflow(${JSON.stringify(alias)}, { args: v.object({ who: v.string().trim().min(1) }), returns: v.object({ status: v.string() }) })`,
       ],
     },
     {
@@ -393,7 +393,7 @@ export const mutationCall = (
       name: `${reference.contractId}.mutations.${name}`,
       kind: "mutation",
     },
-    input: args,
+    args,
     idempotencyKey: key,
   });
 
@@ -411,7 +411,7 @@ export const workflowQuery = (
     name: `${reference.contractId}.queries.${name}`,
     kind: "query",
   },
-  input: args,
+  args,
 });
 
 /** `workflowQuery` as a call's text. */
@@ -421,10 +421,10 @@ export const queryCall = (...args: Parameters<typeof workflowQuery>): string =>
 /** A page's start of the workflow `reference` names, under `key`. */
 export const startCommand = (
   reference: Named,
-  input?: unknown,
+  args?: unknown,
   key = keyOf()
 ): string =>
-  mutationCall(reference, "start", { input: input ?? { who: "Ada" } }, key);
+  mutationCall(reference, "start", { args: args ?? { who: "Ada" } }, key);
 
 /** A page's pause, resume or cancel of run `runId`, under `key`. */
 export const controlCommand = (

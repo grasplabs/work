@@ -27,7 +27,7 @@ export interface BoundWorkflowDecision {
 
 /**
  * A workflow the App declares, as its
- * reference is generated: the App's alias for it and the input and output
+ * reference is generated: the App's alias for it and the args and returns
  * the App declared (`permission.workflow`), the contract its reference pins;
  * and, as the host resolved the App's binding against the approved
  * records, the events it declares by their binding's alias, its listen
@@ -36,8 +36,8 @@ export interface BoundWorkflowDecision {
  */
 export interface BoundWorkflow {
   readonly alias: string;
-  readonly input: ValueDescriptor;
-  readonly output: ValueDescriptor;
+  readonly args: ValueDescriptor;
+  readonly returns: ValueDescriptor;
   readonly events: Readonly<Record<string, BoundWorkflowEvent>>;
   readonly listens: Readonly<Record<string, readonly string[]>>;
   readonly decisions: Readonly<Record<string, BoundWorkflowDecision>>;
@@ -61,7 +61,7 @@ export interface WorkflowPin {
  * What the host resolved of a workflow the App declares, beside the
  * contract the declaration gives (`BoundWorkflow`): never from App code.
  */
-export type WorkflowBindingExtras = Omit<BoundWorkflow, "input" | "output">;
+export type WorkflowBindingExtras = Omit<BoundWorkflow, "args" | "returns">;
 /**
  * The workflows the App declares, in alias order, each with the contract
  * its declaration gives and what the host resolved of it in `bound`; an
@@ -95,8 +95,8 @@ export const declaredWorkflows = (
     decisions: {},
     ...extras.get(declared.alias),
     alias: declared.alias,
-    input: declared.input,
-    output: declared.output,
+    args: declared.args,
+    returns: declared.returns,
   }));
 };
 /**

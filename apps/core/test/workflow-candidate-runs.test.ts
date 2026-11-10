@@ -156,7 +156,7 @@ const ended = async (
 /** How run `run` ended: its status, and its output or error code. */
 const endOf = (run: WorkflowCandidateRun) =>
   run.status === "completed"
-    ? { status: run.status, output: run.output }
+    ? { status: run.status, output: run.result }
     : { status: run.status, code: run.error?.code };
 
 /** What the audit log says any call of run `runId` reached. */
@@ -328,15 +328,15 @@ describe("test runs of a workflow's draft", () => {
         const run = async (fixtures: Record<string, unknown>) => {
           const { runId } = await startCandidateRun(env, ada, workflow.id, {
             revision,
-            input: { who: "Ada" },
+            args: { who: "Ada" },
             fixtures,
           });
           return { runId, run: await ended(ada, workflow.id, runId) };
         };
-        const answered = await run({ [alias]: { output: answer } });
+        const answered = await run({ [alias]: { result: answer } });
         const unanswered = await run({});
         // An answer a real call of it would refuse, refused the same way.
-        const misshapen = await run({ [alias]: { output: { wrong: 1 } } });
+        const misshapen = await run({ [alias]: { result: { wrong: 1 } } });
         return {
           kind,
           answered: endOf(answered.run),
@@ -401,9 +401,9 @@ describe("test runs of a workflow's draft", () => {
     const run = async (params: Record<string, unknown>) => {
       const { runId } = await startCandidateRun(env, ada, workflow.id, {
         revision,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         params,
-        fixtures: { mail: { output: { messageId: "m-1" } } },
+        fixtures: { mail: { result: { messageId: "m-1" } } },
       });
       return { runId, run: await ended(ada, workflow.id, runId) };
     };
@@ -431,8 +431,8 @@ describe("test runs of a workflow's draft", () => {
       untold: await outcome(
         startCandidateRun(env, ada, workflow.id, {
           revision,
-          input: { who: "Ada" },
-          fixtures: { mail: { output: { messageId: "m-1" } } },
+          args: { who: "Ada" },
+          fixtures: { mail: { result: { messageId: "m-1" } } },
         })
       ),
       defaults: endOf(defaults.run),
@@ -464,8 +464,8 @@ describe("test runs of a workflow's draft", () => {
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
-      input: { who: "Ada" },
-      fixtures: { mail: { output: { messageId: "Hi" } } },
+      args: { who: "Ada" },
+      fixtures: { mail: { result: { messageId: "Hi" } } },
     });
     const run = await ended(ada, workflow.id, runId);
     const { results: admitted } = await env.DB.prepare(
@@ -505,7 +505,7 @@ describe("test runs of a workflow's draft", () => {
       startingRun: await outcome(
         startCandidateRun(env, ada, starting.id, {
           revision: saved.revision,
-          input: { who: "Ada" },
+          args: { who: "Ada" },
           fixtures: {},
         })
       ),
@@ -534,14 +534,14 @@ describe("test runs of a workflow's draft", () => {
     const stale = await outcome(
       startCandidateRun(env, ada, workflow.id, {
         revision,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         fixtures: {},
       })
     );
     const unchecked = await outcome(
       startCandidateRun(env, ada, workflow.id, {
         revision: revision + 1,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         fixtures: {},
       })
     );
@@ -554,7 +554,7 @@ describe("test runs of a workflow's draft", () => {
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision: saved.revision,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       fixtures: {},
     });
     const tamper = env.DB.prepare(
@@ -570,14 +570,14 @@ describe("test runs of a workflow's draft", () => {
       wrongInput: await outcome(
         startCandidateRun(env, ada, workflow.id, {
           revision: saved.revision,
-          input: { who: 7 },
+          args: { who: 7 },
           fixtures: {},
         })
       ),
       unknownParam: await outcome(
         startCandidateRun(env, ada, workflow.id, {
           revision: saved.revision,
-          input: { who: "Ada" },
+          args: { who: "Ada" },
           params: { nothing: "here" },
           fixtures: {},
         })
@@ -586,7 +586,7 @@ describe("test runs of a workflow's draft", () => {
       inheritedParam: await outcome(
         startCandidateRun(env, ada, workflow.id, {
           revision: saved.revision,
-          input: { who: "Ada" },
+          args: { who: "Ada" },
           params: { constructor: "here" },
           fixtures: {},
         })
@@ -617,8 +617,8 @@ describe("test runs of a workflow's draft", () => {
     });
     const start = {
       revision,
-      input: { who: "Ada" },
-      fixtures: { ai: { output: { line: "Hi" } } },
+      args: { who: "Ada" },
+      fixtures: { ai: { result: { line: "Hi" } } },
     };
     // The output after its call is stopped once its code returned: tried
     // again, it reads the call's answer as recorded, and the call isn't
@@ -715,7 +715,7 @@ describe("test runs of a workflow's draft", () => {
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       fixtures: {},
     });
     await deleteWorkflowResource(env, ada, workflow.id);
@@ -754,7 +754,7 @@ describe("test runs of a workflow's draft", () => {
       id: grace.userId,
       role: "builder",
     });
-    const start = { revision, input: { who: "Ada" }, fixtures: {} };
+    const start = { revision, args: { who: "Ada" }, fixtures: {} };
     const going = await Promise.all(
       Array.from(
         { length: maxLiveCandidateRuns },
@@ -771,7 +771,7 @@ describe("test runs of a workflow's draft", () => {
         startCandidateRun(env, grace, workflow.id, {
           ...start,
           fixtures: {
-            big: { output: "x".repeat(maxCandidateFixtureBytes) },
+            big: { result: "x".repeat(maxCandidateFixtureBytes) },
           },
         })
       ),
@@ -790,7 +790,7 @@ describe("test runs of a workflow's draft", () => {
     });
     const { runId: longRun } = await startCandidateRun(env, ada, long.id, {
       revision: longRevision,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       fixtures: {},
     });
     const { workflow, revision } = await drafted(ada, {
@@ -798,7 +798,7 @@ describe("test runs of a workflow's draft", () => {
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       fixtures: {},
     });
     await vi.waitFor(
@@ -907,7 +907,7 @@ describe("test runs of a workflow's draft", () => {
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       fixtures: {},
     });
     // Started longer ago than a test run may go on, as if its waits had
@@ -928,7 +928,7 @@ describe("test runs of a workflow's draft", () => {
     const { workflow, revision } = await drafted(ada, {
       steps: [],
     });
-    const start = { revision, input: { who: "Ada" }, fixtures: {} };
+    const start = { revision, args: { who: "Ada" }, fixtures: {} };
     const { runId } = await startCandidateRun(env, ada, workflow.id, start);
     await ended(ada, workflow.id, runId);
     // The rest of what a person may keep, as if started and ended a week
@@ -1000,7 +1000,7 @@ describe("test runs of a workflow's draft", () => {
       id: user.userId,
       role: "user",
     });
-    const start = { revision, input: { who: "Ada" }, fixtures: {} };
+    const start = { revision, args: { who: "Ada" }, fixtures: {} };
     const { runId } = await startCandidateRun(env, ada, workflow.id, start);
     await ended(ada, workflow.id, runId);
     const starts = await Promise.all(
@@ -1059,7 +1059,7 @@ describe("test runs of a workflow's draft", () => {
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       fixtures: {},
     });
     await ended(ada, workflow.id, runId);
@@ -1118,7 +1118,7 @@ describe("a draft's test run and what its workflow keeps between runs", () => {
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       fixtures: {},
     });
     await writeWorkflowState(env, live, stepIdempotencyKey(live, "b:task"), {
@@ -1248,13 +1248,13 @@ describe("a draft's test run keeping and attaching run files", () => {
     ) => {
       const { runId } = await startCandidateRun(env, ada, workflow.id, {
         revision,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         fixtures: {
           reader: {
-            output: { ...file, encoding: "base64", content },
+            result: { ...file, encoding: "base64", content },
           },
-          mailer: { output: { messageId: "m-1" } },
-          runFiles: { output: { text: "a,b" } },
+          mailer: { result: { messageId: "m-1" } },
+          runFiles: { result: { text: "a,b" } },
         },
       });
       const calls = await callsOf(runId);

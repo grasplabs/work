@@ -83,8 +83,8 @@ export type {
   AnyWorkflowReference,
   WorkflowDecisionsOf,
   WorkflowEventsOf,
-  WorkflowInputOf,
-  WorkflowOutputOf,
+  WorkflowArgsOf,
+  WorkflowReturnOf,
   WorkflowReference,
   WorkflowWaitOf,
 } from "./workflow-references.ts";

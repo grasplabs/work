@@ -174,7 +174,7 @@ const requestOf = (
 ): string =>
   JSON.stringify({
     reference: { name: reference.name, kind },
-    input,
+    args: input,
   });
 
 /** A session client whose calls go to core's function route, as the page relays them. */

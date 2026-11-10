@@ -64,7 +64,7 @@ describe(
       const lineage = await lineageOf(runId);
       expect({
         status: run.status,
-        output: run.output,
+        output: run.result,
         waitedForLoad: await loadWaitsOf(runId),
         lineage: { ...lineage, used: undefined },
         startedWithRun:
@@ -269,7 +269,7 @@ describe(
       );
       expect({
         status: result.run.status,
-        output: result.run.output,
+        output: result.run.result,
         chargedToDeadline:
           result.held?.used ===
           (result.held?.deadline ?? 0) - (result.held?.admittedAt ?? 0),

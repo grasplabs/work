@@ -12,10 +12,10 @@ export interface HeldStart {
   workflow: string;
   workflowName: string;
   version: number;
-  /** The input it would start with, exactly as confirming it sends it. */
-  input: Json;
-  /** The SHA-256 of that input: confirming names it, so it is what was shown. */
-  inputHash: string;
+  /** The args it would start with, exactly as confirming it sends them. */
+  args: Json;
+  /** The SHA-256 of those args: confirming names it, so it is what was shown. */
+  argsHash: string;
   /** The chat the agent asked from. */
   chatId: string;
   /** When it was asked for, and when it lapses unconfirmed (ISO 8601). */
@@ -34,11 +34,11 @@ export interface HeldStartsApi {
   /** The starts waiting for them, oldest first. */
   list: () => Promise<HeldStart[]>;
   /**
-   * Starts held start `id`, with exactly the input of `inputHash`, as its
+   * Starts held start `id`, with exactly the args of `argsHash`, as its
    * agent acting for them: the agent's grant and their role read again as
    * it starts. Refused once it doesn't wait (`workflow.start_held_gone`).
    */
-  confirm: (id: string, inputHash: string) => Promise<ConfirmedStart>;
+  confirm: (id: string, argsHash: string) => Promise<ConfirmedStart>;
   /** Declines held start `id`: it never starts. */
   decline: (id: string) => Promise<void>;
 }

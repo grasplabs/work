@@ -152,7 +152,7 @@ export const startedApproval = async (
 ): Promise<ApprovalRun> => {
   const { runId } = await by.api.workflowResources.start(workflow, {
     version: 1,
-    input: { invoice: "INV-7" },
+    args: { invoice: "INV-7" },
     key: unique(),
   });
   return { workflow, run: z.string().parse(runId), by };
@@ -205,7 +205,7 @@ export const outputOf = async ({
   await finished(run);
   const ended = await by.api.workflowResources.run(workflow, run);
   return ended.status === "completed"
-    ? ended.output
+    ? ended.result
     : { status: ended.status, code: ended.error?.code };
 };
 

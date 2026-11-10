@@ -70,7 +70,7 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
       reviewed: { version: 1 },
     });
     const run = await endedRun(builder, id, await startedBy(builder, id));
-    expect({ status: run.status, output: run.output }).toStrictEqual({
+    expect({ status: run.status, output: run.result }).toStrictEqual({
       status: "completed",
       output: { status: "Total 2468" },
     });
@@ -87,7 +87,7 @@ describe("an independent JSON workflow's runs on-prem", runTime, () => {
     await sleeping(second, "hold:task");
     await woken(first, "hold:task");
     const run = await endedRun(builder, id, first);
-    expect({ status: run.status, output: run.output }).toStrictEqual({
+    expect({ status: run.status, output: run.result }).toStrictEqual({
       status: "completed",
       output: { status: "Hello, Ada" },
     });

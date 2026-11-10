@@ -63,7 +63,7 @@ describe("runs of JSON workflows", () => {
     );
     const { runId } = await start(by, workflow.id);
     const run = await ended(by, workflow.id, runId);
-    expect({ status: run.status, output: run.output }).toStrictEqual({
+    expect({ status: run.status, output: run.result }).toStrictEqual({
       status: "completed",
       output: { status: "done", note: "none" },
     });
@@ -90,7 +90,7 @@ describe("runs of JSON workflows", () => {
       sameRun: again.runId === first.runId,
       runIsReceipt: first.runId === first.id,
       status: run.status,
-      output: run.output,
+      output: run.result,
     }).toStrictEqual({
       sameRun: true,
       runIsReceipt: true,
@@ -120,7 +120,7 @@ describe("runs of JSON workflows", () => {
     );
     const { runId } = await start(by, workflow.id);
     const run = await ended(by, workflow.id, runId);
-    expect(run.output).toStrictEqual({ status: "done", texts });
+    expect(run.result).toStrictEqual({ status: "done", texts });
   });
 
   it("fails a run on an expression's failure, without the values it read", async () => {
@@ -183,7 +183,7 @@ describe("runs of JSON workflows", () => {
     );
     const { runId } = await start(by, workflow.id);
     const run = await ended(by, workflow.id, runId);
-    expect({ status: run.status, output: run.output }).toStrictEqual({
+    expect({ status: run.status, output: run.result }).toStrictEqual({
       status: "failed",
       output: undefined,
     });

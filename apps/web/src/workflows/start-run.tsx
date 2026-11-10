@@ -412,7 +412,7 @@ export const StartIndependentRun = ({
           Starts version {version} as you, with the input you give it.
         </Trans>
       }
-      fields={startFieldsOf(form?.input)}
+      fields={startFieldsOf(form?.args)}
       people={form?.people ?? null}
       onFiles={onFiles}
       start={async (input, key) => {
@@ -420,7 +420,7 @@ export const StartIndependentRun = ({
           async (session) =>
             await session.workflowResources.start(workflow, {
               version,
-              input,
+              args: input,
               key,
             })
         );

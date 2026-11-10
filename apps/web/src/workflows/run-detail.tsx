@@ -108,14 +108,14 @@ export const RunResultView = ({
       </section>
     );
   }
-  if (run.output !== undefined) {
+  if (run.result !== undefined) {
     return (
       <section className="flex flex-col gap-2">
         <h3 className="text-muted-foreground">
           <Trans>What it returned</Trans>
         </h3>
         <pre className="bg-muted overflow-x-auto rounded-md p-3 text-xs">
-          {JSON.stringify(run.output, null, 2)}
+          {JSON.stringify(run.result, null, 2)}
         </pre>
       </section>
     );

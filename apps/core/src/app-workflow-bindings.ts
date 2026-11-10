@@ -365,7 +365,7 @@ export const startAppBinding = async (
   if (authority.subject.type !== "app" || typeof alias !== "string") {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
   }
-  const { input, key } = workflowResourceErrors.parse(
+  const { args, key } = workflowResourceErrors.parse(
     "workflow.start_invalid",
     workflowStartSchema.omit({ version: true }),
     request
@@ -388,7 +388,7 @@ export const startAppBinding = async (
     env,
     { type: "app", authority, agent },
     row.workflowResourceId,
-    { version: row.workflowResourceVersion, input, key },
+    { version: row.workflowResourceVersion, args, key },
     sql`EXISTS (SELECT 1 FROM app_workflow_bindings
       WHERE id = ${row.id} AND status = 'active') AND ${requires}`,
     noted,

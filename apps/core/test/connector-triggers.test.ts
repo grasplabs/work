@@ -360,7 +360,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     expect({
       first,
       again,
-      output: run.output,
+      output: run.result,
       keys: runs.map(({ key }) =>
         /^grasp:connector:[\w-]+:[0-9a-f]{64}$/u.test(key)
       ),

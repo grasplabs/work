@@ -472,7 +472,7 @@ const HeldStartItem = ({
           onPress: async () => {
             await decide(
               async (session) => {
-                await session.heldStarts.confirm(start.id, start.inputHash);
+                await session.heldStarts.confirm(start.id, start.argsHash);
               },
               t`Started: ${name}.`
             );
@@ -499,7 +499,7 @@ const HeldStartItem = ({
           </h3>
           <pre className="bg-muted w-full overflow-x-auto rounded-md p-3 text-sm">
             <code className="font-mono">
-              {JSON.stringify(start.input, null, 2)}
+              {JSON.stringify(start.args, null, 2)}
             </code>
           </pre>
         </div>

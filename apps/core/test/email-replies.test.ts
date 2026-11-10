@@ -155,7 +155,7 @@ const holdingRun = async ({ admin, workflow }: ReplyWorkflow) => {
     env,
     { type: "person", person: admin },
     workflow.id,
-    { version: 1, input: {}, key: unique() }
+    { version: 1, args: {}, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -188,7 +188,7 @@ const endedRun = async ({ admin, workflow }: ReplyWorkflow, runId: string) => {
     },
     { timeout: 30_000, interval: 100 }
   );
-  return { status: run.status, output: run.output };
+  return { status: run.status, output: run.result };
 };
 
 /** The events in run `runId`'s inbox, each whether a wait took it. */

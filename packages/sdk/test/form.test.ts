@@ -58,7 +58,7 @@ const sentOf = (body: string): Sent => {
   const key = read("idempotencyKey");
   return {
     contractId: typeof contractId === "string" ? contractId : "",
-    input: read("input"),
+    input: read("args"),
     idempotencyKey: typeof key === "string" ? key : undefined,
   };
 };

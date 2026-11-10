@@ -120,7 +120,7 @@ const asking = async (
 const endOf = async (by: Person, workflow: string, runId: string) => {
   const run = await endedRun(by, workflow, runId);
   return run.status === "completed"
-    ? { status: run.status, output: run.output }
+    ? { status: run.status, output: run.result }
     : { status: run.status, code: run.error?.code };
 };
 

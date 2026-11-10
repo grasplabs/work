@@ -587,7 +587,7 @@ describe("revocation", { timeout: 120_000 }, () => {
       app,
       JSON.stringify({
         reference: { name: "notes.label", kind: "query" },
-        input: {},
+        args: {},
       })
     );
     expect(answer.result).toMatchObject({

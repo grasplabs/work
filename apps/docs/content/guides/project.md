@@ -23,7 +23,7 @@ This guide builds a Tasks App: a list of tasks people add and complete.
 
 The definition is what the App is, as data: its name, its tables and their fields, indexes and access, and the permissions it needs. Every table and field has an ID of its own, so renaming one never loses what refers to it. It is no file: Grasp keeps it with each version of the App, beside its files.
 
-Each type in it says what `v` says, as JSON, in the same words, and leaves out whatever is false: `v.string().trim().max(200).optional()` is `{ "kind": "string", "trim": true, "max": 200, "optional": true }`. Workflows declare their input, output, state and parameters the same way.
+Each type in it says what `v` says, as JSON, in the same words, and leaves out whatever is false: `v.string().trim().max(200).optional()` is `{ "kind": "string", "trim": true, "max": 200, "optional": true }`. Workflows declare their args, returns, state and parameters the same way.
 
 You don't write it by hand. Grasp changes it with its definition tools, in a chat or on the App's page: `addTable`, `addField`, `changeField`, `renameField`, `renameTable`, `setAccess`, `addIndex` and `addPermission`. Each change is checked whole, and Grasp tells you what it does to the records the App already holds.
 

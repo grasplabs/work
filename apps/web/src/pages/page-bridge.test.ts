@@ -287,7 +287,7 @@ describe("the page's bridge to a page", () => {
 
   it("passes a function call's request on as the text the frame sent, and nothing else", async () => {
     const frame = framed();
-    const request = JSON.stringify({ reference: {}, input: { title: "é" } });
+    const request = JSON.stringify({ reference: {}, args: { title: "é" } });
     const results = {
       text: await outcome(frame.page.callFunction(request)),
       object: await outcome(frame.page.callFunction(unchecked({ request }))),
@@ -765,7 +765,7 @@ describe("the page's bridge to a page", () => {
 
   it("lets go of every stream the frame follows once closed", async () => {
     const frame = framed();
-    const request = JSON.stringify({ reference: {}, input: {} });
+    const request = JSON.stringify({ reference: {}, args: {} });
     await frame.page.streamFunction("stream", request, ignoreFrame);
     await frame.page.streamFunction("stream", request, ignoreFrame);
     await frame.page.streamFunction("stream", request, ignoreFrame);
@@ -781,7 +781,7 @@ describe("the page's bridge to a page", () => {
     const frame = framed();
     const gate = Promise.withResolvers<null>();
     frame.opening.gate = gate.promise;
-    const request = JSON.stringify({ reference: {}, input: {} });
+    const request = JSON.stringify({ reference: {}, args: {} });
     const pending = outcome(
       frame.page.streamFunction("stream", request, ignoreFrame)
     );
@@ -798,7 +798,7 @@ describe("the page's bridge to a page", () => {
 
   it("lets go of a stream the frame followed as soon as it ends, not only once closed", async () => {
     const frame = framed();
-    const request = JSON.stringify({ reference: {}, input: {} });
+    const request = JSON.stringify({ reference: {}, args: {} });
     await frame.page.streamFunction("stream", request, ignoreFrame);
     await frame.page.streamFunction("stream", request, ignoreFrame);
     const [first, second] = frame.streams;

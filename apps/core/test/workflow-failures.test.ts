@@ -96,7 +96,7 @@ const startFor = async (by: Acting, id: string, who = "Ada") => {
     env,
     { type: "person", person: by },
     id,
-    { version: 1, input: { who }, key: unique() }
+    { version: 1, args: { who }, key: unique() }
   );
   return runId;
 };
@@ -120,7 +120,7 @@ const endedRun = async (
 const endOf = (run: WorkflowResourceRun) => ({
   status: run.status,
   ...(run.status === "completed"
-    ? { output: run.output }
+    ? { output: run.result }
     : { code: run.error?.code }),
 });
 

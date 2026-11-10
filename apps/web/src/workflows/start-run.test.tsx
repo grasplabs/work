@@ -42,7 +42,7 @@ const settled = async (): Promise<void> => {
 
 const form: WorkflowStartForm = {
   version: 3,
-  input: {
+  args: {
     type: "object",
     properties: { who: { type: "string" }, times: { type: "integer" } },
     required: ["times", "who"],
@@ -72,7 +72,7 @@ const shown = async (
     },
     start: async (
       workflow: string,
-      start: { version: number; input: unknown; key: string }
+      start: { version: number; args: unknown; key: string }
     ) => {
       await Promise.resolve();
       if (refusal !== undefined) {
@@ -81,7 +81,7 @@ const shown = async (
       asked.push({
         workflow,
         version: start.version,
-        input: start.input,
+        input: start.args,
         keyed: start.key.length > 0,
       });
       return { runId: "run-1" };
@@ -236,7 +236,7 @@ describe("starting a workflow by hand", () => {
       () => <StartIndependentRun workflow="workflow-1" />,
       {
         version: 3,
-        input: {
+        args: {
           type: "object",
           properties: {
             approver: { type: "string", "x-grasp-value": { kind: "person" } },
@@ -298,7 +298,7 @@ describe("starting a workflow by hand", () => {
   it("names the person picked apart from someone of the same name", async () => {
     await shown(() => <StartIndependentRun workflow="workflow-1" />, {
       version: 3,
-      input: {
+      args: {
         type: "object",
         properties: {
           approver: { type: "string", "x-grasp-value": { kind: "person" } },
@@ -324,7 +324,7 @@ describe("starting a workflow by hand", () => {
   it("offers no Start for a workflow core gives no version to start", async () => {
     await shown(() => <StartIndependentRun workflow="workflow-1" />, {
       version: null,
-      input: null,
+      args: null,
       people: null,
     });
 

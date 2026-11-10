@@ -289,7 +289,7 @@ const jsonObjectSchema = z.record(z.string(), z.json());
 const appCandidatesOf = (
   keyOf: (call: { app: string; function: string }) => string,
   build: Pick<HostedResourceRun["build"], "tasks">,
-  fixtures: Readonly<Record<string, { readonly output: Json }>>
+  fixtures: Readonly<Record<string, { readonly result: Json }>>
 ): (readonly [string, CandidateBinding])[] =>
   build.tasks.flatMap((task) => {
     if (task.kind !== "call" || task.call.name !== "grasp.app") {
@@ -304,7 +304,7 @@ const appCandidatesOf = (
           contractId: "",
           fingerprint: "",
           answer: Object.hasOwn(fixtures, given)
-            ? fixtures[given]?.output
+            ? fixtures[given]?.result
             : undefined,
         },
       ] as const,
@@ -322,7 +322,7 @@ const rowOf = async (env: Env, id: string): Promise<CandidateRow | undefined> =>
  * Starts a test run of workflow `id`'s draft checkpoint for `by`, one of
  * its builders, from `input` (`workflowCandidateStartSchema`): the
  * checkpoint at exactly the revision it names, compiled now into a build
- * of its own and pinned to it; its input and parameters checked against
+ * of its own and pinned to it; its args and parameters checked against
  * the checkpoint's contract; every call it will make answered from the
  * start's fixtures. Its run's ID.
  */
@@ -350,7 +350,7 @@ export const startCandidateRun = async (
   await requireUnderLimits(env, workflow.id, by.userId);
   const {
     revision,
-    input: given,
+    args: given,
     params = {},
     fixtures,
   } = workflowResourceErrors.parse(
@@ -528,7 +528,7 @@ const loadedCandidateRun = async (
     throw workflowResourceErrors.create("workflow.version_corrupt");
   }
   const fixtures = z
-    .record(z.string(), z.object({ output: z.json() }))
+    .record(z.string(), z.object({ result: z.json() }))
     .parse(JSON.parse(row.fixtures));
   // Imported here, as resource-calls.ts does: app-calls.ts reaches the
   // App's functions, which start workflows, whose runs reach back here.
@@ -568,7 +568,7 @@ const loadedCandidateRun = async (
                   contractId,
                   fingerprint,
                   answer: Object.hasOwn(fixtures, alias)
-                    ? fixtures[alias]?.output
+                    ? fixtures[alias]?.result
                     : undefined,
                 },
               ] as const

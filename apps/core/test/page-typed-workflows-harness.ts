@@ -53,7 +53,7 @@ export const snapshotSchema = z.looseObject({
       .object({ kind: z.string(), stage: z.string() })
       .nullable(),
   }),
-  output: z.unknown().optional(),
+  result: z.unknown().optional(),
   error: z.looseObject({ code: z.string(), message: z.string() }).optional(),
   compensation: z.unknown().optional(),
 });
@@ -207,7 +207,7 @@ export const failingOf = (): string =>
 
 /**
  * A definition answering more than the App declares: its status, and a
- * field the App's output doesn't have.
+ * field the App's `returns` doesn't have.
  */
 export const widerOf = (): string =>
   JSON.stringify({

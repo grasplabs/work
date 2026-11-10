@@ -137,7 +137,7 @@ const started = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, input: { text: "", file: "", ...input }, key: unique() }
+    { version: 1, args: { text: "", file: "", ...input }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -156,7 +156,7 @@ const ended = async (by: Identity, id: string, runId: string) => {
     { timeout: 60_000, interval: 100 }
   );
   return run.status === "completed"
-    ? { status: run.status, output: run.output }
+    ? { status: run.status, output: run.result }
     : { status: run.status, code: run.error?.code };
 };
 

@@ -381,7 +381,7 @@ describe(
                 name: `${reference.contractId}.mutations.restart`,
                 kind: "mutation",
               },
-              input: { runId },
+              args: { runId },
               idempotencyKey: keyOf(),
             })
           )

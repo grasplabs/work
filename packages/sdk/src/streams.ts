@@ -104,7 +104,7 @@ export class Streams {
     const key = idempotencyKey ?? freshKey();
     const request = JSON.stringify({
       reference: read,
-      input,
+      args: input,
       idempotencyKey: key,
     });
     if (

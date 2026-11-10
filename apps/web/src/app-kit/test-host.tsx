@@ -69,7 +69,7 @@ const pageAskedOf = (pagination: unknown): PageAsked | undefined => {
 const sentOf = (body: string): Sent => {
   const parsed: unknown = JSON.parse(body);
   const contractId = read(read(parsed, "reference"), "name");
-  const sentInput = read(parsed, "input");
+  const sentInput = read(parsed, "args");
   const { pagination, ...input } = isRecord(sentInput) ? sentInput : {};
   return {
     contractId: typeof contractId === "string" ? contractId : "",

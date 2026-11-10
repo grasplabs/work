@@ -309,7 +309,7 @@ export const call = async (
     release.manifest.resourceId,
     JSON.stringify({
       reference: { name: path, kind: operation?.kind ?? "action" },
-      input,
+      args: input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     })
   );

@@ -137,7 +137,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       mailer.release.manifest.resourceId,
       JSON.stringify({
         reference: { name: "mail.inbox", kind: "action" },
-        input: {},
+        args: {},
       })
     );
     const permissions = await mailer.admin.api.permissions.list();

@@ -310,7 +310,7 @@ export const startItemTest = async (
         env,
         by,
         workflow.id,
-        { revision, input: source.input, params, fixtures },
+        { revision, args: source.input, params, fixtures },
         undefined,
         (candidateRunId) => itemRow(position, source, { candidateRunId })
       );

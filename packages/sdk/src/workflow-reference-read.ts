@@ -54,7 +54,7 @@ export interface ReadWorkflow {
       Record<never, never>,
       boolean
     >;
-    readonly start: WorkflowMutation<{ readonly input: unknown }, RunHandle>;
+    readonly start: WorkflowMutation<{ readonly args: unknown }, RunHandle>;
     readonly pause: ControlMutation;
     readonly resume: ControlMutation;
     readonly cancel: ControlMutation;

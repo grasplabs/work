@@ -263,7 +263,7 @@ const started = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, input: { amount }, key: unique() }
+    { version: 1, args: { amount }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -290,7 +290,7 @@ const ended = async (
 const endOf = (run: WorkflowResourceRun) => ({
   status: run.status,
   ...(run.status === "completed"
-    ? { output: run.output }
+    ? { output: run.result }
     : { code: run.error?.code }),
 });
 
@@ -1390,9 +1390,9 @@ describe("a test run of a JSON workflow's decision", () => {
     ) => {
       const { runId } = await startCandidateRun(env, owner, workflow.id, {
         revision: saved.revision,
-        input: { amount: 5000 },
+        args: { amount: 5000 },
         params: { reviewer },
-        fixtures: { invoiceApproval: { output: answer } },
+        fixtures: { invoiceApproval: { result: answer } },
       });
       const ran = await vi.waitFor(
         async () => {
@@ -1407,7 +1407,7 @@ describe("a test run of a JSON workflow's decision", () => {
       return {
         end:
           ran.status === "completed"
-            ? { status: ran.status, output: ran.output }
+            ? { status: ran.status, output: ran.result }
             : { status: ran.status, code: ran.error?.code },
         decisions: await decisionCount(runId),
       };

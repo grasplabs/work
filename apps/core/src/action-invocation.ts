@@ -420,8 +420,8 @@ export class ActionInvocation extends DurableObject<Env> {
     // nothing: hashed as none, two such inputs would share a key's run, the
     // second joining the first or reading its receipt instead of being
     // refused (`submission.key_conflict`).
-    const input = jsonOf(spec.call.input);
-    if (input === undefined && spec.call.input !== undefined) {
+    const input = jsonOf(spec.call.args);
+    if (input === undefined && spec.call.args !== undefined) {
       return resultOf(
         refused(operationErrors.create("contract.invalid_request"))
       );

@@ -88,7 +88,7 @@ export const shownValues = (
         label,
         value: shownValue(value),
       }))
-    : [{ label: "input", value: shownValue(input) }];
+    : [{ label: "args", value: shownValue(input) }];
 
 /**
  * Offers workflow `workflowId` with `input` to the person the chat's
@@ -280,7 +280,7 @@ export const pressOffer = async (
       offer.workflowId,
       {
         version: offer.version,
-        input: z.json().parse(JSON.parse(offer.input)),
+        args: z.json().parse(JSON.parse(offer.input)),
         key: `chat-offer-${offer.id}`,
       },
       stillAskable(offer.workflowId)

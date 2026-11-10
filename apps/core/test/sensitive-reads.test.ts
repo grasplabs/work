@@ -242,7 +242,7 @@ const call = async (
         name: path,
         kind: current.app.operations[path]?.kind ?? "query",
       },
-      input,
+      args: input,
     }),
     Date.now() + 30_000
   );

@@ -262,7 +262,7 @@ export const holdStart = async (
   // person's role, its input as the version takes it.
   const decided = await decideWorkflowStart(env, invoker, workflow.id, {
     version,
-    input,
+    args: input,
     key: startKeyOf(scope.chatId, key),
   });
   const accepted =
@@ -341,8 +341,8 @@ export const heldStartsOf = async (
     workflow: row.workflowResourceId,
     workflowName,
     version: row.workflowResourceVersion,
-    input: inputOf(row),
-    inputHash: row.inputHash,
+    args: inputOf(row),
+    argsHash: row.inputHash,
     chatId: row.chatId,
     requestedAt: row.createdAt.toISOString(),
     expiresAt: row.expiresAt.toISOString(),
@@ -383,7 +383,7 @@ const stillWaiting = (id: string) =>
 const stillOpen = (id: string) => and(eq(agentHeldStarts.id, id), openSql());
 
 /**
- * Starts `by`'s held start `id`, with exactly the input of `inputHash`, as
+ * Starts `by`'s held start `id`, with exactly the args of `argsHash`, as
  * its agent acting for them: decided once, then started through
  * `startWorkflow`, everything read again as it is admitted. A start
  * refused for good then is noted with why (`refusal`), which its agent is
@@ -395,10 +395,10 @@ export const confirmHeldStart = async (
   env: Env,
   by: Identity,
   id: unknown,
-  inputHash: unknown
+  argsHash: unknown
 ): Promise<ConfirmedStart> => {
   const row = await waitingFor(env, by, id);
-  if (inputHash !== row.inputHash) {
+  if (argsHash !== row.inputHash) {
     throw workflowResourceErrors.create("workflow.start_held_changed");
   }
   const db = drizzle(env.DB);
@@ -432,7 +432,7 @@ export const confirmHeldStart = async (
       row.workflowResourceId,
       {
         version: row.workflowResourceVersion,
-        input: inputOf(row),
+        args: inputOf(row),
         key: startKeyOf(row.chatId, row.key),
       },
       stillConfirmed,

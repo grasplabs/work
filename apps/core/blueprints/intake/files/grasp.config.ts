@@ -4,14 +4,14 @@
 import { defineApp, permission, v } from "@grasp-os/sdk";
 export const permissions = {
   extract: permission.workflow("extract", {
-    input: v.object({
+    args: v.object({
       notes: v.string().min(1).max(30000),
       lines: v.array(v.object({
         role: v.enum(["guest", "question"]),
         text: v.string()
       }))
     }),
-    output: v.object({
+    returns: v.object({
       statements: v.array(v.object({
         text: v.string(),
         tags: v.array(v.enum(["goal", "blocker", "time_sink", "handover", "tool", "rule"])),

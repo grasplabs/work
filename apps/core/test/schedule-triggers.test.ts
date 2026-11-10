@@ -461,7 +461,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       killed,
       stillDue: stillDue?.nextAt,
       runs,
-      output: run.output,
+      output: run.result,
       movedOn: (after?.nextAt ?? 0) > occurrence.getTime(),
       admitted: admitted.map(({ detail }) => ({
         scheduledAt: detail.scheduledAt,
@@ -1026,7 +1026,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
           env,
           { type: "trigger", triggerId: trigger.id },
           workflow.id,
-          { version: 1, input: nightly, key: keyOf(trigger.id, 1, occurrence) },
+          { version: 1, args: nightly, key: keyOf(trigger.id, 1, occurrence) },
           undefined,
           { scheduledAt: occurrence.toISOString(), triggerVersion: "1" }
         );
@@ -1093,7 +1093,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
           env,
           { type: "trigger", triggerId: trigger.id },
           workflow.id,
-          { version: 1, input: nightly, key: keyOf(trigger.id, 1, occurrence) },
+          { version: 1, args: nightly, key: keyOf(trigger.id, 1, occurrence) },
           undefined,
           { scheduledAt: occurrence.toISOString(), triggerVersion: "1" }
         );

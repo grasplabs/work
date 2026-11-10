@@ -51,7 +51,7 @@ export class QueryCache {
     // A query's request is bounded as a submission's is, before it is sent.
     const request = JSON.stringify({
       reference: read,
-      input,
+      args: input,
     });
     if (
       new TextEncoder().encode(request).byteLength > functionRequestMaxBytes

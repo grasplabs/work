@@ -91,13 +91,13 @@ const started = async (
   await outcome(
     startWorkflow(env, { type: "person", person: by }, id, {
       version,
-      input,
+      args: input,
       key: `key-${unique()}`,
     })
   );
 
 describe("starting an independent workflow by hand", () => {
-  it("gives anyone with a role the version a start runs and the exact schema of its input, which the start takes", async () => {
+  it("gives anyone with a role the version a start runs and the exact schema of its args, which the start takes", async () => {
     const { ada, uma, workflow } = await greetingWorkflow();
 
     const [byBuilder, byUser] = await Promise.all([
@@ -128,7 +128,7 @@ describe("starting an independent workflow by hand", () => {
       byBuilder: byUser,
       byUser: {
         version: 1,
-        input: {
+        args: {
           type: "object",
           properties: {
             who: { type: "string" },
@@ -170,7 +170,7 @@ describe("starting an independent workflow by hand", () => {
       await started(uma, workflow.id, form.version, { approver, note: "" });
 
     expect({
-      properties: form.input?.properties,
+      properties: form.args?.properties,
       // Uma, a user, picks from everyone, by name and ID alone.
       offersAda: form.people?.people.find(({ id }) => id === ada.userId),
       // Each read on the record: how many, never whom. Only this
@@ -246,7 +246,7 @@ describe("starting an independent workflow by hand", () => {
     const live = await workflowStartForm(env, uma, workflow.id);
 
     expect({
-      live: { version: live.version, fields: live.input?.required },
+      live: { version: live.version, fields: live.args?.required },
       starts: await started(uma, workflow.id, live.version, {
         who: "Ada",
         times: 1,
@@ -255,7 +255,7 @@ describe("starting an independent workflow by hand", () => {
     }).toStrictEqual({
       live: { version: 1, fields: ["times", "who"] },
       starts: "ok",
-      unpublished: { version: null, input: null, people: null },
+      unpublished: { version: null, args: null, people: null },
     });
   });
 });

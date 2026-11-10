@@ -391,7 +391,7 @@ export const answersOf = (definition: AppDefinition) =>
 
 /**
  * `data`, a permission's, with each descriptor it holds mapped by `map`:
- * a workflow's `input` and `output`, and the platform's functions' `args`
+ * a workflow's `args` and `returns`, and the platform's functions' `args`
  * and `returns`. The only kinds whose data holds descriptors.
  */
 const permissionTypes = (
@@ -404,7 +404,7 @@ const permissionTypes = (
     map(value) as FrozenJson;
   const kind = data["~permission"];
   if (kind === "workflows") {
-    return { ...data, input: mapped(data.input), output: mapped(data.output) };
+    return { ...data, args: mapped(data.args), returns: mapped(data.returns) };
   }
   const { functions } = data;
   if (kind !== "grasp" || !isPlainObject(functions)) {

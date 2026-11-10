@@ -167,13 +167,13 @@ export const formSubmissionOf = ({
 }: {
   app: string;
   userId: string;
-  call: Pick<FunctionRequest, "input" | "reference">;
+  call: Pick<FunctionRequest, "args" | "reference">;
   key: string;
   operation: string;
   startedAt: number;
 }): FormSubmission => {
   // What the call took, read as JSON: none that wouldn't read is left out.
-  const read = call.input === undefined ? null : jsonOf(call.input);
+  const read = call.args === undefined ? null : jsonOf(call.args);
   const values: Json = read ?? null;
   const fits =
     read !== undefined &&

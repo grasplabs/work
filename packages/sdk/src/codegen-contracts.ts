@@ -81,13 +81,13 @@ export const eventFingerprint = async (
   await sha256Hex(canonicalText({ type: event.type, data: event.data }));
 /**
  * The fingerprint of a bound workflow's contract: the SHA-256, in hex, of
- * its input and output descriptors, canonically. What a run pins and the
+ * its args and returns descriptors, canonically. What a run pins and the
  * host checks at start and watch; its events carry their own fingerprints,
  * and the release's contracts cover all of it.
  */
 export const workflowFingerprint = async (
-  workflow: Pick<BoundWorkflow, "input" | "output">
+  workflow: Pick<BoundWorkflow, "args" | "returns">
 ): Promise<string> =>
   await sha256Hex(
-    canonicalText({ input: workflow.input, output: workflow.output })
+    canonicalText({ args: workflow.args, returns: workflow.returns })
   );

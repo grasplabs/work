@@ -178,38 +178,38 @@ export const peopleDeclaration: PeoplePermission = Object.freeze({
  */
 export interface WorkflowPermission<
   Alias extends string = string,
-  Input = unknown,
-  Output = unknown,
+  Args = unknown,
+  Returns = unknown,
 > extends DeclarationBase<"workflows", Alias> {
   /**
-   * The descriptor of the input the App starts it with: what the host
-   * checks a start's input against before it goes anywhere.
+   * The descriptor of the args the App starts it with: what the host
+   * checks a start's args against before they go anywhere.
    */
-  readonly input: ValueDescriptor;
+  readonly args: ValueDescriptor;
   /**
-   * The descriptor of the output a completed run gives. With the input, it
-   * is the contract the App's pages rely on: they get a reference to it
+   * The descriptor of what a completed run returns. With the args, it is
+   * the contract the App's pages rely on: they get a reference to it
    * pinned to that contract's fingerprint (`workflows.<alias>` in
    * `@server/_generated/api`), and name it in what they ask of the host. The App's own
-   * starts are checked against the bound version's input as they are
+   * starts are checked against the bound version's args as they are
    * admitted, not against this contract.
    */
-  readonly output: ValueDescriptor;
-  /** The input as a caller passes it, for types only: never set. */
-  readonly "~input"?: Input;
-  /** The output a completed run gives, for types only: never set. */
-  readonly "~output"?: Output;
+  readonly returns: ValueDescriptor;
+  /** The args as a caller passes them, for types only: never set. */
+  readonly "~args"?: Args;
+  /** What a completed run returns, for types only: never set. */
+  readonly "~returns"?: Returns;
 }
 
 /** What a workflow permission says. */
 export interface WorkflowConfig<
-  Input extends AnySchema,
-  Output extends AnySchema,
+  Args extends AnySchema,
+  Returns extends AnySchema,
 > {
-  /** The input the App starts it with. */
-  readonly input: Input;
-  /** The output a completed run gives. */
-  readonly output: Output;
+  /** The args the App starts it with. */
+  readonly args: Args;
+  /** What a completed run returns. */
+  readonly returns: Returns;
 }
 
 /** Any permission an action reaches through `ctx`. */

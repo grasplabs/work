@@ -622,12 +622,12 @@ export interface AppWorkflowBinding {
 
 /**
  * A start of an independent workflow: the exact version (a publication
- * number, never an alias such as "latest"), its input, and a key of the
+ * number, never an alias such as "latest"), its args, and a key of the
  * invoker's own, so the same start sent again is the same start.
  */
 export const workflowStartSchema = z.strictObject({
   version: z.number().int().positive(),
-  input: z.json(),
+  args: z.json(),
   key: identifierSchema,
 });
 
@@ -734,7 +734,7 @@ export interface WorkflowResourceRun {
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed, for those who see its details. */
-  output?: unknown;
+  result?: unknown;
   /** Why it failed, for those who see its details. */
   error?: { code: string | null; message: string };
 }
@@ -742,8 +742,8 @@ export interface WorkflowResourceRun {
 /**
  * How a workflow is started by hand: the version a start runs, the one
  * approved to go live or else the one published last (null before any is
- * published), and the JSON Schema its input must match exactly (null when
- * it can't be read). A field of the input that takes a person, team or
+ * published), and the JSON Schema its args must match exactly (null when
+ * it can't be read). A field of the args that takes a person, team or
  * role (`person:<id>`, `team:<id>` or `role:<role>`) carries
  * `"x-grasp-value": { "kind": "person" }`, as a workflow's JSON writes it,
  * and `people` then says whom it may name: the organization's people,
@@ -751,7 +751,7 @@ export interface WorkflowResourceRun {
  */
 export interface WorkflowStartForm {
   version: number | null;
-  input: Record<string, unknown> | null;
+  args: Record<string, unknown> | null;
   people: {
     people: { id: string; name: string }[];
     teams: { id: string; name: string }[];
@@ -1012,21 +1012,21 @@ export const maxCandidateLifetimeMs = 60 * 60 * 1000;
 
 /**
  * A test run of a draft's checkpoint (GRA-815): the checkpoint's exact
- * revision, the run's input, the parameter values it runs with (each
+ * revision, the run's args, the parameter values it runs with (each
  * left out takes its default; the workflow's own values never count),
- * and what each binding it calls answers, by alias, and each App
+ * and the result each binding it calls answers, by alias, and each App
  * function by `<alias>/<function ID>`. A test run never calls anything:
  * a call with no answer here fails (`workflow.candidate_unfixtured`).
  */
 export const workflowCandidateStartSchema = z.strictObject({
   revision: z.int().min(1),
-  input: z.json(),
+  args: z.json(),
   params: z.record(z.string().max(64), z.json()).optional(),
   fixtures: z
     .record(
       // An alias, or an App permission's alias and a function's ID.
       z.string().min(1).max(129),
-      z.strictObject({ output: z.json() })
+      z.strictObject({ result: z.json() })
     )
     .refine(
       (fixtures) => Object.keys(fixtures).length <= maxCandidateFixtures,
@@ -1053,7 +1053,7 @@ export interface WorkflowCandidateRun {
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed. */
-  output?: unknown;
+  result?: unknown;
   /** Why it failed. */
   error?: { code: string | null; message: string };
 }
@@ -1066,14 +1066,14 @@ export const maxItemTestItems = maxLiveCandidateRuns;
 
 /**
  * A test of a draft's checkpoint over recent real items (GRA-513): the
- * checkpoint's exact revision runs once on the input of each of the
+ * checkpoint's exact revision runs once on the args of each of the
  * tester's most recent runs whose details they may see and whose input is
  * still kept (`items` of them, at most `maxItemTestItems`), each as a test
  * run (`workflowCandidateStartSchema`): with the parameters given here or
  * their defaults, and every call answered from `fixtures`, never made.
  */
 export const workflowItemTestStartSchema = workflowCandidateStartSchema
-  .omit({ input: true })
+  .omit({ args: true })
   .extend({ items: z.int().min(1).max(maxItemTestItems).optional() });
 
 /** One real item of a test, and how the draft did on it. */

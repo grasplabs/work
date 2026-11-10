@@ -143,7 +143,10 @@ const call = async (
     env,
     { userId: by.userId, role: by.role, teams: [] },
     app,
-    JSON.stringify({ reference: { name: path, kind: "mutation" }, input }),
+    JSON.stringify({
+      reference: { name: path, kind: "mutation" },
+      args: input,
+    }),
     Date.now() + 30_000
   );
   return answer.result.ok

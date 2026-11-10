@@ -216,7 +216,7 @@ export const rpcParamNames: ParamNames = {
     "rotateSecret": ["id"],
   },
   "HeldStartsRpc": {
-    "confirm": ["id","inputHash"],
+    "confirm": ["id","argsHash"],
     "decline": ["id"],
     "list": [],
   },

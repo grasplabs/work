@@ -166,7 +166,7 @@ export interface MutationCtx<
   readonly db: DatabaseWriter<Tables>;
   readonly runQuery: RunQuery;
   /**
-   * Each of the App's workflows, by alias: `start(input)` starts it once
+   * Each of the App's workflows, by alias: `start(args)` starts it once
    * the mutation has committed, staged with its writes, in the same
    * transaction, and started from the store's outbox exactly once. A
    * mutation that fails, is rolled back or is superseded starts nothing.
@@ -222,12 +222,12 @@ interface ActionBaseCtx<Grants extends Grant = never> extends CallerCtx {
   readonly runMutation: RunMutation;
   readonly runAction: RunAction;
   /**
-   * Each of the App's workflows, by alias: `start(input)` resolves once
+   * Each of the App's workflows, by alias: `start(args)` resolves once
    * the host has admitted the start durably, not once the run ends.
    * Called again under the same idempotency key, the action gets the same
    * start back, matched by its place among the action's starts, as its
    * mutations and permission requests are by theirs. Keep that order a
-   * function of the input: starts made at once, in whichever order they
+   * function of the args: starts made at once, in whichever order they
    * happen to land (`Promise.race`), can swap places on the second call.
    */
   readonly workflows: Workflows<Grants, RunHandle>;

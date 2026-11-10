@@ -215,7 +215,7 @@ const personOf = (who: Person): StartInvoker => ({
 /** A start request: the version, a greeting and a fresh key. */
 const request = (version: unknown = 1, who: unknown = "Ada") => ({
   version,
-  input: { who },
+  args: { who },
   key: `key-${unique()}`,
 });
 
@@ -264,7 +264,7 @@ const decide = async (
 ): Promise<StartAuthorization> => {
   const decision = await decideWorkflowStart(env, invoker, id, {
     version,
-    input: { who: "Ada" },
+    args: { who: "Ada" },
     key: `key-${unique()}`,
   });
   if ("start" in decision) {
@@ -361,7 +361,7 @@ describe("a person starting a workflow", () => {
       other: await outcome(
         startWorkflow(env, personOf(ada), workflow.id, {
           ...first,
-          input: { who: "Grace" },
+          args: { who: "Grace" },
         })
       ),
     }).toStrictEqual({ again: started, other: "workflow.start_conflict" });
@@ -420,7 +420,7 @@ describe("authority changing under a start", () => {
     const key = `key-${unique()}`;
     const started = await startWorkflow(env, personOf(inTeam), workflow.id, {
       version: 1,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       key,
     });
     // Better Auth removes them from the team; their session still lists it.
@@ -432,7 +432,7 @@ describe("authority changing under a start", () => {
     const retried = await outcome(
       startWorkflow(env, personOf(inTeam), workflow.id, {
         version: 1,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         key,
       })
     );
@@ -481,7 +481,7 @@ describe("authority changing under a start", () => {
     // workflow is deleted: a run that hasn't keeps it.
     const { runId } = await startWorkflow(env, personOf(ada), workflow.id, {
       version: 1,
-      input: { who: "Ada" },
+      args: { who: "Ada" },
       key: unchanged.key,
     });
     await vi.waitFor(
@@ -704,7 +704,7 @@ describe("an App starting a workflow", () => {
       workflow.id,
       {
         version: 1,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         key,
       }
     );
@@ -714,7 +714,7 @@ describe("an App starting a workflow", () => {
       workflow.id,
       {
         version: 1,
-        input: { who: "Ada" },
+        args: { who: "Ada" },
         key,
       }
     );

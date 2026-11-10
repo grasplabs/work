@@ -184,7 +184,7 @@ export const start = async (
 ): Promise<WorkflowStart> =>
   await startWorkflow(env, { type: "person", person: by }, id, {
     version: 1,
-    input: { who: "Ada" },
+    args: { who: "Ada" },
     key,
   });
 

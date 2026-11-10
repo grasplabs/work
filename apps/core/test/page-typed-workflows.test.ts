@@ -54,7 +54,7 @@ describe(
   () => {
     afterEach(endLiveResourceRuns);
 
-    it("starts a run once per key, follows it to its end with its output, and tells the person they may start one", async () => {
+    it("starts a run once per key, follows it to its end with its result, and tells the person they may start one", async () => {
       const fixture = await boundApp();
       const { builder, app, reference } = fixture;
       const lease = await pageOf(builder, app);
@@ -95,7 +95,7 @@ describe(
           workflowVersion: handle.workflowVersion,
         },
         shown: {
-          output: shown.value?.output,
+          result: shown.value?.result,
           control: shown.value?.control,
           waits: shown.value?.waits,
         },
@@ -103,7 +103,7 @@ describe(
         again: first,
         handle: { workflowId: fixture.workflow, workflowVersion: 1 },
         shown: {
-          output: { status: "Hello, Ada" },
+          result: { status: "Hello, Ada" },
           control: {
             canPause: false,
             canResume: false,

@@ -60,15 +60,15 @@ const brain = permission.brain({
 });
 const ai = permission.ai({ maxOutputTokens: 500 });
 const followUp = permission.workflow("followUp", {
-  input: v.object({
+  args: v.object({
     noteId: v.id("notes"),
     reason: v.string().default("new"),
   }),
-  output: v.null(),
+  returns: v.null(),
 });
 const optional = permission.workflow("optional", {
-  input: v.string().default("ready"),
-  output: v.null(),
+  args: v.string().default("ready"),
+  returns: v.null(),
 });
 const granted = serverModule(
   schema,
@@ -394,11 +394,11 @@ granted.action({
     // Its input as a caller passes it: the default may be left out.
     const handle = await ctx.workflows.followUp.start({ noteId: args.noteId });
     expectTypeOf(handle).toEqualTypeOf<RunHandle>();
-    // An input with a default may be left out altogether.
+    // Args with a default may be left out altogether.
     await ctx.workflows.optional.start();
-    // @ts-expect-error -- input the declaration doesn't take
+    // @ts-expect-error -- args the declaration doesn't take
     await ctx.workflows.followUp.start({ note: args.noteId });
-    // @ts-expect-error -- `followUp` needs its input
+    // @ts-expect-error -- `followUp` needs its args
     await ctx.workflows.followUp.start();
     // Only the App's: no other workflow, and no connection or query.
     expectTypeOf(ctx.workflows).not.toHaveProperty("unlisted");
@@ -434,7 +434,7 @@ granted.mutation({
     expectTypeOf(
       ctx.workflows.followUp.start({ noteId: id })
     ).resolves.toBeVoid();
-    // @ts-expect-error -- input the declaration doesn't take
+    // @ts-expect-error -- args the declaration doesn't take
     await ctx.workflows.followUp.start({ noteId: 1 });
     // Only the App's.
     expectTypeOf(ctx.workflows).not.toHaveProperty("unlisted");

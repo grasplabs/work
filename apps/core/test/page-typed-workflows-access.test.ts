@@ -105,7 +105,7 @@ describe(
       });
     });
 
-    it("refuses a mutation of a workflow the release doesn't declare or doesn't have, input the declaration doesn't take, a query sent as a mutation and a mutation followed as a query, starting nothing", async () => {
+    it("refuses a mutation of a workflow the release doesn't declare or doesn't have, args the declaration doesn't take, a query sent as a mutation and a mutation followed as a query, starting nothing", async () => {
       const { builder, app, reference } = await boundApp({ hold: "1 hour" });
       const lease = await pageOf(builder, app);
       const startWatched = await following(builder, app, lease, {
@@ -113,7 +113,7 @@ describe(
           name: `${reference.contractId}.mutations.start`,
           kind: "query",
         },
-        input: { input: { who: "Ada" } },
+        args: { args: { who: "Ada" } },
       });
       await vi.waitFor(() => {
         expect(startWatched.received.length).toBeGreaterThan(0);
@@ -132,7 +132,7 @@ describe(
               name: `${reference.contractId}.mutations.restart`,
               kind: "mutation",
             },
-            input: { runId: "run-1" },
+            args: { runId: "run-1" },
             idempotencyKey: keyOf(),
           })
         ),
@@ -153,7 +153,7 @@ describe(
               name: `${reference.contractId}.queries.canStart`,
               kind: "mutation",
             },
-            input: {},
+            args: {},
             idempotencyKey: keyOf(),
           })
         ),
@@ -451,7 +451,7 @@ describe(
       });
     });
 
-    it("answers a page that subscribes after a run's output passed its retention with no output, whatever another page still shows", async () => {
+    it("answers a page that subscribes after a run's result passed its retention with no result, whatever another page still shows", async () => {
       const { builder, app, reference } = await boundApp();
       const lease = await pageOf(builder, app);
       const handle = await pageRuns(builder, app, lease, reference).start({

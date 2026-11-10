@@ -9,8 +9,8 @@ import type {
 } from "./function-references.ts";
 import type {
   AnyWorkflowReference,
-  WorkflowInputOf,
-  WorkflowOutputOf,
+  WorkflowArgsOf,
+  WorkflowReturnOf,
 } from "./workflow-references.ts";
 
 /** A public function of the App, as `@server/_generated/api` generates its reference. */
@@ -92,8 +92,8 @@ export interface TestPrincipal {
    */
   start: <Reference extends AnyWorkflowReference>(
     reference: Reference,
-    input: WorkflowInputOf<Reference>
-  ) => Promise<WorkflowTestRun<WorkflowOutputOf<Reference>>>;
+    args: WorkflowArgsOf<Reference>
+  ) => Promise<WorkflowTestRun<WorkflowReturnOf<Reference>>>;
   /**
    * Answers the decision `run` waits for in its task `task` (a
    * `grasp.decision` call), as this principal: approved or declined, with
@@ -131,16 +131,16 @@ export interface TestDecisionAnswer {
  * A run a test principal started (`start`): its handle, for `t.runs` and
  * `t.effects`. Only the test that started it can ask about it.
  */
-export interface WorkflowTestRun<Output = unknown> {
+export interface WorkflowTestRun<Returns = unknown> {
   /** The workflow's registered path, such as `workflows.summarizeNote`. */
   readonly workflow: string;
   /** Types only: never set. */
-  readonly output?: Output;
+  readonly result?: Returns;
 }
 
 /** How a test's run ended (`t.runs.untilTerminal`). */
-export type TestRunOutcome<Output = unknown> =
-  | { readonly status: "completed"; readonly output: Output }
+export type TestRunOutcome<Returns = unknown> =
+  | { readonly status: "completed"; readonly result: Returns }
   | {
       readonly status: "failed";
       /** A code the platform defines, in its own words: never the run's. */
@@ -152,14 +152,14 @@ export type TestRunOutcome<Output = unknown> =
 /** What a test asks of the runs it started. */
 export interface TestRuns {
   /**
-   * How `run` ended, once it has: completed with its output as the App
-   * declares it, failed with the platform's code and words for why (never
+   * How `run` ended, once it has: completed with its result as the App
+   * declares it (`returns`), failed with the platform's code and words for why (never
    * what the run read), or cancelled. Fails the test if it
    * hasn't ended by the test's own deadline.
    */
-  untilTerminal: <Output>(
-    run: WorkflowTestRun<Output>
-  ) => Promise<TestRunOutcome<Output>>;
+  untilTerminal: <Returns>(
+    run: WorkflowTestRun<Returns>
+  ) => Promise<TestRunOutcome<Returns>>;
 }
 
 /** What a test asks of the effects its runs made. */

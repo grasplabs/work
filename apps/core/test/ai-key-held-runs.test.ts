@@ -255,7 +255,7 @@ describe(
         held,
         shows: providers.find(({ provider: name }) => name === "mistral")
           ?.status?.failingClass,
-        done: { status: run.status, output: run.output },
+        done: { status: run.status, output: run.result },
       }).toStrictEqual({
         held: { status: "running", provider: "mistral", trouble: "limiting" },
         shows: "limiting",

@@ -65,18 +65,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /** A window of the people `body` asks for, searched and filtered, as core would push it. */
 const pageFor = (body: string) => {
   const request: unknown = JSON.parse(body);
-  const input =
-    isRecord(request) && isRecord(request.input) ? request.input : {};
+  const sent = isRecord(request) && isRecord(request.args) ? request.args : {};
   const window =
     isRecord(request) && isRecord(request.window) ? request.window : {};
   const extent =
     typeof window.extent === "number" ? window.extent : people.length;
   const search =
-    typeof input.search === "string" ? input.search.toLowerCase() : "";
+    typeof sent.search === "string" ? sent.search.toLowerCase() : "";
   const found = people.filter(
     (each) =>
       each.name.toLowerCase().includes(search) &&
-      (input.team === undefined || each.team === input.team)
+      (sent.team === undefined || each.team === sent.team)
   );
   const hasMore = found.length > extent;
   return {

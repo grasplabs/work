@@ -1,6 +1,6 @@
 // Compile-time guarantees of a workflow declaration (`permission.workflow`,
 // spec 7.4, 10.4.1) and the reference generated from it: the App declares
-// the output a run gives beside the input it takes, both required; and the
+// what a run returns beside the args it takes, both required; and the
 // reference its pages get (`workflows.<alias>` in `@server/_generated/api`, generated
 // from the Notes fixture's declarations) takes and gives exactly what the
 // declaration does. Type-checked by `vp check`, never run: every
@@ -9,8 +9,8 @@ import { expectTypeOf } from "vite-plus/test";
 
 import { permission, v } from "../src/index.ts";
 import type {
-  WorkflowInputOf,
-  WorkflowOutputOf,
+  WorkflowArgsOf,
+  WorkflowReturnOf,
   WorkflowPermission,
 } from "../src/index.ts";
 import { useWorkflow } from "../src/react.ts";
@@ -18,40 +18,40 @@ import type { archiveNotes } from "./notes/grasp.config.ts";
 import { summarizeNote } from "./notes/grasp.config.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 
-/** The input a declaration takes, as a caller passes it. */
-type DeclaredInput<Declared> =
-  Declared extends WorkflowPermission<string, infer Input> ? Input : never;
+/** The args a declaration takes, as a caller passes them. */
+type DeclaredArgs<Declared> =
+  Declared extends WorkflowPermission<string, infer Args> ? Args : never;
 
-/** The output a declaration's completed run gives. */
-type DeclaredOutput<Declared> =
-  Declared extends WorkflowPermission<string, unknown, infer Output>
-    ? Output
+/** What a declaration's completed run returns. */
+type DeclaredReturns<Declared> =
+  Declared extends WorkflowPermission<string, unknown, infer Returns>
+    ? Returns
     : never;
 
 // The generated reference takes and gives what the App declared.
-expectTypeOf<WorkflowInputOf<typeof workflows.summarizeNote>>().toEqualTypeOf<
-  DeclaredInput<typeof summarizeNote>
+expectTypeOf<WorkflowArgsOf<typeof workflows.summarizeNote>>().toEqualTypeOf<
+  DeclaredArgs<typeof summarizeNote>
 >();
-expectTypeOf<WorkflowOutputOf<typeof workflows.summarizeNote>>().toEqualTypeOf<
-  DeclaredOutput<typeof summarizeNote>
+expectTypeOf<WorkflowReturnOf<typeof workflows.summarizeNote>>().toEqualTypeOf<
+  DeclaredReturns<typeof summarizeNote>
 >();
-expectTypeOf<DeclaredOutput<typeof summarizeNote>>().toEqualTypeOf<{
+expectTypeOf<DeclaredReturns<typeof summarizeNote>>().toEqualTypeOf<{
   summary: string;
   words: number;
 }>();
-expectTypeOf<WorkflowOutputOf<typeof workflows.archiveNotes>>().toEqualTypeOf<
-  DeclaredOutput<typeof archiveNotes>
+expectTypeOf<WorkflowReturnOf<typeof workflows.archiveNotes>>().toEqualTypeOf<
+  DeclaredReturns<typeof archiveNotes>
 >();
-expectTypeOf<DeclaredOutput<typeof archiveNotes>>().toEqualTypeOf<null>();
+expectTypeOf<DeclaredReturns<typeof archiveNotes>>().toEqualTypeOf<null>();
 expectTypeOf(workflows.summarizeNote.alias).toEqualTypeOf<"summarizeNote">();
 
-// A declaration names its output as well as its input: neither is optional.
-// @ts-expect-error -- no output
-permission.workflow("followUp", { input: v.object({}) });
-// @ts-expect-error -- no input
-permission.workflow("followUp", { output: v.null() });
-// @ts-expect-error -- an output is a value schema, not a descriptor or a type
-permission.workflow("followUp", { input: v.object({}), output: "null" });
+// A declaration names what it returns as well as its args: neither is optional.
+// @ts-expect-error -- no returns
+permission.workflow("followUp", { args: v.object({}) });
+// @ts-expect-error -- no args
+permission.workflow("followUp", { returns: v.null() });
+// @ts-expect-error -- returns is a value schema, not a descriptor or a type
+permission.workflow("followUp", { args: v.object({}), returns: "null" });
 
 // A page follows the generated reference, never the declaration itself.
 export const UseDeclaration = (): null => {

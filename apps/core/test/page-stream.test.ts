@@ -136,7 +136,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     // no invocation of theirs has it.
     const request = JSON.stringify({
       reference: { name: api.draft.name, kind: "action" },
-      input: { topic: "a", pauseMs: 0 },
+      args: { topic: "a", pauseMs: 0 },
       idempotencyKey: "mine",
     });
     const attached = await post(opened.app, opened.other, "/attach", request);
@@ -165,7 +165,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     await until(() => steps >= 2);
     const request = JSON.stringify({
       reference: { name: api.slow.name, kind: "action" },
-      input: { title: "Started" },
+      args: { title: "Started" },
       idempotencyKey: "cancel-me",
     });
     await expect(page.transport.cancelStream?.(request)).resolves.toStrictEqual(
@@ -248,7 +248,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
       opened.app,
       opened.builder,
       "",
-      JSON.stringify({ reference, input: { topic: "x" } })
+      JSON.stringify({ reference, args: { topic: "x" } })
     );
     await expect(single.json()).resolves.toMatchObject({
       result: { ok: false, error: { code: "function.mode_mismatch" } },
@@ -258,7 +258,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
       opened.app,
       opened.builder,
       "/stream",
-      JSON.stringify({ reference: echo, input: {}, idempotencyKey: "k" })
+      JSON.stringify({ reference: echo, args: {}, idempotencyKey: "k" })
     );
     await expect(streamed.text()).resolves.toContain(
       '"code":"function.mode_mismatch"'
@@ -276,7 +276,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
       "/stream",
       JSON.stringify({
         reference,
-        input: {},
+        args: {},
         idempotencyKey: key,
         window: { extent: 10 },
       })
@@ -286,7 +286,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
       opened.app,
       opened.builder,
       "/attach",
-      JSON.stringify({ reference, input: {}, idempotencyKey: key })
+      JSON.stringify({ reference, args: {}, idempotencyKey: key })
     );
     const [windowedText, attachedText] = [
       await windowed.text(),

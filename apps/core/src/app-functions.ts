@@ -298,7 +298,7 @@ const functionRequestSchema = z.strictObject({
     name: z.string().min(1).max(256),
     kind: z.enum(["query", "mutation", "action"]),
   }),
-  input: z.unknown(),
+  args: z.unknown(),
   idempotencyKey: z.string().optional(),
 });
 
@@ -535,7 +535,7 @@ const answeredWorkflowQuery = async (
       stillAllowed,
       deadline,
     })();
-    const result = await callWorkflowQuery(env, caller, query, call.input);
+    const result = await callWorkflowQuery(env, caller, query, call.args);
     return {
       result,
       provenance: null,
@@ -609,7 +609,7 @@ const answeredPeople = async (
         requestId,
       }),
       read,
-      call.input
+      call.args
     );
     return {
       result: { ok: true, value },
@@ -719,41 +719,35 @@ const invokedCall = async (
     const submittedCall = call;
     const submittedKey = call.idempotencyKey;
     const submittedApp = appId;
-    const result = await callOperation(
-      hosted,
-      observed,
-      reference,
-      call.input,
-      {
-        ...(call.idempotencyKey === undefined
-          ? {}
-          : { idempotencyKey: call.idempotencyKey }),
-        ...(parentSession === undefined ? {} : { parentSession }),
-        ...(receiptScope === undefined ? {} : { receiptScope }),
-        ...(tellsForm !== true ||
-        submittedCall.reference.kind !== "mutation" ||
-        submittedKey === undefined
-          ? {}
-          : {
-              // Only for a form some webhook would hear: a receipt
-              // whose outbox owes nothing keeps to its own time.
-              // Its values left out when the commit wouldn't hold them.
-              commitIntent: async (startedAt: number) =>
-                (await formHeardBy(env, submittedApp, startedAt))
-                  ? formIntents(
-                      formSubmissionOf({
-                        app: submittedApp,
-                        userId: by.userId,
-                        call: submittedCall,
-                        key: submittedKey,
-                        operation: path,
-                        startedAt,
-                      })
-                    )
-                  : undefined,
-            }),
-      }
-    );
+    const result = await callOperation(hosted, observed, reference, call.args, {
+      ...(call.idempotencyKey === undefined
+        ? {}
+        : { idempotencyKey: call.idempotencyKey }),
+      ...(parentSession === undefined ? {} : { parentSession }),
+      ...(receiptScope === undefined ? {} : { receiptScope }),
+      ...(tellsForm !== true ||
+      submittedCall.reference.kind !== "mutation" ||
+      submittedKey === undefined
+        ? {}
+        : {
+            // Only for a form some webhook would hear: a receipt
+            // whose outbox owes nothing keeps to its own time.
+            // Its values left out when the commit wouldn't hold them.
+            commitIntent: async (startedAt: number) =>
+              (await formHeardBy(env, submittedApp, startedAt))
+                ? formIntents(
+                    formSubmissionOf({
+                      app: submittedApp,
+                      userId: by.userId,
+                      call: submittedCall,
+                      key: submittedKey,
+                      operation: path,
+                      startedAt,
+                    })
+                  )
+                : undefined,
+          }),
+    });
     return {
       result,
       provenance: sources.snapshot(),
@@ -924,7 +918,7 @@ export const callAppFunctionById = async (
       path,
       call: {
         reference: { name: path, kind: operation.kind },
-        input,
+        args: input,
         // Only a mutation keeps a receipt to answer a retry from.
         ...(operation.kind === "mutation" ? { idempotencyKey } : {}),
       },
@@ -1077,7 +1071,7 @@ export const callVisitorFunction = async (
       return {
         result: {
           ok: true,
-          value: await answerPeople(visitorPeopleOf(caller), read, call.input),
+          value: await answerPeople(visitorPeopleOf(caller), read, call.args),
         },
         provenance: null,
         manifestHash: null,
@@ -1108,7 +1102,7 @@ export const callVisitorFunction = async (
       hostedRelease(env, release),
       invocation,
       { path, kind: call.reference.kind },
-      call.input,
+      call.args,
       call.idempotencyKey === undefined
         ? {}
         : { idempotencyKey: call.idempotencyKey }
@@ -1358,7 +1352,7 @@ export const invokeAppAction = async (
       hostedRelease(env, release),
       invocation,
       { path, kind: call.reference.kind },
-      call.input,
+      call.args,
       {
         ...(call.idempotencyKey === undefined
           ? {}

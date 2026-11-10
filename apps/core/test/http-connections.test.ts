@@ -183,7 +183,7 @@ const call = async (
     release.manifest.resourceId,
     JSON.stringify({
       reference: { name: path, kind: operation?.kind ?? "action" },
-      input,
+      args: input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     })
   );
@@ -436,7 +436,7 @@ describe("a JSON workflow calling an outside API", () => {
     const all = await received();
     const reached = all.slice(before.length);
 
-    expect({ status: run.status, output: run.output }).toStrictEqual({
+    expect({ status: run.status, output: run.result }).toStrictEqual({
       status: "completed",
       output: { status: '201 {"created":{"who":"Ada"}}' },
     });

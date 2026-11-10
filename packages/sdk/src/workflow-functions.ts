@@ -84,7 +84,7 @@ const rowFields = {
   canWatch: v.boolean(),
 };
 
-/** One run in a list: no output, error or input. */
+/** One run in a list: no args, result or error. */
 const runRow = v.union(
   v.object({ ...rowFields, status: settledStatus }),
   v.object({ ...rowFields, ...compensation })
@@ -122,8 +122,8 @@ const enumOf = (names: readonly string[]): AnySchema | undefined => {
 };
 
 /**
- * One row of a run's history: metadata only, never input,
- * output, reviewers or review bodies.
+ * One row of a run's history: metadata only, never args,
+ * result, reviewers or review bodies.
  */
 const historyRow = (workflow: BoundWorkflow): AnySchema => {
   const rows: AnySchema[] = [
@@ -319,7 +319,7 @@ const optionalFrom = (descriptor: ValueDescriptor): AnySchema => {
 
 /**
  * One run as its person sees it: its status, what it returned once
- * completed (by the output its App declares), why it failed, what it
+ * completed (`result`, by the `returns` its App declares), why it failed, what it
  * rolls back after; or null for a run the person may not see, one that
  * doesn't exist alike. One object, not a union by status, so a generated
  * module holds its fields once; `useWorkflow` narrows it by status.
@@ -338,7 +338,7 @@ const runSnapshot = (workflow: BoundWorkflow): AnySchema =>
         "failed",
         "cancelled",
       ]),
-      output: optionalFrom(workflow.output),
+      result: optionalFrom(workflow.returns),
       error: sanitizedError.optional(),
       compensation: v
         .union(
@@ -450,7 +450,7 @@ const receipt = v.object({
 
 /**
  * The schemas of `workflow`'s mutations, by name: `start` takes the
- * workflow's input as `input` and answers the run's handle once admitted;
+ * workflow's args as `args` and answers the run's handle once admitted;
  * `pause`, `resume` and `cancel` take a run and answer their receipt,
  * which the run's `pendingControl` shows applying until it settles;
  * `send` takes a run, one of the workflow's events by its alias, and that
@@ -462,7 +462,7 @@ const mutationSchemas = (
   const control = { args: v.object({ runId: idText }), returns: receipt };
   const schemas: Partial<Record<WorkflowMutationName, Schemas>> = {
     start: {
-      args: v.object({ input: schemaFrom(workflow.input) }),
+      args: v.object({ args: schemaFrom(workflow.args) }),
       returns: runHandle,
     },
     pause: control,
@@ -537,7 +537,7 @@ export const workflowFunctions = (
     };
   } catch (error) {
     // A decision's context sits two levels down in a detail; a run's
-    // output, its input and an event's data one: a contract that fits a
+    // result, its args and an event's data one: a contract that fits a
     // binding may still not fit its functions. Refused by name, never cut
     // down.
     if (error instanceof ValueDefinitionError) {

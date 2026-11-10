@@ -101,7 +101,7 @@ const files = (page = pageOf("approval")): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("review", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
+        'permission.workflow("review", {\n  args: v.object({ amount: v.number() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
     },
     {
@@ -532,7 +532,7 @@ const decisionInbox = async (looped = false) => {
       fixture.app,
       JSON.stringify({
         reference: queryReference(release, "review", name),
-        input,
+        args: input,
       })
     );
     return answerOf(result);
@@ -1466,7 +1466,7 @@ describe(
           const run = await resourceRunFor(env, owner, workflowId, runId);
           expect(run.status).toBe("completed");
           return run.status === "completed"
-            ? { status: run.status, output: run.output }
+            ? { status: run.status, output: run.result }
             : { status: run.status };
         },
         { timeout: 30_000, interval: 100 }

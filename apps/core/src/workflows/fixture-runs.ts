@@ -9,7 +9,12 @@ import { z } from "zod";
 
 import type { Release } from "../app-releases.ts";
 import { appTestRuns } from "../db/core/schema.ts";
-import { failureOf, outputOf, pinOf, startCallIn } from "../page-workflows.ts";
+import {
+  failureOf,
+  resultAsDeclared,
+  pinOf,
+  startCallIn,
+} from "../page-workflows.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { fixtureParams } from "../workflow-params.ts";
 import { versionContract } from "../workflow-resources.ts";
@@ -67,8 +72,8 @@ import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 //   parameters are its fixture's, or each one's declared default, never the
 //   values the organization saved (`fixtureParams`); a failure reaches the
 //   test only as a code the platform defines, in its own words
-//   (`failureOf`), and an output only as the App's declaration projects it
-//   (`outputOf`), as a page is shown them.
+//   (`failureOf`), and a result only as the App's declaration projects it
+//   (`resultAsDeclared`), as a page is shown them.
 // - It runs past its test: its record holds the test's deadline, past which
 //   no activation runs it, and from which the sweep removes it.
 
@@ -145,8 +150,8 @@ export interface FixtureStart {
 /** A test's run as its start answers it. */
 export interface FixtureRunStarted {
   readonly runId: string;
-  /** The output the App declares of the workflow (`outputOf`). */
-  readonly output: unknown;
+  /** What the App declares the workflow returns (`resultAsDeclared`). */
+  readonly returns: unknown;
 }
 
 /**
@@ -163,7 +168,7 @@ export const startFixtureRun = async (
   request: unknown,
   test: FixtureStart
 ): Promise<FixtureRunStarted> => {
-  const { resolved, input: declared } = await startCallIn(release, request);
+  const { resolved, args: declared } = await startCallIn(release, request);
   const pin = pinOf(resolved);
   const workflow = workflowResourceIdSchema.parse(pin.workflowId);
   const found = await pinned(env, workflow, pin.version);
@@ -207,7 +212,7 @@ export const startFixtureRun = async (
     await discardFixtureRuns(env, [runId]);
     throw error;
   }
-  return { runId, output: resolved.declared.output };
+  return { runId, returns: resolved.declared.returns };
 };
 
 const jsonObjectSchema = z.record(z.string(), z.json());
@@ -315,11 +320,11 @@ export const runFixtureWorkflow = async (
 
 /**
  * How a test's run ended, as `t.runs.untilTerminal` answers it: a failure
- * as a page is told one (`failureOf`), an output as the App declares it
- * (`outputOf`).
+ * as a page is told one (`failureOf`), a result as the App declares it
+ * (`resultAsDeclared`).
  */
 export type FixtureRunOutcome =
-  | { readonly status: "completed"; readonly output: Json }
+  | { readonly status: "completed"; readonly result: Json }
   | {
       readonly status: "failed";
       readonly code: string;
@@ -374,7 +379,7 @@ export const fixtureRunOutcome = async (
       try {
         return {
           status: "completed",
-          output: outputOf(run.output, status.output),
+          result: resultAsDeclared(run.returns, status.output),
         };
       } catch (error) {
         return failed(codeOf(error));

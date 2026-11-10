@@ -2083,7 +2083,7 @@ describe("erasing a person", () => {
           userId,
           call: {
             reference: { name: "requests", kind: "action" },
-            input: { reason: `${key} of ${userId}` },
+            args: { reason: `${key} of ${userId}` },
           },
           key,
           operation: "requests.send",
