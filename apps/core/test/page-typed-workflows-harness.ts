@@ -304,6 +304,13 @@ export const askingOf = (contract: string, recipient: string): string =>
     { permissions: { decisions: { approval: { contract } } } }
   );
 
+/**
+ * The `approval` decision `askingOf` asks, as an App binding it declares
+ * it: a decision contract of a comment on who to greet.
+ */
+export const declaresApproval =
+  "decisions: { approval: { value: v.object({ comment: v.string() }), context: v.object({ who: v.string() }) } }";
+
 /** What a failed run's snapshot says of `error`: its code and words. */
 export const failureShown = (error: {
   code: string | null;

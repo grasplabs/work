@@ -41,7 +41,15 @@ import { signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = (): TestApp =>
+/**
+ * The `approval` decision `decidingDefinitionOf` asks, as an App binding
+ * it declares it.
+ */
+const declaresApproval =
+  "decisions: { approval: { value: v.object({ comment: v.string() }), context: v.object({ who: v.string() }) } },";
+
+/** The Requests App, declaring `declares` of `followUp` besides its args and returns. */
+const files = (declares = ""): TestApp =>
   testApp(
     {
       name: "Requests",
@@ -52,7 +60,7 @@ const files = (): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("followUp", {\n  args: v.object({ who: v.string().trim().min(1) }),\n  returns: v.object({ status: v.string() }),\n})',
+        `permission.workflow("followUp", {\n  args: v.object({ who: v.string().trim().min(1) }),\n  returns: v.object({ status: v.string() }),\n  ${declares}\n})`,
       ],
     },
     {
@@ -429,7 +437,11 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       definition: decidingDefinitionOf(key),
       basedOn: null,
     });
-    const fixture = await appWith(files(), "Requests", builder.acting);
+    const fixture = await appWith(
+      files(declaresApproval),
+      "Requests",
+      builder.acting
+    );
     await bindWorkflowToApp(env, builder.acting, workflow.id, {
       app: fixture.app,
       alias: "followUp",
@@ -535,7 +547,11 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       definition: decidingDefinitionOf(key),
       basedOn: null,
     });
-    const fixture = await appWith(files(), "Requests", builder.acting);
+    const fixture = await appWith(
+      files(declaresApproval),
+      "Requests",
+      builder.acting
+    );
     await bindWorkflowToApp(env, builder.acting, workflow.id, {
       app: fixture.app,
       alias: "followUp",

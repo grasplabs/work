@@ -110,7 +110,7 @@ describe(
       const lease = await pageOf(builder, app);
       const startWatched = await following(builder, app, lease, {
         reference: {
-          name: `${reference.contractId}.mutations.start`,
+          name: `${reference.name}.mutations.start`,
           kind: "query",
         },
         args: { args: { who: "Ada" } },
@@ -123,13 +123,11 @@ describe(
         outcomeOf(await called(builder, app, lease, request));
 
       expect({
-        unknownAlias: await startOf(
-          startCommand({ contractId: "workflows.other" })
-        ),
+        unknownAlias: await startOf(startCommand({ name: "workflows.other" })),
         unknownMutation: await startOf(
           JSON.stringify({
             reference: {
-              name: `${reference.contractId}.mutations.restart`,
+              name: `${reference.name}.mutations.restart`,
               kind: "mutation",
             },
             args: { runId: "run-1" },
@@ -150,7 +148,7 @@ describe(
         queryAsMutation: await startOf(
           JSON.stringify({
             reference: {
-              name: `${reference.contractId}.queries.canStart`,
+              name: `${reference.name}.queries.canStart`,
               kind: "mutation",
             },
             args: {},

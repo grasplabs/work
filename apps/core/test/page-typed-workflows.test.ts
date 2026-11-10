@@ -29,6 +29,7 @@ import {
   askingOf,
   boundApp,
   callOn,
+  declaresApproval,
   idp,
   pageRuns,
   refusalOf,
@@ -197,6 +198,7 @@ describe(
       });
       const { app, reference } = await boundApp({
         sharing: { admin, builder, workflow },
+        declares: declaresApproval,
       });
       const lease = await pageOf(builder, app);
       const channel = pageRuns(builder, app, lease, reference);
@@ -274,6 +276,7 @@ describe(
       });
       const { app, reference } = await boundApp({
         sharing: { admin, builder, workflow },
+        declares: declaresApproval,
       });
       const lease = await pageOf(builder, app);
       const channel = pageRuns(builder, app, lease, reference);

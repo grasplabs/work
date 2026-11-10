@@ -36,6 +36,7 @@ import {
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   mutationCall,
@@ -59,7 +60,15 @@ import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = (): TestApp =>
+/**
+ * The event the workflow takes, and the task waiting on it, as the bound
+ * version has them.
+ */
+const declaresJobEvents =
+  'events: { jobEvents: { type: "grasp.job.completed", data: v.object({ jobId: v.string() }) } },\n  listens: { job: ["jobEvents"] },';
+
+/** The Invoices App, declaring `declares` of `review` besides its args and returns. */
+const files = (declares = declaresJobEvents): TestApp =>
   testApp(
     {
       name: "Invoices",
@@ -70,7 +79,7 @@ const files = (): TestApp =>
         },
       },
       permissions: [
-        'permission.workflow("review", {\n  args: v.object({ jobId: v.string() }),\n  returns: v.object({ status: v.string() }),\n})',
+        `permission.workflow("review", {\n  args: v.object({ jobId: v.string() }),\n  returns: v.object({ status: v.string() }),\n  ${declares}\n})`,
       ],
     },
     {
@@ -172,7 +181,7 @@ const workflowReference = (release: Release, alias: string) => {
   if (declared?.events.jobEvents === undefined) {
     throw new Error(`No workflow ${alias} that takes jobEvents`);
   }
-  return { contractId: `workflows.${alias}` };
+  return { name: `workflows.${alias}` };
 };
 
 type Reference = ReturnType<typeof workflowReference>;
@@ -245,6 +254,7 @@ const invoicesApp = async (actions: readonly string[][]) => {
   return {
     admin,
     builder,
+    fixture,
     app: fixture.app,
     workflow: workflow.id,
     grants,
@@ -685,6 +695,83 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
       unrestrictedRun: "permission.restricted",
       restrictedRun: true,
       shown: { unrestrictedRun: false, restrictedRun: true },
+    });
+  });
+
+  it("shows a run's event wait only for an event its release declares, and a page follows a run another App version started only when that version declared the same workflow", async () => {
+    const { admin, builder, fixture, app, grants, reference } =
+      await invoicesApp([["start"], ["send"]]);
+    /**
+     * Makes version `version` of the App, declaring `declares` of `review`,
+     * the one that runs, its grants, asked for again, granted for it: a
+     * page opened now is of it.
+     */
+    const current = async (version: number, declares: string) => {
+      await commitDefined(
+        env,
+        builder.acting,
+        app,
+        files(declares),
+        `Version ${version}`
+      );
+      await seal(fixture, version);
+      await publishVersion(env, builder.acting, app, version);
+      for (const grant of grants) {
+        // oxlint-disable-next-line no-await-in-loop -- one grant after the other
+        await grantPermission(env, admin.acting, grant, { version });
+      }
+      return await pageOf(builder, app);
+    };
+    /** What a page's `run` query shows of run `runId`'s waits, or its refusal. */
+    const waitsOn = async (lease: string, runId: string): Promise<unknown> => {
+      const snapshot = await snapshotOf(builder, app, lease, reference, runId);
+      const read = z
+        .object({
+          waits: z.array(
+            z.looseObject({ kind: z.string(), event: z.unknown().optional() })
+          ),
+        })
+        .safeParse(snapshot);
+      return read.success
+        ? read.data.waits.map(({ kind, event }) => ({ kind, event }))
+        : snapshot;
+    };
+    const firstLease = await pageOf(builder, app);
+    const firstRun = await startedRun(builder, app, firstLease, reference);
+    const first = await waitsOn(firstLease, firstRun);
+
+    // Version 2 declares the workflow without its event: its pages type
+    // no event, so they follow no run version 1 started, and show no
+    // event wait in a run of their own.
+    const secondLease = await current(2, "");
+    const secondRun = await startedRun(
+      builder,
+      app,
+      secondLease,
+      reference,
+      "job-2"
+    );
+    const second = {
+      ownRun: await waitsOn(secondLease, secondRun),
+      firstVersionsRun: await waitsOn(secondLease, firstRun),
+    };
+
+    // Version 3 declares it as version 1 did: it follows version 1's run.
+    const thirdLease = await current(3, declaresJobEvents);
+    const third = {
+      firstVersionsRun: await waitsOn(thirdLease, firstRun),
+      secondVersionsRun: await waitsOn(thirdLease, secondRun),
+    };
+
+    const eventWait = {
+      kind: "event",
+      event: { kind: "workflowEvent", alias: "jobEvents" },
+    };
+    expect({ first, second, third }).toStrictEqual({
+      first: [eventWait],
+      // A run of another contract: not shown, as a run that doesn't exist.
+      second: { ownRun: [], firstVersionsRun: null },
+      third: { firstVersionsRun: [eventWait], secondVersionsRun: null },
     });
   });
 });

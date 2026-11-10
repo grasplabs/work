@@ -1,7 +1,15 @@
+import { v } from "@grasp-os/runtime/app";
 import { describe, expect, it } from "vite-plus/test";
 
+import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { greetingOf } from "./json-workflow-apps.ts";
+import {
+  declaresJobEvents,
+  greetingOf,
+  jobEventsContract,
+  jobWaitingOf,
+  requestsApp,
+} from "./json-workflow-apps.ts";
 import {
   openRpc,
   outcome,
@@ -156,6 +164,90 @@ describe("an App's workflow bindings, as its builders read them", () => {
       stranger: "app.not_found",
       staff: "role.forbidden",
       invalid: "app.not_found",
+    });
+  });
+});
+
+describe("binding a workflow its App's current version declares", () => {
+  it("refuses a version whose events, listen tasks or decisions aren't what that version declares, keeping the binding, and binds one that has them, or any version under an alias it doesn't declare or to an App with no current version", async () => {
+    const [admin, builder] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "builder"),
+    ]);
+    const events = await jobEventsContract(admin);
+    const decision = `approval-${unique()}`;
+    await admin.api.workflowResources.publishContract({
+      key: decision,
+      kind: "decision",
+      input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+      response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
+    });
+    const flow = await builder.api.workflowResources.create(
+      `bound-${unique()}`
+    );
+    // Version 1 as the App declares it; 2 with another event, 3 with its
+    // task renamed, 4 with a decision; 5 as 1, but for its greeting.
+    const versions = [
+      jobWaitingOf(events),
+      jobWaitingOf(events, { more: ["laterEvents"] }),
+      jobWaitingOf(events, { task: "awaitJob" }),
+      jobWaitingOf(events, { decision }),
+      jobWaitingOf(events, { label: "Version 5" }),
+    ];
+    for (const [index, definition] of versions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- each version on the last
+      await builder.api.workflowResources.publish(flow.id, {
+        definition,
+        basedOn: index === 0 ? null : index,
+      });
+    }
+    const { id: app } = await builder.api.apps.create({ name: "Requests" });
+    const api = builder.api.workflowResources;
+    const bind = async (version: number, alias = "review", to = app) =>
+      await outcome(api.bindToApp(flow.id, { app: to, alias, version }));
+    const bound = async () => {
+      const listed = await api.appBindings(app);
+      return listed.map(({ alias, version }) => ({ alias, version }));
+    };
+    // No version current yet: what it declares is the one it makes current.
+    const beforeCurrent = await bind(2);
+    await bind(1);
+    await release(builder, app, requestsApp("review", declaresJobEvents));
+
+    const refused = {
+      events: await bind(2),
+      listens: await bind(3),
+      decisions: await bind(4),
+    };
+    const kept = await bound();
+    const sameContract = await bind(5);
+    const undeclaredAlias = await bind(2, "other");
+    const { id: newApp } = await builder.api.apps.create({ name: "Fresh" });
+    const noCurrentVersion = await bind(4, "review", newApp);
+
+    expect({
+      beforeCurrent,
+      refused,
+      kept,
+      sameContract,
+      undeclaredAlias,
+      noCurrentVersion,
+      after: await bound(),
+    }).toStrictEqual({
+      beforeCurrent: "ok",
+      refused: {
+        events: "workflow.app_binding_contract_changed",
+        listens: "workflow.app_binding_contract_changed",
+        decisions: "workflow.app_binding_contract_changed",
+      },
+      kept: [{ alias: "review", version: 1 }],
+      sameContract: "ok",
+      undeclaredAlias: "ok",
+      noCurrentVersion: "ok",
+      after: [
+        { alias: "other", version: 2 },
+        { alias: "review", version: 5 },
+      ],
     });
   });
 });

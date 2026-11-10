@@ -95,23 +95,30 @@ const nameOf = (test: RunningTest, identity: unknown): string => {
   return made.name;
 };
 
+/** A workflow reference's name: `workflows.<alias>`. */
+const workflowNamePattern = /^workflows\.[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
+/** The name of the workflow `reference` names, or undefined for none. */
+const workflowNameOf = (reference: unknown): string | undefined =>
+  isRecord(reference) &&
+  typeof reference.name === "string" &&
+  workflowNamePattern.test(reference.name)
+    ? reference.name
+    : undefined;
+
 /**
  * The start request for `reference` with `args`, as a page's
- * `useWorkflow` sends it: a call of the reference's `start` mutation.
+ * `useWorkflow` sends it: a call of the `start` mutation under the
+ * workflow's own name, never one the reference carries.
  */
 const startRequestFor = (reference: unknown, args: unknown): string => {
-  const start =
-    isRecord(reference) &&
-    reference.kind === "workflow" &&
-    isRecord(reference.mutations)
-      ? reference.mutations.start
-      : undefined;
-  if (!isRecord(start)) {
+  const name = workflowNameOf(reference);
+  if (name === undefined) {
     throw new TestAssertionError(
       "expected a reference to one of the App's workflows, from @server/_generated/api"
     );
   }
-  return requestFor(start, "mutation", { args });
+  return requestFor({ name: `${name}.mutations.start` }, "mutation", { args });
 };
 
 /** What a start answers: the run's number in the session. */
@@ -241,10 +248,7 @@ const identityOf = (
       await ready();
       const answer = await session.start(name, request, given);
       const handle: WorkflowTestRun = Object.freeze({
-        workflow:
-          isRecord(reference) && typeof reference.contractId === "string"
-            ? reference.contractId
-            : "a workflow",
+        workflow: workflowNameOf(reference) ?? "a workflow",
       });
       runNumbers.set(handle, {
         test,

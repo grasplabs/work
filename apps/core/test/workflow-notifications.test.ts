@@ -8,7 +8,6 @@ import {
 } from "@grasp-os/runtime/app";
 import type { WorkflowEventReference } from "@grasp-os/runtime/app";
 import {
-  eventFingerprint,
   inspectApp,
   manifestText,
   registerApp,
@@ -85,30 +84,16 @@ import { applied } from "./store-schemas.ts";
 
 const completed = "grasp.job.completed";
 const jobData = v.object({ jobId: v.string() });
-const jobEvent = { type: completed, data: jobData.descriptor };
 
 /**
  * The reference `@server/_generated/api` generates for the `review` workflow's
- * `jobEvents`, as server code lists it.
+ * `jobEvents`, as server code lists it: its name.
  */
-// SAFETY: the generated reference's fields, its data's type from the
-// descriptor it carries.
-const jobEvents = Object.freeze({
-  kind: "workflowEvent",
-  resourceId: "app",
-  resourceVersion: 1,
-  workflow: "workflows.review",
-  workflowFingerprint: "0".repeat(64),
-  alias: "jobEvents",
-  type: completed,
-  fingerprint: await eventFingerprint(jobEvent),
-  data: jobData.descriptor,
-}) as WorkflowEventReference<
+const jobEvents: WorkflowEventReference<
   "workflows.review",
   "jobEvents",
-  typeof completed,
   { jobId: string }
->;
+> = Object.freeze({ name: "workflows.review.events.jobEvents" });
 
 const schema = defineSchema({
   jobs: defineTable({ jobId: v.string() }).access({
@@ -116,15 +101,29 @@ const schema = defineSchema({
     write: "appMembers",
   }),
 });
+/** The workflow the App binds, with the event it sends a run, as the workflow has it. */
 const review = permission.workflow("review", {
   args: v.object({ jobId: v.string() }),
   returns: v.object({ status: v.string() }),
+  events: { jobEvents: { type: completed, data: jobData } },
+  listens: { job: ["jobEvents"] },
+});
+/** Another workflow the App declares, with an event of its own. */
+const archive = permission.workflow("archive", {
+  args: v.object({ jobId: v.string() }),
+  returns: v.object({ status: v.string() }),
+  events: {
+    archived: {
+      type: "grasp.job.archived",
+      data: v.object({ at: v.number() }),
+    },
+  },
 });
 
-/** The App's config: the one workflow it declares. */
+/** The App's config: the workflows it declares. */
 const config = defineApp({
   name: "Jobs",
-  permissions: { workflows: [review] },
+  permissions: { workflows: [review, archive] },
 });
 
 const { mutation } = serverModule(schema, config);
@@ -156,12 +155,7 @@ const markThenFail = mutation({
 
 /** Its code asks the channel to notify `review` with whatever it is given. */
 const rawNotify = mutation({
-  args: {
-    event: v.string(),
-    runId: v.string(),
-    data: v.string(),
-    fingerprint: v.string().optional(),
-  },
+  args: { event: v.string(), runId: v.string(), data: v.string() },
   returns: v.string(),
   handler: () => "unreached",
 });
@@ -173,10 +167,28 @@ const undeclared = mutation({
   handler: () => "unreached",
 });
 
+/**
+ * Notifies through `ctx.sendEvent` with a reference of its own making,
+ * named `name`, as code that forges one could.
+ */
+const forged = mutation({
+  args: { name: v.string(), runId: v.string() },
+  returns: v.null(),
+  handler: (ctx, args) => {
+    // SAFETY: a forged reference, as App code could build one.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const reference = { name: args.name } as typeof jobEvents;
+    ctx.sendEvent(reference, { runId: args.runId, data: { jobId: "job-1" } });
+    return null;
+  },
+});
+
 const jobsApp = registerApp({
   config,
   schema,
-  modules: { jobs: { markDone, markThenFail, rawNotify, undeclared } },
+  modules: {
+    jobs: { markDone, markThenFail, rawNotify, undeclared, forged },
+  },
   migrations: [],
 });
 
@@ -194,26 +206,19 @@ const codeOf = (error: unknown): string =>
 /**
  * App code as the SDK's runner runs it, but for `rawNotify` and
  * `undeclared`, which talk to their channel directly, as code in an
- * isolate could, and answer what the host said: the event as `jobEvents`
- * names it, but for what `args` changes.
+ * isolate could, and answer what the host said: the event alias, run and
+ * data `args` give.
  */
 const runner: Runner = async (path, args, channel: FunctionChannel) => {
   if (path === "jobs.rawNotify" || path === "jobs.undeclared") {
     const asked = z
-      .object({
-        event: z.string(),
-        runId: z.string(),
-        data: z.string(),
-        fingerprint: z.string().optional(),
-      })
+      .object({ event: z.string(), runId: z.string(), data: z.string() })
       .parse(args);
     return await channel
-      .resource(path === "jobs.rawNotify" ? "review" : "archive", "notify", [
+      .resource(path === "jobs.rawNotify" ? "review" : "ghost", "notify", [
         asked.event,
         asked.runId,
         JSON.parse(asked.data),
-        jobEvents.type,
-        asked.fingerprint ?? jobEvents.fingerprint,
       ])
       .then(
         () => "staged",
@@ -418,9 +423,6 @@ const fixture = async () => {
     workflows: [
       {
         alias: "review",
-        events: { jobEvents: jobEvent },
-        listens: {},
-        decisions: {},
         pinned: { workflowId: workflow.id, version: 1 },
       },
     ],
@@ -444,6 +446,7 @@ const kinds = {
   "jobs.markThenFail": "mutation",
   "jobs.rawNotify": "mutation",
   "jobs.undeclared": "mutation",
+  "jobs.forged": "mutation",
 } as const;
 
 /** Calls `path` as `by` through the App's invocation, as a page would. */
@@ -464,6 +467,19 @@ const call = async (
     { path, kind: kinds[path] },
     args
   );
+};
+
+/** What `send` answers for each of `names`, one after the other. */
+const eachOf = async (
+  names: readonly string[],
+  send: (name: string) => Promise<unknown>
+): Promise<unknown[]> => {
+  const answers: unknown[] = [];
+  for (const name of names) {
+    // oxlint-disable-next-line no-await-in-loop -- one call after the other
+    answers.push(await send(name));
+  }
+  return answers;
 };
 
 /** What a call answered, or the code it failed with. */
@@ -626,7 +642,7 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
     });
   });
 
-  it("stages nothing for a mutation that fails, and refuses an event of a workflow the App doesn't declare, one the release doesn't resolve, data its contract refuses, or a run that isn't the App's before anything is staged", async () => {
+  it("stages nothing for a mutation that fails, and refuses an event the release doesn't declare for the workflow (another workflow's, a key every object inherits, a forged reference's), data the declared event doesn't take, or a run that isn't the App's before anything is staged", async () => {
     const fx = await fixture();
     const runId = await startedRun(fx, fx.ada);
     const { runId: personsRun } = await startWorkflow(
@@ -637,34 +653,45 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
     );
     const raw = async (
       path: "jobs.rawNotify" | "jobs.undeclared",
-      fields: {
-        event?: string;
-        runId?: string | null;
-        data?: unknown;
-        fingerprint?: string;
-      }
+      fields: { event?: string; runId?: string | null; data?: unknown }
     ) =>
       answerOf(
         await call(fx, fx.bob, path, {
           event: fields.event ?? "jobEvents",
           runId: fields.runId ?? runId,
           data: JSON.stringify(fields.data ?? { jobId: "job-1" }),
-          ...(fields.fingerprint === undefined
-            ? {}
-            : { fingerprint: fields.fingerprint }),
         })
       );
+    const forgedAs = async (name: string) =>
+      answerOf(await call(fx, fx.bob, "jobs.forged", { name, runId }));
+    const inherited = ["constructor", "toString", "hasOwnProperty", "valueOf"];
 
     const outcomes = {
       failed: answerOf(await call(fx, fx.bob, "jobs.markThenFail", { runId })),
       undeclared: await raw("jobs.undeclared", {}),
       otherEvent: await raw("jobs.rawNotify", { event: "otherEvents" }),
-      // A reference generated for another contract than the release binds.
-      stale: await raw("jobs.rawNotify", { fingerprint: "0".repeat(64) }),
+      // The event the App declares for its other workflow, under this one.
+      anotherWorkflows: await raw("jobs.rawNotify", { event: "archived" }),
+      inherited: await eachOf(
+        inherited,
+        async (event) => await raw("jobs.rawNotify", { event })
+      ),
+      // References App code made up, sent through `ctx.sendEvent`.
+      forged: {
+        madeUp: await forgedAs("workflows.review.events.madeUp"),
+        inherited: await eachOf(
+          inherited,
+          async (event) => await forgedAs(`workflows.review.events.${event}`)
+        ),
+        otherWorkflows: await forgedAs("workflows.archive.events.jobEvents"),
+        undeclaredWorkflow: await forgedAs("workflows.ghost.events.jobEvents"),
+      },
       extraField: await raw("jobs.rawNotify", {
         data: { jobId: "job-1", source: "urn:forged" },
       }),
       malformed: await raw("jobs.rawNotify", { data: { jobId: 1 } }),
+      // The other workflow's event's data, under this one's event.
+      othersData: await raw("jobs.rawNotify", { data: { at: 1 } }),
       noSuchRun: await raw("jobs.rawNotify", { runId: crypto.randomUUID() }),
       personsRun: await raw("jobs.rawNotify", { runId: personsRun }),
       wellFormed: await raw("jobs.rawNotify", {}),
@@ -675,9 +702,17 @@ describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
         failed: "desk.refused",
         undeclared: "resource.not_allowed",
         otherEvent: "resource.not_allowed",
-        stale: "resource.not_allowed",
+        anotherWorkflows: "resource.not_allowed",
+        inherited: inherited.map(() => "resource.not_allowed"),
+        forged: {
+          madeUp: "resource.not_allowed",
+          inherited: inherited.map(() => "resource.not_allowed"),
+          otherWorkflows: "resource.not_allowed",
+          undeclaredWorkflow: "resource.not_allowed",
+        },
         extraField: "contract.invalid_args",
         malformed: "contract.invalid_args",
+        othersData: "contract.invalid_args",
         noSuchRun: "resource.unavailable",
         personsRun: "resource.unavailable",
         // The one well-formed notification staged.
