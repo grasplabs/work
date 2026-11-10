@@ -80,9 +80,8 @@ import { inList } from "../db/d1.ts";
 //   names another's file to write.
 // - A replay or retry writing twice: `keepFile` opens, adds and finishes
 //   under keys of the call's effect key (its step's key and the call's
-//   ordinal in it), so the
-//   same call again answers the same file, and its bytes must be the
-//   same, all of them: never a prefix of them. A chunk reserved but not
+//   ordinal in it), so the same call again answers the same file, and its
+//   bytes must be the same, all of them: never a prefix of them. A chunk reserved but not
 //   stored (its put failed, or the attempt died) is stored by the same
 //   call again, or swept with its file.
 // - A file outliving its run's retention: its run's details going marks
@@ -93,9 +92,10 @@ import { inList } from "../db/d1.ts";
 //   than any attempt, so a write under way finishes its put first; a put
 //   that still lands after its chunk went deletes its object again
 //   (`store`), so no object outlives every record.
-// - A stale attempt writing: every call, every step of `keepFile` and
-//   every put first checks the attempt still holds its lease
-//   (`requireHolds`).
+// - A stale attempt writing: a call checks that its attempt still holds
+//   its lease (`requireHolds`) as it starts, and a write again before it
+//   reserves a piece's bytes, before each put, and before it seals or
+//   deletes a file; a delete again before it marks the file deleted.
 // - Bytes that aren't what their type says: finishing checks the type
 //   against the bytes (a binary type by its signature, a text type as
 //   UTF-8 with no NUL and no signature) and the whole file's SHA-256; a
@@ -816,6 +816,7 @@ export const keepFile = async (
     at < file.bytes.length;
     at += runFileLimits.callBytes, piece += 1
   ) {
+    // An early exit: `append` checks again before it reserves and puts.
     caller.requireHolds();
     // oxlint-disable-next-line no-await-in-loop -- in order: each piece follows the last
     await append(env, as(`piece${String(piece)}`), {
@@ -831,6 +832,7 @@ export const keepFile = async (
   if (written?.state === "writing" && written.size !== file.bytes.length) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
+  // An early exit: `finish` checks again before it seals or deletes.
   caller.requireHolds();
   const finished = await finish(env, as("finish"), { file: id });
   const sealed = z.object({ sha256: z.string() }).parse(finished.output);
@@ -853,6 +855,8 @@ export const callFiles = async (
   operation: FilesCallOperation,
   args: Json
 ): Promise<FilesAnswer> => {
+  // An early exit: a write or delete checks again before it changes
+  // anything; a read or list changes nothing.
   caller.requireHolds();
   switch (operation) {
     case "read": {

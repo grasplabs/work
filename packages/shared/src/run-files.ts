@@ -313,7 +313,7 @@ export interface RunFileListing {
 export const runFileErrors = defineErrorFamily({
   "file.run_too_large": `A run's file is at most ${runFileLimits.fileBytes / mib} MB.`,
   "file.run_full": `A run keeps at most ${runFileLimits.runFiles} files and ${runFileLimits.runBytes / mib} MB of them.`,
-  "file.writes_open": `A run writes at most ${runFileLimits.openWrites} files at once: try again once one is written.`,
+  "file.writes_open": `A run writes at most ${runFileLimits.openWrites} files at once.`,
   "file.workflow_quota": `This workflow's runs keep at most ${runFileLimits.workflowBytes / gib} GB of files: older runs' files go with their details.`,
   "file.run_type_unsupported":
     "A run's file is a PNG, JPEG, GIF or WebP image, a PDF, a Word or Excel document, or plain text, CSV, Markdown or JSON.",

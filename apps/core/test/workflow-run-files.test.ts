@@ -218,7 +218,8 @@ const databaseLosingAt = (pattern: RegExp, lose: () => void): D1Database =>
   });
 
 /** A write's lookup of the piece its call may have reserved before. */
-const pieceLookup = /select[\s\S]*"append_key" = \?/u;
+const pieceLookup =
+  /from "workflow_run_file_chunks" where[\s\S]*"append_key" = \?/u;
 /** A write's reservation of a piece's bytes. */
 const pieceReserved = /INSERT INTO workflow_run_file_chunks/u;
 /** A lookup of one of a run's files. */
@@ -586,7 +587,7 @@ describe("a workflow run's own files", () => {
 
   it("refuse a stale attempt before anything is stored or sealed, and leave a file it would have deleted", async () => {
     const write = { name: "b.txt", type: "text/plain", text: "late" };
-    // Stale from its first check: refused before anything is decided.
+    // Stale before it starts: refused, no file opened.
     const atCall = callerOf();
     const staleCall = await outcome(
       callFiles(env, atCall.next(lostLease), "write", write)
