@@ -457,6 +457,71 @@ const refusingUse = <E extends Error>(error: E, refused: RefusedUse): E => {
   return error;
 };
 
+/**
+ * `error`, noted as the refusal of a table's use when the App's store
+ * refused it by the table's access mode or row rules: a read the read
+ * mode doesn't admit (`data.access_denied`), a write the write mode
+ * doesn't, or one leaving a row its rules don't (`data.write_denied`).
+ * Kept as the host's own table denials are (`readFor`, `stage`), through
+ * `keepEvidence`, at most once a call.
+ *
+ * Threat model (GRA-1652):
+ *
+ * - A loop of refused reads or writes, nested calls included, floods the
+ *   log: what it adds goes through `keepEvidence`, which keeps the call's
+ *   first refusal of any kind and no other (`Run.evidence`, shared by
+ *   every function the call runs).
+ * - App code forges or suppresses the evidence: only an error core's own
+ *   store call threw is noted (`readFor`'s read, `runMutation`'s commit),
+ *   by its identity in a map App code never reaches, so an error App code
+ *   makes, wraps or rethrows with the same code is noted as nothing; and
+ *   it is kept before App code hears of the refusal (a read's, a nested
+ *   mutation's commit's), so catching it suppresses nothing.
+ * - The table it names is App text: named only when it is a table of the
+ *   sealed release (`Compiled.tables`), the one the store refused by its
+ *   own `details`, never what App code asked for otherwise.
+ * - A row the rules hide is probed: a patch, replacement or deletion of
+ *   one is answered as a missing row (`data.conflict`, store-rules.ts),
+ *   and isn't noted. The audit is the admins' alone, so it would leak
+ *   nothing to App code; but core can't tell that conflict from a record
+ *   deleted or changed meanwhile, which happens every day, so keeping it
+ *   would record ordinary races as refusals.
+ * - Rows a read's rules leave out, and related records of a table the
+ *   caller can't read (store-queries.ts `relationsOf`), are no refusal:
+ *   the read answers without them, and nothing is thrown to note.
+ * - The evidence write fails or hangs: `keepEvidence` logs a failure and
+ *   waits no longer than `useEvidenceWaitMs`; the refusal stands.
+ * - A preview's or an App's tests' store, or a visitor's call: their
+ *   invocation keeps no evidence (no `Invocation.refusedUse`), as for
+ *   every other refused use.
+ */
+const refusedByStore = (run: Run, error: unknown): unknown => {
+  const code = dataErrors.codeOf(error);
+  if (
+    (code !== "data.access_denied" && code !== "data.write_denied") ||
+    typeof error !== "object" ||
+    error === null
+  ) {
+    return error;
+  }
+  const details = "details" in error ? error.details : undefined;
+  const table =
+    typeof details === "object" && details !== null && "table" in details
+      ? details.table
+      : undefined;
+  refusedUses.set(error, {
+    use: {
+      kind: "table",
+      name:
+        typeof table === "string" && run.compiled.tables.has(table)
+          ? table
+          : null,
+    },
+    reason: "request_not_allowed",
+  });
+  return error;
+};
+
 /** `name` when the App's manifest has it in `table`, else null. */
 const sealedName = (
   table: Readonly<Record<string, unknown>> | undefined,
@@ -1314,7 +1379,13 @@ const readFor = async (
       reason: "request_not_allowed",
     });
   }
-  return await reader.read(read, tallied(run.sensitive, fn));
+  try {
+    return await reader.read(read, tallied(run.sensitive, fn));
+  } catch (error) {
+    // What the store refuses by the table's access and row rules is kept
+    // as evidence too (`refusedByStore`).
+    throw refusedByStore(run, error);
+  }
 };
 
 /**
@@ -3537,6 +3608,11 @@ const runMutation = async (
       return committed.result;
     } catch (error) {
       if (dataErrors.codeOf(error) !== "data.reads_changed") {
+        // A write the store refuses by the table's access and row rules
+        // surfaces here, past the mutation's code: kept now, before an
+        // action that called it hears of it (`refusedByStore`).
+        // oxlint-disable-next-line no-await-in-loop -- it ends the loop
+        await keepEvidence(run, fn, refusedByStore(run, error));
         throw error;
       }
     }
