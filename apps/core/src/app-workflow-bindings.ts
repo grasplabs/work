@@ -97,13 +97,17 @@ import type { StartFiles } from "./workflows/start-files.ts";
 // its pages read the runs of the version its starts run. How each way it
 // can fail is closed (`versionBindingChanges`):
 //
-// - A recorded binding is a claim: a definition committed through
-//   `files.commit` is checked for its shape only. Nothing it names is
-//   bound unless it holds as the version is made current: the workflow is
-//   live and published that version, its contract is the one the App
-//   version declares, the person making the version current has a role
-//   in it, and so has the version's author for a binding the version
-//   recorded. Grasp staff never make a version current that binds one.
+// - A recorded binding written by hand: a definition committed through
+//   `files.commit` is checked for its shape only, so a version records a
+//   binding its parent doesn't only if whoever commits it may bind it, as
+//   `bindWorkflow` asks (`requireRecordableBindings`); no one launders one
+//   into another builder's next version, which carries it over. Even so,
+//   nothing it names is bound unless it holds as the version is made
+//   current: the workflow is live and published that version, its
+//   contract is the one the App version declares, the person making the
+//   version current has a role in it, and so has the version's author for
+//   a binding the version recorded of its own. Grasp staff never make a
+//   version current that binds one.
 // - Whoever bound it lost their role in the workflow before it is made
 //   current: refused, the whole switch with it
 //   (`workflow.app_version_binding_unavailable`), as is a version made
@@ -249,7 +253,7 @@ export const carriedOverBinding = async (
   return active?.workflowId === bound.workflowId &&
     active.version === bound.version
     ? undefined
-    : `The App's current version binds version ${bound.version} as \`${alias}\` already, and \`${alias}\` was bound to another version directly since. Bind version ${bound.version} directly, as \`env.workflowBuild.bind\` does: its contract is the one the App declares.`;
+    : `The App's current version binds version ${bound.version} as \`${alias}\` already, and \`${alias}\` was bound to another version, or unbound, directly since. Bind version ${bound.version} directly, as \`env.workflowBuild.bind\` does: its contract is the one the App declares.`;
 };
 
 /**
@@ -346,6 +350,48 @@ const requireMayBind = async (
       throw unavailableToBind();
     }
     throw error;
+  }
+};
+
+/**
+ * The bindings `definition` records that `parent` (the definition of the
+ * version it is committed over, none for an App's first) doesn't: what
+ * the version binds of its own, which its author answers for.
+ */
+export const ownWorkflowBindings = (
+  definition: AppDefinition,
+  parent: AppDefinition | null
+): DefinedWorkflowBinding[] =>
+  (definition.workflowBindings ?? []).filter(
+    (bound) =>
+      !(parent?.workflowBindings ?? []).some(
+        ({ alias, workflowId, version }) =>
+          alias === bound.alias &&
+          workflowId === bound.workflowId &&
+          version === bound.version
+      )
+  );
+
+/**
+ * That `by`, committing `definition` over `parent`, may bind each
+ * workflow version it records of its own (`ownWorkflowBindings`), as a
+ * draft's `bindWorkflow` asks: so no one records, by committing a
+ * definition by hand, a binding another builder would carry into a
+ * version of theirs (`workflow.app_version_binding_unavailable`).
+ */
+export const requireRecordableBindings = async (
+  env: Env,
+  by: Acting,
+  definition: AppDefinition,
+  parent: AppDefinition | null
+): Promise<void> => {
+  const own = ownWorkflowBindings(definition, parent);
+  if (own.length > 0) {
+    requireNotStaff(by);
+  }
+  for (const bound of own) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    await requireMayBind(env, by, bound);
   }
 };
 

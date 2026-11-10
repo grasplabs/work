@@ -318,8 +318,59 @@ export const Route = createFileRoute("/")({ component: Desk });
         again: {
           ok: false,
           problem:
-            "The App's current version binds version 2 as `review` already, and `review` was bound to another version directly since. Bind version 2 directly, as `env.workflowBuild.bind` does: its contract is the one the App declares.",
+            "The App's current version binds version 2 as `review` already, and `review` was bound to another version, or unbound, directly since. Bind version 2 directly, as `env.workflowBuild.bind` does: its contract is the one the App declares.",
         },
+      });
+    });
+
+    it("holds a version's author only to the bindings it records of its own, never those it carries over from its parent", async () => {
+      const [admin, builder, pagesOnly] = await Promise.all([
+        signedIn("admin"),
+        signedIn("builder"),
+        signedIn("builder"),
+      ]);
+      const flow = await threeVersions(admin, builder);
+      const { app, second } = await proposedRebind(builder, flow);
+      await builder.api.apps.versions.setCurrent(app, second);
+      // Builds the App, with no role in the workflow: changes a page only.
+      await builder.api.apps.members.add(app, {
+        type: "person",
+        id: pagesOnly.userId,
+        role: "builder",
+      });
+      const { version: third } = await pagesOnly.api.apps.files.commit(
+        app,
+        {
+          "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+const Desk = () => <main>Open requests</main>;
+
+export const Route = createFileRoute("/")({ component: Desk });
+`,
+        },
+        "Rename the page"
+      );
+      await builder.api.apps.versions.setCurrent(app, third);
+      await builder.api.workflowResources.bindToApp(flow, {
+        app,
+        alias: "review",
+        version: 3,
+      });
+      // Back to the second, then to the third, whose release sealed
+      // version 2 and which only carries it over.
+      await builder.api.apps.versions.setCurrent(app, second);
+      await builder.api.workflowResources.bindToApp(flow, {
+        app,
+        alias: "review",
+        version: 3,
+      });
+      const again = await outcome(
+        builder.api.apps.versions.setCurrent(app, third)
+      );
+
+      expect({ again, bound: await boundOf(builder, app) }).toStrictEqual({
+        again: "ok",
+        bound: { review: { workflowId: flow, version: 2 } },
       });
     });
 
@@ -438,7 +489,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       });
     });
 
-    it("refuses the whole switch for a version whose declaration isn't what the version it binds has, or that binds a workflow its author has no role in, whatever its definition says", async () => {
+    it("refuses the whole switch for a version whose declaration isn't what the version it binds has, and a commit recording a workflow its author has no role in, whatever its definition says", async () => {
       const [admin, builder, stranger] = await Promise.all([
         signedIn("admin"),
         signedIn("builder"),
@@ -460,18 +511,18 @@ export const Route = createFileRoute("/")({ component: Desk });
       const contractChanged = await outcome(
         builder.api.apps.versions.setCurrent(app, mismatched)
       );
-      // Committed by hand: a workflow its author can't see.
-      const { version: foreign } = await commitApp(
-        builder.api.apps.files,
-        app,
-        requestsApp("review", jobEventsDeclared, {
-          workflowId: strangers,
-          version: 1,
-        }),
-        "Bind someone else's workflow"
-      );
+      // Committed by hand: a workflow its author can't see, refused as it
+      // is committed, so no later version of anyone's carries it.
       const unseen = await outcome(
-        admin.api.apps.versions.setCurrent(app, foreign)
+        commitApp(
+          builder.api.apps.files,
+          app,
+          requestsApp("review", jobEventsDeclared, {
+            workflowId: strangers,
+            version: 1,
+          }),
+          "Bind someone else's workflow"
+        )
       );
       const { currentVersion } = await builder.api.apps.get(app);
 
