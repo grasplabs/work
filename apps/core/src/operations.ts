@@ -341,6 +341,16 @@ export interface Invocation {
    */
   readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
   /**
+   * The refused uses a live query's subscription kept already, by
+   * `refusalKey`, shared by its reads: each kept once a subscription,
+   * however often a write reads it again, and one a read meets for the
+   * first time (a flag a write set, a role the person lost) kept then.
+   * One already kept is passed over, and leaves the call's one entry
+   * (`keepEvidence`) to the next refusal it meets. None for any other
+   * call: each keeps its own.
+   */
+  readonly refusalsKept?: Set<string>;
+  /**
    * Keeps the record of what the call read of the store's sensitive
    * tables (`SensitiveRead`), once for the whole call, nested functions
    * included, after it answered or failed and before its caller hears
@@ -440,6 +450,20 @@ export interface UseRefusal {
   readonly reason: "use_undeclared" | "request_not_allowed";
   readonly errorCode: string;
 }
+
+/**
+ * What tells one refused use from another (`Invocation.refusalsKept`):
+ * every field core's own, a name only one of the sealed release's, so a
+ * subscription keeps no more of them than its release has uses.
+ */
+const refusalKey = (refusal: UseRefusal): string =>
+  JSON.stringify([
+    refusal.function,
+    refusal.use.kind,
+    refusal.use.name,
+    refusal.reason,
+    refusal.errorCode,
+  ]);
 
 /** What a refusal of a use carries for its evidence (`refusedUseOf`). */
 type RefusedUse = Pick<UseRefusal, "use" | "reason">;
@@ -2875,14 +2899,23 @@ const keepEvidence = async (
   if (refused === undefined || keep === undefined || run.evidence.kept) {
     return;
   }
-  run.evidence.kept = true;
   const errorCode =
     operationErrors.codeOf(error) ??
     dataErrors.codeOf(error) ??
     "resource.not_allowed";
+  const refusal: UseRefusal = { function: fn.path, ...refused, errorCode };
+  const { refusalsKept } = run.invocation;
+  if (refusalsKept !== undefined) {
+    const key = refusalKey(refusal);
+    if (refusalsKept.has(key)) {
+      return;
+    }
+    refusalsKept.add(key);
+  }
+  run.evidence.kept = true;
   const keeping = (async () => {
     try {
-      await keep({ function: fn.path, ...refused, errorCode });
+      await keep(refusal);
     } catch (keepError) {
       log.error("app.use.audit_failed", {
         requestId: run.invocation.requestId,

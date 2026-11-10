@@ -106,29 +106,11 @@ interface FunctionCaller {
    */
   readonly agent?: CallingAgent;
   /**
-   * The refused uses a live query's subscription kept already
-   * (`refusalKey`), for one of its reads: each is kept once a
-   * subscription, however often a write reads it again, and one a read
-   * meets for the first time, after a write changed what it reads, is
-   * kept then. Every read keeps its own otherwise.
+   * The refused uses a live query's subscription kept already, for one of
+   * its reads (`Invocation.refusalsKept`).
    */
   readonly refusalsKept?: Set<string>;
 }
-
-/**
- * What tells one refused use from another for a live query's
- * subscription (`FunctionCaller.refusalsKept`): every field core's own,
- * a name only one of the sealed release's, so a subscription keeps no
- * more of them than its release has uses.
- */
-const refusalKey = (refusal: UseRefusal): string =>
-  JSON.stringify([
-    refusal.function,
-    refusal.use.kind,
-    refusal.use.name,
-    refusal.reason,
-    refusal.errorCode,
-  ]);
 
 /** Whose call a refused use's evidence names (`keptUseRefusals`). */
 interface UseRefusalContext {
@@ -250,13 +232,6 @@ export const invocationFor = async (
       ? noStore()
       : await openStore(env, release.store.storeId);
   const actor = callerActor(by.userId, agent);
-  const keepRefusal = keptUseRefusals(env, {
-    app,
-    version: release.manifest.resourceVersion,
-    principal: by.userId,
-    requestId,
-    runId: null,
-  });
   return {
     principal: by.userId,
     actor,
@@ -288,17 +263,14 @@ export const invocationFor = async (
     deadline,
     runId: null,
     authorize,
-    refusedUse:
-      refusalsKept === undefined
-        ? keepRefusal
-        : async (refusal) => {
-            const key = refusalKey(refusal);
-            if (refusalsKept.has(key)) {
-              return;
-            }
-            refusalsKept.add(key);
-            await keepRefusal(refusal);
-          },
+    refusedUse: keptUseRefusals(env, {
+      app,
+      version: release.manifest.resourceVersion,
+      principal: by.userId,
+      requestId,
+      runId: null,
+    }),
+    ...(refusalsKept === undefined ? {} : { refusalsKept }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
     // operation host admits each request through `authorize` first, as it
