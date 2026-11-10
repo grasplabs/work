@@ -8,6 +8,8 @@ import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import {
   gateThresholdDefault,
   gateThresholds,
+  knownPercent,
+  knownSourcesOf,
   knownWeights,
 } from "@grasp-os/shared/onboarding-gate";
 import type {
@@ -208,18 +210,19 @@ export const gateView = async (
   const { closedAt, openedAt, threshold } = await stored(env);
   const store = onboardingStore(env);
   const shared = await store.documents();
-  const parts = knownParts(
+  // Only what this company's flow asks it for counts: a step that is off
+  // can't hold the percentage down.
+  const { flow } = await store.flow();
+  const asked = knownSourcesOf(flow);
+  const every = knownParts(
     view,
     await store.kickoffKnown(),
     shared.length > 0 ? 1 : 0,
     await store.choices(),
     await store.reviewKnown()
   );
-  let sum = 0;
-  for (const { weight, known } of parts) {
-    sum += weight * known;
-  }
-  const known = Math.round(sum);
+  const parts = every.filter(({ source }) => asked.includes(source));
+  const known = knownPercent(parts);
   const over = view.plan !== null && dayOf(now) > closesOn(view.plan);
   const config = signInConfig(env);
   const staff = config?.staff;
