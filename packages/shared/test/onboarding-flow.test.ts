@@ -3,11 +3,16 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   defaultFlow,
   flowAgreementsOf,
+  flowOpening,
+  flowPresets,
+  flowScreens,
   flowInterviews,
   flowProblemOf,
   flowSteps,
   onboardingFlowSchema,
+  setupSteps,
   storedFlowOf,
+  withStepMoved,
 } from "../src/onboarding-flow.ts";
 import type { FlowStep, OnboardingFlow } from "../src/onboarding-flow.ts";
 import { knownPercent, knownSourcesOf } from "../src/onboarding-gate.ts";
@@ -27,6 +32,9 @@ const moved = (one: FlowStep, other: FlowStep): FlowStep[] => {
 
 /** A source that counts for ten, with `known` of it in. */
 const weighed = (known: number) => ({ weight: 10, known });
+
+/** A flow's steps by name, in its order. */
+const order = (flow: OnboardingFlow) => flow.steps.map(({ id }) => id);
 
 describe("an onboarding flow", () => {
   it("is everything, in order, for a company whose flow nobody set", () => {
@@ -169,6 +177,59 @@ describe("an onboarding flow", () => {
       half: 50,
       thirds: 67,
       nothingAsked: 100,
+    });
+  });
+
+  it("starts from presets that all work, each with its own way of opening", () => {
+    expect(
+      Object.entries(flowPresets).map(([name, flow]) => [
+        name,
+        onboardingFlowSchema.safeParse(flow).success,
+        flowScreens(flow),
+        flowOpening(flow),
+      ])
+    ).toStrictEqual([
+      ["full", true, [...setupSteps], "go"],
+      [
+        "short",
+        true,
+        [
+          "welcome",
+          "ai",
+          "company",
+          "leads",
+          "team",
+          "listening",
+          "review",
+          "open",
+        ],
+        "go",
+      ],
+      [
+        "setup",
+        true,
+        ["welcome", "ai", "company", "sources", "documents"],
+        "finished",
+      ],
+      ["none", true, [], "at_once"],
+    ]);
+  });
+
+  it("moves a step to another place, the others keeping their order", () => {
+    expect({
+      first: order(withStepMoved(defaultFlow, "documents", 0)).slice(0, 3),
+      last: order(withStepMoved(defaultFlow, "welcome", 99)).at(-1),
+      same: order(withStepMoved(defaultFlow, "ai", 1)),
+      // Opens at once with every step off, too.
+      allOff: flowOpening({
+        ...defaultFlow,
+        steps: stepsOf(flowSteps, flowSteps),
+      }),
+    }).toStrictEqual({
+      first: ["documents", "welcome", "ai"],
+      last: "welcome",
+      same: [...flowSteps],
+      allOff: "at_once",
     });
   });
 });
