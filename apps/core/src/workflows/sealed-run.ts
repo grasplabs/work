@@ -99,6 +99,7 @@ import {
   retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
+import { stepFilesOperations } from "./run-files.ts";
 import { inboxOf } from "./run-inboxes.ts";
 import { sealedMainModules } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
@@ -382,6 +383,50 @@ import { engineStepOf } from "./sealed-steps.ts";
 // - An attempt longer than sealed. Each is held to its task's timeout,
 //   and its engine retries are the host's own (`limitsOf`), whatever its
 //   code declares.
+// - The run's own files reached past what the build seals (`grasp.files`,
+//   `ctx.files.<alias>.<action>`). The permission and the action are
+//   the sealed call's: the isolate names neither, and a call through any
+//   other binding or of any other action is refused as tampering. Only
+//   its arguments are the isolate's (a file's ID, a name, a type, text),
+//   which an expression may compute from anything the run read, so the
+//   host trusts none of them: every file is looked up by its ID *and* the
+//   run's own (run-files.ts), so an ID of another run's file, made up or
+//   carried in an event's data, answers `file.not_found`, as a file that
+//   isn't there does; a name is a run file's name for its type or is
+//   refused; a file is read whole only when it is text of a run file's
+//   text types, at most one call's bytes; a write is text of those types
+//   only, checked against its type as an action's writes are, under the
+//   run's and the workflow's limits; a delete takes only a finished file.
+//   Every files permission of a run reaches all of the run's files, never
+//   another run's: the run scopes them, not the alias. Each call is one of the run's named
+//   calls (`makeCall`): its authority decided again, a write gated by
+//   what the run may still read (`handsOut`: a file's name and bytes are
+//   shown outside the run once it's finished), its receipts kept with the
+//   file's ID, type, size and SHA-256, never its name or content. A write
+//   writes under the step's key, so an attempt, a round or a replay that
+//   writes again answers the file the first wrote, never a second one.
+// - The Brain reached past what the build seals (`grasp.brain`,
+//   `ctx.brain.<alias>.<action>`). The permission's one collection and
+//   the action (search, read, recall) are sealed; what the run reads is
+//   what Knowledge's access rules let the run read as a delegate, under
+//   the permission, for its person: a document outside the collection, or
+//   one the person may not read, is refused as one that isn't there, and
+//   restricted data never reaches an unrestricted run (resource-reads.ts).
+//   What it read is pinned to the run (run-evidence.ts), so nothing it
+//   read leaves the run once the person may no longer read it.
+// - A connection call keeping a file, or attaching run files, where it
+//   mustn't. Where a read's file goes (`into`) and where a write's
+//   attachments come from (`from`) are the sealed call's, each a files
+//   permission of the build's: the call's code names them, and a call
+//   that names others, or names one the build doesn't, is refused as
+//   tampering. Then, as for an action's (resource-calls.ts): `into` only
+//   on an action whose contract answers a file (`answersFile`), `from`
+//   only on one that takes files (`takesFiles`), each files permission's
+//   authority decided again before the call and again as connect sends
+//   it; an attachment is a finished file of this run, named by its ID,
+//   whose name, type, size and digest are core's own records and whose
+//   bytes are read back against that digest; a kept file is typed by its
+//   bytes, never by the label it came with.
 
 /** The run an activation loaded (resource-runs.ts, `loadedRun`). */
 export interface HostedResourceRun {
@@ -666,7 +711,13 @@ const matchesBy = (
 type BoundCall = Extract<
   SealedCall,
   {
-    name: "grasp.connector" | "grasp.model" | "grasp.compute" | "grasp.action";
+    name:
+      | "grasp.connector"
+      | "grasp.model"
+      | "grasp.files"
+      | "grasp.brain"
+      | "grasp.compute"
+      | "grasp.action";
   }
 >;
 
@@ -684,7 +735,9 @@ interface CallTemplate {
 /** The call template of `call`; none for a call the isolate never makes. */
 const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
   switch (call.name) {
-    case "grasp.connector": {
+    case "grasp.connector":
+    case "grasp.files":
+    case "grasp.brain": {
       return { call, operation: call.operation, arguments: call.arguments };
     }
     case "grasp.compute":
@@ -1270,7 +1323,46 @@ const modelArgumentsSchema = z.strictObject({
 const sentCallSchema = z.union([
   z.tuple([z.string(), z.unknown()]),
   z.tuple([z.string(), z.unknown(), z.undefined()]),
+  // A connection call's files permissions (`into`, `from`), which must be
+  // its sealed call's.
+  z.tuple([
+    z.string(),
+    z.unknown(),
+    z.strictObject({
+      into: z.string().max(64).optional(),
+      from: z.string().max(64).optional(),
+    }),
+  ]),
 ]);
+
+/**
+ * Why a call of step `step` names otherwise than its sealed `template`, or
+ * nothing: its binding, its operation, and the files permissions it sent
+ * (`files`, its third part), which must be exactly the sealed call's:
+ * none on any call but a connector's, and on a connector's its `into` and
+ * `from`, each there or not alike.
+ */
+const namedOtherwise = (
+  step: string,
+  { call, operation }: CallTemplate,
+  binding: unknown,
+  sent: string,
+  files: { into?: string; from?: string } | undefined
+): string | undefined => {
+  if (binding !== call.binding) {
+    return `Step "${step}" calls only binding ${call.binding}.`;
+  }
+  if (sent !== operation) {
+    return `Step "${step}" calls only ${operation}.`;
+  }
+  const sealed =
+    call.name === "grasp.connector"
+      ? { into: call.into, from: call.from }
+      : { into: undefined, from: undefined };
+  return files?.into === sealed.into && files?.from === sealed.from
+    ? undefined
+    : `Step "${step}" keeps and attaches files only where its build says.`;
+};
 
 /** `run`, as a test's run's decisions and calls take it (fixture-decisions.ts). */
 const fixtureRunOf = ({
@@ -2691,15 +2783,15 @@ class SealedRun implements SealedRunKind {
           "A call sends its operation and JSON arguments within a step's size and the depth its build allows."
         );
       }
-      if (binding !== template.call.binding) {
-        return await refuse(
-          `Step "${attempt.step}" calls only binding ${template.call.binding}.`
-        );
-      }
-      if (sent.data[0] !== template.operation) {
-        return await refuse(
-          `Step "${attempt.step}" calls only ${template.operation}.`
-        );
+      const named = namedOtherwise(
+        attempt.step,
+        template,
+        binding,
+        sent.data[0],
+        sent.data[2]
+      );
+      if (named !== undefined) {
+        return await refuse(named);
       }
       const { params, calling } = this.run;
       // A test's run reaches only its own sealed modules and the model and
@@ -2854,6 +2946,9 @@ class SealedRun implements SealedRunKind {
           operation: call.operation,
           arguments: value,
           sensitive,
+          // The build's files permissions alone: never the isolate's.
+          ...(call.into === undefined ? {} : { into: call.into }),
+          ...(call.from === undefined ? {} : { from: call.from }),
         };
         try {
           return await makeCall(this.#env, calling, task.id, built, effect);
@@ -2885,6 +2980,34 @@ class SealedRun implements SealedRunKind {
           attempt.aiTrouble = unbilledAiWaitOf(error);
           throw error;
         }
+      }
+      case "grasp.files": {
+        return await makeCall(
+          this.#env,
+          calling,
+          task.id,
+          {
+            name: call.name,
+            binding: call.binding,
+            operation: stepFilesOperations[call.operation],
+            arguments: value,
+          },
+          effect
+        );
+      }
+      case "grasp.brain": {
+        return await makeCall(
+          this.#env,
+          calling,
+          task.id,
+          {
+            name: "grasp.knowledge",
+            binding: call.binding,
+            operation: call.operation,
+            arguments: value,
+          },
+          effect
+        );
       }
       case "grasp.compute": {
         await this.#packagesAdmitted();

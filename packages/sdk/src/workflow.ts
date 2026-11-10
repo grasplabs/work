@@ -16,12 +16,15 @@ import {
 } from "./workflow-params.ts";
 import type { ParamMetadata, ParamValues, Params } from "./workflow-params.ts";
 import type {
+  BrainActions,
   CallOptions,
+  ConnectionCallOptions,
   Decision,
   DecisionRequest,
   Duration,
   EventWait,
   EventWaitRequest,
+  FilesActions,
   GenerateRequest,
   Read,
   StepOptions,
@@ -96,14 +99,19 @@ export { sensitiveParam } from "./workflow-params.ts";
 export type { Json } from "@grasp-os/shared/json";
 export type { Param, ParamMetadata } from "./workflow-params.ts";
 export type {
+  BrainActions,
+  BrainHit,
   CallOptions,
   CaughtError,
+  ConnectionCallOptions,
   Decision,
   DecisionRequest,
   Duration,
   EventWait,
   EventWaitRequest,
+  FilesActions,
   GenerateRequest,
+  RunFile,
   StepOptions,
   WorkflowEvent,
 } from "./workflow-steps.ts";
@@ -127,11 +135,21 @@ export interface WorkflowPermissions {
   >;
   readonly decisions?: readonly string[];
   readonly events?: Readonly<Record<string, readonly string[]>>;
+  /** Each files permission, by alias: the actions its steps take. */
+  readonly files?: Readonly<Record<string, readonly (keyof FilesActions)[]>>;
+  /** Each brain permission, by alias: the actions its steps take. */
+  readonly brain?: Readonly<Record<string, readonly (keyof BrainActions)[]>>;
   readonly modules?: Readonly<Record<string, "compute" | "action">>;
 }
 
-/** A call of a connection's action, or of one of the workflow's modules. */
+/** A call of one of the workflow's modules. */
 export type CallMember = (args: unknown, options: CallOptions) => Promise<Read>;
+
+/** A call of a connection's action. */
+export type ConnectionCallMember = (
+  args: unknown,
+  options: ConnectionCallOptions
+) => Promise<Read>;
 
 type UnionToIntersection<Union> = (
   Union extends unknown ? (value: Union) => void : never
@@ -149,7 +167,7 @@ type PathMembers<
 
 /** A connection's members: each of its actions, by its member path. */
 export type ConnectionMembers<Actions extends string> = UnionToIntersection<
-  Actions extends unknown ? PathMembers<Actions, CallMember> : never
+  Actions extends unknown ? PathMembers<Actions, ConnectionCallMember> : never
 >;
 
 /** What a decision permission's member does. */
@@ -212,6 +230,18 @@ export interface WorkflowCtx<
   readonly events: {
     readonly [Alias in keyof NonNullable<Permissions["events"]>]: EventMembers<
       ListedOf<NonNullable<Permissions["events"]>[Alias]>
+    >;
+  };
+  readonly files: {
+    readonly [Alias in keyof NonNullable<Permissions["files"]>]: Pick<
+      FilesActions,
+      ListedOf<NonNullable<Permissions["files"]>[Alias]>
+    >;
+  };
+  readonly brain: {
+    readonly [Alias in keyof NonNullable<Permissions["brain"]>]: Pick<
+      BrainActions,
+      ListedOf<NonNullable<Permissions["brain"]>[Alias]>
     >;
   };
   readonly modules: {

@@ -19,9 +19,11 @@ import {
   aiAlias,
   aliasedPermissions,
   bindingsOf,
+  brainActions,
   durationMs,
   eachStep,
   expressionRoots,
+  filesActions,
   formatLimits,
   inboxRoot,
   isSensitive,
@@ -114,6 +116,7 @@ export type ProblemCode =
   | "workflow.invalid_contract"
   | "workflow.wait_kind"
   | "workflow.call_kind"
+  | "workflow.unknown_action"
   | "workflow.state_not_allowed"
   | "workflow.invalid_state_key"
   | "workflow.undeclared_state_key"
@@ -483,8 +486,9 @@ const schemaProblem = (error: SchemaError): Problem => {
     return as({
       code: "workflow.call_kind",
       message:
-        "A call calls a connection's action, or one of the workflow's own modules.",
-      remedy: "Give it `connection` and `action`, or `module`.",
+        "A call calls one member: a connection's action, an action on the run's files or a Brain collection, or one of the workflow's own modules.",
+      remedy:
+        "Give it `connection` and `action` (with `into` or `from` if it keeps or attaches files), `files` and one of read, write, list and delete, `brain` and one of search, read and recall, or `module`.",
     });
   }
   if (keyword === "oneOf") {
@@ -1129,6 +1133,35 @@ const checkCall = (
     }
     actions.set(member, step.action);
     walk.members.set(step.connection, actions);
+    // Where a read keeps its file and where a write's attachments come
+    // from: each a files permission of the workflow's. Whether the action
+    // answers or takes files is its contract's, checked as it publishes.
+    for (const key of ["into", "from"] as const) {
+      const files = step[key];
+      if (files !== undefined) {
+        permissionFor(walk, files, ["files"], "files", join(pointer, key));
+      }
+    }
+  } else if ("files" in step || "brain" in step) {
+    const [kind, alias, actions]: readonly [
+      "files" | "brain",
+      string,
+      readonly string[],
+    ] =
+      "files" in step
+        ? ["files", step.files, filesActions]
+        : ["brain", step.brain, brainActions];
+    permissionFor(walk, alias, [kind], kind, join(pointer, kind));
+    // Only an action of the format's fixed list: a member of `ctx.<kind>`.
+    if (!actions.includes(step.action)) {
+      problem(
+        walk,
+        join(pointer, "action"),
+        "workflow.unknown_action",
+        `A ${kind} call's action is one of ${actions.join(", ")}.`,
+        `Name one of ${actions.join(", ")}.`
+      );
+    }
   } else {
     permissionFor(
       walk,
@@ -1140,6 +1173,24 @@ const checkCall = (
   }
   checkDuration(walk, step.timeout, join(pointer, "timeout"));
   checkValue(walk, step.args, join(pointer, "args"), place, connection);
+  // A file a read keeps could hold a sensitive parameter it passed, and the
+  // run reads a kept file whole: no read that passes one keeps a file.
+  const args = join(pointer, "args");
+  if (
+    connection &&
+    step.into !== undefined &&
+    [...walk.placeholders.keys()].some(
+      (at) => at === args || at.startsWith(`${args}/`)
+    )
+  ) {
+    problem(
+      walk,
+      join(pointer, "into"),
+      "workflow.sensitive",
+      "A call that passes a sensitive parameter keeps no file: the file could hold it.",
+      "Leave `into` out, or pass the call no sensitive parameter."
+    );
+  }
   checkCallDepth(walk, step.args, join(pointer, "args"), 0);
   checkState(walk, step.state, pointer, place);
 };

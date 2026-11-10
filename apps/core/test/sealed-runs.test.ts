@@ -313,6 +313,14 @@ const notifyAt = (at: string, to = '"a"'): string =>
 const finishStep =
   'await step.sleep("finish", { key: "task", description: "Its sleep", duration: 1000 })';
 
+/** `send`'s mail, its call naming the files permissions `files` (code). */
+const mailNaming = (files: string): string =>
+  moduleOf(
+    send(
+      `return await env.mail.call("mail.send", { to: input.who, subject: sensitiveParam("token") }, ${files});`
+    )
+  );
+
 describe("a sealed build's run on the run host", () => {
   let sealed: Sealed;
 
@@ -409,6 +417,63 @@ describe("a sealed build's run on the run host", () => {
     expect({ otherBinding, otherOperation }).toStrictEqual({
       otherBinding: refusedAs('Step "send:task" calls only binding mail.'),
       otherOperation: refusedAs('Step "send:task" calls only mail.send.'),
+    });
+  });
+
+  it("refuses a call naming files permissions its build doesn't: a file kept or run files attached of the isolate's own choosing", async () => {
+    // A workflow of its own: its waiting runs count toward no other test's.
+    const own = await sealedWorkflow();
+    const ranNaming = async (files: string) => {
+      const runId = await waitingRun(own);
+      const { ended, tampered } = await ranAs(runId, mailNaming(files));
+      return { ended, tampered, checked: await checkedCalls(runId) };
+    };
+    // Refused as tampering before it is checked or made.
+    const refused = {
+      ended: "workflow.invalid",
+      tampered: ["workflow.invalid"],
+      checked: [],
+    };
+    expect({
+      into: await ranNaming('{ into: "files" }'),
+      from: await ranNaming('{ from: "files" }'),
+    }).toStrictEqual({ into: refused, from: refused });
+  });
+
+  it("keeps no file from a read passing a sensitive parameter, even one its build says keeps it", async () => {
+    const own = await sealedWorkflow();
+    const runId = await waitingRun(own);
+    // A table no check lets through: its mail, which passes the sensitive
+    // token, keeps its answer as a file.
+    const { ended, tampered } = await ranAs(
+      runId,
+      mailNaming('{ into: "files" }'),
+      {
+        sealed: (loaded) => ({
+          ...loaded,
+          build: {
+            ...loaded.build,
+            tasks: loaded.build.tasks.map((task) =>
+              task.kind === "call" && task.call.name === "grasp.connector"
+                ? { ...task, call: { ...task.call, into: "files" } }
+                : task
+            ),
+          },
+        }),
+      }
+    );
+    const events = await allEvents();
+    expect({
+      ended,
+      tampered,
+      made: events.filter(
+        ({ action, target }) =>
+          action === "workflow.run.called" && target?.id === runId
+      ),
+    }).toStrictEqual({
+      ended: "workflow.call_invalid",
+      tampered: [],
+      made: [],
     });
   });
 

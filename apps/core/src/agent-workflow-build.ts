@@ -517,12 +517,10 @@ const workflowBuildDeclaration = `/**
  * (its alias is \`ai\`); a connection, decision or event permission names a contract of its kind from
  * \`catalog()\` (an event contract's \`events\` are the types a wait for it takes), a files permission a
  * \`files\` one and a brain permission a \`knowledge\` one; a module one of the workflow's own
- * (\`local:code/<file>.ts#<export>\`). Each alias is used once across every kind. Only the workflow's
- * own actions reach a files permission (the run's own files) or a brain one (one Brain collection), as
- * uses they declare (\`resource.files\`, \`resource.knowledge\`; a model they use is \`resource.model("ai")\`);
- * no step calls them itself. What an action returns is its step's result, which the run records: return
- * a file's reference \`{ file: <id> }\`, never its content, and hand that reference to the next action,
- * which reads it. Of the Brain, return only what the next step needs.
+ * (\`local:code/<file>.ts#<export>\`). Each alias is used once across every kind. A files permission is
+ * the run's own files, and a brain permission one Brain collection, read as the run's person may: a
+ * \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
+ * sha256 }\`, never its content, and found by its \`file\` ID in its own run alone.
  * \`state\` declares what the workflow keeps between its runs: \`{ [key]: <descriptor> }\`, at
  * most 64 KB in all.
  *
@@ -530,8 +528,19 @@ const workflowBuildDeclaration = `/**
  * letter, then letters and digits, as \`sendInvoice\`; never one of ${[...reservedStepIds].map((name) => `\`${name}\``).join(", ")},
  * nor \`<id>Retries\` of a retrying try's ID; never changed once made; rename by \`title\`), \`if\` an
  * expression that skips it (its result is then \`null\`).
- * - \`call\`: \`{ connection, action, args?, timeout? }\` calls an action of a connection (one its contract's
- *   \`operations\` names), or \`{ module, args?, timeout? }\` the workflow's own compute or action;
+ * - \`call\`: \`{ connection, action, args?, into?, from?, timeout? }\` calls an action of a connection (one
+ *   its contract's \`operations\` names). \`into\`, a files permission, keeps the file an action answers
+ *   as the run's own (only where its contract says \`answersFile\`; its result then names \`file\`, a
+ *   reference, in place of the content); \`from\`, a files permission, attaches run files named by ID in
+ *   its \`args.attachments\` (\`[{ file: <id> }]\`, only where its contract says \`takesFiles\`).
+ *   \`{ files, action, args }\` works on the run's own files through files permission \`files\`: \`read\`
+ *   (\`{ file }\`: \`{ file: <reference>, text }\`, a text, CSV, Markdown or JSON file of at most 512 KB,
+ *   whole), \`write\` (\`{ name, type, text }\`, \`type\` one of text/plain, text/csv, text/markdown and
+ *   application/json: its reference), \`list\` (\`{}\`: the references) or \`delete\` (\`{ file }\`).
+ *   \`{ brain, action, args }\` reads Brain collection \`brain\`: \`search\` (\`{ text, limit? }\`:
+ *   \`[{ id, title, excerpt }]\`), \`read\` (\`{ id }\`: \`{ title, text }\`) or \`recall\` (\`{ query }\`:
+ *   the evidence that applies, \`items\`, each citing its source). \`{ module, args?, timeout? }\` calls the
+ *   workflow's own compute or action;
  * - \`generate\`: \`{ instructions, input, returns, timeout? }\` asks the workflow's model (\`permissions.ai\`)
  *   for an answer of the descriptor \`returns\`;
  * - a \`call\` or \`generate\` step may also take \`state: { [key]: value }\`: declared keys it writes once it

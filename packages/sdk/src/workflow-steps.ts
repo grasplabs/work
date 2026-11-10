@@ -58,6 +58,90 @@ export interface CallOptions extends StepOptions {
 }
 
 /**
+ * A connection call's options: besides a call's, where a read that
+ * answers a file keeps it (`into`, a files permission, its answer naming
+ * the kept file instead of its content) and where a write's attachments
+ * come from (`from`, a files permission, its `attachments` naming run
+ * files by ID). The build seals both; its run host refuses a call that
+ * names others.
+ */
+export interface ConnectionCallOptions extends CallOptions {
+  readonly into?: string;
+  readonly from?: string;
+}
+
+/**
+ * One of the run's own files, as a files call answers it: its ID, which
+ * reaches it only in this run, its name, type, size and SHA-256.
+ */
+export interface RunFile {
+  readonly file: string;
+  readonly name: string;
+  readonly type: string;
+  readonly size: number;
+  readonly sha256: string;
+}
+
+/** What each action on the run's own files takes and answers. */
+export interface FilesActions {
+  /** A text, CSV, Markdown or JSON file of the run, read whole. */
+  readonly read: (
+    args: { readonly file: string },
+    options: CallOptions
+  ) => Promise<{ readonly file: RunFile; readonly text: string }>;
+  /** A text file of the run, written whole: its name, type and text. */
+  readonly write: (
+    args: {
+      readonly name: string;
+      readonly type: string;
+      readonly text: string;
+    },
+    options: CallOptions
+  ) => Promise<RunFile>;
+  /** The run's finished files, oldest first. */
+  readonly list: (
+    args: Readonly<Record<string, never>>,
+    options: CallOptions
+  ) => Promise<readonly RunFile[]>;
+  /** Deletes a file of the run. */
+  readonly delete: (
+    args: { readonly file: string },
+    options: CallOptions
+  ) => Promise<null>;
+}
+
+/** A document a Brain search found: its ID, its title, a snippet. */
+export interface BrainHit {
+  readonly id: string;
+  readonly title: string;
+  readonly excerpt: string;
+}
+
+/**
+ * What each action on a Brain collection takes and answers: what the run's
+ * person may read of it, as the Brain answers it. A recall answers the
+ * Brain's memory pack: its `items` the evidence that applies, each with
+ * what it cites.
+ */
+export interface BrainActions {
+  readonly search: (
+    args: { readonly text: string; readonly limit?: number },
+    options: CallOptions
+  ) => Promise<readonly BrainHit[]>;
+  readonly read: (
+    args: { readonly id: string },
+    options: CallOptions
+  ) => Promise<{ readonly title: string; readonly text: string }>;
+  readonly recall: (
+    args: { readonly query: string; readonly [field: string]: unknown },
+    options: CallOptions
+  ) => Promise<{
+    readonly items: readonly Readonly<Record<string, Read>>[];
+    readonly [field: string]: Read;
+  }>;
+}
+
+/**
  * How a decision ended: answered, by whom (their user ID) and with what
  * `payload` they sent (untrusted input, e.g. `{ comment }`), or timed out.
  * A timeout never means approval.

@@ -19,6 +19,8 @@ interface Made {
   readonly binding: string;
   readonly operation: Json;
   readonly args: Json;
+  /** A connection call's files permissions, when it sent any. */
+  readonly files?: Json;
 }
 
 /** What `value` holds at `path`, as untyped code reads it. */
@@ -102,8 +104,13 @@ const engineOf = ({
   const names: string[] = [];
   const made: Made[] = [];
   const binding = (name: string) => ({
-    call: async (operation: Json, args: Json): Promise<Json> => {
-      made.push({ binding: name, operation, args });
+    call: async (operation: Json, args: Json, files?: Json): Promise<Json> => {
+      made.push({
+        binding: name,
+        operation,
+        args,
+        ...(files === undefined ? {} : { files }),
+      });
       const failure = failing.get(operation);
       if (failure !== undefined) {
         throw Object.assign(new Error(failure.message), { code: failure.code });
@@ -132,7 +139,12 @@ const engineOf = ({
     params: {},
     inbox: { replies: "reply-1@grasp.test" },
     state,
-    env: { mail: binding("mail"), ai: binding("ai") },
+    env: {
+      mail: binding("mail"),
+      ai: binding("ai"),
+      runFiles: binding("runFiles"),
+      handbook: binding("handbook"),
+    },
     do: async (name, _options, fn) => await journaled(name, fn),
     sleep: async (name) => {
       await journaled(name, async () => null);
@@ -308,6 +320,10 @@ const probes: readonly (readonly string[])[] = [
   ["decisions", "__proto__"],
   ["decisions", "finance"],
   ["ai"],
+  ["files", "runFiles"],
+  ["files", "__proto__"],
+  ["brain", "handbook"],
+  ["brain", "constructor"],
   ["constructor"],
   ["toString"],
 ];
@@ -405,6 +421,106 @@ describe("a workflow's ctx", () => {
       expect(names).toStrictEqual(["$params"]);
     }
   );
+
+  it("has only the files and Brain actions its steps take, as frozen members", async () => {
+    let held: unknown;
+    const workflow = defineWorkflow({
+      permissions: {
+        files: { runFiles: ["read"] },
+        brain: { handbook: ["search"] },
+      },
+      handler: async (ctx) => {
+        held = ctx;
+        return null;
+      },
+    });
+    await workflow.run(engineOf().engine, {});
+    const members = [
+      read(held, "files"),
+      read(held, "files", "runFiles"),
+      read(held, "brain", "handbook"),
+    ];
+    expect({
+      data: members.map((member) => isFrozenData(member)),
+      files: keysOf(read(held, "files", "runFiles")),
+      brain: keysOf(read(held, "brain", "handbook")),
+      // An action no step takes is no member: deleting, writing, a read of
+      // the Brain, or a name of the prototype's.
+      undeclared: [
+        read(held, "files", "runFiles", "delete"),
+        read(held, "files", "runFiles", "write"),
+        read(held, "brain", "handbook", "read"),
+        read(held, "files", "runFiles", "constructor"),
+        read(held, "brain", "__proto__"),
+      ],
+    }).toStrictEqual({
+      data: [true, true, true],
+      files: ["read"],
+      brain: ["search"],
+      undeclared: [undefined, undefined, undefined, undefined, undefined],
+    });
+  });
+
+  it("calls files and Brain actions through their permission, and sends a connection's files permissions only when it names them", async () => {
+    const workflow = defineWorkflow({
+      permissions: {
+        connections: {
+          mail: { readAttachment: "mail.readAttachment", send: "mail.send" },
+        },
+        files: { runFiles: ["read"] },
+        brain: { handbook: ["search"] },
+      },
+      handler: async (ctx) => {
+        await ctx.connections.mail.readAttachment(
+          { attachment: "a1" },
+          { step: "kept", into: "runFiles" }
+        );
+        await ctx.connections.mail.send(
+          { attachments: [{ file: "f1" }] },
+          { step: "forwarded", from: "runFiles" }
+        );
+        await ctx.connections.mail.send({ to: "ada" }, { step: "plain" });
+        await ctx.files.runFiles.read({ file: "f1" }, { step: "notes" });
+        await ctx.brain.handbook.search({ text: "refunds" }, { step: "found" });
+        return null;
+      },
+    });
+    const { engine, made } = engineOf();
+    await workflow.run(engine, {});
+    expect(made).toStrictEqual([
+      {
+        binding: "mail",
+        operation: "mail.readAttachment",
+        args: { attachment: "a1" },
+        files: { into: "runFiles" },
+      },
+      {
+        binding: "mail",
+        operation: "mail.send",
+        args: { attachments: [{ file: "f1" }] },
+        files: { from: "runFiles" },
+      },
+      { binding: "mail", operation: "mail.send", args: { to: "ada" } },
+      { binding: "runFiles", operation: "read", args: { file: "f1" } },
+      { binding: "handbook", operation: "search", args: { text: "refunds" } },
+    ]);
+  });
+
+  it("refuses files permissions that aren't names, before anything is journaled", async () => {
+    const workflow = defineWorkflow({
+      permissions: { connections: { mail: { send: "mail.send" } } },
+      handler: async (ctx): Promise<unknown> =>
+        await Reflect.apply(ctx.connections.mail.send, undefined, [
+          {},
+          { step: "send", into: { alias: "runFiles" } },
+        ]),
+    });
+    const { engine, names } = engineOf();
+    await expect(workflow.run(engine, {})).rejects.toMatchObject({
+      code: "workflow.invalid_step_call",
+    });
+    expect(names).toStrictEqual(["$params"]);
+  });
 
   it("refuses a call started while another runs", async () => {
     const workflow = defineWorkflow({

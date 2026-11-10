@@ -364,6 +364,104 @@ export const withLoops = (...steps: unknown[]) => ({
   ],
 });
 
+/**
+ * `everyStep` with a files permission (`runFiles`) and a brain one
+ * (`handbook`), and `steps` after its own: the first of them at
+ * `/steps/5`.
+ */
+export const withFiles = (...steps: unknown[]) => {
+  const document = everyStep();
+  return {
+    ...document,
+    permissions: {
+      ...document.permissions,
+      files: { runFiles: { contract: "files" } },
+      brain: { handbook: { contract: "handbook" } },
+    },
+    steps: [...document.steps, ...steps],
+  };
+};
+
+/**
+ * Every action on the run's files and the Brain, and a connection call
+ * keeping a file and one attaching run files, each reading what the one
+ * before answered.
+ */
+export const fileSteps = () => [
+  {
+    id: "listed",
+    type: "call",
+    files: "runFiles",
+    action: "list",
+    args: {},
+  },
+  {
+    id: "notes",
+    type: "call",
+    files: "runFiles",
+    action: "read",
+    // An ID from anything the run read: the host's lookup is the run's.
+    args: { file: { $expr: "listed[0].file" } },
+  },
+  {
+    id: "searched",
+    type: "call",
+    brain: "handbook",
+    action: "search",
+    args: { text: { $expr: "notes.text" } },
+  },
+  {
+    id: "doc",
+    type: "call",
+    brain: "handbook",
+    action: "read",
+    args: { id: { $expr: 'searched[0]?.id ?? ""' } },
+  },
+  {
+    id: "recalled",
+    type: "call",
+    brain: "handbook",
+    action: "recall",
+    args: { query: { $expr: "doc.title" } },
+  },
+  {
+    id: "summary",
+    type: "call",
+    files: "runFiles",
+    action: "write",
+    args: {
+      name: "summary.md",
+      type: "text/markdown",
+      text: { $expr: 'doc.text + " (" + recalled.items.length + ")"' },
+    },
+  },
+  {
+    id: "attachment",
+    type: "call",
+    connection: "mail",
+    action: "mail.readAttachment",
+    args: { message: "m1", attachment: "a1" },
+    into: "runFiles",
+  },
+  {
+    id: "forwarded",
+    type: "call",
+    connection: "mail",
+    action: "mail.send",
+    args: {
+      attachments: [{ file: { $expr: "summary.file" } }],
+    },
+    from: "runFiles",
+  },
+  {
+    id: "removed",
+    type: "call",
+    files: "runFiles",
+    action: "delete",
+    args: { file: { $expr: "summary.file" } },
+  },
+];
+
 /** `document` checked, failing the test when it isn't valid. */
 export const checked = (document: unknown): CheckedWorkflow => {
   const result = checkWorkflow(document);
