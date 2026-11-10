@@ -3,7 +3,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { signalWindowDays } from "@grasp-os/shared/signals";
 import type { ImprovementSignal, SignalKind } from "@grasp-os/shared/signals";
-import { and, asc, desc, eq, gt, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, inArray, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -22,6 +22,7 @@ import type { Computation } from "./daily-claims.ts";
 import {
   improvementSignalComputations as computations,
   improvementSignals,
+  modelUsage,
   workflowDecisions,
   workflowResourceRuns,
   workflowResources,
@@ -29,12 +30,13 @@ import {
 import { chunks } from "./db/d1.ts";
 import { collectionsPerQuestion } from "./signal-tally.ts";
 import type { SignalTally } from "./signal-tally.ts";
+import { auditableCode } from "./workflows/host.ts";
 
 // Improvement signals, level 1: where to look to improve the Apps'
 // workflows (@grasp-os/shared/signals has what each one means). Each is a
-// query over runs and decisions (the core database) and the audit log
-// (model calls' cost, Knowledge searches that found nothing), over the
-// last `signalWindowDays` days.
+// query over runs, decisions and model usage (the core database) and the
+// audit log (Knowledge searches that found nothing), over the last
+// `signalWindowDays` days.
 //
 // They're computed once a UTC day and kept in `improvement_signals`, so
 // reading them is a few indexed queries. The first run of the 15-minute
@@ -323,6 +325,188 @@ const waitingSignals = async (
   return [...rows, ...waitingForPeople([...groups.values()], waited)];
 };
 
+/** A workflow's runs started in the window, with its name. */
+interface Started {
+  name: string;
+  runs: number;
+}
+
+/** How many runs of each workflow started since `from`, by its ID. */
+const runsSince = async (
+  db: DrizzleD1Database,
+  from: Date
+): Promise<Map<string, Started>> => {
+  const rows = await db
+    .select({
+      id: workflowResourceRuns.workflowResourceId,
+      name: workflowResources.name,
+      runs: count(),
+    })
+    .from(workflowResourceRuns)
+    .innerJoin(
+      workflowResources,
+      eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+    )
+    .where(gte(workflowResourceRuns.createdAt, from))
+    .groupBy(workflowResourceRuns.workflowResourceId);
+  return new Map(rows.map(({ id, ...started }) => [id, started]));
+};
+
+/** The entries of `counts`, most first, then by name. */
+const mostFirst = (counts: ReadonlyMap<string, number>) =>
+  [...counts].toSorted(([a, x], [b, y]) => y - x || a.localeCompare(b));
+
+/**
+ * Steps failing most: runs that failed since `from`, by the task they
+ * failed at (`failed_task`, empty for none), with their error codes. Only
+ * the task's ID and the error's code, never its message or what the run
+ * read.
+ */
+const failingSignals = async (
+  db: DrizzleD1Database,
+  from: Date,
+  runs: ReadonlyMap<string, Started>
+): Promise<SignalRow[]> => {
+  const groups = new Map<
+    string,
+    {
+      workflow: string;
+      name: string;
+      step: string;
+      failures: number;
+      codes: Map<string, number>;
+      recent: NonNullable<EvidenceOf<"failing_step">["recent"]>;
+    }
+  >();
+  const endedAt = sql<number>`${workflowResourceRuns.endedAt}`;
+  await eachPage(
+    async (after: { id: string; endedAt: Date | null } | undefined) =>
+      await db
+        .select({
+          id: workflowResourceRuns.id,
+          workflow: workflowResourceRuns.workflowResourceId,
+          name: workflowResources.name,
+          endedAt: workflowResourceRuns.endedAt,
+          step: workflowResourceRuns.failedTask,
+          code: workflowResourceRuns.failureCode,
+        })
+        .from(workflowResourceRuns)
+        .innerJoin(
+          workflowResources,
+          eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+        )
+        .where(
+          and(
+            eq(workflowResourceRuns.status, "failed"),
+            gte(workflowResourceRuns.endedAt, from),
+            pastCursor(
+              endedAt,
+              workflowResourceRuns.id,
+              after?.endedAt ? { at: after.endedAt, id: after.id } : undefined,
+              "desc"
+            )
+          )
+        )
+        .orderBy(
+          desc(workflowResourceRuns.endedAt),
+          desc(workflowResourceRuns.id)
+        )
+        .limit(pageRows),
+    (row) => {
+      const step = stepName(row.step);
+      const key = JSON.stringify([row.workflow, step]);
+      const group = groups.get(key) ?? {
+        workflow: row.workflow,
+        name: row.name,
+        step,
+        failures: 0,
+        codes: new Map<string, number>(),
+        recent: [],
+      };
+      group.failures += 1;
+      const code = auditableCode(row.code) ?? "workflow.run_failed";
+      group.codes.set(code, (group.codes.get(code) ?? 0) + 1);
+      // Read latest first.
+      if (group.recent.length < samples) {
+        group.recent.push(runIdSchema.parse(row.id));
+      }
+      groups.set(key, group);
+    }
+  );
+  return [...groups.values()].map((group) =>
+    signalRow(
+      "failing_step",
+      { appId: "", workflowId: group.name, subject: group.step },
+      group.failures,
+      {
+        failures: group.failures,
+        runs: runs.get(group.workflow)?.runs ?? 0,
+        errors: mostFirst(group.codes)
+          .slice(0, samples)
+          .map(([code, times]) => ({ code, count: times })),
+        recent: group.recent,
+      }
+    )
+  );
+};
+
+/** Money rounded to millionths of a dollar, as model spend is counted. */
+const dollars = (amount: number): number => Math.round(amount * 1e6) / 1e6;
+
+/**
+ * Cost per run, for each workflow with runs started in the window: what
+ * the model calls of those runs' lineages made in the window cost
+ * (`model_usage`, by the lineage's root and the workflow each call was
+ * made for: model-spend.ts, `spendKeysOf`), over them. A lineage whose
+ * root started before the window counts for nothing, so the cost and
+ * `costliest` name the same runs. The window rolls (the last
+ * `signalWindowDays` days), while model spend counts a UTC calendar
+ * month: the two don't match.
+ */
+const costSignals = async (
+  db: DrizzleD1Database,
+  from: Date,
+  runs: ReadonlyMap<string, Started>
+): Promise<SignalRow[]> => {
+  // Each workflow's total, and its costliest lineages, ranked in the
+  // query: never every lineage of the window in memory.
+  const rows = await db.all<{
+    workflow: string;
+    run: string;
+    cost: number;
+    total: number;
+  }>(sql`SELECT workflow, run, cost, total FROM (
+      SELECT ${modelUsage.workflowId} AS workflow, ${modelUsage.runId} AS run,
+        sum(${modelUsage.cost}) AS cost,
+        sum(sum(${modelUsage.cost})) OVER (PARTITION BY ${modelUsage.workflowId}) AS total,
+        row_number() OVER (PARTITION BY ${modelUsage.workflowId} ORDER BY sum(${modelUsage.cost}) DESC, ${modelUsage.runId}) AS place
+      FROM ${modelUsage}
+      INNER JOIN ${workflowResourceRuns} ON ${workflowResourceRuns.id} = ${modelUsage.runId}
+      WHERE ${modelUsage.createdAt} >= ${from.getTime()}
+        AND ${workflowResourceRuns.createdAt} >= ${from.getTime()}
+        AND ${modelUsage.workflowId} IS NOT NULL
+      GROUP BY ${modelUsage.workflowId}, ${modelUsage.runId}
+    ) WHERE place <= ${samples}`);
+  const costs = Map.groupBy(rows, ({ workflow }) => workflow);
+  return [...runs].map(([workflow, { name, runs: started }]) => {
+    const lineages = costs.get(workflow) ?? [];
+    const cost = lineages[0]?.total ?? 0;
+    return signalRow(
+      "cost_per_run",
+      { appId: "", workflowId: name, subject: "" },
+      dollars(cost / started),
+      {
+        runs: started,
+        cost: dollars(cost),
+        costliest: lineages.map(({ run, cost: amount }) => ({
+          run: runIdSchema.parse(run),
+          cost: dollars(amount),
+        })),
+      }
+    );
+  });
+};
+
 /**
  * Where corrections keep happening: each step's decisions answered since
  * `from`, where any was rejected, changing what the workflow proposed.
@@ -531,11 +715,21 @@ const computeSignals = async (
   totals: SignalTotals
 ): Promise<SignalRow[]> => {
   const db = drizzle(env.DB);
-  const [waiting, corrections] = await Promise.all([
+  const from = signalsFrom(now);
+  const runs = await runsSince(db, from);
+  const [waiting, failing, corrections, costs] = await Promise.all([
     waitingSignals(db, now),
-    correctionSignals(db, signalsFrom(now)),
+    failingSignals(db, from, runs),
+    correctionSignals(db, from),
+    costSignals(db, from, runs),
   ]);
-  return [...waiting, ...corrections, ...unansweredSignals(totals)];
+  return [
+    ...waiting,
+    ...failing,
+    ...corrections,
+    ...costs,
+    ...unansweredSignals(totals),
+  ];
 };
 
 /**

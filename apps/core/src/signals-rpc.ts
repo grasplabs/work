@@ -30,15 +30,13 @@ import { latestComputation, peopleSubject } from "./signals.ts";
 
 // Reading the improvement signals (signals.ts). Admins read every one
 // whole: they read the audit log and every run's details already. An
-// App's builders read that App's as they see its runs, where a run's
-// details are its person's and admins' (`seesDetails` in
-// workflows/runs.ts): counts, and the step names and error codes, which
-// are literals of the App's own code, added up; but no run's or
-// decision's ID and no person a decision waits for (`forBuilders`, and
-// `waitsFor`, which gives them each workflow's waits for people added up
-// instead of each person's). The
-// deployment's own signals (people's unanswered questions) stay with
-// admins. No evidence holds what a run read, returned or failed with.
+// App's builders read that App's, where a run's details are its person's
+// and admins': counts, and the step names and error codes, which are
+// literals of the App's own code, added up; but no run's or decision's ID
+// and no person a decision waits for (`forBuilders`, and `waitsFor`,
+// which gives them each workflow's waits for people added up instead of
+// each person's). Independent workflows' signals, of no App, and the
+// deployment's own (people's unanswered questions) stay with admins. No evidence holds what a run read, returned or failed with.
 // Every read is audited, never refused for it (the outbox keeps the
 // event).
 

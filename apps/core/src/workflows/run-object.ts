@@ -19,6 +19,20 @@ import type { EngineStatus } from "./runs.ts";
 import type { StepError } from "./sealed-isolate.ts";
 import type { RunModelCalls, SentCalls } from "./sealed-run.ts";
 
+/**
+ * A step name's task: its name up to the first `:`, `#` or `@`
+ * (`<task>:<kind>`, `<task>:task#ask`, `<task>:task@2`, sealed-steps.ts).
+ * A step of core's own (`$grasp:…`) has none.
+ */
+const stepTask = /^[A-Za-z][\w-]{0,63}(?=$|[:#@])/u;
+
+/** The task step `step` of a sealed build's run is of, if any. */
+const taskOfStep = (step: string): string | undefined =>
+  stepTask.exec(step)?.[0];
+
+/** The most records one page of the run's history holds (workerflow's). */
+const historyPage = 500;
+
 /** Whether the run's own table is there: a run removed keeps nothing. */
 const runIsThere = (sql: SqlStorage): boolean =>
   sql
@@ -559,8 +573,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     // Why it failed, from its own journal: kept on its row, so the code
     // outlives the engine's record of the run.
     const live = this.status();
-    const project =
-      type === "resource" ? projectResourceRun : projectCandidateRun;
     // A run marked stopped (`markStopped`) that fails before its
     // termination lands, its attempts refused from the stop on, ended
     // by the stop: cancelled, not failed. Unless
@@ -573,20 +585,23 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     const rolledBack =
       live !== undefined && "rollback" in live && live.rollback !== undefined;
     const stoppedEnd = marked && latest.status === "errored" && !rolledBack;
-    const status = stoppedEnd ? "terminated" : latest.status;
-    await project(
-      this.env,
-      latest.instanceId,
-      {
-        status,
-        at: latest.timestamp,
-        sequence: latest.sequence,
-        ...this.#compensationOf(latest.status),
-      },
-      live?.status === "errored" && !stoppedEnd
-        ? (live.error.code ?? null)
-        : null
-    );
+    const engine = {
+      status: stoppedEnd ? "terminated" : latest.status,
+      at: latest.timestamp,
+      sequence: latest.sequence,
+      ...this.#compensationOf(latest.status),
+    } as const;
+    const failed = live?.status === "errored" && !stoppedEnd;
+    const failureCode = failed ? (live.error.code ?? null) : null;
+    await (type === "resource"
+      ? projectResourceRun(
+          this.env,
+          latest.instanceId,
+          engine,
+          failureCode,
+          failed ? this.#failedTask() : null
+        )
+      : projectCandidateRun(this.env, latest.instanceId, engine, failureCode));
     // A page's pause or resume of it settles from where the engine has
     // the run now, and which controls it took, read together here from
     // its journal (resource-runs.ts).
@@ -604,6 +619,35 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     const run = this.instanceId();
     if (run !== undefined) {
       await this.#sharesReleased(run, marked);
+    }
+  }
+
+  /**
+   * The task whose step failed last in the run's own journal, as its row
+   * keeps it (`failed_task`): read once, as the run ends failed. None for
+   * a run no task's step failed in.
+   */
+  #failedTask(): string | null {
+    let task: string | null = null;
+    let after = 0;
+    for (;;) {
+      const page = this.history({ after, limit: historyPage });
+      if (page === undefined || page.records.length === 0) {
+        return task;
+      }
+      for (const record of page.records) {
+        after = record.eventId;
+        if (
+          !record.unreadable &&
+          record.type === "step_errored" &&
+          record.step !== null
+        ) {
+          task = taskOfStep(record.step.name) ?? task;
+        }
+      }
+      if (!page.more) {
+        return task;
+      }
     }
   }
 

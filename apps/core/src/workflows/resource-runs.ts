@@ -264,6 +264,7 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         accountRunId: sql<string | null>`${accountOfAdmitted(run)}`.as(
           "account"
         ),
+        failedTask: sql<null>`NULL`.as("failed_task"),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -1339,14 +1340,16 @@ const projectedOf = (
  * Makes run `id`'s row say where the engine says it is: a notification no
  * newer than the last the row took changes nothing, and an ended run never
  * changes again. Its end is audited with the change, once. A failed end
- * keeps the engine's error code (`failureCode`), which outlives the
- * engine's record of the run.
+ * keeps the engine's error code (`failureCode`), and the task whose step
+ * it failed at (`failedTask`), which outlive the engine's record of the
+ * run.
  */
 export const projectResourceRun = async (
   env: Env,
   id: string,
   engine: EngineStatus,
-  failureCode: string | null = null
+  failureCode: string | null = null,
+  failedTask: string | null = null
 ): Promise<void> => {
   const row = await runOf(env, id);
   if (row === undefined) {
@@ -1377,6 +1380,7 @@ export const projectResourceRun = async (
         ...(status === "failed" && failure !== null
           ? { failureCode: failure }
           : {}),
+        ...(status === "failed" && failedTask !== null ? { failedTask } : {}),
         ...(compensating === undefined ? {} : { compensation: compensating }),
       })
       .where(
