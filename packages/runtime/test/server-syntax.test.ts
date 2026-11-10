@@ -3,6 +3,9 @@ import { appMaxOperations } from "@grasp-os/shared/function-limits";
 import { describe, expect, test } from "vite-plus/test";
 
 import { emptyDefinition } from "../src/definition.ts";
+import { parseProgram } from "../src/oxc-parse.ts";
+import { declaredFunctionsIn } from "../src/server-modules.ts";
+import type { Declared } from "../src/server-modules.ts";
 import {
   generatedServerSources,
   serverFunctionsIn,
@@ -33,6 +36,24 @@ const declaration = (
     await ctx.db.query("tasks").withIndex("by_done", (q) => q.eq("done", done)).collect(),
 });
 `;
+
+/** A module of queries `list0`… up to `length` characters, and their names. */
+const moduleOf = (length: number): { source: string; names: string[] } => {
+  let source = `import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n`;
+  const names: string[] = [];
+  for (let index = 0; ; index += 1) {
+    const next = declaration(index);
+    if (source.length + next.length > length) {
+      return { source, names };
+    }
+    source += next;
+    names.push(`list${index}`);
+  }
+};
+/** What the parser itself reads of `source`, past any cache of reads. */
+const read = (source: string): [string, Declared][] => [
+  ...declaredFunctionsIn(parseProgram(source, "ts").program),
+];
 
 describe("the functions a server module's syntax declares", () => {
   test("are each `export const` of a builder, public or internal by its builder", () => {
@@ -107,26 +128,30 @@ export const sum = ${"a+".repeat(10_000)}a;
     ).toStrictEqual(serverFunctionsIn({ "server/tasks.ts": tasks }));
   });
 
-  test("are the same for a module as long as an App's file may be, whatever was read before", () => {
-    let large = `import { v } from "@grasp-os/sdk";\nimport { query } from "@server/_generated/server";\n`;
-    for (let index = 0; large.length < appLimits.fileLength; index += 1) {
-      large += declaration(index);
-    }
-    large = large.slice(0, large.lastIndexOf("export const"));
-    const each = [1, 2, 3].map(
-      () =>
-        Object.keys(
-          serverFunctionsIn({
-            "server/tasks.ts": tasks,
-            "server/large.ts": large,
-          })
-        ).length
+  test("are the same for a module as long as an App's file may be, whatever the parser read before", () => {
+    const largest = moduleOf(appLimits.fileLength);
+    const expected = largest.names.map((name): [string, Declared] => [
+      name,
+      { kind: "query", visibility: "public" },
+    ]);
+    const others = [0.85, 0.9, 0.95].map(
+      (share) => moduleOf(Math.floor(appLimits.fileLength * share)).source
     );
+    const reads = [
+      read(largest.source),
+      ...others.map((source) => read(source).length),
+      read(largest.source),
+      read(largest.source),
+    ];
     expect({
-      fits: large.length <= appLimits.fileLength,
-      same: new Set(each).size,
-      read: (each[0] ?? 0) > 100,
-    }).toStrictEqual({ fits: true, same: 1, read: true });
+      fits: largest.source.length <= appLimits.fileLength,
+      first: reads[0],
+      after: reads.slice(-2),
+    }).toStrictEqual({
+      fits: true,
+      first: expected,
+      after: [expected, expected],
+    });
   });
 
   test("are at most as many as an App may register, the same ones whatever order the modules come in", () => {
