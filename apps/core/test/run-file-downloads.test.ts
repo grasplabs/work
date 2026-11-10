@@ -115,7 +115,7 @@ const ranOnce = async (
     env,
     invoker ?? { type: "person", person: by.identity },
     id,
-    { version: 1, input: { doc: { id: handed.id } }, key: unique() },
+    { version: 1, args: { doc: { id: handed.id } }, key: unique() },
     undefined,
     undefined,
     undefined,
@@ -132,7 +132,7 @@ const ranOnce = async (
     },
     { timeout: 60_000, interval: 100 }
   );
-  const { status } = z.object({ status: z.string() }).parse(run.output);
+  const { status } = z.object({ status: z.string() }).parse(run.result);
   return { run: runId, file: status };
 };
 

@@ -85,7 +85,7 @@ const handedRun = async (by: Identity): Promise<string> => {
     env,
     { type: "person", person: by },
     workflow.id,
-    { version: 1, input: { doc: { id: handed.id } }, key: unique() },
+    { version: 1, args: { doc: { id: handed.id } }, key: unique() },
     undefined,
     undefined,
     undefined,
