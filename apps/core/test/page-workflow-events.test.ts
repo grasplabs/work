@@ -18,6 +18,7 @@ import { z } from "zod";
 import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
+import { applyVersionSchema } from "../src/app-schema.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
@@ -250,7 +251,13 @@ const granted = async (
  */
 const invoicesApp = async (
   actions: readonly string[][],
-  declares = jobEventsDeclared
+  declares = jobEventsDeclared,
+  /**
+   * Made current over a refused switch, as a database whose switch check
+   * was bypassed would have it: what the host's own checks of each send
+   * still hold to the bound version.
+   */
+  { forcedCurrent = false }: { forcedCurrent?: boolean } = {}
 ) => {
   const admin = await signedIn("admin");
   const builder = await signedIn("builder");
@@ -281,7 +288,25 @@ const invoicesApp = async (
     version: 1,
   });
   await seal(fixture);
-  await publishVersion(env, builder.acting, fixture.app, 1);
+  const switched = await outcome(
+    publishVersion(env, builder.acting, fixture.app, 1)
+  );
+  if (switched !== "ok") {
+    if (!forcedCurrent) {
+      throw new Error(`The switch was refused: ${switched}`);
+    }
+    // Its schema applied to its store, as a switch applies it, and then
+    // current.
+    await applyVersionSchema(
+      env,
+      builder.acting,
+      await loadRelease(env, fixture.app, 1),
+      null
+    );
+    await env.DB.prepare("UPDATE apps SET current_version = 1 WHERE id = ?")
+      .bind(fixture.app)
+      .run();
+  }
   const grants: string[] = [];
   for (const each of actions) {
     // oxlint-disable-next-line no-await-in-loop -- one grant after the other
@@ -295,6 +320,7 @@ const invoicesApp = async (
     app: fixture.app,
     workflow: workflow.id,
     contract,
+    switched,
     grants,
     reference: workflowReference(release, "review"),
   };
@@ -867,7 +893,7 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
     });
   });
 
-  it("never makes current an App version declaring an event of a type its binding's contract lets no page send, while a page's and a mutation's page-sendable event goes through", async () => {
+  it("refuses to make current an App version declaring an event of a type its binding's contract lets no page send, and refuses a page's send and a mutation's event of that type should one be current, so nothing reaches the run, while a page-sendable type goes through", async () => {
     // The binding's contract admits the timeout too, from no page: an
     // App's committed definition naming it as the event's type.
     const timeoutDeclared = contractOf({
@@ -880,7 +906,9 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
       listens: { job: ["jobEvents"] },
     });
     const [forged, sendable] = await Promise.all([
-      outcome(invoicesApp([["start"], ["send"]], timeoutDeclared)),
+      invoicesApp([["start"], ["send"]], timeoutDeclared, {
+        forcedCurrent: true,
+      }),
       invoicesApp([["start"], ["send"]]),
     ]);
     /** What a page's send and a mutation's `ctx.sendEvent` each come to. */
@@ -941,17 +969,32 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
         runs: { pageRun, mutationRun },
       };
     };
+    const refused = await sentBy(forged);
     const taken = await sentBy(sendable);
     expect({
-      forged,
+      switched: forged.switched,
+      refused: { ...refused, runs: undefined },
+      refusedRuns: [
+        await liveStatus(refused.runs.pageRun),
+        await liveStatus(refused.runs.mutationRun),
+      ],
       taken: { ...taken, runs: undefined },
       takenRuns: [
         await statusOf(taken.runs.pageRun, "complete"),
         await statusOf(taken.runs.mutationRun, "complete"),
       ],
     }).toStrictEqual({
-      // Its version is never current, so no page or mutation of it sends.
-      forged: "workflow.app_binding_contract_changed",
+      switched: "workflow.app_binding_contract_changed",
+      // Refused before the run's inbox took anything; the mutation
+      // stands, its event settled undeliverable.
+      refused: {
+        page: "workflow.event_invalid",
+        committed: null,
+        delivered: "workflow.event_invalid",
+        sentToRuns: 0,
+        runs: undefined,
+      },
+      refusedRuns: ["waiting", "waiting"],
       taken: {
         page: "sent",
         committed: null,

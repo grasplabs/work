@@ -2,7 +2,11 @@ import type {
   AppDefinition,
   DefinedWorkflowBinding,
 } from "@grasp-os/runtime/definition";
-import { declaredPermission, sameEventContract } from "@grasp-os/runtime/host";
+import {
+  declaredPermission,
+  declaredPermissions,
+  sameEventContract,
+} from "@grasp-os/runtime/host";
 import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { App } from "@grasp-os/shared/apps";
@@ -112,8 +116,11 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   again after one that landed binds nothing twice.
 // - The contract changed between the draft and the switch (a declaration
 //   committed by hand, a catalog contract the version no longer resolves):
-//   each workflow version the release seals is compared with what it
-//   declares as the switch is checked (`workflow.app_binding_contract_changed`).
+//   each workflow version the release seals, and the binding an alias it
+//   declares keeps where it seals none, is compared with what it declares
+//   as the switch is checked (`workflow.app_binding_contract_changed`).
+//   The roles are checked again once its schema applied, right before
+//   the batch.
 // - A rollback: making an older version current binds what its release
 //   sealed, checked as above, so its pages and its starts name the same
 //   versions again.
@@ -343,14 +350,26 @@ const requireMayBind = async (
 };
 
 /**
+ * What making an App version current does to its workflow bindings: the
+ * bindings it makes (`changes`), and what every alias it declares binds
+ * as it was checked (`held`, an active binding's ID, or none), which the
+ * switch requires still so.
+ */
+export interface BindingSwitch {
+  readonly changes: readonly BindingChange[];
+  readonly held: readonly { readonly alias: string; readonly id?: string }[];
+}
+
+/**
  * What making an App version current binds (see the header), for `by`:
  * each workflow version its release (`release`) seals where App `app`
  * binds another now. Each it binds must be one `by` may bind, and, for one
  * the version recorded (`recorded`, from its definition), one its author
  * (`author`) still may (`workflow.app_version_binding_unavailable`
  * otherwise); Grasp staff bind none (`role.forbidden`). Checked first, so
- * a contract is compared only for a workflow they may read. Then every
- * version it seals must have the contract it declares
+ * a contract is compared only for a workflow they may read. Then what
+ * every alias it declares binds once it is current, sealed or bound now,
+ * must have the contract it declares
  * (`workflow.app_binding_contract_changed` otherwise).
  */
 export const versionBindingChanges = async (
@@ -365,7 +384,7 @@ export const versionBindingChanges = async (
     readonly recorded: readonly DefinedWorkflowBinding[];
   },
   release: Pick<Release, "app" | "workflows">
-): Promise<BindingChange[]> => {
+): Promise<BindingSwitch> => {
   const active = await drizzle(env.DB)
     .select({
       id: appWorkflowBindings.id,
@@ -430,25 +449,35 @@ export const versionBindingChanges = async (
       await requireMayBind(env, authorNow, change);
     }
   }
-  for (const { alias, pinned } of release.workflows) {
-    const declared = declaredPermission(release.app, alias, "workflows");
+  const declared = declaredPermissions(release.app, "workflows");
+  for (const declaration of declared) {
+    // What it binds once current: what its release sealed, otherwise
+    // what the App binds now, which the switch leaves.
+    const bound =
+      release.workflows.find(({ alias }) => alias === declaration.alias)
+        ?.pinned ?? active.find(({ alias }) => alias === declaration.alias);
+    if (bound === undefined) {
+      continue;
+    }
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const bound = await versionEventContract(
+    const contract = await versionEventContract(
       env,
-      pinned.workflowId,
-      pinned.version
+      bound.workflowId,
+      bound.version
     );
-    if (
-      declared === undefined ||
-      !bound.complete ||
-      !sameEventContract(declared, bound)
-    ) {
+    if (!contract.complete || !sameEventContract(declaration, contract)) {
       throw workflowResourceErrors.create(
         "workflow.app_binding_contract_changed"
       );
     }
   }
-  return changes;
+  return {
+    changes,
+    held: declared.map(({ alias }) => {
+      const id = active.find((binding) => binding.alias === alias)?.id;
+      return id === undefined ? { alias } : { alias, id };
+    }),
+  };
 };
 
 /** That `alias` of App `app` binds `id` now, or nothing for none, as SQL. */
@@ -462,25 +491,23 @@ const heldSql = (app: AppId, alias: string, id?: string): SQL =>
           AND held.alias = ${alias} AND held.status = 'active')`;
 
 /**
- * That every change `changes` makes still holds, as SQL: what the
- * statement making the App version current requires, so a deletion or a
- * direct rebind landing first refuses the whole switch. Each workflow
- * version it binds is live and published, and each alias still binds what
- * it was checked against.
+ * That the switch `checked` still holds, as SQL: what the statement making
+ * the App version current requires, so a deletion or a direct rebind
+ * landing first refuses the whole switch. Each workflow version it binds
+ * is live and published, and each alias it declares still binds what it
+ * was checked against.
  */
-export const bindableSql = (
-  app: AppId,
-  changes: readonly BindingChange[]
-): SQL =>
+export const bindableSql = (app: AppId, checked: BindingSwitch): SQL =>
   and(
     sql`1`,
-    ...changes.flatMap(({ alias, workflowId, version, replacing }) => [
-      sql`EXISTS (SELECT 1 FROM workflow_resource_versions AS bound
+    ...checked.changes.map(
+      ({ workflowId, version }) =>
+        sql`EXISTS (SELECT 1 FROM workflow_resource_versions AS bound
           JOIN workflow_resources AS live ON live.id = bound.workflow_resource_id
           WHERE live.id = ${workflowId} AND live.deleted_at IS NULL
-            AND bound.version = ${version})`,
-      heldSql(app, alias, replacing?.id),
-    ])
+            AND bound.version = ${version})`
+    ),
+    ...checked.held.map(({ alias, id }) => heldSql(app, alias, id))
   ) ?? sql`1`;
 
 /**

@@ -1704,7 +1704,9 @@ export const makeCurrent = async (
       { author: row.authorId, recorded: defined.workflowBindings ?? [] },
       release
     );
-  const rebinding = await bindingsOf();
+  // Refused here before the store changes; checked again once it has
+  // (below), as roles may have changed while its schema applied.
+  await bindingsOf();
   // Last before the batch, after every gate above, so no refused gate
   // leaves the store changed: the version's schema applied to its store,
   // its migrations with it, all or nothing (app-schema.ts). The store and
@@ -1715,6 +1717,15 @@ export const makeCurrent = async (
   // that doesn't make it current puts the current version's schema back,
   // or, where it can't, says so (`unfinishedPublish`).
   const applied = await applyVersionSchema(env, by, release, previous);
+  let rebinding: Awaited<ReturnType<typeof bindingsOf>>;
+  try {
+    rebinding = await bindingsOf();
+  } catch (error) {
+    if (applied !== null) {
+      await unfinishedPublish(env, by, appId, number, applied.appliedAt);
+    }
+    throw error;
+  }
   const event = createAuditEvent(
     changeEntry(by, "app.version.current", appId, {
       version: number,
@@ -1773,7 +1784,7 @@ export const makeCurrent = async (
             env,
             by,
             { app: appId, appVersion: number },
-            rebinding,
+            rebinding.changes,
             storedEvent(event.id)
           ),
           ...madeCurrent(env, by, {
@@ -1818,7 +1829,7 @@ export const makeCurrent = async (
       .get();
     if (ours !== undefined) {
       // The try whose answer was lost may have told no page either.
-      if (rebinding.length > 0) {
+      if (rebinding.changes.length > 0) {
         waitUntil(tellBindingChanged(env, appId));
       }
       waitUntil(versionMadeCurrent(env, appId));
@@ -1841,7 +1852,7 @@ export const makeCurrent = async (
     // What is left is a conflict: the base moved.
     throw appErrors.create("app.conflict");
   }
-  if (rebinding.length > 0) {
+  if (rebinding.changes.length > 0) {
     waitUntil(tellBindingChanged(env, appId));
   }
   // The pages open on the App hear of it (spec 11.5): their pages show

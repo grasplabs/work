@@ -4,7 +4,11 @@ import {
   declaredPermissions,
   descriptorFromText,
 } from "@grasp-os/runtime/host";
-import type { AppManifest, RowRule } from "@grasp-os/runtime/host";
+import type {
+  AppManifest,
+  RowRule,
+  WorkflowBindingExtras,
+} from "@grasp-os/runtime/host";
 import type {
   ReviewChange,
   TableRowRules,
@@ -19,7 +23,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { definitionPlan } from "./app-definition.ts";
-import { sealedEvidence, versionManifest } from "./app-releases.ts";
+import {
+  isSealed,
+  loadRelease,
+  sealedEvidence,
+  versionManifest,
+} from "./app-releases.ts";
 import {
   appFor,
   findVersion,
@@ -29,10 +38,8 @@ import {
 } from "./apps.ts";
 import type { VersionRow } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
-import {
-  appWorkflowBindings,
-  workflowResourceVersions,
-} from "./db/core/schema.ts";
+import { sealedWorkflowPins } from "./bound-workflows.ts";
+import { workflowResourceVersions } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
@@ -52,56 +59,50 @@ import { takesFile } from "./workflows/start-files.ts";
 const boundContractSchema = z.object({ input: z.json() });
 
 /**
- * Whether any workflow App `app` binds under one of `aliases` takes a file
- * in its input, as the bound version's contract says.
+ * Whether any workflow version `proposed` of App `app` binds once current
+ * takes a file in its input, as that version's contract says: what its
+ * release seals, sealed or not (bound-workflows.ts, `sealedWorkflowPins`),
+ * so a binding the version records counts as it will bind.
  */
 const boundTakesFile = async (
   env: Env,
   app: AppId,
-  aliases: readonly string[]
+  proposed: { version: number },
+  manifest: AppManifest
 ): Promise<boolean> => {
-  if (aliases.length === 0) {
-    return false;
+  let pins: readonly WorkflowBindingExtras[];
+  if (await isSealed(env, app, proposed.version)) {
+    ({ workflows: pins } = await loadRelease(env, app, proposed.version));
+  } else {
+    const { definition } = await readStored(
+      await findVersion(env, app, proposed.version)
+    );
+    pins = await sealedWorkflowPins(env, app, manifest, definition);
   }
-  // The App's active bindings, whichever aliases they are under, filtered
-  // here: a list of aliases as query parameters would pass D1's limit of
-  // 100 for an App with that many.
-  const named = new Set(aliases);
-  const active = await drizzle(env.DB)
-    .select({
-      alias: appWorkflowBindings.alias,
-      contract: workflowResourceVersions.contract,
-    })
-    .from(appWorkflowBindings)
-    .innerJoin(
-      workflowResourceVersions,
-      and(
-        eq(
-          workflowResourceVersions.workflowResourceId,
-          appWorkflowBindings.workflowResourceId
-        ),
-        eq(
-          workflowResourceVersions.version,
-          appWorkflowBindings.workflowResourceVersion
+  for (const { pinned } of pins) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    const row = await drizzle(env.DB)
+      .select({ contract: workflowResourceVersions.contract })
+      .from(workflowResourceVersions)
+      .where(
+        and(
+          eq(workflowResourceVersions.workflowResourceId, pinned.workflowId),
+          eq(workflowResourceVersions.version, pinned.version)
         )
       )
-    )
-    .where(
-      and(
-        eq(appWorkflowBindings.appId, app),
-        eq(appWorkflowBindings.status, "active")
-      )
-    );
-  return active.some(({ alias, contract }) => {
-    if (!named.has(alias) || contract === null) {
-      return false;
-    }
-    const parsed = boundContractSchema.safeParse(JSON.parse(contract));
-    return (
-      parsed.success &&
+      .get();
+    const parsed =
+      row?.contract === null || row === undefined
+        ? undefined
+        : boundContractSchema.safeParse(JSON.parse(row.contract));
+    if (
+      parsed?.success === true &&
       takesFile(descriptorFromText(JSON.stringify(parsed.data.input)))
-    );
-  });
+    ) {
+      return true;
+    }
+  }
+  return false;
 };
 
 /**
@@ -188,12 +189,8 @@ const handsFilesOf = async (
   }
   // What a start hands is copied by the bound workflow's own input
   // (`handFiles`), whatever the App declares for its alias: read from
-  // the version each alias is bound to.
-  return await boundTakesFile(
-    env,
-    app,
-    workflows.map(({ alias }) => alias)
-  );
+  // the version each alias is bound to once this version is current.
+  return await boundTakesFile(env, app, proposed, manifest);
 };
 
 /**

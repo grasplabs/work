@@ -217,6 +217,56 @@ describe(
       });
     });
 
+    it("refuses a rollback to a version that sealed no binding for an alias it declares, while the App binds a version of another contract there", async () => {
+      const [admin, builder] = await Promise.all([
+        signedIn("admin"),
+        signedIn("builder"),
+      ]);
+      const flow = await threeVersions(admin, builder);
+      const { id: app } = await builder.api.apps.create({ name: "Requests" });
+      // Released before anything is bound: its release seals no binding.
+      const first = await release(
+        builder,
+        app,
+        requestsApp("review", jobEventsDeclared)
+      );
+      await builder.api.workflowResources.bindToApp(flow, {
+        app,
+        alias: "review",
+        version: 1,
+      });
+      const chatId = await appChat(builder, app);
+      await builder.api.chats.defineDraft(chatId, app, {
+        op: "bindWorkflow",
+        alias: "review",
+        workflow: flow,
+        version: 2,
+      });
+      const second = await builder.api.chats.proposeDraft(
+        chatId,
+        app,
+        "Bind version 2"
+      );
+      await builder.api.apps.versions.setCurrent(app, second);
+
+      const rolledBack = await outcome(
+        builder.api.apps.versions.setCurrent(app, first)
+      );
+      const { currentVersion } = await builder.api.apps.get(app);
+
+      expect({
+        sealedFirst: await sealedOf(app, first),
+        rolledBack,
+        currentVersion,
+        bound: await boundOf(builder, app),
+      }).toStrictEqual({
+        sealedFirst: {},
+        rolledBack: "workflow.app_binding_contract_changed",
+        currentVersion: second,
+        bound: { review: { workflowId: flow, version: 2 } },
+      });
+    });
+
     it("keeps a rebind of the same contract made since, when a later version only carries the binding its parent recorded, and tells a draft binding that recorded version again to bind it directly", async () => {
       const [admin, builder] = await Promise.all([
         signedIn("admin"),
