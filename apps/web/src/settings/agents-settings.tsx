@@ -174,7 +174,9 @@ const AgentPanel = ({
           job: agent.job,
           instructions: agent.instructions,
         }}
-        key={`${agent.id}:${agent.changedAt ?? ""}`}
+        // By the agent alone: what is typed and not yet saved stays while
+        // the agent is paused or its reach changes.
+        key={agent.id}
         onSave={async (typed) => {
           await change(async (session) => {
             await session.connections.changeAgent(agent.id, {
@@ -356,7 +358,8 @@ export const AgentsSettings = ({
           ))}
         </ul>
       </SettingsSection>
-      <ErrorText>{failure}</ErrorText>
+      {/* Under the list only while nothing is open over it. */}
+      {opened === null ? <ErrorText>{failure}</ErrorText> : null}
       <Sheet
         onOpenChange={(next) => {
           if (!next) {
@@ -411,6 +414,13 @@ export const AgentsSettings = ({
               />
             </>
           ) : null}
+          {/* Why a change wasn't taken, where it was made: the page under
+              the sheet is covered while it is open. */}
+          {failure === undefined ? null : (
+            <div className="bg-background sticky bottom-0 border-t px-5 py-3">
+              <ErrorText>{failure}</ErrorText>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
     </>

@@ -71,6 +71,10 @@ const fakeConnections = () => {
     makeAgent: async (input: AgentInput): Promise<Agent> => {
       await Promise.resolve();
       asked.push(["make", input]);
+      // As core refuses a name another agent has.
+      if (agents.some(({ name }) => name === input.name)) {
+        throw new Error("Another agent already has that name.");
+      }
       const made: Agent = {
         id: `agent-${agents.length}`,
         ...input,
@@ -382,5 +386,29 @@ describe("Settings › Agents", () => {
     expect(field("Name").disabled).toBeTruthy();
     expect(button("Save").disabled).toBeTruthy();
     expect(asked).toStrictEqual([]);
+  });
+
+  it("says why an agent wasn't made in the sheet it was typed in", async () => {
+    const { connections } = fakeConnections();
+    await shown(connections);
+    await press(button("New agent"));
+    await set(field("Name"), "Stephen", "input");
+    await press(button("Make agent"));
+    const sheet = document.querySelector('[role="dialog"]');
+    expect(sheet?.textContent).toContain(
+      "Another agent already has that name."
+    );
+    // Still open, with what was typed.
+    expect(field("Name").value).toBe("Stephen");
+  });
+
+  it("keeps what is typed and not yet saved while the agent is paused", async () => {
+    const { connections, asked } = fakeConnections();
+    await shown(connections);
+    await madeClaire();
+    await set(field("Instructions"), "A draft, not saved.", "input");
+    await press(toggle("Claire is on"));
+    expect(asked.at(-1)).toStrictEqual(["paused", "agent-1", true]);
+    expect(field("Instructions").value).toBe("A draft, not saved.");
   });
 });
