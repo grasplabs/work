@@ -692,13 +692,13 @@ describe("the on-prem R2 service", () => {
     }
   });
 
-  it("keeps the new object, and removes the old one's file, when a crash comes after a put replaced it but before its file was removed", async () => {
+  it("keeps the new object, and removes the old one's file at the next start, when workerd is killed after a put answered while the old file couldn't be removed", async () => {
     const disk = newDisk();
     const first = await serve(disk);
     await first.run([
       { op: "put", bucket: "FILES", key: "k", size: largeSize },
     ]);
-    // Its removal can't finish before workerd dies.
+    // The old file can't be removed, so it's still there when workerd dies.
     const oldDir = versionDirOf(disk.files, largeSize);
     setWritable([oldDir], false);
     await first.run([
