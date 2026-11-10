@@ -3,6 +3,7 @@ import { z } from "zod";
 import { METER_PURPOSES } from "./admin/org-record.ts";
 import { identifierMaxLength } from "./identifier.ts";
 import { interviewPhases, personStates } from "./interview-links.ts";
+import { onboardingFlowSchema } from "./onboarding-flow.ts";
 import { staffWorksSchema } from "./onboarding-staff.ts";
 import {
   agreementsSchema,
@@ -374,6 +375,14 @@ export const adminSnapshotSchema = z.object({
     changed: z.boolean(),
     suggested: setupReadSchema,
   }),
+  /**
+   * How much onboarding the company goes through, and whether staff set
+   * it. Absent from a core that keeps no flow yet: it goes through all of
+   * it.
+   */
+  flow: z
+    .object({ flow: onboardingFlowSchema, changed: z.boolean() })
+    .optional(),
   kickoff: z
     .object({
       at: isoTime,

@@ -523,8 +523,8 @@ const ordered = (value: unknown, declared = false): unknown => {
 
 /**
  * `definition` as its text holds it: every descriptor in its compact
- * form, and no `functions` while it gives none, so a definition from
- * before functions had IDs keeps its text, and its hash.
+ * form, and no `functions` or `workflowBindings` while it has none, so
+ * an App without them has one text, and one hash.
  */
 const compactForm = ({
   functions,

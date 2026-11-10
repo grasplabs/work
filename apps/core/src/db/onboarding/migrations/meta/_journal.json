@@ -232,6 +232,13 @@
       "when": 1794053952015,
       "tag": "0032_silky_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1794324863345,
+      "tag": "0033_nervous_karma",
+      "breakpoints": true
     }
   ]
 }

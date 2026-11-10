@@ -362,19 +362,6 @@ export const listBlueprints = async (
 };
 
 /**
- * Whether `version` of the App `app` is one an admin approved
- * (`madeCurrent`): approved (1), or from before approvals (null) and
- * current in its App. A copy's first version is approved only then, so a
- * blueprint of code no admin approved doesn't pass as approved in its
- * copies.
- */
-const approvedVersion = (
-  app: { currentVersion: number | null },
-  { version, approved }: Pick<VersionRow, "version" | "approved">
-): boolean =>
-  approved === 1 || (approved === null && app.currentVersion === version);
-
-/**
  * Marks a version as a blueprint: its tree, its App's name and
  * description, and what its App asks for or was given that each App
  * created from it asks for too (`declarableOf`). Marking it again changes
@@ -422,7 +409,10 @@ export const markBlueprint = async (
         definition: definitionText(definition),
         appId: found.id,
         version: row.version,
-        approved: approvedVersion(found, row),
+        // A copy's first version is approved only when this one was
+        // (`madeCurrent`), so code no admin approved doesn't pass as
+        // approved in its copies.
+        approved: row.approved === 1,
         permissions: await declarableOf(env, found.id),
         markedBy: by.userId,
         markedAt: new Date(),

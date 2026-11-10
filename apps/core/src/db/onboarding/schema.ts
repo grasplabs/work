@@ -55,6 +55,11 @@ export const onboarding = sqliteTable(
      * confirms the organization. `null` while nothing waits.
      */
     unconfirmed: text(),
+    /**
+     * How much onboarding the company goes through, as JSON
+     * (`onboardingFlowSchema`), or `null` while it goes through all of it.
+     */
+    flow: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );

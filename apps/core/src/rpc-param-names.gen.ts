@@ -13,6 +13,7 @@ export const rpcParamNames: ParamNames = {
     "list": [],
     "remove": ["provider"],
     "setModels": ["choice"],
+    "setSource": ["source"],
     "test": ["provider","model"],
   },
   "AppBlueprintsRpc": {

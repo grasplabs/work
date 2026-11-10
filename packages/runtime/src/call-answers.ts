@@ -1,3 +1,4 @@
+import { errorCategories } from "@grasp-os/shared/error-categories";
 import type { Json } from "@grasp-os/shared/json";
 
 import { GraspError } from "./client-error.ts";
@@ -37,15 +38,7 @@ const refusalCategory = (code: string): ErrorCategory => {
   return "operational";
 };
 
-const categories: ReadonlySet<unknown> = new Set([
-  "source",
-  "contract",
-  "domain",
-  "authorization",
-  "operational",
-  "uncertain",
-  "safety",
-]);
+const categories: ReadonlySet<unknown> = new Set(errorCategories);
 
 const isCategory = (value: unknown): value is ErrorCategory =>
   categories.has(value);

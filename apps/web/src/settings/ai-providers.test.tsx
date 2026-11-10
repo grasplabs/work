@@ -91,6 +91,15 @@ const fakeAiProviders = ({
     list: async (): Promise<AiProvidersListing> => {
       await Promise.resolve();
       return {
+        source: "own",
+        grasp: {
+          available: false,
+          model: {
+            model: "anthropic/claude-sonnet-5-5",
+            name: "Claude Sonnet 5.5",
+          },
+          whereItRuns: "Anthropic, United States",
+        },
         providers,
         offered: organizationProviderIds.map((provider) => ({
           provider,
