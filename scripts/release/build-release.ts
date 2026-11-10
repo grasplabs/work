@@ -13,10 +13,12 @@
  *
  * Usage: vp run release:build --out <dir> [--release-id <id>]
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 
 import { z } from "zod";
@@ -43,8 +45,35 @@ const FRONTEND = "web";
 const run = (command: string, args: string[], cwd = ROOT): string =>
   execFileSync(command, args, { cwd, encoding: "utf-8" }).trim();
 
-const runVisibly = (command: string, args: string[], cwd = ROOT): void => {
-  execFileSync(command, args, { cwd, stdio: "inherit" });
+/**
+ * Runs a build beside others, printing each line as it comes, prefixed
+ * with whose it is (`[core] `), so a build that fails early or hangs
+ * shows where, and two builds' lines stay told apart.
+ */
+const runBeside = async (
+  name: string,
+  command: string,
+  args: string[],
+  cwd = ROOT
+): Promise<void> => {
+  const label = `${path.relative(ROOT, cwd) || "."}$ ${command} ${args.join(" ")}`;
+  console.info(`[${name}] ${label}`);
+  const child = spawn(command, args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  for (const stream of [child.stdout, child.stderr]) {
+    createInterface({ input: stream }).on("line", (line) => {
+      console.info(`[${name}] ${line}`);
+    });
+  }
+  // Rejects with the spawn's error, if it couldn't start.
+  await once(child, "close");
+  if (child.exitCode !== 0) {
+    throw new Error(
+      `[${name}] ${label} exited with ${String(child.exitCode ?? child.signalCode)}`
+    );
+  }
 };
 
 const { values: args } = parseArgs({
@@ -110,9 +139,14 @@ const buildWorker = async (
     parseJsonc(readFileSync(configFile, "utf-8"))
   );
   // Each app's own build step.
-  runVisibly("vp", ["run", "build"], dir);
+  await runBeside(app, "vp", ["run", "build"], dir);
   const outDir = path.join(bundleDir, app);
-  runVisibly("wrangler", ["deploy", "--dry-run", "--outdir", outDir], dir);
+  await runBeside(
+    app,
+    "wrangler",
+    ["deploy", "--dry-run", "--outdir", outDir],
+    dir
+  );
   return {
     key: app,
     config,
@@ -149,20 +183,36 @@ console.info(`Building release ${releaseId} from ${commit}`);
 // check: an earlier release in it stays until this one is built.
 assertReleaseDir(out);
 
-// Before core's build, which adds the compiled page runtime to its output.
-runVisibly("vp", ["run", "--filter", `@grasp-os/${FRONTEND}`, "build"]);
-
 // Collecting reads every bundle into memory, so the dry-run output can go.
+// The Workers build at once, each on its own CPUs: one after another, with
+// the frontend, they took 80 to 100 s of the release job (November 2026).
+// Only core waits, for the frontend it serves: its build adds the compiled
+// page runtime to the frontend's output. Every build ends before the
+// bundles go and the first failure is thrown: none is left running, still
+// writing into them or printing, behind a failed one.
 const buildWorkers = async (): Promise<WorkerBuild[]> => {
   const bundleDir = mkdtempSync(path.join(tmpdir(), "grasp-os-release-"));
   try {
-    const built: WorkerBuild[] = [];
-    // One at a time: each build prints as it goes.
-    for (const app of RELEASED_APPS) {
-      // oxlint-disable-next-line no-await-in-loop -- builds run in turn
-      built.push(await buildWorker(app, bundleDir));
+    const builds = await Promise.allSettled(
+      RELEASED_APPS.map(async (app) => {
+        if (app === "core") {
+          await runBeside(FRONTEND, "vp", [
+            "run",
+            "--filter",
+            `@grasp-os/${FRONTEND}`,
+            "build",
+          ]);
+        }
+        return await buildWorker(app, bundleDir);
+      })
+    );
+    const failed = builds.find((build) => build.status === "rejected");
+    if (failed !== undefined) {
+      throw failed.reason;
     }
-    return built;
+    return builds.flatMap((build) =>
+      build.status === "fulfilled" ? [build.value] : []
+    );
   } finally {
     rmSync(bundleDir, { force: true, recursive: true });
   }
