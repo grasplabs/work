@@ -335,9 +335,9 @@ export interface Invocation {
   /**
    * Keeps the evidence of a use refused at the host's admission
    * (`UseRefusal`): the first of a caller's call, nested calls included,
-   * before App code hears of it. Never throws: the refusal stands, whatever
-   * came of keeping it. None where nothing is kept (a draft's preview, an
-   * App's tests).
+   * before App code hears of it. Rejects when it couldn't be kept, which
+   * the host logs: the refusal stands, whatever came of keeping it. None
+   * where nothing is kept (a draft's preview, an App's tests).
    */
   readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
   /**
@@ -453,11 +453,15 @@ export interface UseRefusal {
 
 /**
  * What tells one refused use from another (`Invocation.refusalsKept`):
- * every field core's own, a name only one of the sealed release's, so a
- * subscription keeps no more of them than its release has uses.
+ * the version of the App it was refused in, as a subscription outlives a
+ * publish and the next version's refusal is evidence of its own, and
+ * every field of the refusal, all core's own, a name only one of the
+ * sealed release's: so a subscription keeps no more of them than its
+ * versions have uses.
  */
-const refusalKey = (refusal: UseRefusal): string =>
+const refusalKey = (version: number, refusal: UseRefusal): string =>
   JSON.stringify([
+    version,
     refusal.function,
     refusal.use.kind,
     refusal.use.name,
@@ -2904,19 +2908,20 @@ const keepEvidence = async (
     dataErrors.codeOf(error) ??
     "resource.not_allowed";
   const refusal: UseRefusal = { function: fn.path, ...refused, errorCode };
-  const { refusalsKept } = run.invocation;
-  if (refusalsKept !== undefined) {
-    const key = refusalKey(refusal);
-    if (refusalsKept.has(key)) {
-      return;
-    }
-    refusalsKept.add(key);
+  const { refusalsKept, consumer } = run.invocation;
+  const key = refusalKey(consumer.resourceVersion, refusal);
+  if (refusalsKept?.has(key) === true) {
+    return;
   }
+  // Taken before the write, so a read again meanwhile doesn't write it
+  // twice; given back if the write fails, so a later read keeps it.
+  refusalsKept?.add(key);
   run.evidence.kept = true;
   const keeping = (async () => {
     try {
       await keep(refusal);
     } catch (keepError) {
+      refusalsKept?.delete(key);
       log.error("app.use.audit_failed", {
         requestId: run.invocation.requestId,
         errorCode,
