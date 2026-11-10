@@ -75,6 +75,28 @@ export interface AskOptions {
 
 const noOptions: AskOptions = {};
 
+/** A new chat made for a question that then failed to send. */
+export interface UnsentChat {
+  id: string;
+  question: string;
+  /** The agent it was made with; none named: the company's first. */
+  agentId: string | undefined;
+}
+
+/**
+ * The chat asking `question` again goes into: the one made for it when
+ * it failed to send, while the same agent is still picked; else none, and
+ * a new chat is made with the agent picked now.
+ */
+export const unsentChatFor = (
+  unsent: UnsentChat | null,
+  question: string,
+  agentId?: string
+): string | undefined =>
+  unsent?.question === question && unsent.agentId === agentId
+    ? unsent.id
+    : undefined;
+
 /**
  * What the box to ask in needs: the text, model and effort, and asking in
  * `chatId`, or in a new chat named after the question.
@@ -120,7 +142,9 @@ export const useAsk = (
   const sending = useRef(false);
   // A new chat made for a question that then failed to send: asking the
   // same question again asks in it, rather than making another.
-  const unsent = useRef<{ id: string; question: string } | null>(null);
+  // Only for the agent it was made with: picking another one before
+  // asking again makes a new chat, with that agent.
+  const unsent = useRef<UnsentChat | null>(null);
   const attach = (chosen: readonly File[]): void => {
     const problems = chosen.flatMap((file) => problemOf(file) ?? []);
     const added = chosen
@@ -162,9 +186,7 @@ export const useAsk = (
     sending.current = true;
     let created: string | undefined;
     const sent = await run(async (session) => {
-      let id =
-        chatId ??
-        (unsent.current?.question === question ? unsent.current.id : undefined);
+      let id = chatId ?? unsentChatFor(unsent.current, question, agentId);
       if (id === undefined && chatFor !== undefined) {
         id = await chatFor(session);
       }
@@ -203,7 +225,7 @@ export const useAsk = (
       // The box keeps the question and says why it wasn't sent; a new chat
       // made for it waits to be asked in again, and shows in Chat's list.
       if (created !== undefined) {
-        unsent.current = { id: created, question };
+        unsent.current = { id: created, question, agentId };
         await router.invalidate();
       }
       return;
