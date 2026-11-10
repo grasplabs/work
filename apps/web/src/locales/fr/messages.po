@@ -2205,10 +2205,6 @@ msgstr "Une App"
 msgid "An App that… (what it shows, and for whom)"
 msgstr "Une App qui… (ce qu'elle montre, et pour qui)"
 
-#: src/apps/app-settings.tsx
-msgid "An App whose data was stored before this version of Grasp can’t read it any more: reset it, then publish again. Any other App’s data only an admin resets."
-msgstr "Une App dont les données ont été enregistrées avant cette version de Grasp ne peut plus les lire : réinitialisez-les, puis publiez de nouveau. Seul un administrateur réinitialise les données de toute autre App."
-
 #: src/apps/app-status.tsx
 msgid "An archived App is kept as it is and goes offline: nobody opens its pages, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "Une application archivée est conservée telle quelle et passe hors ligne : personne n’ouvre ses pages, ses déclencheurs s’arrêtent et ses exécutions inachevées sont annulées. Un concepteur peut la restaurer plus tard, en brouillon."
@@ -9046,10 +9042,6 @@ msgstr "Seul un administrateur crée une collection pour tout le monde ou pour d
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 msgstr "Seul un administrateur réinitialise les données d'une App : tous les enregistrements disparaissent définitivement et sa version actuelle repart sans enregistrements."
 
-#: src/apps/app-reset.tsx
-msgid "Only for data stored before this version of Grasp, which can’t be read any more. Every record it holds and every file in them is gone for good, and its current version runs again with no records."
-msgstr "Uniquement pour les données enregistrées avant cette version de Grasp, qui ne peuvent plus être lues. Tous ses enregistrements et tous les fichiers qu'ils contiennent disparaissent définitivement, et sa version actuelle repart sans enregistrements."
-
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Seulement les prises de parole surlignées"
@@ -10608,20 +10600,12 @@ msgid "Reset {name}’s data?"
 msgstr "Réinitialiser les données de {name} ?"
 
 #: src/apps/app-reset.tsx
-msgid "Reset {name}’s old data?"
-msgstr "Réinitialiser les anciennes données de {name} ?"
-
-#: src/apps/app-reset.tsx
 msgid "Reset data"
 msgstr "Réinitialiser les données"
 
 #: src/apps/app-reset.tsx
 msgid "Reset for good"
 msgstr "Réinitialiser définitivement"
-
-#: src/apps/app-reset.tsx
-msgid "Reset old data"
-msgstr "Réinitialiser les anciennes données"
 
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"

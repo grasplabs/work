@@ -21,6 +21,7 @@ import type {
 import { StoreHost } from "../src/store-host.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { gatedConsumer } from "./gated-consumer.ts";
+import { seedResourceRun } from "./runs.ts";
 import {
   applied,
   manifestHash,
@@ -414,16 +415,18 @@ describe("retention", () => {
 
   it("keep a live run's receipts past their retention, without stalling the others", async () => {
     const store = await newStore();
-    const appId = crypto.randomUUID();
-    const runId = crypto.randomUUID();
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Runner', '', 'ada', ?)"
-      ).bind(appId, Date.now()),
-      env.DB.prepare(
-        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'saver', 1, 'ada', 'running', ?)"
-      ).bind(runId, appId, Date.now()),
-    ]);
+    const workflow = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_resources (id, name, owner_id, created_at) VALUES (?, ?, 'ada', ?)"
+    )
+      .bind(workflow, `Saver ${workflow}`, Date.now())
+      .run();
+    const runId = await seedResourceRun({
+      workflow,
+      principal: "ada",
+      status: "running",
+      createdAt: Date.now(),
+    });
     const input = { title: "Step" };
     await store.commit(
       insertOf(

@@ -1618,8 +1618,8 @@ const stopResourceRun = async (
     }
     return "taken";
   }
-  // First, in the run's object, the stop's record, as an App run's cancel
-  // is (controls.ts): from then on no attempt of the run holds, so none of
+  // First, in the run's object, the stop's record (run-object.ts,
+  // `markStopped`): from then on no attempt of the run holds, so none of
   // its calls is taken, and should the engine refuse the terminate below,
   // or this request die, the object terminates the run itself on its next
   // alarm, seconds on, with no repair to wait for. A run rolling back
@@ -1989,8 +1989,7 @@ export interface ResourceControlState {
  * status, never from a status alone: one of a generation the engine hasn't
  * taken yet (above `fence`) stays as it is; one of the generation it took
  * last is applied once the run is where it asked; one older was overtaken
- * by a newer control, and is superseded. As an App run's are
- * (controls.ts, `settleFrom`).
+ * by a newer control, and is superseded.
  */
 export const settleResourceControls = async (
   env: Env,

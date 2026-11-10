@@ -629,9 +629,9 @@ export type Authority = z.infer<typeof authoritySchema>;
 
 /**
  * Where an App, agent or independent workflow works, and keeps its
- * restricted mode: a chat, an App, a run of one of the App's workflows, or
- * a run of an independent workflow (`workflowRun`, core's
- * workflows/resource-calls.ts). The host sets it, like the authority.
+ * restricted mode: a chat, an App, or a run of an independent workflow
+ * (`workflowRun`, core's workflows/resource-calls.ts). The host sets it,
+ * like the authority.
  */
 export const workContextSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -640,11 +640,6 @@ export const workContextSchema = z.discriminatedUnion("type", [
     chatId: chatIdSchema,
   }),
   z.strictObject({ type: z.literal("app"), appId: appIdSchema }),
-  z.strictObject({
-    type: z.literal("run"),
-    appId: appIdSchema,
-    runId: runIdSchema,
-  }),
   z.strictObject({
     type: z.literal("workflowRun"),
     workflowId: workflowResourceIdSchema,

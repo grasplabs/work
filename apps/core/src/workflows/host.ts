@@ -81,9 +81,8 @@ export interface HostedRun {
    */
   rootRunId?: RunId;
   /**
-   * The run its work is charged to, when another than its lineage root,
-   * which it inherits (quotas.ts, `accountClaimed`):
-   * from its row, as the root is. None for a run charged to its lineage's
+   * The run its work is charged to, when another than its lineage root
+   * (quotas.ts, `triggeredAccountClaimed`): from its row, as the root is. None for a run charged to its lineage's
    * own.
    */
   accountRunId?: RunId;

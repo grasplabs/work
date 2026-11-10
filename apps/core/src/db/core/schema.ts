@@ -1580,10 +1580,8 @@ export const appTestDecisions = sqliteTable(
 
 /**
  * The fixture stores chats' previews ran on before a preview ran on a
- * throwaway store that empties itself (draft-runs.ts): nothing writes it
- * any more, and core discards every store it lists, then its row
- * (legacy-preview-stores.ts). Dropped in the contract release, with that
- * module.
+ * throwaway store that empties itself (draft-runs.ts). Nothing writes or
+ * reads it: dropped by the next contract migration.
  */
 export const previewFixtureStores = sqliteTable(
   "preview_fixture_stores",
@@ -1675,22 +1673,8 @@ export const appResourceBindings = sqliteTable(
 );
 
 /**
- * Every run of an App's workflow (src/workflows/): the App version it is
- * pinned to, and who it acts for. A run a person started acts for them
- * (`started_by`); one a trigger started (`started_by` null) for the App's
- * owner. The engine keeps the run's steps (src/workflows/engine.ts); this row is what core
- * needs to load it again, and lists runs. `status` is where the run was
- * last seen by core: `running` covers waiting too. `failure` is a failed
- * run's report (JSON): where and why it stopped, without the values it
- * worked on.
- *
- * `details_removed_at` is when an ended run's details were removed, its
- * retention over (workflows/retention.ts): the engine's record of it (its
- * input, what its steps returned, its output), the message of its
- * `failure` and the key of the step that names, and what its decisions
- * asked and were answered, with the keys of their steps. The row itself
- * stays, so the run is still listed, counted and found by the
- * audit log's events of it, and its trigger key still stands for it.
+ * The runs of Apps' own workflows, which went with them (GRA-1367). Nothing
+ * writes or reads it: dropped by the next contract migration.
  */
 export const workflowRuns = sqliteTable(
   "workflow_runs",
@@ -2222,13 +2206,9 @@ export const mailDomains = sqliteTable("mail_domains", {
 });
 
 /**
- * Settled runs' outcomes still owed to the Brain (src/brain-capture.ts):
- * one row per eligible run, written with the write that ended it
- * (src/workflows/runs.ts, `projectStatus`), so a run never ends without
- * its capture. Delivery builds the outcome from the run's row then, and
- * deletes the intent once the Brain has it; one the Brain refused for good
- * stays `dead`, for someone to look at. `seq` only grows (AUTOINCREMENT),
- * so it is the Brain's cursor of this source.
+ * Settled outcomes of Apps' own workflows' runs (`workflow_runs`) owed to
+ * the Brain. Nothing writes or reads it: dropped by the next contract
+ * migration.
  */
 export const brainCaptureIntents = sqliteTable(
   "brain_capture_intents",
@@ -2366,12 +2346,9 @@ export const runInboxes = sqliteTable(
 );
 
 /**
- * Each pause, resume or cancel of a run that the host admitted
- * (src/workflows/controls.ts): its durable receipt. `admitted` until the
- * engine confirms it (`applied`), or a cancel supersedes a pause or resume
- * still unresolved (`superseded`). At most one unresolved receipt of each
- * kind a run: the same request again joins it. `generation` is the run's
- * control generation it was admitted under.
+ * The pauses, resumes and cancels of Apps' own workflows' runs
+ * (`workflow_runs`). Nothing writes or reads it: dropped by the next
+ * contract migration.
  */
 export const workflowRunControls = sqliteTable(
   "workflow_run_controls",

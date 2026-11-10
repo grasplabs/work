@@ -1527,7 +1527,7 @@ class SealedRun implements SealedRunKind {
     };
     this.decisionRun = decisionRunOf(run.calling);
     this.decisionsKept = decisionsKeptOf(env, run);
-    this.aiWaitRun = { kind: "resource", runId: run.runId };
+    this.aiWaitRun = { runId: run.runId };
     this.stepsAudited = run.calling.fixture !== true;
   }
 

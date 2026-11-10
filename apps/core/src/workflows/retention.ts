@@ -1,143 +1,87 @@
-import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  and,
-  asc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch } from "../audit-outbox.ts";
-import { eraseRunCaptures } from "../brain-capture.ts";
 import {
   workflowResourceParams,
   workflowStartReceipts,
-  runLineageChildren,
   runBrainEvidence,
   runChatSources,
   resourceRunMailCalls,
-  runMailCalls,
   runMailStampClaims,
-  runMailStampRefusals,
   runInboxes,
-  runMailStamps,
   runLineageAttempts,
   runLineages,
   workflowDecisions,
   workflowResourceRuns,
-  workflowRuns,
   workflowStateWrites,
 } from "../db/core/schema.ts";
-import { runEngine, runRetentionDays } from "./engine.ts";
+import { runRetentionDays } from "./engine.ts";
 import { runFilesRemoved } from "./run-files.ts";
 import { orphanedSnapshotsRemoved } from "./state-snapshots.ts";
 
 // Retention of workflow runs. A run reads what its person may read (a
 // message, a chat's transcript, a record) and keeps it: as its input, in
-// what its steps returned and in its output, all with the engine; in the
-// message its failure report quotes; in the key of a keyed step, which
-// its failure report and its decisions name; in what its decisions asked
-// and were answered; and in the input of a side effect connect still
-// holds for its person. Kept for ever, that outlives the retention of
-// whatever it was read from. So once a run has ended for the run
-// retention (`runRetentionDays`, 30 days), those details go:
+// what its steps returned and in its output, all with the engine; in what
+// its decisions asked and were answered; and in the input of a side
+// effect connect still holds for its person. Kept for ever, that outlives
+// the retention of whatever it was read from. So once a run has ended for
+// the run retention (`runRetentionDays`, 30 days), those details go:
 // - the engine's record, by the engine itself: every run is created with
 //   the retention as its instance's own (engine.ts), which covers every
 //   way an instance ends (completed, terminated, errored);
-// - the rest by the 15-minute clock (`sweepRunDetails`): what the
-//   run's row and its decisions keep, and connect's held actions.
+// - the rest by the 15-minute clock (`sweepWorkflowStartDetails`): a start
+//   receipt's input and the parameter values it froze, once it was
+//   admitted that long ago and the run it admitted, if any, ended that
+//   long ago (the run reads them from the receipt until it ends:
+//   resource-runs.ts), with the receipts of that run's attempts (its
+//   lineage's row stays), what its decisions asked and were answered, and
+//   connect's held actions; and the values of a parameter revision once
+//   another replaced it that long ago, or its workflow was deleted. The
+//   database lets nothing else of either change, nor be written over by
+//   an insert by key or rowid (migrations 0080, 0095 and 0101): their IDs,
+//   hashes, revisions and who did what stay, so a start sent again is
+//   still known by its key and input's hash, and the revision in force is
+//   never touched.
 //
-// The run's row stays, with what it was and how it went: its ID, App,
-// workflow and version, who started it, its status and times, and of a
-// failed run the step's name, the error's code and the input's shape,
-// none of which hold what the run read. So it is still listed and
-// counted, the audit log's events of it still name a run there is, and
-// its trigger key still stands for it: a trigger delivered again finds
-// this run and starts no other. The row says when its details went
-// (`details_removed_at`), and whoever reads the run is told so, never an
-// empty answer passed off as the run's. What went is left empty in the
-// rows; readers say why (`removedText`).
-//
-// The same retention removes what independent workflows keep of what a
-// person put in (`sweepWorkflowStartDetails`): a start receipt's input and
-// the parameter values it froze, once it was admitted that long ago and
-// the run it admitted, if any, ended that long ago (the run reads them
-// from the receipt until it ends: resource-runs.ts), with the receipts
-// of that run's attempts, as an App run's go with its details (its
-// lineage's row stays, as an App run's does), and
-// the values of a parameter revision once another replaced it that long
-// ago, or its workflow was deleted. The database lets nothing else of
-// either change, nor be written over by an insert by key or rowid
-// (migrations 0080, 0095 and 0101): their IDs, hashes, revisions and who did what stay, so a start
-// sent again is still known by its key and input's hash, and the revision
-// in force is never touched.
+// The run's row stays, with what it was and how it went, none of which
+// holds what the run read: it is still listed and counted, and the audit
+// log's events of it still name a run there is. Whoever reads the run
+// once its retention is over is told so (`detailsRemoved`,
+// `removedText`), never an empty answer passed off as the run's.
 //
 // Kept, each by rules of its own, not this retention's:
 // - The audit log: it has its own retention (audit-log.ts), and its
 //   events of a run's steps name them as the workflow did, keys and all.
-// - What a workflow wrote elsewhere: its App's own storage, Knowledge,
+// - What a workflow wrote elsewhere: an App's own storage, Knowledge,
 //   mail it sent.
-// - The engine's records of core's own runs (Knowledge's extractions),
-//   which aren't Apps' runs: the engine keeps those as long as the
-//   account's plan lets it, 30 days at most.
+// - The engine's records of core's own runs (Knowledge's extractions):
+//   the engine keeps those as long as the account's plan lets it, 30 days
+//   at most.
 //
 // What can go wrong, and why it doesn't:
-// - A live run swept. Only a run whose row has ended is swept, by the
-//   time it ended: a run that waits (for a decision, a held
-//   side effect, a feature switched back on), sleeps or is paused has not
-//   ended, however long ago it started, and the engine's own retention
-//   starts only when its instance ends. Ending is final: every write that
-//   ends a row is conditional on it not having ended, and none sets one
-//   back, so a row read as ended stays ended while it is swept.
-// - Details an approval still needs. A decision or a held side effect is
-//   waited for by a run that hasn't ended, which isn't swept; once the
-//   run has ended nothing takes an answer, and connect runs no held
-//   action for it (pending-actions.ts).
-// - A run core ended whose instance the engine never did: a cancel whose
-//   termination failed leaves the instance waiting or paused, and the
-//   engine's retention never starts for it. It takes no step anyway
-//   (dispatcher.ts refuses it on every execution). The sweep removes the
-//   instance of every cancelled run itself, the one ended state the
-//   engine's retention doesn't cover; one it can't remove is logged, left
-//   due, and tried again by the next pass, and holds up none behind it.
-// - A swept run run again. Replaying needs the engine's record of its
-//   steps, which is gone, so an instance under its ID would do every step
-//   again. Nothing creates one: a start finds the run by its trigger key
-//   and leaves it be unless it is still starting. If something did, the
-//   dispatcher refuses a run whose details were removed, before any step.
+// - A live run swept. Only a start whose run has ended, by the time it
+//   ended, is swept: a run that waits, sleeps or is paused has not ended,
+//   however long ago it started. Ending is final, so a run read as ended
+//   stays ended while it is swept.
 // - The sweep stopped half-way, or run twice at once. Connect's held
-//   actions go first and the row is marked last, so a pass that stops in
-//   between leaves the run due, and the next removes what is left and
-//   marks it: removing what is gone removes nothing. Marking is
-//   conditional on the row not being marked, so two passes mark it once.
-// - The engine's clock, the sweep's and a reader's not agreeing. The
-//   engine counts from when the instance ended, the sweep from when the
-//   row did, a moment apart, and the sweep runs every 15 minutes. So
-//   readers go by neither: a run's details are removed once its row is
-//   marked or its retention is over by its row's own time
-//   (`detailsRemoved`), one rule for every read of a run, and from then
-//   on nothing the row or the engine may still have of it is shown.
+//   actions go first and the receipt is marked last, in one batch with
+//   the rest, so a pass that stops in between leaves the start due, and
+//   the next removes what is left and marks it: removing what is gone
+//   removes nothing. Marking is conditional on the receipt not being
+//   marked, so two passes mark it once.
+// - The engine's clock, the sweep's and a reader's not agreeing. Readers
+//   go by neither: a run's details are removed once its retention is over
+//   by its row's own time (`detailsRemoved`), one rule for every read of
+//   a run, and from then on nothing the engine may still have of it is
+//   shown.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
-/**
- * Most runs swept at once: their IDs are bound to one statement, with a
- * few values more, of the 100 D1 binds.
- */
+/** Most start receipts swept at once, as one page (`dueStarts`). */
 export const sweptPerBatch = 50;
-
-/** Most batches one clock run sweeps: 500 runs every 15 minutes. */
-export const batchesPerSweep = 10;
-
-/** The statuses of a run that has ended. */
-const ended = ["completed", "failed", "cancelled"] as const;
 
 /**
  * Whether a run's details are removed, as every reader of a run asks: its
@@ -161,16 +105,8 @@ export const detailsRemoved = (
 export const removedText = `The details of this run were removed: they are kept for ${runRetentionDays} days after a run ends.`;
 
 /**
- * A step's name without its key: `name:key` is how a keyed step is named
- * (the SDK's, `@grasp-os/sdk/workflow`), and the key is the run's data.
- */
-const unkeyed = (step: SQL): SQL =>
-  sql`CASE WHEN instr(${step}, ':') > 0 THEN substr(${step}, 1, instr(${step}, ':') - 1) ELSE ${step} END`;
-
-/**
  * The statements that remove the receipts of the steps' attempts of
- * `runs` (run IDs, or a query of them; of either run table, as
- * quotas.ts keeps both): a receipt names its step by the engine's key,
+ * `runs` (run IDs, or a query of them): a receipt names its step by the engine's key,
  * which can hold a keyed step's data, and kept for ever, the receipts of
  * ended runs would grow the table without bound, so none outlives its
  * run's details. One still holding (a last attempt that never returned:
@@ -208,127 +144,6 @@ const attemptsPruned = (
   ] as const;
 };
 
-/**
- * The statements that remove what quotas.ts and mail-stamps.ts keep of
- * App runs `runs` (IDs of runs marked, at most
- * {@link receiptRunsPerBatch}, as each is bound several times): their
- * attempts' receipts (`attemptsPruned`), and every token of their mail.
- * Run before its runs are marked, so a sweep that stops before marking
- * them leaves them due, and none of a marked run is left.
- */
-const receiptsPruned = (
-  db: DrizzleD1Database,
-  runs: readonly string[],
-  now: Date
-) =>
-  [
-    ...attemptsPruned(db, runs, now),
-    // The tokens of the runs' mail (mail-stamps.ts): mail to one this
-    // late is mail to an address no one receives at.
-    db.delete(runMailStamps).where(inArray(runMailStamps.runId, runs)),
-    // Before their calls, which name their stamps.
-    db.delete(runMailStampClaims).where(
-      inArray(
-        runMailStampClaims.stamp,
-        db
-          .select({ stamp: sql<string>`${runMailCalls.stamp}` })
-          .from(runMailCalls)
-          .where(inArray(runMailCalls.runId, runs))
-      )
-    ),
-    db.delete(runMailStampRefusals).where(
-      inArray(
-        runMailStampRefusals.stamp,
-        db
-          .select({ stamp: sql<string>`${runMailCalls.stamp}` })
-          .from(runMailCalls)
-          .where(inArray(runMailCalls.runId, runs))
-      )
-    ),
-    db.delete(runMailCalls).where(inArray(runMailCalls.runId, runs)),
-    // What their recalls cited (host.ts): no new call of theirs to gate.
-    db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, runs)),
-    // The children their keys admitted (quotas.ts): what a delivery this
-    // late starts is admitted afresh, if its lineage has room.
-    db.delete(runLineageChildren).where(
-      inArray(
-        runLineageChildren.triggerKey,
-        db
-          .select({ key: sql<string>`${workflowRuns.triggerKey}` })
-          .from(workflowRuns)
-          .where(inArray(workflowRuns.id, runs))
-      )
-    ),
-  ] as const;
-
-/**
- * The statements that mark `runs`, those of them still `due`, as having
- * had their details removed at `now`, and empty what their rows and their
- * decisions kept of them: the failure's message, and the key of the step
- * it names; each decision's description, its answer's payload, and the
- * key in its step's name, replaced by the decision's own ID, since a run
- * has one decision per step name. Only the decisions of runs marked, by
- * this batch or before.
- */
-const marked = (
-  db: DrizzleD1Database,
-  runs: string[],
-  now: Date,
-  due: SQL | undefined
-) => {
-  const step = sql`json_extract(${workflowRuns.failure}, '$.step')`;
-  return [
-    db
-      .update(workflowRuns)
-      .set({
-        detailsRemovedAt: now,
-        // A summary showing the message is out of date: its next revision.
-        summaryRevision: sql`${workflowRuns.summaryRevision} + 1`,
-        // Null stays null: only a failed run has a report.
-        failure: sql`json_set(${workflowRuns.failure}, '$.error.message', '', '$.step', ${unkeyed(step)})`,
-      })
-      .where(and(inArray(workflowRuns.id, runs), due)),
-    db
-      .update(workflowDecisions)
-      .set({
-        description: "",
-        payload: null,
-        step: sql`CASE WHEN instr(${workflowDecisions.step}, ':') > 0 THEN substr(${workflowDecisions.step}, 1, instr(${workflowDecisions.step}, ':')) || ${workflowDecisions.id} ELSE ${workflowDecisions.step} END`,
-      })
-      .where(
-        inArray(
-          workflowDecisions.runId,
-          db
-            .select({ id: workflowRuns.id })
-            .from(workflowRuns)
-            .where(
-              and(
-                inArray(workflowRuns.id, runs),
-                isNotNull(workflowRuns.detailsRemovedAt)
-              )
-            )
-        )
-      ),
-  ] as const;
-};
-
-/** Most runs whose attempt receipts one batch removes (`receiptsPruned`). */
-const receiptRunsPerBatch = 10;
-
-/** Removes the attempt receipts of `runs`, each marked (`receiptsPruned`). */
-const pruneReceipts = async (
-  db: DrizzleD1Database,
-  runs: readonly string[],
-  now: Date
-): Promise<void> => {
-  for (let from = 0; from < runs.length; from += receiptRunsPerBatch) {
-    // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-    await db.batch(
-      receiptsPruned(db, runs.slice(from, from + receiptRunsPerBatch), now)
-    );
-  }
-};
-
 /** Most start receipts, and parameter revisions, one clock run empties. */
 export const startDetailsPerSweep = 500;
 
@@ -349,7 +164,7 @@ interface DueStart {
  * admitted before `before`, and its run, if it admitted one, ended
  * before it too: a run that hasn't ended loads its input and parameters
  * from its receipt on every activation (resource-runs.ts), and once it
- * ended its retention counts from its end, as an App run's does.
+ * ended its retention counts from its end.
  */
 const dueStarts = async (
   db: DrizzleD1Database,
@@ -404,8 +219,7 @@ const startDetailsRemoved = async (
   const due = sql`(SELECT due.value FROM json_each(${JSON.stringify(
     dueRows.map(({ id }) => id)
   )}) AS due)`;
-  // What connect still holds of their runs goes first, as an App run's
-  // does (`removedElsewhere`): a run that ended while a side effect of it
+  // What connect still holds of their runs goes first: a run that ended while a side effect of it
   // was held leaves the action, with its exact input, until its person
   // confirms it, which they may never do. A restricted run's own are held,
   // under the workflow, and so may be those of any App its calls reached,
@@ -456,8 +270,7 @@ const startDetailsRemoved = async (
       .delete(workflowStateWrites)
       .where(inArray(workflowStateWrites.runId, due)),
     // What its decisions asked, about what, and what was answered
-    // (GRA-941), as an App run's go with its details (`marked`): who
-    // answered, when and how stay.
+    // (GRA-941): who answered, when and how stay.
     db
       .update(workflowDecisions)
       .set({ description: "", payload: null, input: null })
@@ -546,117 +359,11 @@ export const sweepWorkflowStartDetails = async (
   await orphanedSnapshotsRemoved(db);
 };
 
-/** A run to sweep, as the sweep reads it. */
-type DueRun = Pick<typeof workflowRuns.$inferSelect, "id" | "appId" | "status">;
-
 /**
- * Removes what is kept of `runs` outside core's database, and answers the
- * ones nothing is kept of any more. The engine's instance of each
- * cancelled run, which its own retention may not reach (see above): one
- * it can't remove is logged and left out. Then the side effects connect
- * still holds for the rest.
- */
-const removedElsewhere = async (
-  env: Env,
-  runs: readonly DueRun[]
-): Promise<string[]> => {
-  const kept = new Set<string>();
-  await Promise.all(
-    runs
-      .filter(({ status }) => status === "cancelled")
-      .map(async ({ id }) => {
-        try {
-          await runEngine(env).remove(id);
-        } catch (error) {
-          kept.add(id);
-          log.error("workflow.run_details_not_removed", {
-            runId: id,
-            ...errorFields(error),
-          });
-        }
-      })
-  );
-  const gone = runs.filter(({ id }) => !kept.has(id));
-  if (gone.length > 0) {
-    await env.CONNECT.dropForEndedRuns({
-      runs: gone.map(({ id, appId }) => ({ appId, runId: id })),
-    });
-  }
-  return gone.map(({ id }) => id);
-};
-
-/**
- * Removes the details core and connect keep of runs that ended more than
- * the retention before `now`, longest ended first, read by the index of
- * ended runs that still have theirs: at most `batchesPerSweep` batches of
- * `sweptPerBatch`, the rest left to the next clock run. For each batch,
- * what is kept elsewhere goes first (`removedElsewhere`), then the rows
- * are marked and emptied in one batch (`marked`). Each batch starts past
- * the last run of the one before, by when it ended and its ID, so a run
- * left out stays due for the next clock run and holds up none behind it.
- *
- * On-prem has no runs, and so reaches neither the engine nor connect.
+ * Removes what core keeps of what independent workflows' runs read, once
+ * the run retention before `now` is over (`sweepWorkflowStartDetails`).
  */
 export const sweepRunDetails = async (env: Env, now: Date): Promise<void> => {
-  const db = drizzle(env.DB);
   const before = new Date(now.getTime() - runRetentionDays * dayMs);
-  // The run has ended, longer ago than the retention, with its details.
-  const due = and(
-    isNotNull(workflowRuns.endedAt),
-    isNull(workflowRuns.detailsRemovedAt),
-    lt(workflowRuns.endedAt, before),
-    // Checked on the row, not looked up (`+`): SQLite would otherwise read
-    // the index by status and time, and sort what it found.
-    inArray(sql`+${workflowRuns.status}`, ended)
-  );
-  let removed = 0;
-  let last: { id: string; endedAt: number } | undefined;
-  for (let batch = 0; batch < batchesPerSweep; batch += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-    const rows = await db
-      .select({
-        id: workflowRuns.id,
-        appId: workflowRuns.appId,
-        status: workflowRuns.status,
-        endedAt: sql<number>`${workflowRuns.endedAt}`,
-      })
-      .from(workflowRuns)
-      .where(
-        and(
-          due,
-          last &&
-            sql`(${workflowRuns.endedAt}, ${workflowRuns.id}) > (${last.endedAt}, ${last.id})`
-        )
-      )
-      .orderBy(asc(workflowRuns.endedAt), asc(workflowRuns.id))
-      .limit(sweptPerBatch);
-    if (rows.length === 0) {
-      break;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-    const gone = await removedElsewhere(env, rows);
-    if (gone.length > 0) {
-      // Its receipts and what the Brain captured of it first, the row
-      // marked last: a sweep that stops in between leaves the run due, and
-      // the next does it all again.
-      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await eraseRunCaptures(env, gone);
-      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await pruneReceipts(db, gone, now);
-      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await db.batch(marked(db, gone, now, due));
-    }
-    removed += gone.length;
-    if (rows.length < sweptPerBatch) {
-      break;
-    }
-    last = rows.at(-1);
-  }
   await sweepWorkflowStartDetails(env, before, now);
-  if (removed > 0) {
-    log.info("workflow.run_details_removed", {
-      runs: removed,
-      days: runRetentionDays,
-    });
-  }
 };
