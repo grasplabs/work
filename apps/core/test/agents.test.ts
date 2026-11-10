@@ -31,6 +31,8 @@ describe("the company's agents", () => {
   });
 
   it("reads the agent every chat already has as the first one, on, with no row kept", async () => {
+    // The ID every grant, chat and memory path made before names.
+    expect(chatAgentId).toBe("organization");
     const first = await readAgent(env, chatAgentId);
     expect(first).toMatchObject({
       id: chatAgentId,
