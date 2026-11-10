@@ -1095,6 +1095,59 @@ export default appTest(schema, {
     await expect(activated(builder, app)).resolves.toBe("current");
   });
 
+  it("leave no run behind the clock that started as it moved", async () => {
+    const { builder, app } = await requestsApp(
+      async (by) =>
+        await workflowOf(
+          by,
+          greeting([
+            { id: "hold", type: "wait", until: { $expr: "params.due" } },
+          ]),
+          {
+            params: {
+              due: {
+                label: "Due",
+                type: { kind: "number", default: 0 },
+                sensitive: false,
+              },
+            },
+          }
+        ),
+      {
+        "tests/clock.test.ts": suiteOf(`
+      const hour = 60 * 60 * 1000;
+      // Due an hour from now on the wall clock: at once for a run on the
+      // moved clock, an hour away for one the move missed.
+      const due = Date.now() + hour;
+      // Known to core first, so its starts go out at once, beside the move.
+      await owner.run(async () => await Promise.resolve(null));
+      const started = Array.from({ length: 4 }, async (_unused, index) =>
+        await owner.start(
+          workflows.followUp,
+          { who: \`Ada \${index}\` },
+          { params: { due } }
+        )
+      );
+      // The move once the starts have gone out, while core starts them.
+      const moved = (async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1);
+        });
+        await t.clock.advance(2 * hour);
+      })();
+      const [runs] = await Promise.all([Promise.all(started), moved]);
+      for (const run of runs) {
+        expect(await t.runs.untilTerminal(run)).toMatchObject({
+          status: "completed",
+        });
+      }`),
+      }
+    );
+    const began = Date.now();
+    await expect(activated(builder, app)).resolves.toBe("current");
+    expect(Date.now() - began).toBeLessThan(60_000);
+  });
+
   it("move the clock from an App's own test past each sleep its run has reached, and keep the runs that ended", async () => {
     const { builder, app } = await requestsApp(
       async (by) =>

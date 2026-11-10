@@ -103,6 +103,9 @@ export default appTest(schema, {
       { task },
       { models: { ai: { approved: true } }, restartAfterStep: "assess" }
     );
+    // Past its day's wait before the reminder, then to its end.
+    await t.runs.untilWaiting(run);
+    await t.clock.advance(24 * 60 * 60 * 1000);
     expect(await t.runs.untilTerminal(run)).toEqual({
       status: "completed",
       result: { approved: true },

@@ -835,6 +835,25 @@ class FixtureSession extends TestTarget {
   readonly #transactions: (TestTransaction | undefined)[] = [];
   /** How far its runs' clock is moved on, in ms (`advanceClock`). */
   #clockMs = 0;
+  /**
+   * The starts and clock moves under way, one after another: a start
+   * reads the clock and joins `#runs` before a move takes the runs to
+   * move, so a run started alongside a move is never left behind it.
+   */
+  #clockTurn: Promise<null> = Promise.resolve(null);
+
+  /** `work`, once every start and clock move before it has settled. */
+  async #inClockTurn<T>(work: () => Promise<T>): Promise<T> {
+    const before = this.#clockTurn;
+    const { promise: done, resolve } = Promise.withResolvers<null>();
+    this.#clockTurn = done;
+    try {
+      await before;
+      return await work();
+    } finally {
+      resolve(null);
+    }
+  }
   #store: Promise<OpenStore> | undefined;
   #closed = false;
   /** Each principal's live queries, by name (`subscribe`). */
@@ -1110,25 +1129,36 @@ class FixtureSession extends TestTarget {
       let recorded = false;
       let started: FixtureRunStarted;
       try {
-        started = await startFixtureRun(
-          this.#env,
-          this.#release,
-          identity.principal,
-          request,
-          {
-            params: given.params ?? {},
-            deciders: given.deciders ?? {},
-            models: given.models ?? {},
-            ...(given.restartAfterStep === undefined
-              ? {}
-              : { restartAfterStep: given.restartAfterStep }),
-            clockMs: this.#clockMs,
-            deadline: this.#endsAt,
-            recorded: () => {
-              recorded = true;
-            },
+        started = await this.#inClockTurn(async () => {
+          const run = await startFixtureRun(
+            this.#env,
+            this.#release,
+            identity.principal,
+            request,
+            {
+              params: given.params ?? {},
+              deciders: given.deciders ?? {},
+              models: given.models ?? {},
+              ...(given.restartAfterStep === undefined
+                ? {}
+                : { restartAfterStep: given.restartAfterStep }),
+              clockMs: this.#clockMs,
+              deadline: this.#endsAt,
+              recorded: () => {
+                recorded = true;
+              },
+            }
+          );
+          // Among the runs a clock move after it moves, unless it was
+          // closed meanwhile: what started goes then, as nothing else
+          // would remove it but the sweep.
+          if (this.#closed) {
+            await discardFixtureRuns(this.#env, [run.runId]);
+            throw sessionEnded();
           }
-        );
+          this.#runs.push(run);
+          return run;
+        });
       } catch (error) {
         // Refused before it was recorded: its room goes back. One recorded
         // was a run, removed again (`startFixtureRun`): its room stays
@@ -1138,14 +1168,7 @@ class FixtureSession extends TestTarget {
         }
         throw error;
       }
-      // Closed meanwhile: what started goes now, as nothing else would
-      // remove it but the sweep.
-      if (this.#closed) {
-        await discardFixtureRuns(this.#env, [started.runId]);
-        throw sessionEnded();
-      }
-      this.#runs.push(started);
-      result = { ok: true, value: { run: this.#runs.length - 1 } };
+      result = { ok: true, value: { run: this.#runs.indexOf(started) } };
     } catch (error) {
       result = { ok: false, error: refusalOf(error, requestId) };
     }
@@ -1361,16 +1384,19 @@ class FixtureSession extends TestTarget {
         z.number().int().min(0).max(maxClockAdvanceMs),
         ms
       );
-      if (this.#clockMs + by > maxClockAdvanceMs) {
-        throw operationErrors.create("contract.invalid_args");
-      }
-      await advanceFixtureClocks(
-        this.#env,
-        this.#runs.map(({ runId }) => runId),
-        by
-      );
-      // Once its runs moved: a start after it starts at the time they're at.
-      this.#clockMs += by;
+      // After the starts before it, which it moves too, and before those
+      // after it, which start at the time it moved to.
+      await this.#inClockTurn(async () => {
+        if (this.#clockMs + by > maxClockAdvanceMs) {
+          throw operationErrors.create("contract.invalid_args");
+        }
+        await advanceFixtureClocks(
+          this.#env,
+          this.#runs.map(({ runId }) => runId),
+          by
+        );
+        this.#clockMs += by;
+      });
       result = { ok: true, value: null };
     } catch (error) {
       result = { ok: false, error: refusalOf(error, requestId) };
