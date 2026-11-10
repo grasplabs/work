@@ -3767,7 +3767,12 @@ export class Workspace extends DurableObject<Env> {
     if (this.#deleting.has(chatId) || this.#erasing) {
       throw agentErrors.create("agent.chat_not_found");
     }
-    await this.#session(chatId).note(text);
+    // Again on a stub of its own should the chat's object reset under the
+    // call, as one that opens cold under load can: a decision's notice is
+    // never dropped for a restart (`#toSession`).
+    await this.#toSession(chatId, async (session) => {
+      await session.note(text);
+    });
     this.#db
       .update(chats)
       .set({ lastAt: new Date() })

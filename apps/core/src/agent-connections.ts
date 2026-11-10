@@ -40,7 +40,7 @@ import { readsMail, textsOf } from "./channels/stephen-rules.ts";
 import { askInChat, askableConnections } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
 import { connectionOwnersOf } from "./connections.ts";
-import { workspace } from "./durable-objects.ts";
+import { callObject, workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
@@ -175,7 +175,9 @@ const heldWritesEnd = async (
  */
 const heldInChat = async (env: Env, scope: AgentScope): Promise<void> => {
   try {
-    await workspace(env, scope.workspaceId).heldChanged(scope.chatId);
+    await callObject(async () => {
+      await workspace(env, scope.workspaceId).heldChanged(scope.chatId);
+    });
   } catch (error) {
     log.warn("chat.held_push_failed", {
       chatId: scope.chatId,

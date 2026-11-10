@@ -30,7 +30,7 @@ import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyRequests, users } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
-import { workspace } from "../durable-objects.ts";
+import { callObject, workspace } from "../durable-objects.ts";
 import {
   latest,
   ofSubject,
@@ -149,10 +149,15 @@ const tellChats = async (
   await Promise.all(
     chats.map(async (via) => {
       try {
-        const chat = workspace(env, workspaceIdSchema.parse(via.workspaceId));
-        await (decided === undefined
-          ? chat.heldChanged(chatIdSchema.parse(via.chatId))
-          : chat.packagesDecided(via.chatId, via.onBehalfOf, decided));
+        const workspaceId = workspaceIdSchema.parse(via.workspaceId);
+        // Again on a stub of its own should the object reset under the
+        // call: a second notice of the same decision tells nothing new.
+        await callObject(async () => {
+          const chat = workspace(env, workspaceId);
+          await (decided === undefined
+            ? chat.heldChanged(chatIdSchema.parse(via.chatId))
+            : chat.packagesDecided(via.chatId, via.onBehalfOf, decided));
+        });
       } catch (error) {
         log.warn("dependencies.chat_unreached", {
           chatId: via.chatId,
