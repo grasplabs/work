@@ -30,6 +30,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { keepsReceipt } from "../src/action-invocation.ts";
 import { operationRoles } from "../src/app-access.ts";
 import { invocationFor } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
+import { loadRelease } from "../src/app-releases.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
@@ -54,7 +56,7 @@ import { hostedRelease } from "../src/release-runner.ts";
 import { testApp } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
-import { appWith, seal } from "./sealed-apps.ts";
+import { appWith, person as sealedPerson, seal } from "./sealed-apps.ts";
 import { applied } from "./store-schemas.ts";
 
 // Actions (spec 7.4, 12): server functions with no database, which
@@ -2562,6 +2564,246 @@ export const stamp = mutation({
       write: {
         result: "data.write_denied",
         kept: [kept("vault", "data.write_denied", "vault.stamp")],
+      },
+    });
+  });
+
+  it("is kept by core for what the store refuses by a table's access and row rules, once a call, and never for rows the rules only hide", async () => {
+    const fixture = await appWith(
+      testApp(
+        {
+          name: "Desk",
+          tables: {
+            // Its builders' alone: a member is refused by the store, as
+            // the host lets every function reach it.
+            ledger: {
+              fields: { amount: "v.number()" },
+              access: { read: "appBuilders", write: "appBuilders" },
+            },
+            // Each team's own rows, and every row for a builder.
+            accounts: {
+              fields: { name: "v.string()", team: "v.string()" },
+              access: {
+                read: "appMembers",
+                write: "appMembers",
+                rows: {
+                  read: [
+                    { kind: "team", field: "team" },
+                    { kind: "role", role: "builder" },
+                  ],
+                  write: [
+                    { kind: "team", field: "team" },
+                    { kind: "role", role: "builder" },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        {
+          "server/desk.ts": `import { v } from "@grasp-os/sdk";
+import { api } from "@server/_generated/api";
+import { action, mutation, query } from "@server/_generated/server";
+export const ledger = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => await ctx.db.query("ledger").count(),
+});
+export const peekLedger = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    let refused = 0;
+    for (let index = 0; index < 5; index += 1) {
+      try {
+        await ctx.db.query("ledger").count();
+      } catch {
+        refused += 1;
+      }
+    }
+    return refused;
+  },
+});
+export const book = mutation({
+  args: {},
+  returns: v.id("ledger"),
+  handler: async (ctx) => await ctx.db.insert("ledger", { amount: 1 }),
+});
+export const open = mutation({
+  args: { team: v.string() },
+  returns: v.id("accounts"),
+  handler: async (ctx, args) =>
+    await ctx.db.insert("accounts", { name: "Acme", team: args.team }),
+});
+export const rename = mutation({
+  args: { id: v.id("accounts") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch("accounts", args.id, { name: "Renamed" });
+    return null;
+  },
+});
+export const openThenCount = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    await ctx.db.insert("accounts", { name: "Acme", team: "elsewhere" });
+    try {
+      return await ctx.db.query("accounts").count();
+    } catch {
+      return -1;
+    }
+  },
+});
+export const openThenAsk = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    await ctx.db.insert("accounts", { name: "Acme", team: "elsewhere" });
+    try {
+      return await ctx.runQuery(api.desk.accounts, {});
+    } catch {
+      return -1;
+    }
+  },
+});
+export const accounts = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => await ctx.db.query("accounts").count(),
+});
+export const both = action({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => {
+    const heard: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      try {
+        await ctx.runMutation(api.desk.book, {});
+      } catch {
+        heard.push("book");
+      }
+      try {
+        await ctx.runQuery(api.desk.ledger, {});
+      } catch {
+        heard.push("ledger");
+      }
+    }
+    return heard;
+  },
+});
+`,
+        }
+      )
+    );
+    await publishVersion(env, fixture.owner, fixture.app, 1);
+    const release = await loadRelease(env, fixture.app, 1);
+    const appId = appIdSchema.parse(fixture.app);
+    // A member of the App in no team, who isn't one of its builders.
+    const member = await sealedPerson("user");
+    await drizzle(env.DB).insert(appMembers).values({
+      appId,
+      memberType: "person",
+      memberId: member.userId,
+      role: "user",
+      addedBy: fixture.owner.userId,
+      addedAt: new Date(),
+    });
+    const run = async (
+      by: typeof fixture.owner,
+      path: string,
+      kind: "query" | "mutation" | "action",
+      args: Json = {}
+    ) => {
+      const requestId = crypto.randomUUID();
+      const result = await callOperation(
+        { manifest: release.app, run: hostedRelease(env, release).run },
+        await invocationFor(env, release, {
+          by,
+          requestId,
+          deadline: Date.now() + 30_000,
+        }),
+        { path, kind },
+        args
+      );
+      const events = await allEvents();
+      const kept = events
+        .filter(
+          (event) =>
+            event.action === "app.use.refused" &&
+            event.target?.id === appId &&
+            event.requestId === requestId
+        )
+        .map(({ detail }) => detail);
+      return { result: result.ok ? result.value : result.error.code, kept };
+    };
+    const kept = (table: string, errorCode: string, fn: string) => ({
+      version: 1,
+      person: member.userId,
+      runId: null,
+      function: fn,
+      useKind: "table",
+      useName: table,
+      reason: "request_not_allowed",
+      errorCode,
+    });
+    // A row of a team the member isn't in, which the rules hide from them.
+    const hidden = await run(fixture.owner, "desk.open", "mutation", {
+      team: "elsewhere",
+    });
+    expect({
+      // The read mode refuses it.
+      read: await run(member, "desk.ledger", "query"),
+      // Five refused reads in one call, each caught: kept once.
+      loop: await run(member, "desk.peekLedger", "query"),
+      // The write mode refuses it, as the commit runs.
+      write: await run(member, "desk.book", "mutation"),
+      // The row it would leave fails the row rules.
+      rule: await run(member, "desk.open", "mutation", { team: "elsewhere" }),
+      // Rows the rules hide are left out of a read, not refused.
+      filtered: await run(member, "desk.accounts", "query"),
+      // A hidden row is answered as a missing one, and kept as no refusal.
+      hiddenRow: await run(member, "desk.rename", "mutation", {
+        id: hidden.result,
+      }),
+      // A refused write that surfaces in a read of the staged writes,
+      // caught: kept once, as the mutation's that staged it, read
+      // directly or by a query it runs.
+      stagedRead: await run(member, "desk.openThenCount", "mutation"),
+      stagedAsk: await run(member, "desk.openThenAsk", "mutation"),
+      // Nested calls refused six times, each caught: the call's first is
+      // kept, a nested mutation's commit, before the action hears of it.
+      nested: await run(member, "desk.both", "action"),
+    }).toStrictEqual({
+      read: {
+        result: "data.access_denied",
+        kept: [kept("ledger", "data.access_denied", "desk.ledger")],
+      },
+      loop: {
+        result: 5,
+        kept: [kept("ledger", "data.access_denied", "desk.peekLedger")],
+      },
+      write: {
+        result: "data.write_denied",
+        kept: [kept("ledger", "data.write_denied", "desk.book")],
+      },
+      rule: {
+        result: "data.write_denied",
+        kept: [kept("accounts", "data.write_denied", "desk.open")],
+      },
+      filtered: { result: 0, kept: [] },
+      hiddenRow: { result: "data.conflict", kept: [] },
+      stagedRead: {
+        result: "data.write_denied",
+        kept: [kept("accounts", "data.write_denied", "desk.openThenCount")],
+      },
+      stagedAsk: {
+        result: "data.write_denied",
+        kept: [kept("accounts", "data.write_denied", "desk.openThenAsk")],
+      },
+      nested: {
+        result: ["book", "ledger", "book", "ledger", "book", "ledger"],
+        kept: [kept("ledger", "data.write_denied", "desk.book")],
       },
     });
   });

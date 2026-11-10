@@ -105,6 +105,11 @@ interface FunctionCaller {
    * it stages needs again when it is dispatched.
    */
   readonly agent?: CallingAgent;
+  /**
+   * The refused uses a live query's subscription kept already, for one of
+   * its reads (`Invocation.refusalsKept`).
+   */
+  readonly refusalsKept?: Set<string>;
 }
 
 /** Whose call a refused use's evidence names (`keptUseRefusals`). */
@@ -190,6 +195,7 @@ export const invocationFor = async (
     stillAllowed,
     sources = invocationSources(),
     agent,
+    refusalsKept,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -264,6 +270,7 @@ export const invocationFor = async (
       requestId,
       runId: null,
     }),
+    ...(refusalsKept === undefined ? {} : { refusalsKept }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
     // operation host admits each request through `authorize` first, as it
@@ -427,6 +434,8 @@ interface FunctionCallOptions {
   readonly agent?: CallingAgent;
   /** What a mutation's receipt is scoped by (`CallOptions.receiptScope`). */
   readonly receiptScope?: string;
+  /** A live query's kept refusals (`FunctionCaller.refusalsKept`). */
+  readonly refusalsKept?: Set<string>;
 }
 
 /**
@@ -705,6 +714,7 @@ const invokedCall = async (
     agent,
     tellsForm,
     receiptScope,
+    refusalsKept,
   } = options;
   try {
     const invocation = await invocationFor(env, release, {
@@ -713,6 +723,7 @@ const invokedCall = async (
       deadline,
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       ...(agent === undefined ? {} : { agent }),
+      ...(refusalsKept === undefined ? {} : { refusalsKept }),
       sources,
     });
     const observed = observedInvocation(invocation, release, observeReads);
@@ -1274,13 +1285,16 @@ export const evaluateAppQuery = async (
     Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: string,
-  deadline: number
+  deadline: number,
+  /** What its subscription kept already (`FunctionCaller.refusalsKept`). */
+  refusalsKept?: Set<string>
 ): Promise<EvaluatedQuery> => {
   let reads: EvaluatedQuery["reads"];
   const answer = await callFunction(env, by, app, request, {
     deadline,
     kind: "query",
     page: true,
+    ...(refusalsKept === undefined ? {} : { refusalsKept }),
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },

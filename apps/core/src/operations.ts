@@ -335,11 +335,22 @@ export interface Invocation {
   /**
    * Keeps the evidence of a use refused at the host's admission
    * (`UseRefusal`): the first of a caller's call, nested calls included,
-   * before App code hears of it. Never throws: the refusal stands, whatever
-   * came of keeping it. None where nothing is kept (a draft's preview, an
-   * App's tests).
+   * before App code hears of it. Rejects when it couldn't be kept, which
+   * the host logs: the refusal stands, whatever came of keeping it. None
+   * where nothing is kept (a draft's preview, an App's tests).
    */
   readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
+  /**
+   * The refused uses a live query's subscription kept already, shared by
+   * its reads (`keepEvidence`): each kept once a version of the App
+   * (`refusalKey`), however often a write reads it again, and one a read
+   * meets for the first time (a flag a write set, a role the person lost,
+   * a version published) kept then. One kept already is passed over and
+   * leaves the call's one entry to the next refusal it meets; one whose
+   * keeping rejected is given back, for a later read to keep. None for
+   * any other call: each keeps its own.
+   */
+  readonly refusalsKept?: Set<string>;
   /**
    * Keeps the record of what the call read of the store's sensitive
    * tables (`SensitiveRead`), once for the whole call, nested functions
@@ -441,6 +452,24 @@ export interface UseRefusal {
   readonly errorCode: string;
 }
 
+/**
+ * What tells one refused use from another (`Invocation.refusalsKept`):
+ * the version of the App it was refused in, as a subscription outlives a
+ * publish and the next version's refusal is evidence of its own, and
+ * every field of the refusal, all core's own, a name only one of the
+ * sealed release's: so a subscription keeps no more of them than its
+ * versions have uses.
+ */
+const refusalKey = (version: number, refusal: UseRefusal): string =>
+  JSON.stringify([
+    version,
+    refusal.function,
+    refusal.use.kind,
+    refusal.use.name,
+    refusal.reason,
+    refusal.errorCode,
+  ]);
+
 /** What a refusal of a use carries for its evidence (`refusedUseOf`). */
 type RefusedUse = Pick<UseRefusal, "use" | "reason">;
 
@@ -454,6 +483,54 @@ const refusedUses = new WeakMap<object, RefusedUse>();
 /** `error`, noted as the refusal of `refused` (`refusedUses`). */
 const refusingUse = <E extends Error>(error: E, refused: RefusedUse): E => {
   refusedUses.set(error, refused);
+  return error;
+};
+
+/**
+ * `error`, noted as the refusal of a table's use when the App's store
+ * refused it by the table's access mode or row rules: a read the read
+ * mode doesn't admit (`data.access_denied`), a write the write mode
+ * doesn't, or one leaving a row its rules don't (`data.write_denied`).
+ * Kept as the host's own table denials are (`readFor`, `stage`), through
+ * `keepEvidence`, at most once a call (GRA-1652).
+ *
+ * - Only an error core's own store call threw is noted (`readFor`'s read,
+ *   `runMutation`'s commit), by its identity: an error App code makes,
+ *   wraps or rethrows with the same code is noted as nothing.
+ * - The table is named only when it is one of the sealed release's
+ *   (`tables`), as the store's own `details` name it.
+ * - A row the rules hide isn't noted: a patch, replacement or deletion of
+ *   one is answered as a missing row (`data.conflict`, store-rules.ts).
+ *   It is a blind write by an ID that is stale or unguessable, App code
+ *   learns nothing by it, and it is an everyday race when a page holds
+ *   the ID of a row someone has since moved out of its person's sight.
+ * - Rows a read's rules leave out, and related records of a table the
+ *   caller can't read (store-queries.ts `relationsOf`), are no refusal:
+ *   the read answers without them, and nothing is thrown to note.
+ */
+const refusedByStore = (
+  tables: Compiled["tables"],
+  error: unknown
+): unknown => {
+  const code = dataErrors.codeOf(error);
+  if (
+    (code !== "data.access_denied" && code !== "data.write_denied") ||
+    !(error instanceof Error)
+  ) {
+    return error;
+  }
+  const details = "details" in error ? error.details : undefined;
+  const table =
+    typeof details === "object" && details !== null && "table" in details
+      ? details.table
+      : undefined;
+  refusedUses.set(error, {
+    use: {
+      kind: "table",
+      name: typeof table === "string" && tables.has(table) ? table : null,
+    },
+    reason: "request_not_allowed",
+  });
   return error;
 };
 
@@ -1314,7 +1391,13 @@ const readFor = async (
       reason: "request_not_allowed",
     });
   }
-  return await reader.read(read, tallied(run.sensitive, fn));
+  try {
+    return await reader.read(read, tallied(run.sensitive, fn));
+  } catch (error) {
+    // What the store refuses by the table's access and row rules is kept
+    // as evidence too (`refusedByStore`).
+    throw refusedByStore(run.compiled.tables, error);
+  }
 };
 
 /**
@@ -2805,8 +2888,11 @@ export const useEvidenceWaitMs = 2000;
 /**
  * Keeps the evidence of a use refused at the host's admission
  * (`refusedUses`) as `fn`'s code asked it: the call's first, through
- * `Invocation.refusedUse`, before the refusal reaches App code. A failure
- * to keep it is logged; the refusal stands either way.
+ * `Invocation.refusedUse`, before the refusal reaches App code. For a
+ * live query, a refusal its subscription kept already in this version is
+ * passed over without taking the call's entry, and one whose keeping
+ * rejects is given back to it (`Invocation.refusalsKept`). A failure to
+ * keep it is logged; the refusal stands either way.
  */
 const keepEvidence = async (
   run: Run,
@@ -2821,15 +2907,27 @@ const keepEvidence = async (
   if (refused === undefined || keep === undefined || run.evidence.kept) {
     return;
   }
-  run.evidence.kept = true;
   const errorCode =
     operationErrors.codeOf(error) ??
     dataErrors.codeOf(error) ??
     "resource.not_allowed";
+  const refusal: UseRefusal = { function: fn.path, ...refused, errorCode };
+  const { refusalsKept, consumer } = run.invocation;
+  const key = refusalKey(consumer.resourceVersion, refusal);
+  if (refusalsKept?.has(key) === true) {
+    return;
+  }
+  // Taken before the write, so a read again meanwhile doesn't write it
+  // twice; given back if the write rejects, so a later read keeps it. A
+  // write that hangs keeps it: it goes on past the wait (`waitUntil`,
+  // app-functions.ts), and a read again would only write it twice.
+  refusalsKept?.add(key);
+  run.evidence.kept = true;
   const keeping = (async () => {
     try {
-      await keep({ function: fn.path, ...refused, errorCode });
+      await keep(refusal);
     } catch (keepError) {
+      refusalsKept?.delete(key);
       log.error("app.use.audit_failed", {
         requestId: run.invocation.requestId,
         errorCode,
@@ -3049,6 +3147,8 @@ const runHandler = async (
  */
 const stagedQuery = async (
   run: Run,
+  /** The mutation that runs it, whose staged writes it sees. */
+  mutation: FunctionManifest,
   callee: FunctionManifest,
   args: Json,
   reader: StoreReader,
@@ -3067,7 +3167,16 @@ const stagedQuery = async (
     {
       read: async (request) => {
         spend();
-        return await readFor(run, callee, reader, request);
+        try {
+          return await readFor(run, callee, reader, request);
+        } catch (error) {
+          // A write the store refuses as it shows the query the staged
+          // writes is the mutation's, which staged it: kept as its own.
+          if (dataErrors.codeOf(error) === "data.write_denied") {
+            await keepEvidence(run, mutation, error);
+          }
+          throw error;
+        }
       },
     },
     undefined,
@@ -3184,6 +3293,7 @@ const startNested = async (
     if (within.type === "mutation") {
       return await stagedQuery(
         nested,
+        fn,
         callee,
         admitted,
         within.reader,
@@ -3537,6 +3647,11 @@ const runMutation = async (
       return committed.result;
     } catch (error) {
       if (dataErrors.codeOf(error) !== "data.reads_changed") {
+        // A write the store refuses by the table's access and row rules
+        // surfaces here, past the mutation's code: kept now, before an
+        // action that called it hears of it (`refusedByStore`).
+        // oxlint-disable-next-line no-await-in-loop -- it ends the loop
+        await keepEvidence(run, fn, refusedByStore(run.compiled.tables, error));
         throw error;
       }
     }

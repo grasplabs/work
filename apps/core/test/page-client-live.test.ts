@@ -7,9 +7,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { definedWith, withFiles } from "./app-definitions.ts";
+import { commitApp, definedWith, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { pastAccessRecheck } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import type { Opened, Push } from "./page-client.ts";
 import {
@@ -722,6 +723,265 @@ describe("live queries and a person's roles", { timeout: 180_000 }, () => {
         JSON.stringify(result).includes("Builders only")
       )
     ).toBeFalsy();
+  });
+
+  it("keeps a refusal its query's first read met once a version, through a refused outbox write and a publish", async () => {
+    const secretFiles = withSecrets();
+    const glanceFiles = withFiles(secretFiles, {
+      "server/notes.ts": `${secretFiles.files["server/notes.ts"] ?? ""}
+export const glance = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(10);
+    try {
+      await ctx.db.query("secrets").take(10);
+    } catch {
+      // Only its builders read the secrets.
+    }
+    return notes.length;
+  },
+});
+`,
+    });
+    const opened = await openedApp(glanceFiles);
+    const { member, lease, client } = await memberOf(opened);
+    const glance = referenceTo<Record<never, never>, number, "query">(
+      opened.release,
+      "notes.glance"
+    );
+    const api = apiOf(opened.release);
+    const follower = pageFollower();
+    const shows = async (count: number) => {
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result).toStrictEqual({
+          ok: true,
+          value: count,
+        });
+      });
+    };
+    const keptVersions = async () => {
+      const events = await allEvents();
+      return events
+        .filter(
+          (event) =>
+            event.action === "app.use.refused" &&
+            event.target?.id === opened.app
+        )
+        .map(({ detail }) => detail?.version);
+    };
+    // Core's database refuses the first read's evidence in its outbox.
+    const trigger = `refuse_${opened.app.replaceAll("-", "_")}`;
+    await env.DB.prepare(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_outbox
+       WHEN NEW.event LIKE '%app.use.refused%'
+       BEGIN SELECT RAISE(ABORT, 'refused for the test'); END`
+    ).run();
+    try {
+      await member.api.pages
+        .frame(opened.app, lease)
+        .watchQuery(requestOf(glance, {}), follower.callback);
+      await shows(0);
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER ${trigger}`).run();
+    }
+    await client.mutation(api.create, { title: "First" });
+    await shows(1);
+    const refusedOutbox = await keptVersions();
+    // A second version made current while the query is followed.
+    const { version } = await commitApp(
+      opened.builder.api.apps.files,
+      opened.app,
+      withFiles(glanceFiles, {
+        "server/notes.ts": `${glanceFiles.files["server/notes.ts"] ?? ""}\n// The second version.\n`,
+      }),
+      "Second"
+    );
+    await opened.builder.api.apps.versions.setCurrent(opened.app, version);
+    await client.mutation(api.create, { title: "Second" });
+    await shows(2);
+    await client.mutation(api.create, { title: "Third" });
+    await shows(3);
+    expect({ refusedOutbox, published: await keptVersions() }).toStrictEqual({
+      // Kept all the same, straight to the log, and once.
+      refusedOutbox: [1],
+      // Once more for the version it was refused in next.
+      published: [1, version],
+    });
+  });
+
+  it("keeps the evidence of each table its query is first refused on a read a write caused, each once only", async () => {
+    const secretFiles = withSecrets();
+    const opened = await openedApp(
+      withFiles(
+        definedWith(secretFiles, {
+          op: "addTable",
+          name: "vault",
+          fields: { text: "v.string()" },
+          access: { read: "appBuilders", write: "appBuilders" },
+        }),
+        {
+          "server/notes.ts": `${secretFiles.files["server/notes.ts"] ?? ""}
+export const glance = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(10);
+    // The secrets once there are two notes, and the vault after them
+    // once there are three.
+    if (notes.length < 2) {
+      return notes.length;
+    }
+    try {
+      await ctx.db.query("secrets").take(10);
+    } catch {
+      // Only its builders read the secrets.
+    }
+    if (notes.length >= 3) {
+      try {
+        await ctx.db.query("vault").take(10);
+      } catch {
+        // Nor the vault.
+      }
+    }
+    return -notes.length;
+  },
+});
+`,
+        }
+      )
+    );
+    const { member, lease, client } = await memberOf(opened);
+    const glance = referenceTo<Record<never, never>, number, "query">(
+      opened.release,
+      "notes.glance"
+    );
+    const api = apiOf(opened.release);
+    const follower = pageFollower();
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(glance, {}), follower.callback);
+    const keptNow = async () => {
+      const events = await allEvents();
+      return events
+        .filter(
+          (event) =>
+            event.action === "app.use.refused" &&
+            event.target?.id === opened.app
+        )
+        .map(({ detail }) => detail);
+    };
+    const kept = [];
+    for (const [count, shows] of [
+      [1, 1],
+      [2, -2],
+      [3, -3],
+      [4, -4],
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one write, one read again
+      await client.mutation(api.create, { title: `Note ${count}` });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result).toStrictEqual({
+          ok: true,
+          value: shows,
+        });
+      });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const now = await keptNow();
+      kept.push(now.length);
+    }
+    expect({ kept, details: await keptNow() }).toStrictEqual({
+      // None until a write makes it read the secrets, then that one only;
+      // the vault once a write makes it read that too, after the secrets
+      // kept already.
+      kept: [0, 1, 2, 2],
+      details: [
+        {
+          version: 1,
+          person: member.userId,
+          runId: null,
+          function: "notes.glance",
+          useKind: "table",
+          useName: "secrets",
+          reason: "request_not_allowed",
+          errorCode: "data.access_denied",
+        },
+        {
+          version: 1,
+          person: member.userId,
+          runId: null,
+          function: "notes.glance",
+          useKind: "table",
+          useName: "vault",
+          reason: "request_not_allowed",
+          errorCode: "data.access_denied",
+        },
+      ],
+    });
+  });
+
+  it("keeps the evidence of a table its query is refused once, on its first read, however often a write reads it again", async () => {
+    const secretFiles = withSecrets();
+    const opened = await openedApp(
+      withFiles(secretFiles, {
+        "server/notes.ts": `${secretFiles.files["server/notes.ts"] ?? ""}
+export const glance = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(10);
+    try {
+      return notes.length + (await ctx.db.query("secrets").take(10)).length;
+    } catch {
+      // Only its builders read the secrets.
+      return notes.length;
+    }
+  },
+});
+`,
+      })
+    );
+    const { member, lease, client } = await memberOf(opened);
+    const glance = referenceTo<Record<never, never>, number, "query">(
+      opened.release,
+      "notes.glance"
+    );
+    const api = apiOf(opened.release);
+    const follower = pageFollower();
+    await member.api.pages
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(glance, {}), follower.callback);
+    // Each of their notes a write their query is read again for, its
+    // secrets refused each time.
+    for (const count of [1, 2, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one write, one read again
+      await client.mutation(api.create, { title: `Note ${count}` });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result).toStrictEqual({
+          ok: true,
+          value: count,
+        });
+      });
+    }
+    const events = await allEvents();
+    const kept = events.filter(
+      (event) =>
+        event.action === "app.use.refused" && event.target?.id === opened.app
+    );
+    expect(kept.map(({ detail }) => detail)).toStrictEqual([
+      {
+        version: 1,
+        person: member.userId,
+        runId: null,
+        function: "notes.glance",
+        useKind: "table",
+        useName: "secrets",
+        reason: "request_not_allowed",
+        errorCode: "data.access_denied",
+      },
+    ]);
   });
 });
 /**

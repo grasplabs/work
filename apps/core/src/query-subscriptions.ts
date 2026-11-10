@@ -318,6 +318,13 @@ interface Evaluation {
   budgetWaitMs: number;
   /** Reads in a row that writes tore (`maxTornReads`). */
   torn: number;
+  /**
+   * The refused uses its reads kept as evidence (app-functions.ts,
+   * `refusalsKept`): each once however often a write reads it again, and
+   * one a read meets for the first time (a flag a write set, a role the
+   * person lost) as it does.
+   */
+  readonly refusalsKept: Set<string>;
   closed: boolean;
   /** The roles its latest result was read under (`rolesOf`). */
   roles?: string;
@@ -391,13 +398,16 @@ export interface LiveReads<By extends Reader> {
   /**
    * Reads the query `request` names as `by`, as `build`, by
    * `deadline`; a throw is a refusal that ends the subscription.
+   * `refusalsKept` holds the refused uses the subscription kept already,
+   * each kept once a subscription (app-functions.ts, `refusalsKept`).
    */
   evaluate: (
     by: By,
     app: AppId,
     build: PageLease | undefined,
     request: string,
-    deadline: number
+    deadline: number,
+    refusalsKept: Set<string>
   ) => Promise<LiveRead>;
 }
 
@@ -412,7 +422,8 @@ const evaluatePage = async (
   app: AppId,
   lease: PageLease | undefined,
   request: string,
-  deadline: number
+  deadline: number,
+  refusalsKept: Set<string>
 ): Promise<EvaluatedQuery> => {
   if (lease?.kind === "draft") {
     let reads: EvaluatedQuery["reads"];
@@ -437,7 +448,8 @@ const evaluatePage = async (
     app,
     lease?.build,
     "watchQuery",
-    async () => await evaluateAppQuery(env, by, app, request, deadline)
+    async () =>
+      await evaluateAppQuery(env, by, app, request, deadline, refusalsKept)
   );
 };
 
@@ -460,14 +472,15 @@ export const pageReads = (
   forget: () => {
     check.forget?.();
   },
-  evaluate: async (by, app, build, request, deadline) => {
+  evaluate: async (by, app, build, request, deadline, refusalsKept) => {
     const { answer, reads } = await evaluatePage(
       env,
       by,
       app,
       build,
       request,
-      deadline
+      deadline,
+      refusalsKept
     );
     return { result: answer.result, reads };
   },
@@ -734,6 +747,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       followsDecisions: callsDecisionQuery(request),
       budgetWaitMs: 0,
       torn: 0,
+      refusalsKept: new Set(),
       closed: false,
     };
     this.#evaluations.set(key, evaluation);
@@ -855,7 +869,8 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         app,
         build,
         request,
-        Date.now() + evaluationMs
+        Date.now() + evaluationMs,
+        evaluation.refusalsKept
       );
     } catch (error) {
       await this.#end(evaluation, refusalResult(error));
