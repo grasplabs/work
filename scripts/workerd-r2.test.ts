@@ -5,6 +5,7 @@
  * returned, or the error it threw: the calls core makes.
  */
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -289,15 +290,45 @@ const config :Workerd.Config = (
  * The files under `dir` and their sizes, hidden ones too: the disk service
  * writes a body to a hidden temporary file before it moves it into place.
  */
-const filesIn = (dir: string): { name: string; size: number }[] =>
+const filesIn = (dir: string): { name: string; dir: string; size: number }[] =>
   existsSync(dir)
     ? readdirSync(dir, { recursive: true, withFileTypes: true })
         .filter((entry) => entry.isFile())
         .map((entry) => ({
           name: entry.name,
+          dir: entry.parentPath,
           size: statSync(path.join(entry.parentPath, entry.name)).size,
         }))
     : [];
+
+/**
+ * The directory a bucket keeps the one file of `size` bytes in: a
+ * version's own.
+ */
+const versionDirOf = (files: string, size: number): string => {
+  const [file, ...others] = filesIn(files).filter(
+    (found) => found.size === size
+  );
+  if (file === undefined || others.length > 0) {
+    throw new Error(`not one file of ${size} bytes`);
+  }
+  return file.dir;
+};
+
+/** The directories under `dir`, and itself. */
+const dirsIn = (dir: string): string[] => [
+  dir,
+  ...readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(entry.parentPath, entry.name)),
+];
+
+/** Makes `dirs` refuse writes, as a read-only disk would, or take them again. */
+const setWritable = (dirs: readonly string[], writable: boolean): void => {
+  for (const dir of dirs) {
+    chmodSync(dir, writable ? 0o755 : 0o555);
+  }
+};
 
 /** How many bytes the files under `dir` hold. */
 const bytesIn = (dir: string): number =>
@@ -590,6 +621,104 @@ describe("the on-prem R2 service", () => {
       kept: { size: largeSize, body: expected },
       after: largeSize,
     });
+  });
+
+  it("answers a put or delete as done when the file it replaced or deleted can't be removed, and removes that file at the next start", async () => {
+    const disk = newDisk();
+    const first = await serve(disk);
+    await first.run([{ op: "put", bucket: "FILES", key: "k", text: "old" }]);
+    // The old version's directory refuses its file's removal.
+    const oldDir = versionDirOf(disk.files, 3);
+    setWritable([oldDir], false);
+    const [replaced, got] = values(
+      await first.run([
+        { op: "put", bucket: "FILES", key: "k", text: "newer" },
+        { op: "get", bucket: "FILES", key: "k" },
+      ])
+    );
+    const newDir = versionDirOf(disk.files, 5);
+    setWritable([newDir], false);
+    const [deleted, head] = values(
+      await first.run([
+        { op: "delete", bucket: "FILES", key: "k" },
+        { op: "head", bucket: "FILES", key: "k" },
+      ])
+    );
+    const leftBehind = filesIn(disk.files).length;
+    await first.stop();
+    setWritable([oldDir, newDir], true);
+
+    const second = await serve(disk);
+    await second.run([{ op: "head", bucket: "FILES", key: "k" }]);
+    await eventually(() => filesIn(disk.files).length === 0);
+    expect({
+      replaced: picked(replaced, ["size"]),
+      got: picked(got, ["body"]),
+      deleted,
+      head,
+      leftBehind,
+    }).toStrictEqual({
+      replaced: { size: 5 },
+      got: { body: "newer" },
+      deleted: "deleted",
+      head: null,
+      leftBehind: 2,
+    });
+  });
+
+  it("refuses a put the disk can't take with a clear error, and keeps the object it would have replaced", async () => {
+    const disk = newDisk();
+    const { run } = await serve(disk);
+    await run([{ op: "put", bucket: "FILES", key: "k", size: largeSize }]);
+    const dirs = dirsIn(disk.files);
+    setWritable(dirs, false);
+    try {
+      const [refusedPut, kept, expected] = values(
+        await run([
+          { op: "put", bucket: "FILES", key: "k", size: largeSize },
+          { op: "get", bucket: "FILES", key: "k" },
+          { op: "expected", size: largeSize },
+        ])
+      );
+      expect({
+        refused: refused(
+          refusedPut,
+          "The disk failed to store the object's body"
+        ),
+        kept: picked(kept, ["body"]),
+      }).toStrictEqual({ refused: true, kept: { body: expected } });
+    } finally {
+      setWritable(dirs, true);
+    }
+  });
+
+  it("keeps the new object, and removes the old one's file, when a crash comes after a put replaced it but before its file was removed", async () => {
+    const disk = newDisk();
+    const first = await serve(disk);
+    await first.run([
+      { op: "put", bucket: "FILES", key: "k", size: largeSize },
+    ]);
+    // Its removal can't finish before workerd dies.
+    const oldDir = versionDirOf(disk.files, largeSize);
+    setWritable([oldDir], false);
+    await first.run([
+      { op: "put", bucket: "FILES", key: "k", size: 2 * largeSize },
+    ]);
+    await first.kill();
+    setWritable([oldDir], true);
+
+    const second = await serve(disk);
+    const [got, expected] = values(
+      await second.run([
+        { op: "get", bucket: "FILES", key: "k" },
+        { op: "expected", size: 2 * largeSize },
+      ])
+    );
+    await eventually(() => filesIn(disk.files).length === 1);
+    expect({
+      got: picked(got, ["body"]),
+      bytes: bytesIn(disk.files),
+    }).toStrictEqual({ got: { body: expected }, bytes: 2 * largeSize });
   });
 
   it("keeps the object a put that fails midway, or doesn't match its checksum, was replacing", async () => {

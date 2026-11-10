@@ -672,6 +672,20 @@ const settled = async (
   }
 };
 
+/**
+ * The error a put fails with when the disk service fails its file: with
+ * the status it answered, or what its request threw.
+ */
+const diskFailed = (cause: unknown): Error => {
+  let reason = String(cause);
+  if (cause instanceof Response) {
+    reason = `it answered ${cause.status}`;
+  } else if (cause instanceof Error) {
+    reason = cause.message;
+  }
+  return new Error(`The disk failed to store the object's body: ${reason}`);
+};
+
 /** One bucket: a SQLite Durable Object that answers R2's client. */
 export class R2Store extends DurableObject<R2Env> {
   /** The versions being read now, with how many reads each. */
@@ -829,14 +843,19 @@ export class R2Store extends DurableObject<R2Env> {
   }
 
   /**
-   * Removes a version's directory, then forgets the version. One the disk
-   * service fails to remove stays in `files`, for the next start.
+   * Removes a version's directory, then forgets the version. It never
+   * fails: one the disk service can't remove stays in `files`, for the
+   * next start, so a put or delete that already committed is never
+   * answered as failed.
    */
   async #remove(version: string): Promise<void> {
-    const response = await this.env.DISK.fetch(this.#directory(version), {
-      method: "DELETE",
-    });
-    if (response.ok || response.status === 404) {
+    const response = await settled(
+      this.env.DISK.fetch(this.#directory(version), { method: "DELETE" })
+    );
+    if (
+      response instanceof Response &&
+      (response.ok || response.status === 404)
+    ) {
       this.ctx.storage.sql.exec("DELETE FROM files WHERE version = ?", version);
     }
   }
@@ -965,6 +984,9 @@ export class R2Store extends DurableObject<R2Env> {
         return replaced;
       });
     } catch (error) {
+      // Read to its end, unkept, so the client gets the error rather than a
+      // lost connection; settled either way, as the body may have failed.
+      await Promise.allSettled([value.pipeTo(new WritableStream())]);
       await this.#remove(version);
       throw error;
     }
@@ -1005,27 +1027,33 @@ export class R2Store extends DurableObject<R2Env> {
       })
     );
     const fileWriter = file.writable.getWriter();
+    const all = [...writers, fileWriter];
+    /**
+     * Writes to the digests and the file. Only the file can fail, when the
+     * disk service stops taking it: said as such, not as what it threw.
+     */
+    const toFile = async (
+      step: (writer: (typeof all)[number]) => Promise<void>
+    ): Promise<void> => {
+      try {
+        await Promise.all(all.map(step));
+      } catch (error) {
+        throw diskFailed(error);
+      }
+    };
     try {
-      for await (const part of value) {
-        await Promise.all(
-          [...writers, fileWriter].map(async (writer) => {
-            await writer.write(part);
-          })
-        );
+      // Not cancelled on a failure: `#put` reads the rest before it answers.
+      for await (const part of value.values({ preventCancel: true })) {
+        await toFile(async (writer) => {
+          await writer.write(part);
+        });
       }
-      await Promise.all(
-        [...writers, fileWriter].map(async (writer) => {
-          await writer.close();
-        })
-      );
+      await toFile(async (writer) => {
+        await writer.close();
+      });
       const answer = await stored;
-      if (answer instanceof Error) {
-        throw answer;
-      }
-      if (!answer.ok) {
-        throw new Error(
-          `The disk refused the object's body (${answer.status}).`
-        );
+      if (answer instanceof Error || !answer.ok) {
+        throw diskFailed(answer);
       }
     } catch (error) {
       // Settled either way: the file may have failed already.
