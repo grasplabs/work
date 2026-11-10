@@ -966,8 +966,15 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       fixture.app,
       version
     );
+    // Made current, each alias it declares held to what it binds.
+    const current = await outcome(
+      fixture.builder.api.apps.versions.setCurrent(fixture.app, version)
+    );
 
-    expect(review.handsFilesToWorkflows).toBeTruthy();
+    expect({
+      handsFiles: review.handsFilesToWorkflows,
+      current,
+    }).toStrictEqual({ handsFiles: true, current: "ok" });
   });
 
   it("refuses a commit's start once the person it acts for left the App before its dispatch, their file read as missing, never as the App", async () => {

@@ -495,20 +495,26 @@ const heldSql = (app: AppId, alias: string, id?: string): SQL =>
  * the App version current requires, so a deletion or a direct rebind
  * landing first refuses the whole switch. Each workflow version it binds
  * is live and published, and each alias it declares still binds what it
- * was checked against.
+ * was checked against. Each list is one JSON value, so an App declaring
+ * many workflows stays within the values D1 binds to one statement.
  */
-export const bindableSql = (app: AppId, checked: BindingSwitch): SQL =>
-  and(
-    sql`1`,
-    ...checked.changes.map(
-      ({ workflowId, version }) =>
-        sql`EXISTS (SELECT 1 FROM workflow_resource_versions AS bound
-          JOIN workflow_resources AS live ON live.id = bound.workflow_resource_id
-          WHERE live.id = ${workflowId} AND live.deleted_at IS NULL
-            AND bound.version = ${version})`
-    ),
-    ...checked.held.map(({ alias, id }) => heldSql(app, alias, id))
-  ) ?? sql`1`;
+export const bindableSql = (app: AppId, checked: BindingSwitch): SQL => {
+  const binds = JSON.stringify(
+    checked.changes.map(({ workflowId, version }) => [workflowId, version])
+  );
+  const held = JSON.stringify(
+    checked.held.map(({ alias, id }) => [alias, id ?? null])
+  );
+  return sql`NOT EXISTS (SELECT 1 FROM json_each(${binds}) AS bind
+      WHERE NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS bound
+        JOIN workflow_resources AS live ON live.id = bound.workflow_resource_id
+        WHERE live.id = bind.value ->> 0 AND live.deleted_at IS NULL
+          AND bound.version = bind.value ->> 1))
+    AND NOT EXISTS (SELECT 1 FROM json_each(${held}) AS checked
+      WHERE (SELECT held.id FROM app_workflow_bindings AS held
+        WHERE held.app_id = ${app} AND held.alias = checked.value ->> 0
+          AND held.status = 'active') IS NOT checked.value ->> 1)`;
+};
 
 /**
  * The statements binding `changes` as version `appVersion` of App `app`
