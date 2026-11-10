@@ -1441,7 +1441,7 @@ const filingContract = async (admin: Identity): Promise<string> => {
 const invoiceFile = { name: "invoice.csv", contentType: "text/csv" };
 
 describe("a draft's test run keeping and attaching run files", () => {
-  it("answers a read kept as a file with a stand-in reference, checked as a real read is, attaches it, and keeps nothing", async () => {
+  it("answers a read kept as a file with a stand-in reference, checked as a real read is, attaches, reads and deletes it by its ID, and keeps nothing", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const filing = await filingContract(admin);
@@ -1474,9 +1474,24 @@ describe("a draft's test run keeping and attaching run files", () => {
           },
           from: "runFiles",
         },
+        // Read back and deleted by its ID, as a real run's kept file is.
+        {
+          id: "text",
+          type: "call",
+          files: "runFiles",
+          action: "read",
+          args: { file: { $expr: "kept.file.file" } },
+        },
+        {
+          id: "removed",
+          type: "call",
+          files: "runFiles",
+          action: "delete",
+          args: { file: { $expr: "kept.file.file" } },
+        },
       ],
       status:
-        'kept.file.file + " " + kept.file.name + " " + kept.file.size + " " + sent.messageId',
+        '(kept.file.file.length === 36 ? "id" : "no id") + " " + kept.file.name + " " + kept.file.size + " " + sent.messageId + " " + text.text',
     });
     const csv = "a,b\n1,2\n";
     const run = async (
@@ -1491,6 +1506,7 @@ describe("a draft's test run keeping and attaching run files", () => {
             output: { ...file, encoding: "base64", content },
           },
           mailer: { output: { messageId: "m-1" } },
+          runFiles: { output: { text: "a,b" } },
         },
       });
       const calls = await callsOf(runId);
@@ -1526,7 +1542,7 @@ describe("a draft's test run keeping and attaching run files", () => {
       kept: {
         end: {
           status: "completed",
-          output: { status: `candidate invoice.csv ${csv.length} m-1` },
+          output: { status: `id invoice.csv ${csv.length} m-1 a,b` },
         },
         calls: 0,
         files: 0,
@@ -1534,7 +1550,7 @@ describe("a draft's test run keeping and attaching run files", () => {
       notBase64: { status: "failed", code: "workflow.call_invalid" },
       relabelled: {
         status: "completed",
-        output: { status: `candidate attachment ${pdf.length} m-1` },
+        output: { status: `id attachment ${pdf.length} m-1 a,b` },
       },
       unsupported: { status: "failed", code: "file.run_type_unsupported" },
     });

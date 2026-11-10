@@ -5,7 +5,7 @@ import {
   attachmentsProperty,
 } from "@grasp-os/shared/connector-attachments";
 import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
-import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -427,8 +427,23 @@ const requireTakesFiles = (
   }
 };
 
-/** The ID a test run's stand-in for a kept file has: no file's. */
-const candidateFileId = "candidate";
+/**
+ * The ID a test run's stand-in for the file its call `key` keeps has: a
+ * UUID, as every run file's is, so a later step's files call names it as
+ * it would a real one, made from the call's own key, so the same call
+ * again (a replay, a retry) answers the same ID. No file has it: a test
+ * run keeps none, and its files calls are answered from its fixtures.
+ */
+const candidateFileId = async (key: string): Promise<string> => {
+  const hex = await sha256Hex(`candidate-file:${key}`);
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `4${hex.slice(13, 16)}`,
+    `8${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
+};
 
 /**
  * What a test run's read kept as a file answers: its fixture, checked
@@ -439,7 +454,8 @@ const candidateFileId = "candidate";
  */
 const candidateKept = async (
   operation: { output: string },
-  answer: Json
+  answer: Json,
+  key: string
 ): Promise<Json> => {
   const read = fileAnswerSchema.safeParse(answer);
   if (!read.success) {
@@ -467,7 +483,7 @@ const candidateKept = async (
   return {
     ...rest,
     file: {
-      file: candidateFileId,
+      file: await candidateFileId(key),
       name: runFileNamed(named.success ? named.data : unnamedFile, type),
       type,
       size: bytes.length,
@@ -958,7 +974,8 @@ const candidateAnswer = async (
   env: Env,
   run: CallingRun,
   bindings: ReadonlyMap<string, CandidateBinding>,
-  call: BuiltCall
+  call: BuiltCall,
+  key: string
 ): Promise<Json> => {
   // An App call goes through no binding: its answer is the start's under
   // the call's own key (app-calls.ts, `appCallKey`), checked against what
@@ -997,7 +1014,7 @@ const candidateAnswer = async (
         return requireShape(shape.output, answer, "output");
       }
       asFileRead(shape, call.arguments);
-      return await candidateKept(shape, answer);
+      return await candidateKept(shape, answer, key);
     }
     case "grasp.model": {
       requireModelRequest(call);
@@ -1198,7 +1215,7 @@ export const makeCall = async (
   // binding, authority or receipt is looked at, so nothing of it can
   // reach connect, a model, an App, a store or Knowledge.
   if (run.candidate !== undefined) {
-    return await candidateAnswer(env, run, run.candidate, call);
+    return await candidateAnswer(env, run, run.candidate, call, effect.key);
   }
   // A run an App's test started never comes here: its host answers its
   // model calls from its test (fixture-calls.ts) and refuses the rest.
