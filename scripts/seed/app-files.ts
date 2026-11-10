@@ -29,46 +29,17 @@ export const appDefinition = (seed: AppSeed): AppDefinition => {
 
 /**
  * An App's files: its AGENTS.md, the code generated from its definition
- * (`appDefinition`), the App's page, and a `workflowTest` suite of each
- * workflow on one fixture: `desk` starts the runs, and `decider` answers
- * what they ask.
+ * (`appDefinition`), the App's page, and an `appTest` suite of each
+ * workflow, which says who starts its runs itself.
  */
 export const appFiles = (
   seed: AppSeed,
   pages: Readonly<Record<string, string>>
-): Record<string, string> => {
-  const fixture = {
-    principals: { desk: { role: "user" }, decider: { role: "user" } },
-    workflows: Object.fromEntries(
-      seed.workflows.flatMap(({ alias, decision }) =>
-        decision === undefined
-          ? []
-          : [
-              [
-                alias,
-                {
-                  params: { [decision.param]: "decider" },
-                  deciders: { [decision.binding]: ["decider"] },
-                },
-              ],
-            ]
-      )
-    ),
-  };
-  return {
-    "AGENTS.md": seed.agents,
-    ...definitionSources(appDefinition(seed)),
-    ...pages,
-    ...Object.fromEntries(
-      seed.workflows.map(({ alias, tests }) => [
-        `tests/${alias}.test.ts`,
-        tests,
-      ])
-    ),
-    ...(seed.workflows.length === 0
-      ? {}
-      : {
-          "tests/fixtures/desk.json": `${JSON.stringify(fixture, null, 2)}\n`,
-        }),
-  };
-};
+): Record<string, string> => ({
+  "AGENTS.md": seed.agents,
+  ...definitionSources(appDefinition(seed)),
+  ...pages,
+  ...Object.fromEntries(
+    seed.workflows.map(({ alias, tests }) => [`tests/${alias}.test.ts`, tests])
+  ),
+});

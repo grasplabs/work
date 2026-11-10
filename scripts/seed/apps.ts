@@ -74,7 +74,7 @@ export interface WorkflowSeed {
   decision?: DecisionSeed;
   /** What the App declares of it: its args and returns, as `v` code. */
   declared: { args: string; returns: string };
-  /** Its `workflowTest` suite, in the App's `tests/`. */
+  /** Its `appTest` suite, in the App's `tests/`. */
   tests: string;
   /** What its page starts a run with. */
   sample: Input;
@@ -111,39 +111,34 @@ export const decisionResponse = JSON.stringify(
 );
 
 /**
- * A `workflowTest` suite of the App's fixture `desk`: `desk` starts each
- * run, and `decider` answers its decisions.
+ * An `appTest` suite of the App's workflows: `desk`, someone of the
+ * desk's, starts each run.
  */
 const suite = (tests: Record<string, string>): string =>
-  `import { workflowTest } from "@grasp-os/sdk/testing";
+  `import { appTest } from "@grasp-os/sdk/testing";
 import { workflows } from "@server/_generated/api";
+import { expect } from "vitest";
+import schema from "../server/schema.ts";
 
-export default workflowTest({
-  fixtures: "desk",
-  tests: {
+export default appTest(schema, {
 ${Object.entries(tests)
   .map(
-    ([name, body]) => `    ${JSON.stringify(name)}: async (t) => {
-      const desk = await t.as("desk");
-      const decider = await t.as("decider");
+    ([name, body]) => `  ${JSON.stringify(name)}: async (t) => {
+    const desk = t.withIdentity({ name: "Desk" });
 ${body
   .trim()
   .split("\n")
-  .map((line) => `      ${line}`)
+  .map((line) => `    ${line}`)
   .join("\n")}
-    },`
+  },`
   )
   .join("\n")}
-  },
 });
 `;
 
 /** A test's check that its run failed with the error its workflow raises, `code`. */
-const failsWith = (
-  code: string
-): string => `const ended = await t.runs.untilTerminal(run);
-t.equal(ended.status, "failed");
-t.equal(ended.status === "failed" ? ended.code : null, ${JSON.stringify(code)});`;
+const failsWith = (code: string): string =>
+  `expect(await t.runs.untilTerminal(run)).toMatchObject({ status: "failed", code: ${JSON.stringify(code)} });`;
 
 // Opportunity-to-Cash
 
@@ -222,9 +217,9 @@ const clientOnboarding: WorkflowSeed = {
   },
   tests: suite({
     "opens a complete file when nothing is missing": `const run = await desk.start(workflows.clientOnboarding, { client: "Fam. Willems", town: "Utrecht", documents: ${JSON.stringify(requiredDocuments)} });
-t.equal(await t.runs.untilTerminal(run), { status: "completed", result: { client: "Fam. Willems", town: "Utrecht", complete: true, chase: [] } });`,
+expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { client: "Fam. Willems", town: "Utrecht", complete: true, chase: [] } });`,
     "lists the documents to chase": `const run = await desk.start(workflows.clientOnboarding, { client: "D. Mulder", town: "Zeist", documents: ["identity"] });
-t.equal(await t.runs.untilTerminal(run), {
+expect(await t.runs.untilTerminal(run)).toEqual({
   status: "completed",
   result: { client: "D. Mulder", town: "Zeist", complete: false, chase: ["payslip", "employer statement", "bank statements"] },
 });`,
@@ -353,9 +348,9 @@ const emailTriage: WorkflowSeed = {
   },
   tests: suite({
     "sends a complaint to the complaints queue, urgently": `const run = await desk.start(workflows.emailTriage, { from: "M. Hendriks", subject: "Complaint", body: "I'm not happy with the valuation." });
-t.equal(await t.runs.untilTerminal(run), { status: "completed", result: { from: "M. Hendriks", queue: "complaints", urgent: true } });`,
+expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { from: "M. Hendriks", queue: "complaints", urgent: true } });`,
     "sends a question about a file to file status": `const run = await desk.start(workflows.emailTriage, { from: "S. Peeters", subject: "Where is my file?", body: "Has it gone to the lender?" });
-t.equal(await t.runs.untilTerminal(run), { status: "completed", result: { from: "S. Peeters", queue: "file status", urgent: false } });`,
+expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { from: "S. Peeters", queue: "file status", urgent: false } });`,
     "refuses an empty email": `const run = await desk.start(workflows.emailTriage, { from: "R. Bos", subject: "Question", body: "" });
 ${failsWith("triage.empty_email")}`,
   }),
@@ -476,7 +471,7 @@ const weeklyReport: WorkflowSeed = {
   },
   tests: suite({
     "plans the week's board pack": `const run = await desk.start(workflows.weeklyReport, { week: "2026-10-05" });
-t.equal(await t.runs.untilTerminal(run), {
+expect(await t.runs.untilTerminal(run)).toEqual({
   status: "completed",
   result: {
     week: "2026-10-05",

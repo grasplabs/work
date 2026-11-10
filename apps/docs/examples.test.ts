@@ -200,7 +200,14 @@ const tsconfig = {
   compilerOptions: {
     lib: ["es2024", "esnext.disposable", "dom", "dom.iterable"],
     jsx: "react-jsx",
-    paths: { "@server/_generated/*": ["./server/_generated/*.ts"] },
+    paths: {
+      "@server/_generated/*": ["./server/_generated/*.ts"],
+      // What an App's tests import as `vitest`: the runtime's module of
+      // vitest's `expect`, as the compiler maps it (app-code.ts).
+      vitest: [
+        path.join(import.meta.dirname, "../../packages/runtime/src/vitest.ts"),
+      ],
+    },
   },
   include: ["**/*.ts", "**/*.tsx"],
 };
