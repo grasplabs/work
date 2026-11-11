@@ -2,8 +2,9 @@
  * The Brain evaluation (GRA-1726): how well recall finds the passage that
  * answers a question, per language, across languages, in the set written
  * in Dutch and in long documents, against plain text search over the same
- * passages, with a margin of error, and how long each recall takes. Outside the checks on each change: it is in no project the root
- * runs, so neither `vp test` nor CI runs it.
+ * passages, with a margin of error, and how long each recall takes.
+ * Outside the checks on each change: it is in no project the root runs,
+ * so neither `vp test` nor CI runs it.
  *
  *   vp run brain:eval                      run it against a local Brain
  *   vp run brain:eval -- --against <file>  compare with that run instead of the last
