@@ -127,16 +127,17 @@ describe("the Brain evaluation", () => {
 
     const people = await signUpPeople();
     const teamIds = await setUpTeams(people);
-    const keyOfId = new Map<string, string>();
-    // One at a time, in the set's order, so "newer first" breaks ties the
-    // same way in every run and in the baseline.
+    // Each source as an upload named by its key in the set, so what recall
+    // returns names it. One at a time, in the set's order, so "newer
+    // first" breaks ties the same way in every run and in the baseline.
     for (const source of sources) {
       // oxlint-disable-next-line no-await-in-loop -- in order, see above
-      const { id } = await addSource(env, {
+      await addSource(env, {
+        source: { producer: "upload", id: source.key },
+        change: source.key,
         text: source.text,
         readers: readersIn(source.readers, people, teamIds),
       });
-      keyOfId.set(id, source.key);
     }
 
     console.log(
@@ -160,9 +161,12 @@ describe("the Brain evaluation", () => {
         question.question
       );
       const ms = performance.now() - started;
+      // Recall returns chunks: the question's source is found when a chunk
+      // of it holds the quote (`rankOf`), and the leak check reads every
+      // chunk returned.
       const brain: Returned = {
-        keys: recalled.sources.map(({ id }) => keyOfId.get(id)),
-        texts: recalled.sources.map(({ text }) => text),
+        keys: recalled.chunks.map(({ source }) => source.id),
+        texts: recalled.chunks.map(({ text }) => text),
       };
       const grep = grepRecall(sources, asker, question.question, recallLimit);
       const brainLeaks = leaksOf(sources, question, brain);
