@@ -44,7 +44,7 @@ export const waitsToFollow = (live: Live): boolean =>
   live.retry !== undefined || live.revision === 0;
 
 /** What following a query tells the rest of the client. */
-export interface FollowerEvents {
+interface FollowerEvents {
   /** Core ended a followed query as `page.access_changed` (`#accessChanged`). */
   readonly onAccessChanged: (error: GraspError) => void;
 }

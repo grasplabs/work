@@ -1,10 +1,9 @@
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 
 import { refuse } from "./permission-checks.ts";
 import { peopleDeclaration, permissionAliases } from "./permission-types.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { permission } from "./permission.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
 

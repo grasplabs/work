@@ -1,4 +1,4 @@
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 
 import {
@@ -9,7 +9,7 @@ import {
   sha256Pattern,
 } from "./declaration.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
-import { isPlainObject, unsafeKeys } from "./value-descriptor.ts";
+import { unsafeKeys } from "./value-descriptor.ts";
 import type {
   FrozenJson,
   JsonValue,

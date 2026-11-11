@@ -1,7 +1,7 @@
+import { deepFreeze, isPlainObject } from "@grasp-os/shared/json";
+
 import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
-import { deepFreeze } from "./declaration.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { DecisionValueOf } from "./workflow-decisions.ts";
 import type { EventDataOf } from "./workflow-events.ts";
 import type { controlKinds } from "./workflow-functions.ts";

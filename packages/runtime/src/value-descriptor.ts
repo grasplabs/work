@@ -255,17 +255,3 @@ export class ValueDefinitionError extends Error {
     this.code = code;
   }
 }
-
-/**
- * Whether a value is a JSON object: its prototype is `Object`'s or none, so
- * not an array, a class instance, a function or an RPC stub.
- */
-export const isPlainObject = (
-  value: unknown
-): value is Record<string, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-};

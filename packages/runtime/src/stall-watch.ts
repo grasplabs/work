@@ -1,5 +1,5 @@
 /** A signal aborted once `ms` pass without a `touch`; `stop` lets it go. */
-export interface StallWatch {
+interface StallWatch {
   readonly signal: AbortSignal;
   readonly touch: () => void;
   readonly stop: () => void;

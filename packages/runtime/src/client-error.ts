@@ -1,8 +1,7 @@
 import type { ErrorCategory } from "@grasp-os/shared/error-categories";
+import { isPlainObject } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-
-import { isPlainObject } from "./value-descriptor.ts";
 
 // The structured error a page's queries, mutations and actions fail
 // with: what core answered, as it answered it, or why
@@ -151,7 +150,7 @@ const clientErrors = {
   },
   "file.operation_undeclared": {
     message:
-      "This App doesn't declare that use of these files: add it to the resource's operations.",
+      "This App doesn't declare that use of these files: add it to the files permission's operations.",
     category: "contract",
   },
   "file.upload_active": {

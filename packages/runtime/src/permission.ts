@@ -1,3 +1,4 @@
+import { isPlainObject } from "@grasp-os/shared/json";
 import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
 import type {
@@ -45,7 +46,6 @@ import type {
   WorkflowPermission,
 } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";

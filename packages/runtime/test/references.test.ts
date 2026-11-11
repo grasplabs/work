@@ -1,3 +1,4 @@
+import { isPlainObject } from "@grasp-os/shared/json";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { describe, expect, test } from "vite-plus/test";
 
@@ -26,7 +27,7 @@ import { runFunction } from "../src/runner.ts";
 import type { FunctionChannel } from "../src/runner.ts";
 import { serverFunctionsIn } from "../src/server-syntax.ts";
 import { serverModule } from "../src/server.ts";
-import { isPlainObject, valueLimits } from "../src/value-descriptor.ts";
+import { valueLimits } from "../src/value-descriptor.ts";
 import { schemaOf } from "../src/value-schema.ts";
 import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable } from "../src/values.ts";

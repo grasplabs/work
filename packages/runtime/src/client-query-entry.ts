@@ -1,3 +1,4 @@
+import { isPlainObject } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import { readAnswer } from "./call-answers.ts";
@@ -6,7 +7,6 @@ import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
 import type { ReadReference } from "./client-request.ts";
 import { nothingRanCodes } from "./refusals.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /** What a query's readers see: its value (undefined while loading) or failure. */
 export interface QuerySnapshot {

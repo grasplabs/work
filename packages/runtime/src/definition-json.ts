@@ -3,6 +3,7 @@ import {
   functionPathMaxSegments,
   functionSegmentPattern,
 } from "@grasp-os/shared/function-limits";
+import { isPlainObject } from "@grasp-os/shared/json";
 import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import { z } from "zod";
 
@@ -10,7 +11,7 @@ import { AppDefinitionError } from "./app-definition-error.ts";
 import { isOverBytes, refuser } from "./declaration.ts";
 import type { AppDefinition, DefinedPermission } from "./definition-types.ts";
 import { compactDescriptor, descriptorFromCompact } from "./value-compact.ts";
-import { isPlainObject, ValueDefinitionError } from "./value-descriptor.ts";
+import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 
 // An App's definition as JSON: the structure its text holds, every
