@@ -378,15 +378,12 @@ const picked = (value: unknown, names: readonly string[]): unknown =>
 
 /**
  * A body larger than the 2 MB a SQLite row in a Durable Object may hold,
- * and than what one read or write of a stream carries.
+ * and than what one read or write of a stream carries. Also far larger
+ * than what workerd buffers between the service and its client: when a
+ * reader has taken its first piece, the service has sent about 12 KiB of
+ * it (measured), so the rest is still unread when it's replaced.
  */
 const largeSize = 2.5 * 1024 * 1024;
-
-/**
- * A body larger than what workerd buffers between the service and its
- * client, so most of it is still unread after the first piece.
- */
-const beyondBuffersSize = 40 * 1024 * 1024;
 
 describe("the on-prem R2 service", () => {
   afterEach(cleanUp);
@@ -550,9 +547,9 @@ describe("the on-prem R2 service", () => {
     const { run } = await serve();
     const [, read, expected] = values(
       await run([
-        { op: "put", bucket: "FILES", key: "k", size: beyondBuffersSize },
+        { op: "put", bucket: "FILES", key: "k", size: largeSize },
         { op: "getWhileReplaced", bucket: "FILES", key: "k" },
-        { op: "expected", size: beyondBuffersSize },
+        { op: "expected", size: largeSize },
       ])
     );
     expect(read).toStrictEqual({ body: expected, now: "replaced" });
@@ -816,9 +813,9 @@ describe("the on-prem R2 service", () => {
     const { run } = await serve(disk);
     const [, got, expected] = values(
       await run([
-        { op: "put", bucket: "FILES", key: "big", size: beyondBuffersSize },
+        { op: "put", bucket: "FILES", key: "big", size: largeSize },
         { op: "get", bucket: "FILES", key: "big" },
-        { op: "expected", size: beyondBuffersSize },
+        { op: "expected", size: largeSize },
       ])
     );
     const stored = {
@@ -831,7 +828,7 @@ describe("the on-prem R2 service", () => {
     await eventually(() => filesIn(disk.files).length === 0);
     expect(stored).toStrictEqual({
       body: { body: expected },
-      files: beyondBuffersSize,
+      files: largeSize,
       indexUnder1MiB: true,
     });
   });
@@ -923,35 +920,46 @@ describe("the on-prem R2 service", () => {
     ]);
   });
 
-  it("deletes one key or many, up to 1000 at once, and their files", async () => {
-    const disk = newDisk();
-    const { run } = await serve(disk);
-    const most = Array.from({ length: 1000 }, (_, i) => `k${i}`);
-    const results = values(
-      await run([
-        putItself("a"),
-        putItself("b"),
-        putItself("c"),
-        { op: "putMany", bucket: "FILES", keys: most },
-        { op: "delete", bucket: "FILES", key: "a" },
-        { op: "delete", bucket: "FILES", keys: ["b", "c", "never-there"] },
-        { op: "delete", bucket: "FILES", manyKeys: most.length },
-        { op: "list", bucket: "FILES", options: {} },
-      ])
-    );
-    await eventually(() => filesIn(disk.files).length === 0);
-    expect(results.slice(4)).toStrictEqual([
-      "deleted",
-      "deleted",
-      "deleted",
-      {
-        keys: [],
-        uploaded: true,
-        truncated: false,
-        delimitedPrefixes: [],
-      },
-    ]);
-  });
+  /**
+   * Putting the 1,000 objects a delete then removes at once is the work
+   * itself, about 0.8 s here and 3.2 s on a loaded CI runner: past half of
+   * the default 5 s, so it gets room of its own.
+   */
+  const putThousandTimeoutMs = 20_000;
+
+  it(
+    "deletes one key or many, up to 1000 at once, and their files",
+    async () => {
+      const disk = newDisk();
+      const { run } = await serve(disk);
+      const most = Array.from({ length: 1000 }, (_, i) => `k${i}`);
+      const results = values(
+        await run([
+          putItself("a"),
+          putItself("b"),
+          putItself("c"),
+          { op: "putMany", bucket: "FILES", keys: most },
+          { op: "delete", bucket: "FILES", key: "a" },
+          { op: "delete", bucket: "FILES", keys: ["b", "c", "never-there"] },
+          { op: "delete", bucket: "FILES", manyKeys: most.length },
+          { op: "list", bucket: "FILES", options: {} },
+        ])
+      );
+      await eventually(() => filesIn(disk.files).length === 0);
+      expect(results.slice(4)).toStrictEqual([
+        "deleted",
+        "deleted",
+        "deleted",
+        {
+          keys: [],
+          uploaded: true,
+          truncated: false,
+          delimitedPrefixes: [],
+        },
+      ]);
+    },
+    putThousandTimeoutMs
+  );
 
   it("lists by prefix, a page at a time, and by delimiter", async () => {
     const { run } = await serve();
