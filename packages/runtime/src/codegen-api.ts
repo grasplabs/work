@@ -16,16 +16,22 @@ import {
 import { workflowsExport } from "./codegen-workflows.ts";
 import { declaredPermissions } from "./manifest-permissions.ts";
 import { pageFunctionsOf, pageWorkflowsOf } from "./page-functions.ts";
+import type { Declared } from "./server-modules.ts";
 import { workflowFunctions } from "./workflow-functions.ts";
 
+/**
+ * An App's server functions as its modules' syntax declares them: each
+ * one's visibility by its path (`tasks.list` for `server/tasks.ts`'s
+ * `export const list = query(…)`), read without running the code
+ * (server-modules.ts). What the generated `api` and `internal` trees
+ * hold, so they depend only on the server files' paths and what they
+ * export, never on a release.
+ */
+export type ServerFunctions = Readonly<Record<string, Declared>>;
+
 /** A tree of function references as a module's typed, frozen export. */
-const referenceExport = (
-  name: string,
-  operations: readonly FunctionManifest[]
-): string => {
-  const tree = treeOf(
-    operations.map((operation) => [operation.path, operation.path])
-  );
+const referenceExport = (name: string, paths: readonly string[]): string => {
+  const tree = treeOf(paths.map((path) => [path, path]));
   const type = renderTree(
     tree,
     referenceTypeOf,
@@ -44,18 +50,18 @@ const referenceExport = (
   return `export const ${name}: ${type} = frozen(${value});\n`;
 };
 
-/** The App's functions of `visibility`, by path. */
-const operationsOf = (
-  manifest: AppManifest,
+/** The paths of `functions` of `visibility`, in order. */
+const pathsOf = (
+  functions: ServerFunctions,
   visibility: "public" | "internal"
-): FunctionManifest[] =>
-  Object.values(manifest.operations)
-    .filter((operation) => operation.visibility === visibility)
-    .toSorted((a, b) => (a.path < b.path ? -1 : 1));
+): string[] =>
+  Object.keys(functions)
+    .filter((path) => functions[path]?.visibility === visibility)
+    .toSorted();
 
 /** `@server/_generated/internal`: the internal tree. */
-export const serverReferencesText = (manifest: AppManifest): string => {
-  const body = referenceExport("internal", operationsOf(manifest, "internal"));
+export const serverReferencesText = (functions: ServerFunctions): string => {
+  const body = referenceExport("internal", pathsOf(functions, "internal"));
   return `${banner}${typeImports(body, ["FunctionReferenceFromExport"])}\n${freezer}\n${body}`;
 };
 
@@ -94,17 +100,18 @@ export const pageFunctionsText = (
 };
 /** `@server/_generated/api`: the public api and everything else a browser may hold. */
 export const referencesText = (
-  manifest: AppManifest,
+  functions: ServerFunctions,
+  app: Pick<AppManifest, "permissions">,
   workflows: readonly BoundWorkflow[]
 ): string => {
   const parts: string[] = [
-    referenceExport("api", operationsOf(manifest, "public")),
+    referenceExport("api", pathsOf(functions, "public")),
     workflowsExport(workflows),
   ];
 
   const resources = [
-    ...declaredPermissions(manifest, "files"),
-    ...declaredPermissions(manifest, "links"),
+    ...declaredPermissions(app, "files"),
+    ...declaredPermissions(app, "links"),
   ].toSorted((a, b) => (a.alias < b.alias ? -1 : 1));
   const resourceTypes = resources.map((declared) => {
     const literals = (

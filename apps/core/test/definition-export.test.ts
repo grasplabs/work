@@ -1,6 +1,6 @@
 import { generatedWorkflowEntry } from "@grasp-os/compiler";
 import { definitionText, readDefinition } from "@grasp-os/runtime/definition";
-import { readAppManifest } from "@grasp-os/runtime/host";
+import { ownFiles, readAppManifest } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -212,7 +212,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       ),
       provenance: exported.app.provenance.definitionHash,
     }).toStrictEqual({
-      files: keys(files().files),
+      files: keys(ownFiles(files().files)),
       manifest: canonicalText(release.app),
       definitionHash: release.manifest.definitionHash,
       provenance: release.manifest.definitionHash,

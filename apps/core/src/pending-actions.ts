@@ -24,7 +24,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { personOf } from "./connections.ts";
-import { workflowResourceRuns, workflowRuns } from "./db/core/schema.ts";
+import { workflowResourceRuns } from "./db/core/schema.ts";
 import { reauthorizedCapability, refusedForBinding } from "./decided-calls.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { isProviderUnreachable } from "./resource-adapter.ts";
@@ -66,38 +66,25 @@ const endedStatuses: ReadonlySet<string> = new Set([
 
 /**
  * Whether the workflow run a held action came from has ended (or isn't
- * the App's, or the workflow's): its step's key names the run, whichever
- * of its App's code made the call. A paused run hasn't: it may be resumed.
+ * the workflow's): its step's key names the run. A paused run hasn't: it
+ * may be resumed.
  */
 const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
   const runId = runOfStepKey(held.idempotencyKey);
-  if (runId !== undefined && held.subject.type === "workflow") {
-    // A run of an independent workflow (a restricted one's call).
-    const run = await drizzle(env.DB)
-      .select({
-        workflowId: workflowResourceRuns.workflowResourceId,
-        status: workflowResourceRuns.status,
-      })
-      .from(workflowResourceRuns)
-      .where(eq(workflowResourceRuns.id, runId))
-      .get();
-    return (
-      run === undefined ||
-      run.workflowId !== held.subject.workflowId ||
-      endedStatuses.has(run.status)
-    );
-  }
-  if (runId === undefined || held.subject.type !== "app") {
+  if (runId === undefined || held.subject.type !== "workflow") {
     return true;
   }
   const run = await drizzle(env.DB)
-    .select({ appId: workflowRuns.appId, status: workflowRuns.status })
-    .from(workflowRuns)
-    .where(eq(workflowRuns.id, runId))
+    .select({
+      workflowId: workflowResourceRuns.workflowResourceId,
+      status: workflowResourceRuns.status,
+    })
+    .from(workflowResourceRuns)
+    .where(eq(workflowResourceRuns.id, runId))
     .get();
   return (
     run === undefined ||
-    run.appId !== held.subject.appId ||
+    run.workflowId !== held.subject.workflowId ||
     endedStatuses.has(run.status)
   );
 };

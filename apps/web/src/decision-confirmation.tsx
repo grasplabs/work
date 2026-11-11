@@ -227,11 +227,7 @@ export const DecisionConfirmDialog = ({
                 <dt className="text-muted-foreground w-24 flex-none">
                   <Trans context="where a decision comes from">From</Trans>
                 </dt>
-                <dd className="min-w-0 truncate">
-                  {decision.app === undefined
-                    ? decision.workflow
-                    : `${decision.app.name} · ${decision.workflow}`}
-                </dd>
+                <dd className="min-w-0 truncate">{decision.workflow}</dd>
               </div>
               <div className="flex gap-4">
                 <dt className="text-muted-foreground w-24 flex-none">

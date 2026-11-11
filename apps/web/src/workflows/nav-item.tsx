@@ -24,11 +24,9 @@ import { useFrameRead } from "../frame/frame-read.ts";
 // Dashboard's count is (frame/frame-read.ts): after every change on a page,
 // and on the way to another once the count is older than half a minute.
 
-/** The workflow a decision's run belongs to: an App's, or an independent one. */
+/** The workflow a decision's run belongs to. */
 const workflowOf = (decision: DecisionView): string =>
-  decision.workflowResource === undefined
-    ? `app:${decision.app?.id ?? ""}:${decision.workflow}`
-    : `resource:${decision.workflowResource.id}`;
+  decision.workflowResource.id;
 
 /**
  * How many workflows need the person; `undefined` when core couldn't say.

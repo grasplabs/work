@@ -11,6 +11,7 @@ import type {
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
+import type { SetupPlace } from "@grasp-os/shared/onboarding-flow";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -32,9 +33,11 @@ import {
   brainScene,
   isReviewItem,
   isStep,
+  finishedAt,
   heldAt,
   keptAt,
   listeningOf,
+  reachedByPlace,
   reachedOf,
   settledAs,
   stepIndex,
@@ -50,6 +53,7 @@ import type {
 } from "../onboarding/setup.ts";
 import { wasHeard } from "../onboarding/visit.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
+import { useCore } from "../use-core.ts";
 import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
 
 // The client onboarding (prototype `routes/onboarding.tsx`): what a
@@ -169,6 +173,25 @@ const writeKept = (userId: string, kept: Kept): void => {
     );
   } catch {
     // Kept only while the page is open.
+  }
+};
+
+/**
+ * Tells core the screens an admin who went as far as `reached` finished.
+ * Not heard this once, core hears it with the next screen: nothing is
+ * lost, and nothing holds the admin up.
+ */
+const notePlace = async (
+  core: ReturnType<typeof useCore>,
+  reached: number
+): Promise<void> => {
+  try {
+    await core.withSession(
+      async (session) =>
+        await session.onboarding.finishSteps(finishedAt(reached))
+    );
+  } catch {
+    // Said again with the next screen.
   }
 };
 
@@ -355,12 +378,21 @@ const Setup = () => {
   const { step: asked } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
   const { roster, plan, progress, percent, parts, choices } = readOf(data);
-  const stored = readKept(identity.userId).reached;
+  // How far they went: as core says, on whatever device, or as this browser kept it before core did.
+  const placed = reachedByPlace(data?.place ?? null);
+  const stored = Math.max(readKept(identity.userId).reached, placed);
   const ai = data?.ai ?? null;
   // Opened without a step, it goes on where they were; never past the AI step while no model is ready for calls.
   const step = stepShown(asked, reachedOf(stored, { plan }), ai);
   const index = stepIndex(step);
-  const kept = useKept(identity.userId, index);
+  const kept = useKept(identity.userId, Math.max(index, placed));
+  // Core hears of every screen they finished, so they go on from it anywhere, and Grasp sees how far they are.
+  const core = useCore();
+  useEffect(() => {
+    if (kept.reached > placed) {
+      void notePlace(core, kept.reached);
+    }
+  }, [core, kept.reached, placed]);
   // How far they went, and how far they can go now.
   const furthest = reachedOf(kept.reached, { plan });
   const reached = heldAt(furthest, ai);
@@ -505,6 +537,8 @@ const aiReadinessOf = async (session: Session): Promise<AiReadiness | null> => {
 
 /** What the onboarding reads from core. */
 interface Loaded {
+  /** The screens the admin finished, as core keeps them. */
+  place: SetupPlace;
   view: OnboardingView;
   /** Everyone's own link to send, once it is out. */
   links: LinkToSend[];
@@ -582,6 +616,7 @@ export const Route = createFileRoute("/setup")({
         review,
         hr,
         ai,
+        place,
       ] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.links(),
@@ -594,6 +629,7 @@ export const Route = createFileRoute("/setup")({
         session.onboarding.review(),
         session.onboarding.hrPlatform(),
         aiReadinessOf(session),
+        session.onboarding.place(),
       ]);
       return {
         view,
@@ -607,6 +643,7 @@ export const Route = createFileRoute("/setup")({
         review,
         hr,
         ai,
+        place,
       };
     }),
   component: Setup,

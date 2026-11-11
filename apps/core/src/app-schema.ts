@@ -14,7 +14,6 @@ import { appendAuditEvent } from "./audit-outbox.ts";
 import { liveStoreOf, openStore, resetAppStore } from "./data-stores.ts";
 import { runMigrations } from "./migration-run.ts";
 import { requireMemberAdmin } from "./permissions.ts";
-import { requireNotStaff } from "./sharing.ts";
 import type { AppliedSchema, SchemaApply } from "./store-host.ts";
 
 // A version's schema applied to its App's store as the version is made
@@ -201,12 +200,7 @@ export const unfinishedPublish = async (
  * that can't be applied leaves the data as it was, so the App is never
  * left without one. Audited there, with how many records each table held.
  */
-const resetWith = async (
-  env: Env,
-  by: Identity,
-  found: App,
-  everything: boolean
-): Promise<void> => {
+const resetWith = async (env: Env, by: Identity, found: App): Promise<void> => {
   // Imported here, not at the top: releases reach back into apps.ts.
   const { readBackRelease } = await import("./app-releases.ts");
   const release =
@@ -219,26 +213,7 @@ const resetWith = async (
     release === null || found.currentVersion === null
       ? undefined
       : await schemaApplyOf(env, by, release, found.currentVersion);
-  await resetAppStore(env, by, found.id, {
-    everything,
-    ...(apply === undefined ? {} : { apply }),
-  });
-};
-
-/**
- * Resets the data of App `app` from before stable IDs, for one of its
- * builders, never Grasp staff: only a store refused with
- * `migration.metadata_missing`, which can be read no other way; any other
- * is refused (`migration.reset_refused`). The staging cut-over to schemas
- * by stable ID. TODO(GRA-1550): remove with the legacy store tables.
- */
-export const resetLegacyAppData = async (
-  env: Env,
-  by: Identity,
-  app: unknown
-): Promise<void> => {
-  requireNotStaff(by);
-  await resetWith(env, by, await editableApp(env, by, app), false);
+  await resetAppStore(env, by, found.id, apply === undefined ? {} : { apply });
 };
 
 /**
@@ -259,5 +234,5 @@ export const resetAppData = async (
   if (typeof name !== "string" || name !== found.name) {
     throw appErrors.create("app.reset_name_mismatch");
   }
-  await resetWith(env, by, found, true);
+  await resetWith(env, by, found);
 };

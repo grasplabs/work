@@ -1,5 +1,6 @@
 import { isPageFile } from "@grasp-os/compiler";
 import {
+  definitionSources,
   definitionText,
   emptyDefinition,
   readDefinition,
@@ -8,6 +9,11 @@ import {
   withExportedFunctions,
 } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
+import {
+  isGeneratedServerFile,
+  isUnderGeneratedServerFolder,
+  ownFiles,
+} from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -57,7 +63,7 @@ import {
   generatedPaths,
   functionIdsOf,
   schemaIdsOf,
-  withDefinitionCode,
+  withGeneratedCode,
 } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { Release } from "./app-releases.ts";
@@ -110,8 +116,9 @@ import { liveStoreSql } from "./store-deletion.ts";
 //
 // - The definition and the code generated from it drift apart: every
 //   version is written through `storedVersion`, which generates its
-//   `grasp.config.ts` and `server/schema.ts` from the definition it is
-//   committed with, whatever the files held, before the tree is hashed;
+//   `grasp.config.ts`, `server/schema.ts` and `server/_generated/` from
+//   the definition it is committed with (and the last from its server
+//   modules too), whatever the files held, before the tree is hashed;
 //   nothing else writes those paths (the agent's `write` refuses them,
 //   app-definition.ts). Generation goes one way: nothing reads a
 //   definition back from code. Applying a version's schema to its store
@@ -372,12 +379,21 @@ interface Size {
   length: number;
 }
 
+/**
+ * `files`' size against an App's limits: what Grasp generates under
+ * `server/_generated/` (app-definition.ts) apart, so an App at its limits
+ * can still be written, whatever its references take.
+ */
 const sizeOf = (files: ReadonlyMap<string, string>): Size => {
+  let count = 0;
   let length = 0;
-  for (const content of files.values()) {
-    length += content.length;
+  for (const [path, content] of files) {
+    if (!isUnderGeneratedServerFolder(path)) {
+      count += 1;
+      length += content.length;
+    }
   }
-  return { files: files.size, length };
+  return { files: count, length };
 };
 
 /** An App's latest version, if it has one, and its files. */
@@ -667,7 +683,10 @@ const exportedPaths = async (
     // commit gives what this one couldn't.
     const build = await withinBuildWait(
       env,
-      async () => await buildAppCode(env, Object.fromEntries(files), app)
+      // Without their copy of `server/_generated/`, as a seal builds
+      // them (app-releases.ts, `sealedSource`): the same build, cached.
+      async () =>
+        await buildAppCode(env, ownFiles(Object.fromEntries(files)), app)
     );
     if (build === "late" || build.functions === undefined) {
       return undefined;
@@ -744,8 +763,9 @@ const exportedFunctionsOf = async (
 
 /**
  * `files` and `definition` as a version stores them, `files` changed in
- * place to hold the config and schema `definition` generates, whatever
- * they held: every version is written through here, so its code is
+ * place to hold what is generated among them (`withGeneratedCode`: the
+ * config, the schema and `server/_generated/`), whatever they held,
+ * before the tree is hashed: every version is written through here, so its code is
  * always its definition's (see the header). `app.too_large` if they are
  * over an App's limits.
  */
@@ -757,7 +777,7 @@ export const storedVersion = async (
   /** The definitions it carries function IDs from (`carriedDefinitions`). */
   previous: readonly AppDefinition[] = []
 ): Promise<StoredVersion> => {
-  withDefinitionCode(files, definition);
+  withGeneratedCode(files, definition);
   const defined = await exportedFunctionsOf(
     env,
     app,
@@ -1028,15 +1048,21 @@ export const applyChanges = (
       files.set(path, content);
     }
   }
-  // The config and schema as the definition generates them, whatever the
-  // changes held of them, before the App's limits are checked on them.
+  // What is generated (the config, the schema and `server/_generated/`)
+  // as the definition and the changed code generate it, whatever the
+  // changes held of it, before the App's limits are checked.
   // Answered as changes too, so a draft saves the files it was checked
   // with.
   const submitted = new Map(
     [...generatedPaths].map((path) => [path, files.get(path)])
   );
-  withDefinitionCode(files, definition);
+  // The App's limits first, which `server/_generated/` doesn't count
+  // toward: nothing past them is read for what it declares.
+  for (const [path, source] of Object.entries(definitionSources(definition))) {
+    files.set(path, source);
+  }
   checkLimits(files, before);
+  withGeneratedCode(files, definition);
   checkPaths(files.keys(), added);
   checkMemory(agentsBefore, files.get(appMemoryPath));
   const generated = [...generatedPaths].flatMap((path): [string, string][] => {
@@ -1271,7 +1297,10 @@ export const draftOverLatest = async (
       baseRow === undefined
         ? new Map<string, string>()
         : await readTree(env, app, baseRow.tree);
+    // What Grasp generates is generated again as the draft is committed
+    // (`storedVersion`): never a clash of its own.
     const clashes = Object.entries(changes).flatMap(([path, content]) =>
+      !isGeneratedServerFile(path) &&
       before.get(path) !== files.get(path) &&
       (content ?? undefined) !== files.get(path)
         ? [changedSince(path)]

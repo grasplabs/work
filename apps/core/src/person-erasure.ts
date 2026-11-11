@@ -68,7 +68,6 @@ import { dropHeldStarts } from "./held-starts.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { coreErasure } from "./knowledge/rpc.ts";
 import { onboardingStore } from "./onboarding/store.ts";
-import { cancelRunsStartedBy } from "./workflows/controls.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
@@ -274,10 +273,9 @@ const brain: ErasureStep = {
  * theirs alone (GRA-1186). The runs they started are the company's
  * records (Nick's D3): kept, naming them by their ID and name, their
  * details removed only as run retention removes any run's. But nothing
- * goes on running for someone erased: every unfinished run of theirs, of
- * an App's workflow or an independent one, is cancelled or stopped as a
- * builder's is, audited, for the admin who asked. The area is complete
- * once each one's cancel or stop was taken, never on a stop claimed by a
+ * goes on running for someone erased: every unfinished run of theirs is
+ * stopped as a builder's is, audited, for the admin who asked. The area is
+ * complete once each one's stop was taken, never on a stop claimed by a
  * pass that died before sending it; the engine ends it. A run that starts for
  * them after (a trigger of an App they own, a schedule of theirs) does
  * nothing: every step of every run checks first that the person it acts
@@ -299,9 +297,8 @@ const runs: ErasureStep = {
       return;
     }
     const by = { userId: erasure.requestedBy, staff: false };
-    const cancelled = await cancelRunsStartedBy(env, by, userId);
     const stopped = await stopRunsFor(env, actorOf(by), userId);
-    if (cancelled.unasked > 0 || stopped.unasked > 0) {
+    if (stopped.unasked > 0) {
       throw new Error("Runs of theirs are still to be asked to end");
     }
     await db.batch([

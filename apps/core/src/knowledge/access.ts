@@ -480,9 +480,7 @@ const readIn = (
   if (context.type === "chat") {
     return { chat: context.chatId };
   }
-  return context.type === "run" || context.type === "workflowRun"
-    ? { run: context.runId }
-    : {};
+  return context.type === "workflowRun" ? { run: context.runId } : {};
 };
 
 /**
