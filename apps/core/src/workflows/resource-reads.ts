@@ -48,7 +48,7 @@ import {
 //   of the run's person), under that one permission: what both the grant
 //   and the person allow, nothing else. A document outside the collection,
 //   or one the person may not read, is refused alike, as one that isn't
-//   there (`resource.item_not_found`).
+//   there (`permission.item_not_found`).
 // - Restricted data reaching an unrestricted run. Knowledge restricts the
 //   reading context before it returns a sensitive collection's data
 //   (knowledge/access.ts), and an independent run never enters restricted
@@ -209,7 +209,7 @@ const pinnedReadTries = 3;
  * the text is the pinned version's. A purge landing between the text and
  * the pin would otherwise pair the old text with the purged version's
  * pin, which every later check accepts. Crossed, it is read again, a few
- * times; then refused (`resource.unavailable`), never handed over
+ * times; then refused (`permission.unavailable`), never handed over
  * unpinned.
  */
 const pinnedRead = async (
@@ -250,7 +250,7 @@ const pinnedRead = async (
       return { found, pins };
     }
   }
-  throw functionErrors.create("resource.unavailable");
+  throw functionErrors.create("permission.unavailable");
 };
 
 /** One document of the bound collection, by its ID. */
@@ -262,7 +262,7 @@ const document = async (
 ): Promise<Json> => {
   const located = await locatedDocument(env, request.id);
   if (located?.collectionId !== bound.collectionId) {
-    throw functionErrors.create("resource.item_not_found");
+    throw functionErrors.create("permission.item_not_found");
   }
   try {
     const { found, pins } = await readAsDelegate(
@@ -280,7 +280,7 @@ const document = async (
     return { title: found.title, text: found.text };
   } catch (error) {
     if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
-      throw functionErrors.create("resource.item_not_found");
+      throw functionErrors.create("permission.item_not_found");
     }
     throw error;
   }

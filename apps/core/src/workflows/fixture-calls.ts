@@ -151,7 +151,7 @@ export const fixtureCalls: ReadonlySet<string> = new Set([
 /**
  * What model call `call` of test run `run`'s task answers (see the
  * header): the answer its fixture gives. Every other call is refused
- * (`resource.unavailable`).
+ * (`permission.unavailable`).
  */
 export const fixtureCall = async (
   env: Env,
@@ -178,5 +178,5 @@ export const fixtureCall = async (
     await countModelRequest(env, run.runId, task);
     return requireShape(JSON.stringify(call.outputSchema), answer, "output");
   }
-  throw functionErrors.create("resource.unavailable");
+  throw functionErrors.create("permission.unavailable");
 };

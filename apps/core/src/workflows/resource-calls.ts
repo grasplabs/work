@@ -1106,7 +1106,7 @@ export const makeCall = async (
   // Refused again, before anything is looked at, so none of its calls
   // can reach connect, a model, an App, a store or Knowledge.
   if (run.fixture === true) {
-    throw functionErrors.create("resource.unavailable");
+    throw functionErrors.create("permission.unavailable");
   }
   if (call.name === "grasp.app") {
     return await madeAppCall(env, run, task, call, effect);

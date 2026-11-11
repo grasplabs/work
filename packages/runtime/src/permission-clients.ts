@@ -90,7 +90,7 @@ type HttpMethodOf<Actions extends readonly string[]> =
  * request as the web's `fetch` makes one, to a path of the connection's
  * own origin, answered as a `Response`. A GET or HEAD (the default) is
  * the declaration's `get`; any other method its `send`, which the host
- * may hold for the person to confirm (`resource.awaiting_confirmation`).
+ * may hold for the person to confirm (`permission.awaiting_confirmation`).
  * Only the methods its declared actions allow type-check: without `get`,
  * the method is required.
  */

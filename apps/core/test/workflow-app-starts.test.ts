@@ -297,7 +297,7 @@ const runnerFor =
   (alias: string): Runner =>
   async (path, args, channel: FunctionChannel) => {
     if (path === "requests.plainAction" || path === "requests.plainMutation") {
-      return await channel.resource(alias, "start", [{ who: "Rogue" }]).then(
+      return await channel.permission(alias, "start", [{ who: "Rogue" }]).then(
         () => "started",
         (error: unknown) => codeOf(error)
       );
@@ -925,8 +925,8 @@ describe("an action starting a workflow", () => {
     }).toStrictEqual({
       // Eve may not use the App at all.
       outsider: "app.not_found",
-      ungranted: "resource.unavailable",
-      unbound: "resource.unavailable",
+      ungranted: "permission.unavailable",
+      unbound: "permission.unavailable",
       receipts: [],
     });
   });
@@ -974,8 +974,8 @@ describe("App code starting a workflow it didn't declare", () => {
       receipts: await receiptsOf(fx.app),
       outbox: await outboxOf(fx.store),
     }).toStrictEqual({
-      actionUndeclared: "resource.not_allowed",
-      mutationUndeclared: "function.no_resources",
+      actionUndeclared: "permission.not_allowed",
+      mutationUndeclared: "function.no_permissions",
       receipts: [],
       outbox: [],
     });

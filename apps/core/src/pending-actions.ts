@@ -291,7 +291,7 @@ const confirmHeld = async (
   try {
     // A binding connect can no longer read is refused, never skipped.
     if (held.binding === "unreadable") {
-      throw functionErrors.create("resource.unavailable");
+      throw functionErrors.create("permission.unavailable");
     }
     // A run of an independent workflow's call: only while the run's own
     // authority for it holds, as its next call would need.
