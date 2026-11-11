@@ -460,9 +460,7 @@ export const reach = action({
             env,
             owner,
             id,
-            withFiles(notesFiles(), {
-              "server/_generated/api.ts": "export const api = {};\n",
-            }),
+            { "server/_generated/api.ts": "export const api = {};\n" },
             "Forged references"
           )
       )

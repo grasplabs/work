@@ -2205,10 +2205,6 @@ msgstr "Een App"
 msgid "An App that… (what it shows, and for whom)"
 msgstr "Een App die… (wat ze laat zien, en voor wie)"
 
-#: src/apps/app-settings.tsx
-msgid "An App whose data was stored before this version of Grasp can’t read it any more: reset it, then publish again. Any other App’s data only an admin resets."
-msgstr "Een App waarvan de gegevens vóór deze versie van Grasp zijn opgeslagen, kan ze niet meer lezen: reset ze en publiceer opnieuw. De gegevens van elke andere App reset alleen een beheerder."
-
 #: src/apps/app-status.tsx
 msgid "An archived App is kept as it is and goes offline: nobody opens its pages, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "Een gearchiveerde app blijft zoals hij is en gaat offline: niemand opent zijn pagina’s, de triggers stoppen en onafgemaakte runs worden geannuleerd. Een bouwer kan hem later herstellen, als concept."
@@ -9046,10 +9042,6 @@ msgstr "Alleen een beheerder maakt een collectie voor iedereen of voor teams."
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 msgstr "Alleen een beheerder reset de gegevens van een App: alle records zijn voorgoed weg en de huidige versie draait opnieuw zonder records."
 
-#: src/apps/app-reset.tsx
-msgid "Only for data stored before this version of Grasp, which can’t be read any more. Every record it holds and every file in them is gone for good, and its current version runs again with no records."
-msgstr "Alleen voor gegevens die vóór deze versie van Grasp zijn opgeslagen en niet meer gelezen kunnen worden. Alle records en alle bestanden erin zijn voorgoed weg en de huidige versie draait opnieuw zonder records."
-
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Alleen gemarkeerde beurten"
@@ -10608,20 +10600,12 @@ msgid "Reset {name}’s data?"
 msgstr "Gegevens van {name} resetten?"
 
 #: src/apps/app-reset.tsx
-msgid "Reset {name}’s old data?"
-msgstr "Oude gegevens van {name} resetten?"
-
-#: src/apps/app-reset.tsx
 msgid "Reset data"
 msgstr "Gegevens resetten"
 
 #: src/apps/app-reset.tsx
 msgid "Reset for good"
 msgstr "Definitief resetten"
-
-#: src/apps/app-reset.tsx
-msgid "Reset old data"
-msgstr "Oude gegevens resetten"
 
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"

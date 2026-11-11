@@ -69,25 +69,22 @@ import type { StartFiles } from "./start-files.ts";
 //   input is then checked against the workflow version's schema as any
 //   start's is; one it doesn't take is refused for good.
 // - A workflow starting itself without end: its own mail reaching a
-//   mailbox its trigger watches, or a trigger and an App mailing each
-//   other. An independent workflow's mail is stamped as an App run's is
-//   (mail-stamps.ts, `resource_run_mail_calls`), and a stamped event's
-//   run joins the stamping run's lineage, one level deeper, admitted
+//   mailbox its trigger watches, or two workflows mailing each other. A
+//   workflow's mail is stamped (mail-stamps.ts, `resource_run_mail_calls`),
+//   and a stamped event's run joins the stamping run's lineage, one level
+//   deeper, admitted
 //   against its nesting and descendant limits (quotas.ts, `admitInLineage`),
 //   so the lineage's limits end the loop (`workflow.lineage_limit`,
 //   refused for good). Its work is charged to its workflow's own account
 //   in that lineage (quotas.ts, `triggeredAccountClaimed`), so a busy
-//   workflow's runs never use up the stamping run's allowances. An App run's mail can't join an independent
-//   lineage (their runs are kept apart), so a stamped event of an App run
-//   is refused for good, audited (`lineage.unjoinable`), never started as a
-//   new root. Deliberately so, until the two lineages can be joined: an
-//   App's own mail never starts an independent workflow, a legitimate App
-//   mailing an operations mailbox a trigger watches included. Besides, a
+//   workflow's runs never use up the stamping run's allowances. A stamped
+//   event of a run no longer kept is refused for good, audited
+//   (`lineage.unjoinable`), never started as a new root. Besides, a
 //   trigger starts at most `triggeredRunsPerHour` runs an hour, counted as
 //   each is admitted; past that the event waits in connect's outbox and is
 //   delivered again later, and one held back longer than `maxHeldMs` is
 //   dropped for the trigger, audited (`workflow.event.dropped`), so the
-//   backlog can't grow without end. The residual case, as for App email
+//   backlog can't grow without end. The residual case, as for email
 //   triggers: mail through a connector that puts no stamp on it (one not
 //   native, such as Composio's) is anyone's mail, a root, so a workflow
 //   mailing its own watched mailbox that way goes on at up to the hourly
@@ -105,7 +102,7 @@ import type { StartFiles } from "./start-files.ts";
 //   clock past `holdsKeptMs`.
 // - An event dropped silently. A trigger that refuses it for good (its
 //   grant to start revoked, its person gone, an input its workflow doesn't
-//   take, its lineage full, an App run's mail, its workflow paused: what
+//   take, its lineage full, its workflow paused: what
 //   happens while it is paused never starts it later) is audited
 //   (`workflow.event.refused`) and the event settled for it; anything
 //   else fails the delivery, so connect delivers it again, until held
@@ -488,8 +485,7 @@ const refusalOf = async (
  * stamping independent run's, one level deeper, admitted once per `admission`
  * (the event or message and the trigger; quotas.ts, `admitInLineage`, which
  * throws `workflow.lineage_limit` past its limits); none for one no run
- * stamped; `unjoinable` for an App run's mail, which can't join an
- * independent lineage (their runs are kept apart), or a run no longer kept.
+ * stamped; `unjoinable` for a run no longer kept.
  */
 const causeOf = async (
   env: Env,
@@ -499,8 +495,7 @@ const causeOf = async (
   if (stamped === undefined) {
     return undefined;
   }
-  const run =
-    stamped.kind === "resource" ? await runOf(env, stamped.runId) : undefined;
+  const run = await runOf(env, stamped.runId);
   if (run === undefined) {
     return "unjoinable";
   }

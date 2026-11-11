@@ -371,43 +371,6 @@ export const stepDone = async (run: string, step: string): Promise<void> => {
   );
 };
 
-/** Runs `endLiveRuns` has ended or found ended; it skips them after. */
-const seenEnded = new Set<string>();
-
-/**
- * Terminates every run a test left waiting, sleeping or paused. The
- * engine keeps those in the project's one workerd across test files, and
- * would go on in the background of whatever runs next: a decision's
- * week-long wait, a run paused, or one waiting while a feature was off.
- * Work that outlives its test is how a test file came to wait forever in
- * CI (see apps/core/vite.config.ts), so each test ends its runs.
- */
-export const endLiveRuns = async (): Promise<void> => {
-  // Only rows that may still have a live run: one that ended otherwise
-  // (completed or failed) ended in the engine first. A cancelled one may
-  // have a live run left, whose termination failed.
-  const { results } = await env.DB.prepare(
-    "SELECT id FROM workflow_runs WHERE status IN ('starting', 'running', 'paused', 'cancelled')"
-  ).all<{ id: string }>();
-  await Promise.all(
-    results
-      .filter(({ id }) => !seenEnded.has(id))
-      .map(async ({ id }) => {
-        // A row whose run never started has no run object: its status is
-        // none, and there is nothing to terminate. Terminating a run that
-        // ended meanwhile does nothing.
-        const status = await runObject(id).status();
-        if (status === undefined) {
-          return;
-        }
-        if (!endedStatuses.has(status.status)) {
-          await runObject(id).terminate({ rollback: false });
-        }
-        seenEnded.add(id);
-      })
-  );
-};
-
 /** Removes a person from the organization; returns how to bring them back. */
 export const leave = async (userId: string): Promise<() => Promise<void>> => {
   const membership = await env.DB.prepare(

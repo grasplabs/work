@@ -1083,7 +1083,6 @@ describe("a reset of a store's data", { timeout: 120_000 }, () => {
       env.DATA_STORES.getByName(store.id).resetData(store.id, {
         actor: { type: "person", userId: "ada" },
         app: "notes",
-        everything: true,
       })
     );
 
@@ -1109,7 +1108,6 @@ describe("a reset of a store's data", { timeout: 120_000 }, () => {
       env.DATA_STORES.getByName(store.id).resetData(store.id, {
         actor: { type: "person", userId: "ada" },
         app: "notes",
-        everything: true,
         apply: change(v1, v1Ids, {
           version: { app: "notes", number: 1, basedOn: 1 },
         }),
@@ -1132,7 +1130,6 @@ describe("a reset of a store's data", { timeout: 120_000 }, () => {
       env.DATA_STORES.getByName(store.id).resetData(store.id, {
         actor: { type: "person", userId: "ada" },
         app: "notes",
-        everything: true,
         apply: change(v1, v1Ids, {
           migration: {
             id: crypto.randomUUID(),

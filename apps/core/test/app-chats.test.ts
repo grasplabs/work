@@ -209,6 +209,10 @@ describe("a chat for an App", () => {
           app: app.id,
           changed: [
             "grasp.config.ts",
+            "server/_generated/api.ts",
+            "server/_generated/dataModel.ts",
+            "server/_generated/internal.ts",
+            "server/_generated/server.ts",
             "server/schema.ts",
             "src/routes/index.tsx",
           ],

@@ -640,10 +640,7 @@ const decisionItems = (
   readAt: string
 ): InboxItem[] =>
   decisions.map((decision) => {
-    const name =
-      decision.app?.name ??
-      decision.workflowResource?.name ??
-      decision.workflow;
+    const { name } = decision.workflowResource;
     return {
       id: `decision:${decision.id}`,
       kind: "decision",

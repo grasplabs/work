@@ -199,20 +199,6 @@ describe("retention", { timeout: 120_000 }, () => {
     ).resolves.toBe("version.not_sealed");
   });
 
-  it("keeps a version a workflow run is still active on", async () => {
-    const start = new Date();
-    const { app, first } = await twoVersions(start);
-    await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, status, created_at) VALUES (?, ?, 'intake', 1, 'paused', ?)"
-    )
-      .bind(crypto.randomUUID(), app, start.getTime())
-      .run();
-    const removeNewer = await newerReleases(app);
-    await sweepsAt(after(start, sealGraceMs + day));
-    await removeNewer();
-    await expect(loadedHash(app, 1)).resolves.toBe(first.manifestHash);
-  });
-
   it("keeps a version an admin's legal hold holds until it is released, both audited", async () => {
     const start = new Date();
     const { app, first } = await twoVersions(start);

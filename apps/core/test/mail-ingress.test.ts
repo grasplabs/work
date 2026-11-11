@@ -14,7 +14,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import worker from "../src/index.ts";
 import {
@@ -24,7 +24,6 @@ import {
   own,
 } from "./email-triggers.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // Mail the router's mail sorter posts to core's raw-mail ingress, signed,
@@ -100,8 +99,6 @@ const minutes = (n: number): string =>
   new Date(Date.now() + n * 60_000).toISOString();
 
 describe("mail posted to core's raw-mail ingress", () => {
-  afterEach(endLiveRuns);
-
   it("starts a run as mail from Email Routing does", async () => {
     const { name, id } = await triggerAt("posted");
 

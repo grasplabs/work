@@ -58,7 +58,7 @@ import { AppIntegrations } from "./app-integrations.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppOwner } from "./app-owner.tsx";
 import { RemoveApp } from "./app-remove.tsx";
-import { ResetAppData, ResetLegacyData } from "./app-reset.tsx";
+import { ResetAppData } from "./app-reset.tsx";
 import { buildsApp } from "./app-role.ts";
 import { AppMembers, readMembers } from "./app-sharing.tsx";
 import {
@@ -419,21 +419,15 @@ const ForBuilders = ({
           </div>
         </SettingsBody>
       </SettingsSection>
-      {app.status === "archived" || identity.staff ? null : (
+      {app.status === "archived" ||
+      identity.staff ||
+      !isAdmin(identity.role) ? null : (
         <SettingsSection
-          description={
-            isAdmin(identity.role)
-              ? t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`
-              : t`An App whose data was stored before this version of Grasp can’t read it any more: reset it, then publish again. Any other App’s data only an admin resets.`
-          }
+          description={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
           title={t`Its data`}
         >
           <SettingsBody>
-            {isAdmin(identity.role) ? (
-              <ResetAppData app={app} />
-            ) : (
-              <ResetLegacyData app={app} />
-            )}
+            <ResetAppData app={app} />
           </SettingsBody>
         </SettingsSection>
       )}

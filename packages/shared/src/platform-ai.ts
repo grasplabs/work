@@ -9,6 +9,13 @@ export const platformAiFeatures = [
   "conversion",
   "transcription",
   "speech",
+  /**
+   * Not a feature of Grasp's: the organization's own AI, where it runs on
+   * Grasp's key (`graspAi`, @grasp-os/shared/ai-providers). Grasp pays the
+   * provider and the organization pays Grasp, so it is told apart from
+   * what Grasp's own features cost.
+   */
+  "organization",
 ] as const;
 
 /** One of Grasp's own AI features. */

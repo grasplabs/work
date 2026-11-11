@@ -77,6 +77,7 @@ export type CommandRefusal =
   | "onboarding.nothing_to_draw"
   | "onboarding.invalid"
   | "onboarding.agreements_kept"
+  | "onboarding.interviews_kept"
   | "not_answered";
 
 /** What the page gets back: applied, or why not. */
@@ -92,6 +93,7 @@ const onboardingCodes: ReadonlySet<string> = new Set([
   "onboarding.nothing_to_draw",
   "onboarding.invalid",
   "onboarding.agreements_kept",
+  "onboarding.interviews_kept",
 ]);
 
 const isOnboardingCode = (code: string): code is CommandRefusal =>

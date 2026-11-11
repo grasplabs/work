@@ -3,6 +3,7 @@ import { z } from "zod";
 import { METER_PURPOSES } from "./admin/org-record.ts";
 import { identifierMaxLength } from "./identifier.ts";
 import { interviewPhases, personStates } from "./interview-links.ts";
+import { onboardingFlowSchema } from "./onboarding-flow.ts";
 import { staffWorksSchema } from "./onboarding-staff.ts";
 import {
   agreementsSchema,
@@ -374,6 +375,19 @@ export const adminSnapshotSchema = z.object({
     changed: z.boolean(),
     suggested: setupReadSchema,
   }),
+  /**
+   * How much onboarding the company goes through, and whether staff set
+   * it. Absent from a core that keeps no flow yet: it goes through all of
+   * it.
+   */
+  flow: z
+    .object({ flow: onboardingFlowSchema, changed: z.boolean() })
+    .optional(),
+  /**
+   * Where the company's admin is in their own onboarding: the screens
+   * they finished, by name. Absent from a core that keeps none yet.
+   */
+  place: z.object({ done: z.array(z.string().max(64)).max(32) }).optional(),
   kickoff: z
     .object({
       at: isoTime,
