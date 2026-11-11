@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "73399537-f3c3-4eb9-a0ed-e562f6c6edbe",
+  "id": "6168eea4-21a8-48d3-94da-1c41821dc149",
   "prevId": "95bf47d4-f8b5-4076-b4e7-21c06462b1a2",
   "tables": {
     "chunks": {
@@ -118,13 +118,6 @@
           "name": "hash",
           "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "bytes": {
-          "name": "bytes",
-          "type": "integer",
-          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -261,6 +254,59 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "source_changes": {
+      "name": "source_changes",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "change": {
+          "name": "change",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version_row": {
+          "name": "version_row",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "source_changes_version_row_source_versions_row_fk": {
+          "name": "source_changes_version_row_source_versions_row_fk",
+          "tableFrom": "source_changes",
+          "tableTo": "source_versions",
+          "columnsFrom": [
+            "version_row"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "source_changes_source_change_pk": {
+          "columns": [
+            "source",
+            "change"
+          ],
+          "name": "source_changes_source_change_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

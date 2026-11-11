@@ -81,7 +81,6 @@ export const files = sqliteTable(
   {
     /** SHA-256 of the file's bytes, in hex: its key in R2. */
     hash: text().primaryKey(),
-    bytes: integer().notNull(),
     /** How many source versions point at the file. */
     refs: integer().notNull(),
     /** When an add last wrote, or was about to write, the file to R2. */
@@ -137,6 +136,24 @@ export const currentVersions = sqliteTable("current_versions", {
     .unique()
     .references(() => sourceVersions.row),
 });
+
+/**
+ * The changes each source was added with: a key its producer gives each
+ * change (an upstream revision, a message id, an id minted before the
+ * first try), and the version the add answered with. The same key again
+ * answers with that version, whatever was added since (sources.ts).
+ */
+export const sourceChanges = sqliteTable(
+  "source_changes",
+  {
+    source: text().notNull(),
+    change: text().notNull(),
+    versionRow: integer("version_row")
+      .notNull()
+      .references(() => sourceVersions.row),
+  },
+  (table) => [primaryKey({ columns: [table.source, table.change] })]
+);
 
 /**
  * A version's text in passages (chunks.ts), in order: what the word index

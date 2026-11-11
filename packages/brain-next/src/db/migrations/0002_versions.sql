@@ -16,13 +16,20 @@ CREATE TABLE `current_versions` (
 CREATE UNIQUE INDEX `current_versions_version_row_unique` ON `current_versions` (`version_row`);--> statement-breakpoint
 CREATE TABLE `files` (
 	`hash` text PRIMARY KEY NOT NULL,
-	`bytes` integer NOT NULL,
 	`refs` integer NOT NULL,
 	`written_at` integer NOT NULL,
 	CONSTRAINT "files_refs" CHECK("files"."refs" >= 0)
 );
 --> statement-breakpoint
 CREATE INDEX `files_unreferenced_idx` ON `files` (`refs`,`written_at`);--> statement-breakpoint
+CREATE TABLE `source_changes` (
+	`source` text NOT NULL,
+	`change` text NOT NULL,
+	`version_row` integer NOT NULL,
+	PRIMARY KEY(`source`, `change`),
+	FOREIGN KEY (`version_row`) REFERENCES `source_versions`(`row`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
 CREATE TABLE `source_versions` (
 	`row` integer PRIMARY KEY NOT NULL,
 	`source` text NOT NULL,
@@ -62,4 +69,8 @@ END;
 --> statement-breakpoint
 CREATE TRIGGER `chunks_no_update` BEFORE UPDATE ON `chunks` BEGIN
 	SELECT RAISE(ABORT, 'chunks are added, never updated');
+END;--> statement-breakpoint
+-- A change keeps the version it was added as, for every retry of it.
+CREATE TRIGGER `source_changes_no_update` BEFORE UPDATE ON `source_changes` BEGIN
+	SELECT RAISE(ABORT, 'source changes are added, never updated');
 END;

@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   newSourceSchema,
   recallRequestSchema,
+  sweepRequestSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
@@ -14,6 +15,7 @@ import type {
   Recalled,
   SourceVersion,
   SourceVersionRef,
+  SweepRequest,
   VersionRequest,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
@@ -96,16 +98,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Sweeps the files nothing points at (files.ts), while the store takes
    * nothing else, so no add notes a file the sweep is deleting.
    */
-  override async alarm(): Promise<void> {
+  async sweep(request: SweepRequest): Promise<void> {
+    const { at } = checked(sweepRequestSchema, request);
     await this.ctx.blockConcurrencyWhile(async () => {
-      const next = await sweepFiles(
-        this.#db,
-        this.env.BRAIN_OBJECTS,
-        Date.now()
-      );
-      if (next !== null) {
-        await this.ctx.storage.setAlarm(next);
-      }
+      await sweepFiles(this.#db, this.env.BRAIN_OBJECTS, at);
     });
   }
 }

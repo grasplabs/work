@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, min, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import { files } from "./db/schema.ts";
@@ -22,7 +22,7 @@ import { files } from "./db/schema.ts";
 //
 // A crash between 2 and 3 leaves a file nothing points at, and nothing
 // visible. A retry of the add takes the same file and goes on. Otherwise
-// the sweep (`sweepFiles`, on the store's alarm) deletes it once it was
+// the sweep (`sweepFiles`, on the host's clock) deletes it once it was
 // written longer ago than an add takes (`fileGraceMs`). So does erasure
 // (GRA-1729), for a file whose count it brings to 0: a file is deleted
 // only with its row, while the store takes nothing else (the store's
@@ -58,14 +58,10 @@ export const isHeld = (db: DrizzleSqliteDODatabase, hash: string): boolean => {
 };
 
 /** Notes that the file of `hash` is about to be written, now. */
-export const noteWrite = (
-  db: DrizzleSqliteDODatabase,
-  hash: string,
-  bytes: number
-): void => {
+export const noteWrite = (db: DrizzleSqliteDODatabase, hash: string): void => {
   const writtenAt = new Date();
   db.insert(files)
-    .values({ hash, bytes, refs: 0, writtenAt })
+    .values({ hash, refs: 0, writtenAt })
     .onConflictDoUpdate({ target: files.hash, set: { writtenAt } })
     .run();
 };
@@ -84,19 +80,24 @@ export const holdFile = (db: DrizzleSqliteDODatabase, hash: string): boolean =>
     .get() !== undefined;
 
 /**
- * Deletes the files no version points at that were written more than
- * `fileGraceMs` before `now`, from R2 and then their rows. Run it while
- * the store takes nothing else. Answers when to sweep next: `null` when
- * no such file is left.
+ * Deletes the files no version points at that were noted more than
+ * `fileGraceMs` before `at`, a batch at a time: each from R2, then its row.
+ *
+ * Run it while the store takes nothing else (`blockConcurrencyWhile`).
+ * What depends on that: between the R2 delete and the row delete, no add
+ * may note the same file and write it (step 1 and 2), or the row delete
+ * would then drop the row of a file just written, which nothing would
+ * ever sweep. With the input blocked, an add notes the file only after
+ * its row is gone, so it writes a new row and the file anew.
  */
 export const sweepFiles = async (
   db: DrizzleSqliteDODatabase,
   bucket: R2Bucket,
-  now: number
-): Promise<number | null> => {
+  at: Date
+): Promise<void> => {
   const unreferenced = and(
     eq(files.refs, 0),
-    lte(files.writtenAt, new Date(now - fileGraceMs))
+    lte(files.writtenAt, new Date(at.getTime() - fileGraceMs))
   );
   const gone = db
     .select({ hash: files.hash })
@@ -105,30 +106,11 @@ export const sweepFiles = async (
     .limit(sweepBatch)
     .all()
     .map(({ hash }) => hash);
-  if (gone.length > 0) {
-    await bucket.delete(gone.map(fileKeyOf));
-    db.delete(files)
-      .where(and(unreferenced, inArray(files.hash, gone)))
-      .run();
+  if (gone.length === 0) {
+    return;
   }
-  if (gone.length === sweepBatch) {
-    return now;
-  }
-  const next = db
-    .select({ at: min(files.writtenAt) })
-    .from(files)
-    .where(eq(files.refs, 0))
-    .get();
-  return next?.at ? next.at.getTime() + fileGraceMs : null;
-};
-
-/** Has the store's alarm go off by `at`, for the sweep. */
-export const sweepBy = async (
-  storage: DurableObjectStorage,
-  at: number
-): Promise<void> => {
-  const set = await storage.getAlarm();
-  if (set === null || set > at) {
-    await storage.setAlarm(at);
-  }
+  await bucket.delete(gone.map(fileKeyOf));
+  db.delete(files)
+    .where(and(unreferenced, inArray(files.hash, gone)))
+    .run();
 };

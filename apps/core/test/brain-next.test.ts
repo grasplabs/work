@@ -1,4 +1,3 @@
-import type { SourceId } from "@grasp-os/brain-next/contract";
 import {
   questionMaxLength,
   readerGroupsMax,
@@ -12,7 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
-import type { SourceReaders } from "../src/brain-next.ts";
+import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
@@ -76,10 +75,20 @@ const inTeams = async (userId: string, count: number): Promise<void> => {
   );
 };
 
+/** A source of its own, as an upload names it. */
+const newSource = (): SourceRef => ({
+  producer: "upload",
+  id: crypto.randomUUID(),
+});
+
 /** Adds `text` as a source of its own, answering its identity. */
-const add = async (text: string, readers: SourceReaders): Promise<SourceId> => {
+const add = async (
+  text: string,
+  readers: SourceReaders
+): Promise<SourceRef> => {
   const { source } = await addSource(env, {
-    source: `test:${crypto.randomUUID()}`,
+    source: newSource(),
+    change: crypto.randomUUID(),
     text,
     readers,
   });
@@ -90,7 +99,7 @@ const add = async (text: string, readers: SourceReaders): Promise<SourceId> => {
 const recalledAs = async (
   personId: string,
   question: string
-): Promise<SourceId[]> => {
+): Promise<SourceRef[]> => {
   const { chunks } = await recallAs(env, personId, question);
   return chunks.map(({ source }) => source);
 };
@@ -101,7 +110,8 @@ const addUnchecked = async (text: string, readers: unknown): Promise<unknown> =>
   // hand them what the type rules out, as a call from outside TypeScript
   // could.
   await addSource(env, {
-    source: `test:${crypto.randomUUID()}`,
+    source: newSource(),
+    change: crypto.randomUUID(),
     text,
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     readers: readers as SourceReaders,
@@ -247,7 +257,10 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     for (const question of [`financiele ${tag}`, `Financiële ${tag}`]) {
       // oxlint-disable-next-line no-await-in-loop -- one question at a time
       const found = await recalledAs(reader, question);
-      expect(found.toSorted()).toStrictEqual([accented, decomposed].toSorted());
+      expect(found).toHaveLength(2);
+      expect(found).toStrictEqual(
+        expect.arrayContaining([accented, decomposed])
+      );
     }
     // "ﬁ" (one character, as PDFs hold it) is "fi".
     await expect(recalledAs(reader, `fi${ligature}`)).resolves.toStrictEqual([

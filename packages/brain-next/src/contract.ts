@@ -29,7 +29,7 @@ export const principalMaxLength = 256;
 /** Most chunks one recall returns. */
 export const recallLimit = 10;
 
-/** Most characters of a source's identity. */
+/** Most characters of a source's identity, and of a change's key. */
 export const sourceIdMaxLength = 256;
 
 const principalSchema = z.string().min(1).max(principalMaxLength);
@@ -40,12 +40,20 @@ const encoder = new TextEncoder();
 const byteLengthOf = (text: string): number => encoder.encode(text).byteLength;
 
 /**
- * A source's identity, given by its producer (this upload, this chat): the
+ * A source's identity, as the host names it (this upload, this chat): the
  * same for every version of it, so a new version of the same thing is
- * added under the same identity.
+ * added under the same identity. The host keeps one producer's sources
+ * apart from another's in how it names them.
  */
 export const sourceIdSchema = z.string().min(1).max(sourceIdMaxLength);
 export type SourceId = z.infer<typeof sourceIdSchema>;
+
+/**
+ * The key of one change to a source, from its producer: an upstream
+ * revision, a message id, or an id minted before the first try. Unique per
+ * source: every retry of that change carries it.
+ */
+export const changeKeySchema = z.string().min(1).max(sourceIdMaxLength);
 
 /** A version of a source: 1 for its first, counting up. */
 export const versionSchema = z.int().positive();
@@ -63,14 +71,16 @@ export const accessSchema = z.discriminatedUnion("kind", [
 export type Access = z.infer<typeof accessSchema>;
 
 /**
- * A version of a source to add: which source, its text, and who may read
- * this version.
+ * A version of a source to add: which source, the change it is, its text,
+ * and who may read this version.
  */
 export const newSourceSchema = z.strictObject({
   source: sourceIdSchema,
+  change: changeKeySchema,
   text: z
     .string()
-    .min(1)
+    // A text of whitespace alone has no passage to keep or find.
+    .regex(/\S/u, { message: "Holds no text" })
     .refine((text) => byteLengthOf(text) <= sourceTextMaxBytes, {
       message: `At most ${sourceTextMaxBytes} bytes`,
       abort: true,
@@ -132,13 +142,20 @@ export interface SourceVersion extends SourceVersionRef {
   addedAt: Date;
 }
 
+/** A sweep of the store's leftovers, as of `at`. */
+export const sweepRequestSchema = z.strictObject({ at: z.date() });
+export type SweepRequest = z.infer<typeof sweepRequestSchema>;
+
 /** The Brain, as its host calls it. */
 export interface Brain {
   /**
-   * Adds a version of `source.source` with this text, readable as its
-   * access says, and makes it the source's current one. The same text
-   * and readers as the current version add nothing and answer with that
-   * version, so an add is safe to repeat after a lost reply.
+   * Adds the change `source.change` to `source.source` as a version with
+   * this text, readable as its access says, and makes it the source's
+   * current one. In this order: a change added before answers with the
+   * version it made, whatever was added since, and is refused with other
+   * text or readers; a new change with the same text and readers as the
+   * current version is that version. So an add is safe to repeat, late
+   * or at once, after a lost reply or a crash.
    */
   addSource: (source: NewSource) => Promise<SourceVersionRef>;
   /**
@@ -148,10 +165,17 @@ export interface Brain {
    */
   recall: (request: RecallRequest) => Promise<Recalled>;
   /**
-   * A version of a source, current or history, whole as it was added:
-   * `null` when there is none or the reader may not read it, alike.
+   * A version of a source, current or history, whole as it was added, for
+   * a reader who could read that version and can read the source's
+   * current one: `null` when there is none or they may not, alike. So
+   * narrowing a source's readers hides its history from those taken off.
    */
   readVersion: (request: VersionRequest) => Promise<SourceVersion | null>;
+  /**
+   * Removes what an add that never finished left: files no version holds,
+   * once past the time an add takes. Harmless to run late or twice.
+   */
+  sweep: (request: SweepRequest) => Promise<void>;
 }
 
 /** The one store's name: the Brain holds everything in one store for now. */
