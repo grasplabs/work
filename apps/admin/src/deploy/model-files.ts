@@ -1,4 +1,3 @@
-import { log } from "@grasp-os/shared/log";
 /**
  * The model files a release names, put in a client's models bucket: the
  * bucket core binds as `modelFilesBinding`, in the client's own inventory,
@@ -30,6 +29,7 @@ import { log } from "@grasp-os/shared/log";
  * (src/cloudflare/api.ts), which already creates and deletes the client's
  * buckets: no other credential.
  */
+import { log } from "@grasp-os/shared/log";
 import {
   deployedModelKey,
   deployedModelKeyPattern,
