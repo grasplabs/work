@@ -273,17 +273,21 @@ export interface Brain {
    * Keeps each vector as the codes of its chunk for `model`, readable as
    * the chunk's version is. A chunk that is not of a current version is
    * left out, so a late put never brings back what a newer version
-   * replaced; a chunk that already holds codes for the model keeps them,
-   * so a put is safe to repeat. Refused when the model's name is known
-   * with another centre. For the Brain's own work queue (GRA-1768): the
-   * host has no way to it.
+   * replaced. Codes are written once per chunk and model name: a chunk
+   * that already holds codes for the model keeps them, so a put is safe
+   * to repeat, and a wrong vector stays until the chunk's next version,
+   * so a model's every build needs a name of its own. Refused when the
+   * model's name is known with another centre. For the Brain's own work
+   * queue (GRA-1768): the host has no way to it.
    */
   putVectors: (request: VectorsToPut) => Promise<void>;
   /**
    * The chunks of current versions the reader may read whose codes for
-   * the model are nearest the vector, nearest first: an exact scan of
-   * every such code, none for a model with no codes. For recall
-   * (GRA-1769): the host has no way to it.
+   * the model are nearest the vector, nearest first, none for a model
+   * with no codes: an exact 1-bit scan of every such code, then the
+   * nearest candidates re-scored by cosine, so a chunk near the top by
+   * cosine whose 1-bit code is not among the candidates is missed. For
+   * recall (GRA-1769): the host has no way to it.
    */
   searchVectors: (request: VectorSearch) => Promise<VectorsFound>;
   /**

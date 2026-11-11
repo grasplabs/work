@@ -8,14 +8,21 @@ import type {
 } from "./contract.ts";
 import { readableSql } from "./reader-sets.ts";
 
-// The vector way: an exact scan, no index structure. Every chunk of a
-// current version can hold a code per embedding model (db/schema.ts
-// `vectorCodes`):
+// The vector way: an exact 1-bit scan, no index structure, with the
+// nearest `rescoreCandidates` re-scored. Every chunk of a current version
+// can hold a code per embedding model (db/schema.ts `vectorCodes`):
 //
 // - a 1-bit code, a bit per dimension set where the vector is above the
-//   model's centre, which every search scans by Hamming distance;
+//   model's centre, which every search scans, all of it, by Hamming
+//   distance;
 // - an 8-bit code of the unit vector, which re-scores the
 //   `rescoreCandidates` nearest by Hamming into a cosine.
+//
+// The scan is exact; the final order is the cosine's only among the
+// candidates, so a chunk whose 1-bit code falls outside them is missed
+// even if its cosine is near the top: how often depends on the model's
+// vectors, and recall (GRA-1769) sets `rescoreCandidates` by evaluating
+// real embeddings.
 //
 // Codes are grouped by model and by the set of readers of the chunk's
 // version, which the store reads from the chunk, never from the caller. A
@@ -38,7 +45,10 @@ import { readableSql } from "./reader-sets.ts";
 /** Codes in a packed block. */
 export const blockSize = 1024;
 
-/** How many of the nearest by Hamming distance are re-scored. */
+/**
+ * How many of the nearest by Hamming distance are re-scored: a first
+ * guess, which recall (GRA-1769) sets by evaluation with real embeddings.
+ */
 export const rescoreCandidates = 256;
 
 /** Bits in a word of a 1-bit code. */
@@ -72,21 +82,27 @@ const bitsOf = (
   return bits;
 };
 
-/** `vector`'s 8-bit code: its unit vector in steps of `scale`. */
+/**
+ * `vector`'s 8-bit code: its unit vector in steps of `scale`, the largest
+ * component `fineSteps` steps. Divided by its largest component before
+ * anything is squared, so no magnitude a finite, non-zero vector can have
+ * underflows to zero or overflows to infinity.
+ */
 const fineOf = (
   vector: readonly number[]
 ): { scale: number; fine: Int8Array<ArrayBuffer> } => {
+  const largest = Math.max(...vector.map((value) => Math.abs(value)));
   let squares = 0;
-  let largest = 0;
   for (const value of vector) {
-    squares += value * value;
-    largest = Math.max(largest, Math.abs(value));
+    const part = value / largest;
+    squares += part * part;
   }
-  // The largest component, of the unit vector, is `fineSteps` steps.
-  const scale = largest / Math.sqrt(squares) / fineSteps;
-  const perStep = 1 / Math.sqrt(squares) / scale;
-  const fine = Int8Array.from(vector, (value) => Math.round(value * perStep));
-  return { scale, fine };
+  return {
+    scale: 1 / (fineSteps * Math.sqrt(squares)),
+    fine: Int8Array.from(vector, (value) =>
+      Math.round((value / largest) * fineSteps)
+    ),
+  };
 };
 
 /**
@@ -167,6 +183,18 @@ WHERE source_versions.source = ?1 AND source_versions.version = ?2
  */
 const packTail = (sql: SqlStorage, model: number, readerSet: number): void => {
   for (;;) {
+    // Counted first, from the index: most puts leave a tail to grow.
+    const { size } = sql
+      .exec<{ size: number }>(
+        `SELECT count(*) AS size FROM vector_codes
+        WHERE model = ? AND reader_set = ? AND block IS NULL`,
+        model,
+        readerSet
+      )
+      .one();
+    if (size < blockSize) {
+      return;
+    }
     const tail = sql
       .exec<{ chunk: number; bits: ArrayBuffer }>(
         `SELECT chunk, bits FROM vector_codes
@@ -253,10 +281,22 @@ export const putVectors = (
 /**
  * Removes the codes of the chunks of the version at `versionRow`, for
  * every model: a packed one is marked removed in its block, until a
- * repack drops it. Run it in the transaction that makes the version no
- * longer current, or that erases it.
+ * repack drops it, and a block left with no code is deleted at once, so
+ * no scan reads it again. Run it in the transaction that makes the
+ * version no longer current, or that erases it.
  */
 export const removeVectorsOf = (sql: SqlStorage, versionRow: number): void => {
+  const blocks = JSON.stringify(
+    sql
+      .exec<{ block: number }>(
+        `SELECT DISTINCT block FROM vector_codes
+        WHERE block IS NOT NULL
+          AND chunk IN (SELECT row FROM chunks WHERE version_row = ?)`,
+        versionRow
+      )
+      .toArray()
+      .map(({ block }) => block)
+  );
   sql.exec(
     `INSERT OR IGNORE INTO vector_removed (block, slot)
     SELECT block, slot FROM vector_codes
@@ -268,6 +308,10 @@ export const removeVectorsOf = (sql: SqlStorage, versionRow: number): void => {
     "DELETE FROM vector_codes WHERE chunk IN (SELECT row FROM chunks WHERE version_row = ?)",
     versionRow
   );
+  const emptied = `SELECT value FROM json_each(?) WHERE NOT EXISTS (
+    SELECT 1 FROM vector_codes WHERE vector_codes.block = json_each.value)`;
+  sql.exec(`DELETE FROM vector_removed WHERE block IN (${emptied})`, blocks);
+  sql.exec(`DELETE FROM vector_blocks WHERE id IN (${emptied})`, blocks);
 };
 
 /**
@@ -422,21 +466,27 @@ const scan = (
 /**
  * `?1` the model, `?2` the reader's person, `?3` their groups (JSON): the
  * blocks of the reader's groups, with the slots marked removed in each.
+ * The reader's sets come first (`CROSS JOIN` keeps SQLite to that order),
+ * each looked up in the blocks' index, so a block of another set is never
+ * read, whatever SQLite's statistics say.
  */
 const blocksSql = `
 WITH ${readableSql}
-SELECT chunks, bits,
+SELECT vector_blocks.chunks AS chunks, vector_blocks.bits AS bits,
   (SELECT json_group_array(slot) FROM vector_removed
     WHERE vector_removed.block = vector_blocks.id) AS removed
-FROM vector_blocks
-WHERE model = ?1 AND reader_set IN (SELECT reader_set FROM readable)`;
+FROM readable
+CROSS JOIN vector_blocks ON vector_blocks.model = ?1
+  AND vector_blocks.reader_set = readable.reader_set`;
 
 /** As `blocksSql`: the tail codes of the reader's groups. */
 const tailSql = `
 WITH ${readableSql}
-SELECT chunk, bits FROM vector_codes
-WHERE model = ?1 AND block IS NULL
-  AND reader_set IN (SELECT reader_set FROM readable)`;
+SELECT vector_codes.chunk AS chunk, vector_codes.bits AS bits
+FROM readable
+CROSS JOIN vector_codes ON vector_codes.model = ?1
+  AND vector_codes.reader_set = readable.reader_set
+  AND vector_codes.block IS NULL`;
 
 /**
  * As `blocksSql`, and `?4` the candidates' chunks (JSON): each one's

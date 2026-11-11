@@ -11,21 +11,23 @@ import { beforeAll, describe, expect, it } from "vite-plus/test";
 // The vector way of the Brain's store (GRA-1766), through the store's
 // contract: codes are put for chunks of current versions, packed in
 // blocks of 1,024 with the newest in a tail, and searched by an exact
-// scan with the access check inside it. From the threat model on the
-// issue: a search returns exactly the nearest chunks the reader may read,
-// as brute force over those alone does; codes the reader may not read,
-// packed or in the tail, change nothing of what they find; nobody finds a
-// source nobody is known to read; a change in membership holds from the
-// next search; a new version's codes replace the old ones' at once, and a
-// late put brings nothing back; a repack drops removed codes for good;
-// codes of two models or builds are never compared; and a put or a
-// repack that breaks half-way leaves the store as it was.
+// 1-bit scan, the nearest candidates re-scored, with the access check
+// inside it. From the threat model on the issue: a search finds the
+// nearest chunks the reader may read, as brute force over those alone
+// does; codes the reader may not read, packed or in the tail, change
+// nothing of what they find, whatever the vectors; nobody finds a source
+// nobody is known to read; a change in membership holds from the next
+// search; a new version's codes replace the old ones' at once, and a late
+// put brings nothing back; a repack drops removed codes for good; codes
+// of two models or builds are never compared; and a put or a repack that
+// breaks half-way leaves the store as it was.
 //
-// Vectors here are made of +1 and -1 alone, with a centre of zeros: their
-// codes are then exact (the 1-bit Hamming distance orders them as their
-// cosine does, and the 8-bit code holds them whole), so brute force over
-// the full vectors is the answer the scan must give, ties to the chunk
-// added first.
+// Most vectors here are made of +1 and -1 alone, with a centre of zeros:
+// their codes are then exact (the 1-bit Hamming distance orders them as
+// their cosine does, and the 8-bit code holds them whole), so brute force
+// over the full vectors is the answer the scan must give, ties to the
+// chunk added first, however many it re-scores. Others are real-valued,
+// with a centre of their own, where the re-scoring is what decides.
 
 const dimensions = 384;
 
@@ -60,21 +62,31 @@ const sourceOf = async (access: Access, count: number): Promise<ChunkRef[]> => {
   }));
 };
 
-/** Random +1 and -1, from a seed of their own, so runs repeat. */
-const randomSigns = (() => {
+/** A random 32-bit word, from a seed of the tests' own, so runs repeat. */
+const randomWord = (() => {
   let state = 0x9e_37_79_b9;
-  return (): number[] =>
-    Array.from({ length: dimensions }, () => {
-      // oxlint-disable-next-line no-bitwise -- xorshift
-      state ^= state << 13;
-      // oxlint-disable-next-line no-bitwise -- xorshift
-      state ^= state >>> 17;
-      // oxlint-disable-next-line no-bitwise -- xorshift
-      state ^= state << 5;
-      // oxlint-disable-next-line no-bitwise -- the lowest bit
-      return (state & 1) === 0 ? -1 : 1;
-    });
+  return (): number => {
+    // oxlint-disable-next-line no-bitwise -- xorshift
+    state ^= state << 13;
+    // oxlint-disable-next-line no-bitwise -- xorshift
+    state ^= state >>> 17;
+    // oxlint-disable-next-line no-bitwise -- xorshift
+    state ^= state << 5;
+    // oxlint-disable-next-line no-bitwise -- as unsigned
+    return state >>> 0;
+  };
 })();
+
+/** Random +1 and -1. */
+const randomSigns = (): number[] =>
+  Array.from({ length: dimensions }, () =>
+    // oxlint-disable-next-line no-bitwise -- the lowest bit
+    (randomWord() & 1) === 0 ? -1 : 1
+  );
+
+/** Random numbers from -1 to 1. */
+const randomReals = (): number[] =>
+  Array.from({ length: dimensions }, () => randomWord() / 2 ** 31 - 1);
 
 /** `vector` with its first `flips` signs turned: nearer the fewer. */
 const near = (vector: readonly number[], flips: number): number[] =>
@@ -148,6 +160,13 @@ const bruteForce = (
     .toSorted((a, b) => b.found.score - a.found.score || a.order - b.order)
     .slice(0, limit)
     .map(({ found }) => found);
+
+/** Where a found chunk is, without its score. */
+const placeOf = ({ source, version, position }: FoundChunk): ChunkRef => ({
+  source,
+  version,
+  position,
+});
 
 /** `found` with scores rounded, to compare with brute force. */
 const rounded = (found: readonly FoundChunk[]) =>
@@ -602,5 +621,121 @@ describe("the Brain's vector way", () => {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await expect(put(model, [{ chunk, vector }])).rejects.toThrow(/refused/u);
     }
+  });
+
+  it("scores vectors of any finite size, stored and asked, as their direction alone", async () => {
+    const model = newModel();
+    const reader = { person: readers.few, groups: [] };
+    const directions = randomly(company.own);
+    // Tiny, smallest, huge and plain magnitudes of the same directions.
+    const sizes = [1e-200, Number.MIN_VALUE, 1e200, 1e300, 1];
+    await put(
+      model,
+      directions.map(({ chunk, vector }, index) => ({
+        chunk,
+        vector: vector.map((value) => value * (sizes[index] ?? 1)),
+      }))
+    );
+    const question = randomSigns();
+    const expected = rounded(bruteForce(question, directions));
+    for (const size of [1e-200, 1e300]) {
+      const asked = question.map((value) => value * size);
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const found = await search(model, asked, reader);
+      expect(rounded(found)).toStrictEqual(expected);
+      expect(
+        found.every(({ score }) => score >= -1 && score <= 1)
+      ).toBeTruthy();
+    }
+  });
+
+  it("finds the nearest by cosine among real-valued vectors with a centre, when they are well inside the candidates", async () => {
+    const model = {
+      ...newModel(),
+      centre: randomReals().map((value) => value / 10),
+    };
+    const reader = { person: principal("person"), groups: [readers.group] };
+    const question = randomReals();
+    const coded = company.shared.map((chunk) => ({
+      chunk,
+      vector: randomReals(),
+    }));
+    // Near ones, each a little farther, packed and in the tail.
+    for (const [rank, at] of [5, 1500, 2150, 700, 2199].entries()) {
+      const planted = coded[at];
+      if (planted !== undefined) {
+        planted.vector = question.map(
+          (value) => value + (rank + 1) * 0.1 * (randomWord() / 2 ** 31 - 1)
+        );
+      }
+    }
+    await put(model, coded);
+    const found = await search(model, question, reader, 5);
+    const expected = bruteForce(question, coded, 5);
+    expect(found.map(placeOf)).toStrictEqual(expected.map(placeOf));
+    for (const [index, { score }] of found.entries()) {
+      expect(score).toBeCloseTo(expected[index]?.score ?? 0, 2);
+    }
+  });
+
+  it("finds the same chunks, in the same order and with the same scores, among real-valued vectors with a centre, whatever codes the reader may not read are stored", async () => {
+    const model = {
+      ...newModel(),
+      centre: randomReals().map((value) => value / 10),
+    };
+    const reader = { person: principal("person"), groups: [readers.group] };
+    const question = randomReals();
+    await put(
+      model,
+      company.shared.map((chunk) => ({ chunk, vector: randomReals() }))
+    );
+    const alone = await search(model, question, reader, 50);
+    const nearQuestion = (chunks: readonly ChunkRef[]): Coded[] =>
+      chunks.map((chunk) => ({
+        chunk,
+        vector: question.map((value) => value + randomWord() / 2 ** 40),
+      }));
+    await put(model, nearQuestion(company.others));
+    await put(model, nearQuestion(company.otherGroups));
+    await put(model, nearQuestion(company.nobodys));
+    await expect(search(model, question, reader, 50)).resolves.toStrictEqual(
+      alone
+    );
+  });
+
+  it("finds a new version with other readers for its readers alone, once its codes are put", async () => {
+    const model = newModel();
+    const question = randomSigns();
+    const before = { person: principal("person"), groups: [] };
+    const after = { person: principal("person"), groups: [] };
+    const first = randomly(await sourceOf(owner(before.person), 3));
+    await put(model, first);
+    expect(rounded(await search(model, question, before))).toStrictEqual(
+      rounded(bruteForce(question, first))
+    );
+    const source = first[0]?.chunk.source ?? "";
+    const second = randomly(await newVersionOf(source, owner(after.person), 3));
+    await expect(search(model, question, before)).resolves.toStrictEqual([]);
+    await expect(search(model, question, after)).resolves.toStrictEqual([]);
+    await put(model, second);
+    expect(rounded(await search(model, question, after))).toStrictEqual(
+      rounded(bruteForce(question, second))
+    );
+    await expect(search(model, question, before)).resolves.toStrictEqual([]);
+  });
+
+  it("deletes a block once every code in it is removed, without a repack", async () => {
+    const model = newModel();
+    const person = principal("person");
+    // Exactly one block, and no tail.
+    const coded = randomly(await sourceOf(owner(person), block));
+    await put(model, coded);
+    const source = coded[0]?.chunk.source ?? "";
+    const removed = await rowsOf(source, 1);
+    const packed = await codedRows();
+    expect(removed.filter((row) => !packed.has(row))).toStrictEqual([]);
+    await newVersionOf(source, owner(person), 1);
+    const left = await codedRows();
+    expect(removed.filter((row) => left.has(row))).toStrictEqual([]);
   });
 });
