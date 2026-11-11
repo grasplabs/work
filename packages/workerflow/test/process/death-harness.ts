@@ -67,7 +67,8 @@ export const onDisk = (): void => {
   });
 
   beforeEach(async () => {
-    current = await Workerd.create(fixture, effectsPort);
+    outside.reset();
+    current = Workerd.create(fixture, effectsPort);
     await current.start();
   });
 

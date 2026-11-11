@@ -131,9 +131,37 @@ export class Outside {
       arrived: false,
     };
     this.#holds.push(hold);
-    await until(`${label} of ${run} to arrive`, () =>
-      hold.arrived ? true : undefined
-    );
+    try {
+      await until(`${label} of ${run} to arrive`, () =>
+        hold.arrived ? true : undefined
+      );
+    } catch (error) {
+      // What did arrive tells a run that went elsewhere, or stalled, from
+      // one whose effect came under another attempt.
+      const arrived = this.of(run).map(
+        (effect) => `${effect.label} (attempt ${effect.attempt})`
+      );
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; of ${run} arrived: ${arrived.join(", ") || "nothing"}`,
+        { cause: error }
+      );
+    }
+  }
+
+  /**
+   * Forgets every test's effects, notifications and holds, and drops the
+   * answers still withheld: a test tried again under the same run IDs
+   * starts from nothing, rather than find the effects of its first try,
+   * or a hold of it that never arrived take what its own hold waits for.
+   */
+  reset(): void {
+    for (const { response } of this.#withheld) {
+      response.destroy();
+    }
+    this.#withheld.length = 0;
+    this.#holds.length = 0;
+    this.effects.length = 0;
+    this.notifications.length = 0;
   }
 
   /** Sends the answer withheld from `label` of `run`, late. */

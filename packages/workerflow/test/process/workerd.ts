@@ -16,10 +16,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
+import { Readable } from "node:stream";
 
 import { requestTimeoutMs, until } from "./outside.ts";
 
@@ -69,27 +70,26 @@ export const bundleFixture = (directory: string): string => {
   return path.join(directory, module);
 };
 
-const freePort = async (): Promise<number> => {
-  const probe = createServer().listen(0, "127.0.0.1");
-  await once(probe, "listening");
-  const address = probe.address();
-  probe.close();
-  await once(probe, "close");
-  if (address === null || typeof address === "string") {
-    throw new Error("no free port for workerd");
-  }
-  return address.port;
-};
+/** Where workerd reports its sockets: the child's stdio after stderr. */
+const controlFd = 3;
+
+/** What workerd's control descriptor says once the socket listens. */
+const isListening = (
+  value: unknown
+): value is { event: "listen"; socket: "http"; port: number } =>
+  typeof value === "object" &&
+  value !== null &&
+  "event" in value &&
+  value.event === "listen" &&
+  "socket" in value &&
+  value.socket === "http" &&
+  "port" in value &&
+  typeof value.port === "number";
 
 /** The deploy a fresh workerd serves until a test redeploys it. */
 const firstDeploy = "1";
 
-const config = (
-  storage: string,
-  port: number,
-  effectsPort: number,
-  deploy: string
-): string =>
+const config = (storage: string, effectsPort: number, deploy: string): string =>
   `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
@@ -98,7 +98,7 @@ const config :Workerd.Config = (
     (name = "storage", disk = (path = "${storage}", writable = true)),
     (name = "effects", external = (address = "127.0.0.1:${effectsPort}", http = ())),
   ],
-  sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "main")],
+  sockets = [(name = "http", address = "127.0.0.1:0", http = (), service = "main")],
 );
 
 const main :Workerd.Worker = (
@@ -115,43 +115,55 @@ const main :Workerd.Worker = (
 );
 `;
 
-/** Plain workerd serving the fixture, on storage that outlives it. */
+/**
+ * Plain workerd serving the fixture, on storage that outlives it.
+ *
+ * Each start listens on a port the kernel picks, which workerd reports on
+ * its control descriptor. A port probed free beforehand can be taken
+ * before workerd binds it, by another test file's workerd started again
+ * after a kill: this one then fails to bind, and its test drives the
+ * other's runs, whose effects reach the other file's outside world.
+ */
 export class Workerd {
   readonly #work: string;
   readonly #config: string;
   readonly #storage: string;
-  readonly #port: number;
   readonly #effectsPort: number;
-  readonly url: string;
+  #port: number | undefined;
   #process: ChildProcess | undefined;
   #log = "";
 
-  private constructor(work: string, port: number, effectsPort: number) {
+  private constructor(work: string, effectsPort: number) {
     this.#work = work;
     this.#config = path.join(work, "config.capnp");
     this.#storage = path.join(work, "storage");
-    this.#port = port;
     this.#effectsPort = effectsPort;
-    this.url = `http://127.0.0.1:${port}`;
     this.#configure(firstDeploy);
+  }
+
+  /** Where the process listens: another port after each start. */
+  get url(): string {
+    if (this.#port === undefined) {
+      throw new Error("workerd isn't listening");
+    }
+    return `http://127.0.0.1:${this.#port}`;
   }
 
   #configure(deploy: string): void {
     writeFileSync(
       this.#config,
-      config(this.#storage, this.#port, this.#effectsPort, deploy)
+      config(this.#storage, this.#effectsPort, deploy)
     );
   }
 
   /** A fresh storage directory, with the bundled fixture next to it. */
-  static async create(module: string, effectsPort: number): Promise<Workerd> {
+  static create(module: string, effectsPort: number): Workerd {
     const work = mkdtempSync(path.join(tmpdir(), "workerflow-death-"));
     const storage = path.join(work, "storage");
     mkdirSync(storage);
     // workerd embeds a module by a path relative to its config.
     copyFileSync(module, path.join(work, "worker.js"));
-    const port = await freePort();
-    return new Workerd(work, port, effectsPort);
+    return new Workerd(work, effectsPort);
   }
 
   /**
@@ -160,10 +172,28 @@ export class Workerd {
    * resumed with no request reaching it.
    */
   async start(): Promise<void> {
-    const child = spawn(workerdBinary, ["serve", this.#config], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    this.#port = undefined;
+    const child = spawn(
+      workerdBinary,
+      ["serve", this.#config, `--control-fd=${controlFd}`],
+      { stdio: ["ignore", "pipe", "pipe", "pipe"] }
+    );
     this.#process = child;
+    const [, stdout, stderr, control] = child.stdio;
+    if (
+      !(stdout instanceof Readable) ||
+      !(stderr instanceof Readable) ||
+      !(control instanceof Readable)
+    ) {
+      throw new TypeError("workerd's output isn't piped");
+    }
+    createInterface({ input: control }).on("line", (line) => {
+      const message: unknown = JSON.parse(line);
+      // Only the process started last says where this one listens.
+      if (isListening(message) && this.#process === child) {
+        this.#port = message.port;
+      }
+    });
     // If the test process exits without disposing (a crash, a timeout),
     // workerd goes with it rather than outlive it.
     const killOnExit = (): void => {
@@ -173,7 +203,7 @@ export class Workerd {
     child.once("exit", () => {
       process.off("exit", killOnExit);
     });
-    for (const stream of [child.stdout, child.stderr]) {
+    for (const stream of [stdout, stderr]) {
       stream.on("data", (chunk: Buffer) => {
         this.#log += chunk.toString();
       });
@@ -183,13 +213,16 @@ export class Workerd {
         throw new Error(`workerd exited at start:\n${this.#log.slice(-2000)}`);
       }
       let ready = false;
-      try {
-        const response = await fetch(`${this.url}/ready`, {
-          signal: AbortSignal.timeout(requestTimeoutMs),
-        });
-        ready = response.status === 204;
-      } catch {
-        // Not listening yet.
+      // Unset until workerd says where it listens.
+      if (this.#port !== undefined) {
+        try {
+          const response = await fetch(`${this.url}/ready`, {
+            signal: AbortSignal.timeout(requestTimeoutMs),
+          });
+          ready = response.status === 204;
+        } catch {
+          // Not serving yet.
+        }
       }
       return ready || undefined;
     });
