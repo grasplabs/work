@@ -31,6 +31,7 @@ const exportsSchema = z.object({
   vocab_size: call,
   longest_token: call,
   set_kernel: call,
+  kernel: call,
   text_buf: call,
   text_cap: call,
   tokenize: call,
@@ -81,6 +82,8 @@ export const rowBytes = (format: RowFormat, dim: number): number =>
 
 export class Engine {
   readonly dim: number;
+  /** The integer kernels this instance runs, `auto` resolved for this CPU. */
+  readonly kernel: Exclude<Kernel, "auto">;
   readonly maxTokens: number;
   readonly vocabSize: number;
   /**
@@ -121,6 +124,7 @@ export class Engine {
       );
     }
     this.exports.set_kernel(kernelCodes[kernel]);
+    this.kernel = this.exports.kernel() === kernelCodes.pairs ? "pairs" : "dot";
     this.dim = this.exports.dim();
     this.maxTokens = this.exports.max_tokens();
     this.vocabSize = this.exports.vocab_size();

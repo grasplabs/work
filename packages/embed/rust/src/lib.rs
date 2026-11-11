@@ -99,6 +99,17 @@ pub extern "C" fn set_kernel(k: u32) {
     unsafe { KERNEL = Some(kernel) }
 }
 
+/// Which integer kernels run: 1 the i32 dot, 2 the i16 pairs (as `set_kernel` numbers them).
+#[unsafe(no_mangle)]
+pub extern "C" fn kernel() -> u32 {
+    unsafe {
+        if KERNEL.is_none() {
+            set_kernel(0);
+        }
+        if KERNEL == Some(Kernel::Pairs) { 2 } else { 1 }
+    }
+}
+
 /// Where the host writes a text's UTF-8 bytes, `text_cap` at most.
 #[unsafe(no_mangle)]
 pub extern "C" fn text_buf() -> *mut u8 {

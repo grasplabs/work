@@ -11,7 +11,8 @@
  *   cut at the model's max tokens as the reference's truncation cuts;
  * - cosine to the reference vectors, least and mean, and how often a
  *   text's nearest other text is the reference's;
- * - whether the i32-dot and i16-pair kernels give the same bits;
+ * - whether the i32-dot and i16-pair kernels give the same bits, and
+ *   which one this CPU runs;
  * - the module's memory, and the time to embed the longest texts.
  *
  * Usage: node packages/embed/scripts/check-model.ts --files <dir> --reference <file> [--float]
@@ -181,7 +182,7 @@ console.info(
         mean: cosines.reduce((s, c) => s + c, 0) / n,
       },
       nearestText: `${nearestEqual}/${n} as the reference's`,
-      kernels: `${kernelsEqual}/${n} bit-identical (i32 dot, i16 pairs)`,
+      kernels: `${kernelsEqual}/${n} bit-identical (i32 dot, i16 pairs); ${auto.kernel} runs here`,
       memoryMiB: Number((auto.memoryBytes / 2 ** 20).toFixed(1)),
       timings,
     },

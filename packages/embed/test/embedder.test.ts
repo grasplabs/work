@@ -565,7 +565,8 @@ describe("embedder", () => {
         shape,
       ],
       ["float-step", withHeaderWord(layerWord(1, floatChannels), 8), shape],
-      // A kind bit nobody defined, and a rotary table the file doesn't have.
+      // A kind bit nobody defined, and a rotary table the file doesn't have
+      // (table 2 in bits 8 to 15; the fixture has two).
       ["kind", withHeaderWord(layerWord(0, kind), 4), shape],
       ["rotary-table", withHeaderWord(layerWord(0, kind), 2 * 256), shape],
       // Within the bounds, but more than the file holds.
