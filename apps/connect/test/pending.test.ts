@@ -1689,4 +1689,82 @@ describe("a write held from a chat platform", () => {
       output: '{"sent":"ben@acme.test"}',
     });
   });
+
+  // A turn nobody was there for (an agent woken by a schedule or an
+  // event): connect holds every change of it, whoever signed the call and
+  // however, and only with an end. These start from the ways it can fail:
+  // a change run because the capability didn't say chat; one held for
+  // good; one run twice; one run after its day ended.
+
+  it("holds a change of an unattended turn even when its capability isn't a chat's, and says so to its person", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const call = mail(connectionId);
+    // Not `interactive`: as if core had signed it as a run's. Held anyway,
+    // and told as held the way a run is told.
+    const result = await outcome(
+      callAs(agentFor(anna.userId), call, {
+        origin: chatOrigin,
+        unattended: true,
+        heldUntil: Date.now() + hourMs,
+      })
+    );
+    const held = await heldFor(anna);
+    expect({
+      result,
+      ran: server.ran,
+      unattended: held.unattended,
+      ends: held.endsAt === undefined,
+    }).toStrictEqual({
+      result: "connect.held",
+      ran: [],
+      unattended: true,
+      ends: false,
+    });
+    // One asked for in chat says nothing of the kind.
+    const ben = someone();
+    await hold(inChat(ben), mail(connectionId));
+    const attended = await heldFor(ben);
+    expect("unattended" in attended).toBeFalsy();
+  });
+
+  it("refuses a change of an unattended turn that carries no end, and holds nothing", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    await expect(
+      outcome(hold(inChat(anna), mail(connectionId), { unattended: true }))
+    ).resolves.toBe("connect.invalid");
+    expect({ waiting: await waitingFor(anna), ran: server.ran }).toStrictEqual({
+      waiting: [],
+      ran: [],
+    });
+  });
+
+  it("runs an unattended turn's change once after one confirmation, and not at all once its day ended", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const signed = { unattended: true, heldUntil: Date.now() + hourMs };
+    await hold(inChat(anna), mail(connectionId), signed);
+    const held = await heldFor(anna);
+    // The person confirms from their own session: no unattended turn there.
+    const [first, second] = await Promise.all([
+      outcome(confirm(anna, held)),
+      outcome(confirm(anna, held)),
+    ]);
+    expect({
+      outcomes: [first, second].toSorted(),
+      ran: server.ran.length,
+    }).toStrictEqual({
+      outcomes: ["connect.pending_not_found", "ok"],
+      ran: 1,
+    });
+
+    await hold(inChat(anna), mail(connectionId, "cy@acme.test"), signed);
+    const late = await heldFor(anna);
+    later(hourMs + 1);
+    await expect(outcome(confirm(anna, late))).resolves.toBe(
+      "connect.pending_expired"
+    );
+    expect(server.ran).toHaveLength(1);
+  });
 });

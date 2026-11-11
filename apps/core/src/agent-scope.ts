@@ -51,6 +51,13 @@ export interface AgentScope {
    * agent's audit events name; Grasp's own app (`web`) when not given.
    */
   via?: ChatChannel;
+  /**
+   * Nobody asked for this turn there and then: the agent was woken by a
+   * schedule or an event. Its code only reads. A change through a
+   * connection is held for its person (connect), and every other write or
+   * side effect is refused (`admitEffect`).
+   */
+  unattended?: boolean;
   /** The code run the stub was made for: it answers only while that runs. */
   runId: string;
 }
@@ -484,12 +491,31 @@ export const requireOpenRun = async (
  * records): the one that found a revocation, or one from a run that had
  * ended; without, its caller records it (`auditedCall`). So a revoked
  * run's refusals are recorded per refused call, not once per run.
+ *
+ * In an unattended turn (`AgentScope.unattended`) every effect is refused
+ * with `agent.unattended`, but one connect holds for the person (`held`).
  */
 export const admitEffect = async (
   env: Env,
   scope: AgentScope,
-  method?: string
+  method?: string,
+  { held = false }: { held?: boolean } = {}
 ): Promise<void> => {
+  // A turn nobody was there for changes nothing itself: only what connect
+  // holds for its person (`held`) may go on. Refused before anything else,
+  // and recorded when nothing else records the call.
+  if (scope.unattended === true && !held) {
+    const refusal = agentErrors.create("agent.unattended");
+    if (method !== undefined) {
+      await auditToolCall(
+        env,
+        scope,
+        { method },
+        { outcome: "refused", reason: refusal.code }
+      );
+    }
+    throw refusal;
+  }
   const chats = workspace(env, scope.workspaceId);
   const opened = await chats.admitFromCodeRun(scope.chatId, scope.runId);
   let refused: "ended" | "revoked" | undefined;

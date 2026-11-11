@@ -321,6 +321,11 @@ export const pendingActions = sqliteTable(
      * decided, as every other does.
      */
     endsAt: timestamp("ends_at"),
+    /**
+     * Asked for by a turn nobody was there for
+     * (`CapabilityClaims.unattended`): its person is told so when shown it.
+     */
+    unattended: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("pending_actions_call_idx").on(

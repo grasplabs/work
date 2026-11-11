@@ -356,6 +356,21 @@ export const appPointerFor = async (
 };
 
 /**
+ * Refuses a class a turn nobody was there for is never offered: reaching
+ * other people. Such a turn may read, and what it would change of its
+ * person's or the company's is held for its person; a message to someone
+ * else isn't even held, for nobody chose to send it.
+ */
+const requireOfferedUnattended = (
+  toolClass: ToolClass,
+  unattended: boolean
+): void => {
+  if (unattended && toolClass === "reach-others") {
+    throw connectErrors.create("connect.class_off");
+  }
+};
+
+/**
  * Refuses the chat's agent's call of a company app's tool (a Composio
  * one) whose class is off for its person: by the class connect takes the
  * tool to be (`ConnectionOwner.toolClasses`), `connect.class_unknown` for
@@ -368,7 +383,8 @@ const requireAppClassOn = async (
   env: Env,
   authority: Authority,
   owner: ConnectionOwner,
-  action: string
+  action: string,
+  unattended: boolean
 ): Promise<ClassedCall> => {
   const toolClass =
     owner.toolClasses !== undefined && Object.hasOwn(owner.toolClasses, action)
@@ -377,6 +393,7 @@ const requireAppClassOn = async (
   if (toolClass === undefined) {
     throw connectErrors.create("connect.class_unknown");
   }
+  requireOfferedUnattended(toolClass, unattended);
   if (toolClass === "read-company") {
     const pointer = await appPointerFor(env, owner.id, authority.onBehalfOf);
     if (pointer === undefined) {
@@ -443,7 +460,8 @@ export const requireToolClassOn = async (
   env: Env,
   authority: Authority,
   connection: ConnectionObject,
-  action: string
+  action: string,
+  unattended = false
 ): Promise<ClassedCall> => {
   if (authority.subject.type !== "agent") {
     return {};
@@ -453,7 +471,7 @@ export const requireToolClassOn = async (
     throw connectErrors.create("connect.connection_not_found");
   }
   if (owner.source === "composio") {
-    return await requireAppClassOn(env, authority, owner, action);
+    return await requireAppClassOn(env, authority, owner, action, unattended);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);
   if (toolClass === undefined) {
@@ -462,6 +480,7 @@ export const requireToolClassOn = async (
   if (toolClass === "never") {
     throw connectErrors.create("connect.class_off");
   }
+  requireOfferedUnattended(toolClass, unattended);
   const audience = await audienceNow(
     env,
     inMailbox(owner.provider, action, toolClass)

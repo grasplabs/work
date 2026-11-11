@@ -355,6 +355,7 @@ const summaryOf = ({
     inputHash: row.inputHash,
     requestedAt: row.createdAt.toISOString(),
     ...(row.endsAt === null ? {} : { endsAt: row.endsAt.toISOString() }),
+    ...(row.unattended ? { unattended: true as const } : {}),
     binding: bindingOf(row),
   };
 };
@@ -663,6 +664,7 @@ export const hold = async (
           ),
           stamp: value(stamp, "stamp"),
           endsAt: value(claims.heldUntil ?? null, "ends_at"),
+          unattended: value(claims.unattended ? 1 : 0, "unattended"),
         })
         .from(connections)
         .where(
