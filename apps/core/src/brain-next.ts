@@ -88,9 +88,10 @@ const kindsWithoutColon = <const K extends string>(
 ): readonly K[] => kinds;
 
 /**
- * Everything that adds sources to the Brain, one kind each. Each producer
- * issue adds its own (GRA-1727: meetings, workflow runs, interviews;
- * GRA-1730: what agents fetch). A kind is never `instructions`, the
+ * Everything that adds sources to the Brain, one kind each. Upload, chat
+ * and run are core's own (brain-producers.ts); each new producer adds its
+ * own: interviews and meetings are not producers yet, and what agents
+ * fetch will be a producer of its own. A kind is never `instructions`, the
  * instruction files' own (`instructionKeyOf`).
  *
  * A kind is only ever added, never removed or renamed: the Brain keeps
@@ -98,7 +99,7 @@ const kindsWithoutColon = <const K extends string>(
  * (`sourceRefOf`), so a kind gone from this list would fail every recall
  * whose results hold one of its sources.
  */
-const producerKinds = kindsWithoutColon(["upload", "chat"]);
+const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
 
 /** Who adds a source: one of `producerKinds`. */
 export type ProducerKind = (typeof producerKinds)[number];

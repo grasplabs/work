@@ -7,10 +7,11 @@
  * in what reached a model, and holds each answer to what the reader asked
  * only of hidden sources to the answer to words nothing holds.
  *
- * Three lists, checked against what exists: `coreProbes` has one entry
+ * Four lists, checked against what exists: `coreProbes` has one entry
  * per export of core's `brain-next.ts`, `instructionProbes` one per export
  * of core's `instruction-files.ts` (the rules over the instruction files
- * brain-next.ts names), `storeProbes` one per public method of the
+ * brain-next.ts names), `producerProbes` one per export of core's
+ * `brain-producers.ts`, `storeProbes` one per public method of the
  * Brain's store (its contract, and anything else a holder of its
  * namespace could call). A member without an entry fails the type check
  * and the harness. A new surface is one more entry here:
@@ -51,6 +52,7 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import * as producers from "../src/brain-producers.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import type { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
@@ -347,10 +349,13 @@ const refusedChange = async (markers: readonly string[]): Promise<Answer[]> => {
   ];
 };
 
-/** Adds as the chat producer under `id`: the version it answers with. */
-const addAsChat = async (id: string): Promise<number> => {
+/** Adds as `producer` under `id`: the version it answers with. */
+const addAs = async (
+  producer: SourceRef["producer"],
+  id: string
+): Promise<number> => {
   const { version } = await coreBrain.addSource(env, {
-    source: { producer: "chat", id },
+    source: { producer, id },
     change: crypto.randomUUID(),
     // The same text and readers every pass: a later pass's add is the
     // version the first made, so every pass answers alike.
@@ -363,24 +368,31 @@ const addAsChat = async (id: string): Promise<number> => {
 /**
  * Adds as another producer kind, with a hidden source's id and with one no
  * one added: the version each answers with must be the same (a first), so
- * no producer learns what another kind holds under that id.
+ * no producer learns what another kind holds under that id. Never as the
+ * hidden source's own kind, which would add to the source itself.
  */
 const otherKindOf = async (
   hiddenVersions: Probing["hiddenVersions"]
 ): Promise<Answer[]> => {
-  const hidden = [...new Set(hiddenVersions.map(({ source }) => source.id))];
+  const hidden = new Map(
+    hiddenVersions.map(({ source }) => [
+      `${source.producer}:${source.id}`,
+      source,
+    ])
+  );
   return [
     await answer(
       "another kind, an id no one added",
-      async () => await addAsChat(crypto.randomUUID()),
+      async () => await addAs("chat", crypto.randomUUID()),
       "nothing"
     ),
     ...(await Promise.all(
-      hidden.map(
-        async (id, index) =>
+      [...hidden.values()].map(
+        async ({ producer, id }, index) =>
           await answer(
             `another kind, hidden source ${index}'s id`,
-            async () => await addAsChat(id),
+            async () =>
+              await addAs(producer === "chat" ? "upload" : "chat", id),
             "hidden"
           )
       )
@@ -1063,6 +1075,210 @@ export const instructionProbes = {
     return asked;
   },
 } satisfies Record<InstructionMember, Probe>;
+
+/**
+ * What `personId` recalls of `markers` once `handOver` has run: a
+ * hand-over held back for them (sensitive, restricted) must leave nothing
+ * there to find, so a guard dropped puts the markers in this answer.
+ */
+const handedOverTo = async (
+  personId: string,
+  markers: readonly string[],
+  handOver: () => Promise<unknown>
+): Promise<unknown> => ({
+  handedOver: await handOver(),
+  recalled: await coreBrain.recallAs(env, personId, markers.join(" ")),
+});
+
+/**
+ * One probe per export of core's brain-producers.ts. A producer has no
+ * reader: each hands over marked text every way it can answer (for
+ * someone else, for no person, with ids the Brain refuses, with text past
+ * its bound, which is cut, an upload's version no longer current or its
+ * check failing, a run's end unreadable), and what it answers or logs
+ * must hold no marker.
+ * What it must hold back (sensitive, restricted) it is handed for the
+ * reader under test, who then recalls the markers: a guard dropped shows
+ * them the markers.
+ */
+export const producerProbes = {
+  handOverUpload: async ({ personId, markers }) => {
+    const text = markedText(markers);
+    const upload = async (
+      name: string,
+      uploadedBy: string,
+      {
+        as = text,
+        sensitive = false,
+        documentId = crypto.randomUUID(),
+        stillCurrent = async () => await Promise.resolve(true),
+      }: {
+        as?: string;
+        sensitive?: boolean;
+        documentId?: string;
+        stillCurrent?: () => Promise<boolean>;
+      } = {}
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await producers.handOverUpload(env, {
+            uploadId: crypto.randomUUID(),
+            documentId,
+            uploadedBy,
+            sensitive,
+            text: as,
+            stillCurrent,
+          })
+      );
+    return [
+      await upload("for someone else", stranger()),
+      await upload("no person", ""),
+      await upload("a person missing", unchecked(null)),
+      await answer(
+        "sensitive, for the reader",
+        async () =>
+          await handedOverTo(
+            personId,
+            markers,
+            async () =>
+              await producers.handOverUpload(env, {
+                uploadId: crypto.randomUUID(),
+                documentId: crypto.randomUUID(),
+                uploadedBy: personId,
+                sensitive: true,
+                text,
+                stillCurrent: async () => await Promise.resolve(true),
+              })
+          )
+      ),
+      await upload("too much text", stranger(), {
+        as: oversizedText(markers),
+      }),
+      await upload("an id of the markers and control characters", stranger(), {
+        documentId: `${markers.join("\n")}\u0000`,
+      }),
+      await answer(
+        "no longer current, for the reader",
+        async () =>
+          await handedOverTo(
+            personId,
+            markers,
+            async () =>
+              await producers.handOverUpload(env, {
+                uploadId: crypto.randomUUID(),
+                documentId: crypto.randomUUID(),
+                uploadedBy: personId,
+                sensitive: false,
+                text,
+                stillCurrent: async () => await Promise.resolve(false),
+              })
+          )
+      ),
+      await upload("its version's check failing", stranger(), {
+        stillCurrent: async () => {
+          await Promise.resolve();
+          throw new Error(text);
+        },
+      }),
+    ];
+  },
+  handOverChatTurn: async ({ personId: readerId, markers }) => {
+    const text = markedText(markers);
+    const turn = async (
+      name: string,
+      personId: string,
+      {
+        said = [
+          { role: "user", text },
+          { role: "assistant", text },
+        ],
+      }: { said?: producers.Said[] } = {}
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await producers.handOverChatTurn(env, {
+            chatId: crypto.randomUUID(),
+            answerId: 1,
+            personId,
+            restricted: false,
+            said,
+          })
+      );
+    return [
+      await turn("for someone else", stranger()),
+      await turn("no person", ""),
+      await answer(
+        "restricted, for the reader",
+        async () =>
+          await handedOverTo(
+            readerId,
+            markers,
+            async () =>
+              await producers.handOverChatTurn(env, {
+                chatId: crypto.randomUUID(),
+                answerId: 1,
+                personId: readerId,
+                restricted: true,
+                said: [{ role: "user", text }],
+              })
+          )
+      ),
+      await turn("nothing said", stranger(), { said: [] }),
+    ];
+  },
+  handOverRun: async ({ personId, markers }) => {
+    const text = markedText(markers);
+    const run = async (
+      name: string,
+      principalId: string,
+      readEnd: () => Promise<producers.RunEnd>
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await producers.handOverRun(env, {
+            runId: crypto.randomUUID(),
+            principalId,
+            restricted: false,
+            status: "completed",
+            readEnd,
+          })
+      );
+    const result = async () => await Promise.resolve({ result: { text } });
+    return [
+      await run("for someone else", stranger(), result),
+      await run("failed, for someone else", stranger(), async () => ({
+        error: await Promise.resolve({ message: text }),
+      })),
+      await run("no person", "", result),
+      await answer(
+        "restricted, for the reader",
+        async () =>
+          await handedOverTo(
+            personId,
+            markers,
+            async () =>
+              await producers.handOverRun(env, {
+                runId: crypto.randomUUID(),
+                principalId: personId,
+                restricted: true,
+                status: "completed",
+                readEnd: result,
+              })
+          )
+      ),
+      await run("its end unreadable", stranger(), async () => {
+        await Promise.resolve();
+        throw new Error(text);
+      }),
+      await run("too much text", stranger(), async () => ({
+        result: await Promise.resolve(oversizedText(markers)),
+      })),
+    ];
+  },
+} satisfies Record<keyof typeof producers, Probe>;
 
 /**
  * Each public method of the Brain's store: what it defines, not the
