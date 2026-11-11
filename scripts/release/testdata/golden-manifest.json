@@ -22,9 +22,9 @@
     },
     {
       "name": "fixture-int8/encoder-int8.bin",
-      "r2Key": "blobs/models/4946b0295db6d1ccb07866bba10721d0548814800edae4ac44c937e6b55cd525",
-      "sha256": "4946b0295db6d1ccb07866bba10721d0548814800edae4ac44c937e6b55cd525",
-      "size": 267344
+      "r2Key": "blobs/models/e8416cfefc9be66a74b2032e85f23d49afbc10124cb4fa36737801c64bb08fd3",
+      "sha256": "e8416cfefc9be66a74b2032e85f23d49afbc10124cb4fa36737801c64bb08fd3",
+      "size": 267328
     },
     {
       "name": "fixture-int8/tokens-int8.bin",
