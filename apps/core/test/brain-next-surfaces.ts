@@ -954,10 +954,11 @@ export const instructionProbes = {
         like
       );
     const asked: Answer[] = [
-      // No code writes a file, whatever the text: an agent for its own
-      // person is refused as an App's code is.
+      // No code writes a file, whatever the text: an agent saving its own
+      // person's file, or an App's code saving it, is refused as an App's
+      // code saving the company's, which no rule could let it.
       await side(
-        "code saving their file",
+        "code saving a file",
         "nothing",
         authoritySchema.parse({
           subject: { type: "app", appId: `app-${crypto.randomUUID()}` },
@@ -965,12 +966,18 @@ export const instructionProbes = {
           mode: "interactive",
           appVersion: 1,
         }),
-        own
+        { scope: "company", name: "facts" }
       ),
+      await side("code saving a file", "hidden", readersAgent(personId), own),
       await side(
-        "code saving their file",
+        "code saving a file",
         "hidden",
-        readersAgent(personId),
+        authoritySchema.parse({
+          subject: { type: "app", appId: `app-${crypto.randomUUID()}` },
+          onBehalfOf: personId,
+          mode: "interactive",
+          appVersion: 1,
+        }),
         own
       ),
     ];
