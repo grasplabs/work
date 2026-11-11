@@ -10,7 +10,7 @@ import { stopWordLists } from "./stop-words.ts";
 // both go through `wordsOf`: each word as written, folded (`foldForSearch`)
 // into the word search holds, with its stems. A source is kept whole as
 // given; only its chunks' words go into the word index (`chunk_words`),
-// and their stems beside them (`chunk_stems`, migration 0004).
+// and their stems beside them (`chunk_stems`, migration 0005).
 //
 // Stems, so "facturen" finds "factuur" and "Rechnungen" finds "Rechnung":
 // every word is reduced by the Snowball stemmers of all five languages
@@ -125,7 +125,7 @@ const primaryLetter = new RegExp(
 /**
  * What a word is made of: letters, digits, the marks that are part of
  * them, and private-use characters. Anything else separates words, as for
- * the word index's tokenizer (migrations 0002 and 0004: the same
+ * the word index's tokenizer (migrations 0002 and 0005: the same
  * categories), which so only splits the words written to it at the spaces
  * between them.
  */
