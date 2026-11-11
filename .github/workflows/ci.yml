@@ -704,10 +704,11 @@ jobs:
           fi
           # When Ubuntu's mirrors can't be reached and apt wants a newer
           # version than the cache holds (an update it can't fetch), the
-          # cached files are still a set that installed on this image:
+          # cached files are still a set that installed on this image (an
+          # exact cache hit only; an older image's set may lack something):
           # install exactly those, without downloading anything.
           if ! vp exec playwright install-deps "$BROWSER"; then
-            [ ${#debs[@]} -gt 0 ] || exit 1
+            [ "$EXACT_CACHE" = true ] && [ ${#debs[@]} -gt 0 ] || exit 1
             echo "::warning::Ubuntu's mirrors failed; installing the cached packages instead"
             sudo apt-get install -y --no-download "${debs[@]}"
           fi
@@ -720,6 +721,8 @@ jobs:
               cp "$deb" ~/playwright-debs/
             fi
           done
+        env:
+          EXACT_CACHE: ${{ steps.debs.outputs.cache-hit }}
       - if: steps.debs.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
