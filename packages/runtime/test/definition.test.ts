@@ -19,6 +19,7 @@ import {
   readDefinition,
 } from "../src/definition.ts";
 import type { AppDefinition } from "../src/definition.ts";
+import { expressionMaxDepth } from "../src/oxc-parse.ts";
 import { isWorkflowPermission } from "../src/permission-checks.ts";
 import { permission } from "../src/permission.ts";
 import { descriptorOf } from "../src/sealed-descriptors.ts";
@@ -59,6 +60,29 @@ const defined = (...operations: DefinitionOperation[]): AppDefinition => {
   }
   return definition;
 };
+
+/**
+ * A field of `tasks` typed `v.string()` cast `casts` times: three nodes
+ * deep (a call, its method, `v`), each `as` one more. A chain oxc parses
+ * without recursion, which the evaluator reads with it.
+ */
+const typed = (casts: number): DefinitionOperation => ({
+  op: "addField",
+  table: "tasks",
+  name: "x",
+  type: `v.string()${" as never".repeat(casts)}`,
+});
+
+/**
+ * A field of `tasks` typed as objects nested `levels` deep, each with two
+ * modifiers: seven nodes a level.
+ */
+const nested = (levels: number): DefinitionOperation => ({
+  op: "addField",
+  table: "tasks",
+  name: "x",
+  type: `${"v.object({ a: ".repeat(levels)}v.string()${" }).optional().nullable()".repeat(levels)}`,
+});
 
 const tasks = (): AppDefinition =>
   defined(
@@ -345,6 +369,32 @@ describe("operations", () => {
       expect(() => applyOperation(before, operation)).toThrow(message);
     }
     expect(tasks()).toStrictEqual(before);
+  });
+
+  test("read a type nested as deep as an expression may be, and refuse one level more", () => {
+    const atLimit = expressionMaxDepth - 3;
+    expect(fieldNames(applyOperation(tasks(), typed(atLimit)))).toStrictEqual([
+      "title",
+      "done",
+      "owner",
+      "x",
+    ]);
+    expect(() => applyOperation(tasks(), typed(atLimit + 1))).toThrow(
+      `That isn't one expression: It nests more than ${expressionMaxDepth} levels deep.`
+    );
+  });
+
+  test("read a type nested as deep as a schema may be, with two modifiers at every level", () => {
+    expect(fieldNames(applyOperation(tasks(), nested(30)))).toStrictEqual([
+      "title",
+      "done",
+      "owner",
+      "x",
+    ]);
+    // One level more is past what a schema may nest, not an expression.
+    expect(() => applyOperation(tasks(), nested(31))).toThrow(
+      /schema nests too deep/u
+    );
   });
 
   test("keep a table's one search index, and a table sensitive once it is declared so", () => {
