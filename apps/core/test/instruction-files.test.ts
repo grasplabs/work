@@ -417,6 +417,28 @@ describe("instruction files", setUpTime, () => {
     ).resolves.toBe("permission.denied");
   });
 
+  it("takes only a whole session's identity as a writer", async () => {
+    const person = await member("user");
+    const own: InstructionFile = { scope: "person", personId: person.userId };
+    const malformed: unknown[] = [
+      { userId: person.userId },
+      { ...person, userId: 42 },
+      { ...person, role: "owner" },
+      { ...person, extra: true },
+      null,
+      "someone",
+    ];
+    const outcomes = await Promise.all(
+      malformed.map(
+        async (by) =>
+          // SAFETY: a call from outside TypeScript can send any shape.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          await saveOutcome(by as Identity, own)
+      )
+    );
+    expect(outcomes).toStrictEqual(malformed.map(() => "permission.invalid"));
+  });
+
   it("refuses someone who left: no reading and no writing", async () => {
     const person = await member("user");
     const file: InstructionFile = { scope: "person", personId: person.userId };
@@ -477,23 +499,6 @@ describe("instruction files", setUpTime, () => {
     );
 
     await expect(recallAs(env, admin.userId, word)).resolves.toStrictEqual({
-      chunks: [],
-    });
-  });
-
-  it("keeps recall whole when an instruction file was indexed by mistake", async () => {
-    const person = await member("user");
-    const word = `w${unique()}`;
-    // Indexed as a source would be, under an instruction file's key,
-    // readable by the person: what a mistake in the store could leave.
-    await store().addSource({
-      source: `instructions:person:${person.userId}`,
-      change: crypto.randomUUID(),
-      text: word,
-      access: { kind: "owner", person: person.userId },
-    });
-
-    await expect(recallAs(env, person.userId, word)).resolves.toStrictEqual({
       chunks: [],
     });
   });

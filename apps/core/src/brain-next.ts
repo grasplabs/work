@@ -71,10 +71,6 @@ const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
 /** The kind instruction files' keys are under (`instructionKeyOf`). */
 const instructionsKind = "instructions";
 
-/** Whether `key` is an instruction file's. */
-const isInstructionKey = (key: SourceId): boolean =>
-  key.startsWith(`${instructionsKind}:`);
-
 /**
  * `kinds`, which must hold no ":", and never `instructionsKind`: a
  * source's key is its kind, ":", and its id, so a kind with ":" could name
@@ -286,14 +282,11 @@ export const recallAs = async (
     reader: await readerOf(env, personId),
   });
   return {
-    // An instruction file is never indexed (`addInstructionFile`); were
-    // one by mistake, it is no producer's source, and is left out here
-    // rather than failing the recall it is in.
-    chunks: chunks.flatMap(({ source, version, text }) =>
-      isInstructionKey(source)
-        ? []
-        : [{ source: sourceRefOf(source), version, text }]
-    ),
+    chunks: chunks.map(({ source, version, text }) => ({
+      source: sourceRefOf(source),
+      version,
+      text,
+    })),
   };
 };
 
@@ -466,7 +459,9 @@ const instructionFilesSchema = z
  *
  * For instruction-files.ts only, which picks the files a context gets,
  * reads `member` from core's records, and passes `builtApp` only once
- * they passed its builder check.
+ * they passed its builder check: both are taken here on the caller's
+ * word, so no other code may call it. (Exported only because core's
+ * Brain contract is reachable from this file alone.)
  */
 export const readInstructionFilesAs = async (
   env: BrainEnv,

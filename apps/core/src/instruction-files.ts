@@ -1,10 +1,10 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import {
   authoritySchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
-import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
+import { requireAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
@@ -158,6 +158,22 @@ export const instructionFilesFor = async (
   }
 };
 
+/**
+ * A signed-in person's session, as the RPC layer builds an `Identity`:
+ * checked whole, so nothing else passes for one. Their role and
+ * membership are read from core's records, not from here.
+ */
+const identitySchema = z.strictObject({
+  userId: identifierSchema,
+  email: z.string(),
+  name: z.string(),
+  role: roleSchema,
+  teams: z.array(z.strictObject({ id: z.string(), name: z.string() })),
+  staff: z.boolean(),
+  onboardingOnly: z.literal(true).optional(),
+  expiresAt: z.string(),
+}) satisfies z.ZodType<Identity>;
+
 /** Refuses `member` writing `file`, unless the rule above lets them. */
 const requireWriter = async (
   env: Env,
@@ -194,22 +210,32 @@ const requireWriter = async (
  * acts for; `permission.person_inactive` for someone no longer a member;
  * `role.forbidden` (or the App's own refusals) for a file not theirs to
  * write; `instructions.too_large` over `instructionsMaxLength` UTF-16
- * units. `change` names this save, minted before its first try, so a
- * retry saves it once.
+ * units; `permission.invalid` for an `Identity` or file that isn't one.
+ * `change` names this save, minted before its first try, so a retry saves
+ * it once.
+ *
+ * A person's route passes the session's `Identity` as the RPC layer built
+ * it, never one assembled by code acting for someone: code passes its own
+ * `Authority`, and is refused.
  */
 export const saveInstructionFile = async (
   env: Env,
   by: Identity | Authority,
   saved: { file: InstructionFile; change: string; text: string }
 ): Promise<{ file: InstructionFile; version: number }> => {
-  if ("subject" in by) {
+  if (typeof by === "object" && by !== null && "subject" in by) {
     throw permissionErrors.create("permission.denied", { action: "write" });
   }
+  const person = permissionErrors.parse(
+    "permission.invalid",
+    identitySchema,
+    by
+  );
   const file = permissionErrors.parse(
     "permission.invalid",
     instructionFileSchema,
     saved.file
   );
-  await requireWriter(env, await memberNamed(env, by.userId), file);
+  await requireWriter(env, await memberNamed(env, person.userId), file);
   return await addInstructionFile(env, { ...saved, file });
 };
