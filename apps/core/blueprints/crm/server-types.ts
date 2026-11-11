@@ -34,11 +34,11 @@ export const {
 } = server;
 
 /** The names of the App's tables. */
-export type TableName = Extract<keyof DataModel, string>;
+export type TableNames = Extract<keyof DataModel, string>;
 /** The ID of a record of table `Table`. */
-export type Id<Table extends TableName> = SdkId<Table>;
+export type Id<Table extends TableNames> = SdkId<Table>;
 /** A record of table `Table`, as a read returns it. */
-export type Doc<Table extends TableName> = SdkDoc<DataModel[Table], Table>;
+export type Doc<Table extends TableNames> = SdkDoc<DataModel[Table], Table>;
 export type QueryCtx = SdkQueryCtx<DataModel>;
 export type MutationCtx = SdkMutationCtx<DataModel>;
 export type ActionCtx = SdkActionCtx;
