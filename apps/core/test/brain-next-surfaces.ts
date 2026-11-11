@@ -7,9 +7,11 @@
  * in what reached a model, and holds each answer to what the reader asked
  * only of hidden sources to the answer to words nothing holds.
  *
- * Two lists, checked against what exists: `coreProbes` has one entry per
- * export of core's `brain-next.ts`, `storeProbes` one per public method
- * of the Brain's store (its contract, and anything else a holder of its
+ * Three lists, checked against what exists: `coreProbes` has one entry
+ * per export of core's `brain-next.ts`, `instructionProbes` one per export
+ * of core's `instruction-files.ts` (the rules over the instruction files
+ * brain-next.ts names), `storeProbes` one per public method of the
+ * Brain's store (its contract, and anything else a holder of its
  * namespace could call). A member without an entry fails the type check
  * and the harness. A new surface is one more entry here:
  *
@@ -20,6 +22,8 @@
  */
 import {
   brainOf,
+  currentReadMax,
+  instructionsMaxLength,
   modelNameMaxLength,
   questionMaxLength,
   readerGroupsMax,
@@ -35,12 +39,21 @@ import type {
   VectorModel,
   VectorsToPut,
 } from "@grasp-os/brain-next/contract";
+import type { Authority } from "@grasp-os/shared/permissions";
+import { authoritySchema } from "@grasp-os/shared/permissions";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 
 import * as coreBrain from "../src/brain-next.ts";
-import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import type {
+  InstructionFile,
+  InstructionFileVersion,
+  SourceReaders,
+  SourceRef,
+} from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import type { BrainStore } from "../src/index.ts";
+import * as instructionFiles from "../src/instruction-files.ts";
 
 /** The reader a probe calls as, and what they may not see. */
 export interface Probing {
@@ -68,6 +81,25 @@ export interface Probing {
    * whose readers they were never among, or were taken off since.
    */
   hiddenVersions: readonly { source: SourceRef; version: number }[];
+  /**
+   * Instruction files the reader may not read, each holding every marker
+   * (instruction-files.ts): another person's, another agent's, an App's
+   * they don't build, or, to someone who isn't a member, the company's.
+   * Each must answer exactly as a file never written.
+   */
+  hiddenInstructionFiles: readonly InstructionFile[];
+  /**
+   * Two Apps the reader uses and doesn't build (core's own records), one
+   * whose file holds every marker and one with none: each asked of must
+   * answer exactly as the other. Absent when the reader builds them.
+   */
+  usedApps?: { withFile: string; withoutFile: string };
+  /**
+   * The groups the instruction files are written for (the company's, and
+   * each App's), which a reader holds only once core let them: a recall
+   * holding them must still find no instruction file, as none is indexed.
+   */
+  instructionGroups: readonly string[];
 }
 
 /** One call a probe made, and what came back. */
@@ -78,10 +110,15 @@ export interface Answer {
   got: { value: unknown } | { error: unknown };
   /**
    * `hidden`: asked only of what the reader may not read; `nothing`: asked
-   * of what nothing holds. Every `hidden` answer of a probe must equal its
-   * `nothing` answer exactly.
+   * of what nothing holds. Every `hidden` answer of a probe must equal the
+   * `nothing` answer of the same `like` exactly.
    */
   about?: "hidden" | "nothing";
+  /**
+   * Which comparison a `hidden` or `nothing` answer belongs to, when a
+   * probe makes several: the probe's default one when absent.
+   */
+  like?: string;
 }
 
 /** Calls one surface every way it can answer; returns what came back each time. */
@@ -186,12 +223,19 @@ export const textOf = (value: unknown): string =>
 const answer = async (
   callName: string,
   call: () => Promise<unknown>,
-  about?: Answer["about"]
+  about?: Answer["about"],
+  like?: string
 ): Promise<Answer> => {
+  const compared = like === undefined ? {} : { like };
   try {
-    return { call: callName, got: { value: await call() }, about };
+    return { call: callName, got: { value: await call() }, about, ...compared };
   } catch (error) {
-    return { call: callName, got: { error: unfolded(error) }, about };
+    return {
+      call: callName,
+      got: { error: unfolded(error) },
+      about,
+      ...compared,
+    };
   }
 };
 
@@ -351,6 +395,118 @@ const sweepTimes = (): Date[] => [
   new Date(0),
 ];
 
+/** An instruction file's key in the store, as core names it (core's brain-next.ts). */
+const instructionKeyOf = (file: InstructionFile): string => {
+  switch (file.scope) {
+    case "company": {
+      return `instructions:company:${file.name}`;
+    }
+    case "person": {
+      return `instructions:person:${file.personId}`;
+    }
+    case "app": {
+      return `instructions:app:${file.appId}`;
+    }
+    case "agent": {
+      return `instructions:agent:${file.agentId}`;
+    }
+    default: {
+      throw new Error("Unknown instruction file");
+    }
+  }
+};
+
+/** A person's instruction file no one wrote. */
+const unwrittenFile = (): InstructionFile => ({
+  scope: "person",
+  personId: stranger(),
+});
+
+/** An agent of the reader's, with a file of its own nobody wrote. */
+const readersAgent = (personId: string): Authority =>
+  authoritySchema.parse({
+    subject: { type: "agent", agentId: `agent-${crypto.randomUUID()}` },
+    onBehalfOf: personId,
+    mode: "interactive",
+  });
+
+/** The code of `error`, as a comparison holds it. */
+const codeOf = (error: unknown): unknown =>
+  typeof error === "object" && error !== null && "code" in error
+    ? error.code
+    : "an error with no code";
+
+/**
+ * What `call` gave, as two answers that must be alike are compared: the
+ * files it gave (which, not their text, so the markers are found by the
+ * scan instead) and, of them, only those `keep` keeps; or the code it was
+ * refused with. A refusal is an answer like any other: it must be the
+ * same whether the hidden file exists or not.
+ */
+const filesOutcome = async (
+  call: () => Promise<InstructionFileVersion[]>,
+  keep: (file: InstructionFile) => boolean = () => true
+): Promise<unknown> => {
+  try {
+    const files = await call();
+    return { files: files.flatMap(({ file }) => (keep(file) ? [file] : [])) };
+  } catch (error) {
+    return { refused: codeOf(error) };
+  }
+};
+
+/** The code `call` was refused with, or `null` when it wasn't. */
+const refusalOf = async (call: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    await call();
+    return { refused: null };
+  } catch (error) {
+    return { refused: codeOf(error) };
+  }
+};
+
+/** `personId`'s session, as the RPC layer builds an `Identity`. */
+const sessionOf = (personId: string): Identity => ({
+  userId: personId,
+  email: "reader@acme.test",
+  name: "Reader",
+  role: "user",
+  teams: [],
+  staff: false,
+  expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+});
+
+/**
+ * The hidden App files of `probing` the reader has no part in: Apps no one
+ * made, which answer as one no one made.
+ */
+const hiddenAppsOf = ({
+  hiddenInstructionFiles,
+  usedApps,
+}: Probing): string[] =>
+  hiddenInstructionFiles.flatMap((file) =>
+    file.scope === "app" &&
+    file.appId !== usedApps?.withFile &&
+    file.appId !== usedApps?.withoutFile
+      ? [file.appId]
+      : []
+  );
+
+/** The hidden files of `probing` of `scope`: their ids. */
+const hiddenIdsOf = (
+  { hiddenInstructionFiles }: Probing,
+  scope: "agent" | "person"
+): string[] =>
+  hiddenInstructionFiles.flatMap((file) => {
+    if (scope === "agent") {
+      return file.scope === "agent" ? [file.agentId] : [];
+    }
+    return file.scope === "person" ? [file.personId] : [];
+  });
+
+/** The kinds of conversation a context names. */
+const conversations = ["own", "direct", "channel"] as const;
+
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
 
@@ -507,7 +663,406 @@ export const coreProbes = {
     );
     return asked;
   },
+  // Adds without a check of who writes (instruction-files.ts checks
+  // first): only to files no reader is, and its refusals.
+  addInstructionFile: async ({ markers }) => {
+    const text = markedText(markers);
+    const add = async (name: string, file: InstructionFile, as = text) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.addInstructionFile(env, {
+            file,
+            change: crypto.randomUUID(),
+            text: as,
+          })
+      );
+    return [
+      await add("someone else's", unwrittenFile()),
+      await add(
+        "too much text",
+        unwrittenFile(),
+        text.padEnd(instructionsMaxLength + 1, " x")
+      ),
+      await add("no text", unwrittenFile(), " "),
+      await add("half a surrogate pair", unwrittenFile(), `${text}\uD800`),
+      await add("an id of the markers and control characters", {
+        scope: "agent",
+        agentId: `${markers.join("\n")}\u0000`,
+      }),
+      await add(
+        "an unknown scope named by the markers",
+        unchecked({ scope: "team", teamId: markers.join("") })
+      ),
+      await add(
+        "a field the scope hasn't",
+        unchecked({ scope: "company", name: "facts", appId: text })
+      ),
+    ];
+  },
+  instructionFileOf: async ({ markers }) => {
+    const of = async (name: string, input: unknown) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return coreBrain.instructionFileOf(input);
+      });
+    return [
+      await of("someone else's", unwrittenFile()),
+      await of("an id of the markers and control characters", {
+        scope: "person",
+        personId: `${markers.join("\n")}\u0000`,
+      }),
+      await of("an id of the markers with half a surrogate pair", {
+        scope: "app",
+        appId: `${markers.join("")}\uD800`,
+      }),
+      await of("an unknown scope", { scope: markers.join("") }),
+      await of("a company file named by the markers", {
+        scope: "company",
+        name: markers.join(""),
+      }),
+    ];
+  },
+  // Reads as the member it is given and with the App it is told they
+  // build, both on its caller's word (instruction-files.ts); which agent's
+  // file is the caller's to pick too. So it is held here to what that
+  // reader may read: never another person's file, nor an App's it wasn't
+  // told they build.
+  readInstructionFilesAs: async ({ personId, hiddenInstructionFiles }) => {
+    const read = async (
+      name: string,
+      files: InstructionFile[],
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.readInstructionFilesAs(
+            env,
+            { userId: personId },
+            files
+          ),
+        about
+      );
+    const hidden = hiddenInstructionFiles.filter(
+      ({ scope }) => scope === "person" || scope === "app"
+    );
+    const asked: Answer[] = [
+      await read("a file never written", [unwrittenFile()], "nothing"),
+    ];
+    for (const [index, file] of hidden.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const answered = await read(`hidden file ${index}`, [file], "hidden");
+      asked.push(answered);
+    }
+    asked.push(
+      await read("every hidden file at once", hidden, "hidden"),
+      await read(
+        "too many files",
+        Array.from({ length: currentReadMax + 1 }, unwrittenFile)
+      )
+    );
+    return asked;
+  },
 } satisfies Record<CoreMember, Probe>;
+
+/** Each export of core's instruction-files.ts. */
+type InstructionMember = keyof typeof instructionFiles;
+
+/** A load of the files `authority` gets in `context`, to call. */
+const loadAs =
+  (authority: Authority, context?: instructionFiles.InstructionContext) =>
+  async () =>
+    await instructionFiles.instructionFilesFor(env, authority, context);
+
+/** One probe per export of core's instruction-files.ts. */
+export const instructionProbes = {
+  // Every comparison holds what a context gives (or its refusal) when it
+  // names a hidden file's real id to what it gives when it names one no
+  // one wrote; then the plain calls, scanned for the markers.
+  instructionFilesFor: async (probing) => {
+    const { personId, markers, usedApps } = probing;
+    const agent = readersAgent(personId);
+    const raw = async (
+      name: string,
+      authority: Authority,
+      context?: instructionFiles.InstructionContext
+    ) => await answer(name, loadAs(authority, context));
+    /** One side of the comparison `like`. */
+    const side = async (
+      like: string,
+      about: "hidden" | "nothing",
+      context: instructionFiles.InstructionContext,
+      keep?: (file: InstructionFile) => boolean
+    ) =>
+      await answer(
+        `${like}, ${about}`,
+        async () => await filesOutcome(loadAs(agent, context), keep),
+        about,
+        like
+      );
+    const asked: Answer[] = [];
+    for (const conversation of conversations) {
+      // A context naming another agent, or another person, by a real id:
+      // refused alike, whatever their file holds.
+      for (const [field, ids, unwritten] of [
+        [
+          "agentId",
+          hiddenIdsOf(probing, "agent"),
+          () => `agent-${crypto.randomUUID()}`,
+        ],
+        ["personId", hiddenIdsOf(probing, "person"), stranger],
+      ] as const) {
+        for (const id of ids) {
+          const like = `${conversation}, naming ${field} ${id}`;
+          asked.push(
+            // oxlint-disable-next-line no-await-in-loop -- one at a time
+            await side(
+              like,
+              "nothing",
+              unchecked({ conversation, [field]: unwritten() })
+            ),
+            // oxlint-disable-next-line no-await-in-loop -- one at a time
+            await side(like, "hidden", unchecked({ conversation, [field]: id }))
+          );
+        }
+      }
+    }
+    // A shared channel gives what a direct message does, but never a
+    // person's file, the reader's own included: others there would read
+    // it through the agent.
+    asked.push(
+      await side(
+        "a shared channel",
+        "nothing",
+        { conversation: "direct" },
+        (file) => file.scope !== "person"
+      ),
+      await side("a shared channel", "hidden", { conversation: "channel" })
+    );
+    // An App they use but don't build: its file is for its builders.
+    if (usedApps !== undefined) {
+      const like = "an App they use";
+      asked.push(
+        await side(like, "nothing", {
+          conversation: "own",
+          appId: usedApps.withoutFile,
+        }),
+        await side(like, "hidden", {
+          conversation: "own",
+          appId: usedApps.withFile,
+        })
+      );
+    }
+    // An App no one made, and one no one made with a file planted.
+    const noApp = "an App no one made";
+    asked.push(
+      await side(noApp, "nothing", {
+        conversation: "own",
+        appId: crypto.randomUUID(),
+      })
+    );
+    for (const appId of hiddenAppsOf(probing)) {
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one App at a time
+        await side(noApp, "hidden", { conversation: "own", appId })
+      );
+    }
+    const inWorkflow = authoritySchema.parse({ ...agent, mode: "workflow" });
+    asked.push(
+      await raw("a workflow step", inWorkflow),
+      await raw("their own chat", agent, { conversation: "own" }),
+      await raw("a direct message", agent, { conversation: "direct" }),
+      await raw("a shared channel", agent, { conversation: "channel" }),
+      ...(usedApps === undefined
+        ? []
+        : [
+            await raw("an App they use", agent, {
+              conversation: "own",
+              appId: usedApps.withFile,
+            }),
+          ]),
+      await raw("as someone who isn't a member", readersAgent(stranger()), {
+        conversation: "direct",
+      }),
+      await raw(
+        "as an App's code",
+        unchecked({
+          subject: { type: "app", appId: markers.join("") },
+          onBehalfOf: personId,
+          mode: "interactive",
+          appVersion: 1,
+        }),
+        { conversation: "own" }
+      ),
+      await raw("no context", agent),
+      await raw(
+        "a context naming the markers",
+        agent,
+        unchecked({ conversation: markers.join("") })
+      ),
+      await raw(
+        "an authority acting for the markers",
+        unchecked({ ...agent, onBehalfOf: markers.join("") }),
+        { conversation: "direct" }
+      )
+    );
+    return asked;
+  },
+  // Every comparison holds the refusal a save gets over a hidden file to
+  // the one it gets over a file no one wrote; then the plain saves, with
+  // the markers, scanned.
+  saveInstructionFile: async (probing) => {
+    const { personId, markers, usedApps } = probing;
+    const text = markedText(markers);
+    const session = sessionOf(personId);
+    const own: InstructionFile = { scope: "person", personId };
+    const save = async (
+      name: string,
+      by: Identity | Authority,
+      file: InstructionFile,
+      as = text
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await instructionFiles.saveInstructionFile(env, by, {
+            file,
+            change: crypto.randomUUID(),
+            text: as,
+          })
+      );
+    /** One side of the comparison `like`: the refusal of a save. */
+    const side = async (
+      like: string,
+      about: "hidden" | "nothing",
+      by: Identity | Authority,
+      file: InstructionFile
+    ) =>
+      await answer(
+        `${like}, ${about}`,
+        async () =>
+          await refusalOf(
+            async () =>
+              await instructionFiles.saveInstructionFile(env, by, {
+                file,
+                change: crypto.randomUUID(),
+                text: "Not the markers",
+              })
+          ),
+        about,
+        like
+      );
+    const asked: Answer[] = [
+      // No code writes a file, whatever the text: an agent saving its own
+      // person's file, or an App's code saving it, is refused as an App's
+      // code saving the company's, which no rule could let it.
+      await side(
+        "code saving a file",
+        "nothing",
+        authoritySchema.parse({
+          subject: { type: "app", appId: `app-${crypto.randomUUID()}` },
+          onBehalfOf: personId,
+          mode: "interactive",
+          appVersion: 1,
+        }),
+        { scope: "company", name: "facts" }
+      ),
+      await side("code saving a file", "hidden", readersAgent(personId), own),
+      await side(
+        "code saving a file",
+        "hidden",
+        authoritySchema.parse({
+          subject: { type: "app", appId: `app-${crypto.randomUUID()}` },
+          onBehalfOf: personId,
+          mode: "interactive",
+          appVersion: 1,
+        }),
+        own
+      ),
+    ];
+    for (const id of hiddenIdsOf(probing, "person")) {
+      const like = `another person's file ${id}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "nothing", session, unwrittenFile()),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "hidden", session, { scope: "person", personId: id })
+      );
+    }
+    for (const id of hiddenIdsOf(probing, "agent")) {
+      const like = `an agent's file ${id}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "nothing", session, {
+          scope: "agent",
+          agentId: `agent-${crypto.randomUUID()}`,
+        }),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "hidden", session, { scope: "agent", agentId: id })
+      );
+    }
+    const noApp = "an App no one made";
+    asked.push(
+      await side(noApp, "nothing", session, {
+        scope: "app",
+        appId: crypto.randomUUID(),
+      })
+    );
+    for (const appId of hiddenAppsOf(probing)) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      asked.push(await side(noApp, "hidden", session, { scope: "app", appId }));
+    }
+    if (usedApps !== undefined) {
+      const like = "an App they use";
+      asked.push(
+        await side(like, "nothing", session, {
+          scope: "app",
+          appId: usedApps.withoutFile,
+        }),
+        await side(like, "hidden", session, {
+          scope: "app",
+          appId: usedApps.withFile,
+        })
+      );
+    }
+    // Their own, without the markers: they read it back in every pass.
+    asked.push(await save("their own", session, own, "Their own notes"));
+    for (const [index, file] of probing.hiddenInstructionFiles.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one file at a time
+      asked.push(await save(`over hidden file ${index}`, session, file));
+    }
+    asked.push(
+      await save("the company's", session, {
+        scope: "company",
+        name: "instructions",
+      }),
+      await save("as their agent", readersAgent(personId), own),
+      await save(
+        "as an identity with an agent's subject",
+        unchecked({ ...session, subject: { type: "agent", agentId: "a" } }),
+        own
+      ),
+      await save(
+        "as an identity named by the markers",
+        unchecked({ ...session, name: text, extra: text }),
+        own
+      ),
+      await save("as someone who isn't a member", sessionOf(stranger()), {
+        scope: "person",
+        personId: stranger(),
+      }),
+      await save(
+        "too much text",
+        session,
+        own,
+        text.padEnd(instructionsMaxLength + 1, " x")
+      ),
+      await save("no text", session, own, " ")
+    );
+    return asked;
+  },
+} satisfies Record<InstructionMember, Probe>;
 
 /**
  * Each public method of the Brain's store: what it defines, not the
@@ -816,7 +1371,35 @@ export const storeProbes = {
       asked.push(answered);
     }
     const hidden = markers.join(" ");
+    // As a reader holding the groups instruction files are written for:
+    // their markers must find what words nothing holds find, as no
+    // instruction file is indexed.
+    const withInstructionGroups: Reader = {
+      ...reader,
+      groups: [...reader.groups, ...probing.instructionGroups],
+    };
+    const like = "with the instruction files' groups";
     asked.push(
+      await answer(
+        `${like}: a word nothing holds`,
+        async () =>
+          await store().recall({
+            question: probing.unknownWord,
+            reader: withInstructionGroups,
+          }),
+        "nothing",
+        like
+      ),
+      await answer(
+        `${like}: the markers`,
+        async () =>
+          await store().recall({
+            question: hidden,
+            reader: withInstructionGroups,
+          }),
+        "hidden",
+        like
+      ),
       await recall("too many groups", hidden, {
         ...reader,
         groups: Array.from({ length: readerGroupsMax + 1 }, () =>
@@ -1069,6 +1652,118 @@ export const storeProbes = {
       );
       asked.push(answered);
     }
+    return asked;
+  },
+  addInstructions: async ({ markers }) => {
+    const text = markedText(markers);
+    const add = async (
+      name: string,
+      access: Access,
+      as = text,
+      source = instructionKeyOf(unwrittenFile())
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await store().addInstructions({
+            source,
+            change: crypto.randomUUID(),
+            text: as,
+            access,
+          })
+      );
+    return [
+      await add("for someone else", { kind: "owner", person: stranger() }),
+      await add("for a group", { kind: "audience", group: stranger() }),
+      await add(
+        "too much text",
+        { kind: "owner", person: stranger() },
+        text.padEnd(instructionsMaxLength + 1, " x")
+      ),
+      await add("no text", { kind: "owner", person: stranger() }, " "),
+      await add(
+        "half a surrogate pair",
+        { kind: "owner", person: stranger() },
+        `${text}\uD800`
+      ),
+      await add("an unknown kind", unchecked({ kind: "everyone" })),
+      await add(
+        "a source named by the markers, too long",
+        { kind: "owner", person: stranger() },
+        text,
+        text.repeat(300)
+      ),
+      await answer(
+        "an unknown field",
+        async () =>
+          await store().addInstructions(
+            unchecked({
+              source: instructionKeyOf(unwrittenFile()),
+              change: crypto.randomUUID(),
+              text,
+              access: { kind: "none" },
+              extra: text,
+            })
+          )
+      ),
+    ];
+  },
+  readCurrent: async ({ reader, markers, hiddenInstructionFiles }) => {
+    const read = async (
+      name: string,
+      sources: string[],
+      as: Reader = reader,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => await store().readCurrent({ sources, reader: as }),
+        about
+      );
+    const hidden = hiddenInstructionFiles.map(instructionKeyOf);
+    const asked: Answer[] = [
+      await read(
+        "a file never written",
+        [instructionKeyOf(unwrittenFile())],
+        reader,
+        "nothing"
+      ),
+    ];
+    for (const [index, source] of hidden.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const answered = await read(
+        `hidden file ${index}`,
+        [source],
+        reader,
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    asked.push(
+      await read("every hidden file at once", hidden, reader, "hidden"),
+      await read("too many sources", [
+        ...hidden,
+        ...Array.from({ length: currentReadMax + 1 }, () =>
+          instructionKeyOf(unwrittenFile())
+        ),
+      ]),
+      await read("too many groups", hidden, {
+        ...reader,
+        groups: Array.from({ length: readerGroupsMax + 1 }, () =>
+          markers.join("")
+        ),
+      }),
+      await read("a source named by the markers, too long", [
+        markers.join("").repeat(300),
+      ]),
+      await answer(
+        "a request with an unknown field",
+        async () =>
+          await store().readCurrent(
+            unchecked({ sources: hidden, reader, extra: markers.join(" ") })
+          )
+      )
+    );
     return asked;
   },
 } satisfies Record<StoreMember, Probe>;

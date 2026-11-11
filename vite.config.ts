@@ -69,6 +69,18 @@ const brainContractImports = {
     "In core, only src/brain-next.ts reaches the Brain: add and recall through its addSource and recallAs.",
 };
 
+/**
+ * Core's module for the Brain (src/brain-next.ts): only the modules listed
+ * in its override below import it, each with its probes in the Brain's
+ * permission harness (test/brain-next-surfaces.ts), so no module reaches
+ * the Brain without them.
+ */
+const brainModuleImports = {
+  group: ["**/brain-next.ts"],
+  message:
+    "Only the modules the Brain's permission harness probes import src/brain-next.ts: add this one to its lint override and probes (test/brain-next-surfaces.ts).",
+};
+
 export default defineConfig({
   lint: {
     extends: [core, react, tanstack, vitest, shadcn],
@@ -245,10 +257,29 @@ export default defineConfig({
             "error",
             {
               paths: unboundedTargetPaths,
-              patterns: [brainStoreImports, brainContractImports],
+              patterns: [
+                brainStoreImports,
+                brainContractImports,
+                brainModuleImports,
+              ],
             },
           ],
           "grasp/no-unbounded-rpc-target": "error",
+        },
+      },
+      {
+        // The modules that reach the Brain through core's module, each
+        // probed by the permission harness: the instruction files' rules,
+        // and the clock's sweep.
+        files: ["apps/core/src/instruction-files.ts", "apps/core/src/clock.ts"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: unboundedTargetPaths,
+              patterns: [brainStoreImports, brainContractImports],
+            },
+          ],
         },
       },
       {
@@ -257,7 +288,10 @@ export default defineConfig({
         rules: {
           "no-restricted-imports": [
             "error",
-            { paths: unboundedTargetPaths, patterns: [brainContractImports] },
+            {
+              paths: unboundedTargetPaths,
+              patterns: [brainContractImports, brainModuleImports],
+            },
           ],
         },
       },
@@ -301,7 +335,11 @@ export default defineConfig({
                   message: unboundedTarget,
                 },
               ],
-              patterns: [brainStoreImports, brainContractImports],
+              patterns: [
+                brainStoreImports,
+                brainContractImports,
+                brainModuleImports,
+              ],
             },
           ],
         },

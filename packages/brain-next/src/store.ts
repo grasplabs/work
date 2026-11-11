@@ -4,6 +4,8 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { z } from "zod";
 
 import {
+  currentRequestSchema,
+  newInstructionsSchema,
   newSourceSchema,
   recallRequestSchema,
   sweepRequestSchema,
@@ -12,6 +14,8 @@ import {
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  CurrentRequest,
+  NewInstructions,
   NewSource,
   RecallRequest,
   Recalled,
@@ -26,7 +30,7 @@ import type {
 import migrations from "./db/migrations/migrations.js";
 import { sweepFiles } from "./files.ts";
 import { recall } from "./recall.ts";
-import { addVersion, readVersion } from "./sources.ts";
+import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
 
@@ -83,7 +87,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * same text and readers as the current version answer with it.
    */
   async addSource(source: NewSource): Promise<SourceVersionRef> {
-    return await addVersion(this.#sources, checked(newSourceSchema, source));
+    return await addVersion(this.#sources, checked(newSourceSchema, source), {
+      indexed: true,
+    });
+  }
+
+  /**
+   * Adds a version of an instruction file, as `addSource` does, kept
+   * whole: no chunks, no words, so recall never finds it.
+   */
+  async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
+    return await addVersion(
+      this.#sources,
+      checked(newInstructionsSchema, source),
+      { indexed: false }
+    );
   }
 
   /** What the reader may read of current versions holding the question's words. */
@@ -97,6 +115,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return await readVersion(
       this.#sources,
       checked(versionRequestSchema, request)
+    );
+  }
+
+  /** The current versions of sources, whole: those the reader may read. */
+  async readCurrent(request: CurrentRequest): Promise<SourceVersion[]> {
+    return await readCurrent(
+      this.#sources,
+      checked(currentRequestSchema, request)
     );
   }
 
