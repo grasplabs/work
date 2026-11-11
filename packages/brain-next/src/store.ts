@@ -90,7 +90,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** This instance's state of its work queue: gone with it. */
   readonly #work = newWorkState(() => {
-    this.ctx.abort("Handlers past their time held up the queue");
+    // Only once what it wrote is on disk: an abort drops the writes not
+    // yet confirmed, the settles of the handlers it is to end among them.
+    void (async () => {
+      await this.ctx.storage.sync();
+      this.ctx.abort("Handlers past their time held up the queue");
+    })();
   });
 
   constructor(ctx: DurableObjectState, env: BrainStoreEnv) {
@@ -165,6 +170,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async work(ask: AskModel, at: Date): Promise<void> {
     const tickAt = checked(tickAtSchema, at);
+    if (this.#work.restarting) {
+      // The store restarts in a moment: the next instance's tick works.
+      return;
+    }
     await this.#sweep(tickAt);
     this.#repack(tickAt);
     await workTick(this.ctx.storage, this.#work, ask, tickAt);

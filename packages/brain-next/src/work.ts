@@ -77,8 +77,12 @@ export { WorkError } from "./work-error.ts";
 //    settled as timed out and left running, holding its key and a slot
 //    (staff see it as overdue); when such handlers hold every slot, or are
 //    all that keeps an interrupted item from running alone, the store
-//    restarts, which ends them, spending no attempt. Errors are kept as the queue's own
-//    codes (`workErrors`), never as text a handler or a provider wrote.
+//    restarts, which ends them. Their rows were settled before (timed out,
+//    the attempt spent, due after the backoff), and the restart waits until
+//    that is on disk: it spends no attempt of its own and comes once for
+//    each such wait. Until it lands, nothing more is claimed and no tick
+//    works. Errors are kept as the queue's own codes (`workErrors`), never
+//    as text a handler or a provider wrote.
 //
 // Time: the queue's own time is the tick's (`at`, core's clock's time
 // now) with the real time since the tick began added. Backoffs, pauses,
@@ -125,6 +129,7 @@ const pauseMostMs = 30 * 60_000;
  * The queue's pause for the AI account. A person fixes an account (a key,
  * a model to allow, credit), never a minute's wait: pausing a minute would
  * send about 3 calls a tick the gateway refuses and audits, for nothing.
+ * A fixed account is picked up within the 15 minutes.
  */
 const pauseAccountMs = 15 * 60_000;
 
@@ -339,8 +344,13 @@ export interface WorkState {
   turns: Promise<unknown>;
   /** By kind and key (`zombieOf`). */
   zombies: Map<string, OverdueWork & { connection: string | null }>;
-  /** Restarts the store: what ends handlers no signal stops. */
+  /**
+   * Restarts the store once what it wrote is on disk: what ends handlers
+   * no signal stops. Called through `restartStore` only.
+   */
   restart: () => void;
+  /** Whether a restart is on its way: nothing more is claimed meanwhile. */
+  restarting: boolean;
 }
 
 /** An instance's state of its queue, as it starts; `restart` restarts its store. */
@@ -348,7 +358,16 @@ export const newWorkState = (restart: () => void): WorkState => ({
   turns: Promise.resolve(),
   zombies: new Map(),
   restart,
+  restarting: false,
 });
+
+/** Restarts the store (rule 6), once however often asked. */
+const restartStore = (state: WorkState): void => {
+  if (!state.restarting) {
+    state.restarting = true;
+    state.restart();
+  }
+};
 
 /** A kind and key, as `WorkState.zombies` keys them. */
 const zombieOf = (item: { kind: string; key: string }): string =>
@@ -588,14 +607,15 @@ const pick = (
  * item, and a crash in its work still counts it. Nothing while the queue
  * is paused. An interrupted item runs alone: first, once nothing else
  * runs, and nothing else while it does. When only handlers left running
- * past their time keep it waiting, the store restarts (rule 6).
+ * past their time keep it waiting, the store restarts (rule 6). Nothing
+ * while a restart is on its way.
  */
 const claim = (
   storage: DurableObjectStorage,
   state: WorkState,
   now: number
 ): Claimed[] => {
-  if (pausedAt(drizzle(storage), now)) {
+  if (state.restarting || pausedAt(drizzle(storage), now)) {
     return [];
   }
   storage.sql.exec(returnParkedSql, now - workParkedMs, workParksMax);
@@ -619,9 +639,9 @@ const claim = (
   } else if (running.length === 0) {
     // Only handlers past their time stand in its way, and may never end:
     // the store restarts, which ends them, and claims nothing meanwhile.
-    // The next instance starts with none, so it runs the item alone: a
-    // restart comes at most once for each such wait, spending no attempt.
-    state.restart();
+    // Their rows are settled and on disk before it lands, so the next
+    // instance starts with none of them running and runs the item alone.
+    restartStore(state);
   }
   for (const item of claimed) {
     item.attempts += 1;
@@ -948,8 +968,9 @@ const runItem = async (
   })();
   if (state.zombies.size >= workAtOnce) {
     // Handlers that ignored their signal hold every slot. Their rows are
-    // settled, so nothing is lost: the store restarts, which ends them.
-    state.restart();
+    // settled, and on disk before the restart lands: it ends them and
+    // loses nothing.
+    restartStore(state);
   }
 };
 

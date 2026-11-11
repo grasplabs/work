@@ -215,6 +215,55 @@ const pause = async (ms: number): Promise<void> => {
   await scheduler.wait(ms);
 };
 
+/** The store's instance now, once a restart under way has landed. */
+const instanceNow = async (): Promise<unknown> => {
+  const read = async (): Promise<unknown> =>
+    await runInDurableObject(store(), (instance) => instance);
+  let last = await read();
+  for (;;) {
+    // A restart lands once what it wrote is on disk: a moment after.
+    // oxlint-disable-next-line no-await-in-loop -- until it holds still
+    await pause(50);
+    // oxlint-disable-next-line no-await-in-loop -- until it holds still
+    const next = await read();
+    if (next === last) {
+      return next;
+    }
+    last = next;
+  }
+};
+
+/** The queue's rows of `keys`, by key, as the store keeps them. */
+const rowsOf = async (keys: readonly string[]) =>
+  await runInDurableObject(store(), (_store, state) =>
+    Object.fromEntries(
+      keys.map((key) => {
+        const [row] = state.storage.sql
+          .exec<{
+            attempts: number;
+            running: number;
+            interrupted: number;
+            error: string | null;
+            notBefore: number;
+          }>(
+            `SELECT attempts, running, interrupted, last_error AS error, not_before AS notBefore
+             FROM work_items WHERE key = ?`,
+            key
+          )
+          .toArray();
+        return [key, row];
+      })
+    )
+  );
+
+/** A row settled as timed out by its first attempt, due after its backoff. */
+const timedOutOnce = {
+  attempts: 1,
+  running: 0,
+  interrupted: 0,
+  error: "timed_out",
+};
+
 /** A handler's work that takes a moment. */
 const brief = async (): Promise<void> => {
   await pause(20);
@@ -1493,8 +1542,14 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     }
     await enqueueAll(hung, { priority: "asked" }, quickWork);
     await enqueueAll(normal, { priority: "archive" });
-    const first = await failed(tick());
-    // The four retried later; the fifth runs on its own beside the rest.
+    const before = await instanceNow();
+    await failed(tick());
+    const restarted = (await instanceNow()) !== before;
+    // The four settled before the restart, to be retried later; the fifth,
+    // never claimed, runs on its own beside the rest.
+    const rows = Object.values(await rowsOf(hung)).map((row) =>
+      row === undefined ? undefined : { ...row, notBefore: undefined }
+    );
     await tick();
     const ran = seen.finished.filter((key) => normal.includes(key)).toSorted();
     // Clear the hung ones: their next runs end at once.
@@ -1503,8 +1558,21 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       behaviours.delete(key);
     }
     await tick(2 * 60 * 60_000);
-    expect({ restarted: first, ran }).toStrictEqual({
+    expect({ restarted, rows, ran }).toStrictEqual({
       restarted: true,
+      rows: [
+        ...Array.from({ length: 4 }, () => ({
+          ...timedOutOnce,
+          notBefore: undefined,
+        })),
+        {
+          attempts: 0,
+          running: 0,
+          interrupted: 0,
+          error: null,
+          notBefore: undefined,
+        },
+      ],
       ran: normal.toSorted(),
     });
   });
@@ -1641,26 +1709,79 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     await enqueue({ key: ordinary, priority: "archive" });
     // The hung one runs alone, past its time; the interrupted one, due
     // next, would wait on it for ever: the store restarts instead.
-    const restarted = await failed(tick());
-    const attempts = await runInDurableObject(store(), (_store, state) =>
-      state.storage.sql
-        .exec<{ attempts: number }>(
-          "SELECT attempts FROM work_items WHERE key = ?",
-          interrupted
-        )
-        .toArray()
-        .map((row) => row.attempts)
-    );
+    const before = await instanceNow();
+    await failed(tick());
+    const tickAt = clock.at;
+    const restarted = (await instanceNow()) !== before;
+    const rows = await rowsOf([hung, interrupted]);
     await tick();
     expect({
       restarted,
-      attempts,
+      hung: { ...rows[hung], notBefore: undefined },
+      hungDueAfterBackoff: (rows[hung]?.notBefore ?? 0) >= tickAt + 60_000,
+      // The first stop gave its attempt back; the restart spent none.
+      interruptedAttempts: rows[interrupted]?.attempts,
       finished: seen.finished.filter((key) => key !== hung),
     }).toStrictEqual({
       restarted: true,
-      // The first stop gave its attempt back; the restart spent none.
-      attempts: [0],
+      hung: { ...timedOutOnce, notBefore: undefined },
+      hungDueAfterBackoff: true,
+      interruptedAttempts: 0,
       finished: [interrupted, ordinary],
+    });
+  });
+
+  it("restarts once for each interrupted item that hangs, not once a tick, and runs an ordinary item right after", async () => {
+    reset();
+    const hung = keysOf("hung-interrupted", 3);
+    const ordinary = keyOf("ordinary-waiting");
+    const reached = new Set<string>();
+    for (const key of hung) {
+      behaviours.set(key, async () => {
+        if (runsOf(key) === 1) {
+          reached.add(key);
+          await pause(60_000);
+          return;
+        }
+        // Ignores its signal and never returns.
+        await Promise.withResolvers<never>().promise;
+      });
+    }
+    await enqueueAll(hung, { priority: "asked" }, quickWork);
+    // All under way when the store stops: each is to run alone next.
+    const stopped = failed(tick());
+    await until(() => reached.size === hung.length);
+    await killStore();
+    await stopped;
+    await enqueue({ key: ordinary, priority: "archive" });
+    let instance = await instanceNow();
+    let restarts = 0;
+    let ticks = 0;
+    while (!seen.finished.includes(ordinary) && ticks < 10) {
+      // oxlint-disable-next-line no-await-in-loop -- tick after tick
+      await failed(tick());
+      ticks += 1;
+      // oxlint-disable-next-line no-await-in-loop -- once it holds still
+      const now = await instanceNow();
+      if (now !== instance) {
+        restarts += 1;
+        instance = now;
+      }
+    }
+    const rows = await rowsOf(hung);
+    const { parked } = await queue(hung);
+    expect({
+      restarts,
+      ticks,
+      rows: hung.map((key) => ({ ...rows[key], notBefore: undefined })),
+      parked,
+    }).toStrictEqual({
+      // One for each hung item another interrupted one waits on; the last
+      // holds only its own slot, and the ordinary item runs in its tick.
+      restarts: hung.length - 1,
+      ticks: hung.length,
+      rows: hung.map(() => ({ ...timedOutOnce, notBefore: undefined })),
+      parked: [],
     });
   });
 
