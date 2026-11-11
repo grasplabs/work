@@ -31,7 +31,7 @@
  */
 
 import { sha256Pattern } from "./declaration.ts";
-import type { PreviewApplied, PreviewLoad } from "./page-runtime.ts";
+import type { PreviewApplied, PreviewLoad } from "./page-bridge.ts";
 
 /** What the receiver works with: Refresh, the frame, and the page. */
 export interface PreviewFrame {

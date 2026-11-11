@@ -1,3 +1,4 @@
+import { deepFreeze } from "@grasp-os/shared/json";
 import {
   boundValuesIssue,
   filterBudgetIssue,
@@ -11,7 +12,6 @@ import type {
   ReadRequest,
 } from "@grasp-os/shared/store-reads";
 
-import { deepFreeze } from "./declaration.ts";
 import { refuse } from "./query-error.ts";
 import { filterOf, filterTree, nodeCount } from "./query-filter.ts";
 import type { NodeBudget } from "./query-filter.ts";

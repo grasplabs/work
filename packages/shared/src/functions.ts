@@ -39,8 +39,8 @@ export const functionErrors = defineErrorFamily({
   "function.read_only": "A query reads records and can't change them.",
   "function.no_database":
     "An action has no database: it reads and writes through the App's queries and mutations.",
-  "function.no_resources":
-    "Only an action uses resources; queries and mutations never reach outside the App.",
+  "function.no_permissions":
+    "Only an action uses permissions; queries and mutations never reach outside the App.",
   "function.ended": "This function's call has ended.",
   "function.deadline_exceeded":
     "The function ran past its deadline, and was stopped before it changed anything more.",
@@ -62,7 +62,7 @@ export const functionErrors = defineErrorFamily({
   "function.emit_limit":
     "The action emitted more progress snapshots than one call may.",
   "function.call_limit":
-    "This call made more host calls, ran more nested functions, or made more resource requests than one call may.",
+    "This call made more host calls, ran more nested functions, or made more permission requests than one call may.",
   "function.depth_exceeded":
     "Functions called each other deeper than one call may go.",
   "function.cpu_exceeded":
@@ -77,28 +77,28 @@ export const functionErrors = defineErrorFamily({
     "The sandbox that runs the App's code isn't available. Try again shortly.",
   "function.sandbox_lost":
     "The sandbox stopped answering after the call started, so whether it changed anything is unknown.",
-  "resource.not_allowed":
-    "The App didn't declare that use of this resource for this function.",
-  "resource.unavailable":
-    "This resource isn't bound to the App, or its binding doesn't serve the contract the App declared.",
-  "resource.budget_busy":
+  "permission.not_allowed":
+    "The App didn't declare that use of this permission for this function.",
+  "permission.unavailable":
+    "This permission isn't bound for the App, or its binding doesn't serve the contract the App declared.",
+  "permission.budget_busy":
     "Runs still under way take all the room this request may use, so it wasn't started. Try again shortly.",
-  "resource.rate_limited":
+  "permission.rate_limited":
     "The model's provider is taking no more requests for now, so this request wasn't answered. Try again after the wait it names.",
-  "resource.awaiting_confirmation":
+  "permission.awaiting_confirmation":
     "This request waits for the person it acts for to confirm it. Make the same call again once they have.",
-  "resource.declined":
+  "permission.declined":
     "The person this request waited for declined it: it didn't run, and won't under this call's key.",
-  "resource.idempotency_conflict":
+  "permission.idempotency_conflict":
     "This call's key was already used for a request with other arguments: it wasn't run again.",
-  "resource.invalid_args":
-    "The arguments don't fit the contract of the resource's action.",
-  "resource.item_not_found":
-    "The resource has no such item, or none the App may read for this person.",
-  "resource.limit_reached":
-    "The App used this resource as much as it may in one call, one minute, one hour or one day, holds as much of it open as it may at once, or made as deep, as round or as many calls between Apps as it may, so this request wasn't made. Its details name which.",
-  "contract.invalid_resource_result":
-    "A resource answered something its contract doesn't allow.",
+  "permission.invalid_args":
+    "The arguments don't fit the contract of the permission's action.",
+  "permission.item_not_found":
+    "What the permission reaches has no such item, or none the App may read for this person.",
+  "permission.limit_reached":
+    "The App used this permission as much as it may in one call, one minute, one hour or one day, holds as much of it open as it may at once, or made as deep, as round or as many calls between Apps as it may, so this request wasn't made. Its details name which.",
+  "contract.invalid_permission_result":
+    "A permission's call answered something its contract doesn't allow.",
   "contract.invalid_args": "The arguments don't fit the function.",
   "contract.input_too_large":
     "The arguments are larger than a function accepts.",
@@ -146,16 +146,16 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "role.forbidden": "authorization",
   "permission.denied": "authorization",
   "data.access_denied": "authorization",
-  "resource.unavailable": "authorization",
-  "resource.not_allowed": "contract",
-  "resource.budget_busy": "operational",
-  "resource.rate_limited": "operational",
-  "resource.awaiting_confirmation": "operational",
-  "resource.item_not_found": "domain",
-  "resource.invalid_args": "contract",
-  "resource.declined": "domain",
-  "resource.idempotency_conflict": "contract",
-  "resource.limit_reached": "operational",
+  "permission.unavailable": "authorization",
+  "permission.not_allowed": "contract",
+  "permission.budget_busy": "operational",
+  "permission.rate_limited": "operational",
+  "permission.awaiting_confirmation": "operational",
+  "permission.item_not_found": "domain",
+  "permission.invalid_args": "contract",
+  "permission.declined": "domain",
+  "permission.idempotency_conflict": "contract",
+  "permission.limit_reached": "operational",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
   "data.referenced": "domain",
@@ -209,9 +209,9 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "submission.superseded",
   "submission.deadline_passed",
   // Nothing was sent; room comes back as requests under way settle.
-  "resource.budget_busy",
+  "permission.budget_busy",
   // Nothing was sent; a provider's rate comes back as its window passes.
-  "resource.rate_limited",
+  "permission.rate_limited",
   "function.sandbox_busy",
   "function.sandbox_unavailable",
   // Nothing was published; the build runs on, cached for the next try.

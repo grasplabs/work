@@ -243,6 +243,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // One chat's agent (core's src/chat-session.ts).
   "CHAT_SESSIONS",
   "BRAIN_OBJECTS",
+  // The Brain's store (core's src/brain-next.ts).
+  "BRAIN_STORE",
   "BUILD_WAIT_MS",
   "BUILTINS",
   "CAPABILITY_SIGNING_KEY",
@@ -259,6 +261,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "DEV_SKIP_ROUTER_SECRET",
   "DURABLE_OBJECT_JURISDICTION",
   "EMAIL",
+  // Our own embedding model's objects (core's src/embedder.ts).
+  "EMBEDDER",
   "ENTRA_CLIENT_SECRET",
   "FILES",
   "GOOGLE_CLIENT_ID",
@@ -283,6 +287,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The documents' Entra app (connect's providers.ts).
   "MICROSOFT_DOCUMENTS_CLIENT_ID",
   "MICROSOFT_DOCUMENTS_CLIENT_SECRET",
+  // The embedding model's files, and on-prem where they come from (core's
+  // src/embedder.ts).
+  "MODEL_FILES",
+  "MODEL_SOURCE",
   "ONBOARDING",
   "PACKAGE_LIMITS",
   "PLATFORM_CHANGE",

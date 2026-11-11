@@ -17,8 +17,7 @@ export type {
   MigrationContext,
   MigrationDefinition,
 } from "./migration.ts";
-export { httpContract } from "./connector-contracts.ts";
-export { graspFunctions } from "./grasp-functions.ts";
+export { httpContract } from "@grasp-os/shared/http-contract";
 export { permission } from "./permission.ts";
 export type {
   ComposioCall,
@@ -26,9 +25,9 @@ export type {
   ConnectorAction,
   ConnectorContract,
   HttpAnswer,
-  HttpContract,
   HttpRequestInit,
 } from "./connector-contracts.ts";
+export type { HttpContract } from "@grasp-os/shared/http-contract";
 export type { GraspFunctions } from "./grasp-functions.ts";
 export type {
   AiClient,

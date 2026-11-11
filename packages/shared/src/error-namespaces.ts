@@ -43,6 +43,7 @@ export const familyNamespaces = [
   "guest",
   "hear",
   "hr",
+  "instructions",
   "internal",
   "interview",
   "kickoff",
@@ -64,7 +65,6 @@ export const familyNamespaces = [
   "project",
   "query",
   "request",
-  "resource",
   "role",
   "signal",
   "speech",
@@ -85,7 +85,7 @@ export const familyNamespaces = [
  * host reserves, which no family defines: a declaration refused
  * (`definition`, `schema`) and the outcome of a safety check (`safety`). A
  * server function's declaration refused (`function.invalid_definition`) and
- * a resource refused at declaration have a family's namespace.
+ * a permission refused at declaration have a family's namespace.
  */
 export const sdkNamespaces = ["definition", "safety", "schema"] as const;
 

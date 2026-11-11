@@ -9,7 +9,8 @@
  * 2. `resources`: its databases and buckets exist, each id recorded
  *    (`ensureClientResources`).
  * 3. `migrations`: the release's D1 migrations, applied to the inventory's
- *    databases, by their observed ids.
+ *    databases, by their observed ids; and the model files it names, in
+ *    the client's models bucket (src/deploy/model-files.ts).
  * 4. and 5. `connect`, then `core`: each Worker rendered onto the client's
  *    inventory (`renderClientWorker`) and uploaded as its stable script,
  *    with its Durable Object migrations and its secrets (the client's
@@ -32,14 +33,18 @@
  * Every step can run again: a retry, by the same runner or one that took
  * the client over, runs the operation from its first step, and each step
  * finds what an earlier run did. Resources are found by their recorded
- * names and ids; migrations skip what a database applied; the sending
+ * names and ids; migrations skip what a database applied, and model
+ * files what the bucket holds; the sending
  * domain's zone is found by its name, and sending turned on only where
  * it's off; an upload whose
  * fingerprint (everything that went into it) is recorded, and whose
  * script is observed at the release's migration tag and holding exactly
  * its secrets by name, isn't made again. Nothing here deletes: an
  * automatic retry never removes a resource or script, and a secret goes
- * only by an upload that no longer gives it.
+ * only by an upload that no longer gives it. The one thing removed is a
+ * model file in the client's models bucket that neither this release
+ * nor the one before names: any release deployed later copies its own
+ * again.
  *
  * Every write to the admin's records is conditional on the runner still
  * holding the client (`stillHolds`), and it checks it holds the client
@@ -111,6 +116,8 @@ import type { SignInApps } from "../deploy/core-config.ts";
 import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
+import { modelsBucketOf, syncModelFiles } from "../deploy/model-files.ts";
+import type { ModelFilesSynced } from "../deploy/model-files.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { registerHostname, smokeAnswering } from "../deploy/router.ts";
 import type { RouterHosts, SmokeOptions } from "../deploy/router.ts";
@@ -285,6 +292,7 @@ export interface ProvisionContext {
   store: ReleaseStore;
   secrets: DeploySecrets;
   signInApps?: SignInApps;
+  usualHosts?: string;
   now?: () => Date;
   router: {
     hosts: RouterHosts;
@@ -948,6 +956,8 @@ interface Loaded {
     rotationLiveAt: Date | null;
     signIn: string | null;
     staffWindow: string | null;
+    /** The onboarding its company starts with, by name; null for all of it. */
+    startingFlow: string | null;
     teamsBot: string | null;
     /** Where its data is kept: what its Durable Objects are made in. */
     jurisdiction: "eu" | "none";
@@ -1439,6 +1449,7 @@ const coreVarsOf = (
     clientId: loaded.held.clientId,
     signIn: loaded.client.signIn,
     staffWindow: loaded.client.staffWindow,
+    startingFlow: loaded.client.startingFlow,
     domain: context.router.domain,
     apps: context.signInApps ?? {},
     ...(context.router.oauthRelay === undefined
@@ -1458,15 +1469,23 @@ const coreVarsOf = (
 
 /**
  * The vars Worker `app` runs with: core's (`coreVarsOf`, read once and
- * passed as `core`), and the client's Teams bot on connect and core, as a
- * deploy gives them (src/clients/teams-bot.ts).
+ * passed as `core`), the client's Teams bot on connect and core, as a
+ * deploy gives them (src/clients/teams-bot.ts), and, on staging set up
+ * for it, the providers whose platform features go to their usual host
+ * (`ProvisionContext.usualHosts`).
  */
 const varsOf = (
+  context: ProvisionContext,
   loaded: Loaded,
   app: App,
   core: Readonly<Record<string, unknown>>
 ): Record<string, unknown> => ({
   ...(app === "core" ? core : {}),
+  // On both Workers alike: core routes a platform feature by it and
+  // connect pins the request to the same host.
+  ...(context.usualHosts === undefined
+    ? {}
+    : { PLATFORM_AI_USUAL_HOSTS: context.usualHosts }),
   ...teamsBotVars(app, teamsBotOf(loaded.client.teamsBot)),
 });
 
@@ -1510,6 +1529,7 @@ const load = async (
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
       staffWindow: clients.staffWindow,
+      startingFlow: clients.startingFlow,
       teamsBot: clients.teamsBot,
       jurisdiction: clients.jurisdiction,
     })
@@ -1579,7 +1599,7 @@ const validate = async (
     assertRunnable(loaded, worker);
     // oxlint-disable-next-line no-await-in-loop -- two Workers
     const secrets = await secretsOf(context, loaded, app);
-    checkBindingNames(worker, varsOf(loaded, app, vars), secrets);
+    checkBindingNames(worker, varsOf(context, loaded, app, vars), secrets);
   }
   await assertHolds(db, held);
   await allocateClientResources(db, "system", {
@@ -1721,6 +1741,52 @@ const uploadCountedAsRun = async (
   }
 };
 
+/**
+ * Step 3's other half: the model files the release names, in the client's
+ * models bucket before core goes live (src/deploy/model-files.ts), and
+ * every other model file there removed unless the release running before
+ * (what a failed probe rolls back to) names it.
+ */
+const syncClientModelFiles = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  inventory: readonly ClientResource[]
+): Promise<ModelFilesSynced> => {
+  const { manifest, operation, held } = loaded;
+  const bucketName = modelsBucketOf(manifest);
+  if (bucketName === undefined) {
+    return { copied: 0, removed: 0 };
+  }
+  const row = inventory.find(
+    (resource) =>
+      resource.kind === "r2_bucket" &&
+      resource.role === `r2:${bucketName}` &&
+      resource.lifecycle === "allocated"
+  );
+  if (row === undefined) {
+    throw new InventoryError(
+      "resource_missing",
+      `${held.clientId} has no ${bucketName} in its inventory`
+    );
+  }
+  const previous =
+    operation.previousReleaseId === null
+      ? null
+      : await importedManifest(context.db, operation.previousReleaseId);
+  return await syncModelFiles(
+    context,
+    {
+      accountId: loaded.accountId,
+      name: row.physicalName,
+      jurisdiction: row.jurisdiction,
+    },
+    { manifest, previous },
+    async () => {
+      await assertHolds(context.db, held);
+    }
+  );
+};
+
 /** Step 4: the release's D1 migrations, on the client's own databases. */
 const migrate = async (
   context: ProvisionContext,
@@ -1741,8 +1807,11 @@ const migrate = async (
       await assertHolds(context.db, loaded.held);
     }
   );
+  const models = await syncClientModelFiles(context, loaded, inventory);
   await recordStep(context.db, loaded, "migrations", {
     applied: [...applied.values()].reduce((sum, count) => sum + count, 0),
+    modelFilesCopied: models.copied,
+    modelFilesRemoved: models.removed,
   });
 };
 
@@ -1994,6 +2063,7 @@ const upload = async (
   }
   const target = targetOf(loaded, inventory, app);
   const vars = varsOf(
+    context,
     loaded,
     app,
     app === "core" ? coreVarsOf(context, loaded) : {}

@@ -1,7 +1,4 @@
-import {
-  cloudflareTest,
-  readD1Migrations,
-} from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineProject } from "vite-plus";
 
 // The Brain on its own: a plain Worker with a D1 database and an R2

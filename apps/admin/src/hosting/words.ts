@@ -196,6 +196,8 @@ const failureCauses = {
   database_outside_eu: "staff",
   bucket_outside_eu: "staff",
   d1_migration_failed: "release",
+  model_files_unbound: "release",
+  model_files_unreadable: "retry",
   unknown_migration_tag: "staff",
   sign_in_incomplete: "staff",
   binding_name_taken: "staff",

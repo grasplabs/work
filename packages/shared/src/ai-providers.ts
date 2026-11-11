@@ -247,13 +247,55 @@ export interface PlatformRoute {
 }
 
 /**
+ * A provider's usual host, outside the EU, for a provider whose platform
+ * features may be sent there for testing (`usualHostProviders`): OpenAI
+ * and ElevenLabs, whose EU data residency hosts take only keys of an
+ * account or project that has EU residency. A provider not named here
+ * always goes to its platform host.
+ */
+const usualHosts: Readonly<Partial<Record<AiProviderId, string>>> = {
+  openai: "api.openai.com",
+  elevenlabs: "api.elevenlabs.io",
+};
+
+/**
+ * The providers named in a deployment's `PLATFORM_AI_USUAL_HOSTS`
+ * setting, comma-separated: those whose platform features go to the
+ * provider's usual host there (`usualHosts`), not its EU data residency
+ * host. For testing only, with a key of an account that has no EU
+ * residency: the admin sets it on a staging deployment alone, never on
+ * production's. A name that isn't a provider with a usual host counts for
+ * nothing, and so does a setting that isn't text.
+ */
+export const usualHostProviders = (setting: unknown): AiProviderId[] =>
+  typeof setting === "string"
+    ? setting.split(",").flatMap((name) => {
+        const provider = aiProviderIdSchema.safeParse(name.trim());
+        return provider.success && Object.hasOwn(usualHosts, provider.data)
+          ? [provider.data]
+          : [];
+      })
+    : [];
+
+/**
  * Where Grasp's own key for `provider` sends a platform feature's
  * requests: its EU data residency host where it has one, else its own.
- * None for a provider without a fixed host.
+ * None for a provider without a fixed host. A provider in `usual` (the
+ * deployment's `usualHostProviders`, on staging only) goes to its usual
+ * host, and is said to run where that is, never in the EU.
  */
 export const platformRouteOf = (
-  provider: AiProviderId
+  provider: AiProviderId,
+  usual: readonly AiProviderId[] = []
 ): PlatformRoute | undefined => {
+  const testing = usual.includes(provider) ? usualHosts[provider] : undefined;
+  if (testing !== undefined) {
+    return {
+      host: testing,
+      region: aiProviders[provider].region,
+      whereItRuns: aiProviders[provider].whereItRuns,
+    };
+  }
   const eu = platformHosts[provider];
   if (eu !== undefined) {
     return {
@@ -276,8 +318,10 @@ export const platformRouteOf = (
  * The one host Grasp's own key for `provider` may be sent to
  * (`platformRouteOf`): connect pins a platform request to it.
  */
-export const platformHostOf = (provider: AiProviderId): string | undefined =>
-  platformRouteOf(provider)?.host;
+export const platformHostOf = (
+  provider: AiProviderId,
+  usual: readonly AiProviderId[] = []
+): string | undefined => platformRouteOf(provider, usual)?.host;
 
 /**
  * What core puts where the key goes, which connect replaces with the real

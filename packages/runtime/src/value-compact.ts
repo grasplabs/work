@@ -1,9 +1,8 @@
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 
 import { seal } from "./descriptor-seal.ts";
 import {
   descriptorVersion,
-  isPlainObject,
   unsafeKeys,
   ValueDefinitionError,
   valueLimits,

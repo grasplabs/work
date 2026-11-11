@@ -6,6 +6,7 @@ import type {
   AiProviderListed,
   AiProvidersListing,
   AiProviderTest,
+  AiSource,
   OrganizationProviderId,
 } from "@grasp-os/shared/ai-providers";
 import { i18n } from "@lingui/core";
@@ -63,17 +64,22 @@ const offered: AiProvidersListing["offered"] = (
 }));
 
 /** Core's AI providers: what an admin saved and chose, and each change asked. */
-const fakeAiProviders = (tested: (model: string) => AiProviderTest) => {
+const fakeAiProviders = (
+  tested: (model: string) => AiProviderTest,
+  /** Whether this deployment has Grasp's key for Grasp's AI. */
+  graspAvailable = false
+) => {
   const asked: unknown[][] = [];
+  let source: AiSource = "own";
   let providers: AiProviderListed[] = [];
   let choice: AiModelChoice | null = null;
   const api = {
     list: async (): Promise<AiProvidersListing> => {
       await Promise.resolve();
       return {
-        source: "own",
+        source,
         grasp: {
-          available: false,
+          available: graspAvailable,
           model: {
             model: "anthropic/claude-sonnet-5-5",
             name: "Claude Sonnet 5.5",
@@ -117,6 +123,11 @@ const fakeAiProviders = (tested: (model: string) => AiProviderTest) => {
       asked.push(["models", next]);
       choice = { defaultModel: next.defaultModel, fallbacks: [] };
     },
+    setSource: async (next: AiSource): Promise<void> => {
+      await Promise.resolve();
+      asked.push(["source", next]);
+      source = next;
+    },
     remove: async (provider: OrganizationProviderId): Promise<void> => {
       await Promise.resolve();
       asked.push(["remove", provider]);
@@ -142,7 +153,10 @@ const shown = async (
     loader: async () => {
       const listing = await api.list();
       // As core's chat models say it: ready once a connected provider's model is chosen.
-      return { listing, ready: listing.choice !== null };
+      return {
+        listing,
+        ready: listing.choice !== null || listing.source === "grasp",
+      };
     },
     component: () => (
       <Seen value>
@@ -202,6 +216,15 @@ const labelled = (label: string): Element => {
     throw new TypeError(`No control labelled ${label}`);
   }
   return control;
+};
+
+/** The control labelled `label`, to press. */
+const labelledControl = (label: string): HTMLElement => {
+  const found = labelled(label);
+  if (!(found instanceof HTMLElement)) {
+    throw new TypeError(`${label} can't be pressed`);
+  }
+  return found;
 };
 
 const textField = (label: string): HTMLInputElement => {
@@ -298,6 +321,47 @@ describe("the onboarding's AI step", () => {
     });
     // The key itself is nowhere on the page once it is saved.
     expect(document.body.innerHTML).not.toContain(pastedKey);
+  });
+
+  it("offers Grasp's AI first where the deployment has it, and going on sets the organization's AI to it with nothing to fill in", async () => {
+    const { api, asked } = fakeAiProviders(
+      (model) => ({ ok: true, model }),
+      true
+    );
+    const { went } = await shown(api);
+
+    expect({
+      offered: text().includes("Use Grasp’s AI"),
+      // Nothing to fill in: no key is asked for.
+      keyAsked: [...document.querySelectorAll("label")].some(
+        (each) => each.textContent?.trim() === "Key"
+      ),
+    }).toStrictEqual({ offered: true, keyAsked: false });
+    await press(button("Continue"));
+
+    expect({
+      asked,
+      went: went(),
+      ready: text().includes("On Grasp’s AI: Claude Sonnet 5.5"),
+    }).toStrictEqual({ asked: [["source", "grasp"]], went: 1, ready: true });
+  });
+
+  it("takes the organization's own key where they choose it over Grasp's AI", async () => {
+    const { api, asked } = fakeAiProviders(
+      (model) => ({ ok: true, model }),
+      true
+    );
+    await shown(api);
+
+    await press(labelledControl("Use your own key"));
+    await enter(textField("Key"), pastedKey);
+    await press(button("Continue"));
+
+    expect(asked.map(([what]) => what)).toStrictEqual([
+      "add",
+      "test",
+      "models",
+    ]);
   });
 
   it("stays on the step and says why when the provider refuses the key: no model is chosen, and the key isn't kept", async () => {

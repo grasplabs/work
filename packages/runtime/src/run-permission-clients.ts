@@ -1,10 +1,11 @@
-import { httpContract } from "./connector-contracts.ts";
+import { httpContract } from "@grasp-os/shared/http-contract";
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import type { FunctionChannel } from "./function-channel.ts";
 import { isActionPermission } from "./manifest-permissions.ts";
 import { memberName, membersOf } from "./member-names.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // The clients an action reaches the App's permissions through
 // (`ctx.ai`, `ctx.brain`, `ctx.connections.<alias>`, `ctx.grasp`,
@@ -16,7 +17,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 // What can go wrong, and what holds:
 // - The members are names, never authority. Each member sends its alias,
 //   its method and its declared name over the channel
-//   (`resource(alias, "call", [action, args])`), and the host decides
+//   (`permission(alias, "call", [action, args])`), and the host decides
 //   every call there and then, against the release's sealed manifest:
 //   the alias is declared, the action is among its actions, an admin bound
 //   the permission and granted what it reaches, and the arguments and the
@@ -163,7 +164,7 @@ const clientOf = (
   const call =
     (method: string) =>
     async (...args: unknown[]): Promise<unknown> =>
-      await channel.resource(permission.alias, method, args);
+      await channel.permission(permission.alias, method, args);
   const kind = permission["~permission"];
   if (kind === "ai") {
     return membersOf([["generate", generateOf(call("generate"))]]);

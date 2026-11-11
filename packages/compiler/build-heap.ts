@@ -47,7 +47,7 @@ const blueprintsSchema = z.record(z.string(), z.record(z.string(), z.string()));
  * functions its server modules export (`registerApp`, as the host's
  * entry registers them). Its server code imports
  * `@server/_generated/server`, which resolves to the blueprint's
- * `server-types.ts`, as its tsconfig maps it.
+ * committed `files/server/_generated/server.ts`, as its tsconfig maps it.
  */
 const blueprintFiles = async (
   blueprints: string
@@ -63,7 +63,8 @@ const blueprintFiles = async (
       const parent = new URL(context.parentURL).pathname;
       const folder = parent.slice(0, parent.lastIndexOf("/files/"));
       return next(
-        pathToFileURL(path.join(folder, "server-types.ts")).href,
+        pathToFileURL(path.join(folder, "files/server/_generated/server.ts"))
+          .href,
         context
       );
     },

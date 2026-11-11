@@ -1,3 +1,4 @@
+import { isPlainObject } from "@grasp-os/shared/json";
 import {
   afterEach,
   beforeEach,
@@ -12,7 +13,6 @@ import { GraspError } from "../src/client-error.ts";
 import type { ClientTransport } from "../src/client-transport.ts";
 import type { Id } from "../src/index.ts";
 import type { WorkflowViewOf } from "../src/react.ts";
-import { isPlainObject } from "../src/value-descriptor.ts";
 import { applyingAtMostMs, WorkflowCalls } from "../src/workflow-calls.ts";
 import { readWorkflowReference } from "../src/workflow-reference-read.ts";
 import { workflowReferenceLimits } from "../src/workflow-references.ts";

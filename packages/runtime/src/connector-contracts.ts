@@ -1,3 +1,5 @@
+import type { HttpContract } from "@grasp-os/shared/http-contract";
+
 import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
 import type { JsonValue } from "./value-descriptor.ts";
 
@@ -10,20 +12,6 @@ import type { JsonValue } from "./value-descriptor.ts";
  * contract the binding pinned when an admin approved it.
  */
 export type ComposioContract = `composio.${string}@1`;
-
-/**
- * An outside API an admin approved as an HTTP connection: its
- * one origin, the paths and methods it allows, and its credential, which
- * connect adds and nobody else sees. Its actions are `get` (a read: GET or
- * HEAD) and `send` (POST, PUT, PATCH or DELETE, a change a person confirms
- * where they are there); its client also has `fetch`, which picks the
- * action by the method. The same as `httpContract` in
- * `@grasp-os/shared/http-connections`.
- */
-export type HttpContract = "http.request@1";
-
-/** An HTTP connection's contract, for `permission.connection`. */
-export const httpContract: HttpContract = "http.request@1";
 
 /** The headers a request sets: never its credential, which connect adds. */
 type HttpHeaders = Readonly<Record<string, string>>;

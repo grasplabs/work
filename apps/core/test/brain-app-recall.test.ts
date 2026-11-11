@@ -247,7 +247,7 @@ describe("an App's recall of the Brain", setUpTime, () => {
       withBrain: outcomeOf(withBrain.result),
       provenance: withBrain.provenance,
     }).toStrictEqual({
-      without: { failed: "resource.unavailable" },
+      without: { failed: "permission.unavailable" },
       withBrain: ["Leave", "Pay"],
       provenance: {
         collectionIds: [ids.handbook, ids.salaries].toSorted(),
@@ -370,7 +370,7 @@ describe("an App's recall of the Brain", setUpTime, () => {
       after: outcomeOf(after.result),
     }).toStrictEqual({
       before: ["Leave"],
-      after: { failed: "resource.unavailable" },
+      after: { failed: "permission.unavailable" },
     });
   });
 });

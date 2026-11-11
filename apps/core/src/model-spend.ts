@@ -103,6 +103,8 @@ export const spendMonth = (
 export interface SpendKeys {
   personId: string | null;
   triggerType: string;
+  /** The agent that asked; null when no agent did. */
+  agentId: string | null;
   workflowAppId: string | null;
   workflowId: string | null;
   runId: string | null;
@@ -119,6 +121,7 @@ export const spendKeysOf = (input: SpendInput): SpendKeys => {
   return {
     personId: spendPersonOf(input) ?? null,
     triggerType: trigger.type,
+    agentId: trigger.type === "agent" ? trigger.agentId : null,
     workflowAppId: null,
     workflowId: lineage?.workflowId ?? null,
     runId: lineage?.rootRunId ?? null,

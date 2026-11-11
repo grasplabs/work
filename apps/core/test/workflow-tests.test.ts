@@ -27,7 +27,7 @@ import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { passing } from "./json-workflow-apps.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { liveStatus, sleeping } from "./runs.ts";
+import { liveStatus, sleeping, statusOnce } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
@@ -929,7 +929,7 @@ export default appTest(schema, {
       connector: await endedIn(connectorRun),
       connectAsked: (await connectCalls()) - connectBefore,
     }).toMatchObject({
-      connector: { status: "failed", code: "resource.unavailable" },
+      connector: { status: "failed", code: "permission.unavailable" },
       connectAsked: 0,
     });
   });
@@ -1041,7 +1041,7 @@ export default appTest(schema, {
     const both = await recordedRuns(app);
     const secondId = both.find((id) => id !== firstId) ?? "";
     await sleeping(secondId, "hold");
-    const beforeAdvance = await liveStatus(secondId);
+    const beforeAdvance = await statusOnce(secondId, "waiting");
     await session.advanceClock(hour);
     const secondEnd = await endOf(session, second);
     const took = Date.now() - began;

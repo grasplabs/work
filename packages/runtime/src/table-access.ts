@@ -1,7 +1,8 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { refuse } from "./schema-error.ts";
 import { indexBase } from "./schema-fields.ts";
 import type { TableState } from "./schema-types.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /**
  * A role in an App a row rule may name: `builder`, or `user`, which

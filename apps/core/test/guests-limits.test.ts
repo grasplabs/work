@@ -28,7 +28,7 @@ import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Guest chats (src/guests.ts) through an App's sealed functions: a guests
-// resource its actions declare (`resource.guests`), which reaches nothing
+// resource its actions declare (`permission.guests`), which reaches nothing
 // until an admin binds it to one of the App's permissions to invite
 // guests (resource-guests.ts). An App invites someone who isn't a member
 // to a chat with a model through a link. The ways it can fail, each tried
@@ -118,11 +118,11 @@ describe("guest chats", { timeout: 60_000 }, () => {
       await ask(app, builder.userId)
     ).success;
     expect({ ...refusals, fiftyFirst, afterRevoke }).toStrictEqual({
-      unknownSkill: { error: "resource.invalid_args" },
-      tooLong: { error: "resource.invalid_args" },
-      noName: { error: "resource.invalid_args" },
+      unknownSkill: { error: "permission.invalid_args" },
+      tooLong: { error: "permission.invalid_args" },
+      noName: { error: "permission.invalid_args" },
       fiftyFirst: {
-        error: "resource.limit_reached",
+        error: "permission.limit_reached",
         details: { limit: "open" },
       },
       afterRevoke: true,
@@ -220,7 +220,7 @@ describe("guest chats", { timeout: 60_000 }, () => {
       open: await readable(open.id),
     }).toStrictEqual({
       before: [true, true],
-      ended: { error: "resource.item_not_found" },
+      ended: { error: "permission.item_not_found" },
       open: true,
     });
   });

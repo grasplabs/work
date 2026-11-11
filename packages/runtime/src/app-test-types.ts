@@ -120,8 +120,8 @@ export interface TestIdentity<Tables extends AnyTables = AnyTables> {
     args: FunctionArgs<Reference>
   ) => Promise<FunctionReturn<Reference>>;
   /**
-   * Calls one of the App's public actions. A test binds no resources, so
-   * an action that reaches one is refused (`resource.unavailable`):
+   * Calls one of the App's public actions. A test binds no permissions, so
+   * an action that reaches one is refused (`permission.unavailable`):
    * outside systems aren't the tests' to touch.
    */
   action: <Reference extends PublicReference<"action">>(
@@ -148,7 +148,7 @@ export interface TestIdentity<Tables extends AnyTables = AnyTables> {
    * organization's around it. Its model calls answer what `options.models`
    * gives; its calls of the App's functions run on this test's own store;
    * other calls that leave its own code (a connection's, the Brain's, an
-   * action's) are refused (`resource.unavailable`). The run is removed as
+   * action's) are refused (`permission.unavailable`). The run is removed as
    * the test ends.
    */
   start: <Reference extends AnyWorkflowReference>(

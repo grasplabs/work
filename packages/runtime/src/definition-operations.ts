@@ -2,17 +2,13 @@ import { AppDefinitionError } from "./app-definition-error.ts";
 import type { WorkflowEventContract } from "./bound-workflows.ts";
 import { isIdentifier } from "./code-print.ts";
 import { refuser } from "./declaration.ts";
+import { definitionManifest, readDefinition } from "./definition-app.ts";
 import {
   evaluateExpression,
   ExpressionError,
 } from "./definition-expression.ts";
-import {
-  definitionManifest,
-  isFunctionPath,
-  peoplePermission,
-  permissionDataSchema,
-  readDefinition,
-} from "./definition.ts";
+import { isFunctionPath, permissionDataSchema } from "./definition-json.ts";
+import { peoplePermission } from "./definition-types.ts";
 import type {
   AppDefinition,
   DefinedAnswer,
@@ -21,7 +17,7 @@ import type {
   DefinedPermission,
   DefinedRule,
   DefinedTable,
-} from "./definition.ts";
+} from "./definition-types.ts";
 import { referencesRenamed } from "./descriptor-references.ts";
 import {
   isBrowserPermission,
@@ -38,7 +34,7 @@ import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 import { v } from "./values.ts";
 
-// The operations that change an App's definition (definition.ts): what
+// The operations that change an App's definition (definition-types.ts): what
 // the chat's tools and the workspace's Data view make. Each answers the
 // definition after it, checked whole (`definitionManifest`), or throws
 // `AppDefinitionError` (or a builder's own error) saying what is wrong,
