@@ -318,7 +318,7 @@ export const OrgFlow = ({
         </SectionRow>
       </Section>
       <Section
-        description="Each can be switched off, and moved by its handle or from the keyboard. Who’s who stays above Team leads and Interviews."
+        description="Each can be switched off, and moved by its handle or from the keyboard. Who’s who stays above Team leads and Interviews, and the interviews’ screens always come last."
         title="The admin’s steps"
       >
         <Steps disabled={busy || !flow.on} flow={flow} onChange={setDraft} />

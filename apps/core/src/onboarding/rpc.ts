@@ -52,7 +52,11 @@ import type {
   ShareDocumentInput,
 } from "@grasp-os/shared/onboarding-documents";
 import { setupPlaceSchema } from "@grasp-os/shared/onboarding-flow";
-import type { SetupPlace, SetupStepId } from "@grasp-os/shared/onboarding-flow";
+import type {
+  OnboardingFlow,
+  SetupPlace,
+  SetupStepId,
+} from "@grasp-os/shared/onboarding-flow";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
@@ -364,6 +368,14 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         parsed,
         actorOf(person)
       );
+    });
+  }
+
+  async flow(): Promise<OnboardingFlow> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const { flow } = await onboardingStore(this.#env).flow();
+      return flow;
     });
   }
 
