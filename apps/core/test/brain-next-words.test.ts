@@ -481,6 +481,35 @@ describe(
       });
     });
 
+    it("finds symbols that fold into letters by those letters, as the first rules did, on a fresh add and after a rebuild", async () => {
+      const reader = await person();
+      const mark = `w${unique()}`;
+      // "㍿" folds to "株式会社", "℡" to "tel", "Ⓐ" to "a".
+      const symbols = await add(`㍿ ℡ Ⓐ ${mark}`, ownedBy(reader));
+      const questions = ["株式会社", "TEL", "a"];
+      const foundBy = async (): Promise<SourceRef[][]> =>
+        await Promise.all(
+          questions.map(async (question) => await recalledAs(reader, question))
+        );
+
+      const fresh = await foundBy();
+      await toFirstRules([mark]);
+      const firstRules = await foundBy();
+      const ticks = await ticksUntilRebuilt();
+
+      expect({
+        fresh,
+        firstRules,
+        rebuilt: Number.isFinite(ticks),
+        after: await foundBy(),
+      }).toStrictEqual({
+        fresh: questions.map(() => [symbols]),
+        firstRules: questions.map(() => [symbols]),
+        rebuilt: true,
+        after: questions.map(() => [symbols]),
+      });
+    });
+
     it("goes on after the store stops mid-rebuild, and indexes every passage exactly once", async () => {
       const reader = await person();
       const mark = `m${digitsMark()}`;

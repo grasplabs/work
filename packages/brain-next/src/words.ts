@@ -227,8 +227,12 @@ export type WordMemo = Map<string, Word[]>;
  */
 export const wordsOf = (text: string, memo: WordMemo = new Map()): Word[] => {
   const words = new Map<string, Set<string>>();
+  // Cut after compatibility folding (NFKC), so a symbol that folds into
+  // letters is words too ("㍿" is "株式会社", "℡" is "tel", "Ⓐ" is "a"),
+  // as `foldForSearch` reads it; NFKC keeps accents, which the stemmers
+  // need, composed.
   for (const written of new Set(
-    text.normalize("NFC").toLowerCase().match(wordPattern)
+    text.normalize("NFKC").toLowerCase().match(wordPattern)
   )) {
     let found = memo.get(written);
     if (found === undefined) {
