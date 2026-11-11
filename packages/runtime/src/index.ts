@@ -18,7 +18,6 @@ export type {
   MigrationDefinition,
 } from "./migration.ts";
 export { httpContract } from "./connector-contracts.ts";
-export { graspFunctions } from "./grasp-functions.ts";
 export { permission } from "./permission.ts";
 export type {
   ComposioCall,
