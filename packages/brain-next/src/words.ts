@@ -10,7 +10,9 @@ import { stopWordLists } from "./stop-words.ts";
 // both go through `wordsOf`: each word as written, folded (`foldForSearch`)
 // into the word search holds, with its stems. A source is kept whole as
 // given; only its chunks' words go into the word index (`chunk_words`),
-// and their stems beside them (`chunk_stems`, migration 0005).
+// and their stems beside them (`chunk_stems`, migration 0005); each index
+// keeps its own copy of what it took, so a deleted chunk's terms leave its
+// pages at once (migration 0006).
 //
 // Stems, so "facturen" finds "factuur" and "Rechnungen" finds "Rechnung":
 // every word is reduced by the Snowball stemmers of all five languages
@@ -348,7 +350,9 @@ export const indexWords = (
  * indexes hold of a chunk change, and every store rebuilds its word
  * indexes from its chunks' text (`reindexWords`). The stop words are read
  * from the question alone, so changing them needs no bump. 1: words folded
- * without the primary letters, no stems; 2: stems (GRA-1725). A store marked
+ * without the primary letters, no stems; 2: stems (GRA-1725). A store's
+ * number is 0 when its indexes were made anew and empty (migration 0006,
+ * GRA-1729), so it rebuilds them whatever the rules. A store marked
  * current stays so: rolled back to a release with older rules, it indexes
  * new chunks by those, and the release after does not rebuild them, since
  * the store reads current; they are recalled by the older rules until the

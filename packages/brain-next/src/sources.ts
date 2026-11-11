@@ -16,6 +16,7 @@ import {
   sourceChanges,
   sourceVersions,
 } from "./db/schema.ts";
+import { isErased, subjectOf } from "./erasure.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -66,10 +67,19 @@ const encoder = new TextEncoder();
  */
 interface Adding {
   readonly added: NewSource;
+  /** The source's key as the erasure ledger names it (erasure.ts). */
+  readonly subject: string;
   readonly hash: string;
   readonly readers: string;
   readonly indexed: boolean;
 }
+
+/**
+ * What an add to an erased source says: its key is closed, and an add to
+ * it is refused for good (erasure.ts). Said only to the producer that
+ * names the source.
+ */
+const erasedSource = "The Brain refused it: this source was erased";
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
 const versionFields = {
@@ -151,6 +161,10 @@ const record = (
   storage: DurableObjectStorage,
   adding: Adding
 ): SourceVersionRef | undefined => {
+  // Erased while this add wrote its file: closed for good.
+  if (isErased(storage.sql, adding.subject)) {
+    throw new Error(erasedSource);
+  }
   // The same change, or the same text and readers, added meanwhile.
   const before = madeBefore(db, adding);
   if (before !== undefined) {
@@ -233,10 +247,14 @@ export const addVersion = async (
   const body = encoder.encode(added.text);
   const adding: Adding = {
     added,
+    subject: await subjectOf(added.source),
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
     indexed,
   };
+  if (isErased(storage.sql, adding.subject)) {
+    throw new Error(erasedSource);
+  }
   const before = madeBefore(db, adding);
   if (before !== undefined) {
     return before;
@@ -261,19 +279,25 @@ export const addVersion = async (
   return recorded;
 };
 
-/** The text of a version's file, under its hash `file`. */
-const textOf = async (bucket: R2Bucket, file: string): Promise<string> => {
+/**
+ * The text of a version's file, under its hash `file`: null when the file
+ * is gone. Only a restore of the store brings back a version whose file
+ * the sweep deleted (erasure.ts replays the ledger then): it reads as
+ * missing, never failing a read of others.
+ */
+const textOf = async (
+  bucket: R2Bucket,
+  file: string
+): Promise<string | null> => {
   const object = await bucket.get(fileKeyOf(file));
-  if (object === null) {
-    throw new Error("The Brain's file of a version is missing");
-  }
-  return await object.text();
+  return object === null ? null : await object.text();
 };
 
 /**
  * `?1` the source, `?2` the reader's person, `?3` their groups (JSON), `?4`
- * the version: its file and when it was added, if the reader is among
- * that version's readers and the source's current version's. So
+ * the version: its file and when it was added, if no erasure hid it and
+ * the reader is among that version's readers and the source's current
+ * version's. So
  * narrowing a source's readers hides its history from those taken off,
  * and a person or group added as a reader in a later version never sees
  * the versions before. Both are matched against the groups the host
@@ -285,6 +309,7 @@ const versionSql = `
 WITH ${readableSql}
 SELECT file, added_at FROM source_versions
 WHERE source = ?1 AND version = ?4
+  AND row NOT IN (SELECT version_row FROM erasing_versions)
   AND reader_set IN (SELECT reader_set FROM readable)
   AND EXISTS (
     SELECT 1 FROM current_versions
@@ -314,12 +339,10 @@ export const readVersion = async (
   if (found === undefined) {
     return null;
   }
-  return {
-    source,
-    version,
-    text: await textOf(bucket, found.file),
-    addedAt: new Date(found.added_at),
-  };
+  const text = await textOf(bucket, found.file);
+  return text === null
+    ? null
+    : { source, version, text, addedAt: new Date(found.added_at) };
 };
 
 /**
@@ -339,8 +362,8 @@ ORDER BY asked.key`;
 
 /**
  * The current version of each of `sources`, whole from its file, in the
- * order given: leaving out each that doesn't exist and each `reader` may
- * not read, alike.
+ * order given: leaving out each that doesn't exist, each `reader` may
+ * not read and each whose file is gone, alike.
  */
 export const readCurrent = async (
   { storage, bucket }: SourcesStore,
@@ -354,12 +377,13 @@ export const readCurrent = async (
       JSON.stringify(reader.groups)
     )
     .toArray();
-  return await Promise.all(
-    found.map(async ({ source, version, file, added_at: addedAt }) => ({
-      source,
-      version,
-      text: await textOf(bucket, file),
-      addedAt: new Date(addedAt),
-    }))
+  const read = await Promise.all(
+    found.map(async ({ source, version, file, added_at: addedAt }) => {
+      const text = await textOf(bucket, file);
+      return text === null
+        ? []
+        : [{ source, version, text, addedAt: new Date(addedAt) }];
+    })
   );
+  return read.flat();
 };

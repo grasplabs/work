@@ -3,7 +3,12 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { addSource, recallAs, workBrain } from "../src/brain-next.ts";
+import {
+  addSource,
+  eraseSource,
+  recallAs,
+  workBrain,
+} from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
@@ -295,7 +300,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
 });
 
 describe("erasing words", { timeout: 60_000 }, () => {
-  it("takes a deleted chunk's words out of both the word and the stem index", async () => {
+  it("takes an erased chunk's words out of both the word and the stem index and their pages at once", async () => {
     const reader = await person();
     // Marks no other word holds, inside words with an ending the stemmers
     // take off: indexed as written and as stems. Digits alone, which no
@@ -305,33 +310,20 @@ describe("erasing words", { timeout: 60_000 }, () => {
     // hide part of it from the page search.
     const [kept, erased] = [digitsMark(), digitsMark()];
     await add(`xq${kept}ingen stays`, ownedBy(reader));
-    await add(`zq${erased}ingen goes`, ownedBy(reader));
+    const goes = await add(`zq${erased}ingen goes`, ownedBy(reader));
     await expect(indexesFind(`zq${erased}`)).resolves.toStrictEqual([
       true,
       true,
     ]);
     await expect(indexesStore(erased)).resolves.toStrictEqual([true, true]);
 
-    // As erasure (GRA-1729) will: delete the chunks, and no search finds
-    // their words at once; then optimize both indexes, and their pages
-    // hold nothing of them.
-    await runInDurableObject(store(), (_instance, state) => {
-      state.storage.sql.exec(
-        "DELETE FROM chunks WHERE text = ?",
-        `zq${erased}ingen goes`
-      );
-    });
+    // Erased (GRA-1729): no search finds its words, and the indexes'
+    // pages hold nothing of them, with no compaction.
+    await eraseSource(env, { source: goes, reason: "deleted" });
     await expect(indexesFind(`zq${erased}`)).resolves.toStrictEqual([
       false,
       false,
     ]);
-    await runInDurableObject(store(), (_instance, state) => {
-      for (const index of wordIndexes) {
-        state.storage.sql.exec(
-          `INSERT INTO ${index} (${index}) VALUES ('optimize')`
-        );
-      }
-    });
 
     await expect(indexesStore(erased)).resolves.toStrictEqual([false, false]);
     await expect(indexesFind(`xq${kept}`)).resolves.toStrictEqual([true, true]);

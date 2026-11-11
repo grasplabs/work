@@ -1,6 +1,7 @@
 import {
   brainOf,
   currentReadMax,
+  erasureReasons,
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
@@ -13,6 +14,7 @@ import type {
   Access,
   AskModel,
   Brain,
+  ErasureReason,
   ModelReply,
   Reader,
   SourceId,
@@ -325,6 +327,53 @@ export const readSourceVersionAs = async (
   return read === null
     ? null
     : { source, version, text: read.text, addedAt: read.addedAt };
+};
+
+// Erasure: for good, apart from ordinary removal, where a new version
+// keeps the one before as history. Each erasure is in the Brain's ledger
+// before it returns, and nothing it covers is found or read from then on;
+// the Brain deletes the rest on core's clock, its files included once no
+// version holds them, and erases it again after a restore of its store.
+// For core's server code only, once whoever asks may erase it: neither
+// function checks, and both answer alike whatever there was to erase.
+
+const sourceErasureSchema = z.strictObject({
+  source: sourceRefSchema,
+  reason: z.enum(erasureReasons),
+});
+
+const personErasureSchema = z.strictObject({
+  personId: idSchema,
+  reason: z.enum(erasureReasons),
+});
+
+/**
+ * Erases `source` for good: every version, with everything kept of it.
+ * Its key is closed: a later add of it is refused, so a producer's late
+ * retry never brings it back. Safe to repeat. For a producer's deletion
+ * for good, or the end of its retention.
+ */
+export const eraseSource = async (
+  env: BrainEnv,
+  erased: { source: SourceRef; reason: ErasureReason }
+): Promise<void> => {
+  const { source, reason } = checked(sourceErasureSchema, erased);
+  await brain(env).eraseSource({ source: sourceKeyOf(source), reason });
+};
+
+/**
+ * Erases what only `personId` may read, added up to now: their own
+ * sources' every version (their uploads, chats and runs, their
+ * instruction file), and, in a source others read now, the versions that
+ * were theirs alone. Content added for them later is new. Safe to repeat.
+ * For an admin's erasure of a person, or a person's withdrawal.
+ */
+export const erasePerson = async (
+  env: BrainEnv,
+  erased: { personId: string; reason: ErasureReason }
+): Promise<void> => {
+  const { personId, reason } = checked(personErasureSchema, erased);
+  await brain(env).erasePerson({ person: personId, reason });
 };
 
 // Instruction files: what people write for every chat to start with (the

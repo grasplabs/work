@@ -7,7 +7,9 @@ import {
   currentRequestSchema,
   newInstructionsSchema,
   newSourceSchema,
+  personErasureSchema,
   recallRequestSchema,
+  sourceErasureSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
   versionRequestSchema,
@@ -17,8 +19,10 @@ import type {
   CurrentRequest,
   NewInstructions,
   NewSource,
+  PersonErasure,
   RecallRequest,
   Recalled,
+  SourceErasure,
   SourceVersion,
   SourceVersionRef,
   VectorSearch,
@@ -28,6 +32,13 @@ import type {
   WorkOverview,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
+import {
+  erase,
+  eraseBatch,
+  erasuresUnfinished,
+  replayLedger,
+} from "./erasure.ts";
+import type { ErasureStore } from "./erasure.ts";
 import { sweepFiles } from "./files.ts";
 import { recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
@@ -84,6 +95,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * instance.
    */
   readonly #stepsFailed: WorkOverview["stepsFailed"] = {
+    erase: null,
     sweep: null,
     repack: null,
     reindex: null,
@@ -110,13 +122,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   constructor(ctx: DurableObjectState, env: BrainStoreEnv) {
     super(ctx, env);
-    // The schema is current, and what an earlier instance had under way
-    // put back in the queue, before the object handles anything.
+    // The schema is current, what an earlier instance had under way put
+    // back in the queue, and every erasure in the ledger applied (an older
+    // copy of the store may have come back), before the object handles
+    // anything. A ledger out of reach fails the start: nothing is served
+    // until it can be read (erasure.ts).
     void ctx.blockConcurrencyWhile(async () => {
       await migrate(this.#db, migrations);
       releaseInterrupted(ctx.storage);
       markWordsCurrentIfEmpty(ctx.storage.sql);
+      await replayLedger(this.#erasures);
     });
+  }
+
+  /** The parts erasure.ts works with, the bucket as the env has it now. */
+  get #erasures(): ErasureStore {
+    return { storage: this.ctx.storage, bucket: this.env.BRAIN_OBJECTS };
   }
 
   /** The parts sources.ts works with, the bucket as the env has it now. */
@@ -174,7 +195,26 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * One tick of the host's clock at `at`: one batch of the sweep, then up
+   * Erases a source for good (erasure.ts): recorded in the ledger and
+   * hidden before it returns, deleted by its tick if not at once.
+   */
+  async eraseSource(request: SourceErasure): Promise<void> {
+    const { source, reason } = checked(sourceErasureSchema, request);
+    await erase(this.#erasures, "source", source, reason);
+  }
+
+  /**
+   * Erases what only one person may read (erasure.ts), as `eraseSource`
+   * erases a source.
+   */
+  async erasePerson(request: PersonErasure): Promise<void> {
+    const { person, reason } = checked(personErasureSchema, request);
+    await erase(this.#erasures, "person", person, reason);
+  }
+
+  /**
+   * One tick of the host's clock at `at`: one batch of what erasures still
+   * hold deleted, then one batch of the sweep, then up
    * to `repackPerTick` blocks of vector codes repacked, then, while the
    * word indexes are behind their rules, one batch of them rebuilt, then
    * the queue,
@@ -187,10 +227,30 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // The store restarts in a moment: the next instance's tick works.
       return;
     }
+    this.#erase(tickAt);
     await this.#sweep(tickAt);
     this.#repack(tickAt);
     this.#reindex(tickAt);
     await workTick(this.ctx.storage, this.#work, ask, tickAt);
+  }
+
+  /**
+   * One batch of the versions erasures hid, deleted with everything they
+   * hold (erasure.ts `eraseBatch`), in one transaction, so a failure or a
+   * stop leaves them hidden and whole for the next tick. First in the
+   * tick, so the files it lets go are swept the same tick when due. A
+   * failure never reaches the rest of the tick: it is tried again next
+   * tick, and the overview shows when it last failed until a batch
+   * succeeds. Never parked: an erasure must finish.
+   */
+  #erase(at: Date): void {
+    try {
+      this.ctx.storage.transactionSync(() => eraseBatch(this.ctx.storage.sql));
+      this.#stepsFailed.erase = null;
+    } catch {
+      // Nothing of the error is kept: the batch stays to do.
+      this.#stepsFailed.erase = { at, reason: "failed" };
+    }
   }
 
   /**
@@ -278,6 +338,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   workOverview(): WorkOverview {
     return {
       ...workOverview(this.ctx.storage, this.#work),
+      erasing: erasuresUnfinished(this.ctx.storage.sql),
       stepsFailed: { ...this.#stepsFailed },
     };
   }

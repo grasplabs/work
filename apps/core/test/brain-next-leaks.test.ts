@@ -7,7 +7,14 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { appFor } from "../src/apps.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
-import { addInstructionFile, addSource, recallAs } from "../src/brain-next.ts";
+import {
+  addInstructionFile,
+  addSource,
+  eraseSource,
+  erasePerson,
+  recallAs,
+  workBrain,
+} from "../src/brain-next.ts";
 import type {
   InstructionFile,
   SourceReaders,
@@ -17,6 +24,7 @@ import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { BrainStore } from "../src/index.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { published } from "./apps.ts";
+import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import {
   coreProbes,
   instructionProbes,
@@ -661,6 +669,135 @@ describe(
         );
       }
       const prompted = await carrying(marker);
+
+      expect({ findings, prompted }).toStrictEqual({
+        findings: [],
+        prompted: [],
+      });
+    });
+
+    it("gives no surface anything erased, once the store is restored from a copy taken before the erasure", async () => {
+      await answeringProvider(() => {});
+      // The holder's own sources, through core's producers too, their
+      // instruction file, and a team's source: each erased, then a copy of
+      // the store from before the erasures comes back. Every surface is
+      // then probed as those who could read them before.
+      const [{ userId: holder }, { userId: teamMate }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const team = await newTeam(holder, teamMate);
+      const markers = {
+        "the holder's own source": markerWord(),
+        "a team's source": markerWord(),
+        "the holder's upload": markerWord(),
+        "the holder's chat turn": markerWord(),
+        "the holder's run": markerWord(),
+        "the holder's instruction file": markerWord(),
+      };
+      const {
+        "the holder's own source": ownMarker,
+        "a team's source": teamMarker,
+        "the holder's upload": uploadMarker,
+        "the holder's chat turn": chatMarker,
+        "the holder's run": runMarker,
+        "the holder's instruction file": fileMarker,
+      } = markers;
+      const sharedWord = `s${unique()}`;
+      const own = await add(`Salary ${sharedWord} ${ownMarker}`, {
+        kind: "owner",
+        personId: holder,
+      });
+      const teamSource = await add(`Minutes ${sharedWord} ${teamMarker}`, {
+        kind: "team",
+        teamId: team,
+      });
+      const upload: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+      const chat: SourceRef = { producer: "chat", id: crypto.randomUUID() };
+      const run: SourceRef = { producer: "run", id: crypto.randomUUID() };
+      await handOverUpload(env, {
+        uploadId: crypto.randomUUID(),
+        documentId: upload.id,
+        uploadedBy: holder,
+        sensitive: false,
+        text: `Contract ${sharedWord} ${uploadMarker}`,
+        stillCurrent: async () => await Promise.resolve(true),
+      });
+      await handOverChatTurn(env, {
+        chatId: chat.id,
+        answerId: 1,
+        personId: holder,
+        restricted: false,
+        said: [
+          { role: "user", text: `Asked ${sharedWord} ${chatMarker}` },
+          { role: "assistant", text: "Answered" },
+        ],
+      });
+      await handOverRun(env, {
+        runId: run.id,
+        principalId: holder,
+        restricted: false,
+        status: "completed",
+        readEnd: async () =>
+          await Promise.resolve({ result: { note: runMarker } }),
+      });
+      const holderFile: InstructionFile = { scope: "person", personId: holder };
+      await addInstructionFile(env, {
+        file: holderFile,
+        change: crypto.randomUUID(),
+        text: `Instructions ${sharedWord} ${fileMarker}`,
+      });
+      const backup = await copyOfStore();
+
+      // A chat and an upload deleted for good, a run past its retention,
+      // the team's source deleted, and then the holder erased.
+      await eraseSource(env, { source: chat, reason: "deleted" });
+      await eraseSource(env, { source: upload, reason: "deleted" });
+      await eraseSource(env, { source: run, reason: "retention" });
+      await eraseSource(env, { source: teamSource, reason: "deleted" });
+      await erasePerson(env, { personId: holder, reason: "person_erased" });
+      await workBrain(env, new Date());
+      await restoreStore(backup);
+
+      const erased = [own, teamSource, upload, chat, run].flatMap((source) =>
+        [1, 2].map((version) => ({ source, version }))
+      );
+      const asReader = (
+        personId: string,
+        hiddenInstructionFiles: InstructionFile[]
+      ): Probing => ({
+        personId,
+        reader: { person: personId, groups: [`team:${team}`] },
+        sharedWord,
+        unknownWord: `u${unique()}`,
+        markers: Object.values(markers),
+        hiddenVersions: erased,
+        hiddenInstructionFiles,
+        instructionGroups: ["company"],
+      });
+      const findings = [
+        // Their own file is theirs to write again, and what they write
+        // after an erasure is new: saving it is probed as the team-mate
+        // only, so the holder's pass finds their erased file if it came
+        // back, and nothing they wrote since.
+        ...(await findingsOf(
+          "the holder, after a restore",
+          asReader(holder, []),
+          markers,
+          {
+            among: surfaces.filter(
+              ([name]) => name !== "instructions saveInstructionFile"
+            ),
+          }
+        )),
+        ...(await findingsOf(
+          "a team-mate, after a restore",
+          asReader(teamMate, [holderFile]),
+          markers
+        )),
+      ];
+      const carried = await Promise.all(Object.values(markers).map(carrying));
+      const prompted = carried.flat();
 
       expect({ findings, prompted }).toStrictEqual({
         findings: [],

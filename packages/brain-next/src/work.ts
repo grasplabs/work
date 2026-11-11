@@ -1036,7 +1036,7 @@ const errorCodeOf = (kept: string | null): WorkErrorCode =>
 export const workOverview = (
   storage: DurableObjectStorage,
   state: WorkState
-): Omit<WorkOverview, "stepsFailed"> => {
+): Omit<WorkOverview, "stepsFailed" | "erasing"> => {
   const db = drizzle(storage);
   const waiting = db
     .select({
