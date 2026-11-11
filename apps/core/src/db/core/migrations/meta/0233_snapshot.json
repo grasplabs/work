@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "14268ff7-f05d-4eb7-8ed5-e847c49cd0e2",
-  "prevId": "1a7fcac5-a63d-4592-816e-c172631aabe1",
+  "id": "5d0dc9ff-fea6-4eea-b9a3-b889622b87bc",
+  "prevId": "554d08c8-a9f4-492a-b13f-eb41852284fb",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -659,151 +659,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "agent_wakes": {
-      "name": "agent_wakes",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cron": {
-          "name": "cron",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "time_zone": {
-          "name": "time_zone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "person_id": {
-          "name": "person_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "opening": {
-          "name": "opening",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "next_at": {
-          "name": "next_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "retry_at": {
-          "name": "retry_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_at": {
-          "name": "last_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_outcome": {
-          "name": "last_outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "made_by": {
-          "name": "made_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "made_at": {
-          "name": "made_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "changed_by": {
-          "name": "changed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "changed_at": {
-          "name": "changed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "agent_wakes_agent_idx": {
-          "name": "agent_wakes_agent_idx",
-          "columns": [
-            "agent_id"
-          ],
-          "isUnique": false
-        },
-        "agent_wakes_person_idx": {
-          "name": "agent_wakes_person_idx",
-          "columns": [
-            "person_id"
-          ],
-          "isUnique": false
-        },
-        "agent_wakes_next_idx": {
-          "name": "agent_wakes_next_idx",
-          "columns": [
-            "next_at"
-          ],
-          "isUnique": false,
-          "where": "\"agent_wakes\".\"next_at\" IS NOT NULL"
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "agents": {
       "name": "agents",
       "columns": {
@@ -819,13 +674,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "name_key": {
-          "name": "name_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "face": {
@@ -892,15 +740,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "agents_name_key_idx": {
-          "name": "agents_name_key_idx",
-          "columns": [
-            "name_key"
-          ],
-          "isUnique": true
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

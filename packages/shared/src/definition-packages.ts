@@ -90,7 +90,7 @@ export const definitionPackageSchema = z.strictObject({
      */
     files: filesSchema,
     /**
-     * The version's App definition (@grasp-os/runtime's definition.ts), which
+     * The version's App definition (@grasp-os/runtime's definition-types.ts), which
      * its config and schema were generated from: its tables, with their
      * stable IDs, access and permissions, as data. Its text hashes to
      * `definitionHash`. A developer's project needs none of it, and none

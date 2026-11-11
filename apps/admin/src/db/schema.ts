@@ -4,6 +4,7 @@
  * token that reaches client accounts lives in Secrets Store, never here
  * (threat model R17).
  */
+import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
 import {
   index,
   integer,
@@ -226,6 +227,16 @@ export const clients = sqliteTable(
      * are read each time (src/crm/attio.ts). Null until it is linked.
      */
     attioCompanyId: text("attio_company_id"),
+    /**
+     * The onboarding its company starts with, as staff chose it when they
+     * added it: the name of one of the flows staff start from
+     * (`flowPresetNames`, @grasp-os/shared/onboarding-flow). Every deploy
+     * gives it to core as `ONBOARDING_START`, which core reads once, as
+     * its onboarding is first kept; what the company goes through since
+     * is on its Flow page. Null for one added before this was kept, or
+     * with the whole onboarding.
+     */
+    startingFlow: text("starting_flow", { enum: flowPresetNames }),
     /** The release it stays on while pinned: promotions skip it. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),

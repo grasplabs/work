@@ -16,6 +16,39 @@ export function isRecord(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Whether a value is a JSON object: its prototype is `Object`'s or none, so
+ * not an array, a class instance, a function or an RPC stub.
+ */
+export const isPlainObject = (
+  value: unknown
+): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+/**
+ * `value` with every object and array in it frozen, frozen ones included,
+ * since a frozen object can hold one that isn't; a shared or cyclic value
+ * is walked once.
+ */
+export const deepFreeze = <Value>(
+  value: Value,
+  seen = new WeakSet<object>()
+): Value => {
+  if (typeof value === "object" && value !== null && !seen.has(value)) {
+    seen.add(value);
+    Object.freeze(value);
+    for (const entry of Object.values(value)) {
+      deepFreeze(entry, seen);
+    }
+  }
+  return value;
+};
+
 /** `record` without its keys whose value is undefined, as JSON leaves them out. */
 export const definedFields = (
   record: Readonly<Record<string, Json | undefined>>

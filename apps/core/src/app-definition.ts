@@ -37,7 +37,7 @@ import { z } from "zod";
 import { catalogOf, planSchemaChange } from "./schema-changes.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 
-// An App's definition (@grasp-os/runtime's definition.ts), what the App is,
+// An App's definition (@grasp-os/runtime's definition-types.ts), what the App is,
 // and the code generated among its files. The definition is no file:
 // each version holds it as metadata (apps.ts), a chat's draft its own
 // copy (workspace.ts). Every write of an App's files, a draft's and a

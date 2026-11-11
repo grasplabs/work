@@ -24,7 +24,7 @@ import {
   MAX_BLOBS_PER_RELEASE,
   MAX_READS_PER_RUN,
 } from "../src/releases/import.ts";
-import type { ReleaseStore } from "../src/releases/import.ts";
+import type { ImportStore } from "../src/releases/import.ts";
 import { channelReleases } from "../src/rollout/targets.ts";
 import worker from "../src/server.ts";
 import {
@@ -68,7 +68,7 @@ const inMinutes = (minutes: number): Date =>
 
 /** Runs an import, with the failures it logs kept out of the test output. */
 const runImport = async (
-  store: ReleaseStore = env.RELEASES,
+  store: ImportStore = env.RELEASES,
   options: { now?: Date } = {}
 ) => {
   const errors = vi.spyOn(console, "error").mockImplementation(() => {
@@ -84,8 +84,9 @@ const runImport = async (
 /** `env.RELEASES`, counting the reads of each key. */
 const countingStore = () => {
   const reads = new Map<string, number>();
-  const store: ReleaseStore = {
+  const store: ImportStore = {
     list: async (options) => await env.RELEASES.list(options),
+    head: async (key: string) => await env.RELEASES.head(key),
     get: async (key: string) => {
       reads.set(key, (reads.get(key) ?? 0) + 1);
       return await env.RELEASES.get(key);
@@ -177,7 +178,8 @@ describe("importing releases", () => {
     let arrived = 0;
     const { promise: barrier, resolve: bothArrived } =
       Promise.withResolvers<boolean>();
-    const store: ReleaseStore = {
+    const store: ImportStore = {
+      head: async (key: string) => await env.RELEASES.head(key),
       list: async (options) => await env.RELEASES.list(options),
       get: async (key: string) => {
         if (key === manifestKey(release.id)) {
@@ -287,6 +289,58 @@ describe("importing releases", () => {
     );
     await expect(releaseRow(sameSize.id)).resolves.toBeUndefined();
     await expect(releaseRow(resized.id)).resolves.toBeUndefined();
+  });
+
+  it("imports a release whose model files the bucket holds as CI stores them, never reading them whole", async () => {
+    const release = await buildRelease({
+      notes: "feat(core): a model",
+      modelFiles: { tokens: `tokens ${crypto.randomUUID()}` },
+    });
+    await putBlobs(release);
+    await putManifest(release);
+    const { store, reads } = countingStore();
+
+    const result = await runImport(store);
+
+    expect(result.imported).toContain(release.id);
+    for (const { r2Key } of release.manifest.modelFiles) {
+      expect(reads.get(r2Key)).toBeUndefined();
+    }
+  });
+
+  it("refuses a release whose model file is missing, has other bytes, or was stored without its SHA-256", async () => {
+    const tokens = `tokens ${crypto.randomUUID()}`;
+    const refused = await Promise.all(
+      ["missing", "other bytes", "no checksum"].map(
+        async (notes) =>
+          await buildRelease({
+            notes: `feat(core): ${notes}`,
+            modelFiles: { tokens: `${notes} ${tokens}` },
+          })
+      )
+    );
+    await Promise.all(refused.map(putBlobs));
+    const [missing, other, unchecked] = refused.map(
+      ({ manifest }) => manifest.modelFiles[0]?.r2Key ?? ""
+    );
+    await env.RELEASES.delete(missing ?? "");
+    // Other bytes of the same size, stored with their own SHA-256.
+    const replaced = sameSizeOther(`other bytes ${tokens}`);
+    await env.RELEASES.put(other ?? "", replaced, {
+      sha256: await sha256OfBytes(new TextEncoder().encode(replaced)),
+    });
+    await env.RELEASES.put(unchecked ?? "", `no checksum ${tokens}`);
+    await Promise.all(refused.map(putManifest));
+
+    const result = await runImport();
+
+    expect(result.failed).toStrictEqual(
+      expect.arrayContaining(refused.map(({ id }) => id))
+    );
+    for (const { id } of refused) {
+      // oxlint-disable-next-line no-await-in-loop -- three releases
+      await expect(releaseRow(id)).resolves.toBeUndefined();
+    }
   });
 
   it("refuses a release with a missing blob, and imports it once the blob is there", async () => {
@@ -440,7 +494,8 @@ CREATE TABLE t (id TEXT);`,
     let arrived = 0;
     const { promise: barrier, resolve: bothArrived } =
       Promise.withResolvers<boolean>();
-    const store: ReleaseStore = {
+    const store: ImportStore = {
+      head: async (key: string) => await env.RELEASES.head(key),
       list: async (options) => await env.RELEASES.list(options),
       get: async (key: string) => {
         if (key === manifestKey(broken)) {
@@ -631,7 +686,8 @@ CREATE TABLE t (id TEXT);`,
     const release = await publishRelease({ notes: "feat(core): paged" });
     const pages: string[] = [];
     // The real bucket, one release per page.
-    const store: ReleaseStore = {
+    const store: ImportStore = {
+      head: async (key: string) => await env.RELEASES.head(key),
       get: async (key: string) => await env.RELEASES.get(key),
       list: async (options) => {
         const page = await env.RELEASES.list({ ...options, limit: 1 });
@@ -650,7 +706,8 @@ CREATE TABLE t (id TEXT);`,
     const release = await publishRelease({ notes: "feat(core): then dies" });
     await db.delete(channels);
     // The bucket as far as this run sees it: only this release.
-    const store: ReleaseStore = {
+    const store: ImportStore = {
+      head: async (key: string) => await env.RELEASES.head(key),
       list: async (options) => {
         const page = await env.RELEASES.list(options);
         return {

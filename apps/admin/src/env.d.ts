@@ -15,6 +15,12 @@ interface __BaseEnv_Env {
    * Grasp's own Entra tenant, whose staff a client's staff window lets in
    * (src/deploy/context.ts, `graspStaffOf`). Unset, no window opens.
    */
+  /**
+   * Staging only, for testing: the providers whose platform features go to
+   * their usual host on every client (src/deploy/context.ts,
+   * `usualHostsOf`). Ignored on production.
+   */
+  PLATFORM_AI_USUAL_HOSTS?: string;
   STAFF_ENTRA_TENANT_ID?: string;
   /** The Entra object ids of the staff a window lets in, comma-separated. */
   STAFF_ENTRA_OIDS?: string;

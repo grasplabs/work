@@ -25,7 +25,7 @@ import { platformGrantOf } from "./resource-platform.ts";
 //   The chat is for, and spends the model budget of, the person the call
 //   acts for, as core resolved them, never anything App code sends.
 // - Another App's chats: guests.ts finds a chat only by the release's own
-//   App (`guest.not_found`, `resource.item_not_found` here).
+//   App (`guest.not_found`, `permission.item_not_found` here).
 // - A link that outlives the binding: a chat invited here records the
 //   binding's alias, and its link opens only while an active guests
 //   binding of that alias still names its permission (guests.ts,
@@ -42,28 +42,28 @@ const guestsContract = "grasp.guests@1";
 
 /**
  * `error`, a guest chats refusal, in the function host's words: input
- * that doesn't fit (`resource.invalid_args`), a chat the App has no such
- * (`resource.item_not_found`), as many open as it may
- * (`resource.limit_reached`, `open`), no model to chat with
- * (`resource.unavailable`). Anything else as it is: the function host
+ * that doesn't fit (`permission.invalid_args`), a chat the App has no such
+ * (`permission.item_not_found`), as many open as it may
+ * (`permission.limit_reached`, `open`), no model to chat with
+ * (`permission.unavailable`). Anything else as it is: the function host
  * allows only its own words through.
  */
 const inHostWords = (error: unknown): unknown => {
   const code = guestErrors.codeOf(error);
   if (code === "guest.invalid") {
-    return functionErrors.create("resource.invalid_args");
+    return functionErrors.create("permission.invalid_args");
   }
   if (code === "guest.not_found") {
-    return functionErrors.create("resource.item_not_found");
+    return functionErrors.create("permission.item_not_found");
   }
   if (code === "guest.too_many_open") {
-    return functionErrors.create("resource.limit_reached", { limit: "open" });
+    return functionErrors.create("permission.limit_reached", { limit: "open" });
   }
   if (code === "guest.no_model") {
-    return functionErrors.create("resource.unavailable");
+    return functionErrors.create("permission.unavailable");
   }
   if (isExpectedError(error) && error.code === "permission.person_inactive") {
-    return functionErrors.create("resource.unavailable");
+    return functionErrors.create("permission.unavailable");
   }
   return error;
 };
@@ -98,7 +98,7 @@ const inviteFor = async (
     caller.context.type !== "app" ||
     caller.context.appId !== caller.app
   ) {
-    throw functionErrors.create("resource.not_allowed");
+    throw functionErrors.create("permission.not_allowed");
   }
   return await inviteGuest(
     env,

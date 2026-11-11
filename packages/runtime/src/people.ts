@@ -53,7 +53,7 @@ export type TeamRef = Infer<typeof team>;
  * visitor (someone outside the organization the App was shared with)
  * holds none.
  */
-export const appRoles = ["builder", "user"] as const;
+const appRoles = ["builder", "user"] as const;
 
 const user = v.object({
   /**

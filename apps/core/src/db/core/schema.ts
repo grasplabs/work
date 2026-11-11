@@ -1013,7 +1013,7 @@ export const appVersions = sqliteTable(
      */
     code: text(),
     /**
-     * The version's App definition (@grasp-os/runtime's definition.ts), as its
+     * The version's App definition (@grasp-os/runtime's definition-types.ts), as its
      * text (`definitionText`): its name, tables with their stable IDs, access and
      * permissions, from which its `grasp.config.ts` and `server/schema.ts`
      * were generated as it was committed. Written once, never changed (a
@@ -5714,6 +5714,13 @@ export const modelUsage = sqliteTable(
     personId: text("person_id"),
     /** What asked: its trigger's type (`person`, `agent`, `workflow`, `system`). */
     triggerType: text("trigger_type").notNull(),
+    /**
+     * The agent that asked, when an agent did: what each of the company's
+     * agents used is counted by it. Null for every other trigger, and for
+     * rows written before agents were told apart, which were all the
+     * organization's one agent's.
+     */
+    agentId: text("agent_id"),
     /** The workflow it was made for: an App's, in its App, or an independent one (no App). */
     workflowAppId: text("workflow_app_id"),
     workflowId: text("workflow_id"),

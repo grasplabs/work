@@ -65,6 +65,12 @@ import { testBinding } from "./test-env.ts";
 
 const idp = mockIdp();
 
+/**
+ * A migration's statement that deletes rows: readD1Migrations keeps the
+ * comments before each statement.
+ */
+const deleteStatement = /^DELETE\b/mu;
+
 /** This release's built-ins, blueprints included. */
 const release = await loadBuiltinRelease();
 
@@ -1281,7 +1287,7 @@ describe("the built-in blueprints", () => {
     // already gone here.
     for (const { queries } of migrations) {
       for (const query of queries) {
-        if (query.trim().startsWith("DELETE")) {
+        if (deleteStatement.test(query)) {
           // oxlint-disable-next-line no-await-in-loop -- in order, as D1 applies them
           await env.DB.prepare(query).run();
         }

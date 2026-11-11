@@ -15,8 +15,8 @@ import type {
 import {
   httpActionSchemas,
   httpActions,
-  httpContract,
 } from "@grasp-os/shared/http-connections";
+import { httpContract } from "@grasp-os/shared/http-contract";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";

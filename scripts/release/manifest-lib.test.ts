@@ -91,6 +91,29 @@ describe("the release manifest", () => {
     ).toThrow(/jurisdiction/u);
   });
 
+  it("names no model files while none ships, though core binds their bucket", () => {
+    expect(
+      generateManifest({ ...info, modelFiles: [] }, fixture).modelFiles
+    ).toStrictEqual([]);
+  });
+
+  it("refuses model files no Worker binds a bucket for", async () => {
+    const [connect] = fixture;
+    const core = await fixtureBuild("core");
+    const unbound = {
+      ...core,
+      config: {
+        ...core.config,
+        r2_buckets: core.config.r2_buckets.filter(
+          ({ binding }) => binding !== "MODEL_FILES"
+        ),
+      },
+    };
+    expect(() => generateManifest(info, [connect ?? core, unbound])).toThrow(
+      /no Worker binds MODEL_FILES/u
+    );
+  });
+
   it("refuses a service binding to a Worker outside the release", async () => {
     const core = await fixtureBuild("core");
     expect(() => generateManifest(info, [core])).toThrow(/grasp-os-connect/u);

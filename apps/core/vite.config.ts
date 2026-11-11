@@ -1,10 +1,7 @@
 import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 
-import {
-  cloudflareTest,
-  readD1Migrations,
-} from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 
@@ -398,6 +395,9 @@ export default coreProject({
     // The Brain baseline's larger scale sizes, on request only:
     // vite.brain-scale.config.ts.
     "test/brain-scale-sizes.test.ts",
+    // How fast the Brain's store scans vector codes, on request only:
+    // vite.brain-vectors.config.ts.
+    "test/brain-next-vector-timings.test.ts",
     // The Brain baseline against a real model, which costs money, on
     // request only: vite.brain-model.config.ts.
     "test/brain-real-model.test.ts",
@@ -409,6 +409,8 @@ export default coreProject({
     "test/brain-baseline*.test.ts",
     "test/brain-recall-e02.test.ts",
     "test/brain-scale-*-of-*.test.ts",
+    // The Brain evaluation, on request only: vite.brain-eval.config.ts.
+    "test/brain-eval.test.ts",
     // Stephen's eval, in a group of its own: vite.stephen.config.ts.
     "test/stephen-eval*.test.ts",
     // Stephen's eval against a real model, which costs money, on request

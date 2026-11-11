@@ -1,6 +1,7 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { namePattern } from "./declaration.ts";
 import type { argsType } from "./function-references.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /**
  * A generated reference to one event a workflow the App declares:
@@ -45,7 +46,7 @@ const eventNamePattern =
  * resolves both aliases in the release it runs, and refuses a name it
  * doesn't declare.
  */
-export const eventName = (name: unknown): EventName | undefined => {
+const eventName = (name: unknown): EventName | undefined => {
   if (typeof name !== "string") {
     return undefined;
   }

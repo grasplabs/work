@@ -1,8 +1,7 @@
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 
 import { isOverBytes } from "./declaration.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { FrozenJson } from "./value-descriptor.ts";
 
 // An App's answers (`app({ answers })`): a value for the records that lack

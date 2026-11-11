@@ -20,6 +20,7 @@ export { WorkflowsApi } from "./agent-workflows.ts";
 export { Builtins } from "./builtins.ts";
 export { Onboarding } from "./onboarding/store.ts";
 export { DataStore } from "./data-store.ts";
+export { Embedder } from "./embedder.ts";
 export { AppTail } from "./server-logs.ts";
 export { ConnectionBinding } from "./bindings.ts";
 export { CollectionBinding } from "./knowledge/binding.ts";
@@ -27,6 +28,9 @@ export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 export { ActionInvocation } from "./action-invocation.ts";
 export { ChatState } from "@grasp-os/chat/state";
 export { ChatSession } from "./chat-session.ts";
+// The Brain's store, registered here: the one import of it in core
+// (src/brain-next.ts reaches it through its contract).
+export { BrainStore } from "@grasp-os/brain-next/store";
 export { WorkflowRuns } from "./workflows/run-object.ts";
 export { Workspace } from "./workspace.ts";
 

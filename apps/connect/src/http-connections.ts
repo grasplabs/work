@@ -10,7 +10,6 @@ import type {
 import {
   httpActionSchemas,
   httpActionsOf,
-  httpContract,
   httpGetInputSchema,
   httpInputProperties,
   httpLimits,
@@ -28,6 +27,7 @@ import type {
   HttpConnectionSummary,
   HttpMethod,
 } from "@grasp-os/shared/http-connections";
+import { httpContract } from "@grasp-os/shared/http-contract";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";

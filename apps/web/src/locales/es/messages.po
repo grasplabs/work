@@ -698,6 +698,10 @@ msgstr "{minutes, plural, one {Guardado hace # min} other {Guardado hace # min}}
 msgid "{minutes}m {rest}s"
 msgstr "{minutes} min {rest} s"
 
+#: src/settings/ai-providers.tsx
+msgid "{model}. Runs at: {whereItRuns}"
+msgstr "{model}. Se ejecuta en: {whereItRuns}"
+
 #: src/brain/brain-atlas.ts
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# de ellos cambió después, en otra conversación con la dirección.} other {# de ellos cambiaron después, en otras conversaciones con la dirección.}}"
@@ -5302,6 +5306,14 @@ msgstr "Todo lo que leo y cada conversación que mantengo funciona con un modelo
 msgid "Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Yours is ready."
 msgstr "Todo lo que leo y cada conversación que mantengo funciona con un modelo de IA, con la clave propia de tu organización. La tuya está lista."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Everything I read and every conversation I have runs on an AI model. Use Grasp’s AI, or your organization’s own key with a model you choose."
+msgstr "Todo lo que leo y cada conversación que mantengo funciona con un modelo de IA. Usa la IA de Grasp, o la clave propia de tu organización con el modelo que elijas."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Everything I read and every conversation I have runs on an AI model. Yours is Grasp’s AI, and it is ready."
+msgstr "Todo lo que leo y cada conversación que mantengo funciona con un modelo de IA. El tuyo es la IA de Grasp, y está lista."
+
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Todo lo que me has contado se elimina para siempre y no se puede recuperar. ¿Solo hay algo mal? Corrígelo mejor con «Añadir algo»."
@@ -6090,6 +6102,14 @@ msgstr "Grasp se actualizó mientras esta página estaba abierta. Vuelve a inten
 #: src/settings/ai-providers.tsx
 msgid "Grasp's AI calls models with your organization's own provider keys. Keys are stored sealed: nobody can read one back, only its last four characters."
 msgstr "La IA de Grasp llama a los modelos con las claves de proveedor propias de tu organización. Las claves se guardan selladas: nadie puede volver a leerlas, solo sus cuatro últimos caracteres."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp’s AI isn’t available here any more: AI is off until you switch to your own keys."
+msgstr "La IA de Grasp ya no está disponible aquí: la IA está desactivada hasta que cambies a tus propias claves."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp’s AI or your own keys"
+msgstr "La IA de Grasp o tus propias claves"
 
 #: src/settings/ai-providers.tsx
 msgid "Grasp's AI uses the default model. When its provider refuses a call before anything was billed, the fallbacks are tried in order."
@@ -8377,6 +8397,10 @@ msgstr "Sin permisos."
 msgid "No projects yet"
 msgstr "Aún no hay proyectos"
 
+#: src/settings/ai-providers.tsx
+msgid "No provider of your own is connected: switching to your own keys leaves AI off until you add one."
+msgstr "No hay ningún proveedor propio conectado: si cambias a tus propias claves, la IA queda desactivada hasta que añadas uno."
+
 #: src/apps/indexes-view.tsx
 msgid "No query uses it yet"
 msgstr "Ninguna consulta lo usa aún"
@@ -8942,6 +8966,10 @@ msgstr "No hay nada pendiente de lo que pidió esta aplicación."
 msgid "Nothing to make better right now."
 msgstr "Ahora mismo no hay nada que mejorar."
 
+#: src/onboarding/ai-step.tsx
+msgid "Nothing to set up. It runs on {model}, and you pay for what your company uses."
+msgstr "Nada que configurar. Funciona con {model}, y pagas por lo que usa tu empresa."
+
 #: src/dashboard/custom-widget.tsx
 msgid "Nothing to show yet."
 msgstr "Aún no hay nada que mostrar."
@@ -9088,6 +9116,10 @@ msgstr "En {where}"
 #: src/onboarding/send-plan-form.tsx
 msgid "On a later day"
 msgstr "Un día más adelante"
+
+#: src/onboarding/ai-step.tsx
+msgid "On Grasp’s AI: {grasp}"
+msgstr "Con la IA de Grasp: {grasp}"
 
 #: src/settings/stephen-settings.tsx
 msgid "On in {name}"
@@ -11201,6 +11233,10 @@ msgstr "ejecuciones a la semana de estos flujos de trabajo"
 msgid "Runs at: {whereItRuns}"
 msgstr "Funciona en: {whereItRuns}"
 
+#: src/onboarding/ai-step.tsx
+msgid "Runs at: {whereItRuns}. A monthly limit applies: once it is reached, AI stops until the next month."
+msgstr "Se ejecuta en: {whereItRuns}. Se aplica un límite mensual: cuando se alcanza, la IA se detiene hasta el mes siguiente."
+
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
 msgstr "Ejecuciones por el día en que empezaron"
@@ -12574,6 +12610,14 @@ msgstr "Desactiva un equipo y nadie en él recibe un enlace."
 msgid "Switch now"
 msgstr "Cambiar ahora"
 
+#: src/settings/ai-providers.tsx
+msgid "Switch to Grasp’s AI"
+msgstr "Cambiar a la IA de Grasp"
+
+#: src/settings/ai-providers.tsx
+msgid "Switch to your own keys"
+msgstr "Cambiar a tus propias claves"
+
 #: src/frame/person-menu.tsx
 msgid "System"
 msgstr "Sistema"
@@ -13328,6 +13372,10 @@ msgstr "el proveedor rechazó la clave"
 msgid "the provider was too busy and asked to wait"
 msgstr "el proveedor estaba demasiado ocupado y pidió esperar"
 
+#: src/settings/ai-providers.tsx
+msgid "The providers and models below."
+msgstr "Los proveedores y modelos de abajo."
+
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
 msgstr "Lo más rápido es conectar tu inicio de sesión de {signIn}. Solo veré nombres, equipos y funciones. Tu correo, tus chats y tus calendarios siguen cerrados."
@@ -13846,9 +13894,17 @@ msgstr "Este mes unas {ahead} de las {of} de tu plan"
 msgid "This month so far"
 msgstr "Este mes hasta ahora"
 
+#: src/settings/ai-providers.tsx
+msgid "This month: {spent} of {limit}. Once the limit is reached, AI stops until the next month."
+msgstr "Este mes: {spent} de {limit}. Cuando se alcanza el límite, la IA se detiene hasta el mes siguiente."
+
 #: src/chat/failure.ts
 msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month."
 msgstr "Se ha alcanzado el límite de este mes para la IA de Grasp. Tu administrador puede cambiar a la clave propia de tu organización en Ajustes › Proveedores de IA, o la IA de Grasp vuelve el mes que viene."
+
+#: src/settings/ai-providers.tsx
+msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
+msgstr "Se ha alcanzado el límite de {limit} de este mes: la IA está detenida hasta el mes que viene, o hasta que cambies a tus propias claves."
 
 #: src/chat/cited-note.tsx
 msgid "This note can't be opened"
@@ -14378,6 +14434,10 @@ msgstr "Elegir otra plataforma"
 msgid "Use capital letters, digits and underscores, starting with a letter, and not a name the platform uses itself."
 msgstr "Use mayúsculas, dígitos y guiones bajos, empezando por una letra, y no un nombre que use la propia plataforma."
 
+#: src/onboarding/ai-step.tsx
+msgid "Use Grasp’s AI"
+msgstr "Usar la IA de Grasp"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Use the chat, Knowledge and the Apps shared with them"
 msgstr "Usar el chat, Conocimiento y las aplicaciones compartidas con ellos"
@@ -14389,6 +14449,10 @@ msgstr "Usar el predeterminado"
 #: src/routes/sign-in.tsx
 msgid "Use your organization’s account to go on."
 msgstr "Usa la cuenta de tu organización para continuar."
+
+#: src/onboarding/ai-step.tsx
+msgid "Use your own key"
+msgstr "Usar tu propia clave"
 
 #: src/chat/thread.tsx
 msgid "Used {tool}"
@@ -15377,6 +15441,10 @@ msgstr "Dónde, por ejemplo Dropbox"
 msgid "Whether people from Grasp can sign in to help with this workspace. They come in only while a window your organization opened lasts."
 msgstr "Si las personas de Grasp pueden iniciar sesión para ayudar con este espacio de trabajo. Solo entran mientras dure un periodo que tu organización abrió."
 
+#: src/onboarding/ai-step.tsx
+msgid "Which AI"
+msgstr "Qué IA"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Which AI should I think with?"
 msgstr "¿Con qué IA debo pensar?"
@@ -15977,6 +16045,14 @@ msgstr "Tu proveedor de IA rechaza tu clave. Pide a tu administrador que la revi
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
 msgstr "Tu proveedor de IA no responde. Suele ser una caída por su parte; inténtalo de nuevo más tarde."
 
+#: src/settings/ai-providers.tsx
+msgid "Your AI runs on Grasp’s AI"
+msgstr "Tu IA funciona con la IA de Grasp"
+
+#: src/settings/ai-providers.tsx
+msgid "Your AI runs on your own keys"
+msgstr "Tu IA funciona con tus propias claves"
+
 #: src/chat/asked-questions.tsx
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
@@ -16060,6 +16136,18 @@ msgstr "Tu organización lo usa mediante los permisos que concedes."
 #: src/routes/_shell.settings.security.tsx
 msgid "Your organization’s account"
 msgstr "La cuenta de tu organización"
+
+#: src/settings/ai-providers.tsx
+msgid "Your organization’s AI runs on Grasp’s AI, which you pay for by use, or on your own provider keys below."
+msgstr "La IA de tu organización funciona con la IA de Grasp, que pagas según el uso, o con tus propias claves de proveedor, abajo."
+
+#: src/settings/ai-providers.tsx
+msgid "Your organization’s own provider keys, for when its AI runs on them. Keys are stored sealed: nobody can read one back, only its last four characters."
+msgstr "Las claves de proveedor propias de tu organización, para cuando su IA funcione con ellas. Las claves se guardan selladas: nadie puede volver a leerlas, solo sus cuatro últimos caracteres."
+
+#: src/onboarding/ai-step.tsx
+msgid "Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly."
+msgstr "Tu propio contrato con Anthropic, OpenAI, Mistral u otro proveedor. Les pagas directamente."
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."

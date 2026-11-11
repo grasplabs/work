@@ -107,7 +107,7 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
         at: where,
       })),
     }).toStrictEqual({
-      consulted: "resource.unavailable",
+      consulted: "permission.unavailable",
       broken: "internal.unexpected",
       seen: true,
       problems: [{ source: "server", at: "notes.broken" }],

@@ -3,10 +3,7 @@
   "compilerOptions": {
     // The Brain runs in Workers: R2, D1 and the scheduler are its globals;
     // its tests run in workerd.
-    "types": [
-      "@cloudflare/workers-types",
-      "@cloudflare/vitest-pool-workers/types"
-    ]
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
   "include": ["src", "test", "drizzle.config.ts", "vite.config.ts"]
 }

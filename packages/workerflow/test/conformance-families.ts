@@ -86,8 +86,9 @@ export const discrepancies = {
   "attempt-timeout-name": {
     family: "retry-policy",
     verdict: "unresolved",
-    workerflow: "a timed-out attempt's error is named WorkflowTimeoutError",
-    reference: "named Error, with the same message",
+    workerflow:
+      "a timed-out attempt's error is named WorkflowTimeoutError, its message unprefixed",
+    reference: 'named Error, its message prefixed "WorkflowTimeoutError: "',
     resolution: toOracle,
   },
   "caught-non-retryable": {
@@ -114,8 +115,9 @@ export const discrepancies = {
   "wait-timeout-name": {
     family: "events",
     verdict: "unresolved",
-    workerflow: "a wait's timeout is named WorkflowTimeoutError",
-    reference: "named Error, with the same message",
+    workerflow:
+      "a wait's timeout is named WorkflowTimeoutError, its message unprefixed",
+    reference: 'named Error, its message prefixed "WorkflowTimeoutError: "',
     resolution: toOracle,
   },
   "event-type-rule": {

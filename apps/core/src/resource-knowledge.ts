@@ -290,7 +290,7 @@ const readBound = async (
     ({ collectionId }) => collectionId === located?.collectionId
   );
   if (binding === undefined) {
-    throw functionErrors.create("resource.item_not_found");
+    throw functionErrors.create("permission.item_not_found");
   }
   try {
     const document = await readAsDelegate(
@@ -304,7 +304,7 @@ const readBound = async (
     return { title: document.title, text: document.text };
   } catch (error) {
     if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
-      throw functionErrors.create("resource.item_not_found");
+      throw functionErrors.create("permission.item_not_found");
     }
     throw error;
   }
@@ -361,10 +361,10 @@ const readableOf = async (
 const asFunctionError = (error: unknown): unknown => {
   const code = brainErrors.codeOf(error);
   if (code === "brain.denied") {
-    return functionErrors.create("resource.unavailable");
+    return functionErrors.create("permission.unavailable");
   }
   if (code === "brain.invalid" || code === "brain.not_found") {
-    return functionErrors.create("resource.invalid_args");
+    return functionErrors.create("permission.invalid_args");
   }
   return error;
 };
@@ -470,7 +470,7 @@ const readSkillBound = async (
     return skill;
   } catch (error) {
     if (brainErrors.codeOf(error) === "brain.not_found") {
-      throw functionErrors.create("resource.item_not_found");
+      throw functionErrors.create("permission.item_not_found");
     }
     throw asFunctionError(error);
   }

@@ -87,9 +87,9 @@ describe("splitting the test files between shards", () => {
   });
 
   it("gives the shards left over to the group whose shards would end last", () => {
-    const groups = splitIntoShards(suite, 6).map((shard) => shard[0]?.group);
+    const groups = splitIntoShards(suite, 5).map((shard) => shard[0]?.group);
 
-    expect(groups).toStrictEqual([0, 0, 0, 0, 1, 2]);
+    expect(groups).toStrictEqual([0, 0, 0, 1, 2]);
   });
 
   it("gives a shard left over to a group it shortens, not to one its longest file holds up", () => {
@@ -114,13 +114,21 @@ describe("splitting the test files between shards", () => {
   });
 
   it("leaves empty the shards no group ends sooner with", () => {
-    // Two at once on a runner: three shards end with the longest file.
-    const files = Array.from({ length: 6 }, (_, index) =>
+    // As many at once as a runner works through: on three shards each
+    // ends with its longest file, and more end no sooner.
+    const atOnce = Math.floor(concurrentFiles);
+    const files = Array.from({ length: 3 * atOnce }, (_, index) =>
       file(`core ${index}`, 100)
     );
     const shards = splitIntoShards(files, 5);
 
-    expect(shards.map((shard) => shard.length)).toStrictEqual([2, 2, 2, 0, 0]);
+    expect(shards.map((shard) => shard.length)).toStrictEqual([
+      atOnce,
+      atOnce,
+      atOnce,
+      0,
+      0,
+    ]);
   });
 
   it("runs the files that install offline from pnpm's store in the first shard, whatever their time", () => {
@@ -230,6 +238,24 @@ describe("splitting the test files between shards", () => {
     expect(shardSeconds([file("core long", 300), ...builds])).toBe(
       2 * projectStartSeconds + 300 + 180
     );
+  });
+
+  it("gives a shard left over to a group of core's before one that ends a little later on paper, as core's runtime starts slower", () => {
+    const brain = [
+      file("@grasp-os/core:brain a", 60, { group: 3, serial: true }),
+      file("@grasp-os/core:brain b", 60, { group: 3, serial: true }),
+    ];
+    const builds = [
+      file("compiler a", 70, { group: 5, serial: true }),
+      file("compiler b", 70, { group: 5, serial: true }),
+    ];
+    const groups = splitIntoShards([...brain, ...builds], 3).map(
+      (shard) => shard[0]?.group
+    );
+
+    // 120 s of the brain's files and 140 s of builds: the brain's start
+    // makes it the later.
+    expect(groups).toStrictEqual([3, 3, 5]);
   });
 
   it("adds a shard's projects up, as Vitest starts each once the one before has ended", () => {

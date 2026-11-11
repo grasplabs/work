@@ -1,5 +1,6 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import type { WorkflowBindingExtras } from "./bound-workflows.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /** What a sealed release's contracts can't be: anything but what was sealed. */
 const unsealed = (what: string): never => {

@@ -1,9 +1,10 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { readRejection } from "./call-answers.ts";
 import { clientError, issueDetails, withReceiptLink } from "./client-error.ts";
 import type { ClientInternals } from "./client-internals.ts";
 import type { DecisionTransport } from "./client-transport.ts";
 import { fences } from "./refusals.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 import type { ReadWorkflow } from "./workflow-reference-read.ts";
 

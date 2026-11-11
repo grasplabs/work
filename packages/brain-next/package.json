@@ -1,0 +1,23 @@
+{
+  "name": "@grasp-os/brain-next",
+  "private": true,
+  "description": "The Brain, rebuilt: the company's memory as a Durable Object store inside core's Worker, reached only through its contract",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./contract": "./src/contract.ts",
+    "./store": "./src/store.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "drizzle-kit": "catalog:"
+  }
+}

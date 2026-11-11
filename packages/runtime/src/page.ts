@@ -9,21 +9,16 @@
 // exported here: refresh hooks into React as it loads, which no page
 // outside a preview, and no console, may have.
 
-export {
-  bridge,
-  bridgeTransport,
-  reportProblem,
-  routeBy,
-  runPage,
-} from "./page-runtime.ts";
+export { bridge, bridgeTransport } from "./page-bridge.ts";
 export type {
   PageBridge,
-  PageHooks,
-  PageStart,
   PreviewApplied,
   PreviewLoad,
   Theme,
-} from "./page-runtime.ts";
+} from "./page-bridge.ts";
+export { reportProblem } from "./page-problems.ts";
+export { routeBy, runPage } from "./page-runtime.ts";
+export type { PageHooks, PageStart } from "./page-runtime.ts";
 export { GraspClient } from "./client-core.ts";
 export { GraspError } from "./client-error.ts";
 export type { ErrorCategory } from "./client-error.ts";

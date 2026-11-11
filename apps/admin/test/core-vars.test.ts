@@ -121,4 +121,21 @@ describe("a hosted client's sign-in, in relay mode", () => {
 
     expect(refusal()).toBe("sign_in_incomplete");
   });
+
+  it("names the onboarding its company starts with, only where staff chose one", () => {
+    const inputs = {
+      clientId: "acme",
+      signIn: JSON.stringify(signIn),
+      domain,
+      apps: signInApps(env),
+    };
+    expect({
+      chosen: derivedCoreConfig({ ...inputs, startingFlow: "setup" })
+        .ONBOARDING_START,
+      whole: "ONBOARDING_START" in derivedCoreConfig(inputs),
+      none:
+        "ONBOARDING_START" in
+        derivedCoreConfig({ ...inputs, startingFlow: null }),
+    }).toStrictEqual({ chosen: "setup", whole: false, none: false });
+  });
 });

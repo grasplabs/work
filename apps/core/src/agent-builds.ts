@@ -23,6 +23,7 @@ import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { DefinitionPlan } from "@grasp-os/shared/data-model";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { functionErrors } from "@grasp-os/shared/functions";
+import { httpContract } from "@grasp-os/shared/http-contract";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ServerLog } from "@grasp-os/shared/pages";
@@ -1901,7 +1902,7 @@ const buildDeclaration = `/**
  * and methods it allows; its credential is connect's and never yours).
  * Never write a URL, key or token into code: add it to the App's
  * permissions (\`addPermission\` with
- * \`permission.connection("billing", { contract: "http.request@1", actions: ["get", "send"] })\`:
+ * \`permission.connection("billing", { contract: "${httpContract}", actions: ["get", "send"] })\`:
  * only the actions you use; \`get\` reads, \`send\` changes), and from
  * an action call \`await ctx.connections.billing.fetch("/v1/invoices?status=open")\` or
  * \`fetch("/v1/invoices", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(invoice) })\`:
@@ -2000,7 +2001,7 @@ build: {
    * path (\`"notes.create"\`) and \`args\` its input object. It runs on the
    * draft sealed as a release, on a store of its own, which keeps what
    * calls write until the next \`env.build.write\` empties it, with no
-   * connections, Knowledge or models (\`resource.unavailable\`); what it
+   * connections, Knowledge or models (\`permission.unavailable\`); what it
    * wrote with \`console\`, in the next proposal's \`check.preview.logs\`. A failure
    * the draft's to fix comes back as \`ok: false\`: a path that names none
    * of its functions, code that doesn't seal (\`message\` names why: each
@@ -2031,8 +2032,8 @@ build: {
    * but a \`warning\` (React's development warnings); \`check.preview.seen\` is
    * false when nobody has the preview open, so its pages weren't run:
    * say so, or \`call\` the server yourself. A preview reaches nothing
-   * outside it: a function's resource call (a connection,
-   * Knowledge, a model) rejects with \`resource.unavailable\`, and a
+   * outside it: a function's call through a permission (a connection,
+   * Knowledge, a model) rejects with \`permission.unavailable\`, and a
    * page's workflow run with \`app.preview_side_effect\`. Handle either
    * as a failed call, as a page must live.
    * Once \`version\` is set, it is proposed: don't propose it again. When

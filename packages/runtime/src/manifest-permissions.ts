@@ -2,10 +2,10 @@ import type { AppManifest } from "./app-types.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 
 /** A permission's kind, as a manifest files it (`~permission`). */
-export type AppPermissionKind = AppPermission["~permission"];
+type AppPermissionKind = AppPermission["~permission"];
 
 /** The permission of kind `Kind`. */
-export type PermissionOfKind<Kind extends AppPermissionKind> = Extract<
+type PermissionOfKind<Kind extends AppPermissionKind> = Extract<
   AppPermission,
   { readonly "~permission": Kind }
 >;
