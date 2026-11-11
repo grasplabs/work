@@ -677,6 +677,57 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     await expect(add(most + 1)).rejects.toThrow(/as indexed/u);
   });
 
+  it("refuses half a surrogate pair anywhere, so two strings never become one, and gives back astral text as given", async () => {
+    const reader = await person();
+    const source = newSource();
+    const change = newChange();
+    // Encoded, the lone half becomes U+FFFD: the two would be one file.
+    const lone = "note \uD800";
+    const replaced = "note �";
+    const astral = "Brain 🧠 and 𝔸 𝔹, as given";
+    const add = async (
+      text: string,
+      on: SourceRef = source,
+      key: string = change
+    ) =>
+      await addSource(env, {
+        source: on,
+        change: key,
+        text,
+        readers: owner(reader),
+      });
+
+    const refusals = [
+      add(lone),
+      add("text", { producer: "upload", id: "id \uDC00" }),
+      add("text", newSource(), "change \uD800"),
+      recallAs(env, reader, "question \uD800"),
+      readSourceVersionAs(env, reader, {
+        source: { producer: "upload", id: "id \uDC00" },
+        version: 1,
+      }),
+    ];
+    for (const refusal of refusals) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await expect(refusal).rejects.toThrow(refused);
+    }
+    // Nothing was kept of the refused text: its change is a first add.
+    const first = await add(replaced);
+    await expect(add(lone)).rejects.toThrow(refused);
+    const astralSource = newSource();
+    await add(astral, astralSource, newChange());
+
+    expect({
+      first,
+      replaced: await historyAs(reader, source, 1),
+      astral: await historyAs(reader, astralSource, 1),
+    }).toStrictEqual({
+      first: { source, version: 1 },
+      replaced,
+      astral,
+    });
+  });
+
   it("refuses a source it can't name or text with nothing in it, and stores nothing", async () => {
     const reader = await person();
     const secret = word();

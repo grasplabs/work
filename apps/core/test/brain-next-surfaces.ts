@@ -395,6 +395,11 @@ export const coreProbes = {
         missingSource(),
         `${markers.join("\n")}\u0000`
       ),
+      await add(
+        "the markers with half a surrogate pair",
+        someoneElse,
+        `${text}\uD800`
+      ),
       ...(await refusedChange(markers)),
       ...(await otherKindOf(hiddenVersions)),
     ];

@@ -32,7 +32,21 @@ export const recallLimit = 10;
 /** Most characters of a source's identity, and of a change's key. */
 export const sourceIdMaxLength = 256;
 
-const principalSchema = z.string().min(1).max(principalMaxLength);
+/**
+ * A string as the Brain takes it: well-formed, no half of a surrogate pair
+ * on its own. Every string the Brain hashes, compares or keeps as bytes is
+ * one: encoding turns a lone half into U+FFFD, so two strings would become
+ * one file, one key or one name, and what is read back would not be what
+ * was given. Checked first, before anything encodes it; the host checks
+ * with the same rule.
+ */
+export const wellFormedString = () =>
+  z.string().refine((value) => value.isWellFormed(), {
+    message: "Holds an unpaired surrogate",
+    abort: true,
+  });
+
+const principalSchema = wellFormedString().min(1).max(principalMaxLength);
 
 const encoder = new TextEncoder();
 
@@ -45,7 +59,7 @@ const byteLengthOf = (text: string): number => encoder.encode(text).byteLength;
  * added under the same identity. The host keeps one producer's sources
  * apart from another's in how it names them.
  */
-export const sourceIdSchema = z.string().min(1).max(sourceIdMaxLength);
+export const sourceIdSchema = wellFormedString().min(1).max(sourceIdMaxLength);
 export type SourceId = z.infer<typeof sourceIdSchema>;
 
 /**
@@ -53,7 +67,7 @@ export type SourceId = z.infer<typeof sourceIdSchema>;
  * revision, a message id, or an id minted before the first try. Unique per
  * source: every retry of that change carries it.
  */
-export const changeKeySchema = z.string().min(1).max(sourceIdMaxLength);
+export const changeKeySchema = wellFormedString().min(1).max(sourceIdMaxLength);
 
 /** A version of a source: 1 for its first, counting up. */
 export const versionSchema = z.int().positive();
@@ -77,8 +91,7 @@ export type Access = z.infer<typeof accessSchema>;
 export const newSourceSchema = z.strictObject({
   source: sourceIdSchema,
   change: changeKeySchema,
-  text: z
-    .string()
+  text: wellFormedString()
     // A text of whitespace alone has no passage to keep or find.
     .regex(/\S/u, { message: "Holds no text" })
     .refine((text) => byteLengthOf(text) <= sourceTextMaxBytes, {
@@ -107,7 +120,7 @@ export type Reader = z.infer<typeof readerSchema>;
 
 /** A recall: a question, in the reader's words, and the reader. */
 export const recallRequestSchema = z.strictObject({
-  question: z.string().max(questionMaxLength),
+  question: wellFormedString().max(questionMaxLength),
   reader: readerSchema,
 });
 export type RecallRequest = z.infer<typeof recallRequestSchema>;

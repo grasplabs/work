@@ -2,6 +2,7 @@ import {
   brainOf,
   principalMaxLength,
   sourceIdMaxLength,
+  wellFormedString,
 } from "@grasp-os/brain-next/contract";
 import type {
   Access,
@@ -31,14 +32,15 @@ import { inJurisdiction } from "./durable-objects.ts";
 // Every argument is checked here, strictly, before anything is named for
 // the Brain: an empty or missing ID would otherwise become a principal
 // ("team:", "team:undefined") the Brain can't tell from a real one, and
-// a source nobody can reach would be added without a word.
+// a source nobody can reach would be added without a word. Every string is
+// well-formed (the Brain's own rule, `wellFormedString`), so no two become
+// one once encoded.
 
 /** A team's group name starts with this; the rest is the team's ID. */
 const teamPrefix = "team:";
 
 /** A person's or a team's ID, as core passes it: never empty. */
-const idSchema = z
-  .string()
+const idSchema = wellFormedString()
   .min(1)
   .max(principalMaxLength - teamPrefix.length);
 
@@ -93,8 +95,7 @@ const controlCharacters = /\p{Cc}/u;
 
 /** An id or key from a producer: some characters, none of them control. */
 const producerIdSchema = (most: number) =>
-  z
-    .string()
+  wellFormedString()
     .min(1)
     .max(most)
     .refine((id) => !controlCharacters.test(id), {
@@ -136,7 +137,7 @@ const changeSchema = producerIdSchema(sourceIdMaxLength);
 const newSourceSchema = z.strictObject({
   source: sourceRefSchema,
   change: changeSchema,
-  text: z.string(),
+  text: wellFormedString(),
   readers: sourceReadersSchema,
 });
 
