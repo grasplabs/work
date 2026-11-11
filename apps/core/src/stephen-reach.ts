@@ -86,7 +86,7 @@ const narrowingOf = <Kept extends string>(
   row.who === kept ? { who: kept } : (audienceOf(row) ?? off);
 
 /** Refuses a change by anyone but the company's own admins. */
-const requireCompanyAdmin = (identity: Identity): void => {
+export const requireCompanyAdmin = (identity: Identity): void => {
   requireAdmin(identity);
   if (identity.staff) {
     throw roleErrors.create("role.forbidden");
@@ -94,7 +94,10 @@ const requireCompanyAdmin = (identity: Identity): void => {
 };
 
 /** Refuses teams the company doesn't have. */
-const requireKnownTeams = async (env: Env, stored: string): Promise<void> => {
+export const requireKnownTeams = async (
+  env: Env,
+  stored: string
+): Promise<void> => {
   const teamIds = storedTeamsSchema.parse(JSON.parse(stored));
   if (teamIds.length === 0) {
     return;
@@ -109,7 +112,7 @@ const requireKnownTeams = async (env: Env, stored: string): Promise<void> => {
 };
 
 /** An audience as stored, `kept` (`asStephen`, `asClass`) as it is. */
-const storedNarrowing = (
+export const storedNarrowing = (
   audience: ToolClassAudience | { who: string }
 ): { who: string; teams: string } => {
   const parsed = toolClassAudienceSchema.safeParse(audience);
@@ -119,7 +122,7 @@ const storedNarrowing = (
 };
 
 /** Each change's teams, as an audit event's flat detail. */
-const teamsDetail = (stored: string): Record<string, string> =>
+export const teamsDetail = (stored: string): Record<string, string> =>
   Object.fromEntries(
     storedTeamsSchema
       .parse(JSON.parse(stored))

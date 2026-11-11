@@ -78,6 +78,14 @@ const typeRules: readonly {
   { action: "connection.app_class.changed", type: "config" },
   { action: "stephen.reach.changed", type: "config" },
   { action: "stephen.place.changed", type: "config" },
+  // An admin making or changing one of the company's agents, pausing it
+  // or turning it back on, and saying whom it reaches and for whom it has
+  // a class of tools (core's src/agent-builder.ts).
+  { action: "agent.made", type: "config" },
+  { action: "agent.changed", type: "config" },
+  { action: "agent.paused", type: "config" },
+  { action: "agent.reach.changed", type: "config" },
+  { action: "agent.class.changed", type: "config" },
   // An admin pointing Stephen at a shared mailbox, and for whom.
   { action: "connection.mailbox.pointed", type: "config" },
   // An admin pointing Stephen at a company app, and for whom.

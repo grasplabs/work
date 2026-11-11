@@ -12,6 +12,12 @@ export const agentErrors = defineErrorFamily({
     "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
   "agent.not_for_you":
     "This agent isn't set up to answer you here. An admin decides who may use it, and where.",
+  // Making and changing the company's agents (agents.ts).
+  "agent.record_invalid": "That isn't an agent's name, job or instructions.",
+  "agent.unknown": "The company has no such agent.",
+  "agent.name_taken": "Another agent already has that name.",
+  "agent.settings_elsewhere":
+    "Who reaches the company's first agent, and what it may do, is set in Settings › Stephen.",
   "agent.unattended":
     "Nobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
   "agent.busy":

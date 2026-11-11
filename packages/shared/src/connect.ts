@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AgentsApi } from "./agents.ts";
 import type { AiProviderConnectApi } from "./ai-providers.ts";
 import type { WebhookOutcome, WebhookPost } from "./app-webhooks.ts";
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
@@ -600,7 +601,7 @@ export const revocationsListed = 200;
  * needs it (`needs_reauth`) is starting one for its provider and scope:
  * finished with the account it holds, it is that connection again.
  */
-export interface ConnectionsApi extends StephenReachApi {
+export interface ConnectionsApi extends StephenReachApi, AgentsApi {
   start: (request: {
     provider: OAuthProvider;
     scope: ConnectionScope;

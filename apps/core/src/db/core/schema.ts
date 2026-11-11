@@ -3023,6 +3023,43 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
 });
 
 /**
+ * The company's agents an admin made or changed (agents.ts): one row per
+ * agent, by the ID its permissions, audit events and memory path name.
+ * `face` is the figure it is drawn with; `job` one line on what it is
+ * for; `instructions` what it is told on top of Grasp's own rules;
+ * `modelRole` the role it asks the gateway for, or null for the model a
+ * chat would use anyway; `state` whether it answers. No row for the
+ * first agent, the organization's: as Grasp ships it.
+ */
+export const agents = sqliteTable(
+  "agents",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    /**
+     * The name as two agents may not share it (`agentNameKey`): folded
+     * by core, since SQLite's `lower` folds ASCII letters alone. Written
+     * with every name.
+     */
+    nameKey: text("name_key"),
+    face: text().notNull(),
+    job: text().notNull(),
+    instructions: text().notNull(),
+    modelRole: text("model_role", { enum: modelRoles }),
+    state: text({ enum: ["on", "paused"] }).notNull(),
+    madeBy: text("made_by").notNull(),
+    madeAt: timestamp("made_at").notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [
+    // No two agents answer to one name, however it is capitalised: people
+    // say which agent they mean by it.
+    uniqueIndex("agents_name_key_idx").on(table.nameKey),
+  ]
+);
+
+/**
  * Whether one of the company's agents answers at all, and for whom
  * (agent-reach.ts): one row per agent an admin set it for, by the agent's
  * ID. The organization's own agent keeps `stephen_reach`. No row: on, for
@@ -3033,29 +3070,6 @@ export const agentReach = sqliteTable("agent_reach", {
   on: integer({ mode: "boolean" }).notNull(),
   who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
   teams: text().notNull().default("[]"),
-  changedBy: text("changed_by").notNull(),
-  changedAt: timestamp("changed_at").notNull(),
-});
-
-/**
- * The company's agents an admin made or changed (agents.ts): one row per
- * agent, by the ID its permissions, audit events and memory path name.
- * `face` is the figure it is drawn with; `job` one line on what it is
- * for; `instructions` what it is told on top of Grasp's own rules;
- * `modelRole` the role it asks the gateway for, or null for the model a
- * chat would use anyway; `state` whether it answers. No row for the
- * first agent, the organization's: as Grasp ships it.
- */
-export const agents = sqliteTable("agents", {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  face: text().notNull(),
-  job: text().notNull(),
-  instructions: text().notNull(),
-  modelRole: text("model_role", { enum: modelRoles }),
-  state: text({ enum: ["on", "paused"] }).notNull(),
-  madeBy: text("made_by").notNull(),
-  madeAt: timestamp("made_at").notNull(),
   changedBy: text("changed_by").notNull(),
   changedAt: timestamp("changed_at").notNull(),
 });

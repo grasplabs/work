@@ -42,6 +42,7 @@
     "./admin/present": "./src/admin/present.ts",
     "./admin/trail": "./src/admin/trail.ts",
     "./agent": "./src/agent.ts",
+    "./agents": "./src/agents.ts",
     "./ai-providers": "./src/ai-providers.ts",
     "./ai-status-report": "./src/ai-status-report.ts",
     "./app-data": "./src/app-data.ts",
