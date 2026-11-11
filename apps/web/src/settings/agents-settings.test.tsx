@@ -131,6 +131,10 @@ const fakeConnections = () => {
     ): Promise<AgentWake> => {
       await Promise.resolve();
       asked.push(["wake", agentId, input]);
+      // As core refuses what isn't a wake-up.
+      if (input.opening === "refuse this") {
+        throw new Error("That isn't a wake-up.");
+      }
       const made: AgentWake = {
         id: `wake-${wakes.length + 1}`,
         agentId,
@@ -526,5 +530,31 @@ describe("Settings › Agents", () => {
       "Stephen never works on its own."
     );
     expect(document.body.textContent).not.toContain("Add a time");
+  });
+
+  it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
+    const { connections, asked } = fakeConnections();
+    await shown(connections);
+    await press(button("Stephen"));
+    await set(field("What to ask it each time"), "refuse this", "input");
+    // Another change on the panel saves and the page is read again.
+    await press(toggle("Stephen is on"));
+    expect(field("What to ask it each time").value).toBe("refuse this");
+    // Core refuses it: still there to be corrected, and said why.
+    await press(button("Add a time"));
+    expect(asked.at(-1)?.[0]).toBe("wake");
+    expect(field("What to ask it each time").value).toBe("refuse this");
+    expect(document.body.textContent).toContain("That isn't a wake-up.");
+  });
+
+  it("shows the time zone a wake-up was made in", async () => {
+    const { connections } = fakeConnections();
+    await shown(connections);
+    await press(button("Stephen"));
+    await set(field("What to ask it each time"), "Check the inbox.", "input");
+    await press(button("Add a time"));
+    expect(document.body.textContent).toContain(
+      "Every weekday at 09:00 · Europe/Amsterdam"
+    );
   });
 });

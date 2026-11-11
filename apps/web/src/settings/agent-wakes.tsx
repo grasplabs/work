@@ -143,14 +143,20 @@ const NewWake = ({
           return;
         }
         void (async () => {
+          let added = false;
           await change(async (session) => {
             await session.connections.makeAgentWake(agent.id, {
               cron,
               personId: person,
               opening: opening.trim(),
             });
+            added = true;
           });
-          setOpening("");
+          // Only what was added is cleared: one core refused stays to be
+          // corrected.
+          if (added) {
+            setOpening("");
+          }
         })();
       }}
     >
@@ -239,6 +245,7 @@ export const AgentWakes = ({
   agent,
   wakes,
   people,
+  editable,
   can,
   change,
 }: {
@@ -246,6 +253,9 @@ export const AgentWakes = ({
   wakes: readonly AgentWake[];
   /** The company's people, whom a wake-up can work for. */
   people: readonly Member[];
+  /** Whether the person may change wake-ups at all. */
+  editable: boolean;
+  /** Whether they may now: not while a change is on its way to core. */
   can: boolean;
   change: Change;
 }) => {
@@ -283,7 +293,9 @@ export const AgentWakes = ({
                 : t`For ${person}: ${opening} · ${last}`
             }
             key={wake.id}
-            name={when}
+            // With the zone it was made in: the company's then, which it
+            // keeps if the company's changes.
+            name={`${when} · ${wake.timeZone}`}
           >
             <span className="flex items-center gap-3">
               <Switch
@@ -316,12 +328,14 @@ export const AgentWakes = ({
           </Row>
         );
       })}
-      {can || wakes.length > 0 ? null : (
+      {editable || wakes.length > 0 ? null : (
         <li className="text-muted-foreground border-t px-5 py-4">
           {t`${name} never works on its own.`}
         </li>
       )}
-      {can ? (
+      {/* Kept while a change is on its way, only disabled: what is typed
+          and not yet added stays. */}
+      {editable ? (
         <li>
           <NewWake agent={agent} can={can} change={change} people={people} />
         </li>

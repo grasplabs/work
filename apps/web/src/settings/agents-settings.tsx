@@ -151,10 +151,13 @@ const AgentPanel = ({
   teams,
   wakes,
   people,
+  editable,
   can,
   change,
 }: {
   agent: Agent;
+  /** Whether the person may change agents at all. */
+  editable: boolean;
   /** The company's first agent, whose reach is Settings › Stephen's. */
   first: boolean;
   settings: AgentSettings | undefined;
@@ -292,6 +295,7 @@ const AgentPanel = ({
           agent={agent}
           can={can}
           change={change}
+          editable={editable}
           people={people}
           wakes={wakes}
         />
@@ -402,6 +406,7 @@ export const AgentsSettings = ({
               agent={open}
               can={can}
               change={change}
+              editable={editable}
               first={open.id === first?.id}
               people={people}
               settings={settings[open.id]}

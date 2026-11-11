@@ -48,11 +48,14 @@ export const Route = createFileRoute("/_shell/settings/agents")({
   component: AgentsPage,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [agents, reach, people] = await Promise.all([
+      const [agents, reach] = await Promise.all([
         session.connections.agents(),
         session.connections.stephenReach(),
-        session.members.list(),
       ]);
+      // The people a wake-up can work for: none when core won't say, and
+      // the page still shows the agents.
+      const [listed] = await Promise.allSettled([session.members.list()]);
+      const people = listed.status === "fulfilled" ? listed.value : [];
       // Every agent but the first, whose reach is Settings › Stephen's.
       const others = agents.slice(1);
       const read = await Promise.all(
@@ -61,11 +64,14 @@ export const Route = createFileRoute("/_shell/settings/agents")({
           await session.connections.agentSettings(id),
         ])
       );
+      // Each agent's wake-ups: none for one core won't say them of.
       const wakes = await Promise.all(
-        agents.map(async ({ id }): Promise<[string, AgentWake[]]> => [
-          id,
-          await session.connections.agentWakes(id),
-        ])
+        agents.map(async ({ id }): Promise<[string, AgentWake[]]> => {
+          const [woken] = await Promise.allSettled([
+            session.connections.agentWakes(id),
+          ]);
+          return [id, woken.status === "fulfilled" ? woken.value : []];
+        })
       );
       return {
         agents,
