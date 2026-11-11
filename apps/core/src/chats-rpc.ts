@@ -58,7 +58,7 @@ import {
   saveDraftChanges,
 } from "./agent-builds.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
-import { firstAgentId } from "./agents.ts";
+import { firstAgentId, turnAgent } from "./agents.ts";
 import {
   dataModelOf,
   definitionPlan,
@@ -331,7 +331,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         person.userId,
         id
       );
-      return kept ?? (await this.#appChat(person, id, name));
+      if (kept !== null) {
+        return kept;
+      }
+      // No new chat with a paused agent: it couldn't answer in it.
+      await turnAgent(this.#env, chatAgentId);
+      return await this.#appChat(person, id, name);
     });
   }
 
@@ -341,6 +346,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }): Promise<ChatSummary & { appId: string }> {
     return await withPerson(this.#check, async (person) => {
       requireBuilder(person);
+      // No App with a chat its paused agent couldn't answer in.
+      await turnAgent(this.#env, chatAgentId);
       // No room for its chat: refused before an App is made, so asking
       // again doesn't leave one behind each time. A chat that fails after
       // all leaves its App, which stays as every App does (`forApp` gives

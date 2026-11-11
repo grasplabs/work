@@ -4,7 +4,7 @@ import type { ChatAgent } from "@grasp-os/shared/chat";
 import { listAgents } from "./agent-builder.ts";
 import { agentFor } from "./agent-reach.ts";
 import { workspaceAgentIdSchema } from "./agent-scope.ts";
-import { firstAgentId } from "./agents.ts";
+import { firstAgentId, turnAgent } from "./agents.ts";
 
 // The company's agents a person may talk to in Grasp's own chat: the ones
 // that are on and whose audience takes them in (agent-reach.ts). A person
@@ -17,7 +17,7 @@ import { firstAgentId } from "./agents.ts";
 //
 // The ways it can fail, which the tests start from: an agent listed for
 // someone outside its audience; a chat made with such an agent, or with a
-// paused one, or with an ID that names none; the refusal telling an agent
+// paused one, the first agent included, or with an ID that names none; the refusal telling an agent
 // that exists from one that doesn't; an agent's instructions on the page.
 
 /** The agents `userId` may talk to in Grasp's own chat, the first one first. */
@@ -41,8 +41,9 @@ export const chatAgentsFor = async (
 /**
  * The agent a new chat of `userId`'s is with: the company's first one
  * when none is named, as chats always were, else the one named, when
- * they may talk to it. Throws `agent.unknown` for any other, whether the
- * company has it or not.
+ * they may talk to it. Throws `agent.paused` for the first agent while
+ * it is paused, so no chat is made that it can't answer in, and
+ * `agent.unknown` for any other, whether the company has it or not.
  */
 export const chatAgentOf = async (
   env: Env,
@@ -50,6 +51,9 @@ export const chatAgentOf = async (
   named: unknown
 ): Promise<string> => {
   if (named === undefined || named === firstAgentId) {
+    // Everyone knows of the first agent, so a paused one is refused as
+    // paused, which says why and who can turn it back on.
+    await turnAgent(env, firstAgentId);
     return firstAgentId;
   }
   const id = workspaceAgentIdSchema.safeParse(named);
