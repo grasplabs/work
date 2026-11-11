@@ -110,8 +110,14 @@ export interface TokensHeader {
   rows: number;
 }
 
-/** The model core runs and every release names: the one an `Embedder` loads unless told otherwise. */
-export const shippedModel: EmbedModel = bekkoA8m;
+/**
+ * The model core runs and every release names, the one an `Embedder`
+ * loads unless told otherwise: none until the choice is made (GRA-1767).
+ * Naming one (`bekkoA8m`, say) is this line, in the same change as its
+ * files are put in the releases bucket (`vp run release:model-files`):
+ * a release that names files the bucket lacks isn't published.
+ */
+export const shippedModel: EmbedModel | null = null;
 
 /** Reads the token table file's header; null when it isn't one of this version. */
 export const readTokensHeader = (bytes: Uint8Array): TokensHeader | null => {

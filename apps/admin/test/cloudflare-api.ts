@@ -758,6 +758,24 @@ const accountRoutes: Route[] = [
       return envelope(null);
     },
   },
+  // A bucket's objects under a prefix, as R2's API lists them, on one page.
+  {
+    method: "GET",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)\/objects$/u,
+    answer: ({ account, call, params }) => {
+      const objects = bucketObjects(account, call, params);
+      if (objects === undefined) {
+        return notFound();
+      }
+      const prefix = call.query.get("prefix") ?? "";
+      return envelope(
+        [...objects]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, bytes]) => ({ key, size: bytes.byteLength })),
+        { is_truncated: false }
+      );
+    },
+  },
   // An object, as R2's API serves it: its bytes, or "not found" in the
   // envelope; a put answers its key and size.
   {
@@ -878,6 +896,8 @@ export type Failure =
   | 503
   | "network"
   | "lost"
+  /** The connection lost partway through the request's body (`failNext` only). */
+  | "mid-body"
   | "statement-failed"
   | { retryAfter: string };
 
@@ -886,7 +906,7 @@ const lostConnection = (): never => {
 };
 
 const failed = (failure: Exclude<Failure, "lost">): Response => {
-  if (failure === "network") {
+  if (failure === "network" || failure === "mid-body") {
     return lostConnection();
   }
   if (failure === "statement-failed") {
@@ -1147,13 +1167,28 @@ export const fakeCloudflareApi = (token: string) => {
 
   const answer = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
-    const call: ApiCall = {
+    const unread: ApiCall = {
       method: request.method,
       path: url.pathname.slice(new URL(base).pathname.length),
       query: url.searchParams,
       headers: request.headers,
-      body: await readBody(request),
+      body: undefined,
     };
+    // The connection lost partway through the request's body: its first
+    // piece read, the rest cancelled, as workerd's fetch cancels a body it
+    // can't send, and no answer.
+    const cut = matched.findIndex(
+      ({ matches, failure }) => failure === "mid-body" && matches(unread)
+    );
+    if (cut !== -1) {
+      matched.splice(cut, 1);
+      calls.push(unread);
+      const reader = request.body?.getReader();
+      await reader?.read();
+      await reader?.cancel(new TypeError("Network connection lost."));
+      return lostConnection();
+    }
+    const call: ApiCall = { ...unread, body: await readBody(request) };
     calls.push(call);
     const match = matched.findIndex(({ matches }) => matches(call));
     const [picked] = match === -1 ? [] : matched.splice(match, 1);

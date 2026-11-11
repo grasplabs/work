@@ -12,7 +12,8 @@
  * empty or holds one.
  *
  * The manifest names the embedder's model files (`shippedModel` of the
- * embed package) by hash, but the build doesn't carry them: they are put
+ * embed package, none until one ships) by hash, but the build doesn't
+ * carry them: they are put
  * in the releases bucket once (upload-model-files.ts), and publishing
  * checks they are there.
  *
@@ -225,6 +226,17 @@ const buildWorkers = async (): Promise<WorkerBuild[]> => {
 };
 const workers = await buildWorkers();
 
+// None until a model ships (`shippedModel`).
+const model = shippedModel;
+const modelFiles =
+  model === null
+    ? []
+    : modelFilesOf(model).map(({ which, sha256, size }) => ({
+        name: `${model.name}/${which}`,
+        sha256,
+        size,
+      }));
+
 const manifest = generateManifest(
   {
     releaseId,
@@ -233,11 +245,7 @@ const manifest = generateManifest(
     notes: run("git", ["log", "-1", "--format=%s", commit]),
     wranglerVersion,
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
-    modelFiles: modelFilesOf(shippedModel).map(({ which, sha256, size }) => ({
-      name: `${shippedModel.name}/${which}`,
-      sha256,
-      size,
-    })),
+    modelFiles,
   },
   workers
 );

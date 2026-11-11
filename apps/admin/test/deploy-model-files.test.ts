@@ -48,6 +48,23 @@ const hashesOf = async (releaseId: string): Promise<string[]> => {
   return manifest.modelFiles.map(({ sha256 }) => sha256);
 };
 
+/** A model whose tokens file is `size` bytes: read from R2 in several pieces. */
+const largeModel = (tag: string, size: number): Record<string, string> => ({
+  ...model(tag),
+  [`${tag}/tokens`]: `${tag} `.padEnd(size, "x"),
+});
+
+/** The bytes client `deploymentId`'s models bucket holds, as text, by key. */
+const heldBy = (
+  account: ReturnType<typeof graspAccount>,
+  deploymentId: string
+): Record<string, string> =>
+  Object.fromEntries(
+    [...(account.objects.get(`grasp-${deploymentId}-core-models`) ?? [])].map(
+      ([key, bytes]) => [key, new TextDecoder().decode(bytes)]
+    )
+  );
+
 const isObjectPut = (call: ApiCall): boolean =>
   call.method === "PUT" && call.path.includes("/objects/");
 
@@ -184,5 +201,123 @@ describe("a release's model files in each deployment", () => {
         (call) => call.method === "PUT" && call.path.includes("/scripts/")
       )
     ).toStrictEqual([]);
+  });
+
+  it("tries an upload again after the connection is lost partway through its body", async () => {
+    const files = largeModel("cut", 1024 * 1024);
+    const release = await placedRelease("feat(core): a cut upload", {
+      modelFiles: files,
+    });
+    const hashes = await hashesOf(release);
+    const tokensHash = hashes.at(-1);
+    const tokensPut = (call: ApiCall): boolean =>
+      isObjectPut(call) &&
+      call.path.endsWith(deployedModelKey(tokensHash ?? ""));
+    cloudflare.failNext(tokensPut, "mid-body");
+
+    const { account, deploymentId } = await livePlacedClient(
+      cloudflare,
+      release
+    );
+
+    expect(cloudflare.calls.filter(tokensPut)).toHaveLength(2);
+    expect(
+      Object.values(heldBy(account, deploymentId)).toSorted()
+    ).toStrictEqual(Object.values(files).toSorted());
+  });
+
+  it("tries an upload again when reading it from the releases bucket breaks partway", async () => {
+    const files = largeModel("flaky", 1024 * 1024);
+    const release = await placedRelease("feat(core): a flaky read", {
+      modelFiles: files,
+    });
+    const hashes = await hashesOf(release);
+    const tokensHash = hashes.at(-1);
+    const key = modelBlobKey(tokensHash ?? "");
+    const get = env.RELEASES.get.bind(env.RELEASES);
+    let broken = 0;
+    vi.spyOn(env.RELEASES, "get").mockImplementation(async (asked, options) => {
+      const object = await get(asked, options);
+      if (
+        asked !== key ||
+        broken > 0 ||
+        object === null ||
+        !("body" in object)
+      ) {
+        return object;
+      }
+      broken += 1;
+      // Its first piece, then the read breaks, however many pieces it has.
+      let passed = false;
+      const body = object.body.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform: (piece, controller) => {
+            if (passed) {
+              throw new Error("R2 read broke");
+            }
+            passed = true;
+            controller.enqueue(piece.slice(0, 1));
+          },
+          flush: () => {
+            throw new Error("R2 read broke");
+          },
+        })
+      );
+      return new Proxy(object, {
+        get: (target, property): unknown =>
+          property === "body" ? body : Reflect.get(target, property, target),
+      });
+    });
+
+    const { account, deploymentId } = await livePlacedClient(
+      cloudflare,
+      release
+    );
+
+    expect(broken).toBe(1);
+    expect(
+      Object.values(heldBy(account, deploymentId)).toSorted()
+    ).toStrictEqual(Object.values(files).toSorted());
+  });
+
+  it("removes a file a crashed deploy left behind, never one the running release names", async () => {
+    const files = model("kept");
+    const first = await placedRelease("feat(core): kept", {
+      modelFiles: files,
+    });
+    const { clientId, account, deploymentId } = await livePlacedClient(
+      cloudflare,
+      first
+    );
+    // Copied by a deploy that died before anything named it.
+    const left = deployedModelKey("f".repeat(64));
+    account.objects
+      .get(`grasp-${deploymentId}-core-models`)
+      ?.set(left, new TextEncoder().encode("left behind"));
+    const again = await placedRelease("fix(core): kept again", {
+      modelFiles: files,
+    });
+
+    await deployPlaced(clientId, again);
+
+    const held = heldBy(account, deploymentId);
+    expect(Object.keys(held)).not.toContain(left);
+    expect(Object.values(held).toSorted()).toStrictEqual(
+      Object.values(files).toSorted()
+    );
+  });
+
+  it("deploys a release that names no model, copying nothing and passing its probe", async () => {
+    const release = await placedRelease("feat(core): no model yet", {
+      modelFiles: {},
+    });
+
+    const { account, deploymentId } = await livePlacedClient(
+      cloudflare,
+      release
+    );
+
+    expect(heldBy(account, deploymentId)).toStrictEqual({});
+    expect(cloudflare.calls.filter(isObjectPut)).toStrictEqual([]);
   });
 });

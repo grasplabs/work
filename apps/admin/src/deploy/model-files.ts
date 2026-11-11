@@ -13,26 +13,32 @@
  * - Writing anywhere else: keys are `deployedModelKey(<sha256>)` alone,
  *   from the manifest's hashes (64 hex, checked by its schema), in the
  *   one bucket the client's inventory names for that binding.
- * - Removing what's in use: a file goes only once neither the release
- *   being deployed nor the one running before it (what a failed probe
- *   rolls back to) names it, and only if this records copying it there
- *   (`client_model_files`). Any release deployed later, a rollback
- *   included, copies what it names again.
+ * - Removing what's in use: the bucket holds model files only, under one
+ *   prefix, so the deploy lists that prefix and removes what neither the
+ *   release being deployed nor the one running before it (what a failed
+ *   probe rolls back to) names. Any release deployed later, a rollback
+ *   included, copies what it names again; a file a crashed deploy left
+ *   behind goes with the next.
  *
- * A file is copied only when the bucket doesn't hold it at its size, so a
- * release that keeps its model copies nothing. Every call goes through
- * the deployer's token (src/cloudflare/api.ts), which already creates and
- * deletes the client's buckets: no other credential.
+ * A file counts as there when the listing has it at its size. R2's REST
+ * API reports no SHA-256 for an object, and an upload through it keeps
+ * none, so the size is what's compared; a file is only ever put whole and
+ * after its hash checked out, and the embedder checks every file's hash
+ * as it loads it, the last line. A release that keeps its model copies
+ * nothing. Every call goes through the deployer's token
+ * (src/cloudflare/api.ts), which already creates and deletes the client's
+ * buckets: no other credential.
  */
-import { deployedModelKey, modelFilesBinding } from "@grasp-os/shared/release";
+import {
+  deployedModelKey,
+  deployedModelPrefix,
+  modelFilesBinding,
+} from "@grasp-os/shared/release";
 import type { ModelFileRef, ReleaseManifest } from "@grasp-os/shared/release";
-import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { isNotFound } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
-import type { AdminDatabase } from "../db/act.ts";
-import { clientModelFiles } from "../db/schema.ts";
 import type { ReleaseStore } from "../releases/import.ts";
 import { DeployError } from "./errors.ts";
 import { streamBlob } from "./release.ts";
@@ -49,7 +55,7 @@ export interface ModelsBucket {
 /**
  * The release name of the bucket `manifest`'s Workers bind as
  * `modelFilesBinding`, or undefined when none does; a release that names
- * model files and binds no bucket for them is refused.
+ * model files and binds no one bucket for them is refused.
  */
 export const modelsBucketOf = (
   manifest: ReleaseManifest
@@ -76,46 +82,67 @@ export const modelsBucketOf = (
   return name;
 };
 
-const objectPath = (bucket: ModelsBucket, key: string): string =>
-  `/accounts/${bucket.accountId}/r2/buckets/${bucket.name}/objects/${key}`;
+const objectsPath = (bucket: ModelsBucket): string =>
+  `/accounts/${bucket.accountId}/r2/buckets/${bucket.name}/objects`;
 
 const headersOf = (bucket: ModelsBucket): Record<string, string> => ({
   "cf-r2-jurisdiction": bucket.jurisdiction,
 });
 
-/** Whether `bucket` holds `file` at its size; its body is never read. */
-const holds = async (
+/** R2's listing: every field is optional in its documentation. */
+const listedSchema = z.array(
+  z.object({ key: z.string().optional(), size: z.number().optional() })
+);
+
+/** Most keys a page of R2's listing answers with. */
+const perPage = 1000;
+
+/** Every model file in `bucket`: its size, by key. */
+const listed = async (
   api: CloudflareApi,
   bucket: ModelsBucket,
-  file: ModelFileRef,
-  beforeSend: () => Promise<void>
-): Promise<boolean> => {
-  const response = await api.response({
-    method: "GET",
-    path: objectPath(bucket, deployedModelKey(file.sha256)),
-    headers: headersOf(bucket),
-    beforeSend,
-  });
-  await response.body?.cancel();
-  if (response.status === 404) {
-    return false;
-  }
-  if (!response.ok) {
-    throw new DeployError(
-      "model_files_unreadable",
-      `${bucket.name} answered ${response.status} for ${file.name}`
-    );
-  }
-  // Without a length it can't be told whole: copied again.
-  return response.headers.get("content-length") === String(file.size);
+  beforeSend: () => Promise<void>,
+  cursor?: string
+): Promise<Map<string, number>> => {
+  const { result, resultInfo } = await api.page(
+    {
+      method: "GET",
+      path: objectsPath(bucket),
+      headers: headersOf(bucket),
+      query: {
+        prefix: deployedModelPrefix,
+        per_page: String(perPage),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+      beforeSend,
+    },
+    listedSchema
+  );
+  // An object listed without its size is copied again.
+  const here = new Map(
+    result.flatMap(({ key, size }) =>
+      key === undefined ? [] : [[key, size ?? -1] as const]
+    )
+  );
+  const next =
+    resultInfo?.is_truncated === true ? resultInfo.cursor : undefined;
+  return next === undefined
+    ? here
+    : new Map([...here, ...(await listed(api, bucket, beforeSend, next))]);
 };
+
+/** Whether `error` is the release's bytes not being what it names: no retry reads others. */
+const isMismatch = (error: unknown): boolean =>
+  error instanceof DeployError && error.code === "release_blob_mismatch";
 
 /**
  * Copies `file` from the releases bucket into `bucket`, checked by hash
  * as it passes and sent at exactly its size. Each attempt the API client
- * makes reads it from the releases bucket afresh. A file that can't be
- * read whole as the release names it (`release_blob_mismatch`) stops the
- * upload and the call, with no retry: trying again reads the same bytes.
+ * makes reads it from the releases bucket afresh, into a body of its own:
+ * an attempt cut off (the connection lost, a server error, a read of the
+ * releases bucket that broke) is retried as any call is. Only bytes that
+ * aren't what the release names (`release_blob_mismatch`) stop the call
+ * with no retry, since trying again reads the same bytes.
  */
 const copy = async (
   context: { api: CloudflareApi; store: ReleaseStore },
@@ -123,15 +150,27 @@ const copy = async (
   file: ModelFileRef,
   beforeSend: () => Promise<void>
 ): Promise<void> => {
-  const unreadable = new AbortController();
+  const mismatch = new AbortController();
   const body = (): ReadableStream<Uint8Array> => {
     const sized = new FixedLengthStream(file.size);
     void (async () => {
+      let stream: ReadableStream<Uint8Array>;
       try {
-        const stream = await streamBlob(context.store, file);
+        stream = await streamBlob(context.store, file);
+      } catch (error) {
+        if (isMismatch(error)) {
+          mismatch.abort(error);
+        }
+        await sized.writable.abort(error);
+        return;
+      }
+      try {
+        // A failure errors this attempt's body, which the call retries.
         await stream.pipeTo(sized.writable);
       } catch (error) {
-        unreadable.abort(error);
+        if (isMismatch(error)) {
+          mismatch.abort(error);
+        }
       }
     })();
     return sized.readable;
@@ -139,31 +178,31 @@ const copy = async (
   await context.api.call(
     {
       method: "PUT",
-      path: objectPath(bucket, deployedModelKey(file.sha256)),
+      path: `${objectsPath(bucket)}/${deployedModelKey(file.sha256)}`,
       headers: {
         ...headersOf(bucket),
         "content-type": "application/octet-stream",
       },
       body,
       beforeSend,
-      signal: unreadable.signal,
+      signal: mismatch.signal,
     },
     z.unknown()
   );
 };
 
-/** Removes the file named `sha256` from `bucket`; one already gone is removed. */
+/** Removes the object at `key` from `bucket`; one already gone is removed. */
 const remove = async (
   api: CloudflareApi,
   bucket: ModelsBucket,
-  sha256: string,
+  key: string,
   beforeSend: () => Promise<void>
 ): Promise<void> => {
   try {
     await api.call(
       {
         method: "DELETE",
-        path: objectPath(bucket, deployedModelKey(sha256)),
+        path: `${objectsPath(bucket)}/${key}`,
         headers: headersOf(bucket),
         beforeSend,
       },
@@ -183,63 +222,40 @@ export interface ModelFilesSynced {
 }
 
 /**
- * Puts every model file `manifest` names in client `clientId`'s models
- * `bucket`, copying only what it doesn't hold at its size, and removes the
- * files recorded there that neither `manifest` nor `previous` (the release
- * running before, if any) names. `beforeSend` runs before each call: the
- * runner's check that it still holds the client.
+ * Puts every model file `manifest` names in the client's models `bucket`,
+ * copying only what it doesn't hold at its size, and removes every other
+ * model file there that `previous` (the release running before, if any)
+ * doesn't name either. `beforeSend` runs before each call: the runner's
+ * check that it still holds the client.
  */
 export const syncModelFiles = async (
-  context: { api: CloudflareApi; store: ReleaseStore; db: AdminDatabase },
-  { clientId, bucket }: { clientId: string; bucket: ModelsBucket },
+  context: { api: CloudflareApi; store: ReleaseStore },
+  bucket: ModelsBucket,
   {
     manifest,
     previous,
   }: { manifest: ReleaseManifest; previous: ReleaseManifest | null },
   beforeSend: () => Promise<void>
 ): Promise<ModelFilesSynced> => {
-  const { api, db } = context;
+  const { api } = context;
+  const there = await listed(api, bucket, beforeSend);
   const keep = new Set(
     [...manifest.modelFiles, ...(previous?.modelFiles ?? [])].map(
-      ({ sha256 }) => sha256
+      ({ sha256 }) => deployedModelKey(sha256)
     )
   );
-  const recorded = await db
-    .select({ sha256: clientModelFiles.sha256 })
-    .from(clientModelFiles)
-    .where(eq(clientModelFiles.clientId, clientId));
-  const old = recorded
-    .map(({ sha256 }) => sha256)
-    .filter((sha256) => !keep.has(sha256));
-  for (const sha256 of old) {
+  const old = [...there.keys()].filter((key) => !keep.has(key));
+  for (const key of old) {
     // oxlint-disable-next-line no-await-in-loop -- a few files, one at a time
-    await remove(api, bucket, sha256, beforeSend);
-  }
-  if (old.length > 0) {
-    await db
-      .delete(clientModelFiles)
-      .where(
-        and(
-          eq(clientModelFiles.clientId, clientId),
-          inArray(clientModelFiles.sha256, old)
-        )
-      );
+    await remove(api, bucket, key, beforeSend);
   }
   let copied = 0;
   for (const file of manifest.modelFiles) {
-    // oxlint-disable-next-line no-await-in-loop -- one large file at a time
-    if (!(await holds(api, bucket, file, beforeSend))) {
+    if (there.get(deployedModelKey(file.sha256)) !== file.size) {
       // oxlint-disable-next-line no-await-in-loop -- one large file at a time
       await copy(context, bucket, file, beforeSend);
       copied += 1;
     }
-    // Recorded once it's there, whoever put it there: so it's removed
-    // when no release needs it.
-    // oxlint-disable-next-line no-await-in-loop -- one large file at a time
-    await db
-      .insert(clientModelFiles)
-      .values({ clientId, sha256: file.sha256, copiedAt: new Date() })
-      .onConflictDoNothing();
   }
   return { copied, removed: old.length };
 };

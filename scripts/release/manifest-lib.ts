@@ -382,9 +382,10 @@ const checkBudget = (build: WorkerBuild): void => {
 };
 
 /**
- * Throws unless the release names model files exactly when a Worker binds
- * the bucket they're copied into: files nothing reads, or a binding with
- * nothing to read, is a release that can't embed.
+ * Throws when the release names model files but no Worker binds the
+ * bucket they're copied into: files nothing reads. A Worker that binds it
+ * while the release names none runs no model (`shippedModel` is unset),
+ * and its embedder says so.
  */
 const checkModelFiles = (
   modelFiles: readonly ModelFileInfo[],
@@ -395,11 +396,9 @@ const checkModelFiles = (
       (bucket) => bucket.binding === modelFilesBinding
     )
   );
-  if (binds !== modelFiles.length > 0) {
+  if (modelFiles.length > 0 && !binds) {
     throw new Error(
-      binds
-        ? `A Worker binds ${modelFilesBinding}, but the release names no model files`
-        : `The release names model files, but no Worker binds ${modelFilesBinding}`
+      `The release names model files, but no Worker binds ${modelFilesBinding}`
     );
   }
 };

@@ -194,10 +194,13 @@ const r2 = (bucket: R2Bucket) => async () => await bucket.head(absentKey);
 
 /**
  * The model files bucket answers, and holds every file of the model core
- * runs at its size: the deploy copied them in before core went live, so a
- * deployment without them stops here rather than at its first question.
+ * runs at its size and, where R2 kept one, its SHA-256: the deploy copied
+ * them in before core went live, so a deployment without them stops here
+ * rather than at its first question. With no model shipped, answering is
+ * all it asks.
  */
 const modelFiles = (bucket: R2Bucket) => async () => {
+  await bucket.head(absentKey);
   if (!(await holdsModelFiles(bucket))) {
     throw new Error("The model's files aren't in the bucket");
   }

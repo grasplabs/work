@@ -1,8 +1,3 @@
-import {
-  modelFileKey,
-  modelFilesOf,
-  shippedModel,
-} from "@grasp-os/embed/model-files";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import { requestIdHeader } from "@grasp-os/shared/http";
@@ -42,20 +37,8 @@ import { coreOrigin } from "./sign-in.ts";
 // - The answer leaking a secret, a resource's id or an error's words.
 // - A binding or clock that doesn't answer passing as one that does.
 // - A deployment whose model files bucket lacks a file of the model core
-//   runs passing, to fail at its first question instead.
-
-/**
- * The model core runs, as its deploy leaves it in MODEL_FILES: a file at
- * each key. Its bytes are the embedder's to check as it loads them; the
- * probe asks that each is there.
- */
-const putModelFiles = async (): Promise<void> => {
-  await Promise.all(
-    modelFilesOf(shippedModel).map(
-      async (file) => await env.MODEL_FILES.put(modelFileKey(file), "model")
-    )
-  );
-};
+//   runs passing, to fail at its first question instead (what the probe
+//   asks of the bucket, `holdsModelFiles`, is tried in embedder.test.ts).
 
 /** The client the admin deployed this core as. */
 const clientId = "acme";
@@ -168,7 +151,6 @@ describe("the console's provisioning probe", () => {
     // alarm is lost.
     await send({ path: "/health", method: "GET" });
     await disarm();
-    await putModelFiles();
 
     const response = await probe();
     const text = await response.text();
@@ -195,7 +177,8 @@ describe("the console's provisioning probe", () => {
           FILES: true,
           AUDIT_ARCHIVE: true,
           BRAIN_OBJECTS: true,
-          // Every file of the model core runs is there.
+          // It answers; no model ships yet, so there are no files to hold
+          // (test/embedder.test.ts holds a model to the files).
           MODEL_FILES: true,
           // The sandbox App code runs in, with a fresh isolate's answer.
           LOADER: true,
@@ -334,19 +317,6 @@ describe("the console's provisioning probe", () => {
     expect(text).not.toContain("9b3e7d10aa");
     expect(text).not.toContain("51c2e9");
     expect(text).not.toContain("deployed");
-  });
-
-  it("says the model files bucket didn't answer while a file of the model core runs isn't in it", async () => {
-    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await putModelFiles();
-    await env.MODEL_FILES.delete(modelFileKey(shippedModel.tokens));
-
-    const response = await probe();
-    warnings.mockRestore();
-
-    expect(provisionProbeSchema.parse(await response.json())).toMatchObject({
-      bindings: { MODEL_FILES: false, FILES: true },
-    });
   });
 
   it("says when it runs as no client the console deployed", async () => {

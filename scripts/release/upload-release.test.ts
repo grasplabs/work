@@ -374,6 +374,17 @@ describe("publishing a release", () => {
     expect(bucket.puts).toStrictEqual([]);
   });
 
+  it("publishes a release that names no model, while none ships, to a bucket without any", async () => {
+    await serve(emptyBucket());
+    writeRelease(
+      dir,
+      generateManifest({ ...info, modelFiles: [] }, fixture),
+      fixture
+    );
+    await upload();
+    expect(bucket.puts.at(-1)).toBe(published);
+  });
+
   it("uploads only the blobs the manifest references", async () => {
     const stray = "blobs/modules/stray";
     mkdirSync(path.dirname(path.join(dir, stray)), { recursive: true });

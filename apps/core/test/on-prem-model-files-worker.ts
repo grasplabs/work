@@ -32,13 +32,13 @@ interface TestEnv {
 const run = async (env: TestEnv, step: string): Promise<unknown> => {
   switch (step) {
     case "ensure": {
-      await ensureModelFilesFrom(
+      const outcome = await ensureModelFilesFrom(
         env.MODEL_SOURCE,
         env.MODEL_FILES,
         fixtureModel
       );
       const listed = await env.MODEL_FILES.list();
-      return listed.objects.map(({ key }) => key).toSorted();
+      return { outcome, keys: listed.objects.map(({ key }) => key).toSorted() };
     }
     case "holds": {
       return await holdsModelFiles(env.MODEL_FILES, fixtureModel);

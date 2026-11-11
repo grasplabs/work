@@ -522,24 +522,6 @@ export const clientResources = sqliteTable(
 );
 
 /**
- * The model files a deploy put in a client's models bucket, each by its
- * SHA-256 (src/deploy/model-files.ts): what a later deploy may remove once
- * no release the client runs or could roll back to names it. Only what's
- * recorded here is ever removed from the bucket.
- */
-export const clientModelFiles = sqliteTable(
-  "client_model_files",
-  {
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    sha256: text().notNull(),
-    copiedAt: timestamp("copied_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.sha256] })]
-);
-
-/**
  * Provisioning a placed client (spec 40.2, src/hosting/operation.ts): one
  * operation per client, however often it's retried, and how far it got.
  * Every step can run again, so a retry resumes it from the start of the

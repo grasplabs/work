@@ -160,7 +160,7 @@ describe("the on-prem profile's model files", () => {
 
     expect({ before, ensured, embedded }).toStrictEqual({
       before: { ok: false },
-      ensured: { ok: deployedKeys },
+      ensured: { ok: { outcome: "ensured", keys: deployedKeys } },
       embedded: { ok: { length: 128, model: "fixture-int8" } },
     });
   }, 120_000);
@@ -171,7 +171,21 @@ describe("the on-prem profile's model files", () => {
 
     const ensured = await run("ensure");
 
-    expect(ensured).toStrictEqual({ ok: deployedKeys });
+    expect(ensured).toStrictEqual({
+      ok: { outcome: "ensured", keys: deployedKeys },
+    });
+  }, 120_000);
+
+  it("says the release directory lacks the model's files, copying nothing and embedding nothing", async () => {
+    const empty = tempDir();
+    mkdirSync(modelFilesDir(empty), { recursive: true });
+    const run = await serve(empty);
+
+    const ensured = await run("ensure");
+    const embedded = await run("embed");
+
+    expect(ensured).toStrictEqual({ ok: { outcome: "missing", keys: [] } });
+    expect(answerSchema.parse(embedded)).toHaveProperty("error");
   }, 120_000);
 
   it("keeps nothing of a file in the release directory that isn't the release's, and embeds nothing", async () => {

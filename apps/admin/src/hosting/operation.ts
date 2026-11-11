@@ -42,8 +42,8 @@
  * its secrets by name, isn't made again. Nothing here deletes: an
  * automatic retry never removes a resource or script, and a secret goes
  * only by an upload that no longer gives it. The one thing removed is a
- * model file in the client's models bucket, once neither this release
- * nor the one before names it: any release deployed later copies its own
+ * model file in the client's models bucket that neither this release
+ * nor the one before names: any release deployed later copies its own
  * again.
  *
  * Every write to the admin's records is conditional on the runner still
@@ -1731,8 +1731,8 @@ const uploadCountedAsRun = async (
 /**
  * Step 3's other half: the model files the release names, in the client's
  * models bucket before core goes live (src/deploy/model-files.ts), and
- * those no release it runs or could roll back to names removed. The
- * release running before is what a failed probe rolls back to.
+ * every other model file there removed unless the release running before
+ * (what a failed probe rolls back to) names it.
  */
 const syncClientModelFiles = async (
   context: ProvisionContext,
@@ -1763,12 +1763,9 @@ const syncClientModelFiles = async (
   return await syncModelFiles(
     context,
     {
-      clientId: held.clientId,
-      bucket: {
-        accountId: loaded.accountId,
-        name: row.physicalName,
-        jurisdiction: row.jurisdiction,
-      },
+      accountId: loaded.accountId,
+      name: row.physicalName,
+      jurisdiction: row.jurisdiction,
     },
     { manifest, previous },
     async () => {

@@ -25,7 +25,7 @@
  * Model files (the embedder's weights, @grasp-os/embed) are named by the
  * release but not carried in each build: at about 100 MB they aren't in
  * git, and each is put in the releases bucket once, under its hash
- * (scripts/release/upload-model-file.ts). A release names them by hash and
+ * (scripts/release/upload-model-files.ts). A release names them by hash and
  * size; publishing it checks the bucket holds them, the admin's import
  * checks them by R2's own SHA-256, and a deploy copies each into the
  * client's models bucket, at `deployedModelKey`, where core's embedder
