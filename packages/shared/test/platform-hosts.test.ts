@@ -4,7 +4,7 @@ import {
   platformHostOf,
   platformRouteOf,
   usualHostProviders,
-} from "./ai-providers.ts";
+} from "../src/ai-providers.ts";
 
 // Where Grasp's own key for a provider goes. These start from the ways it
 // can fail: a platform feature leaving the EU on a deployment nobody set
