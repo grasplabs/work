@@ -31,6 +31,7 @@
     "release:build": "node scripts/release/build-release.ts",
     "release:upload": "node scripts/release/upload-release.ts",
     "release:download": "node scripts/release/download-release.ts",
+    "release:model-files": "node scripts/release/upload-model-files.ts",
     "package:definition": "node scripts/package-definition.ts",
     "parity": "node scripts/parity/run.ts",
     "composio:review": "node scripts/composio-review.ts",
@@ -39,6 +40,7 @@
   "devDependencies": {
     "@commitlint/cli": "catalog:",
     "@commitlint/config-conventional": "catalog:",
+    "@grasp-os/embed": "workspace:*",
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",

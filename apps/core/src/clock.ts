@@ -22,6 +22,7 @@ import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
@@ -170,6 +171,11 @@ export const clockTasks: readonly ClockTask<Env>[] = [
       await drainWebhookDeliveries(env);
     },
   },
+  // The question embedder's model loaded once in each new isolate, so the
+  // first question after a deploy doesn't wait for it; on-prem, the
+  // model's files copied from the release directory first
+  // (src/embedder.ts).
+  { name: "embed.warm", period: "minute", run: warmQuestionEmbedder },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).
   {
     name: "connect.clock",

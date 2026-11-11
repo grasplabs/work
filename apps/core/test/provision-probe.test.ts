@@ -36,6 +36,9 @@ import { coreOrigin } from "./sign-in.ts";
 // - A refused request making core do anything: its clock armed.
 // - The answer leaking a secret, a resource's id or an error's words.
 // - A binding or clock that doesn't answer passing as one that does.
+// - A deployment whose model files bucket lacks a file of the model core
+//   runs passing, to fail at its first question instead (what the probe
+//   asks of the bucket, `holdsModelFiles`, is tried in embedder.test.ts).
 
 /** The client the admin deployed this core as. */
 const clientId = "acme";
@@ -174,6 +177,9 @@ describe("the console's provisioning probe", () => {
           FILES: true,
           AUDIT_ARCHIVE: true,
           BRAIN_OBJECTS: true,
+          // It answers; no model ships yet, so there are no files to hold
+          // (test/embedder.test.ts holds a model to the files).
+          MODEL_FILES: true,
           // The sandbox App code runs in, with a fresh isolate's answer.
           LOADER: true,
           CONNECT: true,
@@ -190,6 +196,7 @@ describe("the console's provisioning probe", () => {
           CHAT_STATE: true,
           CHAT_SESSIONS: true,
           BRAIN_STORE: true,
+          EMBEDDER: true,
           // Connect's own, as connect answered for them.
           "connect.DB": true,
           "connect.LOADER": true,

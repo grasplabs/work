@@ -86,6 +86,9 @@ export class CloudflareApiError extends Error {
 /** Where a page sits in its list. */
 export interface ResultInfo {
   total_count?: number;
+  /** A cursor-paged list's next page (R2's object listing), while `is_truncated`. */
+  cursor?: string;
+  is_truncated?: boolean;
 }
 
 export interface ApiCall {
@@ -190,7 +193,13 @@ const envelopeSchema = z.object({
     .nullish()
     .transform((errors) => errors ?? []),
   result: z.unknown(),
-  result_info: z.object({ total_count: z.number().optional() }).nullish(),
+  result_info: z
+    .object({
+      total_count: z.number().optional(),
+      cursor: z.string().optional(),
+      is_truncated: z.boolean().optional(),
+    })
+    .nullish(),
 });
 type Envelope = z.infer<typeof envelopeSchema>;
 

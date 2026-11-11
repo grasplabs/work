@@ -13,6 +13,7 @@
     "build:wasm": "./build.sh"
   },
   "dependencies": {
+    "@grasp-os/shared": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

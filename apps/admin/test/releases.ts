@@ -9,6 +9,8 @@ import {
   MANIFEST_VERSION,
   manifestKey,
   migrationKey,
+  modelBlobKey,
+  modelFilesBinding,
   moduleKey,
   releaseManifestSchema,
   sha256OfBytes,
@@ -44,6 +46,12 @@ export interface ReleaseSpec {
    * one does; without it, a deploy sets up no sending domain.
    */
   sendsMail?: boolean;
+  /**
+   * The model files it names, by name, and their contents: given at all
+   * (none, too, as while no model ships), core binds `MODEL_FILES` to
+   * `grasp-os-models`, as the real one does.
+   */
+  modelFiles?: Record<string, string>;
 }
 
 /** A built release: its manifest and every blob, by R2 key. */
@@ -158,6 +166,11 @@ export const buildRelease = async (
     assets[hash] = { size: bytes.length, r2Key: assetKey(hash) };
     blobs.set(assetKey(hash), bytes);
   }
+  const modelFiles = await Promise.all(
+    Object.entries(spec.modelFiles ?? {}).map(
+      async ([name, content]) => await file(name, content, modelBlobKey, blobs)
+    )
+  );
   const commit = randomHex(40);
   const manifest = releaseManifestSchema.parse({
     manifestVersion: MANIFEST_VERSION,
@@ -231,6 +244,16 @@ export const buildRelease = async (
           ...(spec.sendsMail === true
             ? [{ type: "send_email", name: "EMAIL" }]
             : []),
+          ...(spec.modelFiles === undefined
+            ? []
+            : [
+                {
+                  type: "r2_bucket",
+                  name: modelFilesBinding,
+                  bucket_name: "grasp-os-models",
+                  jurisdiction: "eu",
+                },
+              ]),
         ],
         d1Databases: [
           { binding: "DB", databaseName: "grasp-os-core", migrations },
@@ -244,6 +267,7 @@ export const buildRelease = async (
       },
     },
     assets,
+    modelFiles,
   });
   return {
     id,
@@ -253,13 +277,19 @@ export const buildRelease = async (
   };
 };
 
-/** Stores a release's blobs, as CI does before its manifest. */
+/**
+ * Stores a release's blobs, as CI does before its manifest: each with its
+ * SHA-256, which R2 checks and keeps.
+ */
 export const putBlobs = async (
   release: Pick<TestRelease, "blobs">
 ): Promise<void> => {
   await Promise.all(
     [...release.blobs].map(
-      async ([key, bytes]) => await env.RELEASES.put(key, bytes)
+      async ([key, bytes]) =>
+        await env.RELEASES.put(key, bytes, {
+          sha256: await sha256OfBytes(new Uint8Array(bytes)),
+        })
     )
   );
 };

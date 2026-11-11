@@ -24,10 +24,10 @@ import type { FileBytes, Kernel, RowFormat } from "./engine.ts";
 import { HashingReader } from "./hashing-reader.ts";
 import {
   ModelFilesError,
-  bekkoA8m,
   modelFileKey,
   modelIdentity,
   readTokensHeader,
+  shippedModel,
   tokensHeaderBytes,
 } from "./model-files.ts";
 import type { EmbedModel, ModelFile, ModelIdentity } from "./model-files.ts";
@@ -72,8 +72,11 @@ const isRowFormat = (value: string): value is RowFormat =>
   value === "float" || value === "int8";
 
 export class Embedder extends DurableObject<EmbedderEnv> {
-  /** The model this object runs. */
-  protected readonly model: EmbedModel = bekkoA8m;
+  /**
+   * The model this object runs: none until a release names one
+   * (`shippedModel`), and then it refuses every text.
+   */
+  protected readonly model: EmbedModel | null = shippedModel;
   /** Which integer kernels run: the fastest for this CPU, unless a test picks one. */
   protected readonly kernel: Kernel = "auto";
   private loading: Promise<Loaded> | undefined;
@@ -89,6 +92,16 @@ export class Embedder extends DurableObject<EmbedderEnv> {
     // One row once every file is in and checked: the model's files, by hash.
     sql.exec(`CREATE TABLE IF NOT EXISTS loaded_model (
       id INTEGER PRIMARY KEY CHECK (id = 1), files TEXT NOT NULL, format TEXT NOT NULL)`);
+  }
+
+  /** The model it runs; a `ModelFilesError` while it has none. */
+  private get running(): EmbedModel {
+    if (this.model === null) {
+      throw new ModelFilesError(
+        "No embedding model ships with this release, so nothing is embedded."
+      );
+    }
+    return this.model;
   }
 
   /** The embedding of `text`, cut at the most tokens the model reads. */
@@ -133,7 +146,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       }>("SELECT files, format FROM loaded_model")
       .toArray();
     const format =
-      stored?.files === filesOf(this.model) && isRowFormat(stored.format)
+      stored?.files === filesOf(this.running) && isRowFormat(stored.format)
         ? stored.format
         : await this.copyFiles();
     const engine = new Engine(
@@ -153,11 +166,11 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       table.most !== width
     ) {
       throw new ModelFilesError(
-        `${this.model.name}'s token table doesn't fit its tokenizer and encoder: ${engine.vocabSize} rows of ${width} bytes wanted.`
+        `${this.running.name}'s token table doesn't fit its tokenizer and encoder: ${engine.vocabSize} rows of ${width} bytes wanted.`
       );
     }
     engine.embed(engine.tokenize(warmUpText), format, (ids) => this.rows(ids));
-    return { engine, format, identity: await modelIdentity(this.model) };
+    return { engine, format, identity: await modelIdentity(this.running) };
   }
 
   /**
@@ -183,7 +196,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       const format = await this.copyTokens();
       sql.exec(
         "INSERT INTO loaded_model (id, files, format) VALUES (1, ?, ?)",
-        filesOf(this.model),
+        filesOf(this.running),
         format
       );
       return format;
@@ -195,17 +208,17 @@ export class Embedder extends DurableObject<EmbedderEnv> {
 
   /** The file's bytes from the bucket, read in order and hashed as they come. */
   private async open(which: Which): Promise<HashingReader> {
-    const file = this.model[which];
+    const file = this.running[which];
     const object = await this.env.MODEL_FILES.get(modelFileKey(file));
     if (object === null) {
       throw new ModelFilesError(
-        `${this.model.name}'s ${which} file is missing: no ${modelFileKey(file)} in the model files bucket.`
+        `${this.running.name}'s ${which} file is missing: no ${modelFileKey(file)} in the model files bucket.`
       );
     }
     if (object.size !== file.size) {
       await object.body.cancel();
       throw new ModelFilesError(
-        `${this.model.name}'s ${which} file is ${object.size} bytes, not ${file.size}.`
+        `${this.running.name}'s ${which} file is ${object.size} bytes, not ${file.size}.`
       );
     }
     return new HashingReader(object.body);
@@ -220,7 +233,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
     const sha256 = await reader.sha256();
     if (reader.total !== file.size || sha256 !== file.sha256) {
       throw new ModelFilesError(
-        `${this.model.name}'s ${which} file has SHA-256 ${sha256} (${reader.total} bytes), not ${file.sha256}.`
+        `${this.running.name}'s ${which} file has SHA-256 ${sha256} (${reader.total} bytes), not ${file.sha256}.`
       );
     }
   }
@@ -236,7 +249,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
     const reader = await this.open(which);
     try {
       const result = await copy(reader);
-      await this.check(which, this.model[which], reader);
+      await this.check(which, this.running[which], reader);
       return result;
     } catch (error) {
       await reader.cancel();
@@ -275,7 +288,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
     );
     if (header === null) {
       throw new ModelFilesError(
-        `${this.model.name}'s tokens file isn't a token table of this version.`
+        `${this.running.name}'s tokens file isn't a token table of this version.`
       );
     }
     const size = rowBytes(header.format, header.dim);
@@ -291,7 +304,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
         id + block.byteLength / size > header.rows
       ) {
         throw new ModelFilesError(
-          `${this.model.name}'s tokens file doesn't hold the ${header.rows} rows its header names.`
+          `${this.running.name}'s tokens file doesn't hold the ${header.rows} rows its header names.`
         );
       }
       this.ctx.storage.transactionSync(() => {
