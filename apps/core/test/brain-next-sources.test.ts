@@ -241,6 +241,20 @@ const refuseDeleting = async (text: string): Promise<() => void> => {
   });
 };
 
+/**
+ * `promise`'s outcome, value or error, observed from now on: a promise
+ * awaited later in a test never rejects with nothing watching it.
+ */
+const settled = async <T>(
+  promise: Promise<T>
+): Promise<{ value: T } | { error: unknown }> => {
+  try {
+    return { value: await promise };
+  } catch (error) {
+    return { error };
+  }
+};
+
 /** Moves the clock, for `Date` alone, to `ms` from now. */
 const later = (ms: number): void => {
   vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + ms });
@@ -697,19 +711,22 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         readers: owner(reader),
       });
 
+    // Calls, not promises: each is made only when its refusal is awaited,
+    // so none rejects before anything observes it.
     const refusals = [
-      add(lone),
-      add("text", { producer: "upload", id: "id \uDC00" }),
-      add("text", newSource(), "change \uD800"),
-      recallAs(env, reader, "question \uD800"),
-      readSourceVersionAs(env, reader, {
-        source: { producer: "upload", id: "id \uDC00" },
-        version: 1,
-      }),
+      async () => await add(lone),
+      async () => await add("text", { producer: "upload", id: "id \uDC00" }),
+      async () => await add("text", newSource(), "change \uD800"),
+      async () => await recallAs(env, reader, "question \uD800"),
+      async () =>
+        await readSourceVersionAs(env, reader, {
+          source: { producer: "upload", id: "id \uDC00" },
+          version: 1,
+        }),
     ];
     for (const refusal of refusals) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
-      await expect(refusal).rejects.toThrow(refused);
+      await expect(refusal()).rejects.toThrow(refused);
     }
     // Nothing was kept of the refused text: its change is a first add.
     const first = await add(replaced);
@@ -731,6 +748,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
   it("refuses a source it can't name or text with nothing in it, and stores nothing", async () => {
     const reader = await person();
     const secret = word();
+    // Calls, not promises, as above: made one at a time as awaited.
     const adds = [
       { producer: "upload", id: "" },
       { producer: "upload", id: "s".repeat(257) },
@@ -739,7 +757,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       { producer: "upload", id: "a\u0000b" },
       { producer: "upload", id: "line\nbreak" },
     ].map(
-      async (source) =>
+      (source) => async () =>
         await addSource(env, {
           // SAFETY: core checks what it is given; these hand it what the
           // type rules out, as a call from outside TypeScript could.
@@ -752,7 +770,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     );
     for (const add of adds) {
       // oxlint-disable-next-line no-await-in-loop -- one add at a time
-      await expect(add).rejects.toThrow(refused);
+      await expect(add()).rejects.toThrow(refused);
     }
     for (const [change, text] of [
       [newChange(), " \n\t "],
@@ -914,7 +932,9 @@ describe(
       // that runs while it writes leaves it be.
       later(fileGraceMs + 60_000);
       const gate = await holdNextFileWrite();
-      const retry = add();
+      // Settled into a value either way at once, so a refusal is never left
+      // unobserved while the test waits.
+      const retry = settled(add());
       await vi.waitFor(() => {
         expect(gate.reached).toBeTruthy();
       });
@@ -926,7 +946,7 @@ describe(
         history: await historyAs(reader, source, 1),
         count: await countOn(text),
       }).toStrictEqual({
-        retried: { source, version: 1 },
+        retried: { value: { source, version: 1 } },
         history: text,
         count: 1,
       });
@@ -945,14 +965,17 @@ describe(
       // An add stalled past its time while it writes the file, and the
       // sweep takes the file's row meanwhile.
       const gate = await holdNextFileWrite();
-      const stalled = add();
+      const stalled = settled(add());
       await vi.waitFor(() => {
         expect(gate.reached).toBeTruthy();
       });
       later(fileGraceMs + 60_000);
       await sweepBrain(env, new Date());
       gate.released = true;
-      await expect(stalled).rejects.toThrow(/add it again/u);
+      const outcome = await stalled;
+      expect("error" in outcome ? String(outcome.error) : "added").toMatch(
+        /add it again/u
+      );
       const afterStall = {
         recalled: await historyAs(reader, source, 1),
         count: await countOn(text),
