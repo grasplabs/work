@@ -46,6 +46,23 @@ const keyOf = (principals: readonly Principal[]): string =>
     .toSorted(byCodeUnits)
     .join(",")}]`;
 
+/** The key of the set of readers `access` names. */
+export const readerSetKeyOf = (access: Access): string =>
+  keyOf(principalsOf(access));
+
+/**
+ * The sets of readers a reader is in, as a common table `readable` for a
+ * statement whose `?2` is the reader's person and `?3` their groups
+ * (JSON). Principals are matched with their kind, so a person never
+ * matches a group of the same name, and a set with no principals matches
+ * no one.
+ */
+export const readableSql = `readable AS (
+  SELECT reader_set FROM reader_set_members
+  WHERE (kind = 'person' AND principal = ?2)
+    OR (kind = 'group' AND principal IN (SELECT value FROM json_each(?3)))
+)`;
+
 /**
  * The set of readers `access` names, made the first time it is needed and
  * shared by every item with the same readers after that. Call it in the

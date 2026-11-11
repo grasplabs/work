@@ -16,6 +16,7 @@ import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
+import { sweepBrain } from "./brain-next.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
@@ -196,6 +197,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
       await indexApps(env);
     },
   },
+  // Files in the new Brain's bucket that adds which never finished left
+  // (src/brain-next.ts).
+  { name: "brain.source_files", period: "quarterHour", run: sweepBrain },
   // Brain command receipts past their retention (src/knowledge/memories.ts).
   {
     name: "knowledge.brain_receipts",
