@@ -1,4 +1,5 @@
-import { recallLimit } from "@grasp-os/brain-next/contract";
+import { brainOf, recallLimit } from "@grasp-os/brain-next/contract";
+import type { ChunkRef, FoundChunk } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -9,6 +10,7 @@ import { organizationId } from "../src/auth/auth.ts";
 import { addSource, readSourceVersionAs, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { seededRandom } from "./brain-scoring.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
@@ -39,6 +41,13 @@ import { testBinding } from "./test-env.ts";
 // - History: a version, whole, to a person among its readers and among
 //   the current version's readers, with the teams they are in now; to
 //   anyone else exactly what a source no one added answers (null).
+// - Vectors: every chunk of a current version holds a vector of its own,
+//   put through the store as the queue will; a search returns the chunks
+//   of current versions the reader may read, nearest the question by
+//   cosine, ties to the chunk added first, at most `vectorLimit`, each
+//   with its cosine. The vectors are +1 and -1 alone with a centre of
+//   zeros, where the store's 1-bit order is the cosine's and its 8-bit
+//   codes are whole, so the answer is exact however many it re-scores.
 //
 // Chunks: a version is one paragraph, shorter than a chunk, or several
 // paragraphs each too long to share a chunk with another (over half the
@@ -103,6 +112,22 @@ const mostParagraphs = 3;
  * target, so no two share a chunk.
  */
 const longParagraph = 650;
+
+/** Dimensions of the scenario's vectors: few, so the puts are cheap. */
+const vectorDimensions = 64;
+
+/** Most chunks a vector search returns here. */
+const vectorLimit = 10;
+
+/** The Brain's store, by its contract: the vector way has no core function yet. */
+const brainStore = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/** A chunk's place, as a key. */
+const placeKey = ({ source, version, position }: ChunkRef): string =>
+  `${source} v${version} c${position}`;
+
+/** A score as the comparison reads it: the store's and brute force's agree to this. */
+const roundedScore = (score: number): number => Math.round(score * 1e9) / 1e9;
 
 /** What a scenario's words end in: few, so sources share words. */
 const letters = ["a", "b", "c", "d"] as const;
@@ -368,6 +393,17 @@ const scenario = (people: readonly string[], seed: number) => {
     (_, index) => longParagraph + index
   );
   const planned: Planned[] = [];
+  /** The order versions were added in, which the store's chunks keep. */
+  const addOrder = new Map<Version, number>();
+  const nextSign = seededRandom(seed * 7919 + 17);
+  const signs = (): number[] =>
+    Array.from({ length: vectorDimensions }, () => (nextSign() < 0.5 ? -1 : 1));
+  /** Each chunk's vector, by its place. */
+  const vectors = new Map<string, number[]>();
+  const vectorModel = {
+    name: `random-${crypto.randomUUID()}@1`,
+    centre: Array.from({ length: vectorDimensions }, () => 0),
+  };
   const personId = (person: number): string => people[person] ?? "";
   const teamId = (team: number): string => teamIds[team] ?? "";
   /** Who may read a planned version, as core names them. */
@@ -460,6 +496,39 @@ const scenario = (people: readonly string[], seed: number) => {
       throw new Error(
         `s${source.index} was added as v${added.version}, not v${version.version}`
       );
+    }
+    addOrder.set(version, addOrder.size);
+  };
+
+  /** Each chunk of a current version, as the store names it. */
+  const currentChunks = () =>
+    planned.flatMap((source) => {
+      const version = currentOf(source);
+      return version.paragraphs.map((_, position) => ({
+        version,
+        chunk: {
+          source: `${source.source.producer}:${source.source.id}`,
+          version: version.version,
+          position,
+        },
+      }));
+    });
+
+  /** Puts a vector for each current chunk without one, as the queue will. */
+  const putVectors = async (): Promise<void> => {
+    const fresh = currentChunks()
+      .filter(({ chunk }) => !vectors.has(placeKey(chunk)))
+      .map(({ chunk }) => {
+        const vector = signs();
+        vectors.set(placeKey(chunk), vector);
+        return { chunk, vector };
+      });
+    for (let first = 0; first < fresh.length; first += 256) {
+      // oxlint-disable-next-line no-await-in-loop -- one put at a time
+      await brainStore().putVectors({
+        model: vectorModel,
+        vectors: fresh.slice(first, first + 256),
+      });
     }
   };
 
@@ -645,12 +714,63 @@ const scenario = (people: readonly string[], seed: number) => {
         ];
   };
 
+  /**
+   * Searches by a vector as `person` once; what went wrong. The answer:
+   * the current chunks they may read, by cosine, ties to the chunk added
+   * first, at most `vectorLimit`, each with its cosine.
+   */
+  const askVectors = async (
+    moment: string,
+    person: number
+  ): Promise<string[]> => {
+    const question = signs();
+    const groups = teamIds
+      .filter((_, team) => membership.has(memberKey(person, team)))
+      .map((id) => `team:${id}`);
+    const { chunks } = await brainStore().searchVectors({
+      model: vectorModel.name,
+      vector: question,
+      reader: { person: personId(person), groups },
+      limit: vectorLimit,
+    });
+    const cosineOf = (chunk: ChunkRef): number =>
+      (vectors.get(placeKey(chunk)) ?? []).reduce(
+        (sum, value, index) => sum + value * (question[index] ?? 0),
+        0
+      ) / vectorDimensions;
+    const expected = currentChunks()
+      .filter(({ version }) => isAmong(version.readers, person, membership))
+      .map(({ version, chunk }) => ({ version, chunk, score: cosineOf(chunk) }))
+      .toSorted(
+        (a, b) =>
+          b.score - a.score ||
+          (addOrder.get(a.version) ?? 0) - (addOrder.get(b.version) ?? 0) ||
+          a.chunk.position - b.chunk.position
+      )
+      .slice(0, vectorLimit);
+    const described = (found: FoundChunk): string =>
+      `${placeKey(found)} ${roundedScore(found.score)}`;
+    const got = chunks.map(described);
+    const wanted = expected.map(({ chunk, score }) =>
+      described({ ...chunk, score })
+    );
+    return JSON.stringify(got) === JSON.stringify(wanted)
+      ? []
+      : [
+          `${moment}, p${person} searches by a vector:`,
+          `got [${got.join(", ")}], but expected [${wanted.join(", ")}]`,
+          ...context(person),
+        ];
+  };
+
   /** Runs every round; the first thing that went wrong, if anything. */
   const run = async (): Promise<string[]> => {
     await start();
     for (let round = 0; round < rounds; round += 1) {
       // oxlint-disable-next-line no-await-in-loop -- round after round
       await addSources(round);
+      // oxlint-disable-next-line no-await-in-loop -- round after round
+      await putVectors();
       for (let person = 0; person < peopleCount; person += 1) {
         const questions = 1 + draws.below(mostQuestionsPerRound);
         for (let question = 0; question < questions; question += 1) {
@@ -665,6 +785,11 @@ const scenario = (people: readonly string[], seed: number) => {
         if (historyProblems.length > 0) {
           return historyProblems;
         }
+        // oxlint-disable-next-line no-await-in-loop -- one person at a time
+        const vectorProblems = await askVectors(`round ${round}`, person);
+        if (vectorProblems.length > 0) {
+          return vectorProblems;
+        }
       }
       for (let change = 1 + draws.below(2); change > 0; change -= 1) {
         const person = draws.below(peopleCount);
@@ -678,6 +803,14 @@ const scenario = (people: readonly string[], seed: number) => {
         );
         if (problems.length > 0) {
           return problems;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one change at a time
+        const vectorProblems = await askVectors(
+          `round ${round}, just after "${history.at(-1) ?? ""}"`,
+          person
+        );
+        if (vectorProblems.length > 0) {
+          return vectorProblems;
         }
       }
     }

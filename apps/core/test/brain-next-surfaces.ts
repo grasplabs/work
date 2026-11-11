@@ -20,11 +20,21 @@
  */
 import {
   brainOf,
+  modelNameMaxLength,
   questionMaxLength,
   readerGroupsMax,
   sourceTextMaxBytes,
+  vectorSearchLimitMax,
+  vectorsPerPutMax,
 } from "@grasp-os/brain-next/contract";
-import type { Access, Brain, Reader } from "@grasp-os/brain-next/contract";
+import type {
+  Access,
+  Brain,
+  ChunkRef,
+  Reader,
+  VectorModel,
+  VectorsToPut,
+} from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 
 import * as coreBrain from "../src/brain-next.ts";
@@ -514,6 +524,131 @@ type StoreMember = {
     : never;
 }[Exclude<keyof BrainStore, keyof Rpc.DurableObjectBranded>];
 
+/** Dimensions of the vectors the vector probes put: few, so they're cheap. */
+const vectorDimensions = 64;
+
+/** Codes the store re-scores at most (vectors.ts `rescoreCandidates`). */
+const rescoredMost = 256;
+
+/** Codes in a packed block of the store (vectors.ts `blockSize`). */
+const vectorBlockSize = 1024;
+
+/** A vector of random numbers from -1 to 1. */
+const randomVector = (): number[] =>
+  Array.from({ length: vectorDimensions }, () => Math.random() * 2 - 1);
+
+/** A model of its own, with a centre of its own. */
+const probeModel = (): VectorModel => ({
+  name: `probe-${crypto.randomUUID()}@1`,
+  centre: randomVector().map((value) => value / 10),
+});
+
+/** A chunk and the vector it is put with. */
+type Coded = VectorsToPut["vectors"][number];
+
+/**
+ * A put, and whatever it answers: nothing today, as its type says, so an
+ * answer a later put gives, for one chunk and not another, shows. Called
+ * through `Reflect.apply`, which keeps the answer the type would drop.
+ */
+const putAnswering = async (request: unknown): Promise<unknown> => {
+  const brain = store();
+  const answered: unknown = await Reflect.apply(brain.putVectors, brain, [
+    request,
+  ]);
+  return answered;
+};
+
+/** Puts `coded` for `model`, as many puts as it takes. */
+const putAll = async (
+  model: VectorModel,
+  coded: readonly Coded[]
+): Promise<void> => {
+  for (let start = 0; start < coded.length; start += vectorsPerPutMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one put at a time
+    await store().putVectors({
+      model,
+      vectors: coded.slice(start, start + vectorsPerPutMax),
+    });
+  }
+};
+
+/**
+ * A source of `count` chunks `access` may read, each paragraph a chunk of
+ * its own (over half a chunk's target, chunks.ts), every one holding
+ * `words`: its chunks, as the contract names them.
+ */
+const chunkedSource = async (
+  access: Access,
+  count: number,
+  words: string
+): Promise<ChunkRef[]> => {
+  const source = keyOf(missingSource());
+  const { version } = await store().addSource({
+    source,
+    change: crypto.randomUUID(),
+    text: Array.from({ length: count }, (_, index) =>
+      `${words} ${index} `.padEnd(650, "x")
+    ).join("\n\n"),
+    access,
+  });
+  return Array.from({ length: count }, (_, position) => ({
+    source,
+    version,
+    position,
+  }));
+};
+
+/** `chunks`, each at `vector`. */
+const placedAt = (chunks: readonly ChunkRef[], vector: number[]): Coded[] =>
+  chunks.map((chunk) => ({ chunk, vector }));
+
+/** The first chunk of each of `versions`, as the contract names it. */
+const firstChunksOf = (versions: Probing["hiddenVersions"]): ChunkRef[] =>
+  versions.map(({ source, version }) => ({
+    source: keyOf(source),
+    version,
+    position: 0,
+  }));
+
+/**
+ * What the vector probes search with: a question, the reader's own chunks
+ * at vectors of their own (found every time, so a hidden code that took a
+ * place or moved a score would show), and a model holding those alone,
+ * whose answer is what the reader gets when nothing hidden is stored.
+ */
+const vectorScene = async (reader: Reader) => {
+  const question = randomVector();
+  const own = await chunkedSource(
+    { kind: "owner", person: reader.person },
+    3,
+    "The reader's own"
+  );
+  const ownCoded = own.map((chunk) => ({ chunk, vector: randomVector() }));
+  /** A model with the reader's own codes in it, and `hidden` besides. */
+  const modelWith = async (...hidden: Coded[][]): Promise<VectorModel> => {
+    const model = probeModel();
+    await putAll(model, ownCoded);
+    for (const coded of hidden) {
+      // oxlint-disable-next-line no-await-in-loop -- one put at a time
+      await putAll(model, coded);
+    }
+    return model;
+  };
+  const search = async (
+    model: VectorModel,
+    vector = question,
+    as: Reader = reader
+  ) =>
+    await store().searchVectors({
+      model: model.name,
+      vector,
+      reader: as,
+      limit: vectorSearchLimitMax,
+    });
+  return { question, ownCoded, modelWith, search };
+};
+
 /** One probe per public method of the Brain's store. */
 export const storeProbes = {
   addSource: async ({ markers }) => {
@@ -705,6 +840,235 @@ export const storeProbes = {
           )
       )
     );
+    return asked;
+  },
+  // A put has no reader: what it may never do is widen who reads a chunk.
+  // Codes put for every hidden version's chunk, at the question itself,
+  // must leave the reader's search exactly as a put for a chunk no one
+  // added does.
+  putVectors: async ({ reader, markers, hiddenVersions }) => {
+    const { question, ownCoded, search } = await vectorScene(reader);
+    const words = markedText(markers);
+    const put = async (name: string, model: unknown, vectors: unknown) =>
+      await answer(name, async () => await putAnswering({ model, vectors }));
+    /**
+     * A put of `chunks` at the question, to a model of its own holding the
+     * reader's own codes: what the put answered, and what the reader then
+     * finds. Two calls shaped alike, so any difference is the chunks'.
+     */
+    const putThenSearch = async (
+      name: string,
+      chunks: ChunkRef[],
+      about: Answer["about"]
+    ) => {
+      const model = probeModel();
+      await putAll(model, ownCoded);
+      return await answer(
+        name,
+        async () => ({
+          put: await putAnswering({
+            model,
+            vectors: placedAt(chunks, question),
+          }),
+          found: await search(model),
+        }),
+        about
+      );
+    };
+    const hidden = probeModel();
+    await putAll(hidden, ownCoded);
+    const missingChunk = {
+      source: keyOf(missingSource()),
+      version: 1,
+      position: 0,
+    };
+    const chunk = firstChunksOf(hiddenVersions)[0] ?? missingChunk;
+    const one = [{ chunk, vector: question }];
+    return [
+      await putThenSearch("a chunk no one added", [missingChunk], "nothing"),
+      await putThenSearch(
+        "every hidden version's first chunk",
+        firstChunksOf(hiddenVersions),
+        "hidden"
+      ),
+      await put(
+        "a model named by the markers, too long",
+        { ...hidden, name: words.repeat(modelNameMaxLength) },
+        one
+      ),
+      await put(
+        "a model named by the markers, with half a surrogate pair",
+        { ...hidden, name: `${words}\uD800` },
+        one
+      ),
+      await put("a centre of the markers", { ...hidden, centre: markers }, one),
+      await put(
+        "a centre holding no number",
+        { ...hidden, centre: hidden.centre.map(() => Number.NaN) },
+        one
+      ),
+      await put(
+        "a known model with another centre",
+        { ...hidden, centre: hidden.centre.map((value) => value + 1) },
+        one
+      ),
+      await put("a vector of the markers", hidden, [
+        { chunk, vector: markers },
+      ]),
+      await put("a vector shorter than the centre", hidden, [
+        { chunk, vector: question.slice(1) },
+      ]),
+      await put("a vector of zeros", hidden, [
+        { chunk, vector: question.map(() => 0) },
+      ]),
+      await put("a chunk of a source named by the markers, too long", hidden, [
+        { chunk: { ...chunk, source: words.repeat(300) }, vector: question },
+      ]),
+      await put(
+        "too many vectors",
+        hidden,
+        Array.from({ length: vectorsPerPutMax + 1 }, () => one[0])
+      ),
+      await answer("a request with an unknown field", async () => {
+        await store().putVectors(
+          unchecked({ model: hidden, vectors: one, extra: words })
+        );
+      }),
+    ];
+  },
+  // Hidden codes at the question itself, in a tail only (the marked
+  // versions' chunks, and more of someone else's than the store
+  // re-scores, so they would crowd out the reader's own if the scan read
+  // them) and in a packed block only (exactly a block's worth of someone
+  // else's): the reader's search must find exactly what it finds with
+  // nothing hidden stored.
+  searchVectors: async ({ reader, markers, hiddenVersions }) => {
+    const { question, modelWith, search } = await vectorScene(reader);
+    const words = markedText(markers);
+    const nothing = await modelWith();
+    const inTail = await modelWith(
+      placedAt(firstChunksOf(hiddenVersions), question),
+      placedAt(
+        await chunkedSource(
+          { kind: "owner", person: stranger() },
+          rescoredMost + 44,
+          words
+        ),
+        question
+      )
+    );
+    const inBlock = await modelWith(
+      placedAt(
+        await chunkedSource(
+          { kind: "owner", person: stranger() },
+          vectorBlockSize,
+          words
+        ),
+        question
+      )
+    );
+    const refused = async (name: string, request: unknown) =>
+      await answer(
+        name,
+        async () => await store().searchVectors(unchecked(request))
+      );
+    const request = {
+      model: nothing.name,
+      vector: question,
+      reader,
+      limit: vectorSearchLimitMax,
+    };
+    return [
+      await answer(
+        "with nothing hidden stored",
+        async () => await search(nothing),
+        "nothing"
+      ),
+      await answer(
+        "with hidden codes in a tail only",
+        async () => await search(inTail),
+        "hidden"
+      ),
+      await answer(
+        "with hidden codes in a packed block only",
+        async () => await search(inBlock),
+        "hidden"
+      ),
+      await answer(
+        "a model with no codes",
+        async () => await search(probeModel())
+      ),
+      await refused("a model named by the markers, too long", {
+        ...request,
+        model: words.repeat(modelNameMaxLength),
+      }),
+      await refused(
+        "a model named by the markers, with half a surrogate pair",
+        {
+          ...request,
+          model: `${words}\uD800`,
+        }
+      ),
+      await refused("a vector of the markers", {
+        ...request,
+        vector: markers,
+      }),
+      await refused("a vector of other dimensions", {
+        ...request,
+        vector: question.slice(1),
+      }),
+      await refused("a vector of zeros", {
+        ...request,
+        vector: question.map(() => 0),
+      }),
+      await refused("no result", { ...request, limit: 0 }),
+      await refused("too many results", {
+        ...request,
+        limit: vectorSearchLimitMax + 1,
+      }),
+      await refused("too many groups", {
+        ...request,
+        reader: {
+          ...reader,
+          groups: Array.from({ length: readerGroupsMax + 1 }, () => words),
+        },
+      }),
+      await refused("a request with an unknown field", {
+        ...request,
+        extra: words,
+      }),
+    ];
+  },
+  // A step with no reader, for the work queue and erasure: one that has
+  // removed codes to drop (a marked source's, replaced by a new version)
+  // and ones with nothing left, none answering, logging or prompting a
+  // marker.
+  repackVectors: async ({ markers }) => {
+    const words = markedText(markers);
+    const access: Access = { kind: "owner", person: stranger() };
+    // One block, of two sources: the first replaced leaves half of it
+    // removed.
+    const replaced = await chunkedSource(access, 600, words);
+    const kept = await chunkedSource(access, vectorBlockSize - 600, words);
+    await putAll(
+      probeModel(),
+      placedAt([...replaced, ...kept], randomVector())
+    );
+    await store().addSource({
+      source: replaced[0]?.source ?? keyOf(missingSource()),
+      change: crypto.randomUUID(),
+      text: words,
+      access,
+    });
+    const asked: Answer[] = [];
+    for (let repack = 1; repack <= 3; repack += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one repack at a time
+      const answered = await answer(
+        `repack ${repack}`,
+        async () => await store().repackVectors()
+      );
+      asked.push(answered);
+    }
     return asked;
   },
 } satisfies Record<StoreMember, Probe>;

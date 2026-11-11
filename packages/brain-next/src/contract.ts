@@ -159,6 +159,85 @@ export interface SourceVersion extends SourceVersionRef {
 export const sweepRequestSchema = z.strictObject({ at: z.date() });
 export type SweepRequest = z.infer<typeof sweepRequestSchema>;
 
+/** Most dimensions of a vector. */
+export const vectorDimensionsMax = 4096;
+
+/** Most vectors one put takes. */
+export const vectorsPerPutMax = 256;
+
+/** Most chunks one vector search returns. */
+export const vectorSearchLimitMax = 50;
+
+/** Most characters of a model's name. */
+export const modelNameMaxLength = 256;
+
+const modelNameSchema = wellFormedString().min(1).max(modelNameMaxLength);
+
+/** A vector: finite numbers, never all zero (it has no direction). */
+const vectorSchema = z
+  .array(z.number())
+  .min(1)
+  .max(vectorDimensionsMax)
+  .refine((vector) => vector.some((value) => value !== 0), {
+    message: "Is all zeros",
+  });
+
+/**
+ * The embedding model vectors come from, as its caller names it: the
+ * model and its build (`name`, one name per build, so codes of two builds
+ * are never compared), and the centre its 1-bit codes are taken against,
+ * shipped with the model: a vector's bit is set where it is above the
+ * centre. The model's first vectors fix its centre and dimensions.
+ */
+export const vectorModelSchema = z.strictObject({
+  name: modelNameSchema,
+  centre: z.array(z.number()).min(1).max(vectorDimensionsMax),
+});
+export type VectorModel = z.infer<typeof vectorModelSchema>;
+
+/** A chunk: its place in a version of a source, from 0. */
+export const chunkRefSchema = z.strictObject({
+  source: sourceIdSchema,
+  version: versionSchema,
+  position: z.int().nonnegative(),
+});
+export type ChunkRef = z.infer<typeof chunkRefSchema>;
+
+/** Vectors of chunks to keep, from one model, each as long as its centre. */
+export const vectorsToPutSchema = z
+  .strictObject({
+    model: vectorModelSchema,
+    vectors: z
+      .array(z.strictObject({ chunk: chunkRefSchema, vector: vectorSchema }))
+      .min(1)
+      .max(vectorsPerPutMax),
+  })
+  .refine(
+    ({ model, vectors }) =>
+      vectors.every(({ vector }) => vector.length === model.centre.length),
+    { message: "A vector is not as long as the model's centre" }
+  );
+export type VectorsToPut = z.infer<typeof vectorsToPutSchema>;
+
+/** A search by meaning: a model's vector of the question, and the reader. */
+export const vectorSearchSchema = z.strictObject({
+  model: modelNameSchema,
+  vector: vectorSchema,
+  reader: readerSchema,
+  limit: z.int().min(1).max(vectorSearchLimitMax),
+});
+export type VectorSearch = z.infer<typeof vectorSearchSchema>;
+
+/** A chunk a vector search found, and how near it is: its cosine, -1 to 1. */
+export interface FoundChunk extends ChunkRef {
+  score: number;
+}
+
+/** What a vector search found the reader may read, nearest first. */
+export interface VectorsFound {
+  chunks: FoundChunk[];
+}
+
 /** The Brain, as its host calls it. */
 export interface Brain {
   /**
@@ -190,6 +269,33 @@ export interface Brain {
    * once past the time an add takes. Harmless to run late or twice.
    */
   sweep: (request: SweepRequest) => Promise<void>;
+  /**
+   * Keeps each vector as the codes of its chunk for `model`, readable as
+   * the chunk's version is. A chunk that is not of a current version is
+   * left out, so a late put never brings back what a newer version
+   * replaced. Codes are written once per chunk and model name: a chunk
+   * that already holds codes for the model keeps them, so a put is safe
+   * to repeat, and a wrong vector stays until the chunk's next version,
+   * so a model's every build needs a name of its own. Refused when the
+   * model's name is known with another centre. For the Brain's own work
+   * queue (GRA-1768): the host has no way to it.
+   */
+  putVectors: (request: VectorsToPut) => Promise<void>;
+  /**
+   * The chunks of current versions the reader may read whose codes for
+   * the model are nearest the vector, nearest first, none for a model
+   * with no codes: an exact 1-bit scan of every such code, then the
+   * nearest candidates re-scored by cosine, so a chunk near the top by
+   * cosine whose 1-bit code is not among the candidates is missed. For
+   * recall (GRA-1769): the host has no way to it.
+   */
+  searchVectors: (request: VectorSearch) => Promise<VectorsFound>;
+  /**
+   * Repacks one block of codes that holds removed ones, dropping them for
+   * good: true when more are left. Harmless to run at any time or twice;
+   * for the work queue (GRA-1724) and erasure (GRA-1729).
+   */
+  repackVectors: () => Promise<boolean>;
 }
 
 /** The one store's name: the Brain holds everything in one store for now. */
