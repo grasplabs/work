@@ -6,6 +6,7 @@ import {
   shippedModel,
 } from "@grasp-os/embed/model-files";
 import type { EmbedModel, ModelFile } from "@grasp-os/embed/model-files";
+import { apiPath } from "@grasp-os/shared/api-path";
 import { toHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { deployedModelPrefix } from "@grasp-os/shared/release";
@@ -94,7 +95,9 @@ export const ensureModelFilesFrom = async (
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- three files, one at a time
-    const response = await source.fetch(`http://release/${file.sha256}`);
+    const response = await source.fetch(
+      `http://release${apiPath(file.sha256)}`
+    );
     if (!response.ok || response.body === null) {
       // oxlint-disable-next-line no-await-in-loop -- once, before returning
       await response.body?.cancel();

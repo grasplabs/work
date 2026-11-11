@@ -56,6 +56,7 @@ const notFound = () =>
 export const fakeAttio = (key: string) => {
   const members: FakeMember[] = [];
   const paths: string[] = [];
+  const urls: URL[] = [];
   const meetings: FakeMeeting[] = [];
   const notes: FakeNote[] = [];
   const state = {
@@ -79,6 +80,8 @@ export const fakeAttio = (key: string) => {
     writes: 0,
     /** Every path asked for. */
     paths,
+    /** Every URL asked for, its query too. */
+    urls,
   };
   const recordRoute =
     /^\/v2\/objects\/(?<object>companies|people|deals)\/records\/(?<id>[^/]+)$/u;
@@ -103,6 +106,7 @@ export const fakeAttio = (key: string) => {
     const url = new URL(request.url);
     const { pathname, searchParams } = url;
     state.paths.push(pathname);
+    state.urls.push(url);
     if (request.method !== "GET") {
       state.writes += 1;
     }
@@ -225,6 +229,7 @@ export const fakeAttio = (key: string) => {
     state.requests = 0;
     state.writes = 0;
     state.paths.length = 0;
+    state.urls.length = 0;
   });
 
   return state;

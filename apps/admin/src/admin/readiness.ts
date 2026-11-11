@@ -9,6 +9,7 @@
  * Nothing secret leaves here: a secret is named, never its value, and an
  * API failure is its code.
  */
+import { apiPath } from "@grasp-os/shared/api-path";
 import {
   clientDomain as stageDomain,
   clientsNamespace,
@@ -239,7 +240,14 @@ const deployerCheck = async (
     await api.call(
       {
         method: "GET",
-        path: `/accounts/${platformAccountId}/workers/dispatch/namespaces/${encodeURIComponent(namespace)}`,
+        path: apiPath(
+          "accounts",
+          platformAccountId,
+          "workers",
+          "dispatch",
+          "namespaces",
+          namespace
+        ),
       },
       z.unknown()
     );

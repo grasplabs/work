@@ -1,3 +1,4 @@
+import { apiPath } from "@grasp-os/shared/api-path";
 import { chunkBytes } from "@grasp-os/shared/chunks";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { pageLimits } from "@grasp-os/shared/pages";
@@ -54,6 +55,8 @@ import { sandboxWaitMs, SandboxUnavailableError } from "./sandboxed.ts";
 //   its own clock a little later still. Which of those it was, or a crash,
 //   core reads from the supervisor's verdict on the call's ID: the App's
 //   failure. A closed session without one is the sandbox being unavailable.
+//   The call's ID is core's own (`randomUUID`), never the isolate's, and
+//   goes into the supervisor's paths through `apiPath`.
 
 /** A capability passed into a session: an object's methods, or a function. */
 export interface SessionCapability {
@@ -490,9 +493,10 @@ const verdictOf = async (
   signal: AbortSignal
 ): Promise<{ verdict?: Verdict; state?: "running" | "ending" }> => {
   try {
-    const response = await host.fetch(`http://sandbox/verdict/${id}`, {
-      signal,
-    });
+    const response = await host.fetch(
+      `http://sandbox${apiPath("verdict", id)}`,
+      { signal }
+    );
     if (response.status !== 200) {
       await response.body?.cancel();
       return {};
@@ -523,7 +527,7 @@ const endSession = async (
 ): Promise<void> => {
   const tell = async (): Promise<boolean> => {
     try {
-      const response = await host.fetch(`http://sandbox/${how}/${id}`, {
+      const response = await host.fetch(`http://sandbox${apiPath(how, id)}`, {
         method: "POST",
         signal: AbortSignal.timeout(backstopMs),
       });

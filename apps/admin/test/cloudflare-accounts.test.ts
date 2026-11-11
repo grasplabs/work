@@ -1,7 +1,14 @@
+import { apiPath } from "@grasp-os/shared/api-path";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { createD1Database } from "../src/cloudflare/accounts.ts";
+import {
+  createD1Database,
+  deleteD1Database,
+  deleteR2Bucket,
+  expireAllObjects,
+  findR2Bucket,
+} from "../src/cloudflare/accounts.ts";
 import {
   CloudflareApiError,
   cloudflareApi,
@@ -9,6 +16,12 @@ import {
 } from "../src/cloudflare/api.ts";
 import type { CloudflareApi } from "../src/cloudflare/api.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import {
+  hostileSegments,
+  keptOrRefused,
+  refusedForItsPath,
+  segmentBetween,
+} from "./hostile-segments.ts";
 
 const token = "test-deployer-token-0123456789";
 const cloudflare = mockCloudflareApi(token);
@@ -19,7 +32,7 @@ const accountSchema = z.object({ id: z.string(), name: z.string() });
 /** The account `accountId`, as the token sees it: a plain read. */
 const getAccount = async (client: CloudflareApi, accountId: string) =>
   await client.call(
-    { method: "GET", path: `/accounts/${accountId}` },
+    { method: "GET", path: apiPath("accounts", accountId) },
     accountSchema
   );
 
@@ -46,7 +59,7 @@ describe("accounts", () => {
     for (let index = 0; index < 58; index += 1) {
       cloudflare.addAccount(`Client ${index}`);
     }
-    const listed = await listAll(api, "/accounts", accountSchema, {
+    const listed = await listAll(api, apiPath("accounts"), accountSchema, {
       name: "Client",
     });
     expect({
@@ -60,7 +73,7 @@ describe("accounts", () => {
       cloudflare.addAccount(`Client ${index}`);
     }
     await expect(
-      listAll(api, "/accounts", accountSchema, { name: "Client" })
+      listAll(api, apiPath("accounts"), accountSchema, { name: "Client" })
     ).rejects.toThrow("Listing /accounts passed 20 pages");
   });
 
@@ -220,4 +233,67 @@ describe("the token", () => {
     expect(shown).not.toContain("wrong-token-9876543210");
     expect(shown).toContain("10000 Authentication error");
   });
+});
+
+describe("a value in a call's path", () => {
+  it.each(hostileSegments)(
+    "keeps the D1 database id %j Cloudflare listed one segment under the account's databases, or sends nothing",
+    async (uuid) => {
+      const account = cloudflare.addAccount();
+      const refused = await refusedForItsPath(async () => {
+        await deleteD1Database(api, account.id, uuid);
+      });
+      expect({
+        refused,
+        segments: cloudflare.calls.map(({ path }) =>
+          segmentBetween(path, `/accounts/${account.id}/d1/database`)
+        ),
+      }).toStrictEqual(keptOrRefused(uuid));
+    }
+  );
+
+  it.each(hostileSegments)(
+    "keeps the bucket name %j one segment under the account's buckets in every bucket call, or sends nothing",
+    async (name) => {
+      const account = cloudflare.addAccount();
+      const buckets = `/accounts/${account.id}/r2/buckets`;
+      const found = await refusedForItsPath(
+        async () => await findR2Bucket(api, account.id, name, "eu")
+      );
+      const deleted = await refusedForItsPath(
+        async () => await deleteR2Bucket(api, account.id, name, "eu")
+      );
+      const expired = await refusedForItsPath(async () => {
+        await expireAllObjects(api, account.id, name, "eu");
+      });
+      const { refused, segments } = keptOrRefused(name);
+      expect({
+        refused: [found, deleted, expired],
+        segments: cloudflare.calls.map(({ path }) =>
+          path.endsWith("/lifecycle")
+            ? segmentBetween(path, buckets, "/lifecycle")
+            : segmentBetween(path, buckets)
+        ),
+      }).toStrictEqual({
+        refused: [refused, refused, refused],
+        segments: [...segments, ...segments, ...segments],
+      });
+    }
+  );
+
+  it.each(hostileSegments)(
+    "keeps the account id %j one segment under the accounts, or sends nothing",
+    async (accountId) => {
+      const refused = await refusedForItsPath(
+        async () =>
+          await createD1Database(api, accountId, "grasp-os-core", "eu")
+      );
+      expect({
+        refused,
+        segments: cloudflare.calls.map(({ path }) =>
+          segmentBetween(path, "/accounts", "/d1/database")
+        ),
+      }).toStrictEqual(keptOrRefused(accountId));
+    }
+  );
 });

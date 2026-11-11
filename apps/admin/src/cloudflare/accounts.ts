@@ -2,6 +2,8 @@
  * The D1 databases and R2 buckets a client's deployment needs in a
  * destination's account: finding, creating and deleting them.
  */
+import { apiPath } from "@grasp-os/shared/api-path";
+import type { ApiPath } from "@grasp-os/shared/api-path";
 import { z } from "zod";
 
 import { CloudflareApiError, isNotFound, listAll } from "./api.ts";
@@ -14,6 +16,10 @@ const d1Schema = z.object({
 });
 export type D1DatabaseInfo = z.infer<typeof d1Schema>;
 
+/** The path of `accountId`'s `...segments`, each one segment, whatever it holds. */
+const accountPath = (accountId: string, ...segments: string[]): ApiPath =>
+  apiPath("accounts", accountId, ...segments);
+
 /** The D1 database named exactly `name`, or undefined. */
 export const findD1Database = async (
   api: CloudflareApi,
@@ -23,7 +29,7 @@ export const findD1Database = async (
   // The API matches `name` as a substring: pick the exact one.
   const matches = await listAll(
     api,
-    `/accounts/${accountId}/d1/database`,
+    accountPath(accountId, "d1", "database"),
     d1Schema,
     { name }
   );
@@ -44,7 +50,7 @@ export const createD1Database = async (
   await api.call(
     {
       method: "POST",
-      path: `/accounts/${accountId}/d1/database`,
+      path: accountPath(accountId, "d1", "database"),
       json: jurisdiction === "default" ? { name } : { name, jurisdiction },
     },
     d1Schema
@@ -71,7 +77,7 @@ export const findR2Bucket = async (
     return await api.call(
       {
         method: "GET",
-        path: `/accounts/${accountId}/r2/buckets/${name}`,
+        path: accountPath(accountId, "r2", "buckets", name),
         headers: { "cf-r2-jurisdiction": jurisdiction },
       },
       bucketSchema
@@ -94,7 +100,7 @@ export const createR2Bucket = async (
   await api.call(
     {
       method: "POST",
-      path: `/accounts/${accountId}/r2/buckets`,
+      path: accountPath(accountId, "r2", "buckets"),
       headers: { "cf-r2-jurisdiction": jurisdiction },
       json: { name },
     },
@@ -112,7 +118,10 @@ export const deleteD1Database = async (
 ): Promise<void> => {
   try {
     await api.call(
-      { method: "DELETE", path: `/accounts/${accountId}/d1/database/${uuid}` },
+      {
+        method: "DELETE",
+        path: accountPath(accountId, "d1", "database", uuid),
+      },
       z.unknown()
     );
   } catch (error) {
@@ -140,7 +149,7 @@ export const deleteR2Bucket = async (
     await api.call(
       {
         method: "DELETE",
-        path: `/accounts/${accountId}/r2/buckets/${name}`,
+        path: accountPath(accountId, "r2", "buckets", name),
         headers: { "cf-r2-jurisdiction": jurisdiction },
       },
       z.unknown()
@@ -174,7 +183,7 @@ export const expireAllObjects = async (
   await api.call(
     {
       method: "PUT",
-      path: `/accounts/${accountId}/r2/buckets/${name}/lifecycle`,
+      path: accountPath(accountId, "r2", "buckets", name, "lifecycle"),
       headers: { "cf-r2-jurisdiction": jurisdiction },
       json: {
         rules: [

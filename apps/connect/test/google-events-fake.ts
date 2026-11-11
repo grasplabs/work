@@ -79,6 +79,10 @@ export const googleEventsFake = () => {
     }
     return changes;
   };
+  /**
+   * Gmail's answer at `path`, as sent: each value in it is one segment,
+   * decoded on its own, as Gmail reads a path.
+   */
   const gmail = (path: string, url: URL): Response => {
     const found = /^\/gmail\/v1\/users\/(?<address>[^/]+)\/(?<rest>.+)$/u.exec(
       path
@@ -86,7 +90,8 @@ export const googleEventsFake = () => {
     if (found?.address === undefined || found.rest === undefined) {
       return notFound();
     }
-    const mailbox = mailboxOf(found.address);
+    const address = decodeURIComponent(found.address);
+    const mailbox = mailboxOf(address);
     // History IDs aren't consecutive: record n (from 1) is `historyBase +
     // n * historyStep`, and only IDs Gmail issued are taken.
     const idOf = (records: number): string =>
@@ -95,7 +100,7 @@ export const googleEventsFake = () => {
     const messages = mailbox.records.flat();
     if (found.rest === "profile") {
       return json({
-        emailAddress: found.address,
+        emailAddress: address,
         messagesTotal: messages.length,
         threadsTotal: messages.length,
         historyId: now,
@@ -130,7 +135,8 @@ export const googleEventsFake = () => {
         historyId: now,
       });
     }
-    const id = /^messages\/(?<id>[^/]+)$/u.exec(found.rest)?.groups?.id;
+    const raw = /^messages\/(?<id>[^/]+)$/u.exec(found.rest)?.groups?.id;
+    const id = raw === undefined ? undefined : decodeURIComponent(raw);
     const message = messages.find((each) => each.id === id);
     if (message === undefined || deleted.has(String(id))) {
       return notFound();
@@ -179,7 +185,7 @@ export const googleEventsFake = () => {
         const target = new URL(
           `https://gmail.googleapis.com${line?.split(" ")[1] ?? "/"}`
         );
-        const answer = gmail(decodeURIComponent(target.pathname), target);
+        const answer = gmail(target.pathname, target);
         const status =
           answer.status === 200 ? "200 OK" : `${answer.status} Not Found`;
         return `--batch_answer\r\nContent-Type: application/http\r\nContent-ID: <response-m${index}>\r\n\r\nHTTP/1.1 ${status}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${await answer.text()}\r\n`;
@@ -202,12 +208,11 @@ export const googleEventsFake = () => {
       if (request.method !== "GET") {
         return notFound();
       }
-      const path = decodeURIComponent(url.pathname);
       if (url.hostname === "gmail.googleapis.com") {
-        return gmail(path, url);
+        return gmail(url.pathname, url);
       }
       return url.hostname === "www.googleapis.com"
-        ? drive(path, url)
+        ? drive(url.pathname, url)
         : notFound();
     },
     /** Messages added to `address`'s mailbox, in one history record. */

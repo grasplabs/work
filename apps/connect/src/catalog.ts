@@ -1,3 +1,4 @@
+import type { ApiPath } from "@grasp-os/shared/api-path";
 import {
   catalogGroupOf,
   catalogLogoUrl,
@@ -19,7 +20,12 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
 import { nativeConnector } from "./bundled-connectors.ts";
-import { ComposioError, composioKey, composioRequest } from "./composio.ts";
+import {
+  ComposioError,
+  composioKey,
+  composioPath,
+  composioRequest,
+} from "./composio.ts";
 import { providers } from "./providers.ts";
 
 // The catalog: what an admin can connect. The native providers come from
@@ -295,28 +301,29 @@ const tagsSchema = z.array(z.string().max(128)).max(64);
 const readOnlyTag = "readOnlyHint";
 
 /**
- * Every item of one of Composio's lists at `path`, page after page, as
- * far as `paging` goes, each item as `schema` reads it; items it can't read
- * are left out. A list longer than `paging` allows is a failure: half a
- * catalog would look like all of it.
+ * Every item of one of Composio's lists at `path`, asked with `filter`,
+ * page after page, as far as `paging` goes, each item as `schema` reads
+ * it; items it can't read are left out. A list longer than `paging` allows
+ * is a failure: half a catalog would look like all of it.
  */
 const composioList = async <Item>(
   key: string,
-  path: string,
+  path: ApiPath,
+  filter: Readonly<Record<string, string>>,
   schema: z.ZodType<Item>,
   { pageSize, maxPages }: Paging
 ): Promise<Item[]> => {
   const items: Item[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < maxPages; page += 1) {
-    const query = new URLSearchParams({ limit: String(pageSize) });
+    const query = new URLSearchParams({ ...filter, limit: String(pageSize) });
     if (cursor !== undefined) {
       query.set("cursor", cursor);
     }
-    const separator = path.includes("?") ? "&" : "?";
     // oxlint-disable-next-line no-await-in-loop -- pages come one after another
     const { items: listed, next_cursor: next } = await composioRequest(key, {
-      path: `${path}${separator}${query.toString()}`,
+      path,
+      query,
       schema: pageSchema,
     });
     for (const item of listed) {
@@ -360,7 +367,8 @@ const authOf = ({
 const composioEntries = async (key: string): Promise<ListedToolkit[]> => {
   const toolkits = await composioList(
     key,
-    "/toolkits?sort_by=alphabetically",
+    composioPath("toolkits"),
+    { sort_by: "alphabetically" },
     toolkitSchema,
     toolkitPaging
   );
@@ -433,7 +441,8 @@ const toolsOf = async (
 ): Promise<CatalogTool[]> => {
   const tools = await composioList(
     key,
-    `/tools?${new URLSearchParams({ toolkit_slug: toolkit }).toString()}`,
+    composioPath("tools"),
+    { toolkit_slug: toolkit },
     toolSchema,
     toolPaging
   );

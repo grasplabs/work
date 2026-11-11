@@ -49,6 +49,33 @@ const internet = fakeInternet(async (request, url) =>
 );
 const audit = auditEvents();
 
+/** Values that would name another resource were they read as a path. */
+const pathAttacks = [
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+  "a%2fb",
+  "a/b",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
+] as const;
+
+/**
+ * Of those, which no path segment can be: dot pieces, plain or encoded,
+ * empty pieces (`//`), and `?` or `#`.
+ */
+const refusedSegments: ReadonlySet<string> = new Set([
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
+]);
+
 /** Finance's shared drive. */
 const financeDrive = "0AFk3nRq9GkTnUk9PVA";
 
@@ -528,6 +555,118 @@ describe("Google Workspace connector events", () => {
         ["google.mail.received", 1, pollIntervalMs],
       ],
     });
+  });
+
+  it.each(pathAttacks)(
+    "ask Gmail for a message whose ID it answered as %j only at that ID, or for none, and read the others",
+    async (id) => {
+      const gmail = await connected();
+      await sync([listener(gmail)]);
+      later();
+      google.receive(
+        gmail.address,
+        { ...gmailInvoice(1, Date.now()), id, threadId: id },
+        gmailInvoice(2, Date.now())
+      );
+      const from = internet.sent.length;
+      const warned = vi.spyOn(console, "warn").mockReturnValue();
+      let warnings: unknown[];
+      try {
+        await sync([listener(gmail)]);
+        warnings = warned.mock.calls.flat();
+      } finally {
+        warned.mockRestore();
+      }
+      // Each message the batch asks for, as its path's segments, decoded.
+      const asked = internet.sent
+        .slice(from)
+        .filter(({ path }) => path.startsWith("/batch/"))
+        .flatMap(({ body }) =>
+          body
+            .split("\r\n")
+            .filter((line) => line.startsWith("GET "))
+            .map((line) => {
+              const url = new URL(
+                line.slice("GET ".length),
+                "https://gmail.googleapis.com"
+              );
+              return url.pathname
+                .split("/")
+                .slice(1)
+                .map((segment) => decodeURIComponent(segment));
+            })
+        );
+      const kept = await outboxed();
+
+      const message = (each: string) => [
+        "gmail",
+        "v1",
+        "users",
+        gmail.address,
+        "messages",
+        each,
+      ];
+
+      const dropped = warnings.filter(
+        (warning: unknown) =>
+          z
+            .object({ event: z.literal("events.gmail_ids_dropped") })
+            .safeParse(warning).success
+      );
+
+      // An ID no segment can be isn't sent: that message is left out,
+      // counted in a warning that names no ID, the others read.
+      expect({
+        asked,
+        kept: kept.map((event) => event.id),
+        dropped,
+        namesId: JSON.stringify(warnings).includes(JSON.stringify(id)),
+      }).toStrictEqual(
+        refusedSegments.has(id)
+          ? {
+              asked: [message(gmailId(2))],
+              kept: [gmailId(2)],
+              dropped: [{ event: "events.gmail_ids_dropped", count: 1 }],
+              namesId: false,
+            }
+          : {
+              asked: [message(id), message(gmailId(2))],
+              kept: [id, gmailId(2)],
+              dropped: [],
+              namesId: false,
+            }
+      );
+    }
+  );
+
+  it("listen nowhere, and send nothing, for a mailbox that would read as another path", async () => {
+    const gmail = await connected();
+    await sync(
+      pathAttacks.flatMap((resource) => [
+        listener(gmail, { resource }),
+        listener(gmail, { type: "google.file.created", resource }),
+      ])
+    );
+    const listened = await sources();
+    // The account's own mailbox, as connect stored it.
+    for (const name of pathAttacks) {
+      // oxlint-disable-next-line no-await-in-loop -- one name at a time
+      await env.DB.prepare(
+        "UPDATE connections SET account_name = ? WHERE id = ?"
+      )
+        .bind(name, gmail.id)
+        .run();
+      // oxlint-disable-next-line no-await-in-loop -- one name at a time
+      await sync([listener(gmail)]);
+      later();
+    }
+
+    expect({
+      listened,
+      sent: internet.sent.filter(({ host }) =>
+        host.endsWith(".googleapis.com")
+      ),
+    }).toStrictEqual({ listened: [], sent: [] });
   });
 
   it("start over from now when Gmail no longer keeps the history", async () => {

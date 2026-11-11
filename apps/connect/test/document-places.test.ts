@@ -499,10 +499,23 @@ describe("a read of a place", () => {
     await items(connectionId, { query: "it's #1/2" });
     await items(google, { place: "0AFinance", query: "it's \\ here" });
     const [graphSearch, googleSearch] = asked();
+    // A search that climbs out of the drive at a gateway that decodes a
+    // path once before routing.
+    await items(connectionId, { query: "/../../../users/x" });
+    // An ordinary search with a mark a path would end at.
+    await items(connectionId, { query: "Q3 report?" });
+    const graphSearches = asked()
+      .filter(({ host }) => host === "graph.microsoft.com")
+      .map(({ pathname }) => decodeURIComponent(pathname));
+    const outsideDrive = graphSearches
+      .map((pathname) => new URL(`https://graph.invalid${pathname}`).pathname)
+      .filter((pathname) => !pathname.startsWith("/v1.0/me/drive/"));
     expect({
       refused,
       sentRefused,
+      outsideDrive,
       graph: decodeURIComponent(graphSearch?.pathname ?? ""),
+      graphSearches,
       google: googleSearch?.searchParams.get("q"),
       corpora: googleSearch?.searchParams.get("corpora"),
       driveId: googleSearch?.searchParams.get("driveId"),
@@ -515,12 +528,47 @@ describe("a read of a place", () => {
         file: "place.no_item",
       },
       sentRefused: 0,
-      graph: "/v1.0/me/drive/root/search(q='it''s #1/2')",
+      outsideDrive: [],
+      graph: "/v1.0/me/drive/root/search(q='it''s  1 2')",
+      graphSearches: [
+        "/v1.0/me/drive/root/search(q='it''s  1 2')",
+        "/v1.0/me/drive/root/search(q=' .. .. .. users x')",
+        "/v1.0/me/drive/root/search(q='Q3 report ')",
+      ],
       google: "fullText contains 'it\\'s \\\\ here' and trashed = false",
       corpora: "drive",
       driveId: "0AFinance",
     });
   });
+
+  it.each(["microsoft-documents", "google-documents"] as const)(
+    "of %s sends nothing for a place, folder or file ID that would read as another path",
+    async (provider) => {
+      const connectionId = await connectPlaces(someone("admin"), provider);
+      const place = provider === "microsoft-documents" ? "me" : "my-drive";
+      const sentBefore = internet.sent.length;
+      const ids = [
+        "..",
+        "%2e%2e",
+        "a%2fb",
+        "a/b",
+        "//evil.example/x",
+        "x?y=1",
+        "x#y",
+      ];
+      const refused = await Promise.all(
+        ids.flatMap((id) => [
+          codeOf(items(connectionId, { place: id })),
+          codeOf(items(connectionId, { place, folder: id })),
+          codeOf(file(connectionId, place, id)),
+        ])
+      );
+      expect({
+        refused: [...new Set(refused)],
+        sent: internet.sent.length - sentBefore,
+      }).toStrictEqual({ refused: ["place.no_item"], sent: 0 });
+    }
+  );
 
   it("of a Google folder names Google's own formats as what they are fetched as, and leaves out what isn't in the place", async () => {
     const connectionId = await connectPlaces(

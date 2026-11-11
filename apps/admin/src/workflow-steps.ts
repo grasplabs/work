@@ -6,6 +6,7 @@
  * way nothing a step returns or throws carries a token or a response body:
  * a run's journal keeps both (threat model R17, CO3).
  */
+import { ApiPathError } from "@grasp-os/shared/api-path";
 import { NonRetryableError } from "@grasp-os/workerflow/errors";
 
 import { CloudflareApiError, isRefused } from "./cloudflare/api.ts";
@@ -46,11 +47,12 @@ export const stop = (code: string, detail?: string): NonRetryableError =>
  * `error` as a step fails with it, carrying its code and our own words,
  * never a response body. One a retry can't fix is a `NonRetryableError`:
  * every deploy failure but the few a retry can fix, a secret missing from
- * Secrets Store, and any API refusal but a timeout or a rate limit
- * (`isRefused`). Anything else is retried, as an `Error` saying what it
- * was: a deploy code, `cloudflare_<status>_<codes>`, our own message, or
- * only the name of an error we didn't throw (a parse error can quote what
- * it parsed).
+ * Secrets Store, a path `apiPath` refused (an answer's value no segment
+ * can be, the same every time), and any API refusal but a timeout or a
+ * rate limit (`isRefused`). Anything else is retried, as an `Error`
+ * saying what it was: a deploy code, `cloudflare_<status>_<codes>`, our
+ * own message, or only the name of an error we didn't throw (a parse
+ * error can quote what it parsed).
  */
 export const asStepError = (error: unknown): Error => {
   if (error instanceof NonRetryableError) {
@@ -63,6 +65,9 @@ export const asStepError = (error: unknown): Error => {
   }
   if (error instanceof MissingStoreSecretError) {
     return stop("store_secret_missing", error.message);
+  }
+  if (error instanceof ApiPathError) {
+    return stop(errorCode(error));
   }
   if (isRefused(error)) {
     return stop(errorCode(error));

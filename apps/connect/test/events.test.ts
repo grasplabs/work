@@ -151,6 +151,33 @@ const graphPaths = (): string[] =>
 
 const now = (): string => new Date().toISOString();
 
+/** Values that would name another resource were they read as a path. */
+const pathAttacks = [
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+  "a%2fb",
+  "a/b",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
+] as const;
+
+/**
+ * Of those, which no path segment can be: dot pieces, plain or encoded,
+ * empty pieces (`//`), and `?` or `#`.
+ */
+const refusedSegments: ReadonlySet<string> = new Set([
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
+]);
+
 /** The audit events of listening and reading, in the order recorded. */
 const listening = async () => {
   const events = await audit.events();
@@ -418,8 +445,11 @@ describe("connector events", () => {
       listener(outlook, { resource: "a/b" }),
       // A drive's events, on a permission for a mailbox.
       listener(outlook, { type: "m365.file.created", resource: invoices }),
-      // A mailbox that is a dot segment.
-      listener(outlook, { resource: ".." }),
+      // A mailbox or a drive that would read as another path.
+      ...pathAttacks.flatMap((resource) => [
+        listener(outlook, { resource }),
+        listener(outlook, { type: "m365.file.created", resource }),
+      ]),
       // An event type nothing reports.
       listener(outlook, { type: "m365.mail.sent" }),
       // A connection no native Microsoft 365 connector carries.
@@ -435,6 +465,56 @@ describe("connector events", () => {
     expect(graphPaths()).toStrictEqual([]);
     await expect(listening()).resolves.toStrictEqual([]);
   });
+
+  it.each(pathAttacks)(
+    "read the own mailbox and OneDrive of an account stored as %j only there, or nowhere",
+    async (account) => {
+      const outlook = await connected();
+      await env.DB.prepare("UPDATE connections SET account_id = ? WHERE id = ?")
+        .bind(account, outlook.id)
+        .run();
+      await sync([
+        listener(outlook),
+        listener(outlook, { type: "m365.file.created" }),
+      ]);
+      // Each path once (a drive is read from the link its priming got),
+      // as its segments, decoded.
+      const sent = [
+        ...new Set(
+          internet.sent
+            .filter(({ host }) => host === "graph.microsoft.com")
+            .map(({ path }) => new URL(path, "https://graph.microsoft.com"))
+            .map(({ pathname }) => pathname)
+        ),
+      ]
+        .toSorted()
+        .map((pathname) =>
+          pathname
+            .split("/")
+            .slice(1)
+            .map((segment) => decodeURIComponent(segment))
+        );
+
+      // A value no segment can be isn't sent: each source's read fails
+      // instead.
+      expect(sent).toStrictEqual(
+        refusedSegments.has(account)
+          ? []
+          : [
+              ["v1.0", "users", account, "drive", "root", "delta"],
+              [
+                "v1.0",
+                "users",
+                account,
+                "mailFolders",
+                "inbox",
+                "messages",
+                "delta",
+              ],
+            ]
+      );
+    }
+  );
 
   it("stop listening where no listener is left, and say so in the audit log", async () => {
     const outlook = await connected();

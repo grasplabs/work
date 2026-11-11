@@ -45,6 +45,7 @@
     "./agents": "./src/agents.ts",
     "./ai-providers": "./src/ai-providers.ts",
     "./ai-status-report": "./src/ai-status-report.ts",
+    "./api-path": "./src/api-path.ts",
     "./app-data": "./src/app-data.ts",
     "./app-file-limits": "./src/app-file-limits.ts",
     "./app-files": "./src/app-files.ts",

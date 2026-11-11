@@ -1,3 +1,4 @@
+import { apiPath } from "@grasp-os/shared/api-path";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import {
   channelAnswer,
@@ -385,7 +386,9 @@ const botToken = async (bot: Bot): Promise<string | undefined> => {
   let response: Response;
   try {
     response = await fetch(
-      `https://${loginHost}/${encodeURIComponent(bot.tenant)}/oauth2/v2.0/token`,
+      // The tenant the console set, one segment: a URL would read `..` as
+      // a move up, so it is refused, and nothing sent.
+      `https://${loginHost}${apiPath(bot.tenant, "oauth2", "v2.0", "token")}`,
       {
         method: "POST",
         body: new URLSearchParams({

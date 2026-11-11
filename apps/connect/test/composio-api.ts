@@ -218,6 +218,13 @@ const page = (
 const notFound = (): Response =>
   Response.json({ error: { message: "Not found" } }, { status: 404 });
 
+/** A route's segments, each decoded, as a server reads a path. */
+const segmentsOf = (route: string): string[] =>
+  route
+    .split("/")
+    .slice(1)
+    .map((segment) => decodeURIComponent(segment));
+
 /** An auth config connect made: Composio's app for one toolkit. */
 export interface FakeAuthConfig {
   toolkit: string;
@@ -425,7 +432,7 @@ export const fakeComposioApi = (
           connected_account_urls: stringsOf(body.connected_account_ids).map(
             (account) =>
               ({
-                own: `${base}?connected_account_id=${account}`,
+                own: `${base}?connected_account_id=${encodeURIComponent(account)}`,
                 other: `${base}?connected_account_id=ca_someone_else`,
                 none: base,
               })[state.accountInUrl]
@@ -437,21 +444,22 @@ export const fakeComposioApi = (
 
   /** A deletion of something connect made, by route. */
   const deletion = (route: string): Response => {
-    const [, area, id] = route.split("/");
+    const [area = "", id = "", ...more] = segmentsOf(route);
     const held = {
       auth_configs: state.holds.authConfigs,
       connected_accounts: state.holds.accounts,
       mcp: state.holds.servers,
-    }[area ?? ""];
-    return held?.delete(id ?? "") === true
+    }[area];
+    return more.length === 0 && held?.delete(id) === true
       ? Response.json({ success: true })
       : notFound();
   };
 
   /** A connected account, as Composio shows it. */
   const accountAt = (route: string): Response => {
-    const id = route.slice("/connected_accounts/".length);
-    const account = state.holds.accounts.get(id);
+    const [, id = "", ...more] = segmentsOf(route);
+    const account =
+      more.length === 0 ? state.holds.accounts.get(id) : undefined;
     return account === undefined
       ? notFound()
       : Response.json({
@@ -500,7 +508,9 @@ export const fakeComposioApi = (
     }
     if (request.method === "PATCH" && route.startsWith("/mcp/")) {
       // Composio's update of a server: its allowlist, here.
-      const server = state.holds.servers.get(route.slice("/mcp/".length));
+      const [, id = "", ...more] = segmentsOf(route);
+      const server =
+        more.length === 0 ? state.holds.servers.get(id) : undefined;
       if (server === undefined) {
         return notFound();
       }
@@ -511,7 +521,7 @@ export const fakeComposioApi = (
       await state.updateGate?.("apply");
       server.allowedTools = stringsOf(body.allowed_tools);
       await state.updateGate?.("answer");
-      return Response.json({ id: route.slice("/mcp/".length) });
+      return Response.json({ id });
     }
     if (
       request.method === "GET" &&

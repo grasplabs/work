@@ -164,7 +164,19 @@ describe("starting a connection", () => {
   });
 
   it("is refused for anything but a tenant of the provider's kind", async () => {
-    const tenants = ["acme.test/../evil", "not-a-tenant", "evil.test#"];
+    const tenants = [
+      "acme.test/../evil",
+      "not-a-tenant",
+      "evil.test#",
+      // Values that would name another path at the provider.
+      "..",
+      "%2e%2e",
+      "a%2fb",
+      "a/b",
+      "//evil.example/x",
+      "x?y=1",
+      "x#y",
+    ];
     const refused = await Promise.all(
       tenants.map(
         async (tenant) => await outcome(startAs(someone(), { tenant }))

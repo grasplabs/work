@@ -1,3 +1,4 @@
+import { apiPath } from "@grasp-os/shared/api-path";
 import { deploymentConfig } from "@grasp-os/shared/config";
 import {
   signInConfigSchema,
@@ -89,7 +90,7 @@ const entraProvider = (
 ): OidcProvider => {
   // The tenant's own issuer, not `common`: ID tokens from any other tenant
   // carry another `iss` and fail verification.
-  const base = `${origin}/${tenantId}`;
+  const base = `${origin}${apiPath(tenantId)}`;
   return {
     providerId,
     label,

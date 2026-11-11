@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { auditEvents } from "../src/db/schema.ts";
 import { recordUnstarted } from "../src/hosting/operation.ts";
@@ -23,6 +24,7 @@ import {
   heldAfter,
   attemptEnded,
 } from "./client-provision-harness.ts";
+import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { graspAccount } from "./grasp-account.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
@@ -46,6 +48,9 @@ import {
 
 mockCloudflareApi(token, cloudflare);
 
+const isD1Create = (call: ApiCall): boolean =>
+  call.method === "POST" && call.path.endsWith("/d1/database");
+
 describe("provisioning a placed client", () => {
   useStoreSecrets({ deployer: token });
 
@@ -61,9 +66,12 @@ describe("provisioning a placed client", () => {
       400
     );
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
-    await attemptEnded(attempts.started[0], "errored");
-    errors.mockRestore();
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await attemptEnded(attempts.started[0], "errored");
+    } finally {
+      errors.mockRestore();
+    }
     await expect(operationOf(clientId)).resolves.toMatchObject({
       status: "failed",
       step: "migrations",
@@ -78,6 +86,50 @@ describe("provisioning a placed client", () => {
     );
   });
 
+  it("stops an attempt at once, unretried, when Cloudflare answers a database id no path can hold, and sends nothing to it", async () => {
+    const manifest = await importRelease();
+    const account = graspAccount(cloudflare);
+    const destinationId = await destination({ accountId: account.id });
+    const { clientId } = await placedClient(destinationId);
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // The first attempt asks for a database and is refused; the second
+      // finds it by its name, answered with `..` for its id.
+      cloudflare.failNext(isD1Create, 400);
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await attemptEnded(attempts.started[0], "errored");
+      const asked = cloudflare.calls.find(isD1Create);
+      const { name } = z.object({ name: z.string() }).parse(asked?.body);
+      account.d1.push({ uuid: "..", name, jurisdiction: "eu" });
+
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await attemptEnded(attempts.started[1], "errored");
+    } finally {
+      errors.mockRestore();
+    }
+    const [, attempt] = attempts.started;
+    const journal = await journalOf(
+      adminWorkflows.provisionPlacedClient,
+      attempt ?? ""
+    );
+
+    expect({
+      operation: await operationOf(clientId),
+      provision: journal.steps.map(({ name: step, attempt: tried }) => ({
+        step,
+        tried,
+      })),
+      sent: cloudflare.calls.filter(({ path }) =>
+        path.includes("/d1/database/")
+      ),
+    }).toMatchObject({
+      operation: { status: "failed", error: "api_path_refused" },
+      provision: [{ step: "provision", tried: 1 }],
+      sent: [],
+    });
+  });
+
   it("records why an attempt stopped before its operation could run, a secret missing from Secrets Store by name, for Setup to say, and resumes once it's back", async () => {
     const manifest = await importRelease();
     const account = graspAccount(cloudflare);
@@ -86,9 +138,12 @@ describe("provisioning a placed client", () => {
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     await emptyStoreSecret(env.DEPLOYER_API_TOKEN, "DEPLOYER_API_TOKEN");
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
-    await attemptEnded(attempts.started[0], "errored");
-    errors.mockRestore();
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await attemptEnded(attempts.started[0], "errored");
+    } finally {
+      errors.mockRestore();
+    }
 
     const code = "store_secret_missing: DEPLOYER_API_TOKEN";
     const view = await getProvisioning(env, clientId);

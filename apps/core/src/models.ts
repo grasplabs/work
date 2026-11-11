@@ -29,6 +29,7 @@ import type {
   PlatformRoute,
   ProviderTrouble,
 } from "@grasp-os/shared/ai-providers";
+import { apiPath } from "@grasp-os/shared/api-path";
 import {
   auditActorSchema,
   auditEventSchema,
@@ -2707,7 +2708,7 @@ const admitSpeech = async (
     enable_logging: "false",
     output_format: speechFormat.query,
   });
-  const path = `/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`;
+  const path = `${apiPath("v1", "text-to-speech", call.voice, "with-timestamps")}?${query.toString()}`;
   const body = JSON.stringify({
     text: call.text,
     model_id: ref.id,

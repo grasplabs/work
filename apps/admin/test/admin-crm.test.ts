@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { attioLimits } from "../src/crm/attio.ts";
+import { attioLimits, readAttioCompany } from "../src/crm/attio.ts";
 import { setAttioCompanyFn } from "../src/crm/functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
@@ -10,6 +10,11 @@ import { mockAccess } from "./access.ts";
 import { attioValue, fakeAttio } from "./attio-fake.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
+import {
+  hostileSegments,
+  keptOrRefused,
+  segmentBetween,
+} from "./hostile-segments.ts";
 import { callServerFn, page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
@@ -85,6 +90,16 @@ const detailsOf = async (clientId: string) => {
   return { html, main: mainOf(html) };
 };
 
+/** Where a read's calls came from, or why it stopped. */
+const callsFrom = (result: Awaited<ReturnType<typeof readAttioCompany>>) =>
+  "records" in result ? result.records.calls?.from : result.error;
+
+/** The query parameter each of Attio's lists takes a company's id in. */
+const idParameter: Record<string, string> = {
+  "/v2/meetings": "linked_record_id",
+  "/v2/notes": "parent_record_id",
+};
+
 /**
  * Noordkade in Attio: the company, two people on its team and one deal
  * Ruben owns, plus a person at another company that must never show.
@@ -135,6 +150,10 @@ const noordkade = () => {
   attio.members.push({ id: ruben, firstName: "Ruben", lastName: "Jansen" });
   return { companyId, dealId: deal };
 };
+
+/** Every path the admin reads Attio at: a record, by one segment, or a list. */
+const attioPath =
+  /^\/v2\/(?:objects\/(?:companies|people|deals)\/records\/[^/]+|meetings|notes|workspace_members)$/u;
 
 const daysAgo = (days: number): string =>
   new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -299,6 +318,148 @@ describe("an organization's company in Attio, with Attio's key", () => {
     expect(
       attio.paths.filter((path) => path.includes("/objects/people/"))
     ).toHaveLength(attioLimits.people);
+  });
+
+  it("reads a page's worth of a company's people when references no record can have come first", async () => {
+    const clientId = await liveClient();
+    const companyId = crypto.randomUUID();
+    const junk = Array.from(
+      { length: attioLimits.people },
+      (_, index) => `../${index}`
+    );
+    const many = Array.from({ length: attioLimits.people + 5 }, () =>
+      crypto.randomUUID()
+    );
+    attio.records.companies.set(companyId, {
+      name: [attioValue.text("Big Co")],
+      team: [...junk, ...many].map((id) => attioValue.reference("people", id)),
+    });
+    for (const [index, id] of many.entries()) {
+      attio.records.people.set(id, {
+        name: [attioValue.personalName("Person", `${index}`)],
+      });
+    }
+    await link(clientId, companyId);
+    await detailsOf(clientId);
+    expect(
+      attio.paths.filter((path) => path.includes("/objects/people/"))
+    ).toStrictEqual(
+      many
+        .slice(0, attioLimits.people)
+        .map((id) => `/v2/objects/people/records/${id}`)
+    );
+  });
+
+  it.each([...hostileSegments, "x&limit=1000"])(
+    "reads the meetings and notes of a stored company id %j at their own paths, the id one query value, or asks nothing",
+    async (companyId) => {
+      attio.records.companies.set(companyId, {
+        name: [attioValue.text("Stored Co")],
+      });
+      attio.meetings.push({
+        title: "Kick-off",
+        start: "2025-10-01T09:00:00.000Z",
+        participants: [],
+        companyIds: [companyId],
+      });
+      attio.notes.push({
+        title: "Notes from the call",
+        createdAt: "2025-10-02T09:00:00.000Z",
+        companyId,
+      });
+      const read = {
+        key: attioKey,
+        recordId: companyId,
+        signal: new AbortController().signal,
+      };
+      const fromMeetings = await readAttioCompany(read);
+      attio.hasMeetings = false;
+      const fromNotes = await readAttioCompany(read);
+
+      const lists = attio.urls
+        .filter(({ pathname }) => !pathname.startsWith("/v2/objects/"))
+        .map(({ pathname, searchParams }) => [
+          pathname,
+          searchParams.getAll(idParameter[pathname] ?? ""),
+        ]);
+      expect({
+        from: [callsFrom(fromMeetings), callsFrom(fromNotes)],
+        lists,
+        requests: attio.requests,
+      }).toStrictEqual(
+        keptOrRefused(companyId).refused
+          ? { from: ["not_found", "not_found"], lists: [], requests: 0 }
+          : {
+              from: ["meetings", "notes"],
+              lists: [
+                ["/v2/meetings", [companyId]],
+                ["/v2/meetings", [companyId]],
+                ["/v2/notes", [companyId]],
+              ],
+              requests: 5,
+            }
+      );
+    }
+  );
+
+  it("reads each person and deal Attio's company answer names at its own record, one segment, whatever its id holds", async () => {
+    const clientId = await liveClient();
+    const { companyId } = noordkade();
+    const company = attio.records.companies.get(companyId) ?? {};
+    // Ids as Attio's answer gives them, each a record Attio holds.
+    for (const [index, id] of hostileSegments.entries()) {
+      attio.records.people.set(id, {
+        name: [attioValue.personalName("Hostile", `person ${index}`)],
+      });
+      attio.records.deals.set(id, {
+        name: [attioValue.text(`Hostile deal ${index}`)],
+      });
+    }
+    attio.records.companies.set(companyId, {
+      ...company,
+      team: [
+        ...(company.team ?? []),
+        ...hostileSegments.map((id) => attioValue.reference("people", id)),
+      ],
+      associated_deals: [
+        ...(company.associated_deals ?? []),
+        ...hostileSegments.map((id) => attioValue.reference("deals", id)),
+      ],
+    });
+
+    await link(clientId, companyId);
+    const { main } = await detailsOf(clientId);
+
+    const hostile = new Set<string>(hostileSegments);
+    /** The hostile ids asked for of `object`, and `outside` for a request that left its records. */
+    const asked = (object: string) =>
+      attio.paths
+        .filter((path) => path.startsWith(`/v2/objects/${object}/`))
+        .map((path) => segmentBetween(path, `/v2/objects/${object}/records`))
+        .map((id) => id ?? "outside")
+        .filter((id) => id === "outside" || hostile.has(id))
+        .toSorted();
+    // An id no record can have (`..`) is left out, as a deleted one is.
+    const kept = hostileSegments
+      .filter((id) => !keptOrRefused(id).refused)
+      .toSorted();
+    expect({
+      people: asked("people"),
+      deals: asked("deals"),
+      elsewhere: attio.paths.filter((path) => !attioPath.test(path)),
+      shown: hostileSegments.map(
+        (_, index) =>
+          main.includes(`Hostile person ${index}`) &&
+          main.includes(`Hostile deal ${index}`)
+      ),
+      sanne: main.includes("Sanne de Wit"),
+    }).toStrictEqual({
+      people: kept,
+      deals: kept,
+      elsewhere: [],
+      shown: hostileSegments.map((id) => !keptOrRefused(id).refused),
+      sanne: true,
+    });
   });
 
   it("says when Attio has no such company, and still offers the link", async () => {

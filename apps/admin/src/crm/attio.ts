@@ -28,6 +28,12 @@
  * (`GET /notes`). A workspace that renamed or removed an attribute simply
  * shows it as not known.
  */
+import {
+  ApiPathError,
+  apiPath,
+  isApiPathSegment,
+} from "@grasp-os/shared/api-path";
+import type { ApiPath } from "@grasp-os/shared/api-path";
 import { z } from "zod";
 
 import { eachLimited } from "../live-reads.ts";
@@ -292,22 +298,24 @@ class AttioError extends Error {
 }
 
 /**
- * A GET to Attio's API at `path`, or with `query` the deals' one reading
- * POST: its JSON answer, or null for a 404.
+ * A GET to Attio's API at `path`, with `search` as its query: its JSON
+ * answer, or null for a 404. Values go in by `apiPath` and `search` alone,
+ * never pasted into the URL, so none moves the read (GRA-1779).
  */
 const get = async (
   { key, signal }: Pick<AttioRead, "key" | "signal">,
-  path: string,
-  query?: { limit: number }
+  path: ApiPath,
+  search: Record<string, string> = {}
 ): Promise<unknown> => {
-  const response = await fetch(`${attioApi}${path}`, {
-    ...(query === undefined
-      ? { method: "GET" }
-      : { method: "POST", body: JSON.stringify(query) }),
+  const url = new URL(`${attioApi}${path}`);
+  for (const [name, value] of Object.entries(search)) {
+    url.searchParams.set(name, value);
+  }
+  const response = await fetch(url, {
+    method: "GET",
     headers: {
       authorization: `Bearer ${key}`,
       accept: "application/json",
-      ...(query === undefined ? {} : { "content-type": "application/json" }),
     },
     // A redirect isn't followed (Workers has no "error"): it isn't ok, so no answer.
     redirect: "manual",
@@ -330,7 +338,10 @@ const get = async (
   });
 };
 
-/** One record of `object`, parsed with `schema`; null when Attio has none. */
+/**
+ * One record of `object`, parsed with `schema`; null when Attio has none,
+ * as for an id no record can have (`..`, which `apiPath` refuses).
+ */
 const record = async <
   T extends z.ZodType<{ data: { id: { record_id: string } } }>,
 >(
@@ -339,10 +350,16 @@ const record = async <
   recordId: string,
   schema: T
 ): Promise<z.output<T> | null> => {
-  const answer = await get(
-    read,
-    `/objects/${object}/records/${encodeURIComponent(recordId)}`
-  );
+  let path: ApiPath;
+  try {
+    path = apiPath("objects", object, "records", recordId);
+  } catch (error) {
+    if (error instanceof ApiPathError) {
+      return null;
+    }
+    throw error;
+  }
+  const answer = await get(read, path);
   if (answer === null) {
     return null;
   }
@@ -353,7 +370,10 @@ const record = async <
   return parsed.data;
 };
 
-/** The distinct ids a reference attribute points at in `object`, at most `limit`. */
+/**
+ * The distinct ids a reference attribute points at in `object`, at most
+ * `limit`; ids no record can have are dropped first, so they take no place.
+ */
 const targets = (
   references: readonly { target_object: string; target_record_id: string }[],
   object: string,
@@ -364,6 +384,7 @@ const targets = (
       references
         .filter((each) => each.target_object === object)
         .map((each) => each.target_record_id)
+        .filter(isApiPathSegment)
     ),
   ].slice(0, limit);
 
@@ -409,7 +430,7 @@ const membersOf = async (
 ): Promise<Map<string, string>> => {
   try {
     const parsed = membersSchema.safeParse(
-      await get(read, "/workspace_members")
+      await get(read, apiPath("workspace_members"))
     );
     return new Map(
       parsed.success
@@ -466,10 +487,11 @@ const meetingsOf = async (
   people: ReadonlyMap<string, string>,
   domains: readonly string[]
 ): Promise<AttioCall[] | null> => {
-  const answer = await get(
-    read,
-    `/meetings?linked_object=companies&linked_record_id=${encodeURIComponent(read.recordId)}&limit=${attioLimits.calls * 2}`
-  );
+  const answer = await get(read, apiPath("meetings"), {
+    linked_object: "companies",
+    linked_record_id: read.recordId,
+    limit: String(attioLimits.calls * 2),
+  });
   const parsed = meetingsSchema.safeParse(answer);
   if (answer === null || !parsed.success) {
     return null;
@@ -503,10 +525,11 @@ const meetingsOf = async (
 
 /** Company `recordId`'s notes, as calls nobody is named in; null when Attio has none to read. */
 const notesOf = async (read: AttioRead): Promise<AttioCall[] | null> => {
-  const answer = await get(
-    read,
-    `/notes?parent_object=companies&parent_record_id=${encodeURIComponent(read.recordId)}&limit=${attioLimits.calls}`
-  );
+  const answer = await get(read, apiPath("notes"), {
+    parent_object: "companies",
+    parent_record_id: read.recordId,
+    limit: String(attioLimits.calls),
+  });
   const parsed = notesSchema.safeParse(answer);
   if (answer === null || !parsed.success) {
     return null;

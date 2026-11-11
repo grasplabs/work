@@ -1,3 +1,5 @@
+import { ApiPathError, apiPath } from "@grasp-os/shared/api-path";
+import type { ApiPath } from "@grasp-os/shared/api-path";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { z } from "zod";
 
@@ -20,6 +22,9 @@ import type { z } from "zod";
 //   oversized or unreadable answer, even a body that won't cancel) ends as
 //   one `ComposioError`, so callers fall back as one: the catalog lists the
 //   native providers alone.
+// - A path is built from segments (`composioPath`), each encoded, the IDs
+//   in it Composio's own answers among them: a stored ID can't name
+//   another resource the key opens (`..`, `/`, `?`), GRA-1779.
 // - Logs carry the method, the path's first segment and the status: never
 //   the key, the query or a body.
 
@@ -43,6 +48,27 @@ export class ComposioError extends Error {
     this.status = status;
   }
 }
+
+/**
+ * `/a/b` under Composio's API from `segments`, each encoded (`apiPath`).
+ * A path a URL would change, such as a stored ID `..`, is a
+ * {@link ComposioError}, as Composio refusing it would be, and nothing is
+ * sent.
+ */
+export const composioPath = (...segments: readonly string[]): ApiPath => {
+  try {
+    return apiPath(...segments);
+  } catch (error) {
+    if (error instanceof ApiPathError) {
+      throw new ComposioError(
+        "A path to Composio is refused",
+        undefined,
+        error
+      );
+    }
+    throw error;
+  }
+};
 
 /** Connect's Composio key, or `undefined` while it is unset. */
 export const composioKey = (env: Env): string | undefined =>
@@ -97,8 +123,10 @@ export const readCappedBytes = async (
 /** One request to Composio's API. */
 export interface ComposioRequest<Schema extends z.ZodType> {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
-  /** The path under the API's base, with its query, such as `/toolkits`. */
-  path: string;
+  /** The path under the API's base, such as `/toolkits`. */
+  path: ApiPath;
+  /** Its query, if any. */
+  query?: Readonly<Record<string, string>> | URLSearchParams;
   body?: object;
   /** What the answer must be. */
   schema: Schema;
@@ -113,10 +141,11 @@ export interface ComposioRequest<Schema extends z.ZodType> {
  */
 export const composioRequest = async <Schema extends z.ZodType>(
   key: string,
-  { method = "GET", path, body, schema }: ComposioRequest<Schema>
+  { method = "GET", path, query, body, schema }: ComposioRequest<Schema>
 ): Promise<z.infer<Schema>> => {
   const url = new URL(`${composioApiBase}${path}`);
-  const [, area = ""] = path.split(/[/?]/u);
+  url.search = new URLSearchParams(query).toString();
+  const [, area = ""] = path.split("/");
   let response: Response;
   try {
     response = await fetch(url, {

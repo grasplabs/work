@@ -110,16 +110,22 @@ export const graphEventsFake = () => {
     );
     return first === -1 ? list.length : first;
   };
+  // Matched on the path as sent, each value then decoded on its own, as
+  // Graph reads a path: a value is one segment, whatever it holds.
   const mailPath =
     /^\/v1\.0\/users\/(?<mailbox>[^/]+)\/mailFolders(?:\/inbox|\('inbox'\))\/messages\/delta$/u;
   const drivePath =
     /^\/v1\.0\/(?:users\/(?<user>[^/]+)\/drive|drives\/(?<drive>[^/]+))\/root\/delta$/u;
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
+  const decoded = (value: string | undefined): string | undefined =>
+    value === undefined ? undefined : decodeURIComponent(value);
 
   return {
     /** Graph's answer to a delta query; 404 for anything else. */
     answer: (request: Request, url: URL): Response => {
-      const path = decodeURIComponent(url.pathname);
-      const mailbox = mailPath.exec(path)?.groups?.mailbox;
+      // `(` and `)` as Graph's links write them; each segment still encoded.
+      const path = url.pathname.replaceAll("%28", "(").replaceAll("%29", ")");
+      const mailbox = decoded(mailPath.exec(path)?.groups?.mailbox);
       if (request.method === "GET" && mailbox !== undefined) {
         const list = listOf(inboxes, mailbox.toLowerCase());
         // A link Graph hands back keeps the first read's selection.
@@ -135,13 +141,17 @@ export const graphEventsFake = () => {
             `${graph}/users/${encodeURIComponent(mailbox)}/mailFolders('inbox')/messages/delta?${query}${selected}`
         );
       }
-      const { user, drive } = drivePath.exec(path)?.groups ?? {};
+      const found = drivePath.exec(path)?.groups;
+      const user = decoded(found?.user);
+      const drive = decoded(found?.drive);
       if (
         request.method === "GET" &&
         (user !== undefined || drive !== undefined)
       ) {
         const base =
-          user === undefined ? `drives/${drive}` : `users/${user}/drive`;
+          user === undefined
+            ? `drives/${encodeURIComponent(drive ?? "")}`
+            : `users/${encodeURIComponent(user)}/drive`;
         const list = listOf(
           drives,
           user === undefined ? `${drive}` : `user:${user}`

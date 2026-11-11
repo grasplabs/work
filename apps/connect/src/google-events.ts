@@ -1,5 +1,7 @@
 import { addressesOf } from "@grasp-os/connector-google-workspace/mime";
 import { stampHeader } from "@grasp-os/connector-kit/manifest";
+import { apiPath, isApiPathSegment } from "@grasp-os/shared/api-path";
+import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
 import {
@@ -81,8 +83,12 @@ const mailboxOf = ({ source, connection }: SourceRead): string => {
   return mailbox;
 };
 
-const gmail = (mailbox: string, path: string): string =>
-  `https://${gmailHost}/gmail/v1/users/${encodeURIComponent(mailbox)}${path}`;
+/** `segments` of `mailbox` at Gmail, each encoded. */
+const gmailPath = (mailbox: string, ...segments: readonly string[]) =>
+  apiPath("gmail", "v1", "users", mailbox, ...segments);
+
+const gmail = (mailbox: string, segment: string): string =>
+  `https://${gmailHost}${gmailPath(mailbox, segment)}`;
 
 const profileSchema = z.object({ historyId: z.string().min(1) });
 
@@ -207,21 +213,32 @@ const batchParts = (
 /**
  * The events of messages `ids`, their metadata read through Gmail's batch
  * endpoint, a request per `messagesPerBatch` messages. A message deleted
- * since it arrived is left out; any other failure fails the read.
+ * since it arrived is left out, as is an ID no path can hold, so one such
+ * ID doesn't stall the mailbox; any other failure fails the read.
  */
 const mailEventsOf = async (
   access: ProviderAccess,
   mailbox: string,
-  ids: readonly string[]
+  answered: readonly string[]
 ): Promise<ReadEvent[]> => {
   const events: ReadEvent[] = [];
+  // A message ID that can't be one segment of a path (`apiPath`) is no
+  // message Gmail could read back.
+  const ids = answered.filter(isApiPathSegment);
+  if (ids.length < answered.length) {
+    log.warn("events.gmail_ids_dropped", {
+      count: answered.length - ids.length,
+    });
+  }
   for (let at = 0; at < ids.length; at += messagesPerBatch) {
     const boundary = `batch_${crypto.randomUUID()}`;
     const body = `${ids
       .slice(at, at + messagesPerBatch)
       .map(
         (id, index) =>
-          `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <m${index}>\r\n\r\nGET /gmail/v1/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=${stampHeader}\r\n\r\n`
+          // A path Gmail parses as a URL's: a message ID from its answer
+          // is one segment (`isApiPathSegment`).
+          `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <m${index}>\r\n\r\nGET ${gmailPath(mailbox, "messages", id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=${stampHeader}\r\n\r\n`
       )
       .join("")}--${boundary}--`;
     // oxlint-disable-next-line no-await-in-loop -- a batch at a time, each counted
@@ -249,7 +266,7 @@ const mailEventsOf = async (
 
 /** Gmail's history of messages added to `mailbox`'s inbox from `historyId`. */
 const historyFrom = (mailbox: string, historyId: string): string =>
-  `${gmail(mailbox, "/history")}?${queryOf({
+  `${gmail(mailbox, "history")}?${queryOf({
     startHistoryId: historyId,
     historyTypes: "messageAdded",
     labelId: "INBOX",
@@ -331,7 +348,7 @@ const mailReceived: EventKind = {
   prime: async (read): Promise<string> => {
     const mailbox = mailboxOf(read);
     const { historyId } = profileSchema.parse(
-      await google(read.access, gmail(mailbox, "/profile"))
+      await google(read.access, gmail(mailbox, "profile"))
     );
     return historyFrom(mailbox, historyId);
   },

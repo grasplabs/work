@@ -1,3 +1,5 @@
+import { ApiPathError } from "@grasp-os/shared/api-path";
+
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import { ClientDomainUnsetError } from "./client-domain.ts";
 import { MissingStoreSecretError } from "./context.ts";
@@ -80,8 +82,9 @@ export const storeSecretMissing = "store_secret_missing";
  * A failure as the admin records it: a code, never a message. A step's own
  * failure has its `DeployError` code; a secret missing from Secrets Store
  * is `store_secret_missing: <its name>`, no client domain
- * `client_domain_unset`; the API's is `cloudflare_<status>`
- * and its error codes; anything else is `unexpected`.
+ * `client_domain_unset`, a path `apiPath` refused `api_path_refused`; the
+ * API's is `cloudflare_<status>` and its error codes; anything else is
+ * `unexpected`.
  */
 export const errorCode = (error: unknown): string => {
   if (error instanceof DeployError) {
@@ -92,6 +95,9 @@ export const errorCode = (error: unknown): string => {
   }
   if (error instanceof ClientDomainUnsetError) {
     return "client_domain_unset";
+  }
+  if (error instanceof ApiPathError) {
+    return "api_path_refused";
   }
   if (error instanceof CloudflareApiError) {
     return ["cloudflare", error.status, ...error.codes].join("_");

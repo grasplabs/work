@@ -1526,3 +1526,193 @@ describe("changing what a connected Composio toolkit may do", () => {
     }).toStrictEqual({ whileNarrowing: 1, left: 1, dropped: false });
   });
 });
+
+// Composio's IDs, as connect stores them from its answers, put into the
+// path of a request sent with connect's key (GRA-1779): each stays one
+// segment under its own area, decoding back to itself, or is refused with
+// nothing sent. None reaches another resource the key opens.
+
+/** IDs that would name another resource were they read as a path. */
+const pathAttacks = [
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+  "a%2fb",
+  "a/b",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
+] as const;
+
+/**
+ * What a parser or a decoding API reads as a move up (dot pieces, plain
+ * or encoded), an empty segment (`//`) or the path's end (`?`, `#`), so
+ * none can be sent.
+ */
+const refusedIds: ReadonlySet<string> = new Set([
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
+]);
+
+/** The areas of Composio's API connect asks. */
+const composioAreas: ReadonlySet<string> = new Set([
+  "auth_configs",
+  "connected_accounts",
+  "mcp",
+  "toolkits",
+  "tools",
+]);
+
+/** The requests sent to Composio from `from` on: their method, path segments (decoded) and query. */
+const composioSentFrom = (from: number): string[][] =>
+  composio.state.requests.slice(from).map(({ method, path }) => {
+    const url = new URL(path, "https://composio.invalid");
+    return [
+      method,
+      ...url.pathname
+        .split("/")
+        .slice(1)
+        .map((segment) => decodeURIComponent(segment)),
+      ...(url.search === "" ? [] : [url.search]),
+    ];
+  });
+
+/** Each request of `sent` once, in the order first sent. */
+const distinct = (sent: readonly string[][]): string[][] => [
+  ...new Map(sent.map((each) => [each.join("\n"), each])).values(),
+];
+
+/** Moves what the fake Composio holds under `from` to `to`. */
+const rekey = <Held>(holds: Map<string, Held>, from: string, to: string) => {
+  const held = holds.get(from);
+  if (held !== undefined) {
+    holds.delete(from);
+    holds.set(to, held);
+  }
+};
+
+describe("Composio's IDs in a path", () => {
+  it.each(pathAttacks)(
+    "finish a flow whose account Composio named %j only at that account, or not at all",
+    async (id) => {
+      const admin = someone("admin");
+      const url = await start(admin);
+      const { state, account } = composio.authorize(url);
+      const made = [...composio.state.holds.accounts].find(
+        ([, each]) => each === account
+      )?.[0];
+      rekey(composio.state.holds.accounts, made ?? "", id);
+      await env.DB.prepare(
+        "UPDATE composio_flows SET connected_account_id = ? WHERE user_id = ?"
+      )
+        .bind(id, admin.userId)
+        .run();
+      const from = composio.state.requests.length;
+      const finished = await outcome(back(admin, state));
+      const sent = composioSentFrom(from);
+
+      expect({
+        finished,
+        withId: sent.filter((each) => each.includes(id)),
+        elsewhere: sent.filter(([, area = ""]) => !composioAreas.has(area)),
+      }).toStrictEqual(
+        refusedIds.has(id)
+          ? {
+              finished: "connection.provider_refused",
+              withId: [],
+              elsewhere: [],
+            }
+          : {
+              finished: "ok",
+              withId: [["GET", "connected_accounts", id]],
+              elsewhere: [],
+            }
+      );
+    }
+  );
+
+  it.each(pathAttacks)(
+    "read, change and delete a connection stored with the IDs %j only at those IDs, or not at all",
+    async (id) => {
+      const admin = someone("admin");
+      const connectionId = await connectHubSpot(admin);
+      const held = await env.DB.prepare(
+        "SELECT account_id AS account, composio_server_id AS server, composio_auth_config_id AS authConfig FROM connections WHERE id = ?"
+      )
+        .bind(connectionId)
+        .first<{ account: string; server: string; authConfig: string }>();
+      const { holds } = composio.state;
+      rekey(holds.accounts, held?.account ?? "", id);
+      rekey(holds.servers, held?.server ?? "", id);
+      rekey(holds.authConfigs, held?.authConfig ?? "", id);
+      // The flow test above may have stored a connection to an account by
+      // this ID: an account is connected once.
+      await env.DB.prepare(
+        "UPDATE connections SET status = 'disconnected' WHERE account_id = ?"
+      )
+        .bind(id)
+        .run();
+      await env.DB.prepare(
+        "UPDATE connections SET account_id = ?1, composio_server_id = ?1, composio_auth_config_id = ?1 WHERE id = ?2"
+      )
+        .bind(id, connectionId)
+        .run();
+      const from = composio.state.requests.length;
+      const listed = await exports.default.organizationConnections();
+      const changed = await outcome(
+        change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"])
+      );
+      const disconnected = await exports.default.disconnect({
+        person: admin,
+        connectionId,
+      });
+      // Other tests' connections are read too: their accounts are the
+      // fake's own (`ca_` and a UUID), never the ID under test.
+      const sent = composioSentFrom(from).filter(
+        ([method, area, each = ""]) =>
+          !(
+            method === "GET" &&
+            area === "connected_accounts" &&
+            /^ca_[\da-f-]{36}$/u.test(each)
+          )
+      );
+
+      expect({
+        state: listed.find((each) => each.id === connectionId)?.composio,
+        changed,
+        disconnected,
+        // A change may send its list more than once (`sendTools`).
+        withId: distinct(sent.filter((each) => each.includes(id))),
+        elsewhere: sent.filter(([, area = ""]) => !composioAreas.has(area)),
+      }).toStrictEqual(
+        refusedIds.has(id)
+          ? {
+              state: "unread",
+              changed: "connection.provider_refused",
+              disconnected: { revoked: false },
+              withId: [],
+              elsewhere: [],
+            }
+          : {
+              state: "active",
+              changed: "ok",
+              disconnected: { revoked: true },
+              withId: [
+                ["GET", "connected_accounts", id],
+                ["PATCH", "mcp", id],
+                ["DELETE", "mcp", id],
+                ["DELETE", "connected_accounts", id],
+                ["DELETE", "auth_configs", id],
+              ],
+              elsewhere: [],
+            }
+      );
+    }
+  );
+});

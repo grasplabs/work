@@ -29,6 +29,8 @@
  * (src/cloudflare/api.ts), which already creates and deletes the client's
  * buckets: no other credential.
  */
+import { ApiPathError, apiPath } from "@grasp-os/shared/api-path";
+import type { ApiPath } from "@grasp-os/shared/api-path";
 import { log } from "@grasp-os/shared/log";
 import {
   deployedModelKey,
@@ -39,7 +41,7 @@ import {
 import type { ModelFileRef, ReleaseManifest } from "@grasp-os/shared/release";
 import { z } from "zod";
 
-import { cloudflareApiBase, isNotFound } from "../cloudflare/api.ts";
+import { isNotFound } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import type { ReleaseStore } from "../releases/import.ts";
 import { DeployError } from "./errors.ts";
@@ -84,32 +86,42 @@ export const modelsBucketOf = (
   return name;
 };
 
-const objectsPath = (bucket: ModelsBucket): string =>
-  `/accounts/${encodeURIComponent(bucket.accountId)}/r2/buckets/${encodeURIComponent(bucket.name)}/objects`;
+/**
+ * The API path of `bucket`'s objects, or of `...below` them, each value
+ * one segment. One `apiPath` refuses, in the account id, the bucket's name
+ * or below (`.` or `..`, an empty segment), stops the deploy with a
+ * message that names none of them, the bucket's name included.
+ */
+const objectsPath = (bucket: ModelsBucket, ...below: string[]): ApiPath => {
+  try {
+    return apiPath(
+      "accounts",
+      bucket.accountId,
+      "r2",
+      "buckets",
+      bucket.name,
+      "objects",
+      ...below
+    );
+  } catch (error) {
+    if (error instanceof ApiPathError) {
+      throw new DeployError(
+        "model_files_unreadable",
+        "A model file's path is refused"
+      );
+    }
+    throw error;
+  }
+};
 
 /**
  * The API path of the object at `key` in `bucket`: each segment of the key
- * percent-encoded (R2 takes a key's slashes as they are). Refused unless
- * the path a URL makes of it, once `.` and `..` are resolved, is still
- * that object's under the bucket's objects: a second guard, behind only
- * ever acting on keys `isModelKey` takes.
+ * one segment of the path (R2 takes a key's slashes as they are), each
+ * percent-encoded, and refused when a URL would read it as another path:
+ * a second guard, behind only ever acting on keys `isModelKey` takes.
  */
-const objectPath = (bucket: ModelsBucket, key: string): string => {
-  const objects = objectsPath(bucket);
-  const path = `${objects}/${key.split("/").map(encodeURIComponent).join("/")}`;
-  const resolved = new URL(`${cloudflareApiBase}${path}`);
-  if (
-    resolved.pathname !== `${new URL(cloudflareApiBase).pathname}${path}` ||
-    resolved.search !== "" ||
-    resolved.hash !== ""
-  ) {
-    throw new DeployError(
-      "model_files_unreadable",
-      `A model file key leaves ${bucket.name}'s objects`
-    );
-  }
-  return path;
-};
+const objectPath = (bucket: ModelsBucket, key: string): ApiPath =>
+  objectsPath(bucket, ...key.split("/"));
 
 /**
  * Whether `key` is a model file's, exactly `deployedModelKey` of a SHA-256:
