@@ -1,21 +1,8 @@
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { useForm as useTanStackForm } from "@tanstack/react-form";
-import type {
-  DeepKeys,
-  DeepValue,
-  FormValidateFn,
-  ReactFormExtendedApi,
-} from "@tanstack/react-form";
-import { useEffect, useState } from "react";
 
-import { clientInternals } from "./client-core.ts";
-import type {
-  ActionReference,
-  GraspClient,
-  MutationReference,
-} from "./client-core.ts";
+import type { GraspClient } from "./client-core.ts";
 import {
   clientError,
   detailIssues,
@@ -23,20 +10,22 @@ import {
   issueDetails,
   receiptLinkOf,
 } from "./client-error.ts";
-import { referenceName } from "./function-references.ts";
-import type { FunctionArgs, FunctionReturn } from "./function-references.ts";
+import { errorsOf } from "./form-issues.ts";
+import { targetOf } from "./form-target.ts";
+import type { Target } from "./form-target.ts";
+import type {
+  FormApiOf,
+  FormFailure,
+  FormOptionsInput,
+  FormStatus,
+  GraspForm,
+  Validate,
+} from "./form-types.ts";
 import { settlesSubmission } from "./refusals.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
-import { schemaOf } from "./value-schema.ts";
-import { v } from "./values.ts";
-import { decisionName } from "./workflow-decisions.ts";
-import type {
-  DecisionOutputOf,
-  DecisionValueOf,
-} from "./workflow-decisions.ts";
 
 // Forms: one `useForm`, two ways in.
 //
@@ -89,46 +78,6 @@ import type {
 //   session client (`GraspClient.guardLeave`), and the host asks before
 //   leaving the page.
 
-/** A form-level validator as TanStack Form runs it. */
-type Validate<Values> = FormValidateFn<Values>;
-
-/** The TanStack Form under a Grasp form, typed by its values. */
-export type FormApiOf<Values> = ReactFormExtendedApi<
-  Values,
-  undefined,
-  Validate<Values>,
-  undefined,
-  Validate<Values>,
-  undefined,
-  Validate<Values>,
-  undefined,
-  undefined,
-  undefined,
-  undefined,
-  never
->;
-
-/** Where a submission is. */
-export type SubmitPhase =
-  /** Nothing in flight: the next submit is a new submission. */
-  | "idle"
-  /** A submission is in flight; fields are locked. */
-  | "submitting"
-  /**
-   * Whether the submission ran is unknown: fields stay locked. The next
-   * submit sends it again under the same key, which gets its outcome from
-   * its receipt, a change's or an action's, and never runs it a second
-   * time. `discard` gives it up instead.
-   */
-  | "uncertain";
-
-/** A failure the form shows at its level: a safe code and message. */
-export interface FormFailure {
-  readonly code: string;
-  readonly message: string;
-  readonly category: GraspError["category"];
-}
-
 /**
  * Whether a resend that failed with `error` may not have run (a sign-out,
  * the request budget, a busy sandbox), so its outcome is as unknown as it
@@ -143,26 +92,6 @@ const leavesResendUnknown = (error: GraspError): boolean =>
   error.code !== "decision.closed" &&
   !settlesSubmission(error);
 
-/** What a form shows of its submission, beside its fields' own state. */
-export interface FormStatus {
-  readonly phase: SubmitPhase;
-  /** Whether its fields take no edits now: a submission is in flight or unknown. */
-  readonly locked: boolean;
-  /** Whether a submit was tried: field errors show from then on. */
-  readonly attempted: boolean;
-  /** Why the last submission failed, at the form's level. */
-  readonly failure: FormFailure | undefined;
-  /** Server issues of editable fields, by field name. */
-  readonly fieldIssues: Readonly<Record<string, string>>;
-  /** The save committed, but `onSuccess` failed: what it said. */
-  readonly applicationError: string | undefined;
-  /**
-   * Whether a field's upload is under way: the form doesn't submit until
-   * it ends (`form.uploading`), or it would save without the file.
-   */
-  readonly uploading: boolean;
-}
-
 const initialStatus: FormStatus = Object.freeze({
   phase: "idle",
   locked: false,
@@ -172,72 +101,6 @@ const initialStatus: FormStatus = Object.freeze({
   applicationError: undefined,
   uploading: false,
 });
-
-/** A Grasp form: TanStack's typed fields and state, and its submission. */
-export interface GraspForm<Values, Result> {
-  /** TanStack Form's typed field, for custom controls. */
-  readonly Field: FormApiOf<Values>["Field"];
-  /** TanStack Form's state subscription. */
-  readonly Subscribe: FormApiOf<Values>["Subscribe"];
-  /**
-   * Validates the whole input and submits it once: the declared result
-   * once the outcome is confirmed, or a rejection with a structured
-   * error. A submit while one is active joins it.
-   */
-  readonly submit: () => Promise<Result>;
-  /** Discards unsaved edits: back to the initial values. */
-  readonly reset: () => void;
-  /**
-   * Gives up a submission whose outcome is unknown, once the person
-   * confirmed it: the fields unlock with what they hold, and the next
-   * submit is a new submission. Whether the one given up ran stays
-   * unknown; nothing is sent to find out.
-   */
-  readonly discard: () => void;
-}
-
-/** A function-bound form's options. */
-export interface FunctionFormOptions<Reference> {
-  /** The editable input, as the function takes it. */
-  readonly defaultValues: FunctionArgs<Reference>;
-  /** After a confirmed outcome, with the function's declared result. */
-  readonly onSuccess?: (
-    result: FunctionReturn<Reference>
-  ) => void | Promise<void>;
-  /** Back to `defaultValues` after a confirmed outcome. Off by default. */
-  readonly resetOnSuccess?: boolean;
-}
-
-/** A local form's options. */
-export interface SchemaFormOptions<Schema extends StandardSchemaV1, Result> {
-  readonly defaultValues: StandardSchemaV1.InferInput<Schema>;
-  /** Gets the schema's normalized output; owns what it does with it. */
-  readonly onSubmit: (
-    values: StandardSchemaV1.InferOutput<Schema>
-  ) => Result | Promise<Result>;
-}
-
-/** An answer to a decision, as its form holds it before it is checked. */
-export interface DecisionAnswer<Value> {
-  readonly approved: boolean;
-  readonly value: Value;
-}
-
-/** What the form of an answer to the decision `Decision` takes. */
-export interface DecisionFormOptions<Decision, Result> {
-  readonly defaultValues: DecisionAnswer<DecisionValueOf<Decision>>;
-  /** Gets the answer, its value normalized; owns what it does with it. */
-  readonly onSubmit: (
-    values: DecisionAnswer<DecisionOutputOf<Decision>>
-  ) => Result | Promise<Result>;
-}
-
-/** The names of a form's fields whose value is text. */
-export type TextFieldName<Values> = {
-  [Name in DeepKeys<Values>]: DeepValue<Values, Name> extends string | undefined
-    ? Name
-    : never;
-}[DeepKeys<Values>];
 
 /** One submission of a form: what it sends, and, once its outcome is unknown, under what. */
 interface Submission {
@@ -274,79 +137,6 @@ const same = (a: unknown, b: unknown): boolean => {
   }
   return canonicalText(a) === canonicalText(b);
 };
-
-/**
- * An issue's path as TanStack names the field: `items[0].name`, array
- * indexes in brackets, keys after dots.
- */
-const fieldName = (path: StandardSchemaV1.Issue["path"]): string => {
-  let name = "";
-  for (const segment of path ?? []) {
-    const key = typeof segment === "object" ? segment.key : segment;
-    if (typeof key === "number") {
-      name += `[${key}]`;
-    } else {
-      name += name === "" ? String(key) : `.${String(key)}`;
-    }
-  }
-  return name;
-};
-
-/** The form's own field a TanStack field name lies in: `items` of `items[0].name`. */
-const rootField = (name: string): string => name.split(/[.[]/u)[0] ?? "";
-
-/** TanStack's form-level error for `issues`: field errors and the rest. */
-const errorsOf = (
-  issues: readonly StandardSchemaV1.Issue[],
-  editable: (field: string) => boolean
-): { form?: string; fields: Record<string, string> } | undefined => {
-  if (issues.length === 0) {
-    return undefined;
-  }
-  const fields: Record<string, string> = {};
-  const rest: string[] = [];
-  for (const issue of issues) {
-    const name = fieldName(issue.path);
-    if (name !== "" && editable(rootField(name))) {
-      fields[name] ??= issue.message;
-    } else {
-      rest.push(issue.message);
-    }
-  }
-  return rest.length === 0 ? { fields } : { form: rest.join(" "), fields };
-};
-
-/** Sends one submission's input through the session client, under its key once it has one. */
-type Send = (
-  input: unknown,
-  options: { readonly idempotencyKey?: string }
-) => Promise<unknown>;
-
-/** How a binding validates and submits, by the way the form was made. */
-type Target =
-  | {
-      readonly kind: "function";
-      readonly send: Send;
-      readonly args: ValueDescriptor;
-    }
-  | { readonly kind: "schema"; readonly schema: StandardSchemaV1 };
-
-/**
- * A callback of any of the typed ways in: a method's parameter is
- * bivariant, so a callback of a narrower argument passes.
- */
-type AnyCallback<Result> = {
-  // oxlint-disable-next-line typescript/method-signature-style -- bivariant on purpose, see above
-  call(value: unknown): Result;
-}["call"];
-
-/** The options of either way in, as the hook reads them. */
-export interface FormOptionsInput {
-  readonly defaultValues?: unknown;
-  readonly resetOnSuccess?: boolean;
-  readonly onSuccess?: AnyCallback<void | Promise<void>>;
-  readonly onSubmit?: AnyCallback<unknown>;
-}
 
 /** A structured error's code, message and category, as a form shows them. */
 const failureOf = (error: GraspError): FormFailure => ({
@@ -915,72 +705,9 @@ export const bindingOf = (form: object): FormBinding => {
   return binding;
 };
 
-/** Whether `value` is a native Standard Schema rather than a reference. */
-const isSchema = (value: unknown): value is StandardSchemaV1 =>
-  typeof value === "object" &&
-  value !== null &&
-  "~standard" in value &&
-  !("name" in value);
-
-/**
- * The schema of an answer to the decision `target` names, as the page's
- * build declares it; undefined when it names no decision the release
- * declares.
- */
-const decisionSchemaOf = (
-  client: GraspClient,
-  target: unknown
-): StandardSchemaV1 | undefined => {
-  const named = decisionName(referenceName(target));
-  const declared =
-    named === undefined
-      ? undefined
-      : clientInternals(client)
-          .workflowOf(named.workflow)
-          ?.decisions.get(named.key);
-  return declared === undefined
-    ? undefined
-    : v.object({ approved: v.boolean(), value: schemaOf(declared.value) });
-};
-
-/** The way `target` and `options` make the form, read once. */
-const targetOf = (client: GraspClient, target: unknown): Target => {
-  if (isSchema(target)) {
-    return { kind: "schema", schema: target };
-  }
-  const decision = decisionSchemaOf(client, target);
-  if (decision !== undefined) {
-    return { kind: "schema", schema: decision };
-  }
-  // A form binds a mutation or an action by its reference's name: its
-  // kind and the arguments the form checks with are the page's release's
-  // (page-functions.ts), never anything the reference itself carries.
-  // Core checks the submission again with the function's own validator,
-  // and the form shows what it refuses by the fields it names.
-  const internals = clientInternals(client);
-  const fn = internals.functionOf(target);
-  if (fn === undefined || fn.kind === "query") {
-    throw clientError("contract.invalid_request");
-  }
-  const { kind, args } = fn;
-  internals.readReference(target, kind);
-  if (kind === "action") {
-    const send: Send = async (input, submit) =>
-      // SAFETY: read as an action reference just above.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      await client.action(target as ActionReference, input, submit);
-    return { kind: "function", send, args };
-  }
-  const send: Send = async (input, submit) =>
-    // SAFETY: read as a mutation reference just above.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    await client.mutation(target as MutationReference, input, submit);
-  return { kind: "function", send, args };
-};
-
 /**
  * The binding of a form of `target` with `options`, submitting through
- * `client`: what `useGraspForm` holds, before its TanStack form is
+ * `client`: what `useForm` (react/form.ts) holds, before its TanStack form is
  * attached.
  */
 export const bindForm = (
@@ -998,56 +725,25 @@ export const bindForm = (
   );
 
 /**
- * The form hook, untyped: what `useForm` in react/form.ts types by its two
- * ways in. `client` is the session client.
+ * The form App code holds, made once around `binding`'s TanStack `form`:
+ * what `bindingOf` finds `binding` by.
  */
-export const useGraspForm = (
-  client: GraspClient,
-  target: unknown,
-  options: FormOptionsInput
+export const graspFormOf = (
+  binding: FormBinding,
+  form: FormApiOf<Record<string, unknown>>
 ): GraspForm<Record<string, unknown>, unknown> => {
-  // One binding for the form's life, never replaced: no setter.
-  // oxlint-disable-next-line react/hook-use-state -- see above
-  const [binding] = useState(() => bindForm(client, target, options));
-  const form: FormApiOf<Record<string, unknown>> = useTanStackForm({
-    defaultValues: binding.initialValues,
-    validators: {
-      onChange: binding.validate,
-      onBlur: binding.validate,
-      onSubmit: binding.validate,
+  binding.attach(form);
+  const made: GraspForm<Record<string, unknown>, unknown> = {
+    Field: form.Field,
+    Subscribe: form.Subscribe,
+    submit: async () => await binding.submit(),
+    reset: () => {
+      binding.reset();
     },
-    listeners: {
-      onChange: ({ fieldApi }) => {
-        binding.fieldChanged(fieldApi.name);
-      },
+    discard: () => {
+      binding.discard();
     },
-  });
-  // The form App code holds, made once around its TanStack form.
-  // oxlint-disable-next-line react/hook-use-state -- see above
-  const [graspForm] = useState(() => {
-    binding.attach(form);
-    const made: GraspForm<Record<string, unknown>, unknown> = {
-      Field: form.Field,
-      Subscribe: form.Subscribe,
-      submit: async () => await binding.submit(),
-      reset: () => {
-        binding.reset();
-      },
-      discard: () => {
-        binding.discard();
-      },
-    };
-    bindings.set(made, binding);
-    return made;
-  });
-  useEffect(() => {
-    binding.setOptions(options);
-  });
-  useEffect(() => {
-    binding.setMounted(true);
-    return () => {
-      binding.setMounted(false);
-    };
-  }, [binding]);
-  return graspForm;
+  };
+  bindings.set(made, binding);
+  return made;
 };

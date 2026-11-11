@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import { AppDefinitionError } from "../src/app-definition-error.ts";
+import { definitionManifest, readDefinition } from "../src/definition-app.ts";
 import { evaluateExpression } from "../src/definition-expression.ts";
+import { definitionText } from "../src/definition-json.ts";
 import {
   applyOperation,
   withExportedFunctions,
@@ -12,20 +14,15 @@ import {
   schemaSource,
   validatorSource,
 } from "../src/definition-source.ts";
-import {
-  definitionManifest,
-  definitionText,
-  emptyDefinition,
-  readDefinition,
-} from "../src/definition.ts";
-import type { AppDefinition } from "../src/definition.ts";
+import { emptyDefinition } from "../src/definition-types.ts";
+import type { AppDefinition } from "../src/definition-types.ts";
 import { expressionMaxDepth } from "../src/oxc-parse.ts";
 import { isWorkflowPermission } from "../src/permission-checks.ts";
 import { permission } from "../src/permission.ts";
 import { descriptorOf } from "../src/sealed-descriptors.ts";
 import { v } from "../src/values.ts";
 
-// An App's definition (definition.ts): the operations that change it, the
+// An App's definition (definition-types.ts): the operations that change it, the
 // code generated from it, and what a definition of unknown origin is
 // refused for. Pure, so unit tests; core's tools and builds are tested
 // through core (apps/core/test/agent-builds.test.ts), and that the code
