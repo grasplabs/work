@@ -9,13 +9,14 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, createContext, use } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { formatSince } from "../format.ts";
 import { AiKeyBanner, failingUpFront } from "./ai-key-banner.tsx";
+import type { FailingProvider } from "./ai-key-banner.tsx";
 
 // The banner over every page while one of the organization's AI provider
 // providers fails its calls, from what core's listing says of each one:
@@ -104,6 +105,9 @@ const limiting = {
 const since = formatSince(failingSince);
 
 let root: Root | undefined;
+
+/** What the shell handed the banner, read as it was entered. */
+const Handed = createContext<FailingProvider[] | undefined>(undefined);
 
 /** Someone of the organization with `role`, signed in. */
 const personWith = (role: Identity["role"]): Identity => ({
@@ -242,42 +246,56 @@ describe("the AI key banner", () => {
     expect(replaced).toStrictEqual({ said: "", links: [] });
   });
 
-  it("comes with the page when read before it showed, so nothing moves once the page is up", async () => {
+  it("comes with the page when read before it showed, and keeps it when the page is loaded again without a read", async () => {
     const asAdmin = personWith("admin");
-    const failing = await failingUpFront(
+    let reads = 0;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const Banner = () => (
+      <AiKeyBanner
+        failing={use(Handed)}
+        identity={asAdmin}
+        // Core never answers the banner's own read: what shows is what was
+        // read before the page showed.
+        providers={async () => {
+          reads += 1;
+          return await Promise.withResolvers<never>().promise;
+        }}
+      />
+    );
+    // In a router, as the shell has it, handed what the shell read.
+    const router = createRouter({
+      routeTree: createRootRoute({ component: Banner }),
+      history: createMemoryHistory(),
+    });
+    const pageWith = (failing?: FailingProvider[]) => (
+      <I18nProvider i18n={i18n}>
+        <Handed value={failing}>
+          <RouterProvider router={router} />
+        </Handed>
+      </I18nProvider>
+    );
+    // Read as the shell was entered.
+    const entered = await failingUpFront(
       asAdmin,
       async () => await Promise.resolve(listingWith(refused))
     );
-    const host = document.createElement("div");
-    document.body.append(host);
-    const rootRoute = createRootRoute({
-      component: () => (
-        <AiKeyBanner
-          failing={failing}
-          identity={asAdmin}
-          // Core never answers the banner's own read: what shows is what
-          // was read before the page showed.
-          providers={async () => await Promise.withResolvers<never>().promise}
-        />
-      ),
-    });
-    const router = createRouter({
-      routeTree: rootRoute,
-      history: createMemoryHistory(),
-    });
     await act(async () => {
       root = createRoot(host);
-      root.render(
-        <I18nProvider i18n={i18n}>
-          <RouterProvider router={router} />
-        </I18nProvider>
-      );
+      root.render(pageWith(entered));
       await router.load();
     });
+    const asEntered = host.textContent;
+    // Loaded again (`invalidate`): the shell reads nothing then.
+    act(() => {
+      root?.render(pageWith());
+    });
 
-    expect(host.textContent).toBe(
-      `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`
-    );
+    expect({ asEntered, reloaded: host.textContent, reads }).toStrictEqual({
+      asEntered: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`,
+      reloaded: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`,
+      reads: 0,
+    });
   });
 
   it("is read before the page only for the organization's own admins, and left to the banner when core doesn't answer", async () => {

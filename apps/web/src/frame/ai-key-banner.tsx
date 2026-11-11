@@ -13,7 +13,7 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { KeyRoundIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { readWithin } from "../core-connection.ts";
@@ -164,12 +164,15 @@ export const AiKeyBanner = ({
    * The failing providers, read before the page showed (`failingUpFront`):
    * the banner then comes with the page, and never pushes it down under
    * the person's pointer as it arrives. Without it, read once mounted.
+   * Only what it had as it mounted counts: after that it reads again
+   * itself, every minute.
    */
   failing?: FailingProvider[];
 }) => {
   const [failing, setFailing] = useState<FailingProvider[]>(readBefore ?? []);
   const shown = isMemberAdmin(identity);
-  const readAlready = readBefore !== undefined;
+  // As it was mounted: the shell hands it over once, as it is entered.
+  const readAtMount = useRef(readBefore !== undefined);
   useEffect(() => {
     let live = true;
     const read = async () => {
@@ -185,7 +188,7 @@ export const AiKeyBanner = ({
         // Not read just now: the banner stays as it was until the next read.
       }
     };
-    if (!readAlready) {
+    if (!readAtMount.current) {
       void read();
     }
     const timer = shown
@@ -197,7 +200,7 @@ export const AiKeyBanner = ({
       live = false;
       clearInterval(timer);
     };
-  }, [providers, readAlready, shown]);
+  }, [providers, shown]);
   if (!shown || failing.length === 0) {
     return null;
   }

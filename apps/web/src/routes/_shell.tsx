@@ -155,12 +155,16 @@ export const Route = createFileRoute("/_shell")({
   // Which AI providers fail, for the banner over every page (an admin's):
   // read with the page, beside its own loader, so the banner comes with
   // the page instead of pushing it down, under the person's pointer, once
-  // it is up. Read once; the banner reads again itself every minute, and
-  // loading Grasp again (`invalidate`) reads it here too.
-  loader: async ({ context: { core, identity } }) => ({
-    failing: await failingUpFront(identity, providersOf(core)),
+  // it is up. Only as the shell is entered: moving within it, preloading
+  // and `invalidate` (which runs this loader again whatever
+  // `shouldReload` says) read nothing, as the banner keeps itself current,
+  // reading again every minute.
+  loader: async ({ cause, context: { core, identity } }) => ({
+    failing:
+      cause === "enter"
+        ? await failingUpFront(identity, providersOf(core))
+        : undefined,
   }),
-  shouldReload: false,
   component: Shell,
   errorComponent: ShellError,
 });
