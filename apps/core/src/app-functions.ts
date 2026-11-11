@@ -111,29 +111,40 @@ interface FunctionCaller {
   readonly refusalsKept?: Set<string>;
 }
 
-/** Whose call a refused use's evidence names (`keptUseRefusals`). */
-interface UseRefusalContext {
+/** A visitor as the audit log names them: by their session once signed in. */
+type VisitorActor = Extract<AuditActor, { type: "visitor" }>;
+
+/**
+ * Whose call a refused use's evidence names (`keptUseRefusals`): a
+ * member's as the App's server code acting for `person`; a visitor's as
+ * the visitor, by their session, as the log names them for their other
+ * actions (app-visitors.ts), with no person, nor anything else of them.
+ */
+type UseRefusalContext = {
   readonly app: AppId;
   readonly version: number;
-  readonly principal: string;
   readonly requestId: string;
   readonly runId: string | null;
-}
+} & ({ readonly person: string } | { readonly visitor: VisitorActor });
 
 /** Writes `refusal` as `app.use.refused` for `context`; never throws (`keepAuditEvent`). */
 const writeUseRefusal = async (
   env: Env,
-  { app, version, principal, requestId, runId }: UseRefusalContext,
+  context: UseRefusalContext,
   refusal: UseRefusal
 ): Promise<void> => {
+  const { app, version, requestId, runId } = context;
+  const member = "person" in context;
   await keepAuditEvent(env, drizzle(env.DB), {
-    actor: { type: "app", appId: app, part: "server" },
+    actor: member
+      ? { type: "app", appId: app, part: "server" }
+      : context.visitor,
     action: "app.use.refused",
     target: { type: "app", id: app },
     requestId,
     detail: {
       version,
-      person: principal,
+      ...(member ? { person: context.person } : {}),
       runId,
       function: refusal.function,
       useKind: refusal.use.kind,
@@ -257,7 +268,7 @@ export const invocationFor = async (
     refusedUse: keptUseRefusals(env, {
       app,
       version: release.manifest.resourceVersion,
-      principal: by.userId,
+      person: by.userId,
       requestId,
       runId: null,
     }),
@@ -969,7 +980,7 @@ export interface VisitorCaller {
   /** The address they signed in with, as their session holds it. */
   readonly email: string;
   /** The visitor, by their session, as the audit log names them. */
-  readonly actor: AuditActor;
+  readonly actor: VisitorActor;
   /**
    * Throws unless the visitor may still call `path`: their session live,
    * the App published at this version, their address listed, and `path`
@@ -1041,6 +1052,18 @@ export const visitorInvocation = async (
       await caller.stillAllowed(path);
       return { appMember: false, appBuilder: false };
     },
+    // What the App's store or the host refuses them, kept as a member's
+    // is, at most once a call, naming them by their session alone: no
+    // person, no address. Each call was counted against the visitor's
+    // and the App's limits before it ran, so a visitor repeating refused
+    // calls adds no more to the log than those limits let through.
+    refusedUse: keptUseRefusals(env, {
+      app: caller.app,
+      version: release.manifest.resourceVersion,
+      visitor: caller.actor,
+      requestId,
+      runId: null,
+    }),
     people: visitorPeopleOf(caller),
   };
 };
