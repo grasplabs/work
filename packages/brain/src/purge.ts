@@ -164,8 +164,11 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // when, why (a reason from a fixed list), which documents and how many
 // versions (and, when preparing, how often a term starts a longer word):
 // never the terms or the text removed. Preparing is recorded too: its
-// counts tell whether text is in a collection the admin can't read, so
-// trying terms one by one leaves a trace.
+// counts tell whether text is in a team's collection the admin isn't in,
+// so trying terms one by one there leaves a trace. A document in someone
+// else's own collection (access `me`, their Personal one among them) can't
+// be named at all: it is answered as one that doesn't exist, with nothing
+// read, counted, changed or recorded (`nameable`).
 //
 // What a purge doesn't reach: paths (a document named after someone keeps
 // its name; a `[[link]]` or a frontmatter field naming it is rewritten
@@ -1134,15 +1137,29 @@ interface Named {
 }
 
 /**
- * The documents a content purge names, in ID order. Refuses with
- * `knowledge.not_found`, naming the ones that don't exist, rather than
- * skipping them: a mistyped ID would otherwise leave the text it was meant
- * for where it is, with a purge recorded as done. Refuses the Grasp
- * skills with `knowledge.read_only`, saying why for each: the next sync
- * would put their text back.
+ * Whether `by` may name documents of `collection` in a content purge: any
+ * but another person's own (access `me`: their Personal collection, with
+ * USER.md, and any they made for themselves), which only its owner reads,
+ * admins included. A purge's counts would tell what such a document says,
+ * a term at a time, so one is answered as if it didn't exist: removing
+ * text there is its owner's, or the personal purge's that erases them.
+ */
+const nameable = (by: Writer, collection: CollectionRow): boolean =>
+  collection.access !== "me" || collection.owner === by.userId;
+
+/**
+ * The documents a content purge names that `by` may name (`nameable`), in
+ * ID order. Refuses with `knowledge.not_found`, naming the others, rather
+ * than skipping them: a mistyped ID would otherwise leave the text it was
+ * meant for where it is, with a purge recorded as done. One that exists
+ * in someone else's own collection is named among them as one that
+ * doesn't, before anything of it is read, counted or recorded. Refuses
+ * the Grasp skills with `knowledge.read_only`, saying why for each: the
+ * next sync would put their text back.
  */
 const documentsNamed = async (
   db: DrizzleD1Database,
+  by: Writer,
   { documentIds }: ContentPurge,
   /**
    * The purge was begun and isn't finished: a document named that is gone
@@ -1151,12 +1168,13 @@ const documentsNamed = async (
    */
   begun = false
 ): Promise<Named[]> => {
-  const found = await db
+  const rows = await db
     .select({ document: documents, collection: collections })
     .from(documents)
     .innerJoin(collections, eq(collections.id, documents.collectionId))
     .where(inList(documents.id, documentIds))
     .orderBy(asc(documents.id));
+  const found = rows.filter(({ collection }) => nameable(by, collection));
   const existing = new Set(found.map(({ document }) => document.id));
   const missing = documentIds.filter((id) => !existing.has(id));
   if (missing.length > 0 && !begun) {
@@ -1897,6 +1915,7 @@ const purgeContent = async <C>(
   const { db } = brain;
   const named = await documentsNamed(
     db,
+    by,
     input,
     await purgeUnfinished(brain, input)
   );
@@ -2151,6 +2170,7 @@ export const preparePurge = async <C>(
   } else {
     const named = await documentsNamed(
       db,
+      by,
       parsed,
       await purgeUnfinished(brain, parsed)
     );

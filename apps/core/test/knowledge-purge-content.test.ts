@@ -35,12 +35,14 @@ const personOf = async (role: Role) => await signedInApi(idp, role);
 describe("a purge of content", setUpTime, () => {
   it("rewrites every version of the documents named, and only those", async () => {
     const admin = await personOf("admin");
-    const owner = await personOf("user");
+    // Another admin's collection for everyone: another person's own is
+    // theirs alone.
+    const owner = await personOf("admin");
     const name = `Jansen${unique()}`;
     const email = `${name.toLowerCase()}.j@acme.test`;
     const notes = await owner.api.knowledge.createCollection({
       name: "Notes",
-      access: "me",
+      access: "everyone",
     });
     await saveOver(
       owner,

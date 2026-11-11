@@ -1132,7 +1132,6 @@ describe("purging", setUpTime, () => {
   it("refuses documents that don't exist, naming them, when prepared and when run", async () => {
     const agent = newAgent();
     const admin = await personOf("admin");
-    const leaver = await personOf("user");
     const handbook = await admin.api.knowledge.createCollection({
       name: "Handbook",
       access: "everyone",
@@ -1153,10 +1152,11 @@ describe("purging", setUpTime, () => {
       })
     );
     // A document that goes after the purge was prepared: here, with its
-    // owner's Personal collection.
+    // owner's Personal collection (the admin's own: another person's is
+    // theirs alone).
     const user = await saveUserMemory(
       env,
-      actingFor(agent, leaver.userId),
+      actingFor(agent, admin.userId),
       await newChat(agent),
       { type: "own" },
       { text: "# About me\nCall me Roos.", ifVersion: 0 }
@@ -1170,7 +1170,7 @@ describe("purging", setUpTime, () => {
     const { token } = await admin.api.knowledge.preparePurge(input);
     await purged(admin, {
       type: "personal",
-      userId: leaver.userId,
+      userId: admin.userId,
       reason: "offboarding",
     });
     let run: unknown;

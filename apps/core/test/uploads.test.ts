@@ -55,12 +55,19 @@ const fixture = async (name: string): Promise<Uint8Array> => {
   return new Uint8Array(await response.arrayBuffer());
 };
 
-/** Someone signed in, with a collection of their own. */
-const personWithCollection = async () => {
-  const person = await signedInApi(idp, "user");
+/**
+ * Someone signed in, with a collection of their own; or an admin with one
+ * for everyone (`"everyone"`), which another admin's content purge may
+ * name: a person's own is theirs alone.
+ */
+const personWithCollection = async (access: "me" | "everyone" = "me") => {
+  const person = await signedInApi(
+    idp,
+    access === "everyone" ? "admin" : "user"
+  );
   const collection = await person.api.knowledge.createCollection({
     name: `Files ${unique()}`,
-    access: "me",
+    access,
   });
   return { ...person, collectionId: collection.id };
 };
@@ -879,7 +886,7 @@ export default class extends WorkerEntrypoint {
   });
 
   it("delete the original of an upload a purge forgot while it was being stored", async () => {
-    const person = await personWithCollection();
+    const person = await personWithCollection("everyone");
     const admin = await signedInApi(idp, "admin");
     const saved = await uploaded(person, "offices.xlsx");
     const input: PurgeInput = {
@@ -936,7 +943,7 @@ export default class extends WorkerEntrypoint {
   });
 
   it("delete a document's originals in a content purge that finds nothing in its text", async () => {
-    const person = await personWithCollection();
+    const person = await personWithCollection("everyone");
     const admin = await signedInApi(idp, "admin");
     const upload = await uploaded(person, "travel-policy.docx");
     // Only in the file, where extraction never read it: an image, say.
@@ -1067,7 +1074,7 @@ export default class extends WorkerEntrypoint {
   });
 
   it("save nothing of an upload whose document a purge rewrote while it was extracted", async () => {
-    const person = await personWithCollection();
+    const person = await personWithCollection("everyone");
     const admin = await signedInApi(idp, "admin");
     const saved = await uploaded(person, "offices.xlsx");
     const inFlight = await leftPending(person, "offices.xlsx", {
@@ -1124,7 +1131,7 @@ export default class extends WorkerEntrypoint {
   });
 
   it("refuse a purge of a document while an upload is being saved as it, and purge it after", async () => {
-    const person = await personWithCollection();
+    const person = await personWithCollection("everyone");
     const admin = await signedInApi(idp, "admin");
     const saved = await uploaded(person, "offices.xlsx");
     const saving = await leftPending(person, "offices.xlsx", {
@@ -1377,7 +1384,7 @@ export default class extends WorkerEntrypoint {
   });
 
   it("delete the original of a document a purge rewrites", async () => {
-    const person = await personWithCollection();
+    const person = await personWithCollection("everyone");
     const admin = await signedInApi(idp, "admin");
     const upload = await uploaded(person, "offices.xlsx");
     const input: PurgeInput = {
