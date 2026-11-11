@@ -80,37 +80,80 @@ export const holdFile = (db: DrizzleSqliteDODatabase, hash: string): boolean =>
     .get() !== undefined;
 
 /**
- * Deletes the files no version points at that were noted more than
- * `fileGraceMs` before `at`, a batch at a time: each from R2, then its row.
+ * Deletes `hashes`' files from R2, answering those it deleted: all at once,
+ * or, when that fails, one by one, so a file R2 won't delete never holds
+ * back the others.
+ */
+const deleteFiles = async (
+  bucket: R2Bucket,
+  hashes: readonly string[]
+): Promise<string[]> => {
+  try {
+    await bucket.delete(hashes.map(fileKeyOf));
+    return [...hashes];
+  } catch {
+    const results = await Promise.allSettled(
+      hashes.map(async (hash) => {
+        await bucket.delete(fileKeyOf(hash));
+        return hash;
+      })
+    );
+    return results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : []
+    );
+  }
+};
+
+/**
+ * Deletes the oldest batch of files no version points at that were noted
+ * more than `fileGraceMs` before `at` (never later than now, so no caller's
+ * clock shortens the grace): each from R2, then its row. A file R2 won't
+ * delete is noted afresh, so it goes to the back and is tried again a
+ * grace later, and never holds back the files behind it.
  *
  * Run it while the store takes nothing else (`blockConcurrencyWhile`).
  * What depends on that: between the R2 delete and the row delete, no add
  * may note the same file and write it (step 1 and 2), or the row delete
  * would then drop the row of a file just written, which nothing would
  * ever sweep. With the input blocked, an add notes the file only after
- * its row is gone, so it writes a new row and the file anew.
+ * its row is gone, so it writes a new row and the file anew. Unverified:
+ * that the continuation of an add's R2 call already in flight is held
+ * back during `blockConcurrencyWhile` as a timer's is (it could not be
+ * made to arrive mid-sweep in local workerd). The worst case needs an add
+ * whose first step was more than `fileGraceMs` before its last.
  */
 export const sweepFiles = async (
   db: DrizzleSqliteDODatabase,
   bucket: R2Bucket,
   at: Date
 ): Promise<void> => {
+  const asOf = Math.min(at.getTime(), Date.now());
   const unreferenced = and(
     eq(files.refs, 0),
-    lte(files.writtenAt, new Date(at.getTime() - fileGraceMs))
+    lte(files.writtenAt, new Date(asOf - fileGraceMs))
   );
-  const gone = db
+  const due = db
     .select({ hash: files.hash })
     .from(files)
     .where(unreferenced)
+    .orderBy(files.writtenAt)
     .limit(sweepBatch)
     .all()
     .map(({ hash }) => hash);
-  if (gone.length === 0) {
+  if (due.length === 0) {
     return;
   }
-  await bucket.delete(gone.map(fileKeyOf));
-  db.delete(files)
-    .where(and(unreferenced, inArray(files.hash, gone)))
-    .run();
+  const deleted = await deleteFiles(bucket, due);
+  if (deleted.length > 0) {
+    db.delete(files)
+      .where(and(unreferenced, inArray(files.hash, deleted)))
+      .run();
+  }
+  const kept = due.filter((hash) => !deleted.includes(hash));
+  if (kept.length > 0) {
+    db.update(files)
+      .set({ writtenAt: new Date() })
+      .where(and(unreferenced, inArray(files.hash, kept)))
+      .run();
+  }
 };

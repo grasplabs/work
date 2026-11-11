@@ -141,7 +141,9 @@ export const currentVersions = sqliteTable("current_versions", {
  * The changes each source was added with: a key its producer gives each
  * change (an upstream revision, a message id, an id minted before the
  * first try), and the version the add answered with. The same key again
- * answers with that version, whatever was added since (sources.ts).
+ * answers with that version, whatever was added since (sources.ts). One
+ * row per add, kept with the source; a key may be a message id, so
+ * erasing a source (GRA-1729) erases its changes too.
  */
 export const sourceChanges = sqliteTable(
   "source_changes",

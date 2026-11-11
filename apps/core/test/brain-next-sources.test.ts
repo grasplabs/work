@@ -212,6 +212,35 @@ const holdNextFileWrite = async () => {
   return gate;
 };
 
+/**
+ * Has the store's bucket refuse to delete the file holding `text`, alone or
+ * with others, as an R2 that keeps failing for it would; deleting the rest
+ * goes through. Answers how to give the store its own bucket back.
+ */
+const refuseDeleting = async (text: string): Promise<() => void> => {
+  const key = `sources/${await hashOf(text)}`;
+  return await runInDurableObject(store(), (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    const bucket = env.BRAIN_OBJECTS;
+    const refusing = {
+      delete: async (keys: string | string[]) => {
+        const named = [keys].flat();
+        if (named.includes(key)) {
+          throw new Error("Refused by the test");
+        }
+        await bucket.delete(named);
+      },
+    };
+    Reflect.set(instance, "env", { ...objectEnv, BRAIN_OBJECTS: refusing });
+    return () => {
+      Reflect.set(instance, "env", objectEnv);
+    };
+  });
+};
+
 /** Moves the clock, for `Date` alone, to `ms` from now. */
 const later = (ms: number): void => {
   vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + ms });
@@ -656,6 +685,8 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       { producer: "upload", id: "s".repeat(257) },
       { producer: "somewhere", id: crypto.randomUUID() },
       { producer: "upload:chat", id: crypto.randomUUID() },
+      { producer: "upload", id: "a\u0000b" },
+      { producer: "upload", id: "line\nbreak" },
     ].map(
       async (source) =>
         await addSource(env, {
@@ -672,14 +703,20 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one add at a time
       await expect(add).rejects.toThrow(refused);
     }
-    await expect(
-      addSource(env, {
-        source: newSource(),
-        change: newChange(),
-        text: " \n\t ",
-        readers: owner(reader),
-      })
-    ).rejects.toThrow(refused);
+    for (const [change, text] of [
+      [newChange(), " \n\t "],
+      [`change\u0007${newChange()}`, secret],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await expect(
+        addSource(env, {
+          source: newSource(),
+          change,
+          text,
+          readers: owner(reader),
+        })
+      ).rejects.toThrow(refused);
+    }
     await expect(recalledAs(reader, secret)).resolves.toStrictEqual([]);
   });
 });
@@ -749,8 +786,10 @@ describe(
         })
       ).rejects.toThrow(crashed);
 
-      // Within an add's time, the sweep leaves the file for the add.
+      // Within an add's time, the sweep leaves the file for the add, even
+      // when its caller's clock runs ahead.
       await sweepBrain(env, new Date());
+      await sweepBrain(env, new Date(Date.now() + fileGraceMs + 60_000));
       const withinTime = await fileOf(lostText);
       later(fileGraceMs + 1);
       await sweepBrain(env, new Date());
@@ -765,6 +804,48 @@ describe(
       expect({ withinTime, pastTime }).toStrictEqual({
         withinTime: lostText,
         pastTime: { file: null, count: null, kept: keptText },
+      });
+    });
+
+    it("has the others swept when R2 won't delete one file, and that one a grace later", async () => {
+      const reader = await person();
+      const [stuckText, freeText] = [`Stuck ${word()}`, `Free ${word()}`];
+      for (const text of [stuckText, freeText]) {
+        // oxlint-disable-next-line no-await-in-loop -- one crash at a time
+        await crashAfterNextFile();
+        // oxlint-disable-next-line no-await-in-loop -- one crash at a time
+        await expect(
+          addSource(env, {
+            source: newSource(),
+            change: newChange(),
+            text,
+            readers: owner(reader),
+          })
+        ).rejects.toThrow(crashed);
+      }
+
+      later(fileGraceMs + 1);
+      const restore = await refuseDeleting(stuckText);
+      await sweepBrain(env, new Date());
+      restore();
+      const afterRefusal = {
+        stuck: await fileOf(stuckText),
+        free: await fileOf(freeText),
+      };
+      // Noted afresh: it waits a grace before it is tried again.
+      await sweepBrain(env, new Date());
+      const sameTick = await fileOf(stuckText);
+      later(fileGraceMs + 1);
+      await sweepBrain(env, new Date());
+
+      expect({
+        afterRefusal,
+        sameTick,
+        graceLater: await fileOf(stuckText),
+      }).toStrictEqual({
+        afterRefusal: { stuck: stuckText, free: null },
+        sameTick: stuckText,
+        graceLater: null,
       });
     });
 

@@ -166,9 +166,10 @@ export interface Brain {
   recall: (request: RecallRequest) => Promise<Recalled>;
   /**
    * A version of a source, current or history, whole as it was added, for
-   * a reader who could read that version and can read the source's
-   * current one: `null` when there is none or they may not, alike. So
-   * narrowing a source's readers hides its history from those taken off.
+   * a reader among that version's readers and the source's current
+   * version's, with the groups the host counts them in now: `null` when
+   * there is none or they may not, alike. So narrowing a source's readers
+   * hides its history from those taken off.
    */
   readVersion: (request: VersionRequest) => Promise<SourceVersion | null>;
   /**

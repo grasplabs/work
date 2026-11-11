@@ -61,17 +61,45 @@ const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
 };
 
 /**
+ * `kinds`, which must hold no ":": a source's key is its kind, ":", and
+ * its id, so a kind with ":" could name a key under another kind. A list
+ * where one does doesn't compile.
+ */
+const kindsWithoutColon = <const K extends string>(
+  kinds: readonly K[] &
+    ([Extract<K, `${string}:${string}`>] extends [never] ? unknown : never)
+): readonly K[] => kinds;
+
+/**
  * Everything that adds sources to the Brain, one kind each. Each producer
  * issue adds its own (GRA-1727: meetings, workflow runs, interviews;
- * GRA-1730: what agents fetch). A kind never holds ":".
+ * GRA-1730: what agents fetch).
+ *
+ * A kind is only ever added, never removed or renamed: the Brain keeps
+ * every key it was given, and recall reads each key's kind back
+ * (`sourceRefOf`), so a kind gone from this list would fail every recall
+ * whose results hold one of its sources.
  */
-const producerKinds = ["upload", "chat"] as const;
+const producerKinds = kindsWithoutColon(["upload", "chat"]);
 
 /** Who adds a source: one of `producerKinds`. */
 export type ProducerKind = (typeof producerKinds)[number];
 
 /** The longest a kind's prefix of a source key can be. */
 const longestPrefix = Math.max(...producerKinds.map((kind) => kind.length)) + 1;
+
+/** Control characters: never part of an id or a change's key. */
+const controlCharacters = /\p{Cc}/u;
+
+/** An id or key from a producer: some characters, none of them control. */
+const producerIdSchema = (most: number) =>
+  z
+    .string()
+    .min(1)
+    .max(most)
+    .refine((id) => !controlCharacters.test(id), {
+      message: "Holds a control character",
+    });
 
 /**
  * A source, as its producer names it: its kind, and its own id for it.
@@ -80,10 +108,7 @@ const longestPrefix = Math.max(...producerKinds.map((kind) => kind.length)) + 1;
  */
 const sourceRefSchema = z.strictObject({
   producer: z.enum(producerKinds),
-  id: z
-    .string()
-    .min(1)
-    .max(sourceIdMaxLength - longestPrefix),
+  id: producerIdSchema(sourceIdMaxLength - longestPrefix),
 });
 
 /** A source, as its producer names it. */
@@ -106,7 +131,7 @@ const sourceRefOf = (key: SourceId): SourceRef => {
 };
 
 /** A change's key, from its producer: see `addSource`. */
-const changeSchema = z.string().min(1).max(sourceIdMaxLength);
+const changeSchema = producerIdSchema(sourceIdMaxLength);
 
 const newSourceSchema = z.strictObject({
   source: sourceRefSchema,
@@ -194,11 +219,16 @@ const readerOf = async (
  * revision, a message id, or an id minted before the first try. Repeat an
  * add with the same `change` (after a lost reply, at once or much later)
  * and it answers with the version it first made, whatever came since; the
- * same `change` with other text or readers is refused. A new `change`
- * with the same text and readers as the current version is that version.
+ * same `change` with other text or readers is refused (which tells the
+ * producer the text or readers differ from that change's: producers are
+ * the server's own code). A new `change` with the same text and readers
+ * as the current version is that version.
  *
  * For producers on the server only: `source.id` and `change` come from
- * the server, never from a person's input.
+ * the server, never from a person's input. An id is not a secret within
+ * its kind (an upload's id is seen by those who can see the upload), so
+ * a producer checks that whoever asks for the change may change that
+ * source before it calls this; the Brain can't tell.
  */
 export const addSource = async (
   env: BrainEnv,
@@ -245,11 +275,13 @@ export const recallAs = async (
 
 /**
  * Version `version` of `source`, current or history, whole, for the
- * member `personId`: only if they could read that version and can read
- * the source's current one, so narrowing a source's readers hides its
- * history from those taken off. `null` when there is none or they may
- * not, alike. Refused once they are no longer a member. For the server
- * only, as `addSource`.
+ * member `personId`: only if they are among that version's readers and
+ * the current version's, so narrowing a source's readers hides its
+ * history from those taken off. Both are read with the teams core counts
+ * them in now: someone who joins a team reads the history that team
+ * could read from before they joined. `null` when there is none or they
+ * may not, alike. Refused once they are no longer a member. For the
+ * server only, as `addSource`.
  */
 export const readSourceVersionAs = async (
   env: BrainEnv & Pick<Env, "DB">,

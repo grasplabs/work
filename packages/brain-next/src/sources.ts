@@ -217,11 +217,14 @@ export const addVersion = async (
 
 /**
  * `?1` the source, `?2` the reader's person, `?3` their groups (JSON), `?4`
- * the version: its file and when it was added, if the reader could read
- * that version and can read the source's current one. History stays
- * readable only by those who could read it then and still can read the
- * source, so narrowing a source's readers hides its history from those
- * taken off, and a reader added later never sees what came before them.
+ * the version: its file and when it was added, if the reader is among
+ * that version's readers and the source's current version's. So
+ * narrowing a source's readers hides its history from those taken off,
+ * and a person or group added as a reader in a later version never sees
+ * the versions before. Both are matched against the groups the host
+ * counts the reader in now (the Brain keeps no membership): someone who
+ * joins a group reads what that group could read from before they
+ * joined.
  */
 const versionSql = `
 WITH ${readableSql}
