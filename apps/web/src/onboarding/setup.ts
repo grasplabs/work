@@ -10,6 +10,8 @@ import type {
   SetupChoices,
 } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingContext } from "@grasp-os/shared/onboarding-context";
+import { setupSteps } from "@grasp-os/shared/onboarding-flow";
+import type { SetupPlace } from "@grasp-os/shared/onboarding-flow";
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
 
 import type { ShapeKey } from "../brain/dot-shapes.ts";
@@ -22,20 +24,8 @@ import { addDays } from "./send-plan.ts";
 // from what core keeps (the roster, the plan, numbers per team, and how
 // much Grasp knows by source). Pure.
 
-export const steps = [
-  "welcome",
-  "ai",
-  "about",
-  "company",
-  "sources",
-  "documents",
-  "pulse",
-  "leads",
-  "team",
-  "listening",
-  "review",
-  "open",
-] as const;
+/** The onboarding's screens, in order: core keeps which of them the admin finished, by these names. */
+export const steps = setupSteps;
 export type SetupStep = (typeof steps)[number];
 
 /** The first nine steps are the wizard; after it, the bottom of the screen says where things stand in a word. */
@@ -339,6 +329,20 @@ export const reachedOf = (
     Math.max(stored, plan === null ? 0 : stepIndex("listening")),
     steps.length - 1
   );
+
+/**
+ * How far core says the admin went: the screen after the furthest one
+ * they finished, wherever they finished it; the first, before any.
+ */
+export const reachedByPlace = (place: SetupPlace | null): number =>
+  Math.min(
+    Math.max(0, ...(place?.done ?? []).map((step) => stepIndex(step) + 1)),
+    steps.length - 1
+  );
+
+/** The screens finished by an admin who went as far as `reached`: every one before it. */
+export const finishedAt = (reached: number): SetupStep[] =>
+  steps.slice(0, Math.max(reached, 0));
 
 /**
  * Where the admin can go from step `index`, having been as far as

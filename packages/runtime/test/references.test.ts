@@ -24,6 +24,7 @@ import { defineApp, permission, v } from "../src/index.ts";
 import { readPageBuild } from "../src/page-functions.ts";
 import { runFunction } from "../src/runner.ts";
 import type { FunctionChannel } from "../src/runner.ts";
+import { serverFunctionsIn } from "../src/server-syntax.ts";
 import { serverModule } from "../src/server.ts";
 import { isPlainObject, valueLimits } from "../src/value-descriptor.ts";
 import { schemaOf } from "../src/value-schema.ts";
@@ -46,6 +47,8 @@ import serverReferencesText from "./notes/server/_generated/internal.ts?raw";
 import { internal } from "./notes/server/_generated/internal.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import serverText from "./notes/server/_generated/server.ts?raw";
+// oxlint-disable-next-line import/default -- a ?raw import is the file's text
+import notesSource from "./notes/server/notes.ts?raw";
 
 // References and generated modules (spec 7.3, 8, 32.1), and reading an
 // App's manifest back as the host does: pure logic, so unit tests. The
@@ -57,6 +60,9 @@ import serverText from "./notes/server/_generated/server.ts?raw";
 
 /** The fixture's manifest, as inspection makes it. */
 const notesManifest = (): AppManifest => inspectApp(notes).manifest;
+
+/** The fixture's functions, as its server module's syntax declares them. */
+const notesFunctions = serverFunctionsIn({ "server/notes.ts": notesSource });
 
 /** `manifest` as JSON text, as a sandbox answers it. */
 const textOf = (manifest: unknown): string => JSON.stringify(manifest);
@@ -116,7 +122,8 @@ const changed = (change: (data: unknown) => void): string => {
 describe("generated modules", () => {
   test("are what the host generates for the fixture, byte for byte", async () => {
     const files = await generateModules(
-      readAppManifest(textOf(notesManifest()))
+      readAppManifest(textOf(notesManifest())),
+      notesFunctions
     );
     expect(files).toStrictEqual({
       "server/_generated/server.ts": serverText,
@@ -138,8 +145,8 @@ describe("generated modules", () => {
           : value
     );
     await expect(
-      generateModules(readAppManifest(textOf(reversed)))
-    ).resolves.toStrictEqual(await generateModules(manifest));
+      generateModules(readAppManifest(textOf(reversed)), notesFunctions)
+    ).resolves.toStrictEqual(await generateModules(manifest, notesFunctions));
   });
 
   test("change the contract fingerprint a binding pins with any change to a function", async () => {
@@ -248,8 +255,8 @@ describe("generated modules", () => {
       },
     };
     const [one, other] = await Promise.all([
-      generateModules(manifest),
-      generateModules(changedContracts, [
+      generateModules(manifest, notesFunctions),
+      generateModules(changedContracts, notesFunctions, [
         {
           alias: "summarizeNote",
           pinned: { workflowId: "workflow-7", version: 7 },
@@ -299,14 +306,17 @@ describe("generated modules", () => {
 
   test("export no workflows for an App that declares none", async () => {
     const manifest = notesManifest();
-    const files = await generateModules({
-      ...manifest,
-      permissions: Object.fromEntries(
-        Object.entries(manifest.permissions).filter(
-          ([, declared]) => declared["~permission"] !== "workflows"
-        )
-      ),
-    });
+    const files = await generateModules(
+      {
+        ...manifest,
+        permissions: Object.fromEntries(
+          Object.entries(manifest.permissions).filter(
+            ([, declared]) => declared["~permission"] !== "workflows"
+          )
+        ),
+      },
+      notesFunctions
+    );
     expect(files["server/_generated/api.ts"]).toContain(
       "export const workflows: Readonly<Record<never, never>> = frozen({});"
     );
@@ -381,6 +391,7 @@ describe("workflow references", () => {
           archiveNotes: { ...archiveNotes, ...declared.archiveNotes },
         },
       },
+      notesFunctions,
       bound
     );
   };
@@ -800,8 +811,14 @@ describe("workflow references", () => {
       );
     });
     await expect(
-      generateModules(readAppManifest(reversed), pins.toReversed())
-    ).resolves.toStrictEqual(await generateModules(notesManifest(), pins));
+      generateModules(
+        readAppManifest(reversed),
+        notesFunctions,
+        pins.toReversed()
+      )
+    ).resolves.toStrictEqual(
+      await generateModules(notesManifest(), notesFunctions, pins)
+    );
   });
 
   test("hold exactly as many events as the client reads (workflowReferenceLimits)", async () => {

@@ -1,13 +1,6 @@
 import { v } from "@grasp-os/runtime/app";
-import {
-  declaredWorkflows,
-  GraspClient,
-  workflowReferenceOf,
-} from "@grasp-os/runtime/host";
-import type {
-  ClientTransport,
-  WorkflowEventContract,
-} from "@grasp-os/runtime/host";
+import { declaredWorkflows, workflowReferenceOf } from "@grasp-os/runtime/host";
+import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -38,8 +31,7 @@ import { routed, signedInApi, unique } from "./sign-in.ts";
 // alias the App's app.ts declares, the App's version made current, its
 // `start` grant asked for by its builder and granted by an admin, and
 // its runs started, followed and controlled by a
-// person or by the App's page over core's function route. What replaces
-// an App's own workflow (workflow-apps.ts) in a test:
+// person or by the App's page over core's function route:
 //
 //   const { signedIn, boundApp } = jsonWorkflowAppsOf(idp);
 //   const { builder, app, workflow, reference } = await boundApp({ hold: "1 hour" });
@@ -407,9 +399,8 @@ export const decisionOf = async (
 
 /**
  * Ends every JSON workflow run a test left live in the engine: a run held
- * an hour would go on in the background of whatever test file runs next
- * (see `endLiveRuns` in runs.ts, which ends App runs). A run the engine
- * has no record of has nothing to end.
+ * an hour would go on in the background of whatever test file runs next.
+ * A run the engine has no record of has nothing to end.
  */
 export const endLiveResourceRuns = async (): Promise<void> => {
   const { results } = await env.DB.prepare(
@@ -431,11 +422,14 @@ export const endLiveResourceRuns = async (): Promise<void> => {
 /**
  * The App every bound workflow here is bound to: one page, one alias,
  * declaring `declares` of the workflow besides its args and returns (its
- * events, listen tasks and decisions, as the version bound has them).
+ * events, listen tasks and decisions, as the version bound has them), and
+ * recording `bound` as the version it binds, as a draft's `bindWorkflow`
+ * does.
  */
 export const requestsApp = (
   alias: string,
-  declares?: WorkflowEventContract
+  declares?: WorkflowEventContract,
+  bound?: { readonly workflowId: string; readonly version: number }
 ): TestApp =>
   testApp(
     {
@@ -450,6 +444,7 @@ export const requestsApp = (
         `permission.workflow(${JSON.stringify(alias)}, { args: v.object({ who: v.string().trim().min(1) }), returns: v.object({ status: v.string() }) })`,
       ],
       ...(declares === undefined ? {} : { contracts: { [alias]: declares } }),
+      ...(bound === undefined ? {} : { bound: { [alias]: bound } }),
     },
     {
       "server/requests.ts": `import { permissions } from "../grasp.config.ts";
@@ -695,42 +690,6 @@ export const called = async (
   }
   const payload = errorPayloadSchema.parse(answer);
   throw Object.assign(new Error(payload.message), { code: payload.code });
-};
-
-/**
- * A session client of `person`'s page, as the frame's own: its calls
- * over core's function route, its live queries over its frame
- * (`pages.frame`), as `useQuery` and `useMutation` reach core.
- */
-export const pageClient = (
-  person: Person,
-  app: string,
-  lease: string
-): GraspClient => {
-  const transport: ClientTransport = {
-    call: async (request) => await called(person, app, lease, request),
-    watch: async (request, onSnapshot, onLost) => {
-      const callback = Object.assign(
-        (push: unknown): void => {
-          onSnapshot(push);
-        },
-        {
-          [Symbol.dispose]: (): void => {
-            onLost();
-          },
-        }
-      );
-      const subscription = await person.api.pages
-        .frame(app, lease)
-        .watchQuery(request, callback);
-      return {
-        release: () => {
-          void subscription.release();
-        },
-      };
-    },
-  };
-  return new GraspClient(transport);
 };
 
 /** Follows `request` raw on `person`'s page: what reached the page. */

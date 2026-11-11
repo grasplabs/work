@@ -153,19 +153,18 @@ const accountOf = async (connectionId: string): Promise<string> => {
 };
 
 /**
- * The stamp of mail run `run` (an independent workflow's, or an App's)
+ * The stamp of mail run `run`
  * sends from `mailbox` to it, through `connectionId`, as its step's call
  * records it (mail-stamps.ts).
  */
 const mailFrom = async (
   run: string,
-  kind: "app" | "resource",
   connectionId: string,
   mailbox: string
 ): Promise<string> => {
   const { stamp } = await stampedMail(
     env,
-    { run, stepKey: `step-${unique()}`, kind },
+    { run, stepKey: `step-${unique()}` },
     {
       connectionId,
       action: "mail.send",
@@ -654,7 +653,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
         }
         mailed = runs.length;
         // oxlint-disable-next-line no-await-in-loop -- one hop after another
-        const stamp = await mailFrom(last.id, "resource", shared, mailbox);
+        const stamp = await mailFrom(last.id, shared, mailbox);
         // oxlint-disable-next-line no-await-in-loop -- one hop after another
         await deliverConnectorEvent(
           env,
@@ -698,55 +697,6 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       oneLineage: true,
       rootFirst: 0,
       refused: ["workflow.lineage_limit"],
-    });
-  });
-
-  it("refuse an App run's own mail, audited, rather than start it as a new root", async () => {
-    const admin = await person("admin");
-    const workflow = await filing(admin);
-    const shared = await connection();
-    const mailbox = await accountOf(shared);
-    const trigger = await connectorTrigger(admin, workflow.id, shared);
-    // An App's run that mails the trigger's mailbox (the App, in turn,
-    // watching the mailbox the trigger's workflow mails).
-    const app = `app-${unique()}`;
-    const appRun = crypto.randomUUID();
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Echo', '', ?, ?)"
-      ).bind(app, admin.userId, Date.now()),
-      env.DB.prepare(
-        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'echo', 1, NULL, 'running', ?, NULL)"
-      ).bind(appRun, app, Date.now()),
-    ]);
-    const stamp = await mailFrom(appRun, "app", shared, mailbox);
-
-    const delivered = await deliverConnectorEvent(
-      env,
-      mailEvent(shared, {
-        stamp,
-        payload: {
-          subject: "Again",
-          folder: "inbox",
-          from: { address: mailbox },
-        },
-      })
-    );
-    const runs = await runsOf(trigger.id);
-    const logged = await allEvents();
-    const refused = logged.filter(
-      ({ action, target }) =>
-        action === "workflow.event.refused" && target?.id === trigger.id
-    );
-
-    expect({
-      delivered,
-      runs: runs.length,
-      refused: refused.map(({ detail }) => detail.code),
-    }).toStrictEqual({
-      delivered: { runs: 0 },
-      runs: 0,
-      refused: ["lineage.unjoinable"],
     });
   });
 

@@ -199,6 +199,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const [result] = await codeResults(chat.stub, chat.chat.id);
     const files = [
       "grasp.config.ts",
+      "server/_generated/api.ts",
+      "server/_generated/dataModel.ts",
+      "server/_generated/internal.ts",
+      "server/_generated/server.ts",
       "server/schema.ts",
       "src/routes/index.tsx",
     ];

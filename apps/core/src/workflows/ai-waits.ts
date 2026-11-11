@@ -12,32 +12,26 @@ import {
   inArray,
   isNotNull,
   isNull,
-  or,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import {
-  workflowAiWaits,
-  workflowResourceRuns,
-  workflowRuns,
-} from "../db/core/schema.ts";
+import { workflowAiWaits, workflowResourceRuns } from "../db/core/schema.ts";
 import { oweWake, sendWake } from "./wakes.ts";
 import type { Wake } from "./wakes.ts";
 
-// Workflow runs, App runs and independent ones, held because a model call
-// of a step failed on the
+// Workflow runs held because a model call of a step failed on the
 // organization's own key for what its provider showed, by the HTTP class
 // seen (`ProviderTrouble`): it refused the key, it isn't answering (an
 // outage, most often), or it is limiting requests. A step bound to its
 // model never falls back to another, so rather than fail, the run waits
 // (host.ts, `keyRound`), and its step runs again once calls work.
 //
-// - What the run's summary shows: a row per held step, from its first
-//   failed call until it runs again: the provider, what it showed last,
-//   and since when (summary.ts). Never which key or what the provider said.
+// - What the run shows: a row per held step, from its first failed call
+//   until it runs again: the provider, what it showed last, and since
+//   when (`aiWaitsOf`). Never which key or what the provider said.
 // - What ends the wait: replacing a key wakes every held run at once
 //   (`wakeAiWaits`, from ai-providers.ts), through the wakes core already
 //   owes runs (wakes.ts), sent again by the per-minute repair until the
@@ -69,33 +63,17 @@ const wakePage = 1000;
 /** Wakes owed in one batch of statements. */
 const owedPerBatch = 100;
 
-/** Which runs a row names: an App's (`workflow_runs`) or an independent one's. */
+/** The run a held step is of. */
 export interface AiWaitRun {
-  kind: "app" | "resource";
   runId: string;
 }
 
-/**
- * The statement that moves run `runId`'s summary on; an independent run's
- * keeps none.
- */
-const movedOn = (db: ReturnType<typeof drizzle>, runId: string) =>
-  db
-    .update(workflowRuns)
-    .set({ summaryRevision: sql`${workflowRuns.summaryRevision} + 1` })
-    .where(eq(workflowRuns.id, runId));
-
 /** Whether `run` hasn't ended, as SQL: a wake is owed only then. */
-const goesOn = ({ kind, runId }: AiWaitRun) =>
-  kind === "resource"
-    ? sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${and(
-        eq(workflowResourceRuns.id, runId),
-        isNull(workflowResourceRuns.endedAt)
-      )})`
-    : sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${and(
-        eq(workflowRuns.id, runId),
-        isNull(workflowRuns.endedAt)
-      )})`;
+const goesOn = ({ runId }: AiWaitRun) =>
+  sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${and(
+    eq(workflowResourceRuns.id, runId),
+    isNull(workflowResourceRuns.endedAt)
+  )})`;
 
 /** What a held step waits for: its provider, and what it showed last. */
 export interface AiWait {
@@ -110,30 +88,26 @@ export interface AiWait {
  */
 export const aiWaitStarted = async (
   env: Env,
-  { kind, runId }: AiWaitRun,
+  { runId }: AiWaitRun,
   step: string,
   { provider, trouble }: AiWait,
   since: number
 ): Promise<void> => {
-  const db = drizzle(env.DB);
   const stepHash = await sha256Hex(step);
-  await db.batch([
-    db
-      .insert(workflowAiWaits)
-      .values({
-        runId,
-        runKind: kind,
-        stepHash,
-        provider,
-        trouble,
-        since: new Date(since),
-      })
-      .onConflictDoUpdate({
-        target: [workflowAiWaits.runId, workflowAiWaits.stepHash],
-        set: { provider, trouble },
-      }),
-    movedOn(db, runId),
-  ]);
+  await drizzle(env.DB)
+    .insert(workflowAiWaits)
+    .values({
+      runId,
+      runKind: "resource",
+      stepHash,
+      provider,
+      trouble,
+      since: new Date(since),
+    })
+    .onConflictDoUpdate({
+      target: [workflowAiWaits.runId, workflowAiWaits.stepHash],
+      set: { provider, trouble },
+    });
 };
 
 /** Records that step `step` of run `runId` waits no more: it ran again. */
@@ -142,19 +116,15 @@ export const aiWaitEnded = async (
   runId: string,
   step: string
 ): Promise<void> => {
-  const db = drizzle(env.DB);
   const stepHash = await sha256Hex(step);
-  await db.batch([
-    db
-      .delete(workflowAiWaits)
-      .where(
-        and(
-          eq(workflowAiWaits.runId, runId),
-          eq(workflowAiWaits.stepHash, stepHash)
-        )
-      ),
-    movedOn(db, runId),
-  ]);
+  await drizzle(env.DB)
+    .delete(workflowAiWaits)
+    .where(
+      and(
+        eq(workflowAiWaits.runId, runId),
+        eq(workflowAiWaits.stepHash, stepHash)
+      )
+    );
 };
 
 /**
@@ -224,40 +194,30 @@ export const wakeAiWaits = async (
 ): Promise<void> => {
   try {
     const db = drizzle(env.DB);
-    const ended = (kind: AiWaitRun["kind"]) =>
-      and(
-        eq(workflowAiWaits.runKind, kind),
+    await db
+      .delete(workflowAiWaits)
+      .where(
         inArray(
           workflowAiWaits.runId,
-          kind === "resource"
-            ? db
-                .select({ id: workflowResourceRuns.id })
-                .from(workflowResourceRuns)
-                .where(isNotNull(workflowResourceRuns.endedAt))
-            : db
-                .select({ id: workflowRuns.id })
-                .from(workflowRuns)
-                .where(isNotNull(workflowRuns.endedAt))
+          db
+            .select({ id: workflowResourceRuns.id })
+            .from(workflowResourceRuns)
+            .where(isNotNull(workflowResourceRuns.endedAt))
         )
       );
-    await db.delete(workflowAiWaits).where(or(ended("app"), ended("resource")));
     const sendNow: string[] = [];
     // Every held run, in pages by run ID: none left out however many.
     for (let after = ""; ;) {
       // oxlint-disable-next-line no-await-in-loop -- one page at a time
       const held = await db
-        .selectDistinct({
-          runId: workflowAiWaits.runId,
-          kind: workflowAiWaits.runKind,
-        })
+        .selectDistinct({ runId: workflowAiWaits.runId })
         .from(workflowAiWaits)
         .where(gt(workflowAiWaits.runId, after))
         .orderBy(asc(workflowAiWaits.runId))
         .limit(pageSize);
-      const wakes: (Wake & AiWaitRun)[] = held.map(({ runId, kind }) => ({
+      const wakes: (Wake & AiWaitRun)[] = held.map(({ runId }) => ({
         id: `ai:${crypto.randomUUID()}`,
         runId,
-        kind: kind === "resource" ? "resource" : "app",
         type: aiWakeType,
       }));
       // oxlint-disable-next-line no-await-in-loop -- one page at a time

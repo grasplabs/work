@@ -8,15 +8,10 @@ import {
 } from "@grasp-os/brain/outcomes";
 import type { TaskOutcome } from "@grasp-os/brain/outcomes";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { waitUntil } from "cloudflare:workers";
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { memberRole } from "./auth/identity.ts";
 import { scheduleConsolidation } from "./brain-consolidation.ts";
-import { apps, brainCaptureIntents, workflowRuns } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
 
 // Settled task outcomes, captured for the Brain without a learning step in
@@ -27,27 +22,21 @@ import { brainOf } from "./knowledge/ports.ts";
 // a page or a model can call.
 //
 // Durable at the owning boundary: the write that settles a task writes
-// its capture intent with it. A workflow run's intent goes in core's
-// database in the batch that ends the run (workflows/runs.ts,
-// `projectStatus`); a chat turn's in its Workspace object's storage as
-// the turn settles (workspace.ts). The Brain's database shares no
-// transaction with either, so delivery is at least once: right after the
-// settle, in the background, and again by the clock (runs) or the
-// object's alarm (turns) for whatever is left, which repairs a crash or
-// an outage between the two. The Brain keeps an event ID once, so a
+// its capture intent with it: a chat turn's in its Workspace object's
+// storage as the turn settles (workspace.ts). The Brain's database shares
+// no transaction with it, so delivery is at least once: right after the
+// settle, in the background, and again by the object's alarm for
+// whatever is left, which repairs a crash or an outage between the two. The Brain keeps an event ID once, so a
 // delivery made again is one event, and keeps each source's cursor: the
 // highest intent sequence it recorded.
 //
 // What is captured, and what isn't (the policy, in one place):
-// - Production work only. A run of a draft App is its builder trying it,
-//   an App's tests run under a pin of their own and an internal job
-//   (indexing, and the learning jobs to come) has no run row, so none of
-//   them reaches an intent: evaluation, test and learning-job work never
+// - Production work only: evaluation, test and learning-job work never
 //   trains production behaviour. The Brain refuses any other purpose too.
 // - Consent and revocation: the outcome is built when it is delivered, from
 //   the task's own records as they are then, so a person who is no longer
-//   a member, a chat in restricted mode, a deleted chat or a run whose
-//   details are gone is dropped, never delivered.
+//   a member, a chat in restricted mode or a deleted chat is dropped, never
+//   delivered.
 // - Audience: a person's own work is their experience alone. A chat others
 //   share is one experience for exactly its members as the chat kept them
 //   for the turn (Nick, GRA-300): the Brain reaches one of them only while
@@ -55,13 +44,12 @@ import { brainOf } from "./knowledge/ports.ts";
 //   `audiences` port, knowledge/access.ts `audiencesOf`).
 // - Minimal and erasable: an outcome holds identifiers and states, never
 //   inputs, outputs or messages, and names the record it rests on. When
-//   that record goes (a chat deleted, a run's details past retention), its
-//   events and intents go too (`eraseCaptured`), and a delivery that
+//   that record goes (a chat deleted), its events and intents go too (`eraseCaptured`), and a delivery that
 //   landed meanwhile is erased by the check after it.
 //
 // What a task's model says of its result is never an outcome: execution
-// states come from the host's records (the run's row, as the engine's
-// journal set it; the turn's end, as the host saw it), and a task counts
+// states come from the host's records (the turn's end, as the host saw
+// it), and a task counts
 // as a success only where a check the host trusts says so, which none
 // does yet: completing is `unknown`, failing is `failure`.
 
@@ -205,147 +193,9 @@ export const drainCaptures = async (
   }
 };
 
-/** How a run's row ended, as an outcome says it. */
-const executions = {
-  completed: "completed",
-  failed: "failed",
-  cancelled: "cancelled",
-} as const;
-
-/** The Brain's source of workflow runs' outcomes. */
-export const runSource = "workflow.run";
-
-/** A run's event ID: one per run, however often it is delivered. */
-const runEventId = (runId: string): string => `${runSource}:${runId}`;
-
 /**
- * The statement that writes run `runId`'s capture intent, for the batch
- * that ends it (runs.ts, `projectStatus`): only if that batch left the run
- * ended, and only for a published App's run, production work. Once per
- * run, whatever the batch is run again for.
- */
-export const runCaptured = (db: DrizzleD1Database, runId: string, now: Date) =>
-  db
-    .insert(brainCaptureIntents)
-    .select(
-      sql`SELECT NULL, ${runEventId(runId)}, ${runId}, 'pending', 0, NULL, ${now.getTime()} FROM ${workflowRuns} INNER JOIN ${apps} ON ${apps.id} = ${workflowRuns.appId} WHERE ${workflowRuns.id} = ${runId} AND ${workflowRuns.endedAt} IS NOT NULL AND ${apps.status} = 'published'`
-    )
-    .onConflictDoNothing({ target: brainCaptureIntents.eventId });
-
-/** A settled run's outcome as its row is now; undefined if not eligible. */
-const runOutcome = async (
-  env: Env,
-  runId: string
-): Promise<CapturedOutcome | undefined> => {
-  const row = await drizzle(env.DB)
-    .select({
-      appId: workflowRuns.appId,
-      workflowId: workflowRuns.workflowId,
-      version: workflowRuns.version,
-      status: workflowRuns.status,
-      endedAt: workflowRuns.endedAt,
-      // A run acts for whoever started it, or its App's owner (runs.ts).
-      ownerId: sql<string>`COALESCE(${workflowRuns.startedBy}, ${apps.ownerId})`,
-    })
-    .from(workflowRuns)
-    .innerJoin(apps, eq(apps.id, workflowRuns.appId))
-    .where(
-      and(
-        eq(workflowRuns.id, runId),
-        isNotNull(workflowRuns.endedAt),
-        sql`${workflowRuns.detailsRemovedAt} IS NULL`
-      )
-    )
-    .get();
-  if (row?.endedAt === null || row === undefined) {
-    return undefined;
-  }
-  const { endedAt, status } = row;
-  if (
-    !(
-      status === "completed" ||
-      status === "failed" ||
-      status === "cancelled"
-    ) ||
-    (await memberRole(env.DB, row.ownerId)) === undefined
-  ) {
-    return undefined;
-  }
-  const execution = executions[status];
-  return {
-    eventId: runEventId(runId),
-    purpose: "production",
-    ownerId: row.ownerId,
-    scope: "person",
-    taskType: `workflow:${row.appId}/${row.workflowId}`,
-    execution,
-    result: execution === "failed" ? "failure" : "unknown",
-    evidenceId: runId,
-    evidenceRefs: [{ kind: "workflow_run", id: runId }],
-    versionRefs: [
-      { kind: "app", id: row.appId, version: String(row.version) },
-      { kind: "workflow", id: row.workflowId },
-    ],
-    occurredAt: endedAt.toISOString(),
-  };
-};
-
-/** Pending intents in core's database, the least tried first. */
-const pendingIn = async (
-  db: DrizzleD1Database,
-  limit: number
-): Promise<PendingCapture[]> =>
-  await db
-    .select({
-      seq: brainCaptureIntents.seq,
-      eventId: brainCaptureIntents.eventId,
-      evidenceId: brainCaptureIntents.evidenceId,
-      facts: sql<null>`NULL`,
-      attempts: brainCaptureIntents.attempts,
-    })
-    .from(brainCaptureIntents)
-    .where(eq(brainCaptureIntents.state, "pending"))
-    .orderBy(asc(brainCaptureIntents.attempts), asc(brainCaptureIntents.seq))
-    .limit(limit);
-
-/** Core's store of workflow runs' capture intents. */
-export const runCaptures = (env: Env): CaptureStore => {
-  const db = drizzle(env.DB);
-  return {
-    source: runSource,
-    pending: async (limit) => await pendingIn(db, limit),
-    settled: async (seq) => {
-      await db
-        .delete(brainCaptureIntents)
-        .where(eq(brainCaptureIntents.seq, seq));
-    },
-    failed: async (seq, code, dead) => {
-      await db
-        .update(brainCaptureIntents)
-        .set({
-          attempts: sql`${brainCaptureIntents.attempts} + 1`,
-          lastError: code,
-          ...(dead ? { state: "dead" as const } : {}),
-        })
-        .where(eq(brainCaptureIntents.seq, seq));
-    },
-    outcomeOf: async ({ evidenceId }) => await runOutcome(env, evidenceId),
-  };
-};
-
-/** Delivers runs' pending intents soon, in the background. */
-export const deliverRunCapturesSoon = (env: Env): void => {
-  waitUntil(drainCaptures(env, runCaptures(env)));
-};
-
-/** Delivers runs' pending intents now: the clock's catch-up. */
-export const reconcileRunCaptures = async (env: Env): Promise<void> => {
-  await drainCaptures(env, runCaptures(env));
-};
-
-/**
- * Erases the Brain's events resting on the records `evidenceIds` (runs,
- * chats), their records going: run before the records go, so an erasure
+ * Erases the Brain's events resting on the records `evidenceIds` (chats),
+ * their records going: run before the records go, so an erasure
  * cut short is made again.
  */
 export const eraseCaptured = async (
@@ -353,24 +203,6 @@ export const eraseCaptured = async (
   evidenceIds: readonly string[]
 ): Promise<void> => {
   await eraseOutcomes(brainOf(env), evidenceIds);
-};
-
-/**
- * Erases what was captured of the runs `runIds`, their details going
- * (workflows/retention.ts): their events in the Brain first, then their
- * intents, so a sweep cut short in between erases again.
- */
-export const eraseRunCaptures = async (
-  env: Env,
-  runIds: readonly string[]
-): Promise<void> => {
-  if (runIds.length === 0) {
-    return;
-  }
-  await eraseCaptured(env, runIds);
-  await drizzle(env.DB)
-    .delete(brainCaptureIntents)
-    .where(inArray(brainCaptureIntents.evidenceId, [...runIds]));
 };
 
 /** How each way a chat turn ends is an execution's end. */

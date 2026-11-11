@@ -2,6 +2,7 @@ import { ensureCollection } from "@grasp-os/brain/collections";
 import { compilerVersion } from "@grasp-os/compiler";
 import { definitionText } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import {
   acceptedUpdateSchema,
   appErrors,
@@ -35,7 +36,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import { generatedPaths, withDefinitionCode } from "./app-definition.ts";
+import { generatedPaths, withGeneratedCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
 import {
@@ -361,19 +362,6 @@ export const listBlueprints = async (
 };
 
 /**
- * Whether `version` of the App `app` is one an admin approved
- * (`madeCurrent`): approved (1), or from before approvals (null) and
- * current in its App. A copy's first version is approved only then, so a
- * blueprint of code no admin approved doesn't pass as approved in its
- * copies.
- */
-const approvedVersion = (
-  app: { currentVersion: number | null },
-  { version, approved }: Pick<VersionRow, "version" | "approved">
-): boolean =>
-  approved === 1 || (approved === null && app.currentVersion === version);
-
-/**
  * Marks a version as a blueprint: its tree, its App's name and
  * description, and what its App asks for or was given that each App
  * created from it asks for too (`declarableOf`). Marking it again changes
@@ -388,7 +376,11 @@ export const markBlueprint = async (
   const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const row = await findVersion(env, found.id, version);
-  const definition = await readStored(row);
+  // Without the workflow versions it binds: each App created from it
+  // binds workflows of its own (`BlueprintWorkflow`), never this App's.
+  const versionDefinition = await readStored(row);
+  const { workflowBindings: _bound, ...definition } =
+    versionDefinition.definition;
   const db = drizzle(env.DB);
   const marked = async () =>
     await db
@@ -414,10 +406,13 @@ export const markBlueprint = async (
         name: found.name,
         description: found.description,
         tree: row.tree,
-        definition: definition.text,
+        definition: definitionText(definition),
         appId: found.id,
         version: row.version,
-        approved: approvedVersion(found, row),
+        // A copy's first version is approved only when this one was
+        // (`madeCurrent`), so code no admin approved doesn't pass as
+        // approved in its copies.
+        approved: row.approved === 1,
         permissions: await declarableOf(env, found.id),
         markedBy: by.userId,
         markedAt: new Date(),
@@ -522,7 +517,7 @@ export const createFromBlueprint = async (
   // Its code as its definition generates it, as every version's is: what
   // the blueprint holds already (its version's, or a built-in's, which
   // its build checks).
-  withDefinitionCode(files, definition);
+  withGeneratedCode(files, definition);
   // The blueprint's code, kept under the copy (`app_origins.code`): what an
   // update of the blueprint is merged over. Its AGENTS.md isn't, as it
   // isn't copied (above).
@@ -860,7 +855,7 @@ const mergeOver = (
   // Its config and schema follow it: no file conflict of their own, a
   // definition conflict being said as such, whether or not the code the
   // two generate differs (stable IDs alone change none).
-  withDefinitionCode(files, kept);
+  withGeneratedCode(files, kept);
   return {
     files,
     definition: kept,
@@ -971,7 +966,10 @@ export const blueprintUpdate = async (
     to: pending.blueprint.tree,
     definition: pending.theirs.definition.hash,
     over: pending.latest.version,
-    changes: diffFiles(pending.ours, pending.merged.files),
+    // What Grasp generates is no change of the blueprint's.
+    changes: diffFiles(pending.ours, pending.merged.files).filter(
+      ({ path }) => !isGeneratedServerFile(path)
+    ),
     conflicts: pending.merged.conflicts,
     definitionConflict: pending.merged.definitionConflict,
   };

@@ -8,7 +8,6 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { appFor } from "../apps.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -36,26 +35,17 @@ const allowed = async (allows: () => Promise<unknown>): Promise<boolean> => {
 
 /**
  * Whether `by` may open the page of the workflow whose run asks `view`:
- * its App's workflow, for someone with a role in the App, or an
- * independent workflow's own page, for someone with a role in it. A
- * decider needs neither to answer.
+ * for someone with a role in it. A decider needs none to answer.
  */
 const opensSource = async (
   env: Env,
   by: Identity,
   view: DecisionView
 ): Promise<boolean> => {
-  const { app, workflowResource } = view;
-  if (app !== undefined) {
-    return await allowed(async () => await appFor(env, by, app.id, "user"));
-  }
-  if (workflowResource !== undefined) {
-    return await allowed(
-      async () =>
-        await requireWorkflowRole(env, by, workflowResource.id, "user")
-    );
-  }
-  return false;
+  const { workflowResource } = view;
+  return await allowed(
+    async () => await requireWorkflowRole(env, by, workflowResource.id, "user")
+  );
 };
 
 /**

@@ -16,6 +16,8 @@ import type {
   RosterPerson,
   TeamProgress,
 } from "@grasp-os/shared/onboarding";
+import { flowAgreements } from "@grasp-os/shared/onboarding-flow";
+import type { FlowAgreement } from "@grasp-os/shared/onboarding-flow";
 
 // The onboarding's rules, as pure functions of what the store holds: whose
 // links are due, and what the company's admin may see of where the
@@ -70,14 +72,23 @@ export const leads = (roster: Roster, person: string): boolean =>
   roster.teams.some((team) => team.lead === person);
 
 /**
- * Whether interviews may happen: the data processing agreement and the
- * risk assessment in place, and the works council agreed or not there.
+ * Whether interviews may happen: of the agreements `asked` of this
+ * company (all of them unless its flow says otherwise), the data
+ * processing agreement and the risk assessment in place, and the works
+ * council agreed or not there. Where none is asked, nothing is waited
+ * for.
  */
-export const agreementsIn = (agreements: Agreements | null): boolean =>
-  agreements !== null &&
-  agreements.processing &&
-  agreements.assessment &&
-  agreements.council !== "waiting";
+export const agreementsIn = (
+  agreements: Agreements | null,
+  asked: readonly FlowAgreement[] = flowAgreements
+): boolean => {
+  const inPlace: Record<FlowAgreement, boolean> = {
+    processing: agreements?.processing === true,
+    assessment: agreements?.assessment === true,
+    council: agreements !== null && agreements.council !== "waiting",
+  };
+  return asked.every((agreement) => inPlace[agreement]);
+};
 
 /** What links depend on beside the roster and the plan. */
 export interface LinkFacts {

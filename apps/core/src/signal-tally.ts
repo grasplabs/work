@@ -1,21 +1,12 @@
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 
-// What the improvement signals (signals.ts) need of the audit log: model
-// calls' cost per workflow run, and Knowledge searches that found nothing,
-// per scope, key and asker. The AuditLog object tallies one stretch of the
+// What the improvement signals (signals.ts) need of the audit log:
+// Knowledge searches that found nothing, per scope, key and asker. The AuditLog object tallies one stretch of the
 // log at a time with these (`AuditLog.tallyStretch`), so only small
 // partial totals cross to the Worker, which adds them up.
 
 /** The most collections a tallied question keeps. */
 export const collectionsPerQuestion = 5;
-
-/** A workflow run's model calls in a stretch: their cost in US dollars. */
-export interface RunCost {
-  appId: string;
-  workflowId: string;
-  runId: string;
-  cost: number;
-}
 
 /**
  * One asker's searches for one key in a stretch: `appId` and `workflowId`
@@ -35,7 +26,6 @@ export interface QuestionTally {
 
 /** A stretch's partial totals. */
 export interface SignalTally {
-  costs: RunCost[];
   questions: QuestionTally[];
 }
 
@@ -83,7 +73,6 @@ export const askerOf = (actor: AuditActor): string => {
  */
 export class SignalTallier {
   readonly #from: string;
-  readonly #costs = new Map<string, RunCost>();
   readonly #questions = new Map<string, QuestionTally>();
 
   constructor(from: string) {
@@ -94,22 +83,7 @@ export class SignalTallier {
     if (receivedAt < this.#from) {
       return;
     }
-    const { action, actor } = event;
-    if (action === "model.call" && actor.type === "workflow") {
-      if (event.cost?.currency !== "USD") {
-        return;
-      }
-      const found = this.#costs.get(actor.runId) ?? {
-        appId: actor.appId,
-        workflowId: actor.workflowId,
-        runId: actor.runId,
-        cost: 0,
-      };
-      found.cost += event.cost.amount;
-      this.#costs.set(actor.runId, found);
-      return;
-    }
-    if (action === "knowledge.search.empty") {
+    if (event.action === "knowledge.search.empty") {
       this.#addQuestion(event, receivedAt);
     }
   }
@@ -148,7 +122,6 @@ export class SignalTallier {
 
   totals(): SignalTally {
     return {
-      costs: [...this.#costs.values()],
       questions: [...this.#questions.values()],
     };
   }

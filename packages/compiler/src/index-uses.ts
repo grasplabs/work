@@ -7,6 +7,11 @@
 // (core's app-definition.ts). The queries and mutations a server file
 // exports are found the same way (`exportedFunctionsOf`).
 
+import {
+  declaredFunctionsIn,
+  serverModuleOf,
+} from "@grasp-os/runtime/server-modules";
+
 import { child, children, walk } from "./syntax.ts";
 import type { Node, Parsed } from "./syntax.ts";
 
@@ -71,11 +76,8 @@ const indexRead = (
 };
 
 /** `server/deals/open.ts` as pages reach it: `deals.open`. */
-const moduleOf = (path: string): string =>
-  path
-    .slice("server/".length)
-    .replace(/\.tsx?$/u, "")
-    .replaceAll("/", ".");
+const moduleOf = (path: string): string | undefined =>
+  serverModuleOf(path)?.replaceAll("/", ".");
 
 /**
  * The indexes each exported function (`export const name = …`) of the
@@ -96,10 +98,11 @@ export const indexReadsOf = (
     }
     return children(declaration, "declarations").flatMap((declarator) => {
       const name = nameOf(child(declarator, "id"));
-      if (name === undefined) {
+      const module = moduleOf(path);
+      if (name === undefined || module === undefined) {
         return [];
       }
-      const query = `${moduleOf(path)}.${name}`;
+      const query = `${module}.${name}`;
       const reads: IndexRead[] = [];
       walk(declarator, (node) => {
         const read =
@@ -112,43 +115,28 @@ export const indexReadsOf = (
     });
   });
 
-/** The builders of a public query or mutation, as server code calls them. */
-const callableBuilders: ReadonlySet<string> = new Set(["query", "mutation"]);
-
 /**
  * The public queries and mutations the server file `path` exports, as
- * pages call them (`deals.list` for `server/deals.ts`'s `list`): each
- * `export const name = query(…)` or `mutation(…)`, as the code spells it
- * out; none of a file that doesn't parse. What a commit gives a stable ID
- * a workflow calls it by (core's apps.ts); a seal keeps only those the
- * code registers.
+ * pages call them (`deals.list` for `server/deals.ts`'s `list`), as the
+ * host reads them for the App's references (the runtime's
+ * `declaredFunctionsIn`); none of a file that doesn't parse. What a
+ * commit gives a stable ID a workflow calls it by (core's apps.ts); a
+ * seal keeps only those the code registers.
  */
 export const exportedFunctionsOf = (
   path: string,
   tree: Parsed | undefined
 ): string[] =>
-  children(tree?.program, "body").flatMap((statement) => {
-    const declaration = child(statement, "declaration");
-    if (
-      statement.type !== "ExportNamedDeclaration" ||
-      declaration?.type !== "VariableDeclaration"
-    ) {
-      return [];
-    }
-    return children(declaration, "declarations").flatMap((declarator) => {
-      const name = nameOf(child(declarator, "id"));
-      const init = child(declarator, "init");
-      const builder =
-        init?.type === "CallExpression"
-          ? nameOf(child(init, "callee"))
-          : undefined;
-      return name !== undefined &&
-        builder !== undefined &&
-        callableBuilders.has(builder)
-        ? [`${moduleOf(path)}.${name}`]
+  [...declaredFunctionsIn(tree?.program)].flatMap(
+    ([name, { kind, visibility }]) => {
+      const module = moduleOf(path);
+      return module !== undefined &&
+        visibility === "public" &&
+        kind !== "action"
+        ? [`${module}.${name}`]
         : [];
-    });
-  });
+    }
+  );
 
 /**
  * The functions a page file calls through `api`, `api.deals.list` as

@@ -2,6 +2,7 @@ import {
   definitionSources,
   definitionText,
 } from "@grasp-os/runtime/definition";
+import { ownFiles } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -18,6 +19,7 @@ import {
   commitApp,
   definitionInput,
   definitionOf,
+  sourceParts,
   testApp,
   withFiles,
 } from "./app-definitions.ts";
@@ -100,6 +102,11 @@ const storedUnchecked = async (
     .run();
 };
 
+/**
+ * `files` as an App's limits count them: what Grasp generates under
+ * `server/_generated/` apart.
+ */
+
 /** The App's definition, and the config and schema generated from it. */
 const defined = testApp({ name: "Invoice desk" });
 
@@ -141,8 +148,9 @@ export const Route = createFileRoute("/")({ component: Page });
     });
 
     expect({ v1, v2 }).toMatchObject({
-      v1: { version: 1, parent: null, files: 4, author: userId },
-      v2: { version: 2, parent: 1, files: 4, author: userId },
+      // Its own four, and the four of server/_generated/.
+      v1: { version: 1, parent: null, files: 8, author: userId },
+      v2: { version: 2, parent: 1, files: 8, author: userId },
     });
     await expect(apps.files.read(app.id, 1)).resolves.toStrictEqual(
       first.files
@@ -337,7 +345,12 @@ export const Route = createFileRoute("/")({ component: Page });
       ],
     };
     const unchanged = { "AGENTS.md": first.files["AGENTS.md"] ?? "" };
-    await apps.files.commit(app.id, first.files, "Notes", definitionInput(two));
+    await apps.files.commit(
+      app.id,
+      sourceParts(first).files,
+      "Notes",
+      definitionInput(two)
+    );
     await apps.versions.setCurrent(app.id, 1);
     await apps.files.commit(
       app.id,
@@ -749,7 +762,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
       const app = await newApp(apps);
       ({ tree } = await apps.files.commit(
         app.id,
-        first.files,
+        sourceParts(first).files,
         "Secret plans in the message"
       ));
       await apps.versions.propose(app.id, 1);
@@ -788,7 +801,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
           parent: null,
           tree,
           definition: aHash,
-          files: 4,
+          files: 8,
         },
       },
       {
@@ -886,7 +899,8 @@ export const Route = createFileRoute("/archive")({ component: Page });
     const tooLong = "x".repeat(appLimits.fileLength + 1);
     // The App's definition counts too: its first version gets one.
     const room =
-      appLimits.totalLength - Object.values(defined.files).join("").length;
+      appLimits.totalLength -
+      Object.values(ownFiles(defined.files)).join("").length;
     const full = Object.fromEntries(
       Array.from(
         { length: Math.ceil(room / appLimits.fileLength) },
@@ -929,7 +943,8 @@ export const Route = createFileRoute("/archive")({ component: Page });
     const app = await newApp(apps);
     // More files than an App may have now: committed when the limits were
     // higher, its definition among them.
-    const count = appLimits.files + 2 - Object.keys(defined.files).length;
+    const count =
+      appLimits.files + 2 - Object.keys(ownFiles(defined.files)).length;
     await storedUnchecked(
       app.id,
       userId,

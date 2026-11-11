@@ -1,7 +1,11 @@
 import type { MemoryPack, RecallInput } from "@grasp-os/brain/contract";
 import { recallWithSources } from "@grasp-os/brain/recall";
 import { brainMemories } from "@grasp-os/brain/schema";
-import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -313,8 +317,8 @@ describe("recalling the Brain's memory records", setUpTime, () => {
     expect({
       app: await asAgentIn({ type: "app", appId }),
       run: await asAgentIn({
-        type: "run",
-        appId,
+        type: "workflowRun",
+        workflowId: workflowResourceIdSchema.parse(crypto.randomUUID()),
         runId: runIdSchema.parse(crypto.randomUUID()),
       }),
       narrowed: memoryItems(

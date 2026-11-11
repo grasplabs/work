@@ -8,6 +8,7 @@ const sections = [
   ["details", "Details"],
   ["contract", "Contract"],
   ["members", "Members"],
+  ["flow", "Flow"],
   ["steps", "Steps"],
   ["organization", "Organization"],
   ["interviews", "Interviews"],

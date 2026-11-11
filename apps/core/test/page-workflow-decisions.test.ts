@@ -21,7 +21,7 @@ import {
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
 import { appFor, versionFiles } from "../src/apps.ts";
-import { boundWorkflowsOf } from "../src/bound-workflows.ts";
+import { sealedWorkflowPins } from "../src/bound-workflows.ts";
 import { decisionOutcome } from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { appHost } from "../src/durable-objects.ts";
@@ -1691,15 +1691,21 @@ describe(
           )
         )
       );
-      const bound = await boundWorkflowsOf(env, fixture.app, {
-        ...release.app,
-        permissions: {
-          ...release.app.permissions,
-          ...Object.fromEntries(
-            aliases.map((alias) => [alias, { ...declared, alias }])
-          ),
+      const bound = await sealedWorkflowPins(
+        env,
+        fixture.app,
+        {
+          ...release.app,
+          permissions: {
+            ...release.app.permissions,
+            ...Object.fromEntries(
+              aliases.map((alias) => [alias, { ...declared, alias }])
+            ),
+          },
         },
-      });
+        // Recording none of its own: each is bound as the App binds it.
+        { name: "Invoices", permissions: [], tables: [], answers: [] }
+      );
 
       expect({
         count: bound.length,

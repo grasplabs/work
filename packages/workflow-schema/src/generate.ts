@@ -162,9 +162,7 @@ export const generatedImport = "@grasp-os/sdk/workflow";
  * code was generated for, which the run host's engine must fit, so a new
  * version here is a new contract between them: core loads only builds of
  * this one, and an older build is refused, to publish again
- * (`workflow.format_unsupported`), never half run. Version 6: no
- * workflow modules (`ctx.modules`), `JSON.parse` through `$parse`, and
- * `run.startedAt`; 7: `ctx.apps`, an App's functions called by their IDs.
+ * (`workflow.format_unsupported`), never half run.
  */
 export const generatorVersion = "grasp-workflow-ts/7";
 

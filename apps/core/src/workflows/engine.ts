@@ -1,15 +1,6 @@
-import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
-import {
-  appIdSchema,
-  workflowIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
-import type {
-  AppId,
-  WorkflowId,
-  WorkflowResourceId,
-} from "@grasp-os/shared/ids";
+import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import type { WorkflowResourceId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { Workflow } from "@grasp-os/workerflow/binding";
 import type { WorkflowOptions } from "@grasp-os/workerflow/binding";
@@ -25,7 +16,7 @@ import { z } from "zod";
 
 import { inJurisdiction } from "../durable-objects.ts";
 
-// The engine that runs Apps' workflow runs, behind the little core asks of
+// The engine that runs workflow runs, behind the little core asks of
 // it: create a run, see where it is, terminate it, send it an event, remove
 // it. This is the only module that reaches the engine's runs, so the rest
 // of core never depends on how it keeps them.
@@ -34,7 +25,7 @@ import { inJurisdiction } from "../durable-objects.ts";
 // Object per run (`WORKFLOW_RUNS`, run-object.ts), the only authority on
 // the run's steps, waits and lifecycle. It runs on Cloudflare and on plain
 // workerd alike, its objects in the EU where the platform has
-// jurisdictions (durable-objects.ts). Every run, an App's or one of
+// jurisdictions (durable-objects.ts). Every run, a workflow's or one of
 // core's own, is a run of one definition, `grasp`, so its object is named
 // by the run's ID alone; what it runs is the opaque version it was created
 // with (`pinOf`), which the dispatcher checks against the run's row on
@@ -68,13 +59,6 @@ export interface AdmittedEngineEvent {
    * sender fills it for the others.
    */
   readonly sender?: string;
-}
-
-/** What an App's run is pinned to: the dispatcher loads it by these. */
-export interface PinnedRun {
-  app: AppId;
-  workflow: WorkflowId;
-  version: number;
 }
 
 /**
@@ -116,12 +100,10 @@ export interface PinnedCandidateRun {
 }
 
 /**
- * What a run executes: an App's pinned workflow, an independent workflow's
- * sealed version, a test run of its draft's checkpoint, or one of core's
- * own.
+ * What a run executes: an independent workflow's sealed version, a test
+ * run of its draft's checkpoint, or one of core's own.
  */
 export type RunPin =
-  | ({ type: "app" } & PinnedRun)
   | ({ type: "resource" } & PinnedResourceRun)
   | ({ type: "candidate" } & PinnedCandidateRun)
   /**
@@ -136,19 +118,6 @@ export type RunPin =
 export const runDefinition = "grasp";
 
 const pinSchema = z.union([
-  z
-    .tuple([
-      z.literal("app"),
-      appIdSchema,
-      workflowIdSchema,
-      z.int().positive(),
-    ])
-    .transform(([, app, workflow, version]): RunPin => ({
-      type: "app",
-      app,
-      workflow,
-      version,
-    })),
   z
     .tuple([
       z.literal("resource"),
@@ -194,9 +163,6 @@ const pinSchema = z.union([
 /** A pin as the engine keeps it: the run's opaque definition version. */
 const versionOf = (pin: RunPin): string => {
   switch (pin.type) {
-    case "app": {
-      return JSON.stringify(["app", pin.app, pin.workflow, pin.version]);
-    }
     case "resource": {
       return JSON.stringify([
         "resource",
@@ -243,18 +209,10 @@ export const pinOf = (identity: DefinitionIdentity): RunPin | undefined => {
 /** The engine core runs workflow runs on. */
 export interface RunEngine {
   /**
-   * Creates the run `id`, pinned to its App version, with its input. Sent
-   * again, it finds the run the first one created, ended or deleted
-   * since included: it never creates a second one.
-   */
-  create: (run: {
-    id: string;
-    pinned: PinnedRun;
-    input: Json | undefined;
-  }) => Promise<void>;
-  /**
-   * As `create`, for a run of an independent workflow, pinned to its
-   * version's sealed manifest.
+   * Creates the run `id` of an independent workflow, pinned to its
+   * version's sealed manifest, with its input. Sent again, it finds the
+   * run the first one created, ended or deleted since included: it never
+   * creates a second one.
    */
   createResource: (run: {
     id: string;
@@ -262,7 +220,7 @@ export interface RunEngine {
     input: Json;
   }) => Promise<void>;
   /**
-   * As `create`, for a test run of a workflow's draft checkpoint, pinned
+   * As `createResource`, for a test run of a workflow's draft checkpoint, pinned
    * to the manifest of the build its start compiled.
    */
   createCandidate: (run: {
@@ -298,7 +256,7 @@ export interface RunEngine {
    * was replayed; nothing when the engine has no such run.
    */
   succeededSteps: (id: string, name: string) => Promise<number | undefined>;
-  /** As `create`, for a run of one of core's own workflows. */
+  /** As `createResource`, for a run of one of core's own workflows. */
   createInternal: (run: {
     id: string;
     workflow: InternalWorkflow;
@@ -425,30 +383,9 @@ export const runObjectOf = (
 const runStub = (env: Env, id: string): RunStub => runObjectOf(env, id);
 
 /**
- * Marks run `id` cancelled in its object by `actor` (run-object.ts,
- * `markCancelled`), the first step of a cancel and its record: no attempt
- * of it holds from then on, whatever the engine does after. Answers the
- * cancel it is marked with, a first one's if it was cancelled before.
- * Throws when the object can't be told, so a cancel fails before anything
- * else of it.
- */
-export const markRunCancelled = async (
-  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
-  id: string,
-  actor: AuditActor
-): Promise<{ runId: string; actor: AuditActor; at: number }> => {
-  const mark = await runObjectOf(env, id).markCancelled(id, actor, Date.now());
-  return {
-    runId: mark.runId,
-    actor: auditActorSchema.parse(mark.actor),
-    at: mark.at,
-  };
-};
-
-/**
  * Marks an independent workflow's run `id` stopped in its object by
- * `actor` (run-object.ts, `markStopped`), the first step of its stop, as
- * `markRunCancelled` is of an App run's cancel: no attempt of it holds
+ * `actor` (run-object.ts, `markStopped`), the first step of its stop: no
+ * attempt of it holds
  * from then on, and the object terminates it itself should the stop's
  * request not. Answers whether it was marked, or why not. Throws when the
  * object can't be told, so a stop fails before anything else of it.
@@ -459,14 +396,6 @@ export const markResourceRunStopped = async (
   actor: AuditActor
 ): Promise<"marked" | "rolling_back" | "ended" | "missing"> =>
   await runObjectOf(env, id).markStopped(id, actor, Date.now());
-
-/** Records that run `id`'s cancel is done (`markRunCancelled`). */
-export const settleRunCancel = async (
-  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
-  id: string
-): Promise<void> => {
-  await runObjectOf(env, id).settleCancel();
-};
 
 /**
  * A run's params, as the engine keeps them: its input under `input`, left
@@ -495,9 +424,6 @@ const admit = async (
 
 /** Workerflow, through the deployment's one run object class. */
 export const runEngine = (env: Env): RunEngine => ({
-  create: async ({ id, pinned, input }) => {
-    await admit(env, id, { type: "app", ...pinned }, input);
-  },
   createResource: async ({ id, pinned, input }) => {
     await admit(env, id, { type: "resource", ...pinned }, input);
   },
@@ -533,7 +459,8 @@ export const runEngine = (env: Env): RunEngine => ({
   },
   // Each with the run's control generation it was admitted under: the run
   // ignores one older than the newest it took, in the same write as the
-  // pause or resume (controls.ts), so a late one can't undo a newer one.
+  // pause or resume (resource-runs.ts), so a late one can't undo a newer
+  // one.
   pause: async (id, generation) => {
     await runStub(env, id).pause({ fence: generation });
   },

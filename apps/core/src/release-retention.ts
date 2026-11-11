@@ -39,9 +39,9 @@ import { collectArtifacts, sweepArtifacts } from "./sealed-artifacts.ts";
 //   is kept while it is the App's current or pending version, while it is
 //   one of the App's last `keptReleases` releases (a rollback's), for a
 //   day after its seal (a publish under way), while an open page's lease
-//   on it holds (15 minutes from the last renewal), while a workflow run
-//   of that version is active, while any pin holds it (a run, a
-//   compatible migration, a pinned trigger, an admin's legal hold), and
+//   on it holds (15 minutes from the last renewal), while any pin holds
+//   it (a compatible migration, a pinned trigger, an admin's legal hold),
+//   and
 //   once revoked, for good. Nothing App code does shortens any of it.
 // - A release is referenced again as it goes: the statement that deletes
 //   it checks every reference again, and a pin or a lease needs the
@@ -87,9 +87,6 @@ export const sealGraceMs = 24 * 60 * 60_000;
 /** The most releases one sweep deletes. */
 const sweepBatch = 20;
 
-/** The run statuses that may still load their version's code. */
-const activeRunStatuses = ["starting", "running", "paused"];
-
 /** What may hold a release past its retention, besides an admin's hold. */
 export type PinHolder = Exclude<
   (typeof sdkReleasePins.$inferInsert)["holderKind"],
@@ -123,13 +120,6 @@ const referenced = (now: Date): SQL =>
       WHERE pins.app_id = ${sdkReleaseManifests.appId}
         AND pins.version = ${sdkReleaseManifests.version}
         AND (pins.expires_at IS NULL OR pins.expires_at > ${now.getTime()}))
-    OR EXISTS (SELECT 1 FROM workflow_runs AS runs
-      WHERE runs.app_id = ${sdkReleaseManifests.appId}
-        AND runs.version = ${sdkReleaseManifests.version}
-        AND runs.status IN (${sql.join(
-          activeRunStatuses.map((status) => sql`${status}`),
-          sql`, `
-        )}))
   )`;
 
 /** The row of release `key`. */

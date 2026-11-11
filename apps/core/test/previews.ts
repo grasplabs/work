@@ -242,16 +242,6 @@ export const refreshed = (update: PreviewUpdate): PreviewRefresh => {
   return update.refresh;
 };
 
-/** What the chat's object answered as text: its value, or its error's code. */
-export const outcomeOfText = (text: string): unknown => {
-  const parsed: unknown = JSON.parse(text);
-  const answer: unknown =
-    typeof parsed === "object" && parsed !== null && "answer" in parsed
-      ? parsed.answer
-      : parsed;
-  return outcome(answer);
-};
-
 /** The stores the chat's previews of `app` keep, by revision. */
 export const previewStores = async (
   person: Person,

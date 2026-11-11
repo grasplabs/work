@@ -3,7 +3,8 @@ import type { App, AppStatus } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
@@ -16,8 +17,11 @@ import {
 } from "./audit-outbox.ts";
 import { apps, appVisitorSessions } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { cancelRunsOf } from "./workflows/controls.ts";
-import { stopsUnsettled } from "./workflows/resource-runs.ts";
+import {
+  stopRetryMs,
+  stopRunsStartedBy,
+  stopsUnsettled,
+} from "./workflows/resource-runs.ts";
 
 // Where an App is in its life (`AppStatus`), and its builders moving it:
 //
@@ -38,9 +42,9 @@ import { stopsUnsettled } from "./workflows/resource-runs.ts";
 //   (`appsFoundBy`, `stillOpenTo`), so none has a path of its own.
 // - Learning that a draft exists: it is answered as an App that isn't
 //   there (`app.not_found`), in lists and errors alike.
-// - A trigger or run outliving the archive: archiving cancels the App's
-//   unfinished runs (`cancelRunsOf`), the clock cancels any left or
-//   started in a race with it (`cancelArchivedRuns`), and a start reads
+// - A trigger or run outliving the archive: archiving stops the
+//   unfinished runs the App started (`stopRunsStartedBy`), the clock stops
+//   any left or started in a race with it (`cancelArchivedRuns`), and a start reads
 //   the status again once its row is written (`startRun`). A restore
 //   waits for the stops still settling (`cancelledBeforeRestore`).
 // - A transition by someone who lost their role: the role is read for the
@@ -89,6 +93,9 @@ const statusFenceOf = async (
   return { status: row?.status, at: row?.at?.getTime() ?? null };
 };
 
+/** Most runs of archived Apps one pass stops (`cancelArchivedRuns`). */
+const archivedRunsPerPass = 50;
+
 /** Most runs one page of a restore's cancels asks to cancel. */
 const cancelPage = 50;
 
@@ -119,9 +126,9 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
   let finished = false;
   for (let page = 0; page < maxCancelPages && !finished; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
-    const { asked, failed } = await cancelRunsOf(
+    const { asked, failed } = await stopRunsStartedBy(
       env,
-      by,
+      actorOf(by),
       app.id,
       archivedAt,
       cancelPage
@@ -275,7 +282,68 @@ export const changeStatus = async (
     await tellKept(env, revocations);
   }
   if (to === "archived") {
-    await cancelRunsOf(env, by, app.id, now);
+    await stopRunsStartedBy(env, actorOf(by), app.id, now, archivedRunsPerPass);
   }
   return app;
+};
+
+/**
+ * Stops, a few at a time, the unfinished runs that archived Apps started:
+ * those archiving left (more than one pass's worth, or a stop that
+ * failed), and a run whose start raced the archive. Each is stopped for
+ * whoever archived its App, or its owner. The clock runs it every minute.
+ */
+export const cancelArchivedRuns = async (
+  env: Env,
+  from: string = crypto.randomUUID()
+): Promise<void> => {
+  // Archived Apps with a run they started left to stop: in ID order from
+  // a random ID (`from`), wrapping round, so Apps whose stops keep failing
+  // can't hold every pass's budget, and every one is reached in time.
+  const slice = async (side: SQL, limit: number) =>
+    await drizzle(env.DB)
+      .select({
+        app: apps.id,
+        owner: apps.ownerId,
+        by: apps.statusChangedBy,
+        at: apps.statusChangedAt,
+      })
+      .from(apps)
+      .where(
+        and(
+          eq(apps.status, "archived"),
+          sql`EXISTS (SELECT 1 FROM workflow_resource_runs r JOIN workflow_start_receipts s ON s.id = r.id WHERE s.invoker_type = 'app' AND s.invoker_id = ${apps.id} AND r.status IN ('starting', 'running', 'paused') AND (r.stop_requested_at IS NULL OR r.stop_requested_at <= ${Date.now() - stopRetryMs}))`,
+          side
+        )
+      )
+      .orderBy(asc(apps.id))
+      .limit(limit);
+  const onward = await slice(gte(apps.id, from), archivedRunsPerPass);
+  const rows =
+    onward.length < archivedRunsPerPass
+      ? [
+          ...onward,
+          ...(await slice(
+            lt(apps.id, from),
+            archivedRunsPerPass - onward.length
+          )),
+        ]
+      : onward;
+  // One budget for the whole pass, whatever the number of Apps.
+  let left = archivedRunsPerPass;
+  for (const { app, owner, by, at } of rows) {
+    if (left <= 0) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one App at a time
+    const { asked } = await stopRunsStartedBy(
+      env,
+      actorOf(by ?? { userId: owner, staff: false }),
+      app,
+      // Archived now: every run of it, a run that raced the archive too.
+      new Date(Math.max(Date.now(), at?.getTime() ?? 0)),
+      left
+    );
+    left -= asked;
+  }
 };

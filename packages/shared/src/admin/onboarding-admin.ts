@@ -460,6 +460,12 @@ export interface Org {
   brief: string[];
   /** What the company's admin skipped in its own onboarding: where the documents live, documents of its own, or Pulse on the laptops. */
   skipped?: ("sources" | "documents" | "pulse")[];
+  /**
+   * The screen the company's admin is on in its own onboarding, by name,
+   * or `done` once they finished them all; none before they started, or
+   * where the company's Grasp doesn't say.
+   */
+  adminStep?: string;
   /** How Stephen is set up there to begin with. */
   stephen: StephenSetup;
   /** A language people there need that Stephen does not speak yet, as it was said. */

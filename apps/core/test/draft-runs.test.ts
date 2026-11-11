@@ -354,27 +354,6 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
     });
   });
 
-  it("discards a removed person's preview stores made before throwaway stores, which never expire on their own", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const storeId = `legacy-${crypto.randomUUID()}`;
-    await env.DB.prepare(
-      "INSERT INTO preview_fixture_stores (store_id, app_id, person_id, created_at) VALUES (?, 'app-gone', ?, ?)"
-    )
-      .bind(storeId, builder.userId, Date.now())
-      .run();
-    const admin = await signedInApi(idp, "admin");
-    await admin.api.members.remove(builder.userId);
-    const row = await env.DB.prepare(
-      "SELECT 1 AS found FROM preview_fixture_stores WHERE store_id = ?"
-    )
-      .bind(storeId)
-      .first();
-    expect({ row, emptied: await storeEmptied(storeId) }).toStrictEqual({
-      row: null,
-      emptied: true,
-    });
-  });
-
   it("is emptied for good when an admin removes its person", async () => {
     const { builder, storeId } = await withNote();
     const admin = await signedInApi(idp, "admin");
