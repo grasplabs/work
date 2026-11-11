@@ -6,27 +6,27 @@ import {
   runFunction,
 } from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { AppId } from "@grasp-os/shared/ids";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { operationRoles } from "../src/app-access.ts";
+import { functionRoles } from "../src/app-access.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appMembers } from "../src/db/core/schema.ts";
-import { callOperation } from "../src/operations.ts";
-import type { Runner } from "../src/operations.ts";
+import { hostFunctionCall } from "../src/function-host.ts";
+import type { Runner } from "../src/function-host.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { published } from "./apps.ts";
 import { applied } from "./store-schemas.ts";
 
-// The App's roles, as the operation host applies them to tables its
+// The App's roles, as the function host applies them to tables its
 // members share (`appMembers`) and tables only its builders reach
 // (`appBuilders`): through the host and the store together, with roles
 // read from the App's real sharing, including a builder demoted while
@@ -162,8 +162,8 @@ const call = async (
   kind: string,
   path: string,
   run: Runner = defaultRun
-): Promise<OperationResult> =>
-  await callOperation(
+): Promise<FunctionResult> =>
+  await hostFunctionCall(
     { manifest, run },
     {
       principal: by.userId,
@@ -175,13 +175,13 @@ const call = async (
       requestId: crypto.randomUUID(),
       deadline: Date.now() + 60_000,
       runId: null,
-      authorize: async () => await operationRoles(env, by, appId),
+      authorize: async () => await functionRoles(env, by, appId),
     },
     { path: `team.${path}`, kind },
     kind === "mutation" && path.startsWith("add") ? { title: "a" } : {}
   );
 
-const outcome = (result: OperationResult): unknown =>
+const outcome = (result: FunctionResult): unknown =>
   result.ok ? result.value : result.error.code;
 
 describe("tables the App's members share", () => {

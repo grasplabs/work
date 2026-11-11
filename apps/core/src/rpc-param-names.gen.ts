@@ -305,6 +305,7 @@ export const rpcParamNames: ParamNames = {
     "documentPlaces": [],
     "documents": [],
     "finishSteps": ["steps"],
+    "flow": [],
     "hrPlatform": [],
     "links": [],
     "linksTaken": ["people"],

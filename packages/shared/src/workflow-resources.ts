@@ -849,7 +849,16 @@ export interface WorkflowResourceVersion {
    * whatever their order.
    */
   modelSteeredWrites: SteeredWrite[];
-  build: WorkflowVersionBuild;
+  /** Its build; null for a version that is refused (`refused`). */
+  build: WorkflowVersionBuild | null;
+  /**
+   * Why the version is refused, when it is: an earlier platform release
+   * published it, in a format this one doesn't read
+   * (`workflow.format_unsupported`), and it is to be published again. It
+   * never runs, starts, is reviewed or exported, so nothing of its build
+   * is shown.
+   */
+  refused?: { code: "workflow.format_unsupported"; message: string };
   author: string;
   createdAt: string;
 }

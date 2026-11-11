@@ -143,7 +143,7 @@ import type { StateSnapshot } from "./workflows/state-snapshots.ts";
 // - A trigger acting for someone who lost access: its principal must still
 //   have a role in the workflow when each start is admitted.
 // - Input the workflow doesn't accept: checked against the version's
-//   contract by the SDK's validator, within the operation input limit;
+//   contract by the SDK's validator, within the function input limit;
 //   refusals name paths, never values.
 // - A parameter edit racing a start: a start freezes the values of the
 //   revision in force as it is decided, and the admitting statement
@@ -330,8 +330,8 @@ const staleRefusals = new WeakSet<object>();
 export const isStaleRefusal = (error: unknown): boolean =>
   typeof error === "object" && error !== null && staleRefusals.has(error);
 
-/** The input descriptor stored with a version's contract. */
-const contractInputSchema = z.object({ input: z.json() });
+/** The args descriptor stored with a version's contract. */
+const contractArgsSchema = z.object({ args: z.json() });
 
 /** That `person` is an active member of the organization, as SQL. */
 const activeSql = (person: string): SQL => activeMember(person);
@@ -495,7 +495,6 @@ export const pinned = async (
   ) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
-  const { input } = contractInputSchema.parse(JSON.parse(row.contract));
   // Read from the manifest the admitting statement pins by its hash: the
   // run is admitted for the build that manifest seals.
   let build: SealedBuild;
@@ -507,11 +506,13 @@ export const pinned = async (
     }
     throw workflowResourceErrors.create("workflow.version_corrupt");
   }
+  // Read once its manifest is of this host's format (`buildOf`).
+  const { args } = contractArgsSchema.parse(JSON.parse(row.contract));
   return {
     generation: row.generation,
     configRevision: row.configRevision,
     manifestHash: row.manifestHash,
-    inputDescriptor: JSON.stringify(input),
+    inputDescriptor: JSON.stringify(args),
     buildHash: build.hash,
   };
 };
@@ -739,7 +740,7 @@ const ruleOf = async (
 /**
  * `input` as the version's contract takes it, normalized, as canonical
  * JSON: `workflow.start_invalid` with its issues (paths, never values)
- * otherwise, or when it is over the operation input limit.
+ * otherwise, or when it is over the function input limit.
  */
 export const acceptedInput = (descriptor: string, input: unknown): string => {
   const schema = schemaFromDescriptor(descriptor);
@@ -763,8 +764,7 @@ export const acceptedInput = (descriptor: string, input: unknown): string => {
   }
   const text = canonicalJson(parsed.data);
   if (
-    new TextEncoder().encode(text).byteLength >
-    platformLimits.operationInputBytes
+    new TextEncoder().encode(text).byteLength > platformLimits.functionArgsBytes
   ) {
     throw workflowResourceErrors.create("workflow.start_invalid", {
       issues: ["args: Too large for a start."],

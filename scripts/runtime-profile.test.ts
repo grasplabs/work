@@ -77,6 +77,7 @@ describe("the runtime profile each deployment says", () => {
       routerSecret: "s",
       modules: [],
       storage: "/tmp/storage",
+      files: "/tmp/files",
     });
     const profiles = [
       ...config.matchAll(

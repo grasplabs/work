@@ -601,7 +601,7 @@ describe("permissions", () => {
     });
     const requests: unknown[] = [
       // Another App, a workflow and an App of the store's builder calling
-      // its public operations.
+      // its public functions.
       onStore(other),
       onStore({ type: "workflow", workflowId: flow.id }),
       onStore(owner),

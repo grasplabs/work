@@ -16,10 +16,10 @@ import {
 } from "@grasp-os/runtime/host";
 import type { FunctionChannel } from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { AppId } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import { commitMaxWrites } from "@grasp-os/shared/stores";
@@ -28,26 +28,26 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { operationRoles } from "../src/app-access.ts";
+import { functionRoles } from "../src/app-access.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appMembers } from "../src/db/core/schema.ts";
-import { callOperation } from "../src/operations.ts";
-import type { HostedApp, Invocation, Runner } from "../src/operations.ts";
+import { hostFunctionCall } from "../src/function-host.ts";
+import type { HostedApp, Invocation, Runner } from "../src/function-host.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { published } from "./apps.ts";
 import { applied } from "./store-schemas.ts";
 
-// An App's server functions run through core's operation host
-// (operations.ts) against a real business store and the App's real roles:
-// the complete Notes operations of spec 9.4 end to end, then the ways the
+// An App's server functions run through core's function host
+// (function-host.ts) against a real business store and the App's real roles:
+// the complete Notes functions of spec 9.4 end to end, then the ways the
 // host can be misused, from its threat model. App code runs here as the
 // SDK's runner runs it; "malicious" runners stand for App code that talks
 // to its channel directly, as code in an isolate could.
 
-/** The public operation output limit of spec 18.1: 256 KiB of UTF-8 JSON. */
+/** The public function output limit of spec 18.1: 256 KiB of UTF-8 JSON. */
 const outputLimit = 256 * 1024;
 
 const noteFields = {
@@ -408,7 +408,7 @@ const invocationOf = (
   requestId: crypto.randomUUID(),
   deadline: Date.now() + 60_000,
   runId: null,
-  authorize: async () => await operationRoles(env, by, appId),
+  authorize: async () => await functionRoles(env, by, appId),
 });
 
 /** Calls `path` of kind `kind` for `by`. */
@@ -424,8 +424,8 @@ const call = async (
     version?: number;
     code?: typeof notesApp;
   } = {}
-): Promise<OperationResult> =>
-  await callOperation(
+): Promise<FunctionResult> =>
+  await hostFunctionCall(
     hosted(more.run, more.code),
     invocationOf(fixture, by, more.version),
     { path, kind },
@@ -436,7 +436,7 @@ const call = async (
   );
 
 /** The value of a call that succeeded; fails the test otherwise. */
-const valueOf = (result: OperationResult): Json => {
+const valueOf = (result: FunctionResult): Json => {
   if (!result.ok) {
     throw new Error(`The call failed: ${result.error.code}`);
   }
@@ -444,7 +444,7 @@ const valueOf = (result: OperationResult): Json => {
 };
 
 /** The error code of a call that failed, or "ok". */
-const codeOf = (result: OperationResult): string =>
+const codeOf = (result: FunctionResult): string =>
   result.ok ? "ok" : result.error.code;
 
 /** A note's ID, as callers pass one. */
@@ -476,7 +476,7 @@ const idsOf = (page: Json): (Json | undefined)[] => {
  * A failed call's error without its request ID, which must be there: a
  * new one each call, so what else it says can be compared whole.
  */
-const failureOf = (result: OperationResult) => {
+const failureOf = (result: FunctionResult) => {
   if (result.ok) {
     throw new Error("The call succeeded");
   }
@@ -534,7 +534,7 @@ const platformAppError: Runner = async () =>
     })
   );
 
-describe("the Notes operations", () => {
+describe("the Notes functions", () => {
   it("create, get, list, update and delete a note through the host", async () => {
     const fixture = await notes();
     const { owner } = fixture;
@@ -1201,7 +1201,7 @@ describe("bounds on one mutation", () => {
     });
   });
 
-  it("holds what a query returns to the public operation output limit, in UTF-8 bytes", async () => {
+  it("holds what a query returns to the public function output limit, in UTF-8 bytes", async () => {
     const fixture = await notes();
     const { owner } = fixture;
     // A string's JSON is its characters and two quotes; "é" is two bytes

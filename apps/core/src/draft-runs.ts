@@ -11,24 +11,21 @@ import {
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { draftSealFailures, functionErrors } from "@grasp-os/shared/functions";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
-import {
-  draftSealFailures,
-  operationErrors,
-} from "@grasp-os/shared/operations";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { exports } from "cloudflare:workers";
 
-import { operationRoles } from "./app-access.ts";
+import { functionRoles } from "./app-access.ts";
 import { schemaIdsOf } from "./app-definition.ts";
 import {
-  publicOperationOf,
+  publicFunctionOf,
   readFunctionRequest,
   refusalOf,
 } from "./app-functions.ts";
@@ -53,8 +50,8 @@ import type { OpenStore } from "./data-stores.ts";
 import { pageModulesOf } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
 import { workspace } from "./durable-objects.ts";
-import { callOperation } from "./operations.ts";
-import type { Invocation, ProgressSink } from "./operations.ts";
+import { hostFunctionCall } from "./function-host.ts";
+import type { Invocation, ProgressSink } from "./function-host.ts";
 import { checkedValue, isWorkflowMutationPath } from "./page-workflows.ts";
 import { appCodeAndTestFiles } from "./pages.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
@@ -68,8 +65,8 @@ import {
 import type { Draft } from "./workspace.ts";
 
 // A builder's preview of their draft of an App: the draft, sealed as the
-// version it would become, run by the operation host as a version is
-// (operations.ts), and reached through pages' one call path (page-calls.ts
+// version it would become, run by the function host as a version is
+// (function-host.ts), and reached through pages' one call path (page-calls.ts
 // for calls and actions, pages-rpc.ts for live queries) under a lease
 // core signed for the builder, naming the draft's chat (page-delivery.ts).
 // A draft is code nobody reviewed, written by an agent from what it was
@@ -83,8 +80,8 @@ import type { Draft } from "./workspace.ts";
 //   schema, which refuses to be a listed store (`DataStore.holdThrowaway`).
 // - The draft reaches outside systems, or starts real work: its
 //   invocations bind no resource (no connection, Brain, model, template or
-//   other App), start no workflow, stage no notification and tell no
-//   webhook, so the operation host refuses each such request
+//   other App), start no workflow, send no run an event and tell no
+//   webhook, so the function host refuses each such request
 //   (`resource.unavailable`); a page's workflow commands and watches, and
 //   a workflow reference's queries, are refused before anything runs. Its
 //   code runs in the release runner's isolates, with no network and no env.
@@ -295,7 +292,7 @@ const builderGate =
     if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
-    const roles = await operationRoles(env, { userId, role }, app);
+    const roles = await functionRoles(env, { userId, role }, app);
     if (!roles.appBuilder) {
       throw roleErrors.create("role.forbidden");
     }
@@ -366,7 +363,7 @@ const draftStore = async (
 };
 
 /**
- * `run`'s release as the operation host runs it: each isolate tailed for
+ * `run`'s release as the function host runs it: each isolate tailed for
  * the chat's preview alone, so what the draft's code writes with
  * `console` reaches the agent's next check of this revision
  * (server-logs.ts), as data.
@@ -444,7 +441,7 @@ const reported = async (
   by: Pick<Identity, "userId">,
   run: DraftRun,
   request: unknown,
-  result: OperationResult,
+  result: FunctionResult,
   thrown: string | undefined
 ): Promise<void> => {
   if (!run.own) {
@@ -478,7 +475,7 @@ export interface DraftCallOptions {
 }
 
 /** The answer to `request` once it ran, or why it was refused. */
-const answerOf = (result: OperationResult, run?: DraftRun): FunctionAnswer => ({
+const answerOf = (result: FunctionResult, run?: DraftRun): FunctionAnswer => ({
   result,
   provenance: null,
   manifestHash: run?.release.manifestHash ?? null,
@@ -499,7 +496,7 @@ const draftCallOf = (
     throw appErrors.create("app.preview_side_effect");
   }
   if (kind !== undefined && call.reference.kind !== kind) {
-    throw operationErrors.create("contract.invalid_request");
+    throw functionErrors.create("contract.invalid_request");
   }
   return call;
 };
@@ -515,25 +512,25 @@ const draftCallOf = (
 const draftWorkflowQuery = (
   release: Release,
   call: FunctionRequest
-): OperationResult => {
+): FunctionResult => {
   const query = workflowQueryOf(release, call.reference);
   if (query.name !== "run" && query.name !== "canStart") {
-    throw operationErrors.create("resource.unavailable");
+    throw functionErrors.create("resource.unavailable");
   }
   checkedValue(query.args, call.args, "contract.invalid_args");
   return { ok: true, value: query.name === "run" ? null : false };
 };
 
 /** `call` of one of the draft's own functions, on `store`. */
-const operationOf = async (
+const draftFunctionCall = async (
   env: Env,
   by: Pick<Identity, "userId">,
   run: DraftRun,
   store: OpenStore,
   call: FunctionRequest,
   { observeReads, ...made }: DraftCall & Pick<DraftCallOptions, "observeReads">
-): Promise<OperationResult> => {
-  const path = publicOperationOf(run.release, call.reference);
+): Promise<FunctionResult> => {
+  const path = publicFunctionOf(run.release, call.reference);
   const invocation = invocationOf(env, by, run, store, made);
   const observe =
     observeReads === undefined
@@ -542,7 +539,7 @@ const operationOf = async (
           observeReads(store.id, readSet);
         };
   const reference = { path, kind: call.reference.kind };
-  return await callOperation(
+  return await hostFunctionCall(
     hosted(env, run),
     observe === undefined
       ? invocation
@@ -571,14 +568,14 @@ export const callDraft = async (
   const { deadline, thrown: told } = options;
   const requestId = crypto.randomUUID();
   let thrown: string | undefined;
-  let result: OperationResult;
+  let result: FunctionResult;
   try {
     const call = draftCallOf(request, options);
     const authorize = builderGate(env, by.userId, run.app);
     const gate = async (): Promise<void> => {
       await authorize();
       if (Date.now() >= deadline) {
-        throw operationErrors.create("function.deadline_exceeded");
+        throw functionErrors.create("function.deadline_exceeded");
       }
     };
     // Before anything is read, the store made or opened.
@@ -604,7 +601,7 @@ export const callDraft = async (
       return answerOf({ ok: true, value }, run);
     }
     const store = await draftStore(env, by.userId, run);
-    result = await operationOf(env, by, run, store, call, {
+    result = await draftFunctionCall(env, by, run, store, call, {
       ...options,
       requestId,
       draftFailure: (message) => {
@@ -671,14 +668,14 @@ export const invokeDraftAction = async (
     readonly cancelled: AbortSignal;
     readonly deadline: number;
   }
-): Promise<{ result: OperationResult; reached: boolean; effects: number }> => {
+): Promise<{ result: FunctionResult; reached: boolean; effects: number }> => {
   const requestId = crypto.randomUUID();
   let reached = false;
   let effects = 0;
   let thrown: string | undefined;
-  let result: OperationResult;
+  let result: FunctionResult;
   try {
-    const path = publicOperationOf(run.release, call.reference);
+    const path = publicFunctionOf(run.release, call.reference);
     await builderGate(env, by.userId, run.app)();
     const store = await draftStore(env, by.userId, run);
     const invocation = invocationOf(env, by, run, store, {
@@ -689,7 +686,7 @@ export const invokeDraftAction = async (
       },
     });
     reached = true;
-    result = await callOperation(
+    result = await hostFunctionCall(
       hosted(env, run),
       invocation,
       { path, kind: call.reference.kind },

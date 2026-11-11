@@ -289,8 +289,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("reports server code that throws as it registers as one error at its line, not one per page", async () => {
-    const operations = notesCode["server/notes.ts"] ?? "";
-    const throwing = operations.replace(
+    const serverCode = notesCode["server/notes.ts"] ?? "";
+    const throwing = serverCode.replace(
       "\nexport const list = query({",
       '\nif (globalThis.Object === Object) throw new Error("No notes today");\nexport const list = query({'
     );
@@ -301,8 +301,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         await env.build.write(app.id, ${JSON.stringify({ ...notesCode, "server/notes.ts": throwing })});
         const proposal = await env.build.propose(app.id, "Notes");
         const errorsOf = ({ check }) => [check.pages, check.server].flatMap(({ diagnostics }) => diagnostics).filter(({ severity }) => severity === "error");
-        // Then an operations file that doesn't parse, the throw gone.
-        await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": `${operations}\nexport const broken = query({ args: {` })});
+        // Then an serverCode file that doesn't parse, the throw gone.
+        await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": `${serverCode}\nexport const broken = query({ args: {` })});
         const unparsed = errorsOf(await env.build.propose(app.id, "Notes"));
         return {
           errors: errorsOf(proposal).length,

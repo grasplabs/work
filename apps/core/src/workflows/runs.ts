@@ -26,9 +26,9 @@ export const shownStatus = (
 
 /**
  * The most input a run starts with, in bytes of its UTF-8 JSON: the public
- * operation input limit (spec 18.1), whoever starts the run.
+ * function input limit (spec 18.1), whoever starts the run.
  */
-export const maxInputBytes = platformLimits.operationInputBytes;
+export const maxInputBytes = platformLimits.functionArgsBytes;
 
 /** The bytes of `value` as UTF-8 JSON. */
 export const jsonBytes = (value: unknown): number =>

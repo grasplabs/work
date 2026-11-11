@@ -54,6 +54,7 @@ import {
   loadCandidateBuild,
   releaseBuild,
   storeBuild,
+  workflowManifestFormat,
 } from "../workflow-builds.ts";
 import { draftCheckpoint } from "../workflow-drafts.ts";
 import { candidateParams } from "../workflow-params.ts";
@@ -262,7 +263,7 @@ const requireUnderLimits = async (
 
 /** What a test run's manifest seals beside its build. */
 const candidateManifestSchema = z.object({
-  contract: z.object({ input: z.json(), output: z.json() }),
+  contract: z.object({ args: z.json(), returns: z.json() }),
   bindings: z.array(
     z.object({
       alias: z.string(),
@@ -360,7 +361,7 @@ export const startCandidateRun = async (
   );
   const checkpoint = await draftCheckpoint(env, workflow.id, revision);
   const built = await candidateBuildOf(env, by, workflow, checkpoint.source);
-  const inputText = acceptedInput(JSON.stringify(built.contract.input), given);
+  const inputText = acceptedInput(JSON.stringify(built.contract.args), given);
   const paramsText = candidateParams(built.contract, params);
   // What the workflow keeps between its runs, read once and frozen with
   // the row, as a start's receipt freezes it: the test reads it, and
@@ -370,7 +371,7 @@ export const startCandidateRun = async (
   // Its build's own seal (sealed-artifacts.ts), which its row names.
   const reservation = newSeal();
   const manifest = canonicalJson({
-    formatVersion: 1,
+    formatVersion: workflowManifestFormat,
     target: "workflow-candidate",
     resourceId: workflow.id,
     draftRevision: revision,
@@ -522,8 +523,9 @@ const loadedCandidateRun = async (
   if ((await liveWorkflow(env, pin.workflow)) === undefined) {
     throw workflowResourceErrors.create("workflow.resource_unavailable");
   }
-  const sealed = candidateManifestSchema.parse(JSON.parse(row.manifest));
+  // Its build first: a manifest of another format is refused as such.
   const build = await loadCandidateBuild(env, pin.workflow, row, pin.manifest);
+  const sealed = candidateManifestSchema.parse(JSON.parse(row.manifest));
   if (build.hash !== row.buildHash) {
     throw workflowResourceErrors.create("workflow.version_corrupt");
   }
@@ -580,7 +582,7 @@ const loadedCandidateRun = async (
       // A test run waits only briefly: one waiting longer fails.
       maxSleepMs: maxCandidateWaitMs,
     },
-    output: JSON.stringify(sealed.contract.output),
+    output: JSON.stringify(sealed.contract.returns),
     owner: candidateOwnerOf(pin.workflow),
   };
 };

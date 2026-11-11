@@ -11,6 +11,7 @@ import { z } from "zod";
 import { projectCandidateRun } from "./candidate-runs.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
+import type { RunPin } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
@@ -24,6 +25,55 @@ const runIsThere = (sql: SqlStorage): boolean =>
   sql
     .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'")
     .toArray().length > 0;
+
+/**
+ * Where a sealed build's run keeps the task whose step's failure it ended
+ * with, as its host named it (resource-runs.ts, `keepFailedTask`): a
+ * table of its object's SQLite, dropped with the run by the engine's
+ * removal of it. Written as the run fails, before the engine records the
+ * failure, and read as its end is told (`notify`).
+ */
+const failedTaskTable = "grasp_run_failed_task";
+
+/**
+ * Keeps `task` as the one the run in `sql` failed at, while it is there;
+ * none (`null`) forgets any an earlier activation kept, so only the end
+ * the run is failing with now names one.
+ */
+const keepFailedTaskIn = (sql: SqlStorage, task: string | null): void => {
+  if (!runIsThere(sql)) {
+    return;
+  }
+  if (task === null) {
+    sql.exec(`DROP TABLE IF EXISTS ${failedTaskTable}`);
+    return;
+  }
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS ${failedTaskTable} (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), task TEXT NOT NULL)`
+  );
+  sql.exec(
+    `INSERT INTO ${failedTaskTable} (singleton, task) VALUES (1, ?) ON CONFLICT (singleton) DO UPDATE SET task = excluded.task`,
+    task
+  );
+};
+
+/** The task the run in `sql` failed at (`keepFailedTaskIn`), if kept. */
+const failedTaskIn = (sql: SqlStorage): string | null => {
+  const there =
+    sql
+      .exec(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        failedTaskTable
+      )
+      .toArray().length > 0;
+  if (!there) {
+    return null;
+  }
+  const [row] = sql
+    .exec<{ task: string }>(`SELECT task FROM ${failedTaskTable}`)
+    .toArray();
+  return row?.task ?? null;
+};
 
 /** A kept failure, as the host kept it: a step's error, or nothing. */
 const keptFailureSchema = z.object({
@@ -294,6 +344,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         return await runPinned(this.env, pin, event, step, {
           modelCalls: modelCallsIn(this.ctx.storage.sql),
           sentCalls: sentCallsIn(this.ctx.storage.sql),
+          keepFailedTask: (task) => {
+            keepFailedTaskIn(this.ctx.storage.sql, task);
+          },
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
           ...(this.#activation === undefined
@@ -542,7 +595,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       version: latest.version,
     });
     if (pin?.type === "resource" || pin?.type === "candidate") {
-      await this.#independentNotified(pin.type, latest);
+      await this.#independentNotified(pin, latest);
     }
   }
 
@@ -553,14 +606,13 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * them, below.
    */
   async #independentNotified(
-    type: "resource" | "candidate",
+    pin: Extract<RunPin, { type: "resource" | "candidate" }>,
     latest: RunNotification
   ): Promise<void> {
+    const { type } = pin;
     // Why it failed, from its own journal: kept on its row, so the code
     // outlives the engine's record of the run.
     const live = this.status();
-    const project =
-      type === "resource" ? projectResourceRun : projectCandidateRun;
     // A run marked stopped (`markStopped`) that fails before its
     // termination lands, its attempts refused from the stop on, ended
     // by the stop: cancelled, not failed. Unless
@@ -573,20 +625,31 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     const rolledBack =
       live !== undefined && "rollback" in live && live.rollback !== undefined;
     const stoppedEnd = marked && latest.status === "errored" && !rolledBack;
-    const status = stoppedEnd ? "terminated" : latest.status;
-    await project(
-      this.env,
-      latest.instanceId,
-      {
-        status,
-        at: latest.timestamp,
-        sequence: latest.sequence,
-        ...this.#compensationOf(latest.status),
-      },
-      live?.status === "errored" && !stoppedEnd
-        ? (live.error.code ?? null)
-        : null
-    );
+    const engine = {
+      status: stoppedEnd ? "terminated" : latest.status,
+      at: latest.timestamp,
+      sequence: latest.sequence,
+      ...this.#compensationOf(latest.status),
+    } as const;
+    // Its notification of its end, the once its failure is read: a later
+    // one (how a rollback went) finds its row ended, and changes nothing.
+    const failure =
+      latest.status === "errored" && live?.status === "errored" && !stoppedEnd
+        ? live.error
+        : undefined;
+    const failureCode = failure?.code ?? null;
+    await (pin.type === "resource"
+      ? projectResourceRun(
+          this.env,
+          latest.instanceId,
+          engine,
+          failureCode,
+          async () =>
+            await Promise.resolve(
+              failure === undefined ? null : failedTaskIn(this.ctx.storage.sql)
+            )
+        )
+      : projectCandidateRun(this.env, latest.instanceId, engine, failureCode));
     // A page's pause or resume of it settles from where the engine has
     // the run now, and which controls it took, read together here from
     // its journal (resource-runs.ts).

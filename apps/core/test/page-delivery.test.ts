@@ -83,7 +83,7 @@ const lookCapMs = 400;
 // whether it answered. One that is held waits after its read until the
 // test lets it go (`<step>: release`, marked once the test has done what
 // it does meanwhile), never for a time that a slow runner could outlast.
-const operationsCode = `import { AppError, v } from "@grasp-os/sdk";
+const functionsCode = `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 const secret = ${JSON.stringify(secret)};
@@ -192,7 +192,7 @@ const appCode = testApp(
     },
   },
   {
-    "server/notes.ts": operationsCode,
+    "server/notes.ts": functionsCode,
   }
 );
 
@@ -316,7 +316,7 @@ const requestFor = async (
   // Its kind as the current release declares it, a query's for a name it
   // doesn't have: a page names a function by its name and kind alone.
   const released = await loadRelease(env, id, currentVersion);
-  const kind = released.app.operations[contractId]?.kind ?? "query";
+  const kind = released.app.functions[contractId]?.kind ?? "query";
   return JSON.stringify({
     reference: { name: contractId, kind },
     args: input,
@@ -589,7 +589,7 @@ describe("page delivery", { timeout: 60_000 }, () => {
     const first = await openFrame(builder, app);
     // Version 2 answers `read` with other code.
     await release(builder, app, {
-      "server/notes.ts": operationsCode.replace(
+      "server/notes.ts": functionsCode.replace(
         "handler: async () => [secret],",
         'handler: async () => ["version 2"],'
       ),
@@ -597,7 +597,7 @@ describe("page delivery", { timeout: 60_000 }, () => {
     const replayed = await called(builder, app, { lease: first.lease });
     // Version 3 takes `read` out of its API, and its page no longer reads it.
     await release(builder, app, {
-      "server/notes.ts": operationsCode
+      "server/notes.ts": functionsCode
         .replace(
           "import { action, mutation, query }",
           "import { action, internalQuery, mutation, query }"

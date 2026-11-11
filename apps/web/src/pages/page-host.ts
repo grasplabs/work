@@ -6,7 +6,7 @@ import { shownAt } from "@grasp-os/shared/chat";
 import type { PreviewAt, PreviewBundle } from "@grasp-os/shared/chat";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import { authErrors, errorPayloadSchema } from "@grasp-os/shared/errors";
-import { isDraftFault } from "@grasp-os/shared/operations";
+import { isDraftFault } from "@grasp-os/shared/functions";
 import {
   appFunctionPath,
   pageErrors,

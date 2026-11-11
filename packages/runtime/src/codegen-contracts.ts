@@ -53,28 +53,29 @@ export const ownFiles = <Content>(
   );
 
 /**
- * The format of `contracts.json`: 5 since it names no release and seals
- * only the version each workflow binding pinned, the App's declaration
- * being the workflow's contract. A release whose contracts are of
- * another format doesn't load: a new version replaces it.
+ * The format of `contracts.json`: 6 since its manifest names the App's
+ * functions `functions`, and it names no release and seals only the
+ * version each workflow binding pinned, the App's declaration being the
+ * workflow's contract. A release whose contracts are of another format
+ * doesn't load: a new version replaces it.
  */
-export const contractsFormatVersion = 5;
+export const contractsFormatVersion = 6;
 
 /**
- * The fingerprint of `operation`'s exact contract: the SHA-256, in hex, of
+ * The fingerprint of `fn`'s exact contract: the SHA-256, in hex, of
  * its kind, visibility, arguments, return and progress, canonically. Any
  * change to any of them changes it.
  */
 export const contractFingerprint = async (
-  operation: FunctionManifest
+  fn: FunctionManifest
 ): Promise<string> =>
   await sha256Hex(
     canonicalText({
-      kind: operation.kind,
-      visibility: operation.visibility,
-      args: operation.args,
-      returns: operation.returns,
-      stream: operation.stream,
+      kind: fn.kind,
+      visibility: fn.visibility,
+      args: fn.args,
+      returns: fn.returns,
+      stream: fn.stream,
     })
   );
 
@@ -83,10 +84,10 @@ export const contractFingerprints = async (
   manifest: AppManifest
 ): Promise<Record<string, string>> => {
   const fingerprints: Record<string, string> = {};
-  for (const [path, operation] of Object.entries(manifest.operations)) {
+  for (const [path, fn] of Object.entries(manifest.functions)) {
     // One after the other: a digest is quick, and the order is the map's.
     // oxlint-disable-next-line no-await-in-loop -- see above
-    fingerprints[path] = await contractFingerprint(operation);
+    fingerprints[path] = await contractFingerprint(fn);
   }
   return fingerprints;
 };

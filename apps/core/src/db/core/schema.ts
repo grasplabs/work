@@ -780,7 +780,7 @@ export const appWebhookDeliveries = sqliteTable(
     occurredAt: timestamp("occurred_at").notNull(),
     version: integer(),
     submission: text(),
-    operation: text(),
+    function: text("operation"),
     values: text({ mode: "json" }).$type<Json>(),
     valuesLeftOut: integer("values_left_out", { mode: "boolean" })
       .notNull()
@@ -1357,7 +1357,7 @@ export const sdkResourceBindings = sqliteTable(
 
 /**
  * The definitions an App's store serves, in core's inventory (spec 24):
- * each distinct schema and operation manifest a sealed release bound the
+ * each distinct schema and function manifest a sealed release bound the
  * store with, numbered per store as it first appears, with the source
  * tree of the release that first bound it. Written in the seal's batch
  * (app-releases.ts), never changed. The store's object holds the schemas
@@ -1369,7 +1369,7 @@ export const businessStoreVersions = sqliteTable(
     storeId: text("store_id").notNull(),
     version: integer().notNull(),
     schemaHash: text("schema_hash").notNull(),
-    operationManifestHash: text("operation_manifest_hash").notNull(),
+    functionManifestHash: text("operation_manifest_hash").notNull(),
     sourceTreeHash: text("source_tree_hash").notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
@@ -1378,7 +1378,7 @@ export const businessStoreVersions = sqliteTable(
     uniqueIndex("business_store_versions_definition").on(
       table.storeId,
       table.schemaHash,
-      table.operationManifestHash
+      table.functionManifestHash
     ),
   ]
 );
@@ -3549,7 +3549,7 @@ export const businessStores = sqliteTable("business_stores", {
    */
   activeSchemaVersion: integer("active_schema_version"),
   activeSchemaHash: text("active_schema_hash"),
-  activeOperationManifestHash: text("active_operation_manifest_hash"),
+  activeFunctionManifestHash: text("active_operation_manifest_hash"),
   /**
    * Unused since each App has one store of its own: kept only until a later
    * release drops it, as an older core may still run on this schema (expand,
@@ -4344,6 +4344,15 @@ export const workflowResourceRuns = sqliteTable(
      * Null for a root.
      */
     accountRunId: text("account_run_id"),
+    /**
+     * The task whose step a failed run failed at last, as its journal had
+     * it when it ended (run-object.ts, `#failedTask`): the task's ID in
+     * its version, never a step's key or anything the run read. Null for
+     * a run that failed at no step of a task (a raise, or a start core
+     * abandoned). What the improvement signals count failures by
+     * (signals.ts).
+     */
+    failedTask: text("failed_task"),
   },
   (table) => [
     // Dropped with its column (GRA-1589).

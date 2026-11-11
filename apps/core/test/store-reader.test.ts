@@ -20,10 +20,10 @@ import {
   newRecordId,
 } from "./store-schemas.ts";
 
-// A query operation's reads as one state of the store (spec 6.3), through
+// A query's reads as one state of the store (spec 6.3), through
 // core's way into a store and its Durable Object: the host-side reader
 // records the generation of each table read, and `readConsistently`
-// reruns an operation whose reads a commit made stale, then gives up with
+// reruns a query whose reads a commit made stale, then gives up with
 // the retryable `query.concurrent_change`. Commits land between reads
 // here exactly as they would from another caller: through the store.
 
@@ -87,7 +87,7 @@ const commit = async (
       binding: null,
       contractId: "notes.write",
       contractVersion: 1,
-      operationKind: "mutation",
+      functionKind: "mutation",
     },
     key: [crypto.randomUUID()],
     inputHash: "c".repeat(64),
@@ -134,7 +134,7 @@ const noteId = (id: string): Id<"notes"> =>
 const dbOver = (reader: StoreReader) =>
   databaseReader(schema, async (request) => await reader.read(request));
 
-/** The code an operation failed with, and its details. */
+/** The code a function failed with, and its details. */
 const failureOf = async (
   run: Promise<unknown>
 ): Promise<{ code?: unknown; details?: unknown }> => {

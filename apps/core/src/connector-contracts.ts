@@ -1,8 +1,8 @@
 import type { ValueSchema } from "@grasp-os/runtime/app";
 import { schemaFromDescriptor } from "@grasp-os/runtime/host";
+import { jsonOf } from "@grasp-os/shared/functions";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { jsonOf } from "@grasp-os/shared/operations";
 
 import { accepts, admissible } from "./connector-schema-check.ts";
 

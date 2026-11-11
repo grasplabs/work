@@ -973,6 +973,7 @@ describe("the on-prem config", () => {
       routerSecret: "s",
       modules: [],
       storage: "/tmp/storage",
+      files: "/tmp/files",
     });
     const service = /name = "SANDBOX_HOST", service = "(?<name>[^"]+)"/u.exec(
       config

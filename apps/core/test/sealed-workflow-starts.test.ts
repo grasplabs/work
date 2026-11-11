@@ -1,4 +1,4 @@
-import type { OperationResult } from "@grasp-os/shared/operations";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
@@ -38,7 +38,7 @@ import { tiledPage } from "./split-pages.ts";
 // sandbox (spec 7.4, 9.5): the action's start and the mutation's staged
 // start cross the isolate as every capability does, and land as runs of
 // the workflow version the App binds. The threat model is tested
-// against the operation host directly (workflow-app-starts.test.ts);
+// against the function host directly (workflow-app-starts.test.ts);
 // this is the same path from the release's own code.
 
 describe("a sealed App's functions", { timeout: 120_000 }, () => {
@@ -84,14 +84,14 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
     const call = async (
       path: "requests.submit" | "requests.kickOff",
       input: unknown
-    ): Promise<OperationResult> => {
-      const operation = release.app.operations[path];
+    ): Promise<FunctionResult> => {
+      const fn = release.app.functions[path];
       const { result } = await callAppFunction(
         env,
         bob,
         app,
         JSON.stringify({
-          reference: { name: path, kind: operation?.kind },
+          reference: { name: path, kind: fn?.kind },
           args: input,
         })
       );
@@ -214,7 +214,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       who: Identity,
       reference: object,
       input: unknown
-    ): Promise<OperationResult> => {
+    ): Promise<FunctionResult> => {
       const { result } = await callAppFunction(
         env,
         who,

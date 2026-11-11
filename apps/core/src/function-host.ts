@@ -39,17 +39,12 @@ import {
   invocationMaxReads,
   isAppErrorCode,
   knowledgeSearchMaxLength,
-  operationInputMaxBytes,
-  operationResultMaxBytes,
+  functionArgsMaxBytes,
+  functionResultMaxBytes,
   stagedReadMaxBytes,
   streamMaxEmits,
   streamProgressMaxBytes,
 } from "@grasp-os/shared/function-limits";
-import { canonicalJson, isRecord } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
-import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
-import { errorFields, log } from "@grasp-os/shared/log";
-import { peopleAlias } from "@grasp-os/shared/notifications";
 import {
   categoryOf,
   effectErrors,
@@ -57,12 +52,17 @@ import {
   isRetryableCode,
   jsonOf,
   jsonWithin,
-  operationErrors,
-} from "@grasp-os/shared/operations";
+  functionErrors,
+} from "@grasp-os/shared/functions";
 import type {
   AppErrorPayload,
-  OperationResult,
-} from "@grasp-os/shared/operations";
+  FunctionResult,
+} from "@grasp-os/shared/functions";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
+import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { peopleAlias } from "@grasp-os/shared/notifications";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
 import { runFileErrors } from "@grasp-os/shared/run-files";
@@ -105,11 +105,11 @@ import { sandboxVerdictOf } from "./sandbox-session.ts";
 import { SandboxUnavailableError } from "./sandboxed.ts";
 import { readConsistently, StoreReader } from "./store-reader.ts";
 import { valueFiles } from "./store-references.ts";
-import type { WorkflowNotifications } from "./workflow-notifications.ts";
+import type { WorkflowEventSends } from "./workflow-event-sends.ts";
 
-// Core's operation host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
+// Core's function host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
 // App's server functions for one caller, through the trusted host, and
-// answers what it returned or why it failed, as an `OperationResult`.
+// answers what it returned or why it failed, as an `FunctionResult`.
 // App code runs where the runner puts it (`Runner`; the SDK's
 // `runFunction`) and holds nothing but its invocation's channel
 // (function-channel.ts); everything that decides what the call may do is
@@ -121,7 +121,7 @@ import type { WorkflowNotifications } from "./workflow-notifications.ts";
 //   (`function.not_found`, `function.kind_mismatch`), before anything
 //   runs.
 // - A caller sends too much, or what isn't JSON: the input is read as
-//   JSON and measured (128 KiB of UTF-8, `operationInputMaxBytes`) before
+//   JSON and measured (128 KiB of UTF-8, `functionArgsMaxBytes`) before
 //   it is validated; then validated by the descriptor the App's
 //   inspection recorded, never by App code, and the handler gets the
 //   normalized value.
@@ -138,7 +138,7 @@ import type { WorkflowNotifications } from "./workflow-notifications.ts";
 //   sealed in its manifest, are the one list, as in Convex, where every
 //   function of an app may use what the app may. A resource request names
 //   an alias the App declares as a permission an action reaches
-//   (`actionPermission`), a start or notification a workflow it declares,
+//   (`actionPermission`), a start or sent event a workflow it declares,
 //   a nested call a function it registers, internal ones included
 //   (`resource.not_allowed`, `function.not_found` otherwise), each then
 //   bound and granted by an admin. No function narrows what the App holds:
@@ -225,11 +225,11 @@ import type { WorkflowNotifications } from "./workflow-notifications.ts";
 // - A mutation spins on starts to make core read without end: a start
 //   takes its place among the commit's starts before it is admitted, so
 //   one past the bound is refused before anything is read.
-// - A mutation notifies a run with an event it didn't declare, or of
-//   another App's: a notification names a workflow the App declares, and
+// - A mutation sends a run an event it didn't declare, or one of
+//   another App's: a sent event names a workflow the App declares, and
 //   the event its generated reference names (its alias, type and
 //   fingerprint, the contract it was generated for), which core stages
-//   only as workflow-notifications.ts admits it against the release it
+//   only as workflow-event-sends.ts admits it against the release it
 //   runs, as an intent of the commit, in the commit's bound with its
 //   starts.
 // - App code tells people it shouldn't, or floods them: a send to people
@@ -318,11 +318,11 @@ export interface Invocation {
    */
   readonly workflows?: WorkflowStarts;
   /**
-   * How core stages a mutation's notifications of the App's workflow runs
-   * (`ctx.sendEvent`, workflow-notifications.ts), for this call; none staged
+   * How core stages the events a mutation sends the App's workflow runs
+   * (`ctx.sendEvent`, workflow-event-sends.ts), for this call; none staged
    * without it, as for starts (`workflows`).
    */
-  readonly notifications?: WorkflowNotifications;
+  readonly eventSends?: WorkflowEventSends;
   /**
    * How core tells people for this call (`ctx.notifyPeople`, of an action
    * or a mutation, app-notifications.ts); none
@@ -433,7 +433,7 @@ const tallied =
 export const draftFailureMaxLength = 2000;
 
 /**
- * A use App code asked the operation host for that the running function's
+ * A use App code asked the function host for that the running function's
  * sealed manifest doesn't allow (GRA-279), as core keeps it for the audit
  * log (`Invocation.refusedUse`): every field from the sealed manifest or
  * the host, never App code's text. `use.name` is a function path, resource
@@ -714,7 +714,7 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   const args = new Map<string, ValueSchema<unknown, unknown>>();
   const returns = new Map<string, ValueSchema<unknown, unknown>>();
   const streams = new Map<string, ValueSchema<unknown, unknown>>();
-  for (const [path, fn] of Object.entries(manifest.operations)) {
+  for (const [path, fn] of Object.entries(manifest.functions)) {
     args.set(path, schemaOfDescriptor(fn.args));
     // A function that declares no `returns` answers what its handler
     // returns, checked as JSON within the output limit only.
@@ -853,26 +853,26 @@ const fromApp = <Answer>(work: () => Answer): Answer => {
  * The function `reference` names in the App's public tree, of its kind:
  * refused the same way whether it is internal or doesn't exist.
  */
-const publicOperation = (
+const publicFunction = (
   manifest: AppManifest,
   reference: CalledFunction,
   streaming: boolean
 ): FunctionManifest => {
   const { path, kind } = reference;
   const fn =
-    typeof path === "string" && Object.hasOwn(manifest.operations, path)
-      ? manifest.operations[path]
+    typeof path === "string" && Object.hasOwn(manifest.functions, path)
+      ? manifest.functions[path]
       : undefined;
   if (fn === undefined || fn.visibility !== "public") {
-    throw operationErrors.create("function.not_found");
+    throw functionErrors.create("function.not_found");
   }
   if (fn.kind !== kind) {
-    throw operationErrors.create("function.kind_mismatch");
+    throw functionErrors.create("function.kind_mismatch");
   }
   // A streaming action runs only where its progress has somewhere to go,
   // and any other only where it answers once (spec 10.7.6).
   if ((fn.stream !== null) !== streaming) {
-    throw operationErrors.create("function.mode_mismatch");
+    throw functionErrors.create("function.mode_mismatch");
   }
   return fn;
 };
@@ -889,21 +889,21 @@ const admittedArgs = (
   fn: FunctionManifest,
   args: unknown
 ): Json => {
-  const read = jsonWithin(args, operationInputMaxBytes);
+  const read = jsonWithin(args, functionArgsMaxBytes);
   if (read === "too_large") {
-    throw operationErrors.create("contract.input_too_large", {
-      maxBytes: operationInputMaxBytes,
+    throw functionErrors.create("contract.input_too_large", {
+      maxBytes: functionArgsMaxBytes,
     });
   }
   if (read === undefined) {
-    throw operationErrors.create("contract.invalid_args", {
+    throw functionErrors.create("contract.invalid_args", {
       issues: argumentIssues([{ message: "The arguments aren't JSON" }]),
     });
   }
   const schema = compiled.args.get(fn.path);
   const result = schema?.["~standard"].validate(read.json);
   if (result === undefined || result.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_args", {
+    throw functionErrors.create("contract.invalid_args", {
       issues: argumentIssues(result?.issues ?? []),
     });
   }
@@ -916,7 +916,7 @@ const admittedArgs = (
 
 /**
  * What a handler returned, if its contract allows it exactly: JSON within
- * the public function output limit (`operationResultMaxBytes`) and, where
+ * the public function output limit (`functionResultMaxBytes`) and, where
  * it declares a return, valid and already as the contract normalizes it
  * (no default left out, nothing to trim). The value is App code's: reading it can run
  * its getters, so anything reading it throws becomes `internal.unexpected`
@@ -927,17 +927,17 @@ const checkedReturn = (
   fn: FunctionManifest,
   value: unknown
 ): Json => {
-  const read = fromApp(() => jsonWithin(value, operationResultMaxBytes));
+  const read = fromApp(() => jsonWithin(value, functionResultMaxBytes));
   if (read === "too_large") {
     throw hostError(
-      operationErrors.create("contract.result_too_large", {
-        maxBytes: operationResultMaxBytes,
+      functionErrors.create("contract.result_too_large", {
+        maxBytes: functionResultMaxBytes,
       })
     );
   }
   if (read === undefined) {
     throw hostError(
-      operationErrors.create("contract.invalid_return", {
+      functionErrors.create("contract.invalid_return", {
         issues: ["The value isn't JSON"],
       })
     );
@@ -950,7 +950,7 @@ const checkedReturn = (
   const result = schema["~standard"].validate(json);
   if (result.issues !== undefined) {
     throw hostError(
-      operationErrors.create("contract.invalid_return", {
+      functionErrors.create("contract.invalid_return", {
         issues: issuesOf(result.issues),
       })
     );
@@ -961,7 +961,7 @@ const checkedReturn = (
     canonicalJson(normalized) !== canonicalJson(json)
   ) {
     throw hostError(
-      operationErrors.create("contract.invalid_return", {
+      functionErrors.create("contract.invalid_return", {
         issues: ["The value isn't in the form its contract normalizes it to"],
       })
     );
@@ -984,7 +984,7 @@ const checkedProgress = (
 ): Json => {
   const read = jsonWithin(value, streamProgressMaxBytes);
   if (read === "too_large") {
-    throw operationErrors.create("contract.progress_too_large", {
+    throw functionErrors.create("contract.progress_too_large", {
       maxBytes: streamProgressMaxBytes,
     });
   }
@@ -994,7 +994,7 @@ const checkedProgress = (
       ? undefined
       : compiled.streams.get(fn.path)?.["~standard"].validate(json);
   if (result === undefined || result.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_progress", {
+    throw functionErrors.create("contract.invalid_progress", {
       issues: issuesOf(result?.issues ?? [{ message: "The value isn't JSON" }]),
     });
   }
@@ -1004,7 +1004,7 @@ const checkedProgress = (
     normalized === undefined ||
     canonicalJson(normalized) !== canonicalJson(json)
   ) {
-    throw operationErrors.create("contract.invalid_progress", {
+    throw functionErrors.create("contract.invalid_progress", {
       issues: ["The value isn't in the form its schema normalizes it to"],
     });
   }
@@ -1103,7 +1103,7 @@ const tokenOf = (details: unknown): string | undefined => {
 
 /**
  * Keeps what a draft's code threw for its chat's preview (`draftFailure`),
- * told once the call has failed with it (`callOperation`): an attempt a
+ * told once the call has failed with it (`hostFunctionCall`): an attempt a
  * stale read discards, or a call that answers after all, tells nothing.
  * A nested function's failure is kept by the error it failed with, and
  * told only when the function the caller named throws on that very error
@@ -1186,7 +1186,7 @@ const failureOf = (
       (failure.details !== undefined && details === undefined)
     ) {
       return hostError(
-        operationErrors.create("contract.invalid_error", {
+        functionErrors.create("contract.invalid_error", {
           maxMessageLength: appErrorMessageMaxLength,
           maxDetailsBytes: appErrorDetailsMaxBytes,
         })
@@ -1209,7 +1209,7 @@ const failureOf = (
     }
   }
   if (sdkDefinitionCodes.has(code)) {
-    return hostError(operationErrors.create("contract.invalid_query"));
+    return hostError(functionErrors.create("contract.invalid_query"));
   }
   log.error("function.failed", {
     requestId,
@@ -1260,7 +1260,7 @@ const sandboxFailureOf = (
     // Only a call that surely never started ran nothing, to try again; one
     // that may have started is an unknown outcome, never to repeat blindly.
     return hostError(
-      operationErrors.create(
+      functionErrors.create(
         thrown.started
           ? "function.sandbox_lost"
           : "function.sandbox_unavailable"
@@ -1274,7 +1274,7 @@ const sandboxFailureOf = (
   // Every function of the call running in the process logs its own: the
   // deepest of them was running when it was ended, its callers waiting.
   log.warn("function.sandbox_ended", { requestId, path, depth, verdict });
-  return hostError(operationErrors.create(sandboxCodes[verdict]));
+  return hostError(functionErrors.create(sandboxCodes[verdict]));
 };
 
 const isJsonArray = (json: Json | undefined): json is readonly Json[] =>
@@ -1500,7 +1500,7 @@ const carriedWithin = (
     staging.reserve({ kind: carried.full.kind, data: carried.full.data });
     return carried.full;
   } catch (error) {
-    if (operationErrors.codeOf(error) !== "mutation.too_large") {
+    if (functionErrors.codeOf(error) !== "mutation.too_large") {
       throw error;
     }
     return carried.lean;
@@ -1524,7 +1524,7 @@ const stagingFor = (
   const take = (value: Json): void => {
     const bytes = bytesOf(value) + 1;
     if (staged + bytes > stagedMaxBytes) {
-      throw operationErrors.create("mutation.too_large", {
+      throw functionErrors.create("mutation.too_large", {
         maxStagedBytes: stagedMaxBytes,
       });
     }
@@ -1536,7 +1536,7 @@ const stagingFor = (
   };
   let refused: Error | undefined;
   const stage = async (request: unknown): Promise<unknown> => {
-    const write = operationErrors.parse(
+    const write = functionErrors.parse(
       "contract.invalid_write",
       writeRequestSchema,
       request
@@ -1715,11 +1715,11 @@ const isKnowledgeOperation = (
   typeof method === "string" && Object.hasOwn(knowledgeRequests, method);
 
 /** A request a resource's declaration doesn't allow. */
-const notAllowed = () => operationErrors.create("resource.not_allowed");
+const notAllowed = () => functionErrors.create("resource.not_allowed");
 
 /** An answer a resource's contract doesn't allow. */
 const invalidResult = () =>
-  operationErrors.create("contract.invalid_resource_result");
+  functionErrors.create("contract.invalid_resource_result");
 
 /** What a knowledge search answers: hits of exactly a title and an excerpt. */
 const knowledgeHitsSchema = z
@@ -1840,7 +1840,7 @@ const allowsKnowledge = (
         typeof name !== "string" || !declaration.collections.includes(name)
     );
   if (allowed && (!schema?.safeParse(first).success || undeclared)) {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   return allowed;
 };
@@ -1866,7 +1866,7 @@ const isAiRequest = (args: readonly Json[]): boolean => {
     descriptorFromText(JSON.stringify(output));
     return true;
   } catch {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
 };
 
@@ -2027,7 +2027,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
     return hostError(effectErrors.create("effect.outcome_unknown"));
   }
   if (code === "permission.denied") {
-    return hostError(operationErrors.create("resource.unavailable"));
+    return hostError(functionErrors.create("resource.unavailable"));
   }
   // A workflow run's attempt let go of before the request left core
   // (`BindingCaller.requireHolds`): nothing was sent.
@@ -2035,15 +2035,15 @@ const providerFailure = (error: unknown, requestId: string): Error => {
     return hostError(executionErrors.create("execution.stale_attempt"));
   }
   // What a binding's adapter, core's own code, says of a request it
-  // refused or couldn't complete, each in the operation host's own words.
+  // refused or couldn't complete, each in the function host's own words.
   if (isAdapterRefusal(code)) {
-    return hostError(operationErrors.create(code));
+    return hostError(functionErrors.create(code));
   }
   // Room held by runs under way, a provider's rate: worth trying again,
   // after the wait computed, the only detail passed on.
   if (code === "resource.budget_busy" || code === "resource.rate_limited") {
     return hostError(
-      operationErrors.create(
+      functionErrors.create(
         code,
         busyDetails(isExpectedError(error) ? error.details : undefined)
       )
@@ -2053,7 +2053,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   // it starts again, the only details passed on.
   if (code === "resource.limit_reached") {
     return hostError(
-      operationErrors.create(
+      functionErrors.create(
         code,
         limitDetailsSchema.safeParse(
           isExpectedError(error) ? error.details : undefined
@@ -2096,7 +2096,7 @@ const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
  */
 const requireNotCancelled = (run: Run): void => {
   if (run.cancelled?.aborted === true) {
-    throw hostError(operationErrors.create("function.cancelled"));
+    throw hostError(functionErrors.create("function.cancelled"));
   }
 };
 
@@ -2116,13 +2116,13 @@ const resourceCall = async (
       : undefined;
   const resourceName = sealedName(run.app.manifest.permissions, alias);
   if (declaration === undefined) {
-    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("resource.not_allowed"), {
       use: undeclaredUse(run, alias),
       reason: "use_undeclared",
     });
   }
   const notAllowedRequest = () =>
-    refusingUse(operationErrors.create("resource.not_allowed"), {
+    refusingUse(functionErrors.create("resource.not_allowed"), {
       use: { kind: "resource", name: resourceName },
       reason: "request_not_allowed",
     });
@@ -2133,9 +2133,9 @@ const resourceCall = async (
   if (args === undefined || !isJsonArray(args)) {
     throw notAllowedRequest();
   }
-  if (bytesOf(args) > operationInputMaxBytes) {
-    throw operationErrors.create("contract.input_too_large", {
-      maxBytes: operationInputMaxBytes,
+  if (bytesOf(args) > functionArgsMaxBytes) {
+    throw functionErrors.create("contract.input_too_large", {
+      maxBytes: functionArgsMaxBytes,
     });
   }
   try {
@@ -2143,7 +2143,7 @@ const resourceCall = async (
   } catch (error) {
     // What its declaration doesn't allow; a declared operation's request
     // outside its contract is the arguments' fault, as it was.
-    throw operationErrors.codeOf(error) === "resource.not_allowed"
+    throw functionErrors.codeOf(error) === "resource.not_allowed"
       ? notAllowedRequest()
       : error;
   }
@@ -2161,7 +2161,7 @@ const resourceCall = async (
     bound.kind !== declaration["~permission"] ||
     bound.contract !== contract
   ) {
-    throw operationErrors.create("resource.unavailable");
+    throw functionErrors.create("resource.unavailable");
   }
   // Cancelled meanwhile: nothing is sent.
   requireNotCancelled(run);
@@ -2177,7 +2177,7 @@ const resourceCall = async (
   }
   const result = jsonOf(answered);
   if (result === undefined || bytesOf(result) > resourceResultMaxBytes) {
-    throw operationErrors.create("contract.invalid_resource_result");
+    throw functionErrors.create("contract.invalid_resource_result");
   }
   return checkedResourceResult(declaration, method, args, result);
 };
@@ -2207,7 +2207,7 @@ const workflowStart = (
       ? sealedName(run.app.manifest.permissions, alias)
       : declaration.alias;
   if (declaration === undefined) {
-    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("resource.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
       reason: "use_undeclared",
     });
@@ -2218,7 +2218,7 @@ const workflowStart = (
     !isJsonArray(args) ||
     args.length > 1
   ) {
-    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("resource.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
       reason: "request_not_allowed",
     });
@@ -2226,9 +2226,9 @@ const workflowStart = (
   // No argument is no input, which JSON can't carry: the declared schema
   // decides it, its default included.
   const given = args.length === 0 ? undefined : args[0];
-  if (given !== undefined && bytesOf(given) > operationInputMaxBytes) {
-    throw operationErrors.create("contract.input_too_large", {
-      maxBytes: operationInputMaxBytes,
+  if (given !== undefined && bytesOf(given) > functionArgsMaxBytes) {
+    throw functionErrors.create("contract.input_too_large", {
+      maxBytes: functionArgsMaxBytes,
     });
   }
   const checked = schemaOfDescriptor(declaration.args)["~standard"].validate(
@@ -2238,7 +2238,7 @@ const workflowStart = (
     throw new Error("A workflow's args schema validated asynchronously");
   }
   if (checked.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_args", {
+    throw functionErrors.create("contract.invalid_args", {
       issues: argumentIssues(checked.issues),
     });
   }
@@ -2261,7 +2261,7 @@ const workflowStart = (
  */
 const startFailure = (error: unknown, requestId: string): Error => {
   // Stopped as it was about to be admitted (`requireGoing`): said as such.
-  const stopped = operationErrors.codeOf(error);
+  const stopped = functionErrors.codeOf(error);
   if (
     error instanceof Error &&
     (stopped === "function.cancelled" ||
@@ -2271,13 +2271,13 @@ const startFailure = (error: unknown, requestId: string): Error => {
   }
   const code = workflowResourceErrors.codeOf(error);
   if (code === "workflow.start_invalid") {
-    return hostError(operationErrors.create("resource.invalid_args"));
+    return hostError(functionErrors.create("resource.invalid_args"));
   }
   if (code === "workflow.run_limit") {
-    return hostError(operationErrors.create("resource.budget_busy"));
+    return hostError(functionErrors.create("resource.budget_busy"));
   }
   if (code === "workflow.start_conflict") {
-    return hostError(operationErrors.create("resource.idempotency_conflict"));
+    return hostError(functionErrors.create("resource.idempotency_conflict"));
   }
   // A file of the input it can't hand its run (GRA-976): one the person
   // can't read now, or past a run's limits. Never which, nor whether the
@@ -2286,10 +2286,10 @@ const startFailure = (error: unknown, requestId: string): Error => {
     fileErrors.codeOf(error) !== undefined ||
     runFileErrors.codeOf(error) !== undefined
   ) {
-    return hostError(operationErrors.create("resource.invalid_args"));
+    return hostError(functionErrors.create("resource.invalid_args"));
   }
   if (code !== undefined) {
-    return hostError(operationErrors.create("resource.unavailable"));
+    return hostError(functionErrors.create("resource.unavailable"));
   }
   log.error("function.workflow_start_failed", {
     requestId,
@@ -2317,14 +2317,14 @@ const startCall = async (
   await admit(run.invocation);
   const starts = run.invocation.workflows;
   if (starts === undefined) {
-    throw operationErrors.create("resource.unavailable");
+    throw functionErrors.create("resource.unavailable");
   }
   // Cancelled, or past its deadline, as the gate was read: nothing is
   // started, and the start asks again just before it is admitted.
   const requireGoing = (): void => {
     requireNotCancelled(run);
     if (Date.now() >= run.invocation.deadline) {
-      throw hostError(operationErrors.create("function.deadline_exceeded"));
+      throw hostError(functionErrors.create("function.deadline_exceeded"));
     }
   };
   requireGoing();
@@ -2356,7 +2356,7 @@ const peopleArgs = (method: unknown, args: unknown): [Json, Json] => {
     !isJsonArray(asked) ||
     asked.length !== 2
   ) {
-    throw operationErrors.create("resource.not_allowed");
+    throw functionErrors.create("resource.not_allowed");
   }
   const [to = null, notification = null] = asked;
   return [to, notification];
@@ -2379,11 +2379,11 @@ const notifyPeopleCall = async (
   await admit(run.invocation);
   const { notifyPeople: people } = run.invocation;
   if (people === undefined) {
-    throw operationErrors.create("resource.unavailable");
+    throw functionErrors.create("resource.unavailable");
   }
   requireNotCancelled(run);
   if (Date.now() >= run.invocation.deadline) {
-    throw hostError(operationErrors.create("function.deadline_exceeded"));
+    throw hostError(functionErrors.create("function.deadline_exceeded"));
   }
   const receipt = await sending(
     async () => await people.send(to, notification, key.join(":"))
@@ -2392,7 +2392,7 @@ const notifyPeopleCall = async (
 };
 
 /**
- * The notification `fn`, a mutation, asks for under workflow
+ * The event `fn`, a mutation, sends under workflow
  * `alias` with `args` (`[event, runId, data]`, the runner's
  * `ctx.sendEvent` with the alias of the event its generated reference
  * names), if the App declares the workflow: the event's alias (which
@@ -2400,7 +2400,7 @@ const notifyPeopleCall = async (
  * declares it), the run and the data. `resource.not_allowed` for
  * anything else.
  */
-const workflowNotification = (
+const workflowEventSend = (
   run: Run,
   fn: FunctionManifest,
   request: { alias: unknown; args: unknown }
@@ -2413,7 +2413,7 @@ const workflowNotification = (
   const workflowName = sealedName(run.app.manifest.permissions, request.alias);
   if (declared === undefined) {
     // Named by what the alias is in the App: a connection's is no workflow.
-    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("resource.not_allowed"), {
       use: undeclaredUse(run, request.alias),
       reason: "use_undeclared",
     });
@@ -2426,7 +2426,7 @@ const workflowNotification = (
     args.length !== 3 ||
     typeof eventAlias !== "string"
   ) {
-    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("resource.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
       reason: "request_not_allowed",
     });
@@ -2440,16 +2440,16 @@ const workflowNotification = (
 };
 
 /**
- * What a notification's refusal becomes for App code: its own refusal
- * when core raised one of the operation host's codes (an event its
+ * What a sent event's refusal becomes for App code: its own refusal
+ * when core raised one of the function host's codes (an event its
  * release doesn't resolve, data its contract refuses), anything else
  * `internal.unexpected`, its cause logged.
  */
-const notifyFailure = (error: unknown, requestId: string): Error => {
-  if (error instanceof Error && operationErrors.codeOf(error) !== undefined) {
+const sendEventFailure = (error: unknown, requestId: string): Error => {
+  if (error instanceof Error && functionErrors.codeOf(error) !== undefined) {
     return hostError(error);
   }
-  log.error("function.workflow_notify_failed", {
+  log.error("function.workflow_send_event_failed", {
     requestId,
     ...errorFields(error),
   });
@@ -2480,7 +2480,7 @@ const spendRead = (budget: ReadBudget, staged: number): void => {
     budget.reads > invocationMaxReads ||
     budget.shipped > stagedReadMaxBytes
   ) {
-    throw operationErrors.create("function.read_limit", {
+    throw functionErrors.create("function.read_limit", {
       maxReads: invocationMaxReads,
       maxStagedBytes: stagedReadMaxBytes,
     });
@@ -2548,7 +2548,7 @@ interface Run {
   readonly evidence: { kept: boolean };
   /**
    * What the call read of sensitive tables (`SensitiveTally`): shared by
-   * every function in it, kept once as the call ends (`callOperation`).
+   * every function in it, kept once as the call ends (`hostFunctionCall`).
    */
   readonly sensitive: SensitiveTally;
   /**
@@ -2628,7 +2628,7 @@ const spendCall = (budget: CallBudget, what: "nested" | "requests"): void => {
     budget.nested > callMaxNested ||
     budget.requests > callMaxResourceRequests
   ) {
-    throw operationErrors.create("function.call_limit", {
+    throw functionErrors.create("function.call_limit", {
       maxNested: callMaxNested,
       maxResourceRequests: callMaxResourceRequests,
     });
@@ -2672,7 +2672,7 @@ const trackedCalls = (
       ? undefined
       : async (...args: Args): Promise<unknown> => {
           if (handlerSettled) {
-            throw operationErrors.create("function.ended");
+            throw functionErrors.create("function.ended");
           }
           const call = use(...args);
           const watched = (async () => {
@@ -2687,7 +2687,7 @@ const trackedCalls = (
               // the wait for it runs out (the host's error, never one to
               // read as App code's).
               if (
-                operationErrors.codeOf(error) === "function.deadline_exceeded"
+                functionErrors.codeOf(error) === "function.deadline_exceeded"
               ) {
                 pastDeadline = true;
               } else {
@@ -2717,7 +2717,7 @@ const trackedCalls = (
       while (running.size > 0) {
         const left = deadline - Date.now();
         if (left <= 0) {
-          throw hostError(operationErrors.create("function.unfinished_call"));
+          throw hostError(functionErrors.create("function.unfinished_call"));
         }
         // The timer is cleared once the calls settle first, so no wait is
         // left pending past the run.
@@ -2730,7 +2730,7 @@ const trackedCalls = (
         timer.abort();
       }
       if (pastDeadline) {
-        throw hostError(operationErrors.create("function.unfinished_call"));
+        throw hostError(functionErrors.create("function.unfinished_call"));
       }
       return unfinished?.error;
     },
@@ -2918,7 +2918,7 @@ const keepEvidence = async (
     return;
   }
   const errorCode =
-    operationErrors.codeOf(error) ??
+    functionErrors.codeOf(error) ??
     dataErrors.codeOf(error) ??
     "resource.not_allowed";
   const refusal: UseRefusal = { function: fn.path, ...refused, errorCode };
@@ -3078,7 +3078,7 @@ const runHandler = async (
       // returns (the `finally` below), so nothing it still does reaches
       // the store, and what it staged never commits.
       throw hostError(
-        operationErrors.create(stoppedCode(outcome, capabilities))
+        functionErrors.create(stoppedCode(outcome, capabilities))
       );
     }
     // What it started and didn't wait for still runs: the run ends once
@@ -3087,7 +3087,7 @@ const runHandler = async (
     const left = await untilCancelled(calls.settle(), run.cancelled);
     if (left === "cancelled") {
       throw hostError(
-        operationErrors.create(stoppedCode("cancelled", capabilities))
+        functionErrors.create(stoppedCode("cancelled", capabilities))
       );
     }
     const unfinished = left.value;
@@ -3168,7 +3168,7 @@ const stagedQuery = async (
   // A mutation runs queries only (inspection and `nestedCall` see to it):
   // checked again here, where anything else would see its staged state.
   if (callee.kind !== "query") {
-    throw operationErrors.create("function.kind_mismatch");
+    throw functionErrors.create("function.kind_mismatch");
   }
   return await runHandler(
     run,
@@ -3268,30 +3268,30 @@ const startNested = async (
 ): Promise<Json> => {
   const { kind, path, args } = request;
   const callee =
-    typeof path === "string" && Object.hasOwn(run.app.manifest.operations, path)
-      ? run.app.manifest.operations[path]
+    typeof path === "string" && Object.hasOwn(run.app.manifest.functions, path)
+      ? run.app.manifest.functions[path]
       : undefined;
   if (callee === undefined) {
-    throw refusingUse(operationErrors.create("function.not_found"), {
+    throw refusingUse(functionErrors.create("function.not_found"), {
       use: {
         kind: "function",
-        name: sealedName(run.app.manifest.operations, path),
+        name: sealedName(run.app.manifest.functions, path),
       },
       reason: "use_undeclared",
     });
   }
   if (callee.kind !== kind) {
-    throw operationErrors.create("function.kind_mismatch");
+    throw functionErrors.create("function.kind_mismatch");
   }
   if (run.depth + 1 > callMaxDepth) {
-    throw operationErrors.create("function.depth_exceeded", {
+    throw functionErrors.create("function.depth_exceeded", {
       maxDepth: callMaxDepth,
     });
   }
   // A streaming action runs only for a page following it (spec 10.7.6):
   // nested, its progress would have no one to go to.
   if (callee.stream !== null) {
-    throw operationErrors.create("function.mode_mismatch");
+    throw functionErrors.create("function.mode_mismatch");
   }
   spendCall(run.budget, "nested");
   const admitted = admittedArgs(run.compiled, callee, args);
@@ -3411,7 +3411,7 @@ const runMutation = async (
               ? run.receiptScope
               : fn.path,
           contractVersion: 1,
-          operationKind: "mutation",
+          functionKind: "mutation",
         },
         key: [...key],
         inputHash,
@@ -3490,13 +3490,13 @@ const runMutation = async (
             if (alias === peopleAlias) {
               const { notifyPeople: people } = invocation;
               if (people === undefined) {
-                throw operationErrors.create("resource.unavailable");
+                throw functionErrors.create("resource.unavailable");
               }
               const [to, notification] = peopleArgs(method, callArgs);
               // Its place first, as a start's: the commit's bound counts
               // it with them, refused before core reads anything.
               if (placed >= commitMaxIntents) {
-                throw operationErrors.create("function.call_limit", {
+                throw functionErrors.create("function.call_limit", {
                   maxStarts: commitMaxIntents,
                 });
               }
@@ -3510,19 +3510,19 @@ const runMutation = async (
               intents.push(intent);
               return null;
             }
-            if (method === "notify") {
-              const asked = workflowNotification(run, fn, {
+            if (method === "sendEvent") {
+              const asked = workflowEventSend(run, fn, {
                 alias,
                 args: callArgs,
               });
-              const { notifications } = invocation;
-              if (notifications === undefined) {
-                throw operationErrors.create("resource.unavailable");
+              const { eventSends } = invocation;
+              if (eventSends === undefined) {
+                throw functionErrors.create("resource.unavailable");
               }
               // Its place first, as a start's: the commit's bound counts
               // both, refused before core reads anything.
               if (placed >= commitMaxIntents) {
-                throw operationErrors.create("function.call_limit", {
+                throw functionErrors.create("function.call_limit", {
                   maxStarts: commitMaxIntents,
                 });
               }
@@ -3530,17 +3530,17 @@ const runMutation = async (
               await admit(invocation);
               let data: Json;
               try {
-                data = await notifications.intent(
+                data = await eventSends.intent(
                   asked.workflow,
                   asked.event,
                   asked.runId,
                   asked.data
                 );
               } catch (error) {
-                const failure = notifyFailure(error, invocation.requestId);
+                const failure = sendEventFailure(error, invocation.requestId);
                 // An event the release doesn't resolve for the workflow
                 // (another, or a stale reference's) is kept as evidence.
-                throw operationErrors.codeOf(failure) === "resource.not_allowed"
+                throw functionErrors.codeOf(failure) === "resource.not_allowed"
                   ? refusingUse(failure, {
                       use: { kind: "workflow", name: asked.workflow },
                       reason: "request_not_allowed",
@@ -3548,7 +3548,7 @@ const runMutation = async (
                   : failure;
               }
               const intent: NonNullable<Commit["intents"]>[number] = {
-                kind: "workflow.notify",
+                kind: "workflow.send_event",
                 data,
               };
               staging.reserve(intent);
@@ -3559,7 +3559,7 @@ const runMutation = async (
               // Any resource but one of the App's workflows: a mutation
               // reaches nothing else.
               throw refusingUse(
-                operationErrors.create("function.no_resources"),
+                functionErrors.create("function.no_resources"),
                 { use: undeclaredUse(run, alias), reason: "use_undeclared" }
               );
             }
@@ -3570,14 +3570,14 @@ const runMutation = async (
             });
             const starts = invocation.workflows;
             if (starts === undefined) {
-              throw operationErrors.create("resource.unavailable");
+              throw functionErrors.create("resource.unavailable");
             }
             // Its place first, synchronously, so a start past the bound is
             // refused before the gate reads anything. Taken for good, the
             // start refused or not: what bounds the gate's reads is how
             // often App code asks, whatever it catches.
             if (placed >= commitMaxIntents) {
-              throw operationErrors.create("function.call_limit", {
+              throw functionErrors.create("function.call_limit", {
                 maxStarts: commitMaxIntents,
               });
             }
@@ -3667,7 +3667,7 @@ const runMutation = async (
     }
   }
   throw hostError(
-    operationErrors.create("mutation.concurrent_change", { retryable: true })
+    functionErrors.create("mutation.concurrent_change", { retryable: true })
   );
 };
 
@@ -3690,10 +3690,10 @@ const emitProgress = async (
 ): Promise<null> => {
   await Promise.resolve();
   if (cancelled?.aborted === true) {
-    throw operationErrors.create("function.cancelled");
+    throw functionErrors.create("function.cancelled");
   }
   if (emitted > streamMaxEmits) {
-    throw operationErrors.create("function.emit_limit", {
+    throw functionErrors.create("function.emit_limit", {
       maxEmits: streamMaxEmits,
     });
   }
@@ -3755,7 +3755,7 @@ const runAction = async (
       // Refused before it was sent, for a budget busy with requests under
       // way or a call cancelled meanwhile: nothing went out. Anything else
       // may have.
-      const code = operationErrors.codeOf(error);
+      const code = functionErrors.codeOf(error);
       if (code !== "resource.budget_busy" && code !== "function.cancelled") {
         run.onEffect?.();
       }
@@ -3952,7 +3952,7 @@ const tellDraft = (invocation: Invocation, told: Told): void => {
 };
 
 /**
- * `callOperation`'s answer, what the call read of sensitive tables counted
+ * `hostFunctionCall`'s answer, what the call read of sensitive tables counted
  * into `sensitive`. Never throws.
  */
 const answer = async (
@@ -3962,7 +3962,7 @@ const answer = async (
   args: unknown,
   options: CallOptions,
   sensitive: SensitiveTally
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const path = typeof reference.path === "string" ? reference.path : "";
   const invocation: Invocation = {
     ...asked,
@@ -3972,7 +3972,7 @@ const answer = async (
   try {
     const { compiled, fn, admitted, key } = await trusted(() => {
       const known = compiledOf(app.manifest);
-      const found = publicOperation(
+      const found = publicFunction(
         app.manifest,
         reference,
         options.progress !== undefined
@@ -3993,7 +3993,7 @@ const answer = async (
     });
     const { progress, cancelled } = options;
     if (cancelled?.aborted === true) {
-      throw hostError(operationErrors.create("function.cancelled"));
+      throw hostError(functionErrors.create("function.cancelled"));
     }
     const filesAdmitted = async (): Promise<void> => {
       await trusted(async () => {
@@ -4056,13 +4056,13 @@ const answer = async (
  * failure of its own (a throw, a timeout, a cancel) leaves it out. Never
  * throws.
  */
-export const callOperation = async (
+export const hostFunctionCall = async (
   app: HostedApp,
   asked: Invocation,
   reference: CalledFunction,
   args: unknown,
   options: CallOptions = {}
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const sensitive: SensitiveTally = new Map();
   const result = await answer(app, asked, reference, args, options, sensitive);
   if (sensitive.size > 0) {

@@ -35,6 +35,7 @@ const listingWith = (
     available: false,
     model: { model: "anthropic/claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
     whereItRuns: "Anthropic, United States",
+    month: { spentUsd: 0, limitUsd: 100, reached: false },
   },
   providers: [
     {

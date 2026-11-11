@@ -1,7 +1,7 @@
 import {
-  operationPathMaxLength,
-  operationPathMaxSegments,
-  operationSegmentPattern,
+  functionPathMaxLength,
+  functionPathMaxSegments,
+  functionSegmentPattern,
 } from "@grasp-os/shared/function-limits";
 import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import { z } from "zod";
@@ -177,9 +177,9 @@ export const isFunctionPath = (name: string): boolean => {
   const segments = name.split(".");
   return (
     segments.length >= 2 &&
-    segments.length <= operationPathMaxSegments &&
-    name.length <= operationPathMaxLength &&
-    segments.every((segment) => operationSegmentPattern.test(segment))
+    segments.length <= functionPathMaxSegments &&
+    name.length <= functionPathMaxLength &&
+    segments.every((segment) => functionSegmentPattern.test(segment))
   );
 };
 

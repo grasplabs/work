@@ -92,7 +92,7 @@ const typesOf = <Name extends string>(
  * its key answers `respond` with that decision's value.
  */
 const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
-  const operations = workflowFunctions(workflow).queries;
+  const { queries } = workflowFunctions(workflow);
   const keys = sortedKeys(workflow.decisions);
   const valueOf = (name: string): string => {
     const decision = workflow.decisions[name];
@@ -100,7 +100,7 @@ const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
       ? "never"
       : valueTypeOf(decision.value, "input");
   };
-  return typesOf<WorkflowQueryName>(operations, {
+  return typesOf<WorkflowQueryName>(queries, {
     run: descriptorReferenceTypeOf,
     canStart: descriptorReferenceTypeOf,
     runs: descriptorReferenceTypeOf,

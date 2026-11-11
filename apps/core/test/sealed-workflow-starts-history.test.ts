@@ -1,4 +1,4 @@
-import type { OperationResult } from "@grasp-os/shared/operations";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
@@ -37,7 +37,7 @@ import { unique } from "./sign-in.ts";
 // sandbox (spec 7.4, 9.5): the action's start and the mutation's staged
 // start cross the isolate as every capability does, and land as runs of
 // the workflow version the App binds. The threat model is tested
-// against the operation host directly (workflow-app-starts.test.ts);
+// against the function host directly (workflow-app-starts.test.ts);
 // this is the same path from the release's own code.
 
 describe("a workflow reference's run list", { timeout: 120_000 }, () => {
@@ -200,7 +200,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
 /** Any value of a history entry the engine sets, as a matcher. */
 const anyValue: unknown = expect.anything();
 
-const pageOf = (result: OperationResult) =>
+const pageOf = (result: FunctionResult) =>
   historySchema.parse(result.ok ? result.value : result);
 
 describe("a workflow reference's run history", { timeout: 180_000 }, () => {
@@ -266,7 +266,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const ask = async (
       who: Identity,
       input: unknown
-    ): Promise<OperationResult> => {
+    ): Promise<FunctionResult> => {
       const { result } = await callAppFunction(
         env,
         who,
