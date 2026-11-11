@@ -113,7 +113,7 @@ const ChoiceLabel = ({
   const { t } = useLingui();
   return (
     <>
-      <span className="max-w-48 truncate">{name}</span>
+      <span className="max-w-48 min-w-0 truncate">{name}</span>
       {effort === undefined ? null : (
         <span className="text-muted-foreground">{t(effortNames[effort])}</span>
       )}
@@ -154,7 +154,8 @@ const ModelPicker = ({
               })}. Change model or thinking`
             : t`Model: ${name}. Change model`
         }
-        render={<PromptInputButton size="sm" />}
+        // It gives way on a narrow screen, so the box's buttons stay apart.
+        render={<PromptInputButton className="min-w-0 shrink" size="sm" />}
       >
         <SparklesIcon className="text-status-attention" />
         <ChoiceLabel effort={thinks ? effort : undefined} name={name} />

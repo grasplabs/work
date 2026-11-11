@@ -46,10 +46,11 @@ export const AgentPicker = ({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={t`${name} answers. Change agent`}
-        render={<PromptInputButton size="sm" />}
+        // It gives way on a narrow screen, so the box's buttons stay apart.
+        render={<PromptInputButton className="min-w-0 shrink" size="sm" />}
       >
         <UsersRoundIcon className="text-muted-foreground" />
-        <span className="max-w-40 truncate">{name}</span>
+        <span className="max-w-40 min-w-0 truncate">{name}</span>
         <ChevronDownIcon className="text-muted-foreground size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
@@ -99,10 +100,10 @@ export const AgentName = ({
   return (
     <span
       aria-label={t`${name} answers in this chat`}
-      className="text-muted-foreground flex items-center gap-1.5 px-2 text-sm"
+      className="text-muted-foreground flex min-w-0 items-center gap-1.5 px-2 text-sm"
     >
-      <UsersRoundIcon aria-hidden className="size-4" />
-      <span aria-hidden className="max-w-40 truncate">
+      <UsersRoundIcon aria-hidden className="size-4 shrink-0" />
+      <span aria-hidden className="max-w-40 min-w-0 truncate">
         {name}
       </span>
     </span>
