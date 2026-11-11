@@ -81,7 +81,7 @@ Onderwerp: PW-2611: aansluiting in hal 2
 
 Beste Marloes,
 
-Week 2 is voor ons akkoord, op voorwaarde dat de aansluiting op tijd klaar is. Onze technische dienst heeft gekeken: in hal 2 ligt nu alleen een aansluiting van 3 x 32 ampère. Installatiebedrijf Elektra Lekdijk trekt in december een nieuwe kabel vanaf de hoofdverdeelkast in hal 1. Intern loopt dit onder ticket GH-2417; de oplevering staat op vrijdag 18 december.
+Week 2 is voor ons akkoord. Wel moet de aansluiting dan klaar zijn. Onze technische dienst heeft gekeken: in hal 2 ligt nu alleen een aansluiting van 3 x 32 ampère. Installatiebedrijf Elektra Lekdijk trekt in december een nieuwe kabel vanaf de hoofdverdeelkast in hal 1. Intern loopt dit onder ticket GH-2417; de oplevering staat op vrijdag 18 december.
 
 Kunnen jullie ons vóór 15 oktober de definitieve tekening sturen, met de plek van de aansluitkast erop? Dan kan de kabel in één keer goed worden gelegd.
 
@@ -238,12 +238,12 @@ Na de pilot hebben we de binnendienst in Utrecht en alle accountmanagers in twee
 3. Wat ging goed
 De pilotklanten vonden het portaal eenvoudig in gebruik. De inkoper van De Vlasakker plaatst zijn bijbestellingen nu met de tablet vanaf de winkelvloer, zodra hij ziet dat een schap leeg raakt. Doordat de voorraad in het portaal elk kwartier wordt bijgewerkt, bellen klanten de binnendienst veel minder vaak om te vragen of iets leverbaar is. Ook de samenwerking met Vlietwerk liep goed: problemen werden binnen een dag opgepakt, ook in de zomer.
 
-Ook intern pakte het goed uit. De binnendienst gebruikt de vrijgekomen tijd om offertes sneller rond te maken, en de accountmanagers praten bij klantbezoeken weer over het assortiment in plaats van over losse bestellingen. Een tuincentrum in Breda liet ons na een maand al weten dat bijbestellen nu net zo makkelijk gaat als boodschappen doen.
+Intern pakte het eveneens goed uit. De binnendienst gebruikt de vrijgekomen tijd om offertes sneller rond te maken, en de accountmanagers praten bij klantbezoeken weer over het assortiment in plaats van over losse bestellingen. Een tuincentrum in Breda liet ons na een maand al weten dat bijbestellen nu net zo makkelijk gaat als boodschappen doen.
 
 4. Wat ging mis
 De scope groeide onderweg. Halverwege de bouw kwam de wens om ook retouren via het portaal te melden; dat kostte zes weken extra werk en is uiteindelijk toch naar fase 2 geschoven. De Franse vertaling was pas eind september klaar, waardoor Camille haar klanten in Frankrijk pas in oktober kon aansluiten. En bij de livegang kregen 38 klanten een welkomstmail met een verkeerde inloglink, wat een dag lang tot veel telefoontjes leidde.
 
-Ook de ondersteuning na de livegang was te krap geregeld. In de eerste twee weken kwamen er ruim 140 vragen binnen, terwijl we op hooguit 50 hadden gerekend. Er was geen apart nummer voor het portaal, waardoor vragen over inloggen en prijzen tussen de gewone bestellingen in de wachtrij belandden. Pas in de derde week hebben we twee collega's van de binnendienst vrijgemaakt voor vragen over het portaal.
+De ondersteuning na de livegang was bovendien te krap geregeld. In de eerste twee weken kwamen er ruim 140 vragen binnen, terwijl we op hooguit 50 hadden gerekend. Er was geen apart nummer voor het portaal, waardoor vragen over inloggen en prijzen tussen de gewone bestellingen in de wachtrij belandden. Pas in de derde week hebben we twee collega's van de binnendienst vrijgemaakt voor vragen over het portaal.
 
 5. Cijfers
 Op 31 oktober, bijna acht weken na de livegang, hadden 87 van de 236 tuincentra die bij Groenhaven bestellen een actief account in het bestelportaal; 61 daarvan plaatsten in oktober minstens één order. In oktober kwam 34 procent van alle orderregels van tuincentra via het portaal binnen. Een portaalorder kost de binnendienst gemiddeld 2 minuten, tegen 11 minuten voor een order die met de hand wordt ingevoerd. BP-26 had een budget van 240.000 euro; de werkelijke kosten kwamen uit op 281.000 euro, vooral door de extra bouwtijd voor de prijskoppeling.
