@@ -10,6 +10,7 @@ import {
   applyD1Migrations,
   deleteTargetScript,
   queryD1,
+  targetSecretNames,
   uploadTargetAssets,
   uploadTargetScript,
 } from "../src/cloudflare/workers.ts";
@@ -504,6 +505,38 @@ describe("a value in a script's path", () => {
         sent: expected.segments.flatMap((segment) => [
           ["DELETE", segment],
           ["PUT", segment],
+        ]),
+      });
+    }
+  );
+
+  it.each(hostileSegments)(
+    "keeps the script name %j one segment under its namespace's scripts when reading its secrets' names and opening its assets' upload session, or sends nothing",
+    async (scriptName) => {
+      const account = namespaced();
+      const target = { accountId: account.id, scriptName, namespace };
+      const refused = [
+        await refusedForItsPath(
+          async () => await targetSecretNames(api, target)
+        ),
+        await refusedForItsPath(
+          async () => await uploadTargetAssets(api, target, [])
+        ),
+      ];
+      const scripts = `/accounts/${account.id}/workers/dispatch/namespaces/${namespace}/scripts`;
+      const expected = keptOrRefused(scriptName);
+      expect({
+        refused,
+        sent: cloudflare.calls.map(({ method, path }) => [
+          method,
+          segmentBetween(path, scripts, "/secrets") ??
+            segmentBetween(path, scripts, "/assets-upload-session"),
+        ]),
+      }).toStrictEqual({
+        refused: [expected.refused, expected.refused],
+        sent: expected.segments.flatMap((segment) => [
+          ["GET", segment],
+          ["POST", segment],
         ]),
       });
     }

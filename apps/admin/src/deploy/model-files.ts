@@ -86,38 +86,42 @@ export const modelsBucketOf = (
   return name;
 };
 
-/** The API path of `bucket`'s objects, or of `...below` them. */
-const objectsPath = (bucket: ModelsBucket, ...below: string[]): ApiPath =>
-  apiPath(
-    "accounts",
-    bucket.accountId,
-    "r2",
-    "buckets",
-    bucket.name,
-    "objects",
-    ...below
-  );
-
 /**
- * The API path of the object at `key` in `bucket`: each segment of the key
- * one segment of the path (R2 takes a key's slashes as they are), each
- * percent-encoded, and refused by `apiPath` when a URL would read it as
- * another path (`.` or `..`, an empty segment): a second guard, behind
- * only ever acting on keys `isModelKey` takes.
+ * The API path of `bucket`'s objects, or of `...below` them, each value
+ * one segment. One `apiPath` refuses, in the account id, the bucket's name
+ * or below (`.` or `..`, an empty segment), stops the deploy, the value
+ * not named.
  */
-const objectPath = (bucket: ModelsBucket, key: string): ApiPath => {
+const objectsPath = (bucket: ModelsBucket, ...below: string[]): ApiPath => {
   try {
-    return objectsPath(bucket, ...key.split("/"));
+    return apiPath(
+      "accounts",
+      bucket.accountId,
+      "r2",
+      "buckets",
+      bucket.name,
+      "objects",
+      ...below
+    );
   } catch (error) {
     if (error instanceof ApiPathError) {
       throw new DeployError(
         "model_files_unreadable",
-        `A model file key leaves ${bucket.name}'s objects`
+        `A model file's path is refused in ${bucket.name}`
       );
     }
     throw error;
   }
 };
+
+/**
+ * The API path of the object at `key` in `bucket`: each segment of the key
+ * one segment of the path (R2 takes a key's slashes as they are), each
+ * percent-encoded, and refused when a URL would read it as another path:
+ * a second guard, behind only ever acting on keys `isModelKey` takes.
+ */
+const objectPath = (bucket: ModelsBucket, key: string): ApiPath =>
+  objectsPath(bucket, ...key.split("/"));
 
 /**
  * Whether `key` is a model file's, exactly `deployedModelKey` of a SHA-256:

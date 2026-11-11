@@ -8,6 +8,7 @@ import { ApiPathError } from "@grasp-os/shared/api-path";
 
 export const hostileSegments = [
   "..",
+  "../../other",
   "%2e%2e",
   "a%2fb",
   "a/b",
@@ -52,12 +53,13 @@ export const refusedForItsPath = async (
 
 /**
  * What a call with `value` in its path must come to: refused unsent when
- * no segment can be it (`..`), or else sent with `value` as its one
- * segment, decoding back to itself.
+ * no segment can be it (`..`, or `..` pieces an API decoding `%2F` once
+ * would climb by), or else sent with `value` as its one segment, decoding
+ * back to itself.
  */
 export const keptOrRefused = (
   value: string
 ): { refused: boolean; segments: string[] } =>
-  value === ".."
+  value === ".." || value === "../../other"
     ? { refused: true, segments: [] }
     : { refused: false, segments: [value] };

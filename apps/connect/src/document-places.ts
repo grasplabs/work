@@ -239,26 +239,23 @@ const graphDrive = (place: string): readonly string[] =>
 
 /**
  * Graph's search of a drive for `query`, as the path's last segment: in
- * OData's own `(`, `=` and `'`, as they are sent, which `apiPath` would
- * encode, with the query encoded inside the quotes (OData quotes a quote by
- * doubling it). Starting `search(`, it is never a dot segment, and the
- * encoded query adds no segment, query or fragment.
+ * OData's own `(`, `=` and `'`, as they are sent, of which `apiPath` would
+ * encode `=` (as `%3D`), with the query encoded inside the quotes (OData
+ * quotes a quote by doubling it). Starting `search(`, it is never a dot
+ * segment, and the encoded query adds no segment, query or fragment.
  */
-const graphSearch = (query: string): string =>
+const graphSearch = (query: string): `search(q='${string}')` =>
   `search(q='${encodeURIComponent(query.replaceAll("'", "''"))}')`;
 
-/**
- * `path` at Graph with `params`, and `search` (`graphSearch`) after it,
- * if any.
- */
+/** A drive's root at Graph, searched: its path, then `graphSearch`. */
+type GraphSearchPath = `${ApiPath}/search(q='${string}')`;
+
+/** `path` at Graph with `params`. */
 const graphUrl = (
-  path: ApiPath,
-  params: Record<string, string>,
-  search?: string
+  path: ApiPath | GraphSearchPath,
+  params: Record<string, string>
 ): URL => {
-  const url = new URL(
-    `https://${graphHost}${path}${search === undefined ? "" : `/${graphSearch(search)}`}`
-  );
+  const url = new URL(`https://${graphHost}${path}`);
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
@@ -407,20 +404,16 @@ const graphItems = async (
   { place, folder, query, cursor }: ItemsAsked
 ): Promise<{ items: PlaceItem[]; next: string | null; read: number }> => {
   const base = graphDrive(place);
-  let path = apiPath(...base, "root", "children");
+  let path: ApiPath | GraphSearchPath = apiPath(...base, "root", "children");
   if (query !== null) {
-    path = apiPath(...base, "root");
+    path = `${apiPath(...base, "root")}/${graphSearch(query)}`;
   } else if (folder !== null) {
     path = apiPath(...base, "items", folder, "children");
   }
-  const url = graphUrl(
-    path,
-    {
-      $select: "id,name,size,lastModifiedDateTime,file,folder",
-      $top: String(placesLimits.itemsPerRead),
-    },
-    query ?? undefined
-  );
+  const url = graphUrl(path, {
+    $select: "id,name,size,lastModifiedDateTime,file,folder",
+    $top: String(placesLimits.itemsPerRead),
+  });
   if (cursor !== null) {
     url.searchParams.set("$skiptoken", cursor);
   }

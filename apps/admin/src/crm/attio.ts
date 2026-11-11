@@ -366,7 +366,23 @@ const record = async <
   return parsed.data;
 };
 
-/** The distinct ids a reference attribute points at in `object`, at most `limit`. */
+/** Whether `id` can be a record's: one `apiPath` refuses (`..`) is no record's. */
+const isRecordId = (id: string): boolean => {
+  try {
+    apiPath(id);
+    return true;
+  } catch (error) {
+    if (error instanceof ApiPathError) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
+ * The distinct ids a reference attribute points at in `object`, at most
+ * `limit`; ids no record can have are dropped first, so they take no place.
+ */
 const targets = (
   references: readonly { target_object: string; target_record_id: string }[],
   object: string,
@@ -377,6 +393,7 @@ const targets = (
       references
         .filter((each) => each.target_object === object)
         .map((each) => each.target_record_id)
+        .filter(isRecordId)
     ),
   ].slice(0, limit);
 

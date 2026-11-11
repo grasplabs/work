@@ -5,9 +5,12 @@
  * (also as `%2e%2e`) move up. `encodeURIComponent` closes all of these
  * but `.` and `..`, which it leaves as they are, so a path a URL parser
  * would change is refused, as is an empty segment, which would turn an
- * item's path into its collection's. What comes out is the path a request
- * will have, one segment per argument. An API that decodes a path twice
- * is not covered. The threat model is on GRA-1779.
+ * item's path into its collection's. A segment with a `.` or `..` piece
+ * between its `/` or `\` is refused too: an API or proxy that decodes `%2F`
+ * or `%5C` once before routing would read those pieces as moves up. What
+ * comes out is the path a request will have, one segment per argument. An
+ * API that decodes a path twice is not covered. The threat model is on
+ * GRA-1779.
  */
 
 declare const brand: unique symbol;
@@ -20,12 +23,19 @@ export class ApiPathError extends Error {
   override name = "ApiPathError";
 }
 
+/** Where a segment splits once `%2F` or `%5C` in it is decoded. */
+const separator = /[/\\]/u;
+
+/** Whether a piece of `segment` would move up once its separators are decoded. */
+const hasDotPiece = (segment: string): boolean =>
+  segment.split(separator).some((piece) => piece === "." || piece === "..");
+
 /** Any fixed origin: only the path it parses back to is compared. */
 const origin = "https://api.invalid";
 
 const encoded = (segment: string, index: number): string => {
   try {
-    if (segment !== "") {
+    if (segment !== "" && !hasDotPiece(segment)) {
       return encodeURIComponent(segment);
     }
   } catch {

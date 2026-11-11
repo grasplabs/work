@@ -80,16 +80,15 @@ describe(apiPath, () => {
     "%2E%2E",
     ".%2e",
     "%2e",
-    "a/../b",
     "a%2fb",
     "a/b",
+    "@scope/name",
     "/abs",
     "//evil.example/x",
     "https://evil.example/x",
     "x?y=1",
     "x#frag",
     "a\\b",
-    "..\\..",
     "a b",
     "a%00b",
     "a\u0000b",
@@ -116,6 +115,12 @@ describe(apiPath, () => {
     ["dot", ["."]],
     ["dot-dot after fixed words", ["accounts", "..", "users"]],
     ["dot at the end", ["accounts", "0123abcd", "."]],
+    ["dot-dot pieces split by slashes", ["scripts", "../../other"]],
+    ["a dot-dot piece in the middle", ["scripts", "a/../b"]],
+    ["a dot-dot piece at the end", ["scripts", "x/.."]],
+    ["a dot piece in the middle", ["scripts", "a/./b"]],
+    ["dot-dot pieces split by backslashes", ["scripts", "..\\.."]],
+    ["a dot piece before a backslash", ["scripts", ".\\x"]],
     ["empty", [""]],
     ["empty at the end", ["accounts", "0123abcd", "scripts", ""]],
     ["empty in the middle", ["accounts", "", "scripts"]],
@@ -142,7 +147,7 @@ describe(apiPath, () => {
     );
   });
 
-  it.each(["..", "\uD800secret"])(
+  it.each(["..", "secret/../x", "\uD800secret"])(
     "names no refused value in its message (%j)",
     (value) => {
       expect(refusalOf(["accounts", value])).not.toContain(value);
