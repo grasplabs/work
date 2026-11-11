@@ -1,10 +1,7 @@
 import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 
-import {
-  cloudflareTest,
-  readD1Migrations,
-} from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 

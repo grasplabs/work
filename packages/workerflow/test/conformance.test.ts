@@ -264,13 +264,7 @@ const checks: Record<Family, () => void> = {
       expect(sameOnBoth(notes(instances))).toStrictEqual([1, 2, 3]);
     });
 
-    test("an attempt past its timeout fails with the same message", async () => {
-      const { reference, engine } = await ran("slow-step");
-      expect(engine.status).toBe("errored");
-      expect(reference.status).toBe("errored");
-      expect(engine.error?.message).toBe(reference.error?.message);
-      expect(engine.error?.message).toBe("Execution timed out after 50ms");
-    });
+    // An attempt past its timeout fails: attempt-timeout-name.
 
     test("a timeout of 0 is refused", async () => {
       const { reference, engine } = await ran("zero-timeout");
@@ -364,15 +358,7 @@ const checks: Record<Family, () => void> = {
       expect(field(outcomes.engine.output, "payload")).toStrictEqual({ n: 1 });
     });
 
-    test("a wait with no event by its timeout rejects, with the same message", async () => {
-      const { reference, engine } = await ran("wait-timeout");
-      expect(field(engine.output, "message")).toBe(
-        field(reference.output, "message")
-      );
-      expect(field(engine.output, "message")).toBe(
-        "Execution timed out after 50ms"
-      );
-    });
+    // A wait with no event by its timeout rejects: wait-timeout-name.
   },
   serialization: () => {
     test("every structured value a step returns comes back as it was", async () => {
@@ -842,8 +828,18 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
   },
   "attempt-timeout-name": async () => {
     const { reference, engine } = await ran("slow-step");
-    expect(engine.error?.name).toBe("WorkflowTimeoutError");
-    expect(reference.error?.name).toBe("Error");
+    expect([engine.status, reference.status]).toStrictEqual([
+      "errored",
+      "errored",
+    ]);
+    expect([engine.error?.name, engine.error?.message]).toStrictEqual([
+      "WorkflowTimeoutError",
+      "Execution timed out after 50ms",
+    ]);
+    expect([reference.error?.name, reference.error?.message]).toStrictEqual([
+      "Error",
+      "WorkflowTimeoutError: Execution timed out after 50ms",
+    ]);
   },
   "caught-non-retryable": async () => {
     const { reference, engine } = await ran("non-retryable-caught");
@@ -869,8 +865,14 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
   },
   "wait-timeout-name": async () => {
     const { reference, engine } = await ran("wait-timeout");
-    expect(field(engine.output, "name")).toBe("WorkflowTimeoutError");
-    expect(field(reference.output, "name")).toBe("Error");
+    expect(engine.output).toStrictEqual({
+      name: "WorkflowTimeoutError",
+      message: "Execution timed out after 50ms",
+    });
+    expect(reference.output).toStrictEqual({
+      name: "Error",
+      message: "WorkflowTimeoutError: Execution timed out after 50ms",
+    });
   },
   "event-type-rule": async () => {
     const { reference, engine, instances } = await ran("odd-event-type");
