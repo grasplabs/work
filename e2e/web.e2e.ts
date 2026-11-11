@@ -329,7 +329,19 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   const { admin, member } = peopleIn("teams");
   await signInTo(context, admin);
   await page.goto("/settings/members");
-  await page.getByRole("tab", { name: "Teams" }).click();
+  // An admin's pages show above them which AI providers fail, read once
+  // the page is up (frame/ai-key-banner.tsx). Earlier tests leave some
+  // failing, and a banner that arrives as the tab is pressed moves it from
+  // under the pointer: the press focuses it, the click lands elsewhere,
+  // and Members stays selected. Pressed again until it is selected, as a
+  // person would.
+  const teamsTab = page.getByRole("tab", { name: "Teams" });
+  await expect(async () => {
+    await teamsTab.click();
+    await expect(teamsTab).toHaveAttribute("aria-selected", "true", {
+      timeout: 1000,
+    });
+  }).toPass();
   const teams = page.getByRole("region", { name: "Teams" });
   const name = `Finance ${crypto.randomUUID().slice(0, 6)}`;
 
