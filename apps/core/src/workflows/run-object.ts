@@ -35,9 +35,17 @@ const runIsThere = (sql: SqlStorage): boolean =>
  */
 const failedTaskTable = "grasp_run_failed_task";
 
-/** Keeps `task` as the one the run in `sql` failed at, while it is there. */
-const keepFailedTaskIn = (sql: SqlStorage, task: string): void => {
+/**
+ * Keeps `task` as the one the run in `sql` failed at, while it is there;
+ * none (`null`) forgets any an earlier activation kept, so only the end
+ * the run is failing with now names one.
+ */
+const keepFailedTaskIn = (sql: SqlStorage, task: string | null): void => {
   if (!runIsThere(sql)) {
+    return;
+  }
+  if (task === null) {
+    sql.exec(`DROP TABLE IF EXISTS ${failedTaskTable}`);
     return;
   }
   sql.exec(

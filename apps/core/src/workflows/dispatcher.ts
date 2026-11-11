@@ -89,7 +89,7 @@ export interface RunMemory {
   /** Its sealed build's calls tried once that went out (sealed-run.ts). */
   sentCalls?: SentCalls;
   /** Keeps the task whose step's failure it ends with (run-object.ts). */
-  keepFailedTask?: (task: string) => void;
+  keepFailedTask?: (task: string | null) => void;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
   aiCalls: AiCalls;
   leaseOf: HostHooks["leaseOf"];

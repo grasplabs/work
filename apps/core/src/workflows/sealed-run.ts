@@ -1596,9 +1596,12 @@ class SealedRun implements SealedRunKind {
 
   /**
    * The task whose step's failure the run ends with, when `failure` is that
-   * very failure (`failureUntaken`, `runFailure`): the one pending, no
-   * catch having taken it. None for any other: a failure outside every
-   * step (an `if`'s condition, a raise), or one a catch took before.
+   * very failure (`failureUntaken`, `runFailure`): the one pending, which
+   * the code threw on or failed past. None for any other: a failure
+   * outside every step (an `if`'s condition, a raise), or one a catch took
+   * before another step ran. A catch's own failure of the pending code,
+   * before any step past it, is taken for the step's rethrown
+   * (`runFailure`): the isolate can't tell the two apart.
    */
   endingTask(failure: StepError): string | undefined {
     return failure === this.#pendingError ? this.#pendingTask?.id : undefined;

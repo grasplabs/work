@@ -137,16 +137,16 @@ describe("an independent workflow's run signals", () => {
   it("blame no task for a run that failed outside every step, after a task whose failure a catch took", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    // Its opening greeting's input fails to evaluate, and a catch takes
-    // that; its greeting runs and ends well; then the condition of an `if`,
-    // outside any step, fails with the same code, and the run with it.
+    // Its opening greeting's step fails (its answer is off its schema), and
+    // a catch takes that; its greeting runs and ends well; then the
+    // condition of an `if`, outside any step, fails, and the run with it.
     const { workflow } = await greetingWorkflow(ada, admin, {
       before: [
         {
           id: "opening",
           type: "try",
-          try: [{ ...greetStep("first"), input: { who: { $expr: failing } } }],
-          catch: { code: "expression.failed" },
+          try: [greetStep("first")],
+          catch: {},
         },
       ],
       after: [
@@ -159,7 +159,10 @@ describe("an independent workflow's run signals", () => {
         },
       ],
     });
-    await providerAnswering(answer('{"line":"Hello Ada"}'));
+    await providerAnswering(
+      answer("Hello, Ada!"),
+      answer('{"line":"Hello Ada"}')
+    );
     const failed = await ended(
       ada,
       workflow.id,

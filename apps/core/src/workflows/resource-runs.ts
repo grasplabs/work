@@ -810,7 +810,7 @@ export interface ResourceRunMemory {
    * Keeps the task whose step's failure the run ends with, as the run's
    * host names it (`SealedRunKind.endingTask`), before it ends.
    */
-  keepFailedTask?: (task: string) => void;
+  keepFailedTask?: (task: string | null) => void;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
   aiCalls?: AiCalls;
   /** Aborts once the activation running the run is over. */
@@ -1135,10 +1135,7 @@ export const sealedActivation = async (
   if (failed !== undefined) {
     // Which task's failure it is, by the very failure its host has
     // pending, never by what the failure says: kept with the run.
-    const task = kind?.endingTask(failed);
-    if (task !== undefined) {
-      memory.keepFailedTask?.(task);
-    }
+    memory.keepFailedTask?.(kind?.endingTask(failed) ?? null);
     throw namedError(failed.name, failed.message, failed.code);
   }
   return acceptedOutput(output, result.ok ? result.value : undefined);
