@@ -33,8 +33,9 @@ export const recallLimit = 10;
 export const sourceIdMaxLength = 256;
 
 /**
- * Most characters of an instruction file's text: about 2000 tokens, so the
- * few files a chat starts with leave it room for the conversation.
+ * Most UTF-16 units (`.length`) of an instruction file's text: about 2000
+ * tokens, so the few files a chat starts with leave it room for the
+ * conversation.
  */
 export const instructionsMaxLength = 8000;
 
@@ -117,20 +118,31 @@ export const newSourceSchema = z.strictObject({
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
 
+/** Whether `text` is over `instructionsMaxLength` UTF-16 units. */
+export const isOverInstructionsLimit = (text: string): boolean =>
+  text.length > instructionsMaxLength;
+
 /**
- * A version of an instruction file to add: a source whose text is held to
- * `instructionsMaxLength`. It is kept whole and versioned like any source,
- * but never cut into chunks or indexed, so recall never finds it: it is
- * read whole (`readCurrent`).
+ * An instruction file's text: some text, at most `instructionsMaxLength`
+ * UTF-16 units (`.length`), the one rule for it, which the host checks
+ * with too.
  */
-export const newInstructionsSchema = z.strictObject({
-  source: sourceIdSchema,
-  change: changeKeySchema,
-  text: z
-    .string()
-    .regex(/\S/u, { message: "Holds no text" })
-    .max(instructionsMaxLength),
-  access: accessSchema,
+export const instructionsTextSchema = z
+  .string()
+  .regex(/\S/u, { message: "Holds no text" })
+  // Not zod's `max`, which counts code points.
+  .refine((text) => !isOverInstructionsLimit(text), {
+    message: `At most ${instructionsMaxLength} UTF-16 units`,
+  });
+
+/**
+ * A version of an instruction file to add: a source whose text is
+ * `instructionsTextSchema`'s. It is kept whole and versioned like any
+ * source, but never cut into chunks or indexed, so recall never finds it:
+ * it is read whole (`readCurrent`).
+ */
+export const newInstructionsSchema = newSourceSchema.extend({
+  text: instructionsTextSchema,
 });
 export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
