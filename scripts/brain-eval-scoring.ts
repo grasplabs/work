@@ -74,10 +74,15 @@ export const questionResultSchema = z.object({
 });
 export type QuestionResult = z.infer<typeof questionResultSchema>;
 
-/** What the run printed about itself. */
+/**
+ * What the run printed about itself. `passagesDigest` (how the Brain's
+ * chunker cut the set) came with long documents: a run written before it
+ * lacks it and still parses.
+ */
 export const runInfoSchema = z.object({
   set: z.string(),
   setDigest: z.string(),
+  passagesDigest: z.string().optional(),
   sources: z.int(),
   longDocuments: z.int().optional(),
   passages: z.int().optional(),
@@ -396,21 +401,30 @@ export interface GroupChange extends SignTest {
 
 /**
  * What else decides a run's numbers, besides the Brain: the set (its
- * digest covers every source, reader, question, asker and team), the most
- * results a recall returns, and the result budget recall is counted at.
+ * digest covers every source, reader, question, asker and team), how the
+ * Brain's chunker cuts it into passages (what counts as found, which
+ * questions are over long documents and grep's units), the most results a
+ * recall returns, and the result budget recall is counted at.
+ * `passagesDigest` is missing from a run written before it.
  */
 export interface RunMeasure {
   setDigest: string;
+  passagesDigest?: string | undefined;
   recallLimit: number;
   resultBudget: number;
 }
 
 /**
  * Whether two runs differ only in the Brain, so a difference in their
- * results is the Brain's: the same set, limit and budget.
+ * results is the Brain's: the same set, cut into the same passages, and the
+ * same limit and budget. A run without a passage digest is never
+ * comparable: its cut is unknown (and its set digest differs anyway, as it
+ * predates long documents).
  */
 export const comparable = (before: RunMeasure, now: RunMeasure): boolean =>
   before.setDigest === now.setDigest &&
+  before.passagesDigest !== undefined &&
+  before.passagesDigest === now.passagesDigest &&
   before.recallLimit === now.recallLimit &&
   before.resultBudget === now.resultBudget;
 
@@ -418,7 +432,8 @@ export const comparable = (before: RunMeasure, now: RunMeasure): boolean =>
  * The Brain's recall now against an earlier run's, per group, paired by
  * question: only questions in both whose digest is unchanged count, and
  * the sign test says whether more were gained than lost. A question's
- * rank depends on every other source and on who may read it, so when the
+ * rank depends on every other source, on how each is cut into passages and
+ * on who may read it, so when the
  * runs aren't {@link comparable} the counts are shown without a verdict.
  */
 export const compareRuns = (
@@ -555,7 +570,7 @@ export const report = (
       "",
       judged
         ? judgedLine
-        : "The set, the result limit or the result budget changed since that run, and every rank depends on them: changes are shown, not judged.",
+        : "The set, how it is cut into passages, the result limit or the result budget changed since that run (or that run doesn't record its passages), and every rank depends on them: changes are shown, not judged.",
       table(
         ["Against that run", "paired", "gained", "lost", "p", "verdict"],
         changes.map((change) => [

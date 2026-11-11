@@ -16,8 +16,10 @@
  * `recallAs`. It prints a compact table and writes the result, one JSON
  * file per run, which the next run compares with: per group, better or
  * worse than last time only beyond the margin. Latency is measured on
- * this machine's workerd, not on production. Exits 1 when the run failed
- * or anything reached an asker who may not read it.
+ * this machine's workerd, not on production. Exits 1 when the run failed:
+ * anything reached an asker who may not read it, the Brain returned a chunk
+ * the set didn't cut, or anything else; a failed run's result is not kept,
+ * so it never becomes the baseline.
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -89,6 +91,17 @@ const linesAfter = (output: string, marker: string): unknown[] =>
     return [json];
   });
 
+/** A chunk the Brain returned that the set didn't cut, as the run printed it. */
+const uncutSchema = z.object({
+  id: z.string(),
+  source: z.string(),
+  start: z.string(),
+});
+
+/** The last lines of the run's output. */
+const tailOf = (output: string): string =>
+  output.split("\n").slice(-60).join("\n");
+
 /** The newest earlier run in `dir`, if there is one. */
 const lastRunIn = (dir: string): string | undefined =>
   readdirSync(dir)
@@ -103,8 +116,11 @@ const [info] = linesAfter(output, "BRAIN_EVAL_RUN").map((line) =>
 const results = linesAfter(output, "BRAIN_EVAL_RESULT").map((line) =>
   questionResultSchema.parse(line)
 );
+const uncut = linesAfter(output, "BRAIN_EVAL_UNCUT").map((line) =>
+  uncutSchema.parse(line)
+);
 if (info === undefined || results.length !== info.questions) {
-  process.stderr.write(`${output.split("\n").slice(-60).join("\n")}\n`);
+  process.stderr.write(`${tailOf(output)}\n`);
   process.stderr.write(
     "The Brain evaluation did not finish: see its output above.\n"
   );
@@ -141,7 +157,9 @@ const file = path.join(
   options.out,
   `${at.replaceAll(":", "-")}-${sha.slice(0, 8)}.json`
 );
-writeFileSync(file, `${JSON.stringify({ ...run, summary }, null, 2)}\n`);
+if (ok) {
+  writeFileSync(file, `${JSON.stringify({ ...run, summary }, null, 2)}\n`);
+}
 
 const passagesLine =
   info.longDocuments === undefined || info.passages === undefined
@@ -163,12 +181,32 @@ process.stdout.write(
       : compareRuns(results, before.results, {
           judged: comparable(
             {
-              ...before.identity.run,
+              setDigest: before.identity.run.setDigest,
+              passagesDigest: before.identity.run.passagesDigest,
+              recallLimit: before.identity.run.recallLimit,
               resultBudget: before.identity.resultBudget,
             },
-            { ...info, resultBudget }
+            {
+              setDigest: info.setDigest,
+              passagesDigest: info.passagesDigest,
+              recallLimit: info.recallLimit,
+              resultBudget,
+            }
           ),
         })
-  )}\n\nResult: ${file}\n`
+  )}\n`
 );
-process.exit(ok && summary.leaks.length === 0 ? 0 : 1);
+if (uncut.length > 0) {
+  process.stdout.write(
+    `\nUNCUT chunks in ${uncut.length} results: the Brain no longer cuts as the set does; ranks are not comparable. ${uncut.map(({ id, source, start }) => `${id} (${source}: "${start}…")`).join("; ")}\n`
+  );
+}
+if (ok) {
+  process.stdout.write(`\nResult: ${file}\n`);
+} else {
+  process.stderr.write(`\n${tailOf(output)}\n`);
+  process.stderr.write(
+    "The Brain evaluation failed: see its output above. Its result is not kept, so it never becomes the baseline.\n"
+  );
+}
+process.exit(ok && summary.leaks.length === 0 && uncut.length === 0 ? 0 : 1);

@@ -323,11 +323,27 @@ describe("the Brain evaluation's scoring", () => {
     expect(all).toMatchObject({ gained: 30, lost: 0, judged: false });
   });
 
-  it("compares runs only on the same set, result limit and result budget", () => {
-    const measure = { setDigest: "set", recallLimit: 10, resultBudget: 5 };
+  it("compares runs only on the same set, cut the same way, result limit and result budget", () => {
+    const measure = {
+      setDigest: "set",
+      passagesDigest: "cut",
+      recallLimit: 10,
+      resultBudget: 5,
+    };
     expect(comparable(measure, { ...measure })).toBeTruthy();
     expect(comparable(measure, { ...measure, setDigest: "other" })).toBeFalsy();
+    expect(
+      comparable(measure, { ...measure, passagesDigest: "recut" })
+    ).toBeFalsy();
     expect(comparable(measure, { ...measure, recallLimit: 20 })).toBeFalsy();
     expect(comparable(measure, { ...measure, resultBudget: 3 })).toBeFalsy();
+  });
+
+  it("never judges against a run that doesn't record how the set was cut", () => {
+    const measure = { setDigest: "set", recallLimit: 10, resultBudget: 5 };
+    expect(
+      comparable(measure, { ...measure, passagesDigest: "cut" })
+    ).toBeFalsy();
+    expect(comparable(measure, { ...measure })).toBeFalsy();
   });
 });

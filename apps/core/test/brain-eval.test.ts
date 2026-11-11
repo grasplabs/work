@@ -25,6 +25,7 @@ import {
   grepRecall,
   isLongDocument,
   leaksOf,
+  passagesDigestOf,
   passagesOf,
   questionDigestOf,
   rankOf,
@@ -45,7 +46,8 @@ import { signedInWithRole } from "./sign-in.ts";
 // (`grepRecall` in fixtures/brain-eval/set.ts) over the same passages the
 // Brain's chunker cuts the sources into, with the same access. It prints
 // what each returned, one JSON line per question (`BRAIN_EVAL_RESULT`),
-// for the script to score; it fails only when the set is broken, the
+// for the script to score, and each chunk it returned that the set didn't
+// cut (`BRAIN_EVAL_UNCUT`); it fails only when the set is broken, the
 // Brain returned something its asker may not read, or it returned a chunk
 // the set didn't cut.
 
@@ -152,7 +154,8 @@ describe("the Brain evaluation", () => {
     const teamIds = await setUpTeams(people);
     // Each source as an upload named by its key in the set, so what recall
     // returns names it. One at a time, in the set's order, so "newer
-    // first" breaks ties the same way in every run and in the baseline.
+    // first" would break ties as the baseline does; a fallback only, since
+    // no two passages are the same length (`setProblems`).
     for (const source of sources) {
       // oxlint-disable-next-line no-await-in-loop -- in order, see above
       await addSource(env, {
@@ -167,6 +170,7 @@ describe("the Brain evaluation", () => {
       `BRAIN_EVAL_RUN ${JSON.stringify({
         set: version,
         setDigest: await setDigestOf(brainEvalSet),
+        passagesDigest: await passagesDigestOf(sources),
         sources: sources.length,
         longDocuments: sources.filter(isLongDocument).length,
         passages: passages.length,
@@ -206,7 +210,14 @@ describe("the Brain evaluation", () => {
       for (const { source, text } of recalled.chunks) {
         const cut = passageTexts.get(source.id);
         if (cut !== undefined && !cut.has(text)) {
-          uncut.push(`${question.id}: ${source.id} "${text.slice(0, 60)}…"`);
+          uncut.push(`${question.id}: ${source.id}`);
+          console.log(
+            `BRAIN_EVAL_UNCUT ${JSON.stringify({
+              id: question.id,
+              source: source.id,
+              start: text.slice(0, 60),
+            })}`
+          );
         }
       }
       const { expects } = question;

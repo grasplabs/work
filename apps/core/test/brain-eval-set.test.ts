@@ -16,6 +16,7 @@ import {
   grepRecall,
   isLongDocument,
   leaksOf,
+  passagesDigestOf,
   passagesOf,
   questionDigestOf,
   rankOf,
@@ -265,10 +266,17 @@ describe("the Brain evaluation's checks", () => {
     ).toStrictEqual(["quoting: its quote is in 2 passages of handbook"]);
   });
 
-  it("reports a look-alike in the passage that holds the quote, or in none", () => {
+  it("reports a look-alike in the passage that holds the quote, alone or with another, or in none", () => {
     const quote = "25 vakantiedagen per jaar in Utrecht";
     expect(
       setProblems(constructedSources, [quoting(quote, "in Utrecht")])
+    ).toStrictEqual([
+      "quoting: its look-alike is in the passage that holds its quote, handbook#0",
+    ]);
+    expect(
+      setProblems(constructedSources, [
+        quoting(quote, "vakantiedagen per jaar"),
+      ])
     ).toStrictEqual([
       "quoting: its look-alike is in the passage that holds its quote, handbook#0",
     ]);
@@ -277,6 +285,14 @@ describe("the Brain evaluation's checks", () => {
     ).toStrictEqual([
       "quoting: its look-alike must be whole in one passage of handbook",
     ]);
+  });
+
+  it("reports a look-alike whole in two passages, neither the quote's", () => {
+    expect(
+      setProblems(constructedSources, [
+        quoting("meld je voor 9 uur", "vakantiedagen per jaar"),
+      ])
+    ).toStrictEqual(["quoting: its look-alike is in 2 passages of handbook"]);
   });
 
   it("reports two passages of the same length, naming a long document's by its place", () => {
@@ -341,6 +357,32 @@ describe("the Brain evaluation's checks", () => {
     await expect(setDigestOf(daanInHr)).resolves.not.toBe(digest);
     await expect(setDigestOf(lukasAsks)).resolves.not.toBe(digest);
     await expect(setDigestOf({ ...brainEvalSet })).resolves.toBe(digest);
+  });
+
+  it("gives the passages, and a question over a source, another digest when the source is cut differently", async () => {
+    const asked: BrainEvalQuestion = {
+      ...leaveInUtrecht,
+      expects: answer(
+        "words",
+        "handbook",
+        "25 vakantiedagen per jaar in Utrecht"
+      ),
+    };
+    // The same paragraphs, the first two run together: two passages, not three.
+    const recut: BrainEvalSource = {
+      ...handbook,
+      text: [`${leaveUtrecht} ${leaveDuisburg}`, sickness].join("\n\n"),
+    };
+    expect(passagesOf([recut])).toHaveLength(2);
+    const set = { ...brainEvalSet, sources: [handbook, memo] };
+    const recutSet = { ...brainEvalSet, sources: [recut, memo] };
+    const passages = await passagesDigestOf(set.sources);
+    await expect(passagesDigestOf([handbook, memo])).resolves.toBe(passages);
+    await expect(passagesDigestOf(recutSet.sources)).resolves.not.toBe(
+      passages
+    );
+    const digest = await questionDigestOf(set, asked);
+    await expect(questionDigestOf(recutSet, asked)).resolves.not.toBe(digest);
   });
 
   it("gives a question another digest when its asker, or the teams they are in, change", async () => {

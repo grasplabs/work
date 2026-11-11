@@ -89,57 +89,12 @@ export const brainEvalSet: BrainEvalSet = {
 };
 
 /**
- * The set's digest: all of it, so a change to any source, reader, question,
- * asker or team is a different set, version bumped or not. A run compared
- * with one of another set gives no verdicts, since every rank depends on
- * every source and on who may read it.
+ * A text's length in code points, as SQLite's `length()` counts it when
+ * the Brain breaks a tie by a chunk's length; JS `.length` counts UTF-16
+ * units, which differ for characters outside the BMP.
  */
-export const setDigestOf = async (set: BrainEvalSet): Promise<string> =>
-  await sha256Hex(JSON.stringify(set));
-
-/**
- * A question's digest: the question, who asks it and the teams they are
- * in, and the source it asks for with its readers. A comparison pairs a
- * question with its earlier result only when this is unchanged.
- */
-export const questionDigestOf = async (
-  set: BrainEvalSet,
-  question: BrainEvalQuestion
-): Promise<string> => {
-  const asker = question.asker ?? set.defaultAsker;
-  const askerTeams = brainEvalTeamNames.filter((team) =>
-    set.teams[team].includes(asker)
-  );
-  const { expects } = question;
-  const source =
-    expects.kind === "absent"
-      ? null
-      : (set.sources.find(({ key }) => key === expects.source) ?? null);
-  const digest = await sha256Hex(
-    JSON.stringify({ question, asker, askerTeams, source })
-  );
-  return digest.slice(0, 16);
-};
-
-/** Who asks `question`. */
-export const askerOf = (question: BrainEvalQuestion): BrainEvalPerson =>
-  question.asker ?? brainEvalDefaultAsker;
-
-/** Whether `person` may read `source`, as its readers say. */
-export const mayRead = (
-  person: BrainEvalPerson,
-  source: BrainEvalSource
-): boolean => {
-  const { readers } = source;
-  if (readers === "nobody") {
-    return false;
-  }
-  if ("owner" in readers) {
-    return readers.owner === person;
-  }
-  const members: readonly BrainEvalPerson[] = brainEvalTeams[readers.team];
-  return members.includes(person);
-};
+// oxlint-disable-next-line typescript/no-misused-spread -- code points are what SQLite counts, see above
+const lengthOf = (text: string): number => [...text].length;
 
 /** A passage of a source: one chunk of it, as the Brain cuts it. */
 export interface Passage {
@@ -164,6 +119,82 @@ export const passagesOf = (sources: readonly BrainEvalSource[]): Passage[] =>
       text,
     }))
   );
+
+/**
+ * The set's digest: all of it, so a change to any source, reader, question,
+ * asker or team is a different set, version bumped or not. A run compared
+ * with one of another set gives no verdicts, since every rank depends on
+ * every source and on who may read it.
+ */
+export const setDigestOf = async (set: BrainEvalSet): Promise<string> =>
+  await sha256Hex(JSON.stringify(set));
+
+/**
+ * The digest of how the Brain's chunker cuts `sources`: each passage's
+ * source, place and text. The set's digest covers only the raw texts, yet
+ * what counts as found, which questions are over long documents and the
+ * units grep ranks all depend on the cut, so a change to the chunker is a
+ * different measurement too.
+ */
+export const passagesDigestOf = async (
+  sources: readonly BrainEvalSource[]
+): Promise<string> =>
+  await sha256Hex(
+    JSON.stringify(
+      passagesOf(sources).map(({ source, position, text }) => [
+        source.key,
+        position,
+        text,
+      ])
+    )
+  );
+
+/**
+ * A question's digest: the question, who asks it and the teams they are
+ * in, and the source it asks for with its readers and the passages the
+ * Brain cuts it into. A comparison pairs a question with its earlier result
+ * only when this is unchanged, so a source cut differently stops pairing.
+ */
+export const questionDigestOf = async (
+  set: BrainEvalSet,
+  question: BrainEvalQuestion
+): Promise<string> => {
+  const asker = question.asker ?? set.defaultAsker;
+  const askerTeams = brainEvalTeamNames.filter((team) =>
+    set.teams[team].includes(asker)
+  );
+  const { expects } = question;
+  const source =
+    expects.kind === "absent"
+      ? null
+      : (set.sources.find(({ key }) => key === expects.source) ?? null);
+  const passages =
+    source === null ? null : passagesOf([source]).map(({ text }) => text);
+  const digest = await sha256Hex(
+    JSON.stringify({ question, asker, askerTeams, source, passages })
+  );
+  return digest.slice(0, 16);
+};
+
+/** Who asks `question`. */
+export const askerOf = (question: BrainEvalQuestion): BrainEvalPerson =>
+  question.asker ?? brainEvalDefaultAsker;
+
+/** Whether `person` may read `source`, as its readers say. */
+export const mayRead = (
+  person: BrainEvalPerson,
+  source: BrainEvalSource
+): boolean => {
+  const { readers } = source;
+  if (readers === "nobody") {
+    return false;
+  }
+  if ("owner" in readers) {
+    return readers.owner === person;
+  }
+  const members: readonly BrainEvalPerson[] = brainEvalTeams[readers.team];
+  return members.includes(person);
+};
 
 /** Whether the Brain cuts `source` into more than one passage. */
 export const isLongDocument = (source: BrainEvalSource): boolean =>
@@ -264,9 +295,11 @@ const wordPattern = /[\p{L}\p{N}]+/gu;
  * "tankpassen", "zuschlag" in "samstagszuschlag"), though not the other
  * way round: on the `forms` way it already does part of what stemming
  * will. It doesn't ignore accents ("financiele" is not "financiële").
- * Ties as the Brain breaks them: the shorter passage first, then the later
- * source in the set (newer), then the earlier place in its source. At most
- * `limit` results, each its source's key and the passage's text.
+ * Ties as the Brain breaks them: the shorter passage first (in code
+ * points). The later source in the set (newer), then the earlier place in
+ * its source, follow only as fallbacks: no two passages are the same length
+ * (`setProblems`), so they never decide. At most `limit` results, each its
+ * source's key and the passage's text.
  */
 export const grepRecall = (
   passages: readonly Passage[],
@@ -280,13 +313,13 @@ export const grepRecall = (
     .map((passage) => {
       const text = passage.text.toLowerCase();
       const score = words.filter((word) => text.includes(word)).length;
-      return { passage, score };
+      return { passage, score, length: lengthOf(passage.text) };
     })
     .filter(({ score }) => score > 0)
     .toSorted(
       (a, b) =>
         b.score - a.score ||
-        a.passage.text.length - b.passage.text.length ||
+        a.length - b.length ||
         b.passage.order - a.passage.order ||
         a.passage.position - b.passage.position
     )
@@ -322,7 +355,7 @@ const passageProblems = (
   // A source of one passage is that passage, and the Brain breaks a tie on
   // score by the chunk's length: with no two the same, a tie never reaches
   // its random IDs.
-  const byLength = Map.groupBy(passages, ({ text }) => text.length);
+  const byLength = Map.groupBy(passages, ({ text }) => lengthOf(text));
   for (const [length, same] of byLength) {
     if (same.length > 1) {
       problems.push(
@@ -365,14 +398,20 @@ const passageProblems = (
     if (lookalike === undefined) {
       continue;
     }
-    const [alike, ...more] = holding(own, lookalike);
-    if (alike === undefined || more.length > 0) {
+    // Whole in exactly one passage, and not the one that holds the quote.
+    const alike = holding(own, lookalike);
+    const withQuote = alike.find((passage) => quoted.includes(passage));
+    if (withQuote !== undefined) {
+      problems.push(
+        `${id}: its look-alike is in the passage that holds its quote, ${nameOf(withQuote)}`
+      );
+    } else if (alike.length === 0) {
       problems.push(
         `${id}: its look-alike must be whole in one passage of ${source.key}`
       );
-    } else if (quoted.includes(alike)) {
+    } else if (alike.length > 1) {
       problems.push(
-        `${id}: its look-alike is in the passage that holds its quote, ${nameOf(alike)}`
+        `${id}: its look-alike is in ${alike.length} passages of ${source.key}`
       );
     }
   }
@@ -388,7 +427,8 @@ const passageProblems = (
  * two the same length, so a tie on score is broken by length, never by the
  * Brain's random IDs; an answer's quote whole in exactly one passage of its
  * source, so only that passage counts as found; its look-alike, when it
- * names one, whole in exactly one other passage of that source; and each
+ * names one, whole in exactly one passage of that source, not the quote's
+ * (in the quote's passage and another is a problem too); and each
  * hidden secret whole in a passage of its source, so the leak check can
  * see it in a returned chunk.
  */
