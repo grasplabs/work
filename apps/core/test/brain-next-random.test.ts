@@ -7,7 +7,7 @@ import { z } from "zod";
 
 import { organizationId } from "../src/auth/auth.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
-import type { SourceReaders } from "../src/brain-next.ts";
+import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { seededRandom } from "./brain-scoring.ts";
 import { mockIdp } from "./idp.ts";
@@ -15,26 +15,30 @@ import { signedInWithRole } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
 // The random permission test (GRA-1722). From a seed: teams, sources with
-// random words and readers, and changes in who is in which team between
-// recalls, all through core, with membership in core's own records. Every
-// recall must return exactly the answer a brute-force reading of the
-// contract builds here, apart from the store's SQL and its folding: the
-// sources the reader may read that hold one of the question's words, those
-// holding more of its words first, then the shorter, at most
-// `recallLimit`, and nothing else in the answer. So no result may be one
+// random words and readers, new versions of them with other readers, other
+// text or both, and changes in who is in which team between recalls, all
+// through core, with membership in core's own records. Every recall must
+// return exactly the answer a brute-force reading of the contract builds
+// here, apart from the store's SQL and its folding: the chunks of current
+// versions the reader may read that hold one of the question's words,
+// those holding more of its distinct words first, then the shorter, at
+// most `recallLimit`, and nothing else in the answer. A version replaced
+// by a newer one is never in it, and its readers no longer count: a
+// version that narrows a source's readers hides it from those taken off. So no result may be one
 // the reader may not read, none may be missing because hidden ones took
 // its place, hidden ones may not move the order, and no field may tell
 // that hidden ones exist. A membership change counts from the very next
 // recall: the person it changed asks at once.
 //
 // The brute-force answer is the specification of ranking, written once:
-// the issues that change ranking (chunks, stemming, exact matches,
-// vectors) change it here, on purpose. Length is the characters of the
-// text as given; the texts here are ASCII, so code units agree. Every
-// text of a scenario has a length of its own, so no two readable sources
-// tie; what decides between ties (when a source was added, then its
-// random ID) is out of its reach, and so is a leak that shows only in how
-// ties fall. Questions stay under the store's limit of 16 words, so
+// the issues that change ranking (stemming, exact matches, vectors)
+// change it here, on purpose. Every text here is far shorter than a chunk,
+// so each version is one chunk, its whole text. Length is the chunk's
+// characters; the texts here are ASCII, so code units agree. Every
+// current version of a scenario has a length of its own, so no two
+// readable chunks tie; what decides between ties (the newer version, then
+// the source's key, then the chunk's place in its version) is out of its
+// reach, and so is a leak that shows only in how ties fall. Questions stay under the store's limit of 16 words, so
 // cutting a question short, and taking out words that fold alike, are not
 // part of this specification.
 //
@@ -67,7 +71,7 @@ const peopleCount = 3;
 /** Rounds of adding sources, recalling and changing membership. */
 const rounds = 3;
 
-/** Most sources a round adds. */
+/** Most sources and versions a round adds. */
 const addedPerRound = 12;
 
 /** Most questions each person asks each round: 1 to this many. */
@@ -101,16 +105,21 @@ type Readers =
   | { kind: "team"; team: number }
   | { kind: "none" };
 
-/** A source as the brute-force answer knows it. */
+/** A source as the brute-force answer knows it: its current version. */
 interface Planned {
   /** Its name in a failure: `s<index>`. */
   index: number;
-  /** Its words, by letter. */
+  /** The source, as its producer names it. */
+  source: SourceRef;
+  /** Its current version, from 1. */
+  version: number;
+  /** Its current version's words, by letter. */
   words: string[];
+  /** Who may read its current version. */
   readers: Readers;
   /**
-   * The length of its text, which no other source of the scenario has:
-   * its words, then filler up to it, so no two sources tie.
+   * The length of its current text, which no other current version of
+   * the scenario has: its words, then filler up to it, so no two tie.
    */
   length: number;
 }
@@ -176,23 +185,29 @@ const drawReaders = (draws: Draws, teamCount: number): Readers => {
   return { kind: "none" };
 };
 
-const describeSource = ({ index, words, readers, length }: Planned): string => {
+const describeSource = ({
+  index,
+  version,
+  words,
+  readers,
+  length,
+}: Planned): string => {
   let whose = "no known readers";
   if (readers.kind === "owner") {
     whose = `p${readers.person}'s own`;
   } else if (readers.kind === "team") {
     whose = `team t${readers.team}`;
   }
-  return `s${index} "${words.join(" ")}" (${whose}, ${length} characters)`;
+  return `s${index} v${version} "${words.join(" ")}" (${whose}, ${length} characters)`;
 };
 
 const names = (indexes: readonly number[]): string =>
   `[${indexes.map((index) => `s${index}`).join(", ")}]`;
 
 /**
- * What `person` may read of what holds one of `asked`'s words, best first,
- * as the contract states it: more of the question's distinct words, then
- * shorter, at most `recallLimit`.
+ * What `person` may read of the current versions holding one of `asked`'s
+ * words, each one chunk, best first, as the contract states it: more of
+ * the question's distinct words, then shorter, at most `recallLimit`.
  */
 const expectedOf = (
   planned: readonly Planned[],
@@ -261,8 +276,6 @@ const scenario = (people: readonly string[], seed: number) => {
     (_, index) => mostWords + 1 + index
   );
   const planned: Planned[] = [];
-  /** Each planned source's ID in the store, by index. */
-  const ids: string[] = [];
   const personId = (person: number): string => people[person] ?? "";
   const teamId = (team: number): string => teamIds[team] ?? "";
   /** Who may read a planned source, as core names them. */
@@ -325,25 +338,75 @@ const scenario = (people: readonly string[], seed: number) => {
     }
   };
 
-  /** Adds this round's sources through core, in order. */
+  /** A length no current version has: the old one is freed for none. */
+  const newLength = (): number => {
+    const [length = 0] = lengths.splice(draws.below(lengths.length), 1);
+    return length;
+  };
+
+  /** Adds `version` through core, as its source's newest. */
+  const addVersion = async (version: Planned): Promise<void> => {
+    const added = await addSource(env, {
+      source: version.source,
+      change: crypto.randomUUID(),
+      text: textOf(version, wordOf),
+      readers: asCore(version.readers),
+    });
+    if (added.version !== version.version) {
+      throw new Error(
+        `s${version.index} was added as v${added.version}, not v${version.version}`
+      );
+    }
+  };
+
+  /**
+   * Adds this round's sources and new versions through core, in order: a
+   * new version has other readers, other text, or both (other text is
+   * always another length, so no two current versions tie).
+   */
   const addSources = async (round: number): Promise<void> => {
     const adding = (round === 0 ? 1 : 0) + draws.below(addedPerRound);
     for (let added = 0; added < adding; added += 1) {
-      const readers = drawReaders(draws, teamIds.length);
-      const [length = 0] = lengths.splice(draws.below(lengths.length), 1);
-      const source: Planned = {
-        index: planned.length,
-        words: draws.letters(mostWordsPerSource),
-        readers,
-        length,
-      };
+      const known = planned.length > 0 && draws.chance(0.4);
+      const before = known ? planned[draws.below(planned.length)] : undefined;
+      let version: Planned;
+      if (before === undefined) {
+        version = {
+          index: planned.length,
+          source: { producer: "upload", id: crypto.randomUUID() },
+          version: 1,
+          words: draws.letters(mostWordsPerSource),
+          readers: drawReaders(draws, teamIds.length),
+          length: newLength(),
+        };
+      } else {
+        const change = draws.below(3);
+        version = {
+          ...before,
+          version: before.version + 1,
+          ...(change === 1
+            ? {}
+            : { readers: drawReaders(draws, teamIds.length) }),
+          ...(change === 0
+            ? {}
+            : {
+                words: draws.letters(mostWordsPerSource),
+                length: newLength(),
+              }),
+        };
+        // The same readers drawn again, the text kept: no change at all,
+        // which the Brain rightly doesn't make a version. Change the text.
+        if (
+          version.length === before.length &&
+          JSON.stringify(version.readers) === JSON.stringify(before.readers)
+        ) {
+          version.words = draws.letters(mostWordsPerSource);
+          version.length = newLength();
+        }
+      }
       // oxlint-disable-next-line no-await-in-loop -- in order, as planned
-      const { id } = await addSource(env, {
-        text: textOf(source, wordOf),
-        readers: asCore(readers),
-      });
-      planned.push(source);
-      ids.push(id);
+      await addVersion(version);
+      planned[version.index] = version;
     }
   };
 
@@ -359,13 +422,16 @@ const scenario = (people: readonly string[], seed: number) => {
     const answer = await recallAs(env, personId(person), question);
     const expected = expectedOf(planned, person, membership, asked);
     const problems = problemsOf({
-      got: answer.sources.map(({ id }) => ids.indexOf(id)),
+      got: answer.chunks.map(({ source }) =>
+        planned.findIndex((known) => known.source.id === source.id)
+      ),
       expected: expected.map(({ index }) => index),
       answer,
       expectedAnswer: {
-        sources: expected.map((source) => ({
-          id: ids[source.index],
-          text: textOf(source, wordOf),
+        chunks: expected.map((version) => ({
+          source: version.source,
+          version: version.version,
+          text: textOf(version, wordOf),
         })),
       },
     });

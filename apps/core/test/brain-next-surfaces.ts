@@ -28,7 +28,7 @@ import type { Access, Brain, Reader } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 
 import * as coreBrain from "../src/brain-next.ts";
-import type { SourceReaders } from "../src/brain-next.ts";
+import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import type { BrainStore } from "../src/index.ts";
 
@@ -51,8 +51,13 @@ export interface Probing {
    * and put them in what they add, so a value echoed anywhere shows.
    */
   markers: readonly string[];
-  /** The IDs of sources the reader may not read. */
-  hiddenIds: readonly string[];
+  /**
+   * Sources the reader may read no version of: someone else's, a team's
+   * they aren't in, one nobody may read, and one whose readers were
+   * narrowed away from them (they could read its first version, and no
+   * longer can).
+   */
+  hiddenIds: readonly SourceRef[];
 }
 
 /** One call a probe made, and what came back. */
@@ -248,6 +253,25 @@ const questionsOf = ({
 /** The Brain's store, as the harness reaches it: by its contract. */
 const store = (): Brain => brainOf(inJurisdiction(env, env.BRAIN_STORE));
 
+/** A source no one added. */
+const missingSource = (): SourceRef => ({
+  producer: "upload",
+  id: crypto.randomUUID(),
+});
+
+/** `source`'s key in the store, as core names it (core's brain-next.ts). */
+const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
+
+/** The versions a probe asks of each source: the first two, and one past. */
+const askedVersions = [1, 2, 3] as const;
+
+/** Times a sweep is asked for: now, far ahead, and long ago. */
+const sweepTimes = (): Date[] => [
+  new Date(),
+  new Date(Date.now() + 365 * 86_400_000),
+  new Date(0),
+];
+
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
 
@@ -255,11 +279,19 @@ type CoreMember = keyof typeof coreBrain;
 export const coreProbes = {
   addSource: async ({ markers }) => {
     const text = markedText(markers);
-    const add = async (name: string, readers: SourceReaders, as = text) =>
+    const add = async (
+      name: string,
+      readers: SourceReaders,
+      as = text,
+      source: SourceRef = missingSource(),
+      change = crypto.randomUUID()
+    ) =>
       await answer(
         name,
-        async () => await coreBrain.addSource(env, { text: as, readers })
+        async () =>
+          await coreBrain.addSource(env, { source, change, text: as, readers })
       );
+    const someoneElse: SourceReaders = { kind: "owner", personId: stranger() };
     return [
       await add("for someone else", { kind: "owner", personId: stranger() }),
       await add("for nobody", { kind: "none" }),
@@ -275,7 +307,95 @@ export const coreProbes = {
         { kind: "owner", personId: stranger() },
         oversizedText(markers)
       ),
+      await add(
+        "an unknown producer named by the markers",
+        someoneElse,
+        text,
+        unchecked({ producer: markers.join(""), id: crypto.randomUUID() })
+      ),
+      await add(
+        "an id of the markers and control characters",
+        someoneElse,
+        text,
+        { producer: "upload", id: `${markers.join("\n")}\u0000` }
+      ),
+      await add(
+        "a change of the markers and control characters",
+        someoneElse,
+        text,
+        missingSource(),
+        `${markers.join("\n")}\u0000`
+      ),
     ];
+  },
+  readSourceVersionAs: async ({ personId, hiddenIds, markers }) => {
+    const read = async (
+      name: string,
+      source: SourceRef,
+      version: number,
+      as = personId,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.readSourceVersionAs(env, as, { source, version }),
+        about
+      );
+    const asked: Answer[] = [
+      await read(
+        "a source no one added",
+        missingSource(),
+        1,
+        personId,
+        "nothing"
+      ),
+    ];
+    for (const [index, source] of hiddenIds.entries()) {
+      for (const version of askedVersions) {
+        // oxlint-disable-next-line no-await-in-loop -- one read at a time
+        const answered = await read(
+          `hidden source ${index}, version ${version}`,
+          source,
+          version,
+          personId,
+          "hidden"
+        );
+        asked.push(answered);
+      }
+    }
+    const [hidden = missingSource()] = hiddenIds;
+    asked.push(
+      await read("as someone who isn't a member", hidden, 1, stranger()),
+      await read("version 0", hidden, 0),
+      await read(
+        "an unknown producer named by the markers",
+        unchecked({ producer: markers.join(""), id: hidden.id }),
+        1
+      ),
+      await read(
+        "an id of the markers and control characters",
+        { producer: "upload", id: `${markers.join("\n")}\u0000` },
+        1
+      )
+    );
+    return asked;
+  },
+  sweepBrain: async () => {
+    const asked: Answer[] = [];
+    for (const at of sweepTimes()) {
+      // oxlint-disable-next-line no-await-in-loop -- one sweep at a time
+      const answered = await answer(`as of ${at.toISOString()}`, async () => {
+        await coreBrain.sweepBrain(env, at);
+      });
+      asked.push(answered);
+    }
+    asked.push(
+      await answer("as of no time", async () => {
+        await coreBrain.sweepBrain(env, unchecked("never"));
+      })
+    );
+    return asked;
   },
   recallAs: async (probing) => {
     const asked: Answer[] = [];
@@ -318,10 +438,17 @@ type StoreMember = {
 export const storeProbes = {
   addSource: async ({ markers }) => {
     const text = markedText(markers);
-    const add = async (name: string, access: Access, as = text) =>
+    const add = async (
+      name: string,
+      access: Access,
+      as = text,
+      source = keyOf(missingSource()),
+      change = crypto.randomUUID()
+    ) =>
       await answer(
         name,
-        async () => await store().addSource({ text: as, access })
+        async () =>
+          await store().addSource({ source, change, text: as, access })
       );
     return [
       await add("for someone else", { kind: "owner", person: stranger() }),
@@ -346,10 +473,114 @@ export const storeProbes = {
         "an unknown field",
         async () =>
           await store().addSource(
-            unchecked({ text, access: { kind: "none" }, extra: text })
+            unchecked({
+              source: keyOf(missingSource()),
+              change: crypto.randomUUID(),
+              text,
+              access: { kind: "none" },
+              extra: text,
+            })
           )
       ),
+      await add(
+        "a source named by the markers, too long",
+        { kind: "owner", person: stranger() },
+        text,
+        text.repeat(300)
+      ),
+      await add(
+        "no change",
+        { kind: "owner", person: stranger() },
+        text,
+        keyOf(missingSource()),
+        ""
+      ),
     ];
+  },
+  readVersion: async ({ reader, hiddenIds, markers }) => {
+    const read = async (
+      name: string,
+      source: string,
+      version: number,
+      as: Reader = reader,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => await store().readVersion({ source, version, reader: as }),
+        about
+      );
+    const asked: Answer[] = [
+      await read(
+        "a source no one added",
+        keyOf(missingSource()),
+        1,
+        reader,
+        "nothing"
+      ),
+    ];
+    for (const [index, source] of hiddenIds.entries()) {
+      for (const version of askedVersions) {
+        // oxlint-disable-next-line no-await-in-loop -- one read at a time
+        const answered = await read(
+          `hidden source ${index}, version ${version}`,
+          keyOf(source),
+          version,
+          reader,
+          "hidden"
+        );
+        asked.push(answered);
+      }
+    }
+    const hidden = keyOf(hiddenIds[0] ?? missingSource());
+    asked.push(
+      await read("version 0", hidden, 0),
+      await read("too many groups", hidden, 1, {
+        ...reader,
+        groups: Array.from({ length: readerGroupsMax + 1 }, () =>
+          markers.join("")
+        ),
+      }),
+      await read(
+        "a source named by the markers, too long",
+        hidden.repeat(300),
+        1
+      ),
+      await answer(
+        "a request with an unknown field",
+        async () =>
+          await store().readVersion(
+            unchecked({
+              source: hidden,
+              version: 1,
+              reader,
+              extra: markers.join(" "),
+            })
+          )
+      )
+    );
+    return asked;
+  },
+  sweep: async ({ markers }) => {
+    const asked: Answer[] = [];
+    for (const at of sweepTimes()) {
+      // oxlint-disable-next-line no-await-in-loop -- one sweep at a time
+      const answered = await answer(`as of ${at.toISOString()}`, async () => {
+        await store().sweep({ at });
+      });
+      asked.push(answered);
+    }
+    asked.push(
+      await answer("as of no time", async () => {
+        await store().sweep(unchecked({ at: markers.join(" ") }));
+      }),
+      await answer("a request with an unknown field", async () => {
+        await store().sweep(
+          unchecked({ at: new Date(), extra: markers.join(" ") })
+        );
+      })
+    );
+    return asked;
   },
   recall: async (probing) => {
     const { reader, markers } = probing;

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
-import type { SourceReaders } from "../src/brain-next.ts";
+import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { BrainStore } from "../src/index.ts";
 import { coreProbes, storeProbes, textOf } from "./brain-next-surfaces.ts";
@@ -17,8 +17,9 @@ import { signedInWithRole, unique } from "./sign-in.ts";
 
 // The marker test (GRA-1722): the gate every later Brain issue keeps
 // green. Unique marker words are planted in sources a reader may not
-// read: someone else's own, a team's they aren't in, and one nobody is
-// known to read. Then every surface (brain-next-surfaces.ts) is called as
+// read: someone else's own, a team's they aren't in, one nobody is known
+// to read, and one whose readers were narrowed away from them in a later
+// version (they could read its first version, and no longer can). Then every surface (brain-next-surfaces.ts) is called as
 // that reader, every way it answers, and:
 //
 // - no marker may be in anything that comes back (results, "nothing
@@ -177,18 +178,34 @@ const newTeam = async (...members: string[]): Promise<string> => {
   return id;
 };
 
-const add = async (text: string, readers: SourceReaders): Promise<string> => {
-  const { id } = await addSource(env, { text, readers });
-  return id;
+/** A source of its own, as an upload names it. */
+const newSource = (): SourceRef => ({
+  producer: "upload",
+  id: crypto.randomUUID(),
+});
+
+/** Adds `text` as a version of `source` (a new one by default). */
+const add = async (
+  text: string,
+  readers: SourceReaders,
+  source: SourceRef = newSource()
+): Promise<SourceRef> => {
+  await addSource(env, {
+    source,
+    change: crypto.randomUUID(),
+    text,
+    readers,
+  });
+  return source;
 };
 
-/** What `personId` recalls for `question`: each source's text. */
+/** What `personId` recalls for `question`: each chunk's text. */
 const textsFor = async (
   personId: string,
   question: string
 ): Promise<string[]> => {
-  const { sources } = await recallAs(env, personId, question);
-  return sources.map(({ text }) => text);
+  const { chunks } = await recallAs(env, personId, question);
+  return chunks.map(({ text }) => text);
 };
 
 /**
@@ -248,11 +265,13 @@ describe(
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
+        "a source narrowed away from the outsider": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
+        "a source narrowed away from the outsider": narrowedMarker,
       } = markers;
       const ownerIds = [
         await add(`Salary review ${sharedWord} ${ownerMarker}`, {
@@ -281,6 +300,20 @@ describe(
       }
       const handbook = `The handbook for everyone who joins the team, ${sharedWord}`;
       await add(handbook, { kind: "team", teamId: ownTeam });
+      // First for the outsider's own team, then narrowed to the holder:
+      // neither its old version nor its history is the outsider's now.
+      const narrowedId = await add(
+        `Draft plan ${sharedWord} ${narrowedMarker}`,
+        {
+          kind: "team",
+          teamId: ownTeam,
+        }
+      );
+      await add(
+        `Final plan ${sharedWord} ${narrowedMarker}`,
+        { kind: "owner", personId: holder },
+        narrowedId
+      );
 
       // The markers are there to find for those who may read them.
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
@@ -298,8 +331,8 @@ describe(
         reader: { person: outsider, groups: groups.map((id) => `team:${id}`) },
         sharedWord,
         unknownWord,
-        markers: [ownerMarker, teamMarker, noneMarker],
-        hiddenIds: [...ownerIds, teamId, noneId],
+        markers: [ownerMarker, teamMarker, noneMarker, narrowedMarker],
+        hiddenIds: [...ownerIds, teamId, noneId, narrowedId],
       });
       const first = await findingsOf(
         "the outsider",
@@ -317,8 +350,8 @@ describe(
         "the outsider, in the team",
         {
           ...asOutsider([ownTeam, secretTeam]),
-          markers: [ownerMarker, noneMarker],
-          hiddenIds: [...ownerIds, noneId],
+          markers: [ownerMarker, noneMarker, narrowedMarker],
+          hiddenIds: [...ownerIds, noneId, narrowedId],
         },
         notJoined
       );
