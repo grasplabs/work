@@ -52,7 +52,7 @@ const scope = {
   binding: "NOTES",
   contractId: "notes.create",
   contractVersion: 1,
-  operationKind: "mutation",
+  functionKind: "mutation",
 } as const;
 
 /** A new store with a `notes` table. */
@@ -527,12 +527,12 @@ describe("outbox", () => {
     const store = await newStore();
     const held = heldBy(await store.claim(await claimOf("k1", {})));
     // A deployment that takes starts only, as one rolled back past
-    // notifications would.
+    // sent events would.
     await expect(
       commitWith(
         store,
         insertOf(held, "Launch", {
-          intents: [{ kind: "workflow.notify", data: {} }],
+          intents: [{ kind: "workflow.send_event", data: {} }],
         }),
         { "workflow.start": taker([]) }
       )
@@ -896,14 +896,14 @@ describe("alarm", () => {
     const store = await newStore();
     const input = { title: "Launch" };
     const held = heldBy(await store.claim(await claimOf("k1", input)));
-    // Staged while something took notifications; the deployment's alarm
+    // Staged while something took sent events; the deployment's alarm
     // takes none now, as one rolled back past them would.
     await commitWith(
       store,
       insertOf(held, "Launch", {
-        intents: [{ kind: "workflow.notify", data: {} }],
+        intents: [{ kind: "workflow.send_event", data: {} }],
       }),
-      { "workflow.notify": taker([]) }
+      { "workflow.send_event": taker([]) }
     );
 
     await alarmTakingNothing(store);

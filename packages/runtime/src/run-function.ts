@@ -81,12 +81,12 @@ const calledPath = (
 };
 
 /** The event the generated reference `event` names, or a refusal. */
-const notifiedEvent = (event: unknown): EventName => {
+const sentEvent = (event: unknown): EventName => {
   const read = eventReferenceName(event);
   if (read === undefined) {
     throw Object.assign(
       new Error(
-        "A mutation notifies with its workflows' generated event references."
+        "A mutation sends events with its workflows' generated event references."
       ),
       { code: "function.not_found" }
     );
@@ -94,8 +94,8 @@ const notifiedEvent = (event: unknown): EventName => {
   return read;
 };
 
-/** A notification a mutation's handler staged, sent once it returns. */
-interface StagedNotification {
+/** An event a mutation's handler staged, sent once it returns. */
+interface StagedEvent {
   readonly event: EventName;
   readonly runId: unknown;
   readonly data: unknown;
@@ -108,20 +108,20 @@ interface StagedNotification {
  * among the commit's intents; nothing for a handler that throws, whose
  * mutation commits nothing. The host checks each again as it stages it.
  */
-const notificationsOf = (channel: FunctionChannel) => {
-  const staged: StagedNotification[] = [];
+const eventSendsOf = (channel: FunctionChannel) => {
+  const staged: StagedEvent[] = [];
   let open = true;
   return {
-    sendEvent: (event: unknown, notification: unknown): void => {
+    sendEvent: (event: unknown, options: unknown): void => {
       if (!open) {
         throw Object.assign(
           new Error("A mutation sends events only while its handler runs."),
           { code: "function.ended" }
         );
       }
-      const given = isPlainObject(notification) ? notification : {};
+      const given = isPlainObject(options) ? options : {};
       staged.push({
-        event: notifiedEvent(event),
+        event: sentEvent(event),
         runId: given.runId,
         data: given.data,
       });
@@ -132,7 +132,7 @@ const notificationsOf = (channel: FunctionChannel) => {
         // In order: each one's place among the commit's intents. The host
         // resolves the event's alias in the release it runs.
         // oxlint-disable-next-line no-await-in-loop -- see above
-        await channel.resource(event.workflow, "notify", [
+        await channel.resource(event.workflow, "sendEvent", [
           event.alias,
           runId,
           data,
@@ -230,11 +230,11 @@ export const runFunction = async (
     ),
   };
   let ctx: object;
-  let notifications: ReturnType<typeof notificationsOf> | undefined;
+  let eventSends: ReturnType<typeof eventSendsOf> | undefined;
   if (fn.kind === "query") {
     ctx = { ...common, db: databaseReader(schema, read) };
   } else if (fn.kind === "mutation") {
-    notifications = notificationsOf(channel);
+    eventSends = eventSendsOf(channel);
     ctx = {
       ...common,
       db: databaseWriter(
@@ -252,7 +252,7 @@ export const runFunction = async (
       ): Promise<void> => {
         await notifyPeopleOf(channel)(to, notification);
       },
-      sendEvent: notifications.sendEvent,
+      sendEvent: eventSends.sendEvent,
     };
   } else {
     ctx = {
@@ -295,6 +295,6 @@ export const runFunction = async (
     }),
   });
   const answer = await handler(Object.freeze(ctx), args);
-  await notifications?.flush();
+  await eventSends?.flush();
   return answer;
 };

@@ -1,6 +1,6 @@
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -33,11 +33,11 @@ const call = async (
   path: string,
   kind: "query" | "mutation" | "action",
   input: unknown = {}
-): Promise<OperationResult> =>
+): Promise<FunctionResult> =>
   await calledAs(await person.api.whoami(), app, { name: path, kind }, input);
 
 /** What a call answered; a refusal fails the test, saying why. */
-const valueOf = (result: OperationResult): unknown => {
+const valueOf = (result: FunctionResult): unknown => {
   if (!result.ok) {
     throw new Error(`Refused: ${result.error.code} ${result.error.message}`);
   }
@@ -45,7 +45,7 @@ const valueOf = (result: OperationResult): unknown => {
 };
 
 /** Why a call was refused, or `ok`. */
-const codeOf = (result: OperationResult): string =>
+const codeOf = (result: FunctionResult): string =>
   result.ok ? "ok" : result.error.code;
 
 const observed = (value: number) => ({ value, basis: "observed" });
@@ -140,7 +140,7 @@ const save = async (
   app: AppId,
   id: string | null,
   fields: Record<string, unknown>
-): Promise<OperationResult> =>
+): Promise<FunctionResult> =>
   await call(person, app, "map.save", "mutation", {
     id,
     ...fields,

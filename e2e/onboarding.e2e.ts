@@ -603,6 +603,74 @@ const nineTeams = [
   "Marketing",
 ];
 
+test("an admin whose company has a shorter flow gets only its screens, in its order", async ({
+  page,
+}) => {
+  const admin = await configuredAdmin();
+  // No story, nowhere the documents live, no documents and no tools: the
+  // interviews stay, as the team is told by now.
+  await adminCommand({
+    type: "onboarding.flow",
+    payload: {
+      flow: {
+        on: true,
+        steps: [
+          { id: "welcome", on: true },
+          { id: "ai", on: true },
+          { id: "about", on: false },
+          { id: "company", on: true },
+          { id: "sources", on: false },
+          { id: "documents", on: false },
+          { id: "pulse", on: false },
+          { id: "leads", on: true },
+          { id: "interviews", on: true },
+        ],
+        grasp: {
+          kickoff: true,
+          agreements: { processing: true, assessment: true, council: true },
+        },
+      },
+    },
+  });
+  try {
+    await signInTo(page.context(), admin);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.route("**/api/speech", async (route) => {
+      await route.fulfill({
+        status: 503,
+        json: { code: "speech.failed", message: "Not here" },
+      });
+    });
+    await installReadingClock(page);
+    await page.goto("/setup?step=welcome");
+    await page.getByRole("button", { name: "English" }).click();
+    await page.getByRole("button", { name: "Let’s start" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Which AI should I think with?" })
+    ).toBeVisible();
+    // Five dots: the welcome, the AI, who's who, the team leads and telling the team.
+    await expect(page.getByRole("button", { name: /^Step \d+$/u })).toHaveCount(
+      5
+    );
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    // Straight to who's who: this company's flow has no "How this works".
+    await expect(
+      page.getByRole("heading", { name: "Who’s who at your company?" })
+    ).toBeVisible();
+    // A screen its flow doesn't have isn't reached by its address either.
+    await page.goto("/setup?step=documents");
+    await expect(
+      page.getByRole("heading", {
+        name: "Do you have anything that explains how you work?",
+      })
+    ).toHaveCount(0);
+  } finally {
+    // All of it again, for the tests after this one.
+    await adminCommand({ type: "onboarding.flow", payload: { flow: null } });
+  }
+});
+
 test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list again changes nothing", async ({
   page,
   cspViolations,

@@ -1,4 +1,4 @@
-import type { OperationResult } from "@grasp-os/shared/operations";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
@@ -110,7 +110,7 @@ export const rolesOf = (by: Identity) => ({
 });
 
 /** The run IDs a runs page answered, or its refusal's code alone. */
-export const runIds = (result: OperationResult): string[] =>
+export const runIds = (result: FunctionResult): string[] =>
   result.ok
     ? z
         .object({
@@ -121,11 +121,11 @@ export const runIds = (result: OperationResult): string[] =>
     : [result.error.code];
 
 /** "ok", or a refusal's code and words. */
-export const refusalOf = (result: OperationResult) =>
+export const refusalOf = (result: FunctionResult) =>
   result.ok ? "ok" : { code: result.error.code, message: result.error.message };
 
 /** "ok", or a refusal's code. */
-export const codeOf = (result: OperationResult): string =>
+export const codeOf = (result: FunctionResult): string =>
   result.ok ? "ok" : result.error.code;
 
 /** A greeting workflow `owner` publishes at version 1. */

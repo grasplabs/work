@@ -264,7 +264,7 @@ export const receipts = sqliteTable(
     createdAt: integer("created_at").notNull(),
     /**
      * The random seed (64 hex digits) the mutation's randomness answers
-     * from in every attempt (operations.ts), made with the receipt. The
+     * from in every attempt (function-host.ts), made with the receipt. The
      * default is only there for SQLite to add the column: its migration
      * gives every receipt made before it a seed of its own.
      */
@@ -333,7 +333,7 @@ export const outbox = sqliteTable(
 
 /**
  * Which consumer, another App or a workflow, made each commit through the
- * store's public operations. Unused since each App's store is its own:
+ * store's public functions. Unused since each App's store is its own:
  * kept only until a later release drops it, as an older core may still run
  * on this schema (expand, then contract). The purge still clears it.
  */
@@ -552,7 +552,7 @@ export const cascadeJobs = sqliteTable(
     /**
      * The resource the commit came through (its receipt's scope): the App
      * whose release committed the deletion, or the consumer that called the
-     * store's public operation.
+     * store's public function.
      */
     resourceId: text("resource_id"),
     /** The workflow run the commit was made in, if any. */

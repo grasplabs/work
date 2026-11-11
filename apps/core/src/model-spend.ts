@@ -1,3 +1,4 @@
+import { graspAi } from "@grasp-os/shared/ai-providers";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import { modelSpendListed } from "@grasp-os/shared/models";
@@ -407,4 +408,35 @@ export const platformSpend = async (
     const micros = Math.round(amount * microsPerDollar);
     return micros > 0 ? [{ ...row, micros }] : [];
   });
+};
+
+/**
+ * What the organization's own AI cost on Grasp's AI in `month`, in US
+ * dollars at list prices: every answered call of its own on Grasp's key.
+ */
+export const graspAiSpent = async (
+  env: Pick<Env, "DB">,
+  month: string
+): Promise<number> => {
+  const [row] = await drizzle(env.DB)
+    .select({ total: sql<number | null>`sum(${modelUsage.cost})` })
+    .from(modelUsage)
+    .where(
+      and(
+        eq(modelUsage.period, month),
+        eq(modelUsage.credential, "platform"),
+        eq(modelUsage.feature, "organization")
+      )
+    );
+  return row?.total ?? 0;
+};
+
+/** The organization's use of Grasp's AI in `month` against its limit. */
+export const graspAiMonth = async (
+  env: Pick<Env, "DB">,
+  month: string
+): Promise<{ spentUsd: number; limitUsd: number; reached: boolean }> => {
+  const spentUsd = await graspAiSpent(env, month);
+  const limitUsd = graspAi.monthlyLimitUsd;
+  return { spentUsd, limitUsd, reached: spentUsd >= limitUsd };
 };

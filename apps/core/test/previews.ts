@@ -85,7 +85,7 @@ export const keptManifestSchema = z.object({
 const contractsSchema = z.object({
   fingerprints: z.record(z.string(), z.string()),
   manifest: z.object({
-    operations: z.record(z.string(), z.object({ kind: z.string() })),
+    functions: z.record(z.string(), z.object({ kind: z.string() })),
   }),
 });
 
@@ -145,7 +145,7 @@ export const requestFor = async (
     JSON.parse((await draftContracts(app, draft)) ?? "null")
   );
   return JSON.stringify({
-    reference: { name: path, kind: read.manifest.operations[path]?.kind },
+    reference: { name: path, kind: read.manifest.functions[path]?.kind },
     args: input,
   });
 };

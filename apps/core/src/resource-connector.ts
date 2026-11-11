@@ -5,11 +5,11 @@ import type {
   ConnectorContractAction,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { jsonOf, functionErrors } from "@grasp-os/shared/functions";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { ConnectionId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import type { PermissionObject } from "@grasp-os/shared/permissions";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -19,7 +19,7 @@ import { signedCall } from "./bindings.ts";
 import { readContractSchema } from "./connector-contracts.ts";
 import type { ReadSchema } from "./connector-contracts.ts";
 import { permissions } from "./db/core/schema.ts";
-import type { ResourceContext } from "./operations.ts";
+import type { ResourceContext } from "./function-host.ts";
 import {
   isProviderUnreachable,
   providerUnreachable,
@@ -327,18 +327,18 @@ const refusalOf = (error: unknown): unknown => {
     code === "connect.not_owner" ||
     code === "connect.action_not_found"
   ) {
-    return operationErrors.create("resource.unavailable");
+    return functionErrors.create("resource.unavailable");
   }
   if (code === "connect.declined") {
-    return operationErrors.create("resource.declined");
+    return functionErrors.create("resource.declined");
   }
   // An HTTP connection's request off what an admin approved (its paths,
   // methods, headers, a redirect elsewhere).
   if (code === "connect.http_refused") {
-    return operationErrors.create("resource.not_allowed");
+    return functionErrors.create("resource.not_allowed");
   }
   if (code === "connect.idempotency_conflict") {
-    return operationErrors.create("resource.idempotency_conflict");
+    return functionErrors.create("resource.idempotency_conflict");
   }
   return error;
 };
@@ -356,11 +356,11 @@ const callAction = async (
   const [name, input] = args;
   const action = typeof name === "string" ? actions.get(name) : undefined;
   if (action === undefined) {
-    throw operationErrors.create("resource.not_allowed");
+    throw functionErrors.create("resource.not_allowed");
   }
   const valid = checked(action.args, input, false);
   if (valid === undefined) {
-    throw operationErrors.create("resource.invalid_args");
+    throw functionErrors.create("resource.invalid_args");
   }
   let answered: Awaited<ReturnType<Env["CONNECT"]["call"]>>;
   try {
@@ -391,12 +391,12 @@ const callAction = async (
       caller.held !== undefined
     ) {
       caller.held(context.idempotencyKey);
-      throw operationErrors.create("resource.awaiting_confirmation");
+      throw functionErrors.create("resource.awaiting_confirmation");
     }
     throw refusalOf(error);
   }
   if (answered.pending !== undefined) {
-    throw operationErrors.create("resource.awaiting_confirmation");
+    throw functionErrors.create("resource.awaiting_confirmation");
   }
   caller.sources.noteConnection(
     grant.connection.connectionId,
@@ -406,11 +406,11 @@ const callAction = async (
   try {
     output = JSON.parse(answered.output);
   } catch {
-    throw operationErrors.create("contract.invalid_resource_result");
+    throw functionErrors.create("contract.invalid_resource_result");
   }
   const answer = checked(action.returns, output, true);
   if (answer === undefined) {
-    throw operationErrors.create("contract.invalid_resource_result");
+    throw functionErrors.create("contract.invalid_resource_result");
   }
   return answer;
 };

@@ -13,10 +13,10 @@ import { valueDepth } from "./value-depth.ts";
 // in a stable code, a message people can read, the category the host
 // puts it in, whether trying again may help, and the request ID to quote.
 // Never more: no cause, stack, SQL, provider error or credential reaches
-// a caller, whatever the App's code threw (core's operation host,
-// apps/core/src/operations.ts, decides what each failure becomes).
+// a caller, whatever the App's code threw (core's function host,
+// apps/core/src/function-host.ts, decides what each failure becomes).
 
-/** A failed operation, as its caller gets it. */
+/** A failed function call, as its caller gets it. */
 export interface AppErrorPayload {
   code: string;
   message: string;
@@ -26,13 +26,13 @@ export interface AppErrorPayload {
   details?: Json;
 }
 
-/** What an operation answers, as it crosses to its caller. */
-export type OperationResult =
+/** What a function answers, as it crosses to its caller. */
+export type FunctionResult =
   | { ok: true; value: Json }
   | { ok: false; error: AppErrorPayload };
 
-/** Why the operation host refused or failed a call. */
-export const operationErrors = defineErrorFamily({
+/** Why the function host refused or failed a call. */
+export const functionErrors = defineErrorFamily({
   "function.not_found": "There is no such function.",
   "function.kind_mismatch":
     "That function is of another kind than the call expects.",
@@ -194,7 +194,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "function.depth_exceeded": "source",
   "function.emit_limit": "source",
   "function.no_stream": "source",
-  // A call it started outlived the operation's deadline: the operation
+  // A call it started outlived the function's deadline: the function
   // broke its contract to end with its calls.
   "function.unfinished_call": "contract",
   // A JSON workflow's own error, which its `raise` task declares.

@@ -1,5 +1,5 @@
-// How much one caller's call of an App function may run, as core's operation
-// host counts it (operations.ts, store-reader.ts), in a module of its own so
+// How much one caller's call of an App function may run, as core's function
+// host counts it (function-host.ts, store-reader.ts), in a module of its own so
 // the on-prem sandbox host bounds a session by the same numbers.
 
 /**
@@ -9,7 +9,7 @@
  */
 export const callMaxNested = 64;
 
-/** How many times a query operation runs again before it gives up. */
+/** How many times a query runs again before it gives up. */
 export const queryMaxReruns = 3;
 
 /**

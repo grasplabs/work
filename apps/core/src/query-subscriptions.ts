@@ -1,12 +1,12 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import {
   jsonBytes,
   querySubscriptionLimits,
@@ -16,7 +16,7 @@ import {
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { operationRoles } from "./app-access.ts";
+import { functionRoles } from "./app-access.ts";
 import {
   callsDecisionQuery,
   callsWorkflowQuery,
@@ -105,7 +105,7 @@ import { Subscription } from "./subscription.ts";
 // - A subscription outlives its session or the App's version: a session
 //   that ended refuses the read (`check`) and ends it; every read is of
 //   the App's current release, by the function's name (app-functions.ts,
-//   `publicOperationOf`), so a page open across a publish reads the new
+//   `publicFunctionOf`), so a page open across a publish reads the new
 //   code, and one whose function is gone is refused, which ends it.
 // - Results cross people or builds: a connection is one session's, and
 //   one read is shared only by subscriptions of the same App, build,
@@ -184,7 +184,7 @@ const endsSubscription = (code: string): boolean =>
   code === "page.revoked";
 
 /** A result as a push carries it: `{ ok, value }` or `{ ok, error }`. */
-type Result = OperationResult;
+type Result = FunctionResult;
 
 /** A push made, and its size. */
 interface Snapshot {
@@ -212,7 +212,7 @@ interface Shown {
 }
 
 /**
- * The roles `by` reads App `app`'s tables with (`operationRoles`), and
+ * The roles `by` reads App `app`'s tables with (`functionRoles`), and
  * the teams a table's row rules read, as a key: what decides which
  * records a read sees, so a result read under one is never pushed under
  * another.
@@ -223,7 +223,7 @@ const rolesOf = async (
   app: AppId
 ): Promise<string | undefined> => {
   try {
-    const { appMember, appBuilder, teams } = await operationRoles(env, by, app);
+    const { appMember, appBuilder, teams } = await functionRoles(env, by, app);
     return canonicalJson({ appMember, appBuilder, teams: teams.toSorted() });
   } catch (error) {
     // No answer (the database away for a moment): thrown, so the gate

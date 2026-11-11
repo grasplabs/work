@@ -1,5 +1,5 @@
 import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
-import { appMaxOperations } from "@grasp-os/shared/function-limits";
+import { appMaxFunctions } from "@grasp-os/shared/function-limits";
 import { canonicalText } from "@grasp-os/shared/json";
 
 import { AppDefinitionError } from "./app-definition-error.ts";
@@ -264,22 +264,22 @@ export const readAppManifest = (text: string): AppManifest => {
   } catch {
     return refuse("The App's manifest isn't JSON.");
   }
-  const keys = ["name", "schema", "operations", "permissions", "migrations"];
+  const keys = ["name", "schema", "functions", "permissions", "migrations"];
   // `answers` only where it declares any.
   const answers = isPlainObject(data) && Object.hasOwn(data, "answers");
   if (!hasExactly(data, [...keys, ...(answers ? ["answers"] : [])])) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, permissions, migrations, answers? }`."
+      "An App's manifest is `{ name, schema, functions, permissions, migrations, answers? }`."
     );
   }
   const { schema } = readSchemaManifest(JSON.stringify(data.schema));
 
-  const operationEntries = entriesOf(data.operations, "operations");
+  const functionEntries = entriesOf(data.functions, "functions");
   // Counted before any is read.
-  if (operationEntries.length > appMaxOperations) {
-    refuse(`An App registers at most ${appMaxOperations} functions.`);
+  if (functionEntries.length > appMaxFunctions) {
+    refuse(`An App registers at most ${appMaxFunctions} functions.`);
   }
-  const functions = operationEntries.map(([path, input]) =>
+  const functions = functionEntries.map(([path, input]) =>
     functionFrom(path, input)
   );
   // Each constructor checks the declaration it is given at run time, as

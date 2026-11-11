@@ -1,5 +1,5 @@
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -232,8 +232,8 @@ const called = async (
   input: Record<string, Json>
 ): Promise<FunctionAnswer> => {
   const contractId = `skills.${name}`;
-  const operation = release.app.operations[contractId];
-  if (operation === undefined) {
+  const fn = release.app.functions[contractId];
+  if (fn === undefined) {
     throw new Error(`No ${contractId}`);
   }
   return await callAppFunction(
@@ -241,7 +241,7 @@ const called = async (
     owner,
     app,
     JSON.stringify({
-      reference: { name: contractId, kind: operation.kind },
+      reference: { name: contractId, kind: fn.kind },
       args: input,
     })
   );
@@ -253,7 +253,7 @@ const pickedSchema = z.strictObject({
 });
 
 /** What a pick answered: the skill or why none, and whether its text came, or its error's code. */
-const pickOf = (result: OperationResult): Json => {
+const pickOf = (result: FunctionResult): Json => {
   if (!result.ok) {
     return { failed: result.error.code };
   }
@@ -262,7 +262,7 @@ const pickOf = (result: OperationResult): Json => {
 };
 
 /** What an open answered: the skill's name, or its error's code. */
-const openOf = (result: OperationResult): Json =>
+const openOf = (result: FunctionResult): Json =>
   result.ok ? z.string().parse(result.value) : { failed: result.error.code };
 
 /** Signing people in, sealing and granting can be slow on CI. */

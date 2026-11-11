@@ -11,7 +11,7 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { requestText } from "../../src/app-requests.ts";
 import { codeRuntime, describeRun, runCode } from "../../src/code-mode.ts";
 import type { OpenStore } from "../../src/data-stores.ts";
-import { callOperation } from "../../src/operations.ts";
+import { hostFunctionCall } from "../../src/function-host.ts";
 import { releaseRunner } from "../../src/release-runner.ts";
 import { runSessionOf } from "../../src/run-sessions.ts";
 import { sessionHost } from "../../src/sandboxed.ts";
@@ -99,7 +99,7 @@ export class Caps extends WorkerEntrypoint<StandInEnv, { runId: string }> {
    */
   async callsFunction(): Promise<unknown> {
     const parentSession = runSessionOf(this.ctx.props.runId);
-    const result = await callOperation(
+    const result = await hostFunctionCall(
       { manifest, run: releaseRunner(this.env, release, "app-jobs") },
       {
         principal: "person-stand-in",

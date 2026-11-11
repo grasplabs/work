@@ -49,11 +49,11 @@ import type { Fragment } from "./store-expressions.ts";
 //   `appBuilders`, written by `appMembers`) lets its writers reach rows by
 //   ID they can't read, as before rules, by its builders' explicit choice.
 // - A team membership changes: the teams are read when the invocation is
-//   resolved (`operationRoles`) and again before each commit, so the next
+//   resolved (`functionRoles`) and again before each commit, so the next
 //   read or write sees the change; nothing here caches them.
 // - `role("user")` admits more than its name says: everyone with a role
 //   in the App, its builders included, and whoever calls a public
-//   operation of a store the App serves (another App's or a workflow's
+//   function of a store the App serves (another App's or a workflow's
 //   person, a member of the store's App for those calls).
 // - A migration's transform, which reads every row of its table whoever
 //   may, moves a row into other people's sight or carries one row's

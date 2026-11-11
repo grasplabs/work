@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3fdf79ae-c91d-40e0-9cb8-9ffc15618c62",
+  "id": "c4f0f9a4-188c-44cf-a13f-2cf7ef9b21ca",
   "prevId": "f5922123-b79f-4ca9-9294-ff3d098bc41e",
   "tables": {
     "access_revocations": {
@@ -6371,13 +6371,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "workflow_app_id": {
@@ -12943,6 +12936,13 @@
         },
         "failure_code": {
           "name": "failure_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "failed_task": {
+          "name": "failed_task",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

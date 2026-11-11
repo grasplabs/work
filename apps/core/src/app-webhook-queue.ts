@@ -1,10 +1,10 @@
 import { appWebhookLimits } from "@grasp-os/shared/app-webhooks";
 import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { jsonOf } from "@grasp-os/shared/functions";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { jsonOf } from "@grasp-os/shared/operations";
 import { storeIntentSchema } from "@grasp-os/shared/stores";
 import type { SubmissionIntent } from "@grasp-os/shared/submissions";
 import {
@@ -111,7 +111,7 @@ export const queuedWebhookDeliveries = (
 
 /**
  * A form a page sent, as core answered it: a keyed mutation, or a keyed
- * action, of App `app`, by `userId`, to the public function `operation`,
+ * action, of App `app`, by `userId`, to the public function at `path`,
  * in the run that started at `startedAt` (its receipt's, its invocation's:
  * the same for every repeat of that run, new for a fresh run under the
  * key once its receipt is gone). Plain JSON, so a run's receipt or a
@@ -125,7 +125,8 @@ const formSubmissionSchema = z.strictObject({
   name: z.string().min(1),
   /** The submission's idempotency key. */
   key: z.string().min(1),
-  operation: z.string().min(1),
+  /** The path of the function it sent to. */
+  function: z.string().min(1),
   startedAt: z.number().int().min(0),
   /** The form's values; null, and `valuesLeftOut`, past what a delivery takes. */
   values: z.custom<Json>(),
@@ -156,20 +157,20 @@ export const formIntents = (
   lean: formSentIntent({ ...submission, values: null, valuesLeftOut: true }),
 });
 
-/** `call`, sent under `key` to `operation` in the run started at `startedAt`, as a form. */
+/** `call`, sent under `key` to the function at `path` in the run started at `startedAt`, as a form. */
 export const formSubmissionOf = ({
   app,
   userId,
   call,
   key,
-  operation,
+  path,
   startedAt,
 }: {
   app: string;
   userId: string;
   call: Pick<FunctionRequest, "args" | "reference">;
   key: string;
-  operation: string;
+  path: string;
   startedAt: number;
 }): FormSubmission => {
   // What the call took, read as JSON: none that wouldn't read is left out.
@@ -186,7 +187,7 @@ export const formSubmissionOf = ({
     kind,
     name,
     key,
-    operation,
+    function: path,
     startedAt,
     values: fits ? values : null,
     valuesLeftOut: !fits,
@@ -230,8 +231,15 @@ export const queueFormSent = async (
   env: Env,
   submission: FormSubmission
 ): Promise<void> => {
-  const { app, userId, key, operation, startedAt, values, valuesLeftOut } =
-    submission;
+  const {
+    app,
+    userId,
+    key,
+    function: path,
+    startedAt,
+    values,
+    valuesLeftOut,
+  } = submission;
   const db = drizzle(env.DB);
   // An App removed, or gone, has nobody left to tell: done, never a
   // failure to try again for as long as the run's receipt is kept.
@@ -285,7 +293,7 @@ export const queueFormSent = async (
         db
           .insert(appWebhookDeliveries)
           .select(
-            sql`SELECT ${crypto.randomUUID().replaceAll("-", "")}, ${appWebhooks.id}, ${app}, 'form_sent', ${`form_sent:${id}`}, ${startedAt}, NULL, ${key}, ${approved ? operation : null}, ${approved ? json : null}, ${approved && valuesLeftOut ? 1 : 0}, 0, NULL, NULL, NULL, ${userId}
+            sql`SELECT ${crypto.randomUUID().replaceAll("-", "")}, ${appWebhooks.id}, ${app}, 'form_sent', ${`form_sent:${id}`}, ${startedAt}, NULL, ${key}, ${approved ? path : null}, ${approved ? json : null}, ${approved && valuesLeftOut ? 1 : 0}, 0, NULL, NULL, NULL, ${userId}
               FROM ${appWebhooks}
               WHERE ${appWebhooks.id} = ${webhook}
                 AND ${roomFor(webhook)}

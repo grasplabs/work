@@ -103,11 +103,11 @@ const rpcEnvelopeSize = 4 * 1024;
 
 /**
  * The longest message a frame may send over its port, in UTF-16 code
- * units: a public operation's output (the larger of its input and output)
+ * units: a public function's output (the larger of its input and output)
  * and the envelope around it. The largest input fits even as Cap'n Web
  * writes it, each array bracketed twice, which at most doubles its text.
  */
-const rpcMessageMaxSize = platformLimits.operationOutputBytes + rpcEnvelopeSize;
+const rpcMessageMaxSize = platformLimits.functionResultBytes + rpcEnvelopeSize;
 
 /**
  * The limits of a page's start and traffic, in one place. They are the
@@ -159,9 +159,9 @@ export const pageLimits = {
     maxBigIntDigits: 32,
   },
   /** A server call's arguments, as UTF-8 JSON, in bytes. */
-  inputBytes: platformLimits.operationInputBytes,
+  inputBytes: platformLimits.functionArgsBytes,
   /** A server call's answer, as UTF-8 JSON, in bytes: more is paged. */
-  answerBytes: platformLimits.operationOutputBytes,
+  answerBytes: platformLimits.functionResultBytes,
   /**
    * The most characters of where in an App its frame is
    * (`pageHrefSchema`): what the page carries in its own address, as a

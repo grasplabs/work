@@ -685,7 +685,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
           binding: null,
           contractId: "notes.create",
           contractVersion: 1,
-          operationKind: "mutation",
+          functionKind: "mutation",
         },
         key: [crypto.randomUUID()],
         inputHash: "c".repeat(64),

@@ -25,7 +25,7 @@ import { appStartFiles } from "./app-start-files.ts";
 import { startAppBinding } from "./app-workflow-bindings.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { permissions } from "./db/core/schema.ts";
-import type { WorkflowStarts } from "./operations.ts";
+import type { WorkflowStarts } from "./function-host.ts";
 import { defaultMaxAttempts } from "./outbox-delivery.ts";
 import type { OutboxEntry } from "./outbox-delivery.ts";
 import { allowingPermissionSql, grantedPermissions } from "./permissions.ts";
@@ -66,8 +66,8 @@ import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
 //   takes that for an answer; only a refusal a fresh decision makes
 //   settles the entry. Decisions that all went stale answer nothing: the
 //   entry is handed over again later (`isStaleRefusal`).
-// - An undeclared workflow: the operation host starts only an alias the
-//   App declares (operations.ts); an alias the App
+// - An undeclared workflow: the function host starts only an alias the
+//   App declares (function-host.ts); an alias the App
 //   doesn't bind is `workflow.app_binding_unavailable`.
 // - A rolled-back, failed or superseded mutation that still starts: its
 //   starts are outbox entries written in its commit's transaction, so a
@@ -234,7 +234,7 @@ const startDecided = async (
  * How core starts the workflows App code binds, for an invocation acting
  * as `authority` (the App, its version, the person), made by `agent`'s
  * call when an agent made it: each through the App's binding of the
- * alias, with the key the operation host derived.
+ * alias, with the key the function host derived.
  */
 export const appWorkflowStarts = (
   env: Env,
@@ -286,8 +286,8 @@ const undeliverable = (code: string) => ({ undeliverable: code });
 /**
  * Refuses (`workflow.start_denied`) a start an agent's call staged, once
  * the agent no longer holds `write` on App `app` for the person, as it
- * needed to make the call: and a notification, likewise
- * (workflow-notifications.ts).
+ * needed to make the call: and an event sent to a run, likewise
+ * (workflow-event-sends.ts).
  */
 export const requireAgentAllowed = async (
   env: Env,

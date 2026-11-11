@@ -2,10 +2,10 @@ import type { FunctionManifest } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { categoryOf } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { categoryOf } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -318,9 +318,9 @@ export const candidateAppAnswer = async (
   if (!app.success || person === undefined) {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
-  let operation: FunctionManifest;
+  let fn: FunctionManifest;
   try {
-    ({ operation } = await functionById(env, person, app.data, call.function));
+    ({ fn } = await functionById(env, person, app.data, call.function));
   } catch (error) {
     const code = isExpectedError(error) ? error.code : undefined;
     if (code !== undefined && unavailableCodes.has(code)) {
@@ -328,10 +328,10 @@ export const candidateAppAnswer = async (
     }
     throw error;
   }
-  if (operation.kind === "action") {
+  if (fn.kind === "action") {
     throw actionRefused();
   }
-  return operation.returns === null
+  return fn.returns === null
     ? boundedAnswer(binding.answer, "output")
-    : requireShape(JSON.stringify(operation.returns), binding.answer, "output");
+    : requireShape(JSON.stringify(fn.returns), binding.answer, "output");
 };

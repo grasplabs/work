@@ -191,7 +191,7 @@ const restrictedEntry = (
  * A run of an independent workflow never enters it after it starts: it
  * starts restricted or not, as its start decided (workflow-starts.ts,
  * `restrictedStart`), and keeps that. It reads no Knowledge, and what it
- * calls answers an unrestricted one nothing restricted (an operation of
+ * calls answers an unrestricted one nothing restricted (a function of
  * an App in restricted mode is refused, before and after:
  * workflows/resource-calls.ts). Anything that would restrict an
  * unrestricted one is refused instead, `permission.restricted`, so

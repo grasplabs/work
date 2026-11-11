@@ -268,7 +268,7 @@ export const readScopeSchema = z.strictObject({
 export type ReadScope = z.infer<typeof readScopeSchema>;
 
 /**
- * A write's fields: an object, whose names and values the operation host
+ * A write's fields: an object, whose names and values the function host
  * then checks against the pinned schema's fields.
  */
 const writeFieldsSchema = z.custom<WriteFields>(
@@ -283,7 +283,7 @@ const writeFieldsSchema = z.custom<WriteFields>(
 
 /**
  * One write a mutation stages, as it crosses from App code to core's
- * operation host: checked for its shape here, and then against the pinned
+ * function host: checked for its shape here, and then against the pinned
  * schema, the caller's access and the store.
  */
 export const writeRequestSchema = z.discriminatedUnion("kind", [

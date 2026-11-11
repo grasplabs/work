@@ -27,7 +27,7 @@ export type SendEvent<Grants extends Grant> = <
   Event extends GrantedEvent<Grants>,
 >(
   event: Event,
-  notification: {
+  options: {
     readonly runId: string;
     readonly data: NoInfer<EventDataOf<Event>>;
   }

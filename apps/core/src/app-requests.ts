@@ -1,6 +1,6 @@
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
-import { operationErrors } from "@grasp-os/shared/operations";
+import { functionErrors } from "@grasp-os/shared/functions";
 
 // The request a chat's code sends with an App call (env.apps.call), read
 // as AppsApi.call reads it (agent-apps.ts): a stream, read no further than
@@ -24,11 +24,11 @@ const readBounded = async (
     }
     // Bytes only: a chunk of anything else has no length to count.
     if (!(value instanceof Uint8Array)) {
-      throw operationErrors.create("contract.invalid_request");
+      throw functionErrors.create("contract.invalid_request");
     }
     length += value.byteLength;
     if (length > functionRequestMaxBytes) {
-      throw operationErrors.create("contract.input_too_large", {
+      throw functionErrors.create("contract.input_too_large", {
         maxBytes: functionRequestMaxBytes,
       });
     }
@@ -45,7 +45,7 @@ const readBounded = async (
  */
 export const requestText = async (request: unknown): Promise<string> => {
   if (!(request instanceof ReadableStream)) {
-    throw operationErrors.create("contract.invalid_request");
+    throw functionErrors.create("contract.invalid_request");
   }
   const reader: ReadableStreamDefaultReader<unknown> = request.getReader();
   const limit = deadline(requestReadMs);
@@ -53,7 +53,7 @@ export const requestText = async (request: unknown): Promise<string> => {
     return await Promise.race([
       readBounded(reader),
       whenAborted(limit.signal).catch(() => {
-        throw operationErrors.create("function.deadline_exceeded");
+        throw functionErrors.create("function.deadline_exceeded");
       }),
     ]);
   } catch (error) {

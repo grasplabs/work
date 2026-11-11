@@ -948,7 +948,7 @@ describe("a page's typed send", { timeout: 180_000 }, () => {
         const settled = events.find(
           ({ action, target }) =>
             (action === "workflow.event.sent" ||
-              action === "workflow.notify_intent.refused") &&
+              action === "workflow.send_event.refused") &&
             target?.id === mutationRun
         );
         expect(settled).toBeDefined();

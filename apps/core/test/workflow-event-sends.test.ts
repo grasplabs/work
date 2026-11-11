@@ -20,11 +20,11 @@ import {
   releaseManifestSchema,
 } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -41,8 +41,8 @@ import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { callOperation } from "../src/operations.ts";
-import type { HostedApp, Runner } from "../src/operations.ts";
+import { hostFunctionCall } from "../src/function-host.ts";
+import type { HostedApp, Runner } from "../src/function-host.ts";
 import type { OutboxConsumer } from "../src/outbox-delivery.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
@@ -53,7 +53,7 @@ import {
 import { StoreHost } from "../src/store-host.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { dispatchNotifyIntent } from "../src/workflow-notifications.ts";
+import { dispatchSendEventIntent } from "../src/workflow-event-sends.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -71,9 +71,9 @@ import { liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
 
-// A mutation's workflow notifications (spec 10.7.4; operations.ts stages
-// them, workflow-notifications.ts admits and delivers them), from their
-// threat model: a notification commits with its mutation's records and
+// The events a mutation sends workflow runs (spec 10.7.4; function-host.ts stages
+// them, workflow-event-sends.ts admits and delivers them), from their
+// threat model: a sent event commits with its mutation's records and
 // receipt or not at all; it is delivered from the store's outbox into the
 // run's inbox once, its event's ID from the receipt and its place, a
 // dispatch that dies after the inbox took it delivering the same event;
@@ -128,7 +128,7 @@ const config = defineApp({
 
 const { mutation } = serverModule(schema, config);
 
-/** Records a job done and notifies its run. */
+/** Records a job done and sends its run an event. */
 const markDone = mutation({
   args: { runId: v.string(), jobId: v.string() },
   returns: v.string(),
@@ -142,7 +142,7 @@ const markDone = mutation({
   },
 });
 
-/** Records a job done and notifies its run, then fails. */
+/** Records a job done and sends its run an event, then fails. */
 const markThenFail = mutation({
   args: { runId: v.string() },
   returns: v.null(),
@@ -153,14 +153,14 @@ const markThenFail = mutation({
   },
 });
 
-/** Its code asks the channel to notify `review` with whatever it is given. */
-const rawNotify = mutation({
+/** Its code asks the channel to send `review` an event with whatever it is given. */
+const rawSendEvent = mutation({
   args: { event: v.string(), runId: v.string(), data: v.string() },
   returns: v.string(),
   handler: () => "unreached",
 });
 
-/** Its code asks the channel to notify a workflow the App doesn't declare. */
+/** Its code asks the channel to send an event to a workflow the App doesn't declare. */
 const undeclared = mutation({
   args: { event: v.string(), runId: v.string(), data: v.string() },
   returns: v.string(),
@@ -168,7 +168,7 @@ const undeclared = mutation({
 });
 
 /**
- * Notifies through `ctx.sendEvent` with a reference of its own making,
+ * Sends an event through `ctx.sendEvent` with a reference of its own making,
  * named `name`, as code that forges one could.
  */
 const forged = mutation({
@@ -187,7 +187,7 @@ const jobsApp = registerApp({
   config,
   schema,
   modules: {
-    jobs: { markDone, markThenFail, rawNotify, undeclared, forged },
+    jobs: { markDone, markThenFail, rawSendEvent, undeclared, forged },
   },
   migrations: [],
 });
@@ -204,22 +204,22 @@ const codeOf = (error: unknown): string =>
     : String(error);
 
 /**
- * App code as the SDK's runner runs it, but for `rawNotify` and
+ * App code as the SDK's runner runs it, but for `rawSendEvent` and
  * `undeclared`, which talk to their channel directly, as code in an
  * isolate could, and answer what the host said: the event alias, run and
  * data `args` give.
  */
 const runner: Runner = async (path, args, channel: FunctionChannel) => {
-  if (path === "jobs.rawNotify" || path === "jobs.undeclared") {
+  if (path === "jobs.rawSendEvent" || path === "jobs.undeclared") {
     const asked = z
       .object({ event: z.string(), runId: z.string(), data: z.string() })
       .parse(args);
     return await channel
-      .resource(path === "jobs.rawNotify" ? "review" : "ghost", "notify", [
-        asked.event,
-        asked.runId,
-        JSON.parse(asked.data),
-      ])
+      .resource(
+        path === "jobs.rawSendEvent" ? "review" : "ghost",
+        "sendEvent",
+        [asked.event, asked.runId, JSON.parse(asked.data)]
+      )
       .then(
         () => "staged",
         (error: unknown) => codeOf(error)
@@ -418,7 +418,7 @@ const fixture = async () => {
       storeId,
       schemaVersion: 1,
       schemaHash: zeros,
-      operationManifestHash: zeros,
+      functionManifestHash: zeros,
     },
     workflows: [
       {
@@ -444,7 +444,7 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 const kinds = {
   "jobs.markDone": "mutation",
   "jobs.markThenFail": "mutation",
-  "jobs.rawNotify": "mutation",
+  "jobs.rawSendEvent": "mutation",
   "jobs.undeclared": "mutation",
   "jobs.forged": "mutation",
 } as const;
@@ -455,13 +455,13 @@ const call = async (
   by: Identity,
   path: keyof typeof kinds,
   args: Json
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const invocation = await invocationFor(env, fx.release, {
     by,
     requestId: crypto.randomUUID(),
     deadline: Date.now() + 30_000,
   });
-  return await callOperation(
+  return await hostFunctionCall(
     hosted,
     invocation,
     { path, kind: kinds[path] },
@@ -483,7 +483,7 @@ const eachOf = async (
 };
 
 /** What a call answered, or the code it failed with. */
-const answerOf = (result: OperationResult): unknown =>
+const answerOf = (result: FunctionResult): unknown =>
   result.ok ? result.value : result.error.code;
 
 /** A run of `review` the App starts for `by` on job `jobId`, waiting: its ID. */
@@ -537,7 +537,7 @@ const outboxOf = async (store: OpenStore) =>
       }))
   );
 
-/** Drains the store's outbox with `consumer` taking its notifications, at `at`. */
+/** Drains the store's outbox with `consumer` taking its sent events, at `at`. */
 const drainWith = async (
   store: OpenStore,
   consumer: OutboxConsumer,
@@ -545,7 +545,7 @@ const drainWith = async (
 ): Promise<void> => {
   await runInDurableObject(objectOf(store), async (_instance, state) => {
     await new StoreHost(state, env).drainOutbox(
-      { "workflow.notify": consumer },
+      { "workflow.send_event": consumer },
       { now: new Date(at) }
     );
   });
@@ -553,11 +553,11 @@ const drainWith = async (
 
 /** The dispatch as the store's outbox runs it. */
 const dispatch: OutboxConsumer = async (entry) =>
-  await dispatchNotifyIntent(env, entry);
+  await dispatchSendEventIntent(env, entry);
 
 /** A dispatch that delivers the event, then dies before it acknowledges. */
 const killedDispatch: OutboxConsumer = async (entry) => {
-  await dispatchNotifyIntent(env, entry);
+  await dispatchSendEventIntent(env, entry);
   throw new Error("Killed before acknowledging");
 };
 
@@ -590,283 +590,298 @@ const auditedFor = async (action: string, runId: string) => {
     .map(({ actor, detail }) => ({ actor, detail }));
 };
 
-describe("a mutation notifying a workflow's run", { timeout: 120_000 }, () => {
-  it("is delivered once from the store's outbox after its commit, with the host's source, the same event when a dispatch dies after the inbox took it", async () => {
-    const fx = await fixture();
-    const runId = await startedRun(fx, fx.ada);
+describe(
+  "a mutation sending a workflow's run an event",
+  { timeout: 120_000 },
+  () => {
+    it("is delivered once from the store's outbox after its commit, with the host's source, the same event when a dispatch dies after the inbox took it", async () => {
+      const fx = await fixture();
+      const runId = await startedRun(fx, fx.ada);
 
-    const committed = await call(fx, fx.bob, "jobs.markDone", {
-      runId,
-      jobId: "job-1",
-    });
-    const staged = await outboxOf(fx.store);
-    await drainWith(fx.store, killedDispatch);
-    await drainWith(fx.store, dispatch, Date.now() + hour);
-    const run = await ended(fx, runId);
-    const sent = await auditedFor("workflow.event.sent", runId);
+      const committed = await call(fx, fx.bob, "jobs.markDone", {
+        runId,
+        jobId: "job-1",
+      });
+      const staged = await outboxOf(fx.store);
+      await drainWith(fx.store, killedDispatch);
+      await drainWith(fx.store, dispatch, Date.now() + hour);
+      const run = await ended(fx, runId);
+      const sent = await auditedFor("workflow.event.sent", runId);
 
-    expect({
-      committed: committed.ok,
-      staged,
-      settled: await outboxOf(fx.store),
-      run: { status: run.status, output: run.result },
-      sent: sent.map(({ actor, detail }) => ({
-        actor,
-        via: detail?.via,
-        principal: detail?.principal,
-        redelivered: detail?.redelivered,
-        sameEvent: detail?.event === sent[0]?.detail?.event,
-      })),
-    }).toStrictEqual({
-      committed: true,
-      staged: [
-        { kind: "workflow.notify", settled: false, undeliverable: null },
-      ],
-      settled: [
-        { kind: "workflow.notify", settled: true, undeliverable: null },
-      ],
-      // Bob's mutation notified Ada's run, as the App, for Bob.
-      run: {
-        status: "completed",
-        output: {
-          status: `urn:grasp:app:${fx.app}:version:1:person:${fx.bob.userId}:mutation job-1`,
+      expect({
+        committed: committed.ok,
+        staged,
+        settled: await outboxOf(fx.store),
+        run: { status: run.status, output: run.result },
+        sent: sent.map(({ actor, detail }) => ({
+          actor,
+          via: detail?.via,
+          principal: detail?.principal,
+          redelivered: detail?.redelivered,
+          sameEvent: detail?.event === sent[0]?.detail?.event,
+        })),
+      }).toStrictEqual({
+        committed: true,
+        staged: [
+          { kind: "workflow.send_event", settled: false, undeliverable: null },
+        ],
+        settled: [
+          { kind: "workflow.send_event", settled: true, undeliverable: null },
+        ],
+        // Bob's mutation sent Ada's run an event, as the App, for Bob.
+        run: {
+          status: "completed",
+          output: {
+            status: `urn:grasp:app:${fx.app}:version:1:person:${fx.bob.userId}:mutation job-1`,
+          },
         },
-      },
-      sent: [false, true].map((redelivered) => ({
-        actor: { type: "app", appId: fx.app, part: "server" },
-        via: "mutation",
-        principal: fx.bob.userId,
-        redelivered,
-        sameEvent: true,
-      })),
+        sent: [false, true].map((redelivered) => ({
+          actor: { type: "app", appId: fx.app, part: "server" },
+          via: "mutation",
+          principal: fx.bob.userId,
+          redelivered,
+          sameEvent: true,
+        })),
+      });
     });
-  });
 
-  it("stages nothing for a mutation that fails, and refuses an event the release doesn't declare for the workflow (another workflow's, a key every object inherits, a forged reference's), data the declared event doesn't take, or a run that isn't the App's before anything is staged", async () => {
-    const fx = await fixture();
-    const runId = await startedRun(fx, fx.ada);
-    const { runId: personsRun } = await startWorkflow(
-      env,
-      { type: "person", person: fx.ada },
-      fx.workflowId,
-      { version: 1, args: { jobId: "job-9" }, key: unique() }
-    );
-    const raw = async (
-      path: "jobs.rawNotify" | "jobs.undeclared",
-      fields: { event?: string; runId?: string | null; data?: unknown }
-    ) =>
-      answerOf(
-        await call(fx, fx.bob, path, {
-          event: fields.event ?? "jobEvents",
-          runId: fields.runId ?? runId,
-          data: JSON.stringify(fields.data ?? { jobId: "job-1" }),
-        })
+    it("stages nothing for a mutation that fails, and refuses an event the release doesn't declare for the workflow (another workflow's, a key every object inherits, a forged reference's), data the declared event doesn't take, or a run that isn't the App's before anything is staged", async () => {
+      const fx = await fixture();
+      const runId = await startedRun(fx, fx.ada);
+      const { runId: personsRun } = await startWorkflow(
+        env,
+        { type: "person", person: fx.ada },
+        fx.workflowId,
+        { version: 1, args: { jobId: "job-9" }, key: unique() }
       );
-    const forgedAs = async (name: string) =>
-      answerOf(await call(fx, fx.bob, "jobs.forged", { name, runId }));
-    const inherited = ["constructor", "toString", "hasOwnProperty", "valueOf"];
+      const raw = async (
+        path: "jobs.rawSendEvent" | "jobs.undeclared",
+        fields: { event?: string; runId?: string | null; data?: unknown }
+      ) =>
+        answerOf(
+          await call(fx, fx.bob, path, {
+            event: fields.event ?? "jobEvents",
+            runId: fields.runId ?? runId,
+            data: JSON.stringify(fields.data ?? { jobId: "job-1" }),
+          })
+        );
+      const forgedAs = async (name: string) =>
+        answerOf(await call(fx, fx.bob, "jobs.forged", { name, runId }));
+      const inherited = [
+        "constructor",
+        "toString",
+        "hasOwnProperty",
+        "valueOf",
+      ];
 
-    const outcomes = {
-      failed: answerOf(await call(fx, fx.bob, "jobs.markThenFail", { runId })),
-      undeclared: await raw("jobs.undeclared", {}),
-      otherEvent: await raw("jobs.rawNotify", { event: "otherEvents" }),
-      // The event the App declares for its other workflow, under this one.
-      anotherWorkflows: await raw("jobs.rawNotify", { event: "archived" }),
-      inherited: await eachOf(
-        inherited,
-        async (event) => await raw("jobs.rawNotify", { event })
-      ),
-      // References App code made up, sent through `ctx.sendEvent`.
-      forged: {
-        madeUp: await forgedAs("workflows.review.events.madeUp"),
+      const outcomes = {
+        failed: answerOf(
+          await call(fx, fx.bob, "jobs.markThenFail", { runId })
+        ),
+        undeclared: await raw("jobs.undeclared", {}),
+        otherEvent: await raw("jobs.rawSendEvent", { event: "otherEvents" }),
+        // The event the App declares for its other workflow, under this one.
+        anotherWorkflows: await raw("jobs.rawSendEvent", { event: "archived" }),
         inherited: await eachOf(
           inherited,
-          async (event) => await forgedAs(`workflows.review.events.${event}`)
+          async (event) => await raw("jobs.rawSendEvent", { event })
         ),
-        otherWorkflows: await forgedAs("workflows.archive.events.jobEvents"),
-        undeclaredWorkflow: await forgedAs("workflows.ghost.events.jobEvents"),
-      },
-      extraField: await raw("jobs.rawNotify", {
-        data: { jobId: "job-1", source: "urn:forged" },
-      }),
-      malformed: await raw("jobs.rawNotify", { data: { jobId: 1 } }),
-      // The other workflow's event's data, under this one's event.
-      othersData: await raw("jobs.rawNotify", { data: { at: 1 } }),
-      noSuchRun: await raw("jobs.rawNotify", { runId: crypto.randomUUID() }),
-      personsRun: await raw("jobs.rawNotify", { runId: personsRun }),
-      wellFormed: await raw("jobs.rawNotify", {}),
-    };
-
-    expect({ outcomes, outbox: await outboxOf(fx.store) }).toStrictEqual({
-      outcomes: {
-        failed: "desk.refused",
-        undeclared: "resource.not_allowed",
-        otherEvent: "resource.not_allowed",
-        anotherWorkflows: "resource.not_allowed",
-        inherited: inherited.map(() => "resource.not_allowed"),
+        // References App code made up, sent through `ctx.sendEvent`.
         forged: {
-          madeUp: "resource.not_allowed",
+          madeUp: await forgedAs("workflows.review.events.madeUp"),
+          inherited: await eachOf(
+            inherited,
+            async (event) => await forgedAs(`workflows.review.events.${event}`)
+          ),
+          otherWorkflows: await forgedAs("workflows.archive.events.jobEvents"),
+          undeclaredWorkflow: await forgedAs(
+            "workflows.ghost.events.jobEvents"
+          ),
+        },
+        extraField: await raw("jobs.rawSendEvent", {
+          data: { jobId: "job-1", source: "urn:forged" },
+        }),
+        malformed: await raw("jobs.rawSendEvent", { data: { jobId: 1 } }),
+        // The other workflow's event's data, under this one's event.
+        othersData: await raw("jobs.rawSendEvent", { data: { at: 1 } }),
+        noSuchRun: await raw("jobs.rawSendEvent", {
+          runId: crypto.randomUUID(),
+        }),
+        personsRun: await raw("jobs.rawSendEvent", { runId: personsRun }),
+        wellFormed: await raw("jobs.rawSendEvent", {}),
+      };
+
+      expect({ outcomes, outbox: await outboxOf(fx.store) }).toStrictEqual({
+        outcomes: {
+          failed: "desk.refused",
+          undeclared: "resource.not_allowed",
+          otherEvent: "resource.not_allowed",
+          anotherWorkflows: "resource.not_allowed",
           inherited: inherited.map(() => "resource.not_allowed"),
-          otherWorkflows: "resource.not_allowed",
-          undeclaredWorkflow: "resource.not_allowed",
+          forged: {
+            madeUp: "resource.not_allowed",
+            inherited: inherited.map(() => "resource.not_allowed"),
+            otherWorkflows: "resource.not_allowed",
+            undeclaredWorkflow: "resource.not_allowed",
+          },
+          extraField: "contract.invalid_args",
+          malformed: "contract.invalid_args",
+          othersData: "contract.invalid_args",
+          noSuchRun: "resource.unavailable",
+          personsRun: "resource.unavailable",
+          // The one well-formed event staged.
+          wellFormed: "staged",
         },
-        extraField: "contract.invalid_args",
-        malformed: "contract.invalid_args",
-        othersData: "contract.invalid_args",
-        noSuchRun: "resource.unavailable",
-        personsRun: "resource.unavailable",
-        // The one well-formed notification staged.
-        wellFormed: "staged",
-      },
-      outbox: [
-        { kind: "workflow.notify", settled: false, undeliverable: null },
-      ],
-    });
-  });
-
-  it("sends only the events its sealed version names, whatever the workflow is rebound to, and keeps a refused one as evidence", async () => {
-    const fx = await fixture();
-    const runId = await startedRun(fx, fx.ada);
-    // A later version of the workflow with an event of its own, bound to
-    // the App in place of the one its version was sealed with.
-    const contract = `later-events-${unique()}`;
-    await publishCatalogContract(env, fx.admin, {
-      key: contract,
-      kind: "event",
-      events: {
-        [completed]: {
-          data: JSON.stringify(jobData.descriptor),
-          browser: true,
-        },
-      },
-    });
-    await publishWorkflowVersion(env, fx.ada, fx.workflowId, {
-      definition: definitionOf(contract, {
-        laterEvents: { contract },
-      }),
-      basedOn: 1,
-    });
-    for (const alias of ["jobEvents", "laterEvents"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one approval after the other
-      await approveWorkflowBinding(env, fx.admin, fx.workflowId, {
-        alias,
-        target: { kind: "event" },
-        reviewed: { version: 2 },
+        outbox: [
+          { kind: "workflow.send_event", settled: false, undeliverable: null },
+        ],
       });
-    }
-    await bindWorkflowToApp(env, fx.ada, fx.workflowId, {
-      app: fx.app,
-      alias: "review",
-      version: 2,
     });
-    const raw = async (event: string) =>
-      answerOf(
-        await call(fx, fx.bob, "jobs.rawNotify", {
-          event,
-          runId,
-          data: JSON.stringify({ jobId: "job-1" }),
-        })
-      );
-    const refusals = async () => {
-      const events = await allEvents();
-      return events
-        .filter(
-          (each) =>
-            each.action === "app.use.refused" && each.target?.id === fx.app
-        )
-        .map(({ detail }) => ({
-          function: detail?.function,
-          useKind: detail?.useKind,
-          useName: detail?.useName,
-          reason: detail?.reason,
-          errorCode: detail?.errorCode,
-        }));
-    };
-    expect({
-      // The new event: the version was sealed without it.
-      later: await raw("laterEvents"),
-      // The sealed one: its workflow is bound to another version now.
-      sealed: await raw("jobEvents"),
-      refusals: await refusals(),
-      outbox: await outboxOf(fx.store),
-    }).toStrictEqual({
-      later: "resource.not_allowed",
-      sealed: "resource.unavailable",
-      refusals: [
-        {
-          function: "jobs.rawNotify",
-          useKind: "workflow",
-          useName: "review",
-          reason: "request_not_allowed",
-          errorCode: "resource.not_allowed",
+
+    it("sends only the events its sealed version names, whatever the workflow is rebound to, and keeps a refused one as evidence", async () => {
+      const fx = await fixture();
+      const runId = await startedRun(fx, fx.ada);
+      // A later version of the workflow with an event of its own, bound to
+      // the App in place of the one its version was sealed with.
+      const contract = `later-events-${unique()}`;
+      await publishCatalogContract(env, fx.admin, {
+        key: contract,
+        kind: "event",
+        events: {
+          [completed]: {
+            data: JSON.stringify(jobData.descriptor),
+            browser: true,
+          },
         },
-      ],
-      outbox: [],
+      });
+      await publishWorkflowVersion(env, fx.ada, fx.workflowId, {
+        definition: definitionOf(contract, {
+          laterEvents: { contract },
+        }),
+        basedOn: 1,
+      });
+      for (const alias of ["jobEvents", "laterEvents"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one approval after the other
+        await approveWorkflowBinding(env, fx.admin, fx.workflowId, {
+          alias,
+          target: { kind: "event" },
+          reviewed: { version: 2 },
+        });
+      }
+      await bindWorkflowToApp(env, fx.ada, fx.workflowId, {
+        app: fx.app,
+        alias: "review",
+        version: 2,
+      });
+      const raw = async (event: string) =>
+        answerOf(
+          await call(fx, fx.bob, "jobs.rawSendEvent", {
+            event,
+            runId,
+            data: JSON.stringify({ jobId: "job-1" }),
+          })
+        );
+      const refusals = async () => {
+        const events = await allEvents();
+        return events
+          .filter(
+            (each) =>
+              each.action === "app.use.refused" && each.target?.id === fx.app
+          )
+          .map(({ detail }) => ({
+            function: detail?.function,
+            useKind: detail?.useKind,
+            useName: detail?.useName,
+            reason: detail?.reason,
+            errorCode: detail?.errorCode,
+          }));
+      };
+      expect({
+        // The new event: the version was sealed without it.
+        later: await raw("laterEvents"),
+        // The sealed one: its workflow is bound to another version now.
+        sealed: await raw("jobEvents"),
+        refusals: await refusals(),
+        outbox: await outboxOf(fx.store),
+      }).toStrictEqual({
+        later: "resource.not_allowed",
+        sealed: "resource.unavailable",
+        refusals: [
+          {
+            function: "jobs.rawSendEvent",
+            useKind: "workflow",
+            useName: "review",
+            reason: "request_not_allowed",
+            errorCode: "resource.not_allowed",
+          },
+        ],
+        outbox: [],
+      });
     });
-  });
 
-  it("refuses to stage without the App's send grant", async () => {
-    const fx = await fixture();
-    const runId = await startedRun(fx, fx.ada);
-    await revokePermission(env, fx.admin, fx.send);
+    it("refuses to stage without the App's send grant", async () => {
+      const fx = await fixture();
+      const runId = await startedRun(fx, fx.ada);
+      await revokePermission(env, fx.admin, fx.send);
 
-    const refused = await call(fx, fx.bob, "jobs.markDone", {
-      runId,
-      jobId: "job-1",
+      const refused = await call(fx, fx.bob, "jobs.markDone", {
+        runId,
+        jobId: "job-1",
+      });
+
+      expect({
+        refused: answerOf(refused),
+        outbox: await outboxOf(fx.store),
+      }).toStrictEqual({ refused: "resource.unavailable", outbox: [] });
     });
 
-    expect({
-      refused: answerOf(refused),
-      outbox: await outboxOf(fx.store),
-    }).toStrictEqual({ refused: "resource.unavailable", outbox: [] });
-  });
+    it("settles undeliverable, audited, once the run ended or the grant went before delivery, and the mutation stands", async () => {
+      const fx = await fixture();
+      const endedRun = await startedRun(fx, fx.ada);
+      const revokedRun = await startedRun(fx, fx.ada, "job-2");
+      const first = await call(fx, fx.bob, "jobs.markDone", {
+        runId: endedRun,
+        jobId: "job-1",
+      });
+      await terminateResourceRun(env, fx.ada, fx.workflowId, endedRun);
+      await ended(fx, endedRun);
+      await drainWith(fx.store, dispatch);
+      const second = await call(fx, fx.bob, "jobs.markDone", {
+        runId: revokedRun,
+        jobId: "job-2",
+      });
+      await revokePermission(env, fx.admin, fx.send);
+      await drainWith(fx.store, dispatch);
+      const refusals = [
+        ...(await auditedFor("workflow.send_event.refused", endedRun)),
+        ...(await auditedFor("workflow.send_event.refused", revokedRun)),
+      ];
 
-  it("settles undeliverable, audited, once the run ended or the grant went before delivery, and the mutation stands", async () => {
-    const fx = await fixture();
-    const endedRun = await startedRun(fx, fx.ada);
-    const revokedRun = await startedRun(fx, fx.ada, "job-2");
-    const first = await call(fx, fx.bob, "jobs.markDone", {
-      runId: endedRun,
-      jobId: "job-1",
+      expect({
+        committed: [first.ok, second.ok],
+        outbox: await outboxOf(fx.store),
+        refusals: refusals.map(({ detail }) => detail?.reason),
+        sent: [
+          ...(await auditedFor("workflow.event.sent", endedRun)),
+          ...(await auditedFor("workflow.event.sent", revokedRun)),
+        ],
+      }).toStrictEqual({
+        committed: [true, true],
+        outbox: [
+          {
+            kind: "workflow.send_event",
+            settled: true,
+            undeliverable: "workflow.run_ended",
+          },
+          {
+            kind: "workflow.send_event",
+            settled: true,
+            undeliverable: "workflow.event_denied",
+          },
+        ],
+        refusals: ["workflow.run_ended", "workflow.event_denied"],
+        sent: [],
+      });
     });
-    await terminateResourceRun(env, fx.ada, fx.workflowId, endedRun);
-    await ended(fx, endedRun);
-    await drainWith(fx.store, dispatch);
-    const second = await call(fx, fx.bob, "jobs.markDone", {
-      runId: revokedRun,
-      jobId: "job-2",
-    });
-    await revokePermission(env, fx.admin, fx.send);
-    await drainWith(fx.store, dispatch);
-    const refusals = [
-      ...(await auditedFor("workflow.notify_intent.refused", endedRun)),
-      ...(await auditedFor("workflow.notify_intent.refused", revokedRun)),
-    ];
-
-    expect({
-      committed: [first.ok, second.ok],
-      outbox: await outboxOf(fx.store),
-      refusals: refusals.map(({ detail }) => detail?.reason),
-      sent: [
-        ...(await auditedFor("workflow.event.sent", endedRun)),
-        ...(await auditedFor("workflow.event.sent", revokedRun)),
-      ],
-    }).toStrictEqual({
-      committed: [true, true],
-      outbox: [
-        {
-          kind: "workflow.notify",
-          settled: true,
-          undeliverable: "workflow.run_ended",
-        },
-        {
-          kind: "workflow.notify",
-          settled: true,
-          undeliverable: "workflow.event_denied",
-        },
-      ],
-      refusals: ["workflow.run_ended", "workflow.event_denied"],
-      sent: [],
-    });
-  });
-});
+  }
+);

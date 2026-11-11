@@ -151,7 +151,7 @@ describe("generated modules", () => {
 
   test("change the contract fingerprint a binding pins with any change to a function", async () => {
     const manifest = notesManifest();
-    const create = manifest.operations["notes.create"];
+    const create = manifest.functions["notes.create"];
     if (create === undefined) {
       throw new Error("No notes.create");
     }
@@ -198,8 +198,8 @@ describe("generated modules", () => {
   });
 
   test("give a page the release's public functions by name, its workflows' too, as data a client reads them from", () => {
-    const { operations } = notesManifest();
-    const create = operations["notes.create"];
+    const { functions } = notesManifest();
+    const create = functions["notes.create"];
     const build = readPageBuild(builtFunctions);
     const releaseFunctions = build.functions;
     expect(releaseFunctions.get("notes.create")).toStrictEqual({
@@ -239,14 +239,14 @@ describe("generated modules", () => {
     // Another version, whose functions take and answer other values, and
     // whose workflows were bound to other versions: the references are
     // the code's names, and their types the code's own.
-    const create = manifest.operations["notes.create"];
+    const create = manifest.functions["notes.create"];
     if (create === undefined) {
       throw new Error("No notes.create");
     }
     const changedContracts = {
       ...manifest,
-      operations: {
-        ...manifest.operations,
+      functions: {
+        ...manifest.functions,
         "notes.create": {
           ...create,
           args: v.object({ heading: v.string() }).descriptor,
@@ -1431,14 +1431,14 @@ describe("reading a manifest back", () => {
     [
       "a function's own uses",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.tally", "uses"], []);
+        setAt(data, ["functions", "notes.tally", "uses"], []);
       },
       "isn't a function as a manifest holds one",
     ],
     [
       "a function's own table verbs",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.get", "tables"], {
+        setAt(data, ["functions", "notes.get", "tables"], {
           notes: { read: true, insert: true, update: true, delete: true },
         });
       },
@@ -1449,7 +1449,7 @@ describe("reading a manifest back", () => {
       (data: unknown) => {
         setAt(
           data,
-          ["operations", "notes.get", "stream"],
+          ["functions", "notes.get", "stream"],
           v.object({}).descriptor
         );
       },
@@ -1465,29 +1465,29 @@ describe("reading a manifest back", () => {
     [
       "a key no function has",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.get", "grants"], ["admin"]);
+        setAt(data, ["functions", "notes.get", "grants"], ["admin"]);
       },
       "isn't a function as a manifest holds one",
     ],
     [
       "a function filed under another path",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.get", "path"], "notes.list");
+        setAt(data, ["functions", "notes.get", "path"], "notes.list");
       },
       "path, kind or visibility",
     ],
     [
       "a kind there isn't",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.get", "kind"], "admin");
+        setAt(data, ["functions", "notes.get", "kind"], "admin");
       },
       "path, kind or visibility",
     ],
     [
       "a path that clashes with another",
       (data: unknown) => {
-        const get = at(data, ["operations", "notes.get"]);
-        setAt(data, ["operations", "notes.get.more"], {
+        const get = at(data, ["functions", "notes.get"]);
+        setAt(data, ["functions", "notes.get.more"], {
           ...(typeof get === "object" ? get : {}),
           path: "notes.get.more",
         });
@@ -1532,28 +1532,28 @@ describe("reading a manifest back", () => {
     [
       "a descriptor of a kind there isn't",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.get", "returns", "kind"], "script");
+        setAt(data, ["functions", "notes.get", "returns", "kind"], "script");
       },
       "kind isn't one this SDK knows",
     ],
     [
       "arguments that aren't an object",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.get", "args"], v.string().descriptor);
+        setAt(data, ["functions", "notes.get", "args"], v.string().descriptor);
       },
       "arguments are an object",
     ],
     [
       "arguments that may be null as a whole, which no declaration makes",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.get", "args", "nullable"], true);
+        setAt(data, ["functions", "notes.get", "args", "nullable"], true);
       },
       "isn't what its declaration makes",
     ],
     [
       "a stream on a query",
       (data: unknown) => {
-        setAt(data, ["operations", "notes.get", "stream"], v.null().descriptor);
+        setAt(data, ["functions", "notes.get", "stream"], v.null().descriptor);
       },
       "A query's declaration has no `stream`",
     ],
@@ -1598,7 +1598,7 @@ describe("reading a manifest back", () => {
       refusal(() =>
         readAppManifest(
           changed((data) => {
-            setAt(data, ["operations", "notes.get", "returns"], deep);
+            setAt(data, ["functions", "notes.get", "returns"], deep);
           })
         )
       )

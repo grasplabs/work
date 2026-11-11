@@ -104,7 +104,7 @@ export interface TestStartOptions {
 /**
  * Someone a test acts as (`t.withIdentity`). Each call goes to core,
  * which resolves the reference against the App's release as it resolves a
- * page's, and runs the function through the operation host, as them. A
+ * page's, and runs the function through the function host, as them. A
  * call answers the function's value; a refusal rejects with the
  * `GraspError` a page's call gets, its `code` such as `note.not_found`.
  */

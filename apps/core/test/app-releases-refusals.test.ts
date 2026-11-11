@@ -137,7 +137,7 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
     const forging = `const stringify = JSON.stringify;
 JSON.stringify = (value, ...rest) => {
   const text = stringify(value, ...rest);
-  return typeof value === "object" && value !== null && "operations" in value
+  return typeof value === "object" && value !== null && "functions" in value
     ? text.replace('"stream":null', '"stream":null,"uses":[{"type":"resource","kind":"ai","alias":"ai"}]')
     : text;
 };
@@ -218,7 +218,7 @@ JSON.stringify = (value, ...rest) => {
     const events = await allEvents();
     // A version without tables made current: version 1 binds the store
     // still, kept as a rollback target.
-    // Its operations replaced: the notes' file goes, which reads tables
+    // Its functions replaced: the notes' file goes, which reads tables
     // version 2 doesn't have.
     await commitDefined(
       env,
@@ -306,8 +306,8 @@ export const reach = action({
     );
     const release = await seal(fixture);
     expect([
-      release.app.operations["preferences.defaults"]?.kind,
-      release.app.operations["preferences.reach"]?.kind,
+      release.app.functions["preferences.defaults"]?.kind,
+      release.app.functions["preferences.reach"]?.kind,
     ]).toStrictEqual(["query", "action"]);
   });
 
@@ -361,7 +361,7 @@ export const reach = action({
     ).resolves.toBe("app.nothing_to_commit");
   });
 
-  it("can't keep anything but server code under operations/: each is refused by name", async () => {
+  it("can't keep anything but server code under server/: each is refused by name", async () => {
     const strays = [
       "server/notes.json",
       "server/view.tsx",
@@ -425,7 +425,7 @@ export const reach = action({
     }).toStrictEqual({ ok: false, refused: new Set(strays) });
   });
 
-  it("builds each operations file as a module of its own, dotted folders included", async () => {
+  it("builds each server file as a module of its own, dotted folders included", async () => {
     // A folder named like a file beside it: each still has its own module.
     const built = await buildAppCode(
       env,

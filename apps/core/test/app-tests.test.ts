@@ -28,7 +28,7 @@ import { applied } from "./store-schemas.ts";
 
 // An App's tests (`appTest`, spec 28.2), as core runs them whenever a
 // version is made current: each suite in its own isolate, every call
-// through the real operation host on a fixture store of the test's own.
+// through the real function host on a fixture store of the test's own.
 // What the tests here check is what that host did: the App's access
 // rules held between identities and roles, a store per test, what a
 // test seeds and inspects directly (`t.run`) and where that may happen,

@@ -1,27 +1,27 @@
 import { AppError, v } from "@grasp-os/runtime/app";
 import type { AppManifest, FunctionChannel } from "@grasp-os/runtime/host";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
-import type { OperationResult } from "@grasp-os/shared/operations";
+import { jsonOf, functionErrors } from "@grasp-os/shared/functions";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import {
   readRequestSchema,
   writeRequestSchema,
 } from "@grasp-os/shared/store-queries";
 
 import { refusalOf } from "./app-functions.ts";
-import { callOperation } from "./operations.ts";
-import type { Invocation, Runner } from "./operations.ts";
+import { hostFunctionCall } from "./function-host.ts";
+import type { Invocation, Runner } from "./function-host.ts";
 
 // A test's own transaction (`t.run`, app-tests.ts): the test reads and
 // writes the App's tables directly, as convex-test's `t.run` does, for
 // what to seed and what to inspect. It runs as a mutation does, through
-// the operation host (operations.ts), so its reads see its own writes and
+// the function host (function-host.ts), so its reads see its own writes and
 // it commits once, whole, when the test's function returns, or not at all;
 // only its "handler" is the test isolate's function, which drives the
 // mutation's channel from outside through this module. Threat model, and
 // how each is closed:
 //
 // - Reaching past the App's access rules anywhere but a test's store: the
-//   transaction is `unrestricted` (operations.ts), which only this module
+//   transaction is `unrestricted` (function-host.ts), which only this module
 //   sets, for the test session's own invocation (app-tests.ts), and the
 //   store takes it only on a fixture store core recorded and no inventory
 //   lists (data-store.ts, `#admitScope`), so a business store refuses it
@@ -32,7 +32,7 @@ import type { Invocation, Runner } from "./operations.ts";
 //   release's manifest only for this call, never to the release.
 // - Writing what the schema refuses: each write is staged and checked as
 //   any mutation's (`stagingFor`), and the store checks the commit again.
-// - A transaction left open: it is the operation's own, so it ends at the
+// - A transaction left open: it is the function's own, so it ends at the
 //   invocation's deadline (the test's), as a mutation does, its writes
 //   dropped; and as its test's session closes (`end`). How many a test
 //   opens is bounded by that deadline alone, as its calls are: each holds
@@ -60,8 +60,8 @@ const withTestRun = (app: AppManifest): AppManifest => {
   }
   const made: AppManifest = {
     ...app,
-    operations: {
-      ...app.operations,
+    functions: {
+      ...app.functions,
       [testRunPath]: {
         path: testRunPath,
         kind: "mutation",
@@ -80,14 +80,14 @@ const withTestRun = (app: AppManifest): AppManifest => {
 /** One transaction a test holds open. */
 export interface TestTransaction {
   /** One read, as a mutation's: it sees the transaction's writes. */
-  readonly read: (request: unknown) => Promise<OperationResult>;
+  readonly read: (request: unknown) => Promise<FunctionResult>;
   /** One write, staged: an insert answers its minted ID. */
-  readonly write: (request: unknown) => Promise<OperationResult>;
+  readonly write: (request: unknown) => Promise<FunctionResult>;
   /**
    * Commits what it staged (`commit`), or drops it, and answers how: once;
    * any read or write after it is refused.
    */
-  readonly end: (commit: boolean) => Promise<OperationResult>;
+  readonly end: (commit: boolean) => Promise<FunctionResult>;
 }
 
 /**
@@ -98,12 +98,12 @@ const dropped = (): AppError =>
   new AppError("test.dropped", "The test's function threw: nothing commits.");
 
 /** A read or write of a transaction that has ended. */
-const ended = (): Error => operationErrors.create("function.ended");
+const ended = (): Error => functionErrors.create("function.ended");
 
 /** What `work` answers, or its refusal, as a result. */
 const resultOf = async (
   work: () => Promise<unknown>
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const requestId = crypto.randomUUID();
   try {
     return { ok: true, value: jsonOf(await work()) ?? null };
@@ -115,7 +115,7 @@ const resultOf = async (
 /**
  * Opens a transaction on `app` (the release's manifest) for `invocation`,
  * which the test's session built: unrestricted, so the App's access rules
- * don't hold it back. Answers it, or why the operation host refused it
+ * don't hold it back. Answers it, or why the function host refused it
  * before it opened.
  */
 export const openTestTransaction = async (
@@ -123,7 +123,7 @@ export const openTestTransaction = async (
   invocation: Invocation
 ): Promise<
   | { readonly transaction: TestTransaction }
-  | { readonly refused: OperationResult }
+  | { readonly refused: FunctionResult }
 > => {
   const entered = Promise.withResolvers<FunctionChannel>();
   const done = Promise.withResolvers<null>();
@@ -142,7 +142,7 @@ export const openTestTransaction = async (
     entered.resolve(channel);
     return await done.promise;
   };
-  const outcome = callOperation(
+  const outcome = hostFunctionCall(
     { manifest: withTestRun(app), run },
     { ...invocation, unrestricted: true },
     { path: testRunPath, kind: "mutation" },
@@ -151,7 +151,7 @@ export const openTestTransaction = async (
   const lent = async (): Promise<{ channel: FunctionChannel }> => ({
     channel: await entered.promise,
   });
-  const refused = async (): Promise<{ result: OperationResult }> => ({
+  const refused = async (): Promise<{ result: FunctionResult }> => ({
     result: await outcome,
   });
   const opened = await Promise.race([lent(), refused()]);
@@ -171,7 +171,7 @@ export const openTestTransaction = async (
         await resultOf(async () => {
           open();
           return await channel.read(
-            operationErrors.parse(
+            functionErrors.parse(
               "contract.invalid_request",
               readRequestSchema,
               request
@@ -182,7 +182,7 @@ export const openTestTransaction = async (
         await resultOf(async () => {
           open();
           return await channel.write(
-            operationErrors.parse(
+            functionErrors.parse(
               "contract.invalid_write",
               writeRequestSchema,
               request
@@ -205,7 +205,7 @@ export const openTestTransaction = async (
         if (commit && result.ok && entries > 1) {
           return await resultOf(async () => {
             await Promise.reject(
-              operationErrors.create("mutation.concurrent_change")
+              functionErrors.create("mutation.concurrent_change")
             );
           });
         }
