@@ -862,7 +862,12 @@ const Source = ({
           </Button>
         ) : null}
       </SettingsRow>
-      {onGrasp ? (
+      {onGrasp && !grasp.available ? (
+        <SettingsBody>
+          <p className="text-status-attention">{t`Grasp’s AI isn’t available here any more: AI is off until you switch to your own keys.`}</p>
+        </SettingsBody>
+      ) : null}
+      {onGrasp && grasp.available ? (
         <SettingsBody>
           {grasp.month.reached ? (
             <p className="text-status-attention">{t`This month’s limit of ${limit} is reached: AI is stopped until next month, or until you switch to your own keys.`}</p>
@@ -924,11 +929,16 @@ export const AiProvidersSettings = ({
         }}
       />
       <SettingsSection
-        description={t`Grasp's AI calls models with your organization's own provider keys. Keys are stored sealed: nobody can read one back, only its last four characters.`}
+        description={
+          listing.source === "grasp"
+            ? t`Your organization’s own provider keys, for when its AI runs on them. Keys are stored sealed: nobody can read one back, only its last four characters.`
+            : t`Grasp's AI calls models with your organization's own provider keys. Keys are stored sealed: nobody can read one back, only its last four characters.`
+        }
         title={t`AI providers`}
       >
         <ErrorText>{failure}</ErrorText>
-        {providers.length === 0 ? (
+        {/* On Grasp's AI, having no key of its own keeps nothing from answering. */}
+        {providers.length === 0 && listing.source !== "grasp" ? (
           <SettingsBody>
             <p className="text-muted-foreground">
               {editable ? (
@@ -944,7 +954,8 @@ export const AiProvidersSettings = ({
               )}
             </p>
           </SettingsBody>
-        ) : (
+        ) : null}
+        {providers.length > 0 ? (
           <ul aria-label={t`Connected providers`}>
             {providers.map((provider) => (
               <ProviderRow
@@ -995,7 +1006,7 @@ export const AiProvidersSettings = ({
               />
             ))}
           </ul>
-        )}
+        ) : null}
       </SettingsSection>
       {editable && addable.length > 0 ? (
         <AddProvider

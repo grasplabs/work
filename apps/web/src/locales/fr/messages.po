@@ -6001,6 +6001,10 @@ msgid "Grasp's AI calls models with your organization's own provider keys. Keys 
 msgstr "L'IA de Grasp appelle les modèles avec les propres clés de fournisseur de votre organisation. Les clés sont stockées scellées : personne ne peut les relire, seulement leurs quatre derniers caractères."
 
 #: src/settings/ai-providers.tsx
+msgid "Grasp’s AI isn’t available here any more: AI is off until you switch to your own keys."
+msgstr "L’IA de Grasp n’est plus disponible ici : l’IA est désactivée jusqu’à ce que vous passiez à vos propres clés."
+
+#: src/settings/ai-providers.tsx
 msgid "Grasp’s AI or your own keys"
 msgstr "L’IA de Grasp ou vos propres clés"
 
@@ -15936,6 +15940,10 @@ msgstr "Le compte de votre organisation"
 #: src/settings/ai-providers.tsx
 msgid "Your organization’s AI runs on Grasp’s AI, which you pay for by use, or on your own provider keys below."
 msgstr "L’IA de votre organisation fonctionne avec l’IA de Grasp, que vous payez à l’usage, ou avec vos propres clés de fournisseur ci-dessous."
+
+#: src/settings/ai-providers.tsx
+msgid "Your organization’s own provider keys, for when its AI runs on them. Keys are stored sealed: nobody can read one back, only its last four characters."
+msgstr "Les propres clés de fournisseur de votre organisation, pour quand son IA fonctionne avec elles. Les clés sont stockées scellées : personne ne peut les relire, seulement leurs quatre derniers caractères."
 
 #: src/onboarding/ai-step.tsx
 msgid "Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly."

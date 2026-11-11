@@ -632,6 +632,25 @@ describe("Settings › AI providers", () => {
     });
   });
 
+  it("doesn't say AI can't answer for want of a provider while it runs on Grasp's AI", async () => {
+    const { api } = fakeAiProviders({ graspAvailable: true });
+    await shown(api);
+    const onOwn = text().includes("so Grasp's AI features can't answer");
+    await press(button("Switch to Grasp’s AI"));
+
+    expect({
+      onOwn,
+      onGrasp: text().includes("so Grasp's AI features can't answer"),
+      whatSwitchingLeaves: text().includes(
+        "No provider of your own is connected"
+      ),
+    }).toStrictEqual({
+      onOwn: true,
+      onGrasp: false,
+      whatSwitchingLeaves: true,
+    });
+  });
+
   it("says nothing of Grasp's AI where the deployment doesn't offer it", async () => {
     const { api } = fakeAiProviders();
     await shown(api);
