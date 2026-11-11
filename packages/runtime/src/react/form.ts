@@ -107,7 +107,7 @@ const useGraspForm = (
  * `SubmitButton` from `@grasp-os/ui/form`, or custom controls through
  * `form.Field`.
  */
-// SAFETY: one implementation serves the two typed ways in above; it
+// SAFETY: one implementation serves the three typed ways in above; it
 // reads which one it was given at run time (form-target.ts, `targetOf`).
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 export const useForm = ((target: unknown, options: FormOptionsInput) =>
