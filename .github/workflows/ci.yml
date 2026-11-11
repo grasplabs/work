@@ -16,9 +16,9 @@
 # an admin makes outside the queue lands without it. A pull request's run,
 # draft or not, is fast feedback for review: the fast checks (static,
 # generated, embed-wasm, oxc-wasm), the release build and core on plain
-# workerd, a few minutes on six runners. Marking a draft ready runs them
+# workerd, a few minutes on seven runners. Marking a draft ready runs them
 # again, so its title and description, which become the commit on main,
-# are checked as they stand. The test shards, the e2e stack and its parts, and the
+# are checked as they stood then (an edit after that isn't). The test shards, the e2e stack and its parts, and the
 # admin's journeys run on the merge queue, a run by hand and the nightly
 # run. A full run is 62 jobs and the account runs 60 at once, so a pull
 # request's full run beside the queue's left one of them waiting for
@@ -791,8 +791,8 @@ jobs:
   # frontend's static files and D1 migrations, with its manifest) and checks
   # every blob against the manifest, and builds the admin, which isn't part
   # of a release. For a pull request or the merge queue, that's all: part
-  # of the required `check` (above), and a pull request's only build. On a
-  # push to main it's the commit's only build: the bundle
+  # of the required `check` (above). On a push to main it's the commit's
+  # only build: the bundle
   # is the run's `release` artifact, which publish-release publishes as
   # it is, so the release an admin rolls out is the one CI tested, byte
   # for byte.
@@ -865,8 +865,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Core's tests' global-setup builds on main, where every pull request can
-  # read them (a pull request's own are its alone), built without a test
+  # Core's tests' global-setup builds on main, where every run can read
+  # them (the merge queue's, a run by hand, the nightly), built without a test
   # run (scripts/build-core-test-prebuilt.ts). One job saves, so the shards
   # never race to pack the same files. Nothing waits for it. Vitest's
   # pre-bundled dependencies aren't cached: restored warm, they started
