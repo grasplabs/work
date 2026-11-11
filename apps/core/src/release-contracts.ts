@@ -52,12 +52,16 @@ export const approvalContract = "grasp/approval";
  * Schema envelopes, which connect confirms are its own. Which origin,
  * paths and methods are reached is the connection's, never the contract's.
  * A binding is served only by a connection that serves every operation of
- * its contract, so a read-only API binds `httpReadContract`.
+ * its contract, so a read-only API binds `httpReadCatalogContract`. Not the
+ * connector contract an HTTP connection serves (`httpContract` in
+ * `@grasp-os/shared/http-contract`), which an App names directly: a
+ * workflow names this interface, and an admin binds it to whichever
+ * connection's contract serves its operations.
  */
-export const httpContract = "grasp/http";
+export const httpCatalogContract = "grasp/http";
 
 /** An outside API's reads alone (`get`), for a connection allowing no change. */
-export const httpReadContract = "grasp/http-read";
+export const httpReadCatalogContract = "grasp/http-read";
 
 /** An action's schema, as an envelope of its JSON Schema. */
 const enveloped = (document: unknown): string =>
@@ -178,9 +182,13 @@ export const releaseContracts: readonly CatalogContractDefinition[] = [
       },
     },
   },
-  { key: httpReadContract, kind: "connector", operations: { get: httpGet } },
   {
-    key: httpContract,
+    key: httpReadCatalogContract,
+    kind: "connector",
+    operations: { get: httpGet },
+  },
+  {
+    key: httpCatalogContract,
     kind: "connector",
     operations: {
       get: httpGet,

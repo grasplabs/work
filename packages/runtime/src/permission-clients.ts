@@ -11,13 +11,10 @@ import type {
   GuestInvite,
   GuestTranscript,
 } from "@grasp-os/shared/guests";
+import type { HttpContract } from "@grasp-os/shared/http-contract";
 import type { ResourceRecallInput } from "@grasp-os/shared/knowledge";
 
-import type {
-  ContractAction,
-  HttpContract,
-  HttpRequestInit,
-} from "./connector-contracts.ts";
+import type { ContractAction, HttpRequestInit } from "./connector-contracts.ts";
 import type { GraspFunctions } from "./grasp-functions.ts";
 import type { MemberName } from "./member-names.ts";
 import type {

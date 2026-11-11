@@ -1,4 +1,5 @@
-import { httpContract } from "./connector-contracts.ts";
+import { httpContract } from "@grasp-os/shared/http-contract";
+
 import type { FunctionChannel } from "./function-channel.ts";
 import { isActionPermission } from "./manifest-permissions.ts";
 import { memberName, membersOf } from "./member-names.ts";
