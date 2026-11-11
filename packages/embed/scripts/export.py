@@ -234,7 +234,9 @@ def tokenizer(src: Path) -> bytes:
 def export(src: Path, out: Path, float_files: bool, calibration: list[str] | None, max_tokens: int = MAX_TOKENS) -> dict[str, int]:
     """Writes the three model files into `out`; returns their sizes."""
     cfg = AutoConfig.from_pretrained(src)
-    assert 2 <= max_tokens <= cfg.max_position_embeddings and max_tokens % 8 == 0, max_tokens
+    # At most 1,024: past it attention's integer sums could overflow, and the embedder refuses the file
+    # (rust/src/encoder.rs, MAX_TOKENS).
+    assert 2 <= max_tokens <= min(1024, cfg.max_position_embeddings) and max_tokens % 8 == 0, max_tokens
     out.mkdir(parents=True, exist_ok=True)
     int8 = not float_files
     cal = calibrate(src, calibration, max_tokens) if int8 and calibration else None
@@ -257,7 +259,7 @@ if __name__ == "__main__":
         default=MAX_TOKENS,
         help=f"the most tokens the embedder reads (default {MAX_TOKENS}, as the reference truncates), not the config's "
         "max_position_embeddings: the encoder's buffers and rotary tables are sized to it, and at 8,192 they don't fit "
-        "the module's 64 MiB",
+        "the module's 64 MiB; at most 1,024, where attention's integer sums stay in range",
     )
     args = ap.parse_args()
     texts = json.loads(args.calibration.read_text()) if args.calibration else None

@@ -117,11 +117,21 @@ fn alloc<T>(n: usize) -> *mut T {
 }
 
 /// The most of each size an encoder file may declare: well past any model of the family, and small enough that
-/// no size computed from them overflows (the largest buffer, (8192 + 16) x 2 x 16384 floats, is 1 GiB).
+/// no size computed from them overflows (the largest buffer, (1024 + 16) x 2 x 16384 floats, is 136 MB).
 const MAX_HEADS: usize = 64;
 const MAX_FF: usize = 16384;
 const MAX_LAYERS: usize = 64;
-const MAX_TOKENS: usize = 8192;
+/// The token limit is what keeps the integer sums inside i32. Every one, by its worst case (n tokens, k inputs):
+/// - `att_pv`, the largest: per output lane, the sum over all keys of P x V, with P = round(2^(s - max + 14)) at
+///   most 16,385 (2^14 times the exp2 polynomial's 1 + 7.6e-5) and |V| <= 127: n x 16,385 x 127 = n x 2,080,895,
+///   which fits 2^31 - 1 = 2,147,483,647 up to n = 1,032. Hence 1,024 (the models we ship read 512).
+/// - `att_softmax`'s sum of P: n x 16,385.
+/// - `att_scores`: 64 dims x 127 x 127 = 1,032,256, and the zero-point term 127 x 64 x 127, the same.
+/// - `tile_dot`: k x 127 x 127 with k <= 16,384 (`MAX_FF`): 264,257,536, and the zero-point term the same.
+/// - the 16-bit pair kernels (`tile_pairs`, `att_scores::<_, true>`): each i16 lane at most 258 x 127 = 32,766
+///   (the exporter's and `pack_head_i8`'s bound, checked by `pairable`), then widened into the i32 sums above.
+/// Pooling, norms and the float feed-forward channels are float32.
+const MAX_TOKENS: usize = 1024;
 
 impl Model {
     /// Reads an encoder file (see scripts/export.py) that stays where it is, at `base`, for the life of the model.

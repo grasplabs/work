@@ -36,7 +36,7 @@ export class Int8Embedder extends Embedder {
 }
 
 /** An embedder whose model a test names: for model files that are wrong on purpose. */
-export class CustomEmbedder extends Embedder {
+export class CustomEmbedder extends Int8Embedder {
   protected override model: EmbedModel = int8Model;
 
   /** Test-only: the model this object loads from now on. */

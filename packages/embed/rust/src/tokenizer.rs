@@ -113,6 +113,11 @@ impl Tok {
         self.offs.len() - 1
     }
 
+    /// The most bytes one token covers: the longest vocabulary piece or added token.
+    pub fn longest_token(&self) -> usize {
+        self.added_lens.first().map_or(self.longest, |&l| l.max(self.longest))
+    }
+
     fn piece(&self, id: u32) -> &[u8] {
         &self.pieces[self.offs[id as usize] as usize..self.offs[id as usize + 1] as usize]
     }

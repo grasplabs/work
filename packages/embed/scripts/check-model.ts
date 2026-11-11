@@ -98,6 +98,9 @@ const truncated = (ids: number[]): number[] =>
     : [...ids.slice(0, auto.maxTokens - 1), ids.at(-1) ?? 0];
 const same = (a: ArrayLike<number>, b: ArrayLike<number>): boolean =>
   a.length === b.length && Array.prototype.every.call(a, (x, i) => x === b[i]);
+/** A vector's float32 bit patterns: +0 and -0, or two NaNs, differ here. */
+const bits = (vector: Float32Array): Uint32Array =>
+  new Uint32Array(vector.buffer, vector.byteOffset, vector.length);
 
 let tokensEqual = 0;
 const cases = [...reference.embeddings, ...reference.tokens];
@@ -126,7 +129,12 @@ for (const { text, vector } of reference.embeddings) {
   const v = auto.embed(ids, format, rows);
   ours.push(v);
   cosines.push(dot(v, vector) / Math.sqrt(dot(v, v) * dot(vector, vector)));
-  if (same(pairs.embed(ids, format, rows), plain.embed(ids, format, rows))) {
+  if (
+    same(
+      bits(pairs.embed(ids, format, rows)),
+      bits(plain.embed(ids, format, rows))
+    )
+  ) {
     kernelsEqual += 1;
   }
 }

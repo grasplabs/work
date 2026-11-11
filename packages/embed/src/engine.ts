@@ -29,6 +29,7 @@ const exportsSchema = z.object({
   dim: call,
   max_tokens: call,
   vocab_size: call,
+  longest_token: call,
   set_kernel: call,
   text_buf: call,
   text_cap: call,
@@ -71,6 +72,9 @@ const fitting = (load: () => number): number => {
   }
 };
 
+/** Whitespace as the tokenizer's lstrip reads it (Rust's `char::is_whitespace`: Unicode White_Space). */
+const whitespace = /\p{White_Space}/gu;
+
 /** The bytes one row of the token table takes in `format`. */
 export const rowBytes = (format: RowFormat, dim: number): number =>
   format === "float" ? 4 * dim : 4 + dim;
@@ -79,6 +83,10 @@ export class Engine {
   readonly dim: number;
   readonly maxTokens: number;
   readonly vocabSize: number;
+  /** How many times one whitespace character may repeat before a run is shortened (`tokenize`). */
+  private readonly runLimit: number;
+  /** A run of one whitespace character, repeated more than `runLimit` times. */
+  private readonly longRuns: RegExp;
   private readonly exports: Exports;
   private readonly encoder = new TextEncoder();
 
@@ -115,6 +123,11 @@ export class Engine {
     this.dim = this.exports.dim();
     this.maxTokens = this.exports.max_tokens();
     this.vocabSize = this.exports.vocab_size();
+    this.runLimit = this.maxTokens * this.exports.longest_token() + 1;
+    this.longRuns = new RegExp(
+      String.raw`(\p{White_Space})\1{${String(this.runLimit)},}`,
+      "gu"
+    );
   }
 
   /** How much memory the module holds now. */
@@ -145,17 +158,43 @@ export class Engine {
 
   /**
    * The text's token IDs, `<bos>` and `<eos>` included, cut at the most
-   * tokens the model reads. A text longer than the module's text buffer
-   * (256 KiB of UTF-8) is cut there first, at a character: far beyond what
-   * the model reads.
+   * tokens the model reads, as the reference tokenizer gives them for every
+   * text it tokenizes within that limit. Two steps keep a text of any size
+   * within the module's 256 KiB text buffer without changing that:
+   *
+   * - A run of one whitespace character repeated more than `runLimit`
+   *   times keeps `runLimit` of them. In a text within the limit such a
+   *   run can only be whitespace an added token with lstrip takes, past a
+   *   head of at most max tokens x the longest token's bytes (each token
+   *   covers at most that much), so the same tokens come out. In a text
+   *   beyond the limit, the run alone still fills it.
+   * - A text still longer than the buffer is cut there only when what is
+   *   kept holds at least max tokens x the longest token's bytes of
+   *   non-whitespace, which no lstrip can take: the text is then certainly
+   *   beyond the limit, where the tokens kept near the cut may differ from
+   *   the reference's (as for a long word, rust/src/tokenizer.rs).
+   *   Otherwise it is refused: cut it before embedding.
    */
   tokenize(text: string): Int32Array {
+    const bounded = text.replace(this.longRuns, (_run, char: string) =>
+      char.repeat(this.runLimit)
+    );
     // The buffer first: allocating it may grow the memory.
     const at = this.exports.text_buf();
-    const { written } = this.encoder.encodeInto(
-      text,
+    const { read, written } = this.encoder.encodeInto(
+      bounded,
       this.bytes().subarray(at, at + this.exports.text_cap())
     );
+    if (
+      read < bounded.length &&
+      this.encoder.encode(bounded.slice(0, read).replaceAll(whitespace, ""))
+        .byteLength <
+        this.runLimit - 1
+    ) {
+      throw new RangeError(
+        "The text is too long to tokenize exactly: its first 256 KiB are mostly whitespace. Cut it before embedding."
+      );
+    }
     const count = this.exports.tokenize(written);
     return new Int32Array(
       this.exports.memory.buffer,

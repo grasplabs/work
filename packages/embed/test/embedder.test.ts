@@ -124,12 +124,12 @@ const withHeaderWord = (index: number, value: number): Uint8Array => {
 };
 
 /**
- * The float fixture's encoder declaring `maxTokens` tokens, with rotary
- * tables of that size (zeros): a consistent file whose buffers need far
- * more memory than the module may have.
+ * A fixture encoder declaring `maxTokens` tokens, with rotary tables of
+ * that size that are all zeros: every query and key is then zero, so every
+ * attention score is equal.
  */
-const withMaxTokens = (maxTokens: number): Uint8Array => {
-  const source = new Uint8Array(encoderFloat);
+const withMaxTokens = (encoder: ArrayBuffer, maxTokens: number): Uint8Array => {
+  const source = new Uint8Array(encoder);
   const view = new DataView(source.buffer);
   const word = (i: number): number => view.getUint32(i * 4, true);
   const [hidden, layers, oldMax, tables] = [word(3), word(6), word(7), word(9)];
@@ -150,6 +150,54 @@ const withMaxTokens = (maxTokens: number): Uint8Array => {
   new DataView(out.buffer).setUint32(7 * 4, maxTokens, true);
   return out;
 };
+
+/**
+ * A float encoder of zeros, one layer, width 64, one head, feed-forward
+ * 16,384, 1,024 tokens: within every bound the parser sets, but its
+ * buffers need over 136 MB, past the module's 64 MiB.
+ */
+const tooLargeEncoder = (): Uint8Array => {
+  const [hidden, heads, ff, layers, maxTokens, window, tables] = [
+    64, 1, 16_384, 1, 1024, 8, 1,
+  ];
+  const header = new Uint8Array(pad16((10 + layers) * 4));
+  const words = new DataView(header.buffer);
+  header.set(new TextEncoder().encode("GENC"));
+  for (const [i, value] of [
+    1,
+    0,
+    hidden,
+    heads,
+    ff,
+    layers,
+    maxTokens,
+    window,
+    tables,
+    0,
+  ].entries()) {
+    words.setUint32((i + 1) * 4, value, true);
+  }
+  const floats = (n: number): number => pad16(n * 4);
+  const layer =
+    floats(3 * hidden * hidden) +
+    floats(hidden * hidden) +
+    floats(2 * ff * hidden) +
+    16 +
+    floats(hidden * ff) +
+    2 * floats(hidden);
+  const out = new Uint8Array(
+    header.byteLength +
+      2 * floats(hidden) +
+      2 * tables * tableBytes(maxTokens) +
+      layers * layer
+  );
+  out.set(header);
+  return out;
+};
+
+/** A vector's float32 bits, as hex: what "the same bits" compares. */
+const bitsOf = (vector: Float32Array): string =>
+  hex(new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength));
 
 const dot = (a: ArrayLike<number>, b: ArrayLike<number>): number => {
   let sum = 0;
@@ -211,7 +259,7 @@ describe("embedder", () => {
       const [auto, ...forced] = await Promise.all(
         objects.map(async (embedder) => {
           const { vector } = await embedder.embed(text);
-          return vector;
+          return bitsOf(vector);
         })
       );
       expect(forced).toStrictEqual([auto, auto]);
@@ -250,6 +298,72 @@ describe("embedder", () => {
     expect(bits).toStrictEqual(int8Bits);
   });
 
+  it("keeps attention's integer sums in range at the most tokens a model may read", async () => {
+    // Zero rotary tables zero every query and key, so all 1,024 scores in
+    // a row are equal: each P is 16,383, and each value lane sums
+    // 1,024 x 16,383 x 127 at a column's largest value, the most att_pv
+    // can reach (rust/src/encoder.rs, MAX_TOKENS). The float path is the
+    // scalar reference.
+    const model = (encoder: ArrayBuffer, tokens: ArrayBuffer) => ({
+      tokenizer: new Uint8Array(tokenizer),
+      encoder: withMaxTokens(encoder, 1024),
+      tokens: new Uint8Array(tokens),
+    });
+    const [int8, float] = await Promise.all([
+      customEmbedder("uniform-int8", model(encoderInt8, tokensInt8)),
+      customEmbedder("uniform-float", model(encoderFloat, tokensFloat)),
+    ]);
+    const text = "a ".repeat(2000);
+    const ids = await int8.tokenize(text);
+    expect(ids).toHaveLength(1024);
+    expect(new Set(ids.slice(1, -1)).size).toBe(1);
+    const [quantised, reference32] = await Promise.all([
+      int8.embed(text),
+      float.embed(text),
+    ]);
+    expect(dot(quantised.vector, reference32.vector)).toBeGreaterThanOrEqual(
+      int8LeastCosine
+    );
+  });
+
+  it("tokenizes whitespace past the text buffer as the reference does", async () => {
+    // The texts are built here as make-fixture.py builds them; reference.json
+    // keeps only their IDs.
+    const texts: Record<string, string> = {
+      "spaces-then-mask": `${" ".repeat(262_144)}<mask>`,
+      "newlines-then-mask": `Hallo${"\n".repeat(300_000)}<mask> Welt`,
+    };
+    await upload(int8Model, int8Files);
+    const embedder = env.INT8.getByName("whitespace");
+    for (const { name, ids } of reference.generated) {
+      // oxlint-disable-next-line no-await-in-loop -- one object, one text at a time
+      await expect(embedder.tokenize(texts[name] ?? "")).resolves.toStrictEqual(
+        ids
+      );
+    }
+  });
+
+  it("refuses a text past the buffer that is too much whitespace to cut exactly", async () => {
+    await upload(int8Model, int8Files);
+    const stub = env.INT8.getByName("refused");
+    // Runs of alternating whitespace, which the run rule leaves alone.
+    const text = `${" \n".repeat(200_000)}<mask>`;
+    const outcome = await runInDurableObject(stub, async (instance) => {
+      if (!(instance instanceof Embedder)) {
+        throw new TypeError("Not an embedder.");
+      }
+      try {
+        await instance.embed(text);
+        return "embedded";
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    });
+    expect(outcome).toBe(
+      "The text is too long to tokenize exactly: its first 256 KiB are mostly whitespace. Cut it before embedding."
+    );
+  });
+
   it("answers questions from an object of their own, with the same model", async () => {
     await upload(int8Model, int8Files);
     const text = "Who approves purchase orders above 5,000 euros?";
@@ -257,7 +371,8 @@ describe("embedder", () => {
       questionEmbedder(env.INT8).embed(text),
       env.INT8.getByName("other").embed(text),
     ]);
-    expect(question).toStrictEqual(other);
+    expect(bitsOf(question.vector)).toBe(bitsOf(other.vector));
+    expect(question.model).toStrictEqual(other.model);
   });
 
   it("reads a lone surrogate as the replacement character, as UTF-8 encoding does", async () => {
@@ -272,7 +387,7 @@ describe("embedder", () => {
       embedder.embed("a\uD800b"),
       embedder.embed("a\uD800b"),
     ]);
-    expect(first).toStrictEqual(second);
+    expect(bitsOf(first.vector)).toBe(bitsOf(second.vector));
   });
 
   it("cuts a long text without spaces at the most tokens the model reads", async () => {
@@ -289,7 +404,7 @@ describe("embedder", () => {
   it("fails closed on a model whose buffers don't fit the module's memory", async () => {
     const embedder = await customEmbedder("too-large", {
       tokenizer: new Uint8Array(tokenizer),
-      encoder: withMaxTokens(8192),
+      encoder: tooLargeEncoder(),
       tokens: new Uint8Array(tokensFloat),
     });
     const tooLarge =
@@ -311,6 +426,8 @@ describe("embedder", () => {
       ["layers", withHeaderWord(6, 2 ** 30), shape],
       // Within the bounds, but more than the file holds.
       ["declared-larger", withHeaderWord(5, 16_384), sizes],
+      // Past 1,024 tokens attention's integer sums could overflow.
+      ["token-limit", withMaxTokens(encoderFloat, 1032), shape],
       [
         "version",
         withHeaderWord(1, 2),
@@ -399,6 +516,7 @@ describe("embedder", () => {
       // The abort breaks the call that made it.
     }
     const after = await env.INT8.getByName("evicted").embed(text);
-    expect(after).toStrictEqual(before);
+    expect(bitsOf(after.vector)).toBe(bitsOf(before.vector));
+    expect(after.model).toStrictEqual(before.model);
   });
 });
