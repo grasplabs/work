@@ -106,7 +106,10 @@ const kindsWithoutColon = <const K extends string>(
  * (`sourceRefOf`), so a kind gone from this list would fail every recall
  * whose results hold one of its sources.
  */
-const producerKinds = kindsWithoutColon(["upload", "chat"]);
+// `run` stays although nothing produces it now: stores filled between
+// #2157 and its revert hold run sources, and a recall that meets one must
+// still read it.
+const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
 
 /** Who adds a source: one of `producerKinds`. */
 export type ProducerKind = (typeof producerKinds)[number];
