@@ -1,4 +1,4 @@
-import { apiPath } from "@grasp-os/shared/api-path";
+import { apiPath, isApiPathSegment } from "@grasp-os/shared/api-path";
 import type { ApiPath } from "@grasp-os/shared/api-path";
 import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import {
@@ -242,7 +242,9 @@ const graphDrive = (place: string): readonly string[] =>
  * OData's own `(`, `=` and `'`, as they are sent, of which `apiPath` would
  * encode `=` (as `%3D`), with the query encoded inside the quotes (OData
  * quotes a quote by doubling it). Starting `search(`, it is never a dot
- * segment, and the encoded query adds no segment, query or fragment.
+ * segment, and to a URL parser the encoded query adds no segment, query
+ * or fragment. A gateway that decodes a path once would read its `/`
+ * again, so only a query `isApiPathSegment` keeps is sent (`graphItems`).
  */
 const graphSearch = (query: string): `search(q='${string}')` =>
   `search(q='${encodeURIComponent(query.replaceAll("'", "''"))}')`;
@@ -405,6 +407,11 @@ const graphItems = async (
 ): Promise<{ items: PlaceItem[]; next: string | null; read: number }> => {
   const base = graphDrive(place);
   let path: ApiPath | GraphSearchPath = apiPath(...base, "root", "children");
+  if (query !== null && !isApiPathSegment(query)) {
+    // A search that would read as another path once decoded (`/../x`)
+    // finds nothing, and Graph isn't asked.
+    return { items: [], next: null, read: 0 };
+  }
   if (query !== null) {
     path = `${apiPath(...base, "root")}/${graphSearch(query)}`;
   } else if (folder !== null) {

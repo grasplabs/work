@@ -5,14 +5,17 @@
  * (also as `%2e%2e`) move up. `encodeURIComponent` closes all of these
  * but `.` and `..`, so an empty segment, which would turn an item's path
  * into its collection's, is refused, as is a segment with a dot piece:
- * a piece between its `/` or `\` (or the whole segment) that is `.` or
- * `..`, plain or percent-encoded (`%2e`, `.%2E`), with or without spaces
- * at its ends (`.. `). A segment with an ASCII control character
- * (U+0000 to U+001F, U+007F) is refused too: a URL parser drops tabs and
- * line breaks (`.\t.` reads as `..`) and trims controls and spaces at a
- * URL's ends, and no id, name, key or version holds one. So neither a URL
- * parser nor an API or proxy that decodes a path once before routing
- * (`%252e` to `%2e`, `%2F` to `/`, `%09` to a tab) moves up. What comes
+ * a piece between its `/`, `\`, `?` or `#` (or the whole segment) that is
+ * `.` or `..`, plain or percent-encoded (`%2e`, `.%2E`), with or without
+ * spaces at its ends (`.. `). Once decoded, `/` and `\` split a segment
+ * and `?` and `#` end the path, so `..?x` reads as `..`. A segment with
+ * an ASCII control character (U+0000 to U+001F, U+007F) is refused too:
+ * a URL parser drops tabs and line breaks (`.\t.` reads as `..`) and
+ * trims controls and spaces at a URL's ends, and no id, name, key or
+ * version holds one. So neither a URL parser nor an API or proxy that
+ * decodes a path once before routing (`%252e` to `%2e`, `%2F` to `/`,
+ * `%3F` to `?`, `%09` to a tab) moves up; the tests hold every value of
+ * up to four dots, separators, spaces and tabs to it. What comes
  * out is the path a request will have, one segment per argument. Not
  * covered: an API that decodes a path twice (a value's `%252e` would
  * reach its router as `.`), a server that reads `;` parameters inside a
@@ -30,8 +33,11 @@ export class ApiPathError extends Error {
   override name = "ApiPathError";
 }
 
-/** Where a segment splits once `%2F` or `%5C` in it is decoded. */
-const separator = /[/\\]/u;
+/**
+ * Where a piece of a segment ends once `%2F`, `%5C`, `%3F` or `%23` in it
+ * is decoded: a new segment, or the end of the path.
+ */
+const separator = /[/\\?#]/u;
 
 /**
  * A dot piece: `.` or `..`, each dot plain or percent-encoded, with any
@@ -91,10 +97,8 @@ export const isApiPathSegment = (value: string): boolean => {
   try {
     apiPath(value);
     return true;
-  } catch (error) {
-    if (error instanceof ApiPathError) {
-      return false;
-    }
-    throw error;
+  } catch {
+    // `apiPath` throws only its refusal.
+    return false;
   }
 };

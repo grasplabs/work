@@ -499,9 +499,21 @@ describe("a read of a place", () => {
     await items(connectionId, { query: "it's #1/2" });
     await items(google, { place: "0AFinance", query: "it's \\ here" });
     const [graphSearch, googleSearch] = asked();
+    // A search that climbs out of the drive at a gateway that decodes a
+    // path once before routing.
+    await items(connectionId, { query: "/../../../users/x" });
+    const outsideDrive = asked()
+      .filter(({ host }) => host === "graph.microsoft.com")
+      .map(
+        ({ pathname }) =>
+          new URL(`https://graph.invalid${decodeURIComponent(pathname)}`)
+            .pathname
+      )
+      .filter((pathname) => !pathname.startsWith("/v1.0/me/drive/"));
     expect({
       refused,
       sentRefused,
+      outsideDrive,
       graph: decodeURIComponent(graphSearch?.pathname ?? ""),
       google: googleSearch?.searchParams.get("q"),
       corpora: googleSearch?.searchParams.get("corpora"),
@@ -515,6 +527,7 @@ describe("a read of a place", () => {
         file: "place.no_item",
       },
       sentRefused: 0,
+      outsideDrive: [],
       graph: "/v1.0/me/drive/root/search(q='it''s #1/2')",
       google: "fullText contains 'it\\'s \\\\ here' and trashed = false",
       corpora: "drive",
