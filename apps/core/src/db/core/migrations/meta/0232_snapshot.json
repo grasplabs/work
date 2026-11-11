@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7ba2a0f3-5637-4bf5-bb70-97c7128592fd",
+  "id": "554d08c8-a9f4-492a-b13f-eb41852284fb",
   "prevId": "c4f0f9a4-188c-44cf-a13f-2cf7ef9b21ca",
   "tables": {
     "access_revocations": {
@@ -477,105 +477,71 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "agent_places": {
-      "name": "agent_places",
+    "agents": {
+      "name": "agents",
       "columns": {
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "place": {
-          "name": "place",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "who": {
-          "name": "who",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "teams": {
-          "name": "teams",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "acts": {
-          "name": "acts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "changed_by": {
-          "name": "changed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "changed_at": {
-          "name": "changed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "agent_places_agent_id_place_pk": {
-          "columns": [
-            "agent_id",
-            "place"
-          ],
-          "name": "agent_places_agent_id_place_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "agent_reach": {
-      "name": "agent_reach",
-      "columns": {
-        "agent_id": {
-          "name": "agent_id",
+        "id": {
+          "name": "id",
           "type": "text",
           "primaryKey": true,
           "notNull": true,
           "autoincrement": false
         },
-        "on": {
-          "name": "on",
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "face": {
+          "name": "face",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job": {
+          "name": "job",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instructions": {
+          "name": "instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_role": {
+          "name": "model_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "made_by": {
+          "name": "made_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "made_at": {
+          "name": "made_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "who": {
-          "name": "who",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "teams": {
-          "name": "teams",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
         },
         "changed_by": {
           "name": "changed_by",
@@ -595,67 +561,6 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "agent_tool_classes": {
-      "name": "agent_tool_classes",
-      "columns": {
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tool_class": {
-          "name": "tool_class",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "who": {
-          "name": "who",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "teams": {
-          "name": "teams",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "changed_by": {
-          "name": "changed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "changed_at": {
-          "name": "changed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "agent_tool_classes_agent_id_tool_class_pk": {
-          "columns": [
-            "agent_id",
-            "tool_class"
-          ],
-          "name": "agent_tool_classes_agent_id_tool_class_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

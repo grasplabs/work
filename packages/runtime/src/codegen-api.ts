@@ -109,11 +109,11 @@ export const referencesText = (
     workflowsExport(workflows),
   ];
 
-  const resources = [
+  const referenced = [
     ...declaredPermissions(app, "files"),
     ...declaredPermissions(app, "links"),
   ].toSorted((a, b) => (a.alias < b.alias ? -1 : 1));
-  const resourceTypes = resources.map((declared) => {
+  const referencedTypes = referenced.map((declared) => {
     const literals = (
       declared["~permission"] === "files"
         ? declared.operations
@@ -127,7 +127,7 @@ export const referencesText = (
         : `LinksReference<${JSON.stringify(declared.alias)}, readonly [${literals}]>`;
     return `  readonly ${key(declared.alias)}: ${type};`;
   });
-  const resourceValues = resources.map((declared) => {
+  const referencedValues = referenced.map((declared) => {
     const data =
       declared["~permission"] === "files"
         ? {
@@ -139,9 +139,9 @@ export const referencesText = (
     return `  ${key(declared.alias)}: ${dataOf(data, 1)},`;
   });
   parts.push(
-    resources.length === 0
+    referenced.length === 0
       ? "export const permissions: Readonly<Record<never, never>> = frozen({});\n"
-      : `export const permissions: {\n${resourceTypes.join("\n")}\n} = frozen({\n${resourceValues.join("\n")}\n});\n`
+      : `export const permissions: {\n${referencedTypes.join("\n")}\n} = frozen({\n${referencedValues.join("\n")}\n});\n`
   );
 
   const body = parts.join("\n");

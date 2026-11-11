@@ -54,7 +54,7 @@ describe("model binding spend", { timeout: 120_000 }, () => {
     );
     expect(
       outcomeOf(await callOn(withProvider, sealed, "assist.attempt"))
-    ).toBe("resource.rate_limited|2");
+    ).toBe("permission.rate_limited|2");
   });
 
   it("list each App's model bindings with this month's spend, each App's apart, to admins only", async () => {

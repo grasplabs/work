@@ -1,8 +1,9 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { readRejection } from "./call-answers.ts";
 import { clientError, GraspError } from "./client-error.ts";
 import { namePattern } from "./declaration.ts";
 import type { LinksReference } from "./file-link-references.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // The session client's links: `client.links.open`,
 // which asks the trusted host to open a URL through a links resource the

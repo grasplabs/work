@@ -1,16 +1,13 @@
 {
-  // The intake's server code, checked as core's are, with
-  // `@server/_generated/server` resolved to what the host generates for it
-  // (server-types.ts). Its pages import `@server/_generated/api`, generated from its
-  // manifest, so the page build checks them (../tsconfig.json leaves
-  // them out).
-  "extends": "../../tsconfig.json",
+  // The built-in's config and server code, as an App's build checks them
+  // (the compiler's type-check.ts): against what Grasp generates for it
+  // (files/server/_generated/, ../../generate-blueprints.ts). Its pages
+  // need the route tree and the kit a page build gives them, so the build
+  // type-checks them (builtin-blueprints.test.ts), as it does any App's.
+  "extends": "../../../../tsconfig.base.json",
   "compilerOptions": {
-    "paths": {
-      "@xmldom/xmldom": ["../../types/xmldom.d.ts"],
-      "@server/_generated/server": ["./server-types.ts"]
-    }
+    "lib": ["es2024", "webworker", "esnext.disposable"],
+    "paths": { "@server/_generated/*": ["./files/server/_generated/*"] }
   },
-  "include": ["server-types.ts", "files/*.ts", "files/server"],
-  "exclude": []
+  "include": ["files/*.ts", "files/server"]
 }

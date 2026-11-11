@@ -3,10 +3,7 @@
   "compilerOptions": {
     // drizzle-kit writes each Durable Object's migrations.js.
     "allowJs": true,
-    "types": [
-      "@cloudflare/workers-types",
-      "@cloudflare/vitest-pool-workers/types"
-    ],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"],
     // Keeps the browser's globals out of a Worker's types (see the file).
     "paths": { "@xmldom/xmldom": ["./types/xmldom.d.ts"] },
     // Core's JSX is Chat SDK's cards (src/channels/cards.tsx), never React:
@@ -14,31 +11,12 @@
     "jsx": "react-jsx",
     "jsxImportSource": "chat"
   },
-  "include": [
-    "src",
-    "test",
-    "types",
-    "blueprints",
-    "worker-configuration.d.ts",
-    "*.ts"
-  ],
-  // The built-ins' pages: blueprints/tsconfig.json. The tests' own
-  // built-in is an App of spec 8's layout, whose functions import the
-  // module its seal generates (`@server/_generated/server`), which nothing here maps:
-  // its files are untyped, like any inline test App's (the seal strips
-  // types without checking them), and builtin-blueprints.test.ts covers
-  // what they do at runtime. A built-in of spec 8's layout (each of them
-  // now) is checked by its own tsconfig.json, which resolves
-  // `@server/_generated/server`.
-  "exclude": [
-    "blueprints/intake",
-    "blueprints/workflow-map",
-    "blueprints/kanban-board",
-    "blueprints/crm",
-    "blueprints/approvals",
-    "blueprints/dashboard",
-    "blueprints/*/files/pages",
-    "blueprints/*/files/components",
-    "test/fixtures/blueprints/*/files"
-  ]
+  "include": ["src", "test", "types", "worker-configuration.d.ts", "*.ts"],
+  // Each built-in (blueprints/) is checked by its own tsconfig.json, as an
+  // App. The tests' own built-in imports what its seal generates
+  // (`@server/_generated/server`), which nothing here maps: its files are
+  // untyped, like any inline test App's (the seal strips types without
+  // checking them), and builtin-blueprints.test.ts covers what they do at
+  // runtime.
+  "exclude": ["test/fixtures/blueprints/*/files"]
 }

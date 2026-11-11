@@ -236,6 +236,14 @@
       ],
       "vars": {
         "STAGE": "staging",
+        // For testing only, and on staging only: Grasp's own speech
+        // (ElevenLabs) and listening and conversion (OpenAI) go to the
+        // providers' usual hosts, not their EU data residency hosts, so
+        // keys of accounts without EU residency can be tried
+        // (@grasp-os/shared/ai-providers, `usualHostProviders`). Never set
+        // for production, and the admin ignores it there
+        // (src/deploy/context.ts, `usualHostsOf`).
+        "PLATFORM_AI_USUAL_HOSTS": "elevenlabs,openai",
         "CF_ACCESS_AUD": "d9c971fada72b860273c91d805c70f07a73ccf1596aa81ff986ff3141d36619d",
         "CF_ACCESS_ISS": "https://grasp-work.cloudflareaccess.com",
         "ENTRA_CLIENT_ID": "01228906-bd5b-488e-b7c1-720f4dc12dc2",

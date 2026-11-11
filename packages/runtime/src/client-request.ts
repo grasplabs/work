@@ -1,9 +1,8 @@
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isPlainObject } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import { clientError } from "./client-error.ts";
 import type { ReferenceKind } from "./function-references.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /**
  * A reference as the client sends it: the function's name, read from the

@@ -12,8 +12,9 @@ name: Review tier
 
 on:
   pull_request_target:
-    # `edited`: a new base branch changes the files.
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    # `edited`: a new base branch changes the files. Not `ready_for_review`:
+    # marking a draft ready changes none.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read

@@ -355,6 +355,7 @@ const summaryOf = ({
     inputHash: row.inputHash,
     requestedAt: row.createdAt.toISOString(),
     ...(row.endsAt === null ? {} : { endsAt: row.endsAt.toISOString() }),
+    ...(row.unattended ? { unattended: true as const } : {}),
     binding: bindingOf(row),
   };
 };
@@ -622,6 +623,10 @@ export const hold = async (
           sameCaller,
           eq(pendingActions.inputHash, inputHash),
           eq(pendingActions.context, context),
+          // One a person asked for and one a turn nobody was there for
+          // asked for are never the same action: the second ends with the
+          // day and says so, whatever the first does.
+          eq(pendingActions.unattended, claims.unattended),
           or(
             isNull(pendingActions.endsAt),
             gt(pendingActions.endsAt, new Date(heldAt))
@@ -663,6 +668,7 @@ export const hold = async (
           ),
           stamp: value(stamp, "stamp"),
           endsAt: value(claims.heldUntil ?? null, "ends_at"),
+          unattended: value(claims.unattended ? 1 : 0, "unattended"),
         })
         .from(connections)
         .where(

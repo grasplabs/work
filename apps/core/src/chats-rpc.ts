@@ -57,6 +57,7 @@ import {
   saveDraftChanges,
 } from "./agent-builds.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
+import { firstAgentId } from "./agents.ts";
 import {
   dataModelOf,
   definitionPlan,
@@ -71,7 +72,6 @@ import {
   editableApp,
   hasPages,
 } from "./apps.ts";
-import { organizationId } from "./auth/auth.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { personOf } from "./connections.ts";
@@ -114,12 +114,13 @@ import { questionSchema } from "./workspace.ts";
 /**
  * The agent every chat's agent is: the organization workspace's, so
  * admins grant to it once, whoever's chat it answers in. Named as agents
- * must be (`workspaceAgentIdSchema` in agent-scope.ts).
+ * must be (`workspaceAgentIdSchema` in agent-scope.ts). The first of the
+ * company's agents (agents.ts), under the ID it always had.
  */
 // Where it is: the leaf module, which what this module imports can import.
 export { personalWorkspaceId } from "./personal-workspace.ts";
 
-export const chatAgentId = organizationId;
+export const chatAgentId = firstAgentId;
 
 /**
  * Most chats one connection follows at once: a page shows one, and a page

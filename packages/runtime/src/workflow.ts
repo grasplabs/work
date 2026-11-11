@@ -7,8 +7,9 @@ import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer } from "./value-types.ts";
 import { v } from "./values.ts";
+import { frozenCopy } from "./workflow-data.ts";
 import { checkOrThrow, WorkflowError } from "./workflow-error.ts";
-import { frozenCopy, journaledCtx } from "./workflow-journal.ts";
+import { journaledCtx } from "./workflow-journal.ts";
 import {
   describeParams,
   resolveParams,
@@ -59,7 +60,7 @@ import type {
  * - Prototype access through data. Every value the handler reads (its
  *   args, parameters, state, inbox, each call's result, each event, each
  *   decision, each caught error) is JSON copied into objects with no
- *   prototype, frozen all the way down (`frozenData`, workflow-journal.ts),
+ *   prototype, frozen all the way down (`frozenData`, workflow-data.ts),
  *   on a first run and on a replay alike: a field nobody wrote, `__proto__`
  *   and `constructor` included, is `undefined` or an own field holding
  *   data, never something inherited, and nothing changes it. The check of

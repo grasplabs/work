@@ -2,11 +2,9 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 
 import { own as ownField } from "./expression-runtime.ts";
+import { caughtError as caughtErrorOf } from "./workflow-caught.ts";
+import { frozenData } from "./workflow-data.ts";
 import { WorkflowError } from "./workflow-error.ts";
-import {
-  caughtError as caughtErrorOf,
-  frozenData,
-} from "./workflow-journal.ts";
 import type { CaughtError, Read } from "./workflow-steps.ts";
 
 // What only the code generated from a grasp-workflow/2 document calls

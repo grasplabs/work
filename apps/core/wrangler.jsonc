@@ -133,6 +133,12 @@
       // One object per chat: its agent's turns on pi-durable, and its
       // transcript as the model reads it (src/chat-session.ts).
       { "name": "CHAT_SESSIONS", "class_name": "ChatSession" },
+      // The Brain's one store (@grasp-os/brain-next), reached only through
+      // its contract (src/brain-next.ts).
+      { "name": "BRAIN_STORE", "class_name": "BrainStore" },
+      // Our own embedding model, run from MODEL_FILES (@grasp-os/embed):
+      // questions have an object of their own (src/embedder.ts).
+      { "name": "EMBEDDER", "class_name": "Embedder" },
     ],
   },
   "migrations": [
@@ -149,6 +155,8 @@
     // The model ledger, and its storage: spend is recorded after each
     // response, in D1 (src/model-usage.ts).
     { "tag": "v11", "deleted_classes": ["ModelLedger"] },
+    { "tag": "v12", "new_sqlite_classes": ["BrainStore"] },
+    { "tag": "v13", "new_sqlite_classes": ["Embedder"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],
@@ -178,12 +186,24 @@
       "bucket_name": "grasp-os-audit-archive",
       "jurisdiction": "eu",
     },
-    // The texts of Knowledge's versions, each an immutable object written
-    // once (src/knowledge/payloads.ts). One bucket per deployment, private,
-    // in the EU; only core reads and writes it.
+    // The Brain's files. The new Brain's original source files, one per
+    // content hash under `sources/` (@grasp-os/brain-next's files.ts), and
+    // today's Knowledge's version texts under `payloads/`
+    // (src/knowledge/payloads.ts). The bucket stays when today's Brain is
+    // removed. One bucket per deployment, private, in the EU; only core
+    // reads and writes it.
     {
       "binding": "BRAIN_OBJECTS",
       "bucket_name": "grasp-os-brain-objects",
+      "jurisdiction": "eu",
+    },
+    // The embedding model's files (@grasp-os/embed), each under its hash:
+    // the admin's deploy copies in the files the release names
+    // (apps/admin/src/deploy/model-files.ts), and the embedder reads and
+    // checks them. Model files only, never client data.
+    {
+      "binding": "MODEL_FILES",
+      "bucket_name": "grasp-os-models",
       "jurisdiction": "eu",
     },
   ],

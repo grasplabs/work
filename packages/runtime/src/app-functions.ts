@@ -4,12 +4,12 @@ import {
   functionPathMaxSegments,
   functionSegmentPattern,
 } from "@grasp-os/shared/function-limits";
+import { isPlainObject } from "@grasp-os/shared/json";
 
 import { AppDefinitionError } from "./app-definition-error.ts";
 import { refuser } from "./declaration.ts";
 import { isServerFunction, serverFunctions } from "./handlers.ts";
 import type { AnyFunction } from "./server-function.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 const refuse: (message: string) => never = refuser(AppDefinitionError);
 
@@ -19,7 +19,7 @@ const refuse: (message: string) => never = refuser(AppDefinitionError);
  * (`workflows.<alias>.queries.*` and `.mutations.*`) and `people` for who calls and the
  * organization's people (people.ts), which the host answers itself. No
  * function registers under either, whether or not the App declares
- * workflows now, so declaring one later never shadows or is shadowed by a
+ * workflows, so declaring one later never shadows or is shadowed by a
  * function.
  */
 const reservedSegments: ReadonlyMap<string, string> = new Map([

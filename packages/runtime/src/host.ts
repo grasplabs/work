@@ -104,7 +104,11 @@ export { symbolicModules } from "./codegen-stand-ins.ts";
 export { workflowReferenceOf } from "./codegen-workflows.ts";
 export type { ServerFunctions } from "./codegen-api.ts";
 export { generateModules } from "./generate.ts";
-export { workflowFunctions, workflowQueryNames } from "./workflow-functions.ts";
+export {
+  maxWaits,
+  workflowFunctions,
+  workflowQueryNames,
+} from "./workflow-functions.ts";
 export type {
   WorkflowFunctions,
   WorkflowMutationName,

@@ -79,7 +79,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       answered: outcomeOf(answered),
       again: outcomeOf(again),
     }).toStrictEqual({
-      held: { failed: "resource.awaiting_confirmation" },
+      held: { failed: "permission.awaiting_confirmation" },
       sentWhileHeld: 0,
       answered: { mailbox: "team@acme.test", sent: true },
       again: { mailbox: "team@acme.test", sent: true },
@@ -93,7 +93,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const result = await call(mailer, "mail.careless", {});
     const pending = await mailer.builder.api.pendingActions.list();
     expect({ outcome: outcomeOf(result), held: pending.length }).toStrictEqual({
-      outcome: { failed: "resource.invalid_args" },
+      outcome: { failed: "permission.invalid_args" },
       held: 0,
     });
   });
@@ -111,8 +111,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       reshaped: outcomeOf(reshaped),
       disconnected: outcomeOf(disconnected),
     }).toStrictEqual({
-      reshaped: { failed: "resource.unavailable" },
-      disconnected: { failed: "resource.unavailable" },
+      reshaped: { failed: "permission.unavailable" },
+      disconnected: { failed: "permission.unavailable" },
     });
   });
 
@@ -125,7 +125,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     await approveResourceBinding(changed, admin, mailer.approval);
     const result = await call(mailer, "mail.inbox", {}, undefined, changed);
     expect(outcomeOf(result)).toStrictEqual({
-      failed: "contract.invalid_resource_result",
+      failed: "contract.invalid_permission_result",
     });
   });
 
@@ -188,8 +188,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       granted: outcomeOf(granted),
       sent: await sentCount("Unapproved"),
     }).toStrictEqual({
-      unapproved: { failed: "resource.unavailable" },
-      granted: { failed: "resource.awaiting_confirmation" },
+      unapproved: { failed: "permission.unavailable" },
+      granted: { failed: "permission.awaiting_confirmation" },
       sent: 0,
     });
   });
@@ -199,7 +199,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     await call(mailer, "mail.sendFresh", {}, "fresh-1");
     const replayed = await call(mailer, "mail.sendFresh", {}, "fresh-1");
     expect(outcomeOf(replayed)).toStrictEqual({
-      failed: "resource.idempotency_conflict",
+      failed: "permission.idempotency_conflict",
     });
   });
 
@@ -214,7 +214,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       again: outcomeOf(again),
       sent: await sentCount("Declined"),
     }).toStrictEqual({
-      again: { failed: "resource.declined" },
+      again: { failed: "permission.declined" },
       sent: 0,
     });
   });
@@ -264,7 +264,11 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       refused,
       sent: await sentCount("Stale"),
       waiting: waiting.length,
-    }).toStrictEqual({ refused: "resource.unavailable", sent: 0, waiting: 0 });
+    }).toStrictEqual({
+      refused: "permission.unavailable",
+      sent: 0,
+      waiting: 0,
+    });
   });
 
   it("refuse to confirm a held side effect whose contract drifted since", async () => {
@@ -293,6 +297,10 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       refused,
       sent: await sentCount("Drift"),
       waiting: waiting.length,
-    }).toStrictEqual({ refused: "resource.unavailable", sent: 0, waiting: 0 });
+    }).toStrictEqual({
+      refused: "permission.unavailable",
+      sent: 0,
+      waiting: 0,
+    });
   });
 });

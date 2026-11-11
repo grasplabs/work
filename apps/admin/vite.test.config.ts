@@ -1,9 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 
-import {
-  cloudflareTest,
-  readD1Migrations,
-} from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineProject } from "vite-plus";

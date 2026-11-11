@@ -10,21 +10,27 @@
 # with the Deploy platform workflow. Jobs with secrets never run for pull
 # requests from forks. CI deploys no client: the admins roll releases out.
 #
-# A draft pull request runs only the fast checks (static, generated): the tests,
-# workerd, the release build and the journeys wait until it is ready for
-# review, which runs them all (`ready_for_review`). A draft can't be
-# merged.
+# The full suite runs once per merge, in the merge queue: there it tests
+# the exact tree that lands (the pull request on top of main and the
+# entries ahead of it), so it is the one gate that matters: only a merge
+# an admin makes outside the queue lands without it. A pull request's run,
+# draft or not, is fast feedback for review: the fast checks (static,
+# generated, embed-wasm, oxc-wasm), the release build and core on plain
+# workerd, a few minutes on seven runners. Marking a draft ready runs them
+# again, so its title and description, which become the commit on main,
+# are checked as they stood then (an edit after that isn't). The test shards, the e2e stack and its parts, and the
+# admin's journeys run on the merge queue, a run by hand and the nightly
+# run. A full run is 62 jobs and the account runs 60 at once, so a pull
+# request's full run beside the queue's left one of them waiting for
+# runners, minutes at a time (November 2026): one full run per merge
+# halves that.
 #
-# Every other run runs everything: every test project, every journey, the
-# builds, all at once: a run took 4.9 to 5.9 minutes (November 2026), so
-# there is nothing left to select: the pull request's run, the merge
-# queue's and a run by hand are the same run. No job waits for another
-# but `check`: a plan job ahead of the tests (which projects a change
-# reaches) cost 45 s on every run's critical path, and a pull request's
-# run that tested only part of the suite then needed a second, full run
-# before it could merge (November 2026). A nightly run on main runs it
-# all again, for merges an admin makes outside the queue; when it fails,
-# it opens an issue (nightly-alert, below).
+# A full run runs everything at once: every test project, every journey,
+# the builds. No job waits for another but `check`: a plan job ahead of
+# the tests (which projects a change reaches) cost 45 s on every run's
+# critical path (November 2026). A nightly run on main runs it all again:
+# the only full run a merge an admin makes outside the queue gets. When it
+# fails, it opens an issue (nightly-alert, below).
 name: CI
 
 on:
@@ -138,7 +144,7 @@ jobs:
   # (below).
   test:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    if: contains(fromJSON('["merge_group", "workflow_dispatch", "schedule"]'), github.event_name)
     runs-on: ubuntu-latest
     # The test step's timeout, and room for the steps around it.
     timeout-minutes: 15
@@ -194,13 +200,14 @@ jobs:
       - if: matrix.shard == 1
         uses: ./.github/actions/playwright-browser
       # Core's tests' global-setup builds, restored by their inputs' key;
-      # test-caches (below) saves them on main. On a pull request the first
-      # shard builds and saves those it missed too, in the pull request's
-      # own scope, so its next run restores them in every shard; the rest
-      # only restore, so no two shards race to pack the same files.
+      # test-caches (below) saves them on main. In a run by hand the first
+      # shard builds and saves those it missed too, in its branch's own
+      # scope, so the branch's next run restores them in every shard (a
+      # merge queue's scope is its entry's alone, read by nothing after);
+      # the rest only restore, so no two shards race to pack the same files.
       - uses: ./.github/actions/core-test-prebuilt
         with:
-          save: ${{ github.event_name == 'pull_request' && matrix.shard == 1 }}
+          save: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 1 }}
       # Shards split by how long each file takes (scripts/test-sequencer.ts,
       # with the times in scripts/test-durations.json), each shard running
       # one project group only (scripts/test-shards.ts): a shard that ran
@@ -327,7 +334,7 @@ jobs:
   # rest, a few seconds of git. Part of the required `check`.
   oxc-wasm:
     name: oxc-wasm
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -352,14 +359,55 @@ jobs:
         with:
           check: true
 
+  # Proves the committed embed.wasm is its source's build, byte for byte:
+  # when packages/embed's Rust, its build or the module changed against the
+  # base (the merge commit's first parent), and on every full run, builds
+  # it again (packages/embed/build.sh, the toolchain rust-toolchain.toml
+  # pins) and fails unless embed.wasm and wasm-sha256.ts come out as
+  # committed. The build is reproducible (no dependencies, paths remapped),
+  # so a module built on a laptop matches. About a minute of Rust on a
+  # pull request that changes it; on the rest, a few seconds of git. Part
+  # of the required `check`.
+  embed-wasm:
+    name: embed-wasm
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The merge commit and its first parent, the base it compares with.
+          fetch-depth: 2
+      - id: changed
+        run: |
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet HEAD^1 HEAD -- packages/embed/rust packages/embed/build.sh packages/embed/src/embed.wasm packages/embed/src/wasm-sha256.ts; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "embed.wasm and its source are main's: nothing to prove." >> "$GITHUB_STEP_SUMMARY"
+          fi
+        env:
+          EVENT: ${{ github.event_name }}
+      - if: steps.changed.outputs.changed == 'true'
+        run: |
+          packages/embed/build.sh
+          if ! git diff --exit-code -- packages/embed/src/embed.wasm packages/embed/src/wasm-sha256.ts; then
+            echo "::error::packages/embed/src/embed.wasm isn't the build of packages/embed/rust: run packages/embed/build.sh and commit what it writes"
+            exit 1
+          fi
+          echo "packages/embed/src/embed.wasm is this source's build, byte for byte: SHA-256 \`$(sha256sum packages/embed/src/embed.wasm | cut -d ' ' -f 1)\`." >> "$GITHUB_STEP_SUMMARY"
+
   # The one required check (.github/rulesets/main.json), for every job of
   # the run: a job added, split or removed leaves the ruleset as it is, and
   # no runner starts only to report a name the ruleset asks for. It runs
   # however they ended, and passes only if all of them passed: GitHub
   # counts a skipped required check as passing, so this job mustn't be
-  # skipped when one of them failed, was cancelled or was skipped. One skip
-  # passes: on a draft, everything but static and generated (a draft
-  # can't be merged; marking it ready runs it all, and this check again).
+  # skipped when one of them failed, was cancelled or was skipped. What it
+  # requires is set by the run's event, by name: on a pull request, the
+  # fast jobs, its only ones (the full suite skipped); in the merge queue,
+  # by hand and nightly, every job. Any other event fails it.
   check:
     name: check
     needs:
@@ -374,32 +422,43 @@ jobs:
         e2e-browsers,
         admin-e2e,
         oxc-wasm,
+        embed-wasm,
       ]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, generated: $GENERATED, test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, e2e-build: $E2E_BUILD, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
-          for fast in "static=$STATIC" "generated=$GENERATED"; do
-            if [ "${fast#*=}" != success ]; then
-              echo "::error title=check::${fast%%=*} ended as ${fast#*=}; check passes only when it succeeds."
-              exit 1
-            fi
-          done
-          if [ "$DRAFT" = true ]; then
-            echo "A draft runs only the fast checks; marking it ready for review runs the rest."
-            exit 0
-          fi
+          echo "event: $EVENT; static: $STATIC, generated: $GENERATED, embed-wasm: $EMBED_WASM, oxc-wasm: $OXC_WASM, release: $RELEASE, workerd: $WORKERD; test shards: $TEST, e2e-build: $E2E_BUILD, e2e parts: $E2E, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E"
           # Each job by its own name: when e2e-build fails, the parts it
           # holds back show as skipped, and the build is what failed.
+          fast=("static=$STATIC" "generated=$GENERATED" "embed-wasm=$EMBED_WASM" "oxc-wasm=$OXC_WASM" "release=$RELEASE" "workerd=$WORKERD")
+          full=("test shards=$TEST" "e2e-build=$E2E_BUILD" "e2e parts=$E2E" "e2e browsers=$E2E_BROWSERS" "admin-e2e=$ADMIN_E2E")
+          case "$EVENT" in
+            pull_request) required=("${fast[@]}") ;;
+            merge_group | workflow_dispatch | schedule) required=("${fast[@]}" "${full[@]}") ;;
+            *)
+              echo "::error title=check::no rule for a $EVENT run; check passes only for an event it knows."
+              exit 1
+              ;;
+          esac
           failed=""
-          for job in "test shards=$TEST" "release=$RELEASE" "workerd=$WORKERD" "e2e-build=$E2E_BUILD" "e2e parts=$E2E" "e2e browsers=$E2E_BROWSERS" "admin-e2e=$ADMIN_E2E" "oxc-wasm=$OXC_WASM"; do
+          for job in "${required[@]}"; do
             [ "${job#*=}" = success ] || failed="$failed ${job%%=*} (${job#*=}),"
           done
+          # On a pull request the full suite is the queue's: one that ran
+          # here anyway is a condition gone wrong, not a pass.
+          if [ "$EVENT" = pull_request ]; then
+            for job in "${full[@]}"; do
+              [ "${job#*=}" = skipped ] || failed="$failed ${job%%=*} (${job#*=}, not skipped),"
+            done
+          fi
           if [ -n "$failed" ]; then
-            echo "::error title=check::not every job succeeded:${failed%,}. check passes only when all of them do."
+            echo "::error title=check::not every job a $EVENT run requires succeeded:${failed%,}. check passes only when all of them do."
             exit 1
+          fi
+          if [ "$EVENT" = pull_request ]; then
+            echo "A pull request runs the fast checks; the merge queue runs every test on the tree that lands." >> "$GITHUB_STEP_SUMMARY"
           fi
         env:
           STATIC: ${{ needs.static.result }}
@@ -413,7 +472,7 @@ jobs:
           E2E_BROWSERS: ${{ needs.e2e-browsers.result }}
           ADMIN_E2E: ${{ needs.admin-e2e.result }}
           OXC_WASM: ${{ needs.oxc-wasm.result }}
-          DRAFT: ${{ github.event.pull_request.draft == true }}
+          EMBED_WASM: ${{ needs.embed-wasm.result }}
           EVENT: ${{ github.event_name }}
 
   # The e2e stack, built once for every e2e part (`node e2e/build.ts`, run
@@ -427,7 +486,7 @@ jobs:
   # by Playwright's version, for the parts to restore.
   e2e-build:
     name: e2e-build
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    if: contains(fromJSON('["merge_group", "workflow_dispatch", "schedule"]'), github.event_name)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -478,8 +537,8 @@ jobs:
   # (setup-voice.e2e.ts's story), after about a minute of setup and
   # starting the stack (November 2026). Add a parallel part by adding an
   # entry and raising the count in every entry's `part` and in e2e-build's
-  # `--all` (above). Part of the required `check` (above), in the merge
-  # queue too: it is the run that tests the tree that lands.
+  # `--all` (above). Part of the required `check` (above) in the merge
+  # queue, the run that tests the tree that lands.
   #
   # On the runner itself, with Chromium's headless shell from e2e-build's
   # cache: the runner's image has the system packages Chromium needs.
@@ -490,7 +549,7 @@ jobs:
   e2e:
     name: e2e (${{ matrix.part }})
     needs: e2e-build
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    if: contains(fromJSON('["merge_group", "workflow_dispatch", "schedule"]'), github.event_name)
     runs-on: ubuntu-latest
     # About 1 minute of setup and starting the stack, then each part's
     # tests.
@@ -602,7 +661,7 @@ jobs:
   e2e-browsers:
     name: e2e (${{ matrix.browser }})
     needs: e2e-build
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    if: contains(fromJSON('["merge_group", "workflow_dispatch", "schedule"]'), github.event_name)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -643,7 +702,16 @@ jobs:
           if [ ${#debs[@]} -gt 0 ]; then
             sudo cp "${debs[@]}" /var/cache/apt/archives/
           fi
-          vp exec playwright install-deps "$BROWSER"
+          # When Ubuntu's mirrors can't be reached and apt wants a newer
+          # version than the cache holds (an update it can't fetch), the
+          # cached files are still a set that installed on this image (an
+          # exact cache hit only; an older image's set may lack something):
+          # install exactly those, without downloading anything.
+          if ! vp exec playwright install-deps "$BROWSER"; then
+            [ "$EXACT_CACHE" = true ] && [ ${#debs[@]} -gt 0 ] || exit 1
+            echo "::warning::Ubuntu's mirrors failed; installing the cached packages instead"
+            sudo apt-get install -y --no-download --no-install-recommends "${debs[@]}"
+          fi
           rm -f ~/playwright-debs/*.deb
           for deb in /var/cache/apt/archives/*.deb; do
             package=$(dpkg-deb -f "$deb" Package)
@@ -653,6 +721,8 @@ jobs:
               cp "$deb" ~/playwright-debs/
             fi
           done
+        env:
+          EXACT_CACHE: ${{ steps.debs.outputs.cache-hit }}
       - if: steps.debs.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -688,7 +758,7 @@ jobs:
   # parts.
   admin-e2e:
     name: admin-e2e (${{ matrix.shard }})
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    if: contains(fromJSON('["merge_group", "workflow_dispatch", "schedule"]'), github.event_name)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -715,7 +785,7 @@ jobs:
   # On-prem ready: core must boot on plain workerd.
   workerd:
     name: workerd
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -731,16 +801,14 @@ jobs:
   # Builds a release bundle as main will publish it (core, connect, the
   # frontend's static files and D1 migrations, with its manifest) and checks
   # every blob against the manifest, and builds the admin, which isn't part
-  # of a release. For a pull request or the merge queue, that's all, and
-  # it's the run's only build: part of the required `check` (above). On a
-  # push to main it's the commit's only build too: the bundle
+  # of a release. For a pull request or the merge queue, that's all: part
+  # of the required `check` (above). On a push to main it's the commit's
+  # only build: the bundle
   # is the run's `release` artifact, which publish-release publishes as
   # it is, so the release an admin rolls out is the one CI tested, byte
   # for byte.
   release:
     name: release
-    # Not for a draft; a push to main has no pull request.
-    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -808,8 +876,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Core's tests' global-setup builds on main, where every pull request can
-  # read them (a pull request's own are its alone), built without a test
+  # Core's tests' global-setup builds on main, where every run can read
+  # them (the merge queue's, a run by hand, the nightly), built without a test
   # run (scripts/build-core-test-prebuilt.ts). One job saves, so the shards
   # never race to pack the same files. Nothing waits for it. Vitest's
   # pre-bundled dependencies aren't cached: restored warm, they started
@@ -909,9 +977,9 @@ jobs:
       - run: vp run release:upload --release release-out --assign-id
 
   # When the nightly full run fails, an issue says so: nobody watches the
-  # Actions tab at 02:17, and merges an admin makes outside the queue
-  # are tested only on their own, so this run is where a break between two
-  # of them shows. One open issue at a time: a later failure comments on it.
+  # Actions tab at 02:17, and a merge an admin makes outside the queue
+  # gets only a pull request's fast checks, so this run is where its tests
+  # first run. One open issue at a time: a later failure comments on it.
   # Only the nightly run, and not when it was cancelled.
   nightly-alert:
     name: nightly-alert

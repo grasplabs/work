@@ -12,7 +12,7 @@
     "@grasp-os/shared": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "wrangler": "catalog:"
   }

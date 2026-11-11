@@ -16,9 +16,6 @@ import type { Json } from "./json.ts";
 // It is never edited: a different origin, path or credential is another
 // connection, so a grant always covers what the admin approved.
 
-/** The contract every HTTP connection serves (connect's contracts.ts). */
-export const httpContract = "http.request@1";
-
 /** The connection's provider, as connect records it. */
 export const httpProvider = "http";
 

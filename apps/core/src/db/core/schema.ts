@@ -3,6 +3,7 @@ import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencyFinding } from "@grasp-os/shared/dependencies";
+import { modelRoles } from "@grasp-os/shared/deployment-config";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
 import type {
@@ -1012,7 +1013,7 @@ export const appVersions = sqliteTable(
      */
     code: text(),
     /**
-     * The version's App definition (@grasp-os/runtime's definition.ts), as its
+     * The version's App definition (@grasp-os/runtime's definition-types.ts), as its
      * text (`definitionText`): its name, tables with their stable IDs, access and
      * permissions, from which its `grasp.config.ts` and `server/schema.ts`
      * were generated as it was committed. Written once, never changed (a
@@ -3032,6 +3033,29 @@ export const agentReach = sqliteTable("agent_reach", {
   on: integer({ mode: "boolean" }).notNull(),
   who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
   teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * The company's agents an admin made or changed (agents.ts): one row per
+ * agent, by the ID its permissions, audit events and memory path name.
+ * `face` is the figure it is drawn with; `job` one line on what it is
+ * for; `instructions` what it is told on top of Grasp's own rules;
+ * `modelRole` the role it asks the gateway for, or null for the model a
+ * chat would use anyway; `state` whether it answers. No row for the
+ * first agent, the organization's: as Grasp ships it.
+ */
+export const agents = sqliteTable("agents", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  face: text().notNull(),
+  job: text().notNull(),
+  instructions: text().notNull(),
+  modelRole: text("model_role", { enum: modelRoles }),
+  state: text({ enum: ["on", "paused"] }).notNull(),
+  madeBy: text("made_by").notNull(),
+  madeAt: timestamp("made_at").notNull(),
   changedBy: text("changed_by").notNull(),
   changedAt: timestamp("changed_at").notNull(),
 });

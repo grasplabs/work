@@ -48,7 +48,7 @@ export interface BoundWorkflow {
   readonly pinned?: WorkflowPin;
 }
 
-/** A workflow resource's version, as the host resolved a binding to it. */
+/** A workflow permission's version, as the host resolved a binding to it. */
 export interface WorkflowPin {
   readonly workflowId: string;
   readonly version: number;

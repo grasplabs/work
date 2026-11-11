@@ -1,7 +1,7 @@
-/** The operations a files resource declares. */
+/** The operations a files permission declares. */
 export type FilesOperation = "upload" | "read" | "attach" | "delete";
 
-/** A generated reference to a files resource: its alias and operations. */
+/** A generated reference to a files permission: its alias and operations. */
 export interface FilesReference<
   Alias extends string = string,
   Operations extends readonly FilesOperation[] = readonly FilesOperation[],
@@ -11,7 +11,7 @@ export interface FilesReference<
   readonly operations: Operations;
 }
 
-/** A generated reference to a links resource: its exact HTTPS origins. */
+/** A generated reference to a links permission: its exact HTTPS origins. */
 export interface LinksReference<
   Alias extends string = string,
   Origins extends readonly string[] = readonly string[],

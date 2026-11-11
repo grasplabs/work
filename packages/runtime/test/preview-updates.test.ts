@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { PreviewLoad } from "../src/page-runtime.ts";
+import type { PreviewLoad } from "../src/page-bridge.ts";
 import {
   ModuleNotLoadedError,
   notLoaded,
