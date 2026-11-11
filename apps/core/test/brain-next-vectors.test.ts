@@ -592,6 +592,57 @@ describe("the Brain's vector way", () => {
     ).rejects.toThrow(/dimensions/u);
   });
 
+  it("drops a code a fault left in a reader's own group before ranking it, when its chunk is hidden or superseded", async () => {
+    const model = newModel();
+    const question = randomSigns();
+    const reader = { person: readers.few, groups: [] };
+    const own = randomly(company.own);
+    const [first] = own;
+    if (first === undefined) {
+      throw new Error("No chunk");
+    }
+    first.vector = [...question];
+    await put(model, own);
+    // A chunk the reader may not read, and one of a superseded version
+    // they could read.
+    const [hidden] = await rowsOf(company.others[0]?.source ?? "", 1);
+    const superseded = await sourceOf(owner(readers.few), 1);
+    const supersededSource = superseded[0]?.source ?? "";
+    await newVersionOf(supersededSource, owner(readers.few), 1);
+    const [stale] = await rowsOf(supersededSource, 1);
+    const [ownRow] = await rowsOf(first.chunk.source, first.chunk.version);
+    // The fault: codes for both in the reader's own tail, at the question.
+    await runInDurableObject(store(), (_instance, state) => {
+      const { sql } = state.storage;
+      for (const chunk of [hidden, stale]) {
+        sql.exec(
+          `INSERT INTO vector_codes (chunk, model, reader_set, bits, scale, fine)
+          SELECT ?, model, reader_set, bits, scale, fine FROM vector_codes
+          WHERE chunk = ? AND model = (SELECT id FROM vector_models WHERE name = ?)`,
+          chunk,
+          ownRow,
+          model.name
+        );
+      }
+    });
+    expect(rounded(await search(model, question, reader))).toStrictEqual(
+      rounded(bruteForce(question, own))
+    );
+  });
+
+  it("takes a centre of -0 as the same centre as one of 0", async () => {
+    const model = newModel();
+    const reader = { person: readers.few, groups: [] };
+    const coded = randomly(company.own);
+    const [first, ...rest] = coded;
+    await put(model, first === undefined ? [] : [first]);
+    await put({ ...model, centre: model.centre.map(() => -0) }, rest);
+    const question = randomSigns();
+    expect(rounded(await search(model, question, reader))).toStrictEqual(
+      rounded(bruteForce(question, coded))
+    );
+  });
+
   it("keeps one code per chunk and model however often it is put", async () => {
     const model = newModel();
     const question = randomSigns();

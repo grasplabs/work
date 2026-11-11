@@ -171,7 +171,7 @@ export const vectorSearchLimitMax = 50;
 /** Most characters of a model's name. */
 export const modelNameMaxLength = 256;
 
-const modelNameSchema = z.string().min(1).max(modelNameMaxLength);
+const modelNameSchema = wellFormedString().min(1).max(modelNameMaxLength);
 
 /** A vector: finite numbers, never all zero (it has no direction). */
 const vectorSchema = z

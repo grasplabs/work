@@ -112,15 +112,12 @@ const fineOf = (
 const bytesOf = (view: { readonly buffer: ArrayBuffer }): ArrayBuffer =>
   view.buffer;
 
-/** Whether two blobs hold the same bytes. */
-const sameBytes = (a: ArrayBuffer, b: ArrayBuffer): boolean => {
-  if (a.byteLength !== b.byteLength) {
-    return false;
-  }
-  const left = new Uint8Array(a);
-  const right = new Uint8Array(b);
-  return left.every((byte, index) => byte === right[index]);
-};
+/**
+ * Whether two centres hold the same numbers: compared as numbers, so -0
+ * and 0 are the same (no centre holds NaN: the contract refuses it).
+ */
+const sameCentre = (a: Float64Array, b: Float64Array): boolean =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
 
 /** The model named `name`, if it has codes. */
 const storedModel = (
@@ -147,7 +144,7 @@ const modelOf = (sql: SqlStorage, model: VectorModel): StoredModel => {
   const centre = Float64Array.from(model.centre);
   const known = storedModel(sql, model.name);
   if (known !== undefined) {
-    if (!sameBytes(bytesOf(known.centre), bytesOf(centre))) {
+    if (!sameCentre(known.centre, centre)) {
       throw new Error(
         "The Brain refused it: this model is known with another centre"
       );
