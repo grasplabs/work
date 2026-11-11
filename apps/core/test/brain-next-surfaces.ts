@@ -88,6 +88,18 @@ export interface Probing {
    * Each must answer exactly as a file never written.
    */
   hiddenInstructionFiles: readonly InstructionFile[];
+  /**
+   * Two Apps the reader uses and doesn't build (core's own records), one
+   * whose file holds every marker and one with none: each asked of must
+   * answer exactly as the other. Absent when the reader builds them.
+   */
+  usedApps?: { withFile: string; withoutFile: string };
+  /**
+   * The groups the instruction files are written for (the company's, and
+   * each App's), which a reader holds only once core let them: a recall
+   * holding them must still find no instruction file, as none is indexed.
+   */
+  instructionGroups: readonly string[];
 }
 
 /** One call a probe made, and what came back. */
@@ -98,10 +110,15 @@ export interface Answer {
   got: { value: unknown } | { error: unknown };
   /**
    * `hidden`: asked only of what the reader may not read; `nothing`: asked
-   * of what nothing holds. Every `hidden` answer of a probe must equal its
-   * `nothing` answer exactly.
+   * of what nothing holds. Every `hidden` answer of a probe must equal the
+   * `nothing` answer of the same `like` exactly.
    */
   about?: "hidden" | "nothing";
+  /**
+   * Which comparison a `hidden` or `nothing` answer belongs to, when a
+   * probe makes several: the probe's default one when absent.
+   */
+  like?: string;
 }
 
 /** Calls one surface every way it can answer; returns what came back each time. */
@@ -206,12 +223,19 @@ export const textOf = (value: unknown): string =>
 const answer = async (
   callName: string,
   call: () => Promise<unknown>,
-  about?: Answer["about"]
+  about?: Answer["about"],
+  like?: string
 ): Promise<Answer> => {
+  const compared = like === undefined ? {} : { like };
   try {
-    return { call: callName, got: { value: await call() }, about };
+    return { call: callName, got: { value: await call() }, about, ...compared };
   } catch (error) {
-    return { call: callName, got: { error: unfolded(error) }, about };
+    return {
+      call: callName,
+      got: { error: unfolded(error) },
+      about,
+      ...compared,
+    };
   }
 };
 
@@ -406,24 +430,30 @@ const readersAgent = (personId: string): Authority =>
     mode: "interactive",
   });
 
+/** The code of `error`, as a comparison holds it. */
+const codeOf = (error: unknown): unknown =>
+  typeof error === "object" && error !== null && "code" in error
+    ? error.code
+    : "an error with no code";
+
 /**
- * Of `files`, those that aren't the reader's to get from `authority`:
- * another person's, another agent's, and an App's (none of the probes
- * work on an App the reader builds).
+ * What `call` gave, as two answers that must be alike are compared: the
+ * files it gave (which, not their text, so the markers are found by the
+ * scan instead) and, of them, only those `keep` keeps; or the code it was
+ * refused with. A refusal is an answer like any other: it must be the
+ * same whether the hidden file exists or not.
  */
-const notTheirs = (
-  files: readonly InstructionFileVersion[],
-  authority: Authority
-): InstructionFile[] =>
-  files.flatMap(({ file }) => {
-    const theirs =
-      file.scope === "company" ||
-      (file.scope === "person" && file.personId === authority.onBehalfOf) ||
-      (file.scope === "agent" &&
-        authority.subject.type === "agent" &&
-        file.agentId === authority.subject.agentId);
-    return theirs ? [] : [file];
-  });
+const filesOutcome = async (
+  call: () => Promise<InstructionFileVersion[]>,
+  keep: (file: InstructionFile) => boolean = () => true
+): Promise<unknown> => {
+  try {
+    const files = await call();
+    return { files: files.flatMap(({ file }) => (keep(file) ? [file] : [])) };
+  } catch (error) {
+    return { refused: codeOf(error) };
+  }
+};
 
 /** The code `call` was refused with, or `null` when it wasn't. */
 const refusalOf = async (call: () => Promise<unknown>): Promise<unknown> => {
@@ -431,12 +461,7 @@ const refusalOf = async (call: () => Promise<unknown>): Promise<unknown> => {
     await call();
     return { refused: null };
   } catch (error) {
-    return {
-      refused:
-        typeof error === "object" && error !== null && "code" in error
-          ? error.code
-          : "an error with no code",
-    };
+    return { refused: codeOf(error) };
   }
 };
 
@@ -451,9 +476,36 @@ const sessionOf = (personId: string): Identity => ({
   expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
 });
 
-/** The hidden App files of `files`: an App's the reader doesn't build. */
-const hiddenAppsOf = (files: readonly InstructionFile[]): string[] =>
-  files.flatMap((file) => (file.scope === "app" ? [file.appId] : []));
+/**
+ * The hidden App files of `probing` the reader has no part in: Apps no one
+ * made, which answer as one no one made.
+ */
+const hiddenAppsOf = ({
+  hiddenInstructionFiles,
+  usedApps,
+}: Probing): string[] =>
+  hiddenInstructionFiles.flatMap((file) =>
+    file.scope === "app" &&
+    file.appId !== usedApps?.withFile &&
+    file.appId !== usedApps?.withoutFile
+      ? [file.appId]
+      : []
+  );
+
+/** The hidden files of `probing` of `scope`: their ids. */
+const hiddenIdsOf = (
+  { hiddenInstructionFiles }: Probing,
+  scope: "agent" | "person"
+): string[] =>
+  hiddenInstructionFiles.flatMap((file) => {
+    if (scope === "agent") {
+      return file.scope === "agent" ? [file.agentId] : [];
+    }
+    return file.scope === "person" ? [file.personId] : [];
+  });
+
+/** The kinds of conversation a context names. */
+const conversations = ["own", "direct", "channel"] as const;
 
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
@@ -717,107 +769,125 @@ export const coreProbes = {
 /** Each export of core's instruction-files.ts. */
 type InstructionMember = keyof typeof instructionFiles;
 
+/** A load of the files `authority` gets in `context`, to call. */
+const loadAs =
+  (authority: Authority, context?: instructionFiles.InstructionContext) =>
+  async () =>
+    await instructionFiles.instructionFilesFor(env, authority, context);
+
 /** One probe per export of core's instruction-files.ts. */
 export const instructionProbes = {
-  // `hidden`: what the reader got that isn't theirs (`notTheirs`), or what
-  // they got of a hidden App; `nothing`: the same of a workflow step,
-  // which gets no file at all.
-  instructionFilesFor: async ({
-    personId,
-    markers,
-    hiddenInstructionFiles,
-  }) => {
+  // Every comparison holds what a context gives (or its refusal) when it
+  // names a hidden file's real id to what it gives when it names one no
+  // one wrote; then the plain calls, scanned for the markers.
+  instructionFilesFor: async (probing) => {
+    const { personId, markers, usedApps } = probing;
     const agent = readersAgent(personId);
     const raw = async (
       name: string,
       authority: Authority,
       context?: instructionFiles.InstructionContext
+    ) => await answer(name, loadAs(authority, context));
+    /** One side of the comparison `like`. */
+    const side = async (
+      like: string,
+      about: "hidden" | "nothing",
+      context: instructionFiles.InstructionContext,
+      keep?: (file: InstructionFile) => boolean
     ) =>
       await answer(
-        name,
-        async () =>
-          await instructionFiles.instructionFilesFor(env, authority, context)
+        `${like}, ${about}`,
+        async () => await filesOutcome(loadAs(agent, context), keep),
+        about,
+        like
       );
-    const notTheirsIn = async (
-      name: string,
-      context: instructionFiles.InstructionContext | undefined,
-      authority: Authority = agent
-    ) =>
-      await answer(
-        `what isn't theirs: ${name}`,
-        async () => {
-          try {
-            return notTheirs(
-              await instructionFiles.instructionFilesFor(
-                env,
-                authority,
-                context
-              ),
-              authority
-            );
-          } catch {
-            // Refused: nothing given.
-            return [];
-          }
-        },
-        authority.mode === "workflow" ? "nothing" : "hidden"
+    const asked: Answer[] = [];
+    for (const conversation of conversations) {
+      // A context naming another agent, or another person, by a real id:
+      // refused alike, whatever their file holds.
+      for (const [field, ids, unwritten] of [
+        [
+          "agentId",
+          hiddenIdsOf(probing, "agent"),
+          () => `agent-${crypto.randomUUID()}`,
+        ],
+        ["personId", hiddenIdsOf(probing, "person"), stranger],
+      ] as const) {
+        for (const id of ids) {
+          const like = `${conversation}, naming ${field} ${id}`;
+          asked.push(
+            // oxlint-disable-next-line no-await-in-loop -- one at a time
+            await side(
+              like,
+              "nothing",
+              unchecked({ conversation, [field]: unwritten() })
+            ),
+            // oxlint-disable-next-line no-await-in-loop -- one at a time
+            await side(like, "hidden", unchecked({ conversation, [field]: id }))
+          );
+        }
+      }
+    }
+    // A shared channel gives what a direct message does, but never a
+    // person's file, the reader's own included: others there would read
+    // it through the agent.
+    asked.push(
+      await side(
+        "a shared channel",
+        "nothing",
+        { conversation: "direct" },
+        (file) => file.scope !== "person"
+      ),
+      await side("a shared channel", "hidden", { conversation: "channel" })
+    );
+    // An App they use but don't build: its file is for its builders.
+    if (usedApps !== undefined) {
+      const like = "an App they use";
+      asked.push(
+        await side(like, "nothing", {
+          conversation: "own",
+          appId: usedApps.withoutFile,
+        }),
+        await side(like, "hidden", {
+          conversation: "own",
+          appId: usedApps.withFile,
+        })
       );
+    }
+    // An App no one made, and one no one made with a file planted.
+    const noApp = "an App no one made";
+    asked.push(
+      await side(noApp, "nothing", {
+        conversation: "own",
+        appId: crypto.randomUUID(),
+      })
+    );
+    for (const appId of hiddenAppsOf(probing)) {
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one App at a time
+        await side(noApp, "hidden", { conversation: "own", appId })
+      );
+    }
     const inWorkflow = authoritySchema.parse({ ...agent, mode: "workflow" });
-    const asked: Answer[] = [
-      await notTheirsIn("a workflow step", undefined, inWorkflow),
+    asked.push(
       await raw("a workflow step", inWorkflow),
       await raw("their own chat", agent, { conversation: "own" }),
       await raw("a direct message", agent, { conversation: "direct" }),
       await raw("a shared channel", agent, { conversation: "channel" }),
-      await notTheirsIn("their own chat", { conversation: "own" }),
-      await notTheirsIn("a direct message", { conversation: "direct" }),
-      await notTheirsIn("a shared channel", { conversation: "channel" }),
-      // A shared channel never gets a person's file, the reader's own
-      // included: others there would read it through the agent.
-      await answer(
-        "a person's file in a shared channel",
-        async () => {
-          try {
-            const files = await instructionFiles.instructionFilesFor(
-              env,
-              agent,
-              { conversation: "channel" }
-            );
-            return files.filter(({ file }) => file.scope === "person");
-          } catch {
-            // Refused: nothing given.
-            return [];
-          }
-        },
-        "hidden"
-      ),
-    ];
-    for (const appId of hiddenAppsOf(hiddenInstructionFiles)) {
-      const onApp = { conversation: "own", appId } as const;
-      // oxlint-disable-next-line no-await-in-loop -- one App at a time
-      const loaded = await raw(
-        `an App they don't build: ${appId}`,
-        agent,
-        onApp
-      );
-      // oxlint-disable-next-line no-await-in-loop -- one App at a time
-      const given = await notTheirsIn(
-        `an App they don't build: ${appId}`,
-        onApp
-      );
-      asked.push(loaded, given);
-    }
-    asked.push(
-      await raw("an App no one made", agent, {
-        conversation: "own",
-        appId: crypto.randomUUID(),
-      }),
+      ...(usedApps === undefined
+        ? []
+        : [
+            await raw("an App they use", agent, {
+              conversation: "own",
+              appId: usedApps.withFile,
+            }),
+          ]),
       await raw("as someone who isn't a member", readersAgent(stranger()), {
         conversation: "direct",
       }),
       await raw(
         "as an App's code",
-        authoritySchema.parse({
+        unchecked({
           subject: { type: "app", appId: markers.join("") },
           onBehalfOf: personId,
           mode: "interactive",
@@ -829,14 +899,7 @@ export const instructionProbes = {
       await raw(
         "a context naming the markers",
         agent,
-        unchecked({
-          conversation: markers.join(""),
-        })
-      ),
-      await raw(
-        "a context naming another agent",
-        agent,
-        unchecked({ conversation: "direct", agentId: markers.join("") })
+        unchecked({ conversation: markers.join("") })
       ),
       await raw(
         "an authority acting for the markers",
@@ -846,14 +909,14 @@ export const instructionProbes = {
     );
     return asked;
   },
-  // `hidden` and `nothing`: the refusal a save to an App the reader
-  // doesn't build gets, and a save to an App no one made.
-  saveInstructionFile: async ({
-    personId,
-    markers,
-    hiddenInstructionFiles,
-  }) => {
+  // Every comparison holds the refusal a save gets over a hidden file to
+  // the one it gets over a file no one wrote; then the plain saves, with
+  // the markers, scanned.
+  saveInstructionFile: async (probing) => {
+    const { personId, markers, usedApps } = probing;
     const text = markedText(markers);
+    const session = sessionOf(personId);
+    const own: InstructionFile = { scope: "person", personId };
     const save = async (
       name: string,
       by: Identity | Authority,
@@ -869,48 +932,98 @@ export const instructionProbes = {
             text: as,
           })
       );
-    const session = sessionOf(personId);
-    const own: InstructionFile = { scope: "person", personId };
-    const refusalSaving = async (
-      name: string,
-      file: InstructionFile,
-      about: Answer["about"]
+    /** One side of the comparison `like`: the refusal of a save. */
+    const side = async (
+      like: string,
+      about: "hidden" | "nothing",
+      by: Identity | Authority,
+      file: InstructionFile
     ) =>
       await answer(
-        `the refusal: ${name}`,
+        `${like}, ${about}`,
         async () =>
           await refusalOf(
             async () =>
-              await instructionFiles.saveInstructionFile(env, session, {
+              await instructionFiles.saveInstructionFile(env, by, {
                 file,
                 change: crypto.randomUUID(),
-                text,
+                text: "Not the markers",
               })
           ),
-        about
+        about,
+        like
       );
     const asked: Answer[] = [
-      await refusalSaving(
-        "an App no one made",
-        { scope: "app", appId: crypto.randomUUID() },
-        "nothing"
+      // No code writes a file, whatever the text: an agent for its own
+      // person is refused as an App's code is.
+      await side(
+        "code saving their file",
+        "nothing",
+        authoritySchema.parse({
+          subject: { type: "app", appId: `app-${crypto.randomUUID()}` },
+          onBehalfOf: personId,
+          mode: "interactive",
+          appVersion: 1,
+        }),
+        own
       ),
-      // Their own, without the markers: they read it back in every pass.
-      await save("their own", session, own, "Their own notes"),
+      await side(
+        "code saving their file",
+        "hidden",
+        readersAgent(personId),
+        own
+      ),
     ];
-    for (const [index, file] of hiddenInstructionFiles.entries()) {
+    for (const id of hiddenIdsOf(probing, "person")) {
+      const like = `another person's file ${id}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "nothing", session, unwrittenFile()),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "hidden", session, { scope: "person", personId: id })
+      );
+    }
+    for (const id of hiddenIdsOf(probing, "agent")) {
+      const like = `an agent's file ${id}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "nothing", session, {
+          scope: "agent",
+          agentId: `agent-${crypto.randomUUID()}`,
+        }),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "hidden", session, { scope: "agent", agentId: id })
+      );
+    }
+    const noApp = "an App no one made";
+    asked.push(
+      await side(noApp, "nothing", session, {
+        scope: "app",
+        appId: crypto.randomUUID(),
+      })
+    );
+    for (const appId of hiddenAppsOf(probing)) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      asked.push(await side(noApp, "hidden", session, { scope: "app", appId }));
+    }
+    if (usedApps !== undefined) {
+      const like = "an App they use";
+      asked.push(
+        await side(like, "nothing", session, {
+          scope: "app",
+          appId: usedApps.withoutFile,
+        }),
+        await side(like, "hidden", session, {
+          scope: "app",
+          appId: usedApps.withFile,
+        })
+      );
+    }
+    // Their own, without the markers: they read it back in every pass.
+    asked.push(await save("their own", session, own, "Their own notes"));
+    for (const [index, file] of probing.hiddenInstructionFiles.entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one file at a time
       asked.push(await save(`over hidden file ${index}`, session, file));
-    }
-    for (const appId of hiddenAppsOf(hiddenInstructionFiles)) {
-      asked.push(
-        // oxlint-disable-next-line no-await-in-loop -- one App at a time
-        await refusalSaving(
-          `an App they don't build: ${appId}`,
-          { scope: "app", appId },
-          "hidden"
-        )
-      );
     }
     asked.push(
       await save("the company's", session, {
@@ -1251,7 +1364,35 @@ export const storeProbes = {
       asked.push(answered);
     }
     const hidden = markers.join(" ");
+    // As a reader holding the groups instruction files are written for:
+    // their markers must find what words nothing holds find, as no
+    // instruction file is indexed.
+    const withInstructionGroups: Reader = {
+      ...reader,
+      groups: [...reader.groups, ...probing.instructionGroups],
+    };
+    const like = "with the instruction files' groups";
     asked.push(
+      await answer(
+        `${like}: a word nothing holds`,
+        async () =>
+          await store().recall({
+            question: probing.unknownWord,
+            reader: withInstructionGroups,
+          }),
+        "nothing",
+        like
+      ),
+      await answer(
+        `${like}: the markers`,
+        async () =>
+          await store().recall({
+            question: hidden,
+            reader: withInstructionGroups,
+          }),
+        "hidden",
+        like
+      ),
       await recall("too many groups", hidden, {
         ...reader,
         groups: Array.from({ length: readerGroupsMax + 1 }, () =>

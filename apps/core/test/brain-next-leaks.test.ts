@@ -1,3 +1,4 @@
+import { authoritySchema } from "@grasp-os/shared/permissions";
 import { DurableObject, env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -12,6 +13,7 @@ import type {
 } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { BrainStore } from "../src/index.ts";
+import { instructionFilesFor } from "../src/instruction-files.ts";
 import {
   coreProbes,
   instructionProbes,
@@ -22,7 +24,7 @@ import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { carrying } from "./platform-providers.ts";
-import { signedInWithRole, unique } from "./sign-in.ts";
+import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The marker test (GRA-1722): the gate every later Brain issue keeps
 // green. Unique marker words are planted in sources a reader may not
@@ -123,31 +125,43 @@ const findingsIn = (
   answers: readonly Answer[],
   forbidden: Readonly<Record<string, string>>
 ): string[] => {
-  const nothing = answers.find(({ about }) => about === "nothing");
-  const unlike = answers
-    .filter(
-      ({ about, got }) =>
-        about === "hidden" && textOf(got) !== textOf(nothing?.got)
-    )
-    .map(
-      ({ call, got }) =>
-        `"${call}" answered ${textOf(got)}, unlike "${nothing?.call}": ${textOf(nothing?.got)}`
-    );
+  // Each hidden answer against the nothing answer of its comparison.
+  const nothingOf = (like: string | undefined) =>
+    answers.find((one) => one.about === "nothing" && one.like === like);
+  const unlike = answers.flatMap(({ about, got, call, like }) => {
+    const nothing = nothingOf(like);
+    return about === "hidden" && textOf(got) !== textOf(nothing?.got)
+      ? [
+          `"${call}" answered ${textOf(got)}, unlike "${nothing?.call}": ${textOf(nothing?.got)}`,
+        ]
+      : [];
+  });
   const thin = answers.some(({ got }) => "value" in got)
     ? []
     : ["no call answered"];
   return [...markersIn(answers, forbidden), ...unlike, ...thin];
 };
 
+/** The surfaces that recall, where no instruction file may ever show. */
+const recallSurfaces = new Set(["core recallAs", "store recall"]);
+
 /**
  * Calls every surface (or those `among`) as `probing`'s reader; what they
- * gave away, in their answers or in the console.
+ * gave away, in their answers or in the console. `inRecall` is forbidden
+ * in what the recall surfaces answer too: instruction files, which no
+ * recall finds, the reader's own included.
  */
 const findingsOf = async (
   pass: string,
   probing: Probing,
   forbidden: Readonly<Record<string, string>>,
-  among: readonly [string, Probe][] = surfaces
+  {
+    among = surfaces,
+    inRecall = {},
+  }: {
+    among?: readonly [string, Probe][];
+    inRecall?: Readonly<Record<string, string>>;
+  } = {}
 ): Promise<Finding[]> => {
   const { value: answered, lines } = await logsOf(async () => {
     const found: [string, Answer[]][] = [];
@@ -159,7 +173,10 @@ const findingsOf = async (
   });
   return [
     ...answered.flatMap(([name, answers]) =>
-      findingsIn(answers, forbidden).map((found) => ({ pass, in: name, found }))
+      findingsIn(
+        answers,
+        recallSurfaces.has(name) ? { ...forbidden, ...inRecall } : forbidden
+      ).map((found) => ({ pass, in: name, found }))
     ),
     ...markersIn(lines, forbidden).map((found) => ({
       pass,
@@ -280,13 +297,13 @@ describe(
       // A provider is connected, so anything that prompts a model reaches
       // the providers stub, which keeps every request it gets.
       await answeringProvider(() => {});
-      const [holder, outsider] = await Promise.all([
+      // The holder builds Apps, so they can make the outsider a user of
+      // two.
+      const [holderApi, { userId: outsider }] = await Promise.all([
+        signedInApi(idp, "builder"),
         signedInWithRole(idp, "user"),
-        signedInWithRole(idp, "user"),
-      ]).then((people) => people.map(({ userId }) => userId));
-      if (holder === undefined || outsider === undefined) {
-        throw new Error("Expected two people");
-      }
+      ]);
+      const holder = holderApi.userId;
       const secretTeam = await newTeam(holder);
       const ownTeam = await newTeam(outsider);
       const sharedWord = `s${unique()}`;
@@ -299,6 +316,7 @@ describe(
         "the holder's instruction file": markerWord(),
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
+        "an App's instruction file the outsider uses": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -308,6 +326,7 @@ describe(
         "the holder's instruction file": holderFileMarker,
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
+        "an App's instruction file the outsider uses": usedAppFileMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -321,10 +340,31 @@ describe(
         scope: "app",
         appId: crypto.randomUUID(),
       };
+      // Two Apps the holder builds and the outsider uses, through core's
+      // own records: one with a file, one without. A file is for an App's
+      // builders, so the outsider gets neither.
+      const { id: withFile } = await holderApi.api.apps.create({
+        name: "Desk",
+      });
+      const { id: withoutFile } = await holderApi.api.apps.create({
+        name: "Ledger",
+      });
+      for (const appId of [withFile, withoutFile]) {
+        // oxlint-disable-next-line no-await-in-loop -- one App at a time
+        await holderApi.api.apps.members.add(appId, {
+          type: "person",
+          id: outsider,
+          role: "user",
+        });
+      }
+      const usedApps = { withFile, withoutFile };
+      const usedAppFile: InstructionFile = { scope: "app", appId: withFile };
+      const usedAppText = `Instructions ${sharedWord} ${usedAppFileMarker}`;
       for (const [file, marker] of [
         [holderFile, holderFileMarker],
         [agentFile, agentFileMarker],
         [appFile, appFileMarker],
+        [usedAppFile, usedAppFileMarker],
       ] as const) {
         // oxlint-disable-next-line no-await-in-loop -- one file at a time
         await addInstructionFile(env, {
@@ -337,6 +377,18 @@ describe(
         holderFileMarker,
         agentFileMarker,
         appFileMarker,
+        usedAppFileMarker,
+      ];
+      // No recall ever finds an instruction file, a reader's own included.
+      const inRecall = {
+        "the holder's instruction file": holderFileMarker,
+        "another agent's instruction file": agentFileMarker,
+        "an App's instruction file the outsider doesn't build": appFileMarker,
+        "an App's instruction file the outsider uses": usedAppFileMarker,
+      };
+      const instructionGroups = [
+        "company",
+        ...[withFile, withoutFile, appFile.appId].map((id) => `app:${id}`),
       ];
       const ownerIds = [
         await add(`Salary review ${sharedWord} ${ownerMarker}`, {
@@ -418,12 +470,15 @@ describe(
           ...instructionMarkers,
         ],
         hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
-        hiddenInstructionFiles: [holderFile, agentFile, appFile],
+        hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
+        usedApps,
+        instructionGroups,
       });
       const first = await findingsOf(
         "the outsider",
         asOutsider([ownTeam]),
-        markers
+        markers,
+        { inRecall }
       );
 
       // Joining the team counts from the very next recall: its source is
@@ -444,7 +499,8 @@ describe(
           ],
           hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
         },
-        notJoined
+        notJoined,
+        { inRecall }
       );
 
       // Leaving counts from the very next recall too.
@@ -453,7 +509,8 @@ describe(
       const outAgain = await findingsOf(
         "the outsider, out of the team again",
         asOutsider([ownTeam]),
-        markers
+        markers,
+        { inRecall }
       );
 
       // Someone who may read everything else still never gets the source
@@ -471,15 +528,28 @@ describe(
             ...everyVersionOf(noneId),
             { source: narrowedId, version: 1 },
           ],
-          // Their own instruction file is theirs.
+          // Their own instruction file is theirs, and so are the Apps'
+          // they build.
           hiddenInstructionFiles: [agentFile, appFile],
+          instructionGroups,
         },
         {
           "a source nobody is known to read": noneMarker,
           "a source narrowed away from the outsider": narrowedMarker,
           "another agent's instruction file": agentFileMarker,
           "an App's instruction file the outsider doesn't build": appFileMarker,
-        }
+        },
+        { inRecall }
+      );
+      // The holder builds the App, so its file is theirs to get.
+      const holderAppFiles = await instructionFilesFor(
+        env,
+        authoritySchema.parse({
+          subject: { type: "agent", agentId: `agent-${unique()}` },
+          onBehalfOf: holder,
+          mode: "interactive",
+        }),
+        { conversation: "own", appId: withFile }
       );
 
       // Any request any provider got, whoever's key it carried.
@@ -507,18 +577,26 @@ describe(
         outsiderFinds,
         joinedFinds,
         leftFinds,
+        holderAppFile: holderAppFiles.some(({ text }) => text === usedAppText),
       }).toStrictEqual({
         findings: [],
         outsiderFinds: [handbook],
         joinedFinds: [teamSource],
         leftFinds: [],
+        holderAppFile: true,
       });
     });
 
-    it("gives someone who isn't a member nothing of the company's instruction files", async () => {
+    it("gives someone who isn't a member, or was one, nothing of the company's instruction files", async () => {
       await answeringProvider(() => {});
       // Every member may read the company's files, so they are probed as
-      // someone who isn't one: the surfaces that load and read them.
+      // someone who never was one, and someone an admin removed: the
+      // surfaces that load, read and recall them.
+      const [admin, former] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInWithRole(idp, "user"),
+      ]);
+      await admin.api.members.remove(former.userId);
       const marker = markerWord();
       const companyFiles: InstructionFile[] = [
         { scope: "company", name: "instructions" },
@@ -532,26 +610,39 @@ describe(
           text: `Company instructions ${marker}`,
         });
       }
-      const nonMember = `stranger-${crypto.randomUUID()}`;
       const forbidden = { "the company's instruction files": marker };
-      const findings = await findingsOf(
-        "someone who isn't a member",
-        {
-          personId: nonMember,
-          reader: { person: nonMember, groups: [] },
-          sharedWord: `s${unique()}`,
-          unknownWord: `u${unique()}`,
-          markers: [marker],
-          hiddenVersions: [],
-          hiddenInstructionFiles: companyFiles,
-        },
-        forbidden,
-        surfaces.filter(([name]) =>
-          ["instructions instructionFilesFor", "store readCurrent"].includes(
-            name
-          )
-        )
-      );
+      const findings: Finding[] = [];
+      for (const [pass, personId] of [
+        ["someone who never was a member", `stranger-${crypto.randomUUID()}`],
+        ["someone an admin removed", former.userId],
+      ] as const) {
+        findings.push(
+          // oxlint-disable-next-line no-await-in-loop -- one pass at a time
+          ...(await findingsOf(
+            pass,
+            {
+              personId,
+              reader: { person: personId, groups: [] },
+              sharedWord: `s${unique()}`,
+              unknownWord: `u${unique()}`,
+              markers: [marker],
+              hiddenVersions: [],
+              hiddenInstructionFiles: companyFiles,
+              instructionGroups: ["company"],
+            },
+            forbidden,
+            {
+              among: surfaces.filter(([name]) =>
+                [
+                  "instructions instructionFilesFor",
+                  "store readCurrent",
+                  "store recall",
+                ].includes(name)
+              ),
+            }
+          ))
+        );
+      }
       const prompted = await carrying(marker);
 
       expect({ findings, prompted }).toStrictEqual({
