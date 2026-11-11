@@ -33,7 +33,7 @@ export interface PagerSnapshot {
 }
 
 /** A page as its query answered it. */
-export interface PageValue {
+interface PageValue {
   readonly items: readonly unknown[];
   readonly hasMore: boolean;
   readonly nextCursor: string | null;

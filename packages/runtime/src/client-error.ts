@@ -151,7 +151,7 @@ const clientErrors = {
   },
   "file.operation_undeclared": {
     message:
-      "This App doesn't declare that use of these files: add it to the resource's operations.",
+      "This App doesn't declare that use of these files: add it to the files permission's operations.",
     category: "contract",
   },
   "file.upload_active": {

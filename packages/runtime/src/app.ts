@@ -1,3 +1,5 @@
+import { deepFreeze } from "@grasp-os/shared/json";
+
 import { AppDefinitionError } from "./app-definition-error.ts";
 import { exportedFunctions, registeredFunctions } from "./app-functions.ts";
 import { migrationsOf } from "./app-migrations.ts";
@@ -11,7 +13,7 @@ import type {
   GrantsOf,
   FunctionManifest,
 } from "./app-types.ts";
-import { deepFreeze, refuser } from "./declaration.ts";
+import { refuser } from "./declaration.ts";
 import type { AppPermission } from "./permission-types.ts";
 import { readSchemaAnswers } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";

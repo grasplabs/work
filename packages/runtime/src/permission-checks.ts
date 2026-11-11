@@ -1,8 +1,9 @@
 import { originRefusal } from "@grasp-os/shared/app-link-limits";
 import { resourceAliasPattern } from "@grasp-os/shared/function-limits";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
+import { deepFreeze } from "@grasp-os/shared/json";
 
-import { deepFreeze, refuser } from "./declaration.ts";
+import { refuser } from "./declaration.ts";
 import type { FilesOperation } from "./file-link-references.ts";
 import { memberName } from "./member-names.ts";
 import type {

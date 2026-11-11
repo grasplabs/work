@@ -162,7 +162,7 @@ const platformWrapKey: unknown = Reflect.get(platformSubtle, "wrapKey");
 export type Reads = "the clock" | "randomness";
 
 /** What the clock and randomness answer from. */
-export interface ClockAndRandomness {
+interface ClockAndRandomness {
   /**
    * `Date.now()`, `new Date()`, `Date()`, a formatter given no date, and a
    * file's `lastModified` unless given.
@@ -191,7 +191,7 @@ export interface ClockAndRandomness {
  * reading one never looks on `Object.prototype`, where module code could
  * put one.
  */
-export interface Replacement {
+interface Replacement {
   readonly target: object;
   readonly key: string;
   readonly get: ((this: unknown) => unknown) | undefined;

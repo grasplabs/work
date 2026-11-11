@@ -43,7 +43,7 @@ export interface PageFunction {
 }
 
 /** A release's public functions, by name. */
-export type PageFunctions = ReadonlyMap<string, PageFunction>;
+type PageFunctions = ReadonlyMap<string, PageFunction>;
 
 /** One workflow the release declares, as a page reads it. */
 export interface PageWorkflow {

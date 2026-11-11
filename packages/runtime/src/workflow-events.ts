@@ -45,7 +45,7 @@ const eventNamePattern =
  * resolves both aliases in the release it runs, and refuses a name it
  * doesn't declare.
  */
-export const eventName = (name: unknown): EventName | undefined => {
+const eventName = (name: unknown): EventName | undefined => {
   if (typeof name !== "string") {
     return undefined;
   }

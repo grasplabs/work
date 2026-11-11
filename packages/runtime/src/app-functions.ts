@@ -19,7 +19,7 @@ const refuse: (message: string) => never = refuser(AppDefinitionError);
  * (`workflows.<alias>.queries.*` and `.mutations.*`) and `people` for who calls and the
  * organization's people (people.ts), which the host answers itself. No
  * function registers under either, whether or not the App declares
- * workflows now, so declaring one later never shadows or is shadowed by a
+ * workflows, so declaring one later never shadows or is shadowed by a
  * function.
  */
 const reservedSegments: ReadonlyMap<string, string> = new Map([

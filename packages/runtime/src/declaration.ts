@@ -17,18 +17,6 @@ export const refuser =
     throw new Refusal(...args);
   };
 
-/** `value` with every object and array in it frozen; data only. */
-export const deepFreeze = <Value>(value: Value): Value => {
-  // Into frozen objects too: a frozen object can hold one that isn't.
-  if (typeof value === "object" && value !== null) {
-    Object.freeze(value);
-    for (const entry of Object.values(value)) {
-      deepFreeze(entry);
-    }
-  }
-  return value;
-};
-
 /**
  * A reader of a declaration's keys as data properties, never getters:
  * `refuse` names what declared it as `what` (`A calculation`).
@@ -63,7 +51,7 @@ export const hasExactly = (
   Object.keys(value).length === keys.length &&
   keys.every((key) => Object.hasOwn(value, key));
 
-/** A name a declaration gives: a table's, or a resource's alias. */
+/** A name a declaration gives: a table's, or a permission's alias. */
 export const namePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
 /** A SHA-256 in lower-case hex: a fingerprint, a schema hash, an address. */

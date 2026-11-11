@@ -2,6 +2,7 @@ import {
   functionRequestMaxBytes,
   streamIdleCancelMs,
 } from "@grasp-os/shared/function-limits";
+import { deepFreeze } from "@grasp-os/shared/json";
 
 import type { AccessFence } from "./access-fence.ts";
 import { readRejection } from "./call-answers.ts";
@@ -16,7 +17,6 @@ import {
 import { retryCapMs, waitAfter } from "./client-retry.ts";
 import { freshKey, retryDelay, sleep } from "./client-shared.ts";
 import type { ClientTransport, StreamLink } from "./client-transport.ts";
-import { deepFreeze } from "./declaration.ts";
 import { fences, refusedBeforeCallCodes } from "./refusals.ts";
 import {
   isAborted,
