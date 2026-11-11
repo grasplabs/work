@@ -1,3 +1,4 @@
+import { sourceTextMaxBytes } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -459,6 +460,24 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       again: { source: lost, version: 1 },
       history: lostText,
     });
+  });
+
+  it("holds a source to its bound as the word index takes it, not only as given", async () => {
+    const reader = await person();
+    // "ﷺ" is 3 bytes as given and 33 as indexed: 30,303 of them are
+    // 999,999 bytes indexed, one more is past the bound, though either is
+    // under 100 kB as given.
+    const indexedBytes = 33;
+    const most = Math.floor(sourceTextMaxBytes / indexedBytes);
+    const add = async (count: number) =>
+      await addSource(env, {
+        source: newSource(),
+        text: "ﷺ".repeat(count),
+        readers: owner(reader),
+      });
+
+    await expect(add(most)).resolves.toMatchObject({ version: 1 });
+    await expect(add(most + 1)).rejects.toThrow(/as indexed/u);
   });
 
   it("refuses a source without an identity, or with one too long, and stores nothing", async () => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { BrainStore } from "./store.ts";
+import { foldForSearch } from "./words.ts";
 
 // The Brain's one way in. Its host (core) adds sources and recalls them
 // through `Brain`, and nothing else reaches the store: its data lives in
@@ -13,7 +14,7 @@ import type { BrainStore } from "./store.ts";
 // never from what a caller claims: so a group's membership is the host's,
 // read at each recall, and a change in it rewrites nothing here.
 
-/** Most bytes of a source's text (UTF-8). */
+/** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
 /** Most characters of a question. */
@@ -32,6 +33,11 @@ export const recallLimit = 10;
 export const sourceIdMaxLength = 256;
 
 const principalSchema = z.string().min(1).max(principalMaxLength);
+
+const encoder = new TextEncoder();
+
+/** `text`'s length in UTF-8 bytes. */
+const byteLengthOf = (text: string): number => encoder.encode(text).byteLength;
 
 /**
  * A source's identity, given by its producer (this upload, this chat): the
@@ -65,10 +71,16 @@ export const newSourceSchema = z.strictObject({
   text: z
     .string()
     .min(1)
-    .refine(
-      (text) => new TextEncoder().encode(text).byteLength <= sourceTextMaxBytes,
-      { message: `At most ${sourceTextMaxBytes} bytes` }
-    ),
+    .refine((text) => byteLengthOf(text) <= sourceTextMaxBytes, {
+      message: `At most ${sourceTextMaxBytes} bytes`,
+      abort: true,
+    })
+    // Folding can grow a text many times (a compatibility form such as
+    // "ﷺ" is 3 bytes, and 33 folded), so the bound holds for what the
+    // word index takes too.
+    .refine((text) => byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes, {
+      message: `At most ${sourceTextMaxBytes} bytes as indexed`,
+    }),
   access: accessSchema,
 });
 export type NewSource = z.infer<typeof newSourceSchema>;

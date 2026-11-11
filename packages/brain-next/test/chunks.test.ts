@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { chunkMax, chunkTarget, chunksOf } from "../src/chunks.ts";
+import { foldForSearch } from "../src/words.ts";
 
 /** The words of `texts`, in order, whatever whitespace parts them. */
 const wordsOf = (...texts: string[]): string[] =>
@@ -46,6 +47,20 @@ describe("cutting a text into chunks", () => {
     for (const chunk of chunks) {
       expect(chunk.length).toBeLessThanOrEqual(chunkMax);
       expect(chunk.isWellFormed()).toBeTruthy();
+    }
+  });
+
+  it("keeps every chunk within the bound as the word index takes it, for text that grows when folded", () => {
+    // "ﷺ" is one character, and 18 as indexed.
+    for (const text of ["ﷺ".repeat(1000), "ﷺ ".repeat(1000)]) {
+      const chunks = chunksOf(text);
+
+      expect(chunks.join("").replaceAll(/\s/gu, "")).toBe(
+        text.replaceAll(/\s/gu, "")
+      );
+      expect(
+        chunks.filter((chunk) => foldForSearch(chunk).length > chunkMax)
+      ).toStrictEqual([]);
     }
   });
 
