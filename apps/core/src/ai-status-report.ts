@@ -19,11 +19,11 @@ import { log } from "@grasp-os/shared/log";
 import { platformAiFeatures } from "@grasp-os/shared/platform-ai";
 import { z } from "zod";
 
-import { readModelChoice } from "./ai-model-choice.ts";
+import { readAiSource, readModelChoice } from "./ai-model-choice.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { parseModelRef } from "./model-catalog.ts";
-import { platformSpend } from "./model-spend.ts";
+import { graspAiMonth, platformSpend } from "./model-spend.ts";
 import type { PlatformSpendByPeriod } from "./model-spend.ts";
 import { providerHealthOf } from "./model-usage.ts";
 import type { ProviderHealth } from "./model-usage.ts";
@@ -89,16 +89,21 @@ const monthSpend = (
     })),
 });
 
+/** Millionths in a US dollar: what the report's amounts are in. */
+const microsPerDollar = 1_000_000;
+
 /** The organization's providers and Grasp's, as the admin reads them. */
 const aiStatus = async (env: Env): Promise<AiStatusReport> => {
   const now = new Date();
   const thisMonth = periodOf(now, 0);
   const lastMonth = periodOf(now, 1);
-  const [keys, health, choice, spend] = await Promise.all([
+  const [keys, health, choice, spend, source, grasp] = await Promise.all([
     env.CONNECT.aiProviderKeys(),
     providerHealthOf(env),
     readModelChoice(env),
     platformSpend(env, [thisMonth, lastMonth]),
+    readAiSource(env),
+    graspAiMonth(env, thisMonth),
   ]);
   const chosen =
     choice?.defaultModel === null || choice === null
@@ -125,6 +130,15 @@ const aiStatus = async (env: Env): Promise<AiStatusReport> => {
       thisMonth: monthSpend(spend, thisMonth),
       lastMonth: monthSpend(spend, lastMonth),
     },
+    ...(source === "grasp"
+      ? {
+          graspAi: {
+            spentMicros: Math.round(grasp.spentUsd * microsPerDollar),
+            limitMicros: Math.round(grasp.limitUsd * microsPerDollar),
+            reached: grasp.reached,
+          },
+        }
+      : {}),
   };
 };
 

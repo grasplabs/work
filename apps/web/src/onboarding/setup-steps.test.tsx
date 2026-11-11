@@ -111,6 +111,7 @@ const aiOf = ({ ready }: { ready: boolean }): AiReadiness => {
           name: "Claude Sonnet 5.5",
         },
         whereItRuns: "Anthropic, United States",
+        month: { spentUsd: 0, limitUsd: 100, reached: false },
       },
       providers: ready
         ? [

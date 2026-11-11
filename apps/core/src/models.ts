@@ -78,6 +78,7 @@ import type { ModelDocument } from "./model-documents.ts";
 import { usageCost } from "./model-prices.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Refusal } from "./model-rules.ts";
+import { graspAiMonth, spendMonth } from "./model-spend.ts";
 import {
   connectRequest,
   connectSocket,
@@ -1492,20 +1493,29 @@ const record = async (
           estimated: used.estimated,
         };
   const health = healthOf(route, sent, outcome, failure?.stopped);
-  await recordResponse(env, {
-    entry: auditEntry(route, {
-      ...used,
-      logId,
-      attempt,
-      outcome,
-      status: failure?.status ?? status,
-      errorType: failure?.errorType,
-    }),
-    at: Date.now(),
-    spend: call,
-    ...(usage === undefined ? {} : { usage }),
-    ...(health === undefined ? {} : { health }),
-  });
+  await recordResponse(
+    env,
+    {
+      entry: auditEntry(route, {
+        ...used,
+        logId,
+        attempt,
+        outcome,
+        status: failure?.status ?? status,
+        errorType: failure?.errorType,
+      }),
+      at: Date.now(),
+      spend: call,
+      ...(usage === undefined ? {} : { usage }),
+      ...(health === undefined ? {} : { health }),
+    },
+    // What Grasp's AI cost is written before its answer is given: the
+    // month's limit is read off it, so the call after one that reached
+    // the limit is refused, not let through while the write is under way.
+    {
+      awaited: way.credential === "platform" && way.feature === "organization",
+    }
+  );
 };
 
 /**
@@ -1554,6 +1564,29 @@ const refuse = async (
   throw modelErrors.create(code, {
     model: call.model,
     ...(because === undefined ? {} : { because }),
+  });
+};
+
+/**
+ * Refuses a call on Grasp's AI past its month's limit, audited. It fails
+ * as a provider limiting requests does, which billed nothing: a workflow
+ * run waits and tries again (workflows/host.ts), and goes on once the
+ * organization's AI answers, on its own key or in the next month, for
+ * as long as a step waits for its AI at all (`aiKeyHoldMsOf`,
+ * workflows/host.ts): past that the step fails.
+ */
+const refuseAtLimit = async (env: Env, call: Session): Promise<never> => {
+  log.warn("model.refused", { reason: "model.grasp_limit_reached" });
+  await keepAuditEvent(
+    env,
+    drizzle(env.DB),
+    refusedEntry(call, { code: "model.grasp_limit_reached" })
+  );
+  throw modelErrors.create("model.grasp_limit_reached", {
+    model: call.model,
+    provider: graspAi.provider,
+    trouble: "limiting",
+    unbilled: true,
   });
 };
 
@@ -1647,6 +1680,47 @@ const routesOrFailed = async (env: Env): Promise<AiProviderRoutes> => {
 };
 
 /**
+ * Where an organization's own call goes on Grasp's AI: to its one model,
+ * on Grasp's key, and nothing else; refused past its month's limit. The
+ * organization's own key is never used in its place, nor Grasp's for any
+ * model but this one.
+ */
+const graspRouting = async (
+  env: Env,
+  call: Session,
+  ref: ModelRef | undefined,
+  via: Via
+): Promise<{ ref: ModelRef; routing: Routing }> => {
+  // Grasp's AI: its one model, on Grasp's key, and nothing else. The
+  // organization's own key is never used in its place, nor Grasp's for
+  // any model but this one.
+  const platform = platformRouteOf(graspAi.provider);
+  if (ref === undefined || call.model !== graspAi.model) {
+    return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  if (platform === undefined) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  // Grasp pays the provider first: past this month's limit nothing more
+  // goes out on its key. Counted from what answered calls cost, so a
+  // call already out when the limit is reached still ends.
+  const month = await graspAiMonth(env, spendMonth(env));
+  if (month.reached) {
+    return await refuseAtLimit(env, call);
+  }
+  const target = {
+    credential: "platform",
+    provider: graspAi.provider,
+    baseUrl: null,
+    platform,
+  } as const;
+  return {
+    ref,
+    routing: await connectRouting(env, call, ref, target, [], via),
+  };
+};
+
+/**
  * Where `call` goes, as `via` lets it through (`Via`), or its refusal,
  * audited: a model of a provider with no key for it is never routed.
  */
@@ -1713,26 +1787,7 @@ const routingOf = async (
     });
   }
   if (source === "grasp") {
-    // Grasp's AI: its one model, on Grasp's key, and nothing else. The
-    // organization's own key is never used in its place, nor Grasp's for
-    // any model but this one.
-    const platform = platformRouteOf(graspAi.provider);
-    if (ref === undefined || call.model !== graspAi.model) {
-      return await refuse(env, call, { code: "model.not_allowed" });
-    }
-    if (platform === undefined) {
-      throw modelErrors.create("model.unconfigured");
-    }
-    const target = {
-      credential: "platform",
-      provider: graspAi.provider,
-      baseUrl: null,
-      platform,
-    } as const;
-    return {
-      ref,
-      routing: await connectRouting(env, call, ref, target, [], via),
-    };
+    return await graspRouting(env, call, ref, via);
   }
   const at = chosen.indexOf(call.model);
   if (at === -1 || ref === undefined || connected === undefined) {

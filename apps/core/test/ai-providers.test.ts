@@ -28,6 +28,8 @@ import type {
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import {
   afterEach,
   beforeEach,
@@ -39,7 +41,8 @@ import {
 import { z } from "zod";
 
 import { usableModels } from "../src/ai-model-choice.ts";
-import { monthSpend, spendMonth } from "../src/model-spend.ts";
+import { modelUsage } from "../src/db/core/schema.ts";
+import { graspAiMonth, monthSpend, spendMonth } from "../src/model-spend.ts";
 import { modelFailureOf, models, modelSettings } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -1354,7 +1357,18 @@ describe("AI providers", { timeout: 60_000 }, () => {
   //   staff, who would be choosing what Grasp is paid for.
   // - Its use not told apart from Grasp's own features, or missing from
   //   what the organization spent.
+  // - An organization spending without bound on Grasp's key: past its
+  //   month's limit a call must not reach the provider.
   describe("Grasp's AI, on Grasp's key", () => {
+    /** Whose usage the limit's tests record, so it is theirs to clear. */
+    const graspSpender = "grasp-ai-limit-test";
+
+    afterEach(async () => {
+      await drizzle(env.DB)
+        .delete(modelUsage)
+        .where(eq(modelUsage.personId, graspSpender));
+    });
+
     /** How many requests carried Grasp's Anthropic key so far. */
     const onGraspKey = async (): Promise<number> => {
       const carried = await carrying(platformAnthropicKey);
@@ -1390,6 +1404,11 @@ describe("AI providers", { timeout: 60_000 }, () => {
           available: true,
           model: { model: graspAi.model, name: "Claude Sonnet 5.5" },
           whereItRuns: "Anthropic, United States",
+          month: {
+            spentUsd: 0,
+            limitUsd: graspAi.monthlyLimitUsd,
+            reached: false,
+          },
         },
         noProvider: "model.no_provider",
         refusedKey: "model.provider_key_failed",
@@ -1535,6 +1554,99 @@ describe("AI providers", { timeout: 60_000 }, () => {
         unknown: "ai_provider.invalid",
         kept: "own",
         set: [{ source: "grasp" }],
+      });
+    });
+
+    /** Records that the organization's use of Grasp's AI came to `usd` more this month, as an answered call does. */
+    const spentOnGraspAi = async (usd: number): Promise<void> => {
+      await drizzle(env.DB)
+        .insert(modelUsage)
+        .values({
+          id: crypto.randomUUID(),
+          period: spendMonth(env),
+          personId: graspSpender,
+          triggerType: "person",
+          model: graspAi.model,
+          credential: "platform",
+          feature: "organization",
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          cost: usd,
+          estimated: false,
+          createdAt: new Date(),
+        });
+    };
+
+    it("answers until the month's use of Grasp's AI reaches its limit, then refuses every call without reaching the provider, and never limits the organization's own key", async () => {
+      const own = await connected(openaiCase);
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      // A cent under the limit: the next call still goes out.
+      await spentOnGraspAi(graspAi.monthlyLimitUsd - 0.01);
+      await plan(platformAnthropicKey, [
+        answered("anthropic-messages", "Still here."),
+      ]);
+      const under = await models(env).call(await callOf(graspAi.model));
+      const beforeLimit = await by.api.aiProviders.list();
+
+      await spentOnGraspAi(0.01);
+      const before = await onGraspKey();
+      const trigger = newPerson();
+      const atLimit = await outcome(
+        models(env).call(await callOf(graspAi.model, { trigger }))
+      );
+      const again = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+      const listing = await by.api.aiProviders.list();
+      const [refused] = await auditedFor(trigger.userId, 1);
+
+      // On its own key again, its calls answer as before.
+      await by.api.aiProviders.setSource("own");
+      await plan(own, [answered(openaiCase.api, "On our own key.")]);
+      const ownKey = await models(env).call(await callOf(openaiCase.model));
+
+      expect({
+        under: under.text,
+        beforeLimit: beforeLimit.grasp.month.reached,
+        atLimit,
+        again,
+        reachedProvider: (await onGraspKey()) - before,
+        month: {
+          limitUsd: listing.grasp.month.limitUsd,
+          reached: listing.grasp.month.reached,
+        },
+        audited: [refused?.action, refused?.detail.reason],
+        ownKey: ownKey.text,
+      }).toStrictEqual({
+        under: "Still here.",
+        beforeLimit: false,
+        atLimit: "model.grasp_limit_reached",
+        again: "model.grasp_limit_reached",
+        reachedProvider: 0,
+        month: { limitUsd: graspAi.monthlyLimitUsd, reached: true },
+        audited: ["model.refused", "model.grasp_limit_reached"],
+        ownKey: "On our own key.",
+      });
+    });
+
+    it("refuses the call right after the one whose answer took the month's use to its limit", async () => {
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      // So close under the limit that what one answer costs reaches it,
+      // counting what this month's answered calls cost already.
+      const { spentUsd } = await graspAiMonth(env, spendMonth(env));
+      await spentOnGraspAi(graspAi.monthlyLimitUsd - spentUsd - 1e-9);
+      await plan(platformAnthropicKey, [
+        answered("anthropic-messages", "The last one."),
+      ]);
+      const last = await models(env).call(await callOf(graspAi.model));
+      const next = await outcome(models(env).call(await callOf(graspAi.model)));
+      expect({ last: last.text, next }).toStrictEqual({
+        last: "The last one.",
+        next: "model.grasp_limit_reached",
       });
     });
 
