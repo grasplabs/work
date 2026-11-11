@@ -139,11 +139,11 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       revoked: statesOf(revoked),
       afterRevoke: outcomeOf(afterRevoke),
     }).toStrictEqual({
-      unbound: { failed: "resource.unavailable" },
+      unbound: { failed: "permission.unavailable" },
       states: { ai: "served", brain: "served" },
       bound: [],
       revoked: { ai: "served", brain: "unbound" },
-      afterRevoke: { failed: "resource.unavailable" },
+      afterRevoke: { failed: "permission.unavailable" },
     });
   });
 
@@ -173,10 +173,10 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       read: outcomeOf(read),
     }).toStrictEqual({
       lost: { ai: "grant_lost", brain: "grant_lost" },
-      found: { failed: "resource.unavailable" },
+      found: { failed: "permission.unavailable" },
       changed: { brain: "declaration_changed" },
       undeclared: ["ai"],
-      read: { failed: "resource.unavailable" },
+      read: { failed: "permission.unavailable" },
     });
   });
 
@@ -227,7 +227,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       declared: [["ai", "served"]],
       undeclared: ["brain"],
       brainStillActive: "active",
-      widened: { failed: "resource.unavailable" },
+      widened: { failed: "permission.unavailable" },
       sent: 0,
       sneak: "absent",
       find: { failed: "function.not_found" },

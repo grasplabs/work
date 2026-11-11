@@ -133,7 +133,7 @@ export const refusal = (code: string): string => {
     case "board.too_many_workflows": {
       return "The workflow map has more workflows than one snapshot holds (250).";
     }
-    case "resource.unavailable": {
+    case "permission.unavailable": {
       return "The page can't read the platform's statistics yet: an admin binds them first.";
     }
     case "app.unreachable": {

@@ -2000,7 +2000,7 @@ build: {
    * path (\`"notes.create"\`) and \`args\` its input object. It runs on the
    * draft sealed as a release, on a store of its own, which keeps what
    * calls write until the next \`env.build.write\` empties it, with no
-   * connections, Knowledge or models (\`resource.unavailable\`); what it
+   * connections, Knowledge or models (\`permission.unavailable\`); what it
    * wrote with \`console\`, in the next proposal's \`check.preview.logs\`. A failure
    * the draft's to fix comes back as \`ok: false\`: a path that names none
    * of its functions, code that doesn't seal (\`message\` names why: each
@@ -2031,8 +2031,8 @@ build: {
    * but a \`warning\` (React's development warnings); \`check.preview.seen\` is
    * false when nobody has the preview open, so its pages weren't run:
    * say so, or \`call\` the server yourself. A preview reaches nothing
-   * outside it: a function's resource call (a connection,
-   * Knowledge, a model) rejects with \`resource.unavailable\`, and a
+   * outside it: a function's call through a permission (a connection,
+   * Knowledge, a model) rejects with \`permission.unavailable\`, and a
    * page's workflow run with \`app.preview_side_effect\`. Handle either
    * as a failed call, as a page must live.
    * Once \`version\` is set, it is proposed: don't propose it again. When

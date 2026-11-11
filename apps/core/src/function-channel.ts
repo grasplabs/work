@@ -14,18 +14,18 @@ import {
 
 // The one authority an App's code is handed for one invocation of one of
 // its server functions (function-host.ts): a read, a staged write, a call of
-// another of its functions, a resource, a streaming action's progress
+// another of its functions, a permission, a streaming action's progress
 // (`emit`), each decided here, by the host, for the invocation's kind. App
 // code can hold on to the channel, or pass it on, so:
 // - what it may do is fixed by the invocation that made it: a query's has
-//   no write, call or resource, a mutation's no resource, only a streaming
+//   no write, call or permission, a mutation's no permission, only a streaming
 //   action's has `emit`, and asking
 //   anyway is refused whatever the App code says (`function.read_only`,
-//   `function.no_resources`, ...);
+//   `function.no_permissions`, ...);
 // - it stops working once its invocation ends (`function.ended`), so a
 //   channel kept from an earlier call acts for no one;
 // - it answers at most `platformLimits.invocationHostCalls` reads, calls
-//   and resource requests (100), counted as each reaches it, refused or
+//   and permission requests (100), counted as each reaches it, refused or
 //   not, and none after that (`function.call_limit`): a loop of them ends
 //   there, and a function's nested calls, each an invocation of its own
 //   with its own channel, are bounded by the call's budget (function-host.ts).
@@ -54,7 +54,7 @@ type CapabilityName =
   | "read"
   | "write"
   | "call"
-  | "resource"
+  | "permission"
   | "emit"
   | "people";
 
@@ -69,7 +69,7 @@ export interface ChannelCapabilities {
   readonly read?: Capability;
   readonly write?: Capability;
   readonly call?: Capability;
-  readonly resource?: Capability;
+  readonly permission?: Capability;
   /** A streaming action's progress snapshot (function-host.ts `runAction`). */
   readonly emit?: Capability;
   /** Who calls, and the organization's people (app-people.ts). */
@@ -136,7 +136,7 @@ const isAppFailure = (error: unknown): boolean =>
 /** What a channel and the host that made it share. */
 interface ChannelState {
   ended: boolean;
-  /** Its reads, calls and resource requests so far, refused ones included. */
+  /** Its reads, calls and permission requests so far, refused ones included. */
   uses: number;
   readonly raised: Map<string, CodedError>;
 }
@@ -178,12 +178,12 @@ class Channel extends ChannelTarget implements FunctionChannel {
     return await this.#use("call", [kind, path, args]);
   }
 
-  async resource(
+  async permission(
     alias: unknown,
     method: unknown,
     args: unknown
   ): Promise<unknown> {
-    return await this.#use("resource", [alias, method, args]);
+    return await this.#use("permission", [alias, method, args]);
   }
 
   async emit(progress: unknown): Promise<unknown> {

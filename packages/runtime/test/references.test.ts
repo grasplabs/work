@@ -1313,7 +1313,7 @@ describe("references a function calls", () => {
         calls.push(args);
         return await Promise.resolve(3);
       },
-      resource: async () => await Promise.reject(new Error("no resources")),
+      permission: async () => await Promise.reject(new Error("no permissions")),
       emit: async () => await Promise.reject(new Error("no emits")),
       people: async () => await Promise.reject(new Error("no people")),
     };

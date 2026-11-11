@@ -70,7 +70,11 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       refused,
       sent: await sentCount("Wider"),
       waiting: waiting.length,
-    }).toStrictEqual({ refused: "resource.unavailable", sent: 0, waiting: 0 });
+    }).toStrictEqual({
+      refused: "permission.unavailable",
+      sent: 0,
+      waiting: 0,
+    });
   });
 
   it("leave a dropped held call's key free: the same call is asked again, never answered as declined", async () => {
@@ -92,8 +96,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       afterRevoke: outcomeOf(afterRevoke),
       sent: await sentCount("Again"),
     }).toStrictEqual({
-      afterReplace: { failed: "resource.awaiting_confirmation" },
-      afterRevoke: { failed: "resource.awaiting_confirmation" },
+      afterReplace: { failed: "permission.awaiting_confirmation" },
+      afterRevoke: { failed: "permission.awaiting_confirmation" },
       sent: 0,
     });
   });
@@ -116,7 +120,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
         await mailer.builder.api.pendingActions.confirm(held.id, held.inputHash)
     );
     expect({ refused, sent: await sentCount("Garbled") }).toStrictEqual({
-      refused: "resource.unavailable",
+      refused: "permission.unavailable",
       sent: 0,
     });
   });
@@ -144,7 +148,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
         await mailer.builder.api.pendingActions.confirm(held.id, held.inputHash)
     );
     expect({ refused, sent: await sentCount("Unused") }).toStrictEqual({
-      refused: "resource.unavailable",
+      refused: "permission.unavailable",
       sent: 0,
     });
   });
@@ -188,7 +192,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const mailer = await mailerApp();
     await mailer.admin.api.permissions.revoke(mailer.permission);
     expect(outcomeOf(await call(mailer, "mail.inbox", {}))).toStrictEqual({
-      failed: "resource.unavailable",
+      failed: "permission.unavailable",
     });
   });
 
@@ -209,8 +213,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
           await mailerApp({ files: unknownContractFiles(), bind: false })
       ),
     }).toStrictEqual({
-      narrow: "resource.target_invalid",
-      google: "resource.target_invalid",
+      narrow: "permission.target_invalid",
+      google: "permission.target_invalid",
       unknown: "version.build_failed",
     });
   });

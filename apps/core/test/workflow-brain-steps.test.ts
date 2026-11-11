@@ -359,7 +359,7 @@ describe("a workflow's steps on a Brain collection", () => {
       // what isn't there.
       sensitive: await endOf(ada, sensitive.workflow.id, { query: "zebra" }),
     }).toStrictEqual({
-      outside: { status: "failed", code: "resource.item_not_found" },
+      outside: { status: "failed", code: "permission.item_not_found" },
       sensitive: { status: "failed", code: "permission.restricted" },
     });
   });
@@ -403,7 +403,7 @@ describe("a workflow's steps on a Brain collection", () => {
       // team leaves out: as if the collection held nothing.
       bob: {
         search: { status: "completed", output: { hits: [], found: "" } },
-        read: { status: "failed", code: "resource.item_not_found" },
+        read: { status: "failed", code: "permission.item_not_found" },
       },
     });
   });

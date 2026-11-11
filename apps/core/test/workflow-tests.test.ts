@@ -929,7 +929,7 @@ export default appTest(schema, {
       connector: await endedIn(connectorRun),
       connectAsked: (await connectCalls()) - connectBefore,
     }).toMatchObject({
-      connector: { status: "failed", code: "resource.unavailable" },
+      connector: { status: "failed", code: "permission.unavailable" },
       connectAsked: 0,
     });
   });

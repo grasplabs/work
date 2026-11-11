@@ -578,7 +578,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       },
       roles: await invocation.authorize(),
     }).toStrictEqual({
-      kicked: "resource.unavailable",
+      kicked: "permission.unavailable",
       // Its note never committed.
       notes: [],
       bound: {

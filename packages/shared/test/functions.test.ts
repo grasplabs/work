@@ -82,26 +82,26 @@ describe(categoryOf, () => {
 describe(isRetryable, () => {
   test("retries a step on every code a function's caller would try again, and on the workflow's own", () => {
     const codes = [
-      "resource.budget_busy",
+      "permission.budget_busy",
       "function.sandbox_busy",
       "function.sandbox_unavailable",
       "mutation.concurrent_change",
       "connect.server_unavailable",
       "model.rate_limited",
       "function.cpu_exceeded",
-      "resource.declined",
+      "permission.declined",
     ];
     expect(
       Object.fromEntries(codes.map((code) => [code, isRetryable({ code })]))
     ).toStrictEqual({
-      "resource.budget_busy": true,
+      "permission.budget_busy": true,
       "function.sandbox_busy": true,
       "function.sandbox_unavailable": true,
       "mutation.concurrent_change": true,
       "connect.server_unavailable": true,
       "model.rate_limited": true,
       "function.cpu_exceeded": false,
-      "resource.declined": false,
+      "permission.declined": false,
     });
   });
 });

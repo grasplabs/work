@@ -337,7 +337,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     // Without the binding, nothing is read.
     await unbindWorkflowFromApp(env, owner, binding.id);
     expect(codeOf(await ask(bob, references.runs, { pagination: {} }))).toBe(
-      "resource.unavailable"
+      "permission.unavailable"
     );
   });
 
