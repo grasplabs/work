@@ -13,7 +13,7 @@
  * namespace could call). A member without an entry fails the type check
  * and the harness. A new surface is one more entry here:
  *
- * - one that answers about a single item probes it with `hiddenIds`;
+ * - one that answers about a single item probes it with `hiddenVersions`;
  * - one with no reader (an overview, a step the clock runs) ignores the
  *   reader: what it returns, logs or sends a model must hold no marker in
  *   any pass.
@@ -52,12 +52,12 @@ export interface Probing {
    */
   markers: readonly string[];
   /**
-   * Sources the reader may read no version of: someone else's, a team's
-   * they aren't in, one nobody may read, and one whose readers were
-   * narrowed away from them (they could read its first version, and no
-   * longer can).
+   * Versions of sources the reader may not read, each of which must
+   * answer exactly as a source no one added: every version of someone
+   * else's, a team's they aren't in, one nobody may read; and a version
+   * whose readers they were never among, or were taken off since.
    */
-  hiddenIds: readonly SourceRef[];
+  hiddenVersions: readonly { source: SourceRef; version: number }[];
 }
 
 /** One call a probe made, and what came back. */
@@ -262,8 +262,77 @@ const missingSource = (): SourceRef => ({
 /** `source`'s key in the store, as core names it (core's brain-next.ts). */
 const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
 
-/** The versions a probe asks of each source: the first two, and one past. */
-const askedVersions = [1, 2, 3] as const;
+/**
+ * A change added twice to a source no one else has: the second time with
+ * the markers in its text, which the Brain refuses. The refusal says only
+ * that the change was added with other text or readers, nothing of them.
+ */
+const refusedChange = async (markers: readonly string[]): Promise<Answer[]> => {
+  const source = missingSource();
+  const change = crypto.randomUUID();
+  const readers: SourceReaders = { kind: "owner", personId: stranger() };
+  return [
+    await answer("a change, first", async () => {
+      await coreBrain.addSource(env, {
+        source,
+        change,
+        text: "First",
+        readers,
+      });
+    }),
+    await answer(
+      "the same change again with the markers",
+      async () =>
+        await coreBrain.addSource(env, {
+          source,
+          change,
+          text: markedText(markers),
+          readers,
+        })
+    ),
+  ];
+};
+
+/** Adds as the chat producer under `id`: the version it answers with. */
+const addAsChat = async (id: string): Promise<number> => {
+  const { version } = await coreBrain.addSource(env, {
+    source: { producer: "chat", id },
+    change: crypto.randomUUID(),
+    // The same text and readers every pass: a later pass's add is the
+    // version the first made, so every pass answers alike.
+    text: "Another producer's own",
+    readers: { kind: "none" },
+  });
+  return version;
+};
+
+/**
+ * Adds as another producer kind, with a hidden source's id and with one no
+ * one added: the version each answers with must be the same (a first), so
+ * no producer learns what another kind holds under that id.
+ */
+const otherKindOf = async (
+  hiddenVersions: Probing["hiddenVersions"]
+): Promise<Answer[]> => {
+  const hidden = [...new Set(hiddenVersions.map(({ source }) => source.id))];
+  return [
+    await answer(
+      "another kind, an id no one added",
+      async () => await addAsChat(crypto.randomUUID()),
+      "nothing"
+    ),
+    ...(await Promise.all(
+      hidden.map(
+        async (id, index) =>
+          await answer(
+            `another kind, hidden source ${index}'s id`,
+            async () => await addAsChat(id),
+            "hidden"
+          )
+      )
+    )),
+  ];
+};
 
 /** Times a sweep is asked for: now, far ahead, and long ago. */
 const sweepTimes = (): Date[] => [
@@ -277,7 +346,7 @@ type CoreMember = keyof typeof coreBrain;
 
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
-  addSource: async ({ markers }) => {
+  addSource: async ({ markers, hiddenVersions }) => {
     const text = markedText(markers);
     const add = async (
       name: string,
@@ -326,9 +395,11 @@ export const coreProbes = {
         missingSource(),
         `${markers.join("\n")}\u0000`
       ),
+      ...(await refusedChange(markers)),
+      ...(await otherKindOf(hiddenVersions)),
     ];
   },
-  readSourceVersionAs: async ({ personId, hiddenIds, markers }) => {
+  readSourceVersionAs: async ({ personId, hiddenVersions, markers }) => {
     const read = async (
       name: string,
       source: SourceRef,
@@ -351,20 +422,18 @@ export const coreProbes = {
         "nothing"
       ),
     ];
-    for (const [index, source] of hiddenIds.entries()) {
-      for (const version of askedVersions) {
-        // oxlint-disable-next-line no-await-in-loop -- one read at a time
-        const answered = await read(
-          `hidden source ${index}, version ${version}`,
-          source,
-          version,
-          personId,
-          "hidden"
-        );
-        asked.push(answered);
-      }
+    for (const [index, { source, version }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const answered = await read(
+        `hidden version ${index}`,
+        source,
+        version,
+        personId,
+        "hidden"
+      );
+      asked.push(answered);
     }
-    const [hidden = missingSource()] = hiddenIds;
+    const hidden = hiddenVersions[0]?.source ?? missingSource();
     asked.push(
       await read("as someone who isn't a member", hidden, 1, stranger()),
       await read("version 0", hidden, 0),
@@ -381,6 +450,12 @@ export const coreProbes = {
     );
     return asked;
   },
+  // What the sweep probes cover, and what they don't: the sweep runs as of
+  // `min(at, now)`, and no file is left over past its grace while the
+  // harness runs, so these sweeps delete nothing. They hold a sweep with
+  // nothing due, and its refusals, to answer, log and prompt nothing of a
+  // marker. A sweep that deletes is covered by brain-next-sources.test.ts
+  // (files and rows gone, held files kept), not for what it logs.
   sweepBrain: async () => {
     const asked: Answer[] = [];
     for (const at of sweepTimes()) {
@@ -497,7 +572,7 @@ export const storeProbes = {
       ),
     ];
   },
-  readVersion: async ({ reader, hiddenIds, markers }) => {
+  readVersion: async ({ reader, hiddenVersions, markers }) => {
     const read = async (
       name: string,
       source: string,
@@ -519,20 +594,18 @@ export const storeProbes = {
         "nothing"
       ),
     ];
-    for (const [index, source] of hiddenIds.entries()) {
-      for (const version of askedVersions) {
-        // oxlint-disable-next-line no-await-in-loop -- one read at a time
-        const answered = await read(
-          `hidden source ${index}, version ${version}`,
-          keyOf(source),
-          version,
-          reader,
-          "hidden"
-        );
-        asked.push(answered);
-      }
+    for (const [index, { source, version }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const answered = await read(
+        `hidden version ${index}`,
+        keyOf(source),
+        version,
+        reader,
+        "hidden"
+      );
+      asked.push(answered);
     }
-    const hidden = keyOf(hiddenIds[0] ?? missingSource());
+    const hidden = keyOf(hiddenVersions[0]?.source ?? missingSource());
     asked.push(
       await read("version 0", hidden, 0),
       await read("too many groups", hidden, 1, {
@@ -561,6 +634,7 @@ export const storeProbes = {
     );
     return asked;
   },
+  // As `sweepBrain`: a sweep with nothing due, and its refusals.
   sweep: async ({ markers }) => {
     const asked: Answer[] = [];
     for (const at of sweepTimes()) {

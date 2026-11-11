@@ -18,8 +18,10 @@ import { signedInWithRole, unique } from "./sign-in.ts";
 // The marker test (GRA-1722): the gate every later Brain issue keeps
 // green. Unique marker words are planted in sources a reader may not
 // read: someone else's own, a team's they aren't in, one nobody is known
-// to read, and one whose readers were narrowed away from them in a later
-// version (they could read its first version, and no longer can). Then every surface (brain-next-surfaces.ts) is called as
+// to read, and the first version of one whose readers changed: narrowed
+// away from the outsider (they could read that version, and no longer
+// can), and so widened to the holder, who may read its current version
+// but was never among the first one's readers. Then every surface (brain-next-surfaces.ts) is called as
 // that reader, every way it answers, and:
 //
 // - no marker may be in anything that comes back (results, "nothing
@@ -178,6 +180,15 @@ const newTeam = async (...members: string[]): Promise<string> => {
   return id;
 };
 
+/**
+ * Every version of `sources` a probe asks of: the first three, those past
+ * a source's last as missing as any.
+ */
+const everyVersionOf = (...sources: SourceRef[]) =>
+  sources.flatMap((source) =>
+    [1, 2, 3].map((version) => ({ source, version }))
+  );
+
 /** A source of its own, as an upload names it. */
 const newSource = (): SourceRef => ({
   producer: "upload",
@@ -298,19 +309,33 @@ describe(
         });
         ownerIds.push(id);
       }
+      // The outsider's own source, with more earlier versions than a
+      // recall returns, each holding the shared word and shorter than the
+      // current one: superseded, they may neither show nor take its place.
+      const handbookId = await add(`${sharedWord} draft 0`, {
+        kind: "team",
+        teamId: ownTeam,
+      });
+      for (let draft = 1; draft <= 11; draft += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one version at a time
+        await add(
+          `${sharedWord} draft ${draft}`,
+          { kind: "team", teamId: ownTeam },
+          handbookId
+        );
+      }
       const handbook = `The handbook for everyone who joins the team, ${sharedWord}`;
-      await add(handbook, { kind: "team", teamId: ownTeam });
-      // First for the outsider's own team, then narrowed to the holder:
-      // neither its old version nor its history is the outsider's now.
+      await add(handbook, { kind: "team", teamId: ownTeam }, handbookId);
+      // First for the outsider's own team, the marker in that version only;
+      // then narrowed to the holder. Its first version is neither the
+      // outsider's now (taken off) nor ever the holder's (not among its
+      // readers), though the holder reads the current one.
       const narrowedId = await add(
         `Draft plan ${sharedWord} ${narrowedMarker}`,
-        {
-          kind: "team",
-          teamId: ownTeam,
-        }
+        { kind: "team", teamId: ownTeam }
       );
       await add(
-        `Final plan ${sharedWord} ${narrowedMarker}`,
+        `Final plan ${sharedWord}`,
         { kind: "owner", personId: holder },
         narrowedId
       );
@@ -332,7 +357,7 @@ describe(
         sharedWord,
         unknownWord,
         markers: [ownerMarker, teamMarker, noneMarker, narrowedMarker],
-        hiddenIds: [...ownerIds, teamId, noneId, narrowedId],
+        hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
       });
       const first = await findingsOf(
         "the outsider",
@@ -351,7 +376,7 @@ describe(
         {
           ...asOutsider([ownTeam, secretTeam]),
           markers: [ownerMarker, noneMarker, narrowedMarker],
-          hiddenIds: [...ownerIds, noneId, narrowedId],
+          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
         },
         notJoined
       );
@@ -366,7 +391,8 @@ describe(
       );
 
       // Someone who may read everything else still never gets the source
-      // nobody is known to read.
+      // nobody is known to read, nor the first version of the source widened
+      // to them, which was never theirs.
       const asHolder = await findingsOf(
         "the holder",
         {
@@ -374,10 +400,16 @@ describe(
           reader: { person: holder, groups: [`team:${secretTeam}`] },
           sharedWord,
           unknownWord,
-          markers: [noneMarker],
-          hiddenIds: [noneId],
+          markers: [noneMarker, narrowedMarker],
+          hiddenVersions: [
+            ...everyVersionOf(noneId),
+            { source: narrowedId, version: 1 },
+          ],
         },
-        { "a source nobody is known to read": noneMarker }
+        {
+          "a source nobody is known to read": noneMarker,
+          "a source narrowed away from the outsider": narrowedMarker,
+        }
       );
 
       // Any request any provider got, whoever's key it carried.
