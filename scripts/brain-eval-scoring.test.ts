@@ -1,9 +1,12 @@
+import { parseArgs } from "node:util";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   comparable,
   compareRuns,
   estimate,
+  evalArgs,
   questionResultSchema,
   report,
   signTest,
@@ -345,5 +348,25 @@ describe("the Brain evaluation's scoring", () => {
       comparable(measure, { ...measure, passagesDigest: "cut" })
     ).toBeFalsy();
     expect(comparable(measure, { ...measure })).toBeFalsy();
+  });
+});
+
+/** The evaluation's options from `args`, as scripts/brain-eval.ts reads them. */
+const optionsOf = (args: readonly string[]) => ({
+  ...parseArgs({
+    args: evalArgs(args),
+    options: { out: { type: "string" }, against: { type: "string" } },
+  }).values,
+});
+
+describe("the evaluation's arguments", () => {
+  it("reads options after the `--` that `vp run brain:eval --` passes on, and without it", () => {
+    expect(
+      optionsOf(["--", "--out", "runs", "--against", "last.json"])
+    ).toStrictEqual({
+      out: "runs",
+      against: "last.json",
+    });
+    expect(optionsOf(["--out", "runs"])).toStrictEqual({ out: "runs" });
   });
 });

@@ -343,10 +343,15 @@ export interface WorkOverview {
    * since the store started: the sweep of leftover files, cleared once a
    * later sweep reached R2 and had its answer (one with nothing due
    * clears nothing; sweeping waits a quarter of an hour after a failure),
-   * and the repack of vector codes, cleared once a later tick's repack
-   * finishes (tried again next tick).
+   * the repack of vector codes, cleared once a later tick's repack
+   * finishes (tried again next tick), and the rebuild of the word indexes
+   * after their rules changed, cleared once a later batch finishes.
    */
-  stepsFailed: { sweep: StepFailure | null; repack: StepFailure | null };
+  stepsFailed: {
+    sweep: StepFailure | null;
+    repack: StepFailure | null;
+    reindex: StepFailure | null;
+  };
 }
 
 /**
@@ -458,8 +463,11 @@ export interface Brain {
   addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
   /**
    * The chunks of current versions the reader may read that hold the
-   * question's words, best first: those holding more of them, then
-   * shorter, then newer.
+   * question's words in any of their forms, best first: those holding
+   * more of them, then more of its commonest words (the stop words of
+   * English, Dutch, German, French and Spanish), then more of them as
+   * asked, then shorter, then newer. Chunks holding only its commonest
+   * words come last, and only when the others are fewer than the limit.
    */
   recall: (request: RecallRequest) => Promise<Recalled>;
   /**

@@ -27,6 +27,7 @@ import {
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { removeVectorsOf } from "./vectors.ts";
 import { indexWords } from "./words.ts";
+import type { WordMemo } from "./words.ts";
 
 // Sources and their versions. A source is an identity its host gives;
 // each change its producer adds is a version of it, never written over
@@ -181,13 +182,15 @@ const record = (
     .returning({ row: sourceVersions.row })
     .get();
   const indexed = adding.indexed ? chunksOf(added.text) : [];
+  // Each word as written is stemmed once per add, however many chunks hold it.
+  const memo: WordMemo = new Map();
   for (const [position, chunk] of indexed.entries()) {
     const written = db
       .insert(chunks)
       .values({ versionRow: row, position, text: chunk })
       .returning({ row: chunks.row })
       .get();
-    indexWords(storage.sql, written.row, chunk);
+    indexWords(storage.sql, written.row, chunk, memo);
   }
   db.insert(sourceChanges)
     .values({ source: added.source, change: added.change, versionRow: row })

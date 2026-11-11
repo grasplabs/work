@@ -378,3 +378,24 @@ export const workModelBucket = sqliteTable(
   },
   () => [check("work_model_bucket_one", sql.raw("id = 1"))]
 );
+
+/**
+ * The rules the word indexes (`chunk_words`, `chunk_stems`) were built
+ * with (words.ts `wordsVersion`), and the rebuild under way when they
+ * change: the rules it writes, and the last chunk it rewrote. One row; a
+ * store whose `version` is behind rebuilds a batch a tick (words.ts
+ * `reindexWords`).
+ */
+export const wordIndex = sqliteTable(
+  "word_index",
+  {
+    id: integer().primaryKey(),
+    /** The rules every chunk's words are indexed by. */
+    version: integer().notNull(),
+    /** The rules a rebuild under way writes. */
+    target: integer().notNull(),
+    /** The last chunk (`chunks.row`) the rebuild rewrote: 0 before the first. */
+    cursor: integer().notNull(),
+  },
+  () => [check("word_index_one", sql.raw("id = 1"))]
+);

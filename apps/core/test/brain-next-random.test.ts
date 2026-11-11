@@ -33,11 +33,16 @@ import { testBinding } from "./test-env.ts";
 // issues that change ranking (stemming, exact matches, vectors) change it
 // here, on purpose:
 //
-// - Recall: the chunks of current versions the reader may read that hold
-//   one of the question's words; those holding more of its distinct words
-//   first, then the shorter, then (in one version) the earlier in it; at
-//   most `recallLimit`, and nothing else in the answer. A version replaced
-//   by a newer one is never in it.
+// - Recall (GRA-1725): a question's words are its telling words and its
+//   stop words; a question of stop words alone is all telling. The chunks
+//   of current versions the reader may read that hold one of its telling
+//   words in any of its forms come first: those holding more of its
+//   distinct telling words, then more of its stop words, then more of its
+//   telling words in the very form asked, then the shorter, then (in one
+//   version) the earlier in it. When they are fewer than `recallLimit`,
+//   the readable chunks holding only its stop words follow: more of them
+//   first, then as above. At most `recallLimit`, and nothing else in the
+//   answer. A version replaced by a newer one is never in it.
 // - History: a version, whole, to a person among its readers and among
 //   the current version's readers, with the teams they are in now; to
 //   anyone else exactly what a source no one added answers (null).
@@ -49,18 +54,33 @@ import { testBinding } from "./test-env.ts";
 //   zeros, where the store's 1-bit order is the cosine's and its 8-bit
 //   codes are whole, so the answer is exact however many it re-scores.
 //
+// Words: forms and stop words are exercised on purpose, without asking
+// the store's stemmer what they are. Each scenario has four roots, one per
+// letter, each written in three forms built on Dutch and English endings
+// ("<prefix><letter>kamp", "…kamps", "…kampen"): forms of one root by
+// construction, which the five stemmers reduce alike and never to another
+// root's (checked over thousands of prefixes when the vocabulary was
+// chosen). And a few real stop words of the five languages, which no
+// other word matches. So the answer here compares roots and forms by the
+// plan, never by stemming.
+//
 // Chunks: a version is one paragraph, shorter than a chunk, or several
 // paragraphs each too long to share a chunk with another (over half the
 // chunk target of 1,200 characters, under the most of 2,000), so each is
 // a chunk of its own, in order. Length is a chunk's characters; the texts
-// are ASCII, so code units agree. Each current version's chunks have a
-// length no other current version's have, and the paragraphs of one
-// version share theirs, so chunks tie only within a version, where their
-// place decides. What decides between versions that tie (the newer, then
-// the source's key) is out of its reach, and so is a leak that shows only
-// in how those ties fall. Questions stay under the store's limit of 16
-// words, so cutting a question short, and taking out words that fold
-// alike, are not part of this specification.
+// are ASCII, so code units agree. Every paragraph of every version has a
+// length of its own, so no two chunks tie on length and an order keyed on
+// anything shared by a version's chunks shows. What decides between
+// chunks that tie (the newer version, the source's key, the place) is out
+// of its reach, and so is a leak that shows only in how those ties fall.
+// Not part of this specification, and so out of its reach: cutting a
+// question short (questions stay under the store's limit of 16 words);
+// words over 64 characters, matched only as written; accented words and
+// the stems of a word as written (every word here is plain ASCII); and
+// ties on length (no two chunks share one).
+//
+// People are signed in for each seed, so the stop words every scenario
+// shares never find another seed's sources.
 //
 // There are enough sources that a reader often has more matches than a
 // recall returns, with hidden and superseded ones among them, so the cut
@@ -129,8 +149,36 @@ const placeKey = ({ source, version, position }: ChunkRef): string =>
 /** A score as the comparison reads it: the store's and brute force's agree to this. */
 const roundedScore = (score: number): number => Math.round(score * 1e9) / 1e9;
 
-/** What a scenario's words end in: few, so sources share words. */
+/** A scenario's roots, one per letter: few, so sources share words. */
 const letters = ["a", "b", "c", "d"] as const;
+
+/**
+ * The endings of a root's three forms: Dutch and English endings the
+ * stemmers take off alike, so the forms of one root match each other and
+ * never another root's.
+ */
+const formEndings = ["kamp", "kamps", "kampen"] as const;
+
+/**
+ * Stop words of the five languages (Dutch, English, German, French,
+ * Spanish), which no other word matches and none of which matches
+ * another: few, so chunks share them.
+ */
+const stopWords = ["de", "het", "the", "und", "les", "los"] as const;
+
+/**
+ * A planned word: a root's form (`a1` is root a in its second form) or a
+ * stop word (`~de`).
+ */
+type Token = string;
+
+const stopPrefix = "~";
+
+const isStop = (token: Token): boolean => token.startsWith(stopPrefix);
+
+/** A token's root: its letter, or the stop word itself. */
+const rootOf = (token: Token): string =>
+  isStop(token) ? token : token.slice(0, 1);
 
 /** The draws a scenario is made of, from its seed. */
 const drawsOf = (seed: number) => {
@@ -139,10 +187,12 @@ const drawsOf = (seed: number) => {
   return {
     below,
     chance: (probability: number): boolean => next() < probability,
-    letters: (most: number): string[] =>
-      Array.from(
-        { length: 1 + below(most) },
-        () => letters[below(letters.length)] ?? "a"
+    /** 1 to `most` words: mostly forms of roots, a stop word in `stops` of them. */
+    tokens: (most: number, stops: number): Token[] =>
+      Array.from({ length: 1 + below(most) }, () =>
+        next() < stops
+          ? `${stopPrefix}${stopWords[below(stopWords.length)] ?? "de"}`
+          : `${letters[below(letters.length)] ?? "a"}${below(formEndings.length)}`
       ),
   };
 };
@@ -158,14 +208,14 @@ type Readers =
 interface Version {
   /** Its number, from 1. */
   version: number;
-  /** Each paragraph's words, by letter: each paragraph is one chunk. */
-  paragraphs: string[][];
+  /** Each paragraph's words, as planned: each paragraph is one chunk. */
+  paragraphs: Token[][];
   readers: Readers;
   /**
-   * The length of each of its paragraphs, which no other current
-   * version's have: the words, then filler up to it.
+   * The length of each of its paragraphs, which no other paragraph has:
+   * the words, then filler up to it.
    */
-  length: number;
+  lengths: number[];
 }
 
 /** A source as the brute-force answer knows it: every version of it. */
@@ -188,17 +238,24 @@ const currentOf = ({ versions }: Planned): Version => {
 };
 
 /**
- * Words no other scenario has: each letter behind a prefix of its own.
- * Lowercase ASCII letters and digits, which search reads as they are: the
- * brute-force answer compares letters, never folds.
+ * Words no other scenario has: each root behind its seed's own prefix, and
+ * the stop words as they are. Lowercase ASCII letters and digits, which
+ * search reads as they are: the brute-force answer compares tokens, never
+ * folds or stems.
  */
-const vocabulary = () => {
-  const prefix = `r${crypto.randomUUID().slice(0, 8)}`;
-  return (letter: string): string => `${prefix}${letter}`;
+const vocabulary = (seed: number) => {
+  // From the seed, so a failure that turns on the words comes back with it.
+  const prefix = `r${Math.floor(seededRandom(seed)() * 2 ** 32)
+    .toString(16)
+    .padStart(8, "0")}`;
+  return (token: Token): string =>
+    isStop(token)
+      ? token.slice(stopPrefix.length)
+      : `${prefix}${token.slice(0, 1)}${formEndings[Number(token.slice(1))] ?? ""}`;
 };
 
-/** Characters of a word: "r", eight of a UUID, and its letter. */
-const wordLength = 10;
+/** Characters of the longest word: "r", eight hex digits, its letter and ending. */
+const wordLength = 10 + Math.max(...formEndings.map(({ length }) => length));
 
 /** Characters the longest list of words takes, with a space after it. */
 const mostWords = mostWordsPerParagraph * (wordLength + 1);
@@ -212,18 +269,29 @@ const placeLength = 4;
 
 /** One paragraph: its words, its place, then filler up to `length`. */
 const paragraphText = (
-  words: readonly string[],
+  words: readonly Token[],
   position: number,
   length: number,
-  wordOf: (letter: string) => string
+  wordOf: (token: Token) => string
 ): string => `${words.map(wordOf).join(" ")} p${position} `.padEnd(length, "q");
 
+/** A paragraph of `version`'s text. */
+const paragraphOf = (
+  version: Version,
+  position: number,
+  wordOf: (token: Token) => string
+): string =>
+  paragraphText(
+    version.paragraphs[position] ?? [],
+    position,
+    version.lengths[position] ?? 0,
+    wordOf
+  );
+
 /** A version's text: its paragraphs, a blank line between. */
-const textOf = (version: Version, wordOf: (letter: string) => string) =>
+const textOf = (version: Version, wordOf: (token: Token) => string) =>
   version.paragraphs
-    .map((words, position) =>
-      paragraphText(words, position, version.length, wordOf)
-    )
+    .map((_, position) => paragraphOf(version, position, wordOf))
     .join("\n\n");
 
 /** Who is in which team: `person:team` for each pair. */
@@ -246,9 +314,9 @@ const isAmong = (
   return false;
 };
 
-/** Whether `words` hold one of the asked letters' words. */
-const holds = (words: readonly string[], asked: readonly string[]): boolean =>
-  asked.some((letter) => words.includes(letter));
+/** Whether `words` hold one of the asked words, in any of its forms. */
+const holds = (words: readonly Token[], asked: readonly Token[]): boolean =>
+  asked.some((token) => words.some((word) => rootOf(word) === rootOf(token)));
 
 /** Draws who may read a version: mostly a person or a team, sometimes nobody. */
 const drawReaders = (draws: Draws, teamCount: number): Readers => {
@@ -275,12 +343,13 @@ const describeReaders = (readers: Readers): string => {
 const describeSource = (planned: Planned): string =>
   `s${planned.index}: ${planned.versions
     .map(
-      ({ version, paragraphs, readers, length }) =>
+      ({ version, paragraphs, readers, lengths }) =>
         `v${version} ${paragraphs
-          .map((words) => `"${words.join(" ")}"`)
-          .join(
-            " / "
-          )} (${describeReaders(readers)}, ${length} characters each)`
+          .map(
+            (words, position) =>
+              `"${words.join(" ")}" (${lengths[position] ?? 0})`
+          )
+          .join(" / ")} (${describeReaders(readers)})`
     )
     .join("; ")}`;
 
@@ -290,49 +359,69 @@ interface ExpectedChunk {
   planned: Planned;
   version: Version;
   position: number;
-  score: number;
+  length: number;
+  /** Distinct telling words it holds, in any form. */
+  telling: number;
+  /** Distinct stop words it holds. */
+  stops: number;
+  /** Distinct telling words it holds in the very form asked. */
+  exact: number;
 }
 
 /**
- * What `person` may read of the current versions' chunks holding one of
- * `asked`'s words, best first, as the contract states it: more of the
- * question's distinct words, then shorter, then earlier in one version,
- * at most `recallLimit`.
+ * What `person` may read of the current versions' chunks for `asked`,
+ * best first, as the contract states it (above), at most `recallLimit`.
  */
 const expectedOf = (
   planned: readonly Planned[],
   person: number,
   membership: Membership,
-  asked: readonly string[]
+  asked: readonly Token[]
 ): ExpectedChunk[] => {
   const distinct = [...new Set(asked)];
-  const matched = planned.flatMap((source) => {
+  const askedStops = distinct.filter(isStop);
+  const askedTelling = distinct.filter((token) => !isStop(token));
+  // A question of stop words alone is all telling.
+  const [telling, stops] =
+    askedTelling.length > 0 ? [askedTelling, askedStops] : [askedStops, []];
+  const readable = planned.flatMap((source) => {
     const version = currentOf(source);
     if (!isAmong(version.readers, person, membership)) {
       return [];
     }
-    return version.paragraphs.flatMap((words, position) =>
-      holds(words, asked)
-        ? [
-            {
-              name: `s${source.index} v${version.version} c${position}`,
-              planned: source,
-              version,
-              position,
-              score: distinct.filter((letter) => words.includes(letter)).length,
-            },
-          ]
-        : []
-    );
+    return version.paragraphs.map((words, position) => ({
+      name: `s${source.index} v${version.version} c${position}`,
+      planned: source,
+      version,
+      position,
+      length: version.lengths[position] ?? 0,
+      telling: telling.filter((token) => holds(words, [token])).length,
+      stops: stops.filter((token) => words.includes(token)).length,
+      exact: telling.filter((token) => words.includes(token)).length,
+    }));
   });
-  return matched
+  const first = readable
+    .filter((chunk) => chunk.telling > 0)
     .toSorted(
       (a, b) =>
-        b.score - a.score ||
-        a.version.length - b.version.length ||
+        b.telling - a.telling ||
+        b.stops - a.stops ||
+        b.exact - a.exact ||
+        a.length - b.length ||
         a.position - b.position
-    )
-    .slice(0, recallLimit);
+    );
+  const after =
+    first.length < recallLimit
+      ? readable
+          .filter((chunk) => chunk.telling === 0 && chunk.stops > 0)
+          .toSorted(
+            (a, b) =>
+              b.stops - a.stops ||
+              a.length - b.length ||
+              a.position - b.position
+          )
+      : [];
+  return [...first, ...after].slice(0, recallLimit);
 };
 
 /** What one recall broke, if anything: by chunk, then the whole answer. */
@@ -381,7 +470,7 @@ const scenario = (people: readonly string[], seed: number) => {
   );
   const membership: Membership = new Set();
   const history: string[] = [];
-  const wordOf = vocabulary();
+  const wordOf = vocabulary(seed);
   const versionsMost = rounds * addedPerRound;
   /** Lengths for one-paragraph versions, and for long ones: each used once. */
   const shortLengths = Array.from(
@@ -389,7 +478,7 @@ const scenario = (people: readonly string[], seed: number) => {
     (_, index) => mostWords + placeLength + 1 + index
   );
   const longLengths = Array.from(
-    { length: versionsMost },
+    { length: versionsMost * mostParagraphs },
     (_, index) => longParagraph + index
   );
   const planned: Planned[] = [];
@@ -468,17 +557,19 @@ const scenario = (people: readonly string[], seed: number) => {
 
   /**
    * New text: one short paragraph mostly, sometimes several long ones,
-   * each with words of its own; and a length no version had.
+   * each with words of its own and a length no paragraph had.
    */
-  const drawText = (): Pick<Version, "paragraphs" | "length"> => {
+  const drawText = (): Pick<Version, "paragraphs" | "lengths"> => {
     const long = draws.chance(0.25);
     const pool = long ? longLengths : shortLengths;
-    const [length = 0] = pool.splice(draws.below(pool.length), 1);
     const paragraphs = Array.from(
       { length: long ? 2 + draws.below(mostParagraphs - 1) : 1 },
-      () => draws.letters(mostWordsPerParagraph)
+      () => draws.tokens(mostWordsPerParagraph, 0.3)
     );
-    return { paragraphs, length };
+    const lengths = paragraphs.map(
+      () => pool.splice(draws.below(pool.length), 1)[0] ?? 0
+    );
+    return { paragraphs, lengths };
   };
 
   /** Adds `version` of `source` through core, as its newest. */
@@ -569,7 +660,7 @@ const scenario = (people: readonly string[], seed: number) => {
         // The same readers drawn again, the text kept: no change at all,
         // which the Brain rightly doesn't make a version. Change the text.
         if (
-          version.length === before.length &&
+          JSON.stringify(version.lengths) === JSON.stringify(before.lengths) &&
           JSON.stringify(version.readers) === JSON.stringify(before.readers)
         ) {
           version = { ...version, ...drawText() };
@@ -592,8 +683,7 @@ const scenario = (people: readonly string[], seed: number) => {
       asPlanned === undefined
         ? -1
         : asPlanned.paragraphs.findIndex(
-            (words, index) =>
-              paragraphText(words, index, asPlanned.length, wordOf) === text
+            (_, index) => paragraphOf(asPlanned, index, wordOf) === text
           );
     return `s${found?.index ?? "?"} v${version} c${position < 0 ? "?" : position}`;
   };
@@ -611,11 +701,15 @@ const scenario = (people: readonly string[], seed: number) => {
 
   /** Asks as `person` once; what went wrong, with what bears on it. */
   const ask = async (moment: string, person: number): Promise<string[]> => {
-    const asked = draws.letters(3);
+    // Mostly forms with a stop word now and then; sometimes stop words
+    // alone.
+    const asked = draws.chance(0.15)
+      ? draws.tokens(3, 1)
+      : draws.tokens(4, 0.35);
     // Sometimes in capitals: search reads a word whatever its case.
     const question = asked
-      .map((letter) =>
-        draws.chance(0.2) ? wordOf(letter).toUpperCase() : wordOf(letter)
+      .map((token) =>
+        draws.chance(0.2) ? wordOf(token).toUpperCase() : wordOf(token)
       )
       .join(" ");
     const answer = await recallAs(env, personId(person), question);
@@ -630,12 +724,7 @@ const scenario = (people: readonly string[], seed: number) => {
         chunks: expected.map(({ planned: source, version, position }) => ({
           source: source.source,
           version: version.version,
-          text: paragraphText(
-            version.paragraphs[position] ?? [],
-            position,
-            version.length,
-            wordOf
-          ),
+          text: paragraphOf(version, position, wordOf),
         })),
       },
     });
@@ -828,13 +917,13 @@ const scenario = (people: readonly string[], seed: number) => {
 };
 
 describe("recall, against a brute-force answer", { timeout: 60_000 }, () => {
-  const people: string[] = [];
-
   /**
-   * The people every seed shares, signed in by the first seed's test (the
-   * identity provider answers inside a test only).
+   * The seed's own people, signed in in its test (the identity provider
+   * answers inside a test only): another seed's sources are never theirs,
+   * whatever stop words they share.
    */
   const signedInPeople = async (): Promise<string[]> => {
+    const people: string[] = [];
     while (people.length < peopleCount) {
       // oxlint-disable-next-line no-await-in-loop -- one sign-in at a time
       const { userId } = await signedInWithRole(idp, "user");
