@@ -796,6 +796,10 @@ msgstr "Logo van {name}"
 msgid "{name} may write. Change to Read"
 msgstr "{name} mag schrijven. Wijzigen naar Lezen"
 
+#: src/settings/agent-wakes.tsx
+msgid "{name} never works on its own."
+msgstr "{name} werkt nooit uit zichzelf."
+
 #: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} leest alleen. Wijzigen naar Schrijven"
@@ -1233,6 +1237,10 @@ msgstr "{waiting, plural, one {# wacht} other {# wachten}}"
 #: src/workflows/nav-item.tsx
 msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
 msgstr "{waiting, plural, one {# workflow heeft je nodig} other {# workflows hebben je nodig}}"
+
+#: src/settings/agent-wakes.tsx
+msgid "{when}, for {person}, is on"
+msgstr "{when}, voor {person}, staat aan"
 
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/item-detail.tsx
@@ -1845,6 +1853,10 @@ msgstr "Plek toevoegen"
 #: src/settings/ai-providers.tsx
 msgid "Add a provider"
 msgstr "Aanbieder toevoegen"
+
+#: src/settings/agent-wakes.tsx
+msgid "Add a time"
+msgstr "Tijd toevoegen"
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Add a trigger"
@@ -2844,6 +2856,10 @@ msgstr "Minstens {shortest} tekens. Grasp houdt het verzegeld en laat het nooit 
 msgid "At most {tokens} tokens an answer"
 msgstr "Hoogstens {tokens} tokens per antwoord"
 
+#: src/settings/agent-wakes.tsx
+msgid "At these times it looks into something without being asked. It only reads. What it wants to change waits in that person's chat until they confirm it."
+msgstr "Op deze tijden kijkt hij iets na zonder dat het gevraagd is. Hij leest alleen. Wat hij wil wijzigen, wacht in de chat van die persoon tot die het bevestigt."
+
 #: src/workflows/requests/request-plan.tsx
 msgid "At this pace"
 msgstr "In dit tempo"
@@ -2851,6 +2867,10 @@ msgstr "In dit tempo"
 #: src/workflows/workflows-table.tsx
 msgid "At work"
 msgstr "Aan het werk"
+
+#: src/settings/agent-wakes.tsx
+msgid "At, in the company's time zone"
+msgstr "Om, in de tijdzone van het bedrijf"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -4638,6 +4658,26 @@ msgstr "Heeft een webhookgebeurtenis niet doorgegeven aan de run die erop wachtt
 msgid "Didn't keep a webhook event: its source keeps as many as it may"
 msgstr "Heeft een webhookgebeurtenis niet bewaard: de bron bewaart er al zoveel als mag"
 
+#: src/settings/agent-wakes.tsx
+msgid "Didn't run {when}: no AI provider is connected"
+msgstr "Niet uitgevoerd op {when}: er is geen AI-provider verbonden"
+
+#: src/settings/agent-wakes.tsx
+msgid "Didn't run {when}: something went wrong"
+msgstr "Niet uitgevoerd op {when}: er ging iets mis"
+
+#: src/settings/agent-wakes.tsx
+msgid "Didn't run {when}: the agent isn't set up to answer this person"
+msgstr "Niet uitgevoerd op {when}: de agent is niet ingesteld om deze persoon te antwoorden"
+
+#: src/settings/agent-wakes.tsx
+msgid "Didn't run {when}: the agent was paused"
+msgstr "Niet uitgevoerd op {when}: de agent was gepauzeerd"
+
+#: src/settings/agent-wakes.tsx
+msgid "Didn't run {when}: this person is no longer in the company"
+msgstr "Niet uitgevoerd op {when}: deze persoon zit niet meer in het bedrijf"
+
 #: src/activity/audit-words.ts
 msgid "Didn't start a workflow from a webhook event"
 msgstr "Heeft geen workflow gestart vanuit een webhookgebeurtenis"
@@ -5098,6 +5138,14 @@ msgstr "Gebeurtenissen die ouder zijn dan de audittrail bewaart, verplaatst naar
 msgid "Every client question or complaint, from the first message until it is solved."
 msgstr "Elke vraag of klacht van een klant, van het eerste bericht tot ze is opgelost."
 
+#: src/settings/agent-wakes.tsx
+msgid "Every day"
+msgstr "Elke dag"
+
+#: src/settings/agent-wakes.tsx
+msgid "Every day at {time}"
+msgstr "Elke dag om {time}"
+
 #: src/apps/app-webhooks.tsx
 msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
 msgstr "Elke levering wordt ermee ondertekend, zodat de ontvanger weet dat die van Grasp komt."
@@ -5105,6 +5153,14 @@ msgstr "Elke levering wordt ermee ondertekend, zodat de ontvanger weet dat die v
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
 msgstr "Elk uitgenodigd team geïnterviewd"
+
+#: src/settings/agent-wakes.tsx
+msgid "Every Monday"
+msgstr "Elke maandag"
+
+#: src/settings/agent-wakes.tsx
+msgid "Every Monday at {time}"
+msgstr "Elke maandag om {time}"
 
 #: src/workflows/requests/request-summary.tsx
 msgid "Every Monday morning, to you"
@@ -5137,6 +5193,14 @@ msgstr "Al zijn tools: apps en agents gebruiken alleen wat hun is toegekend."
 #: src/apps/app-settings.tsx
 msgid "Every version of the App, which one runs, and going back to one."
 msgstr "Elke versie van de App, welke draait, en teruggaan naar een eerdere."
+
+#: src/settings/agent-wakes.tsx
+msgid "Every weekday"
+msgstr "Elke werkdag"
+
+#: src/settings/agent-wakes.tsx
+msgid "Every weekday at {time}"
+msgstr "Elke werkdag om {time}"
 
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
@@ -5603,6 +5667,14 @@ msgstr "Voor {0}, die is gevraagd"
 msgid "For {person}"
 msgstr "Voor {person}"
 
+#: src/settings/agent-wakes.tsx
+msgid "For {person}: {opening}"
+msgstr "Voor {person}: {opening}"
+
+#: src/settings/agent-wakes.tsx
+msgid "For {person}: {opening} · {last}"
+msgstr "Voor {person}: {opening} · {last}"
+
 #: src/settings/erasures.tsx
 msgid "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
 msgstr "Voor een adres dat uw bedrijf aan iemand anders heeft gegeven. Wie zich ermee aanmeldt, komt dan binnen, ook {name} als uw aanmeldprovider het nog voor die persoon heeft."
@@ -5651,6 +5723,10 @@ msgstr "Voor de {role}"
 #: src/apps/app-workspace.tsx
 msgid "For the people it is shared with"
 msgstr "Voor de mensen met wie hij gedeeld is"
+
+#: src/settings/agent-wakes.tsx
+msgid "For whom"
+msgstr "Voor wie"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -6259,6 +6335,10 @@ msgstr "Hoe lang Grasp bewaart wat het vastlegt."
 #: src/onboarding/knowledge-bar.tsx
 msgid "How much I know about your organization, not how far you are in these steps. It grows as you share and as I talk to your team. Your team can start at {threshold}%, and I keep learning after that."
 msgstr "Hoeveel ik weet over je organisatie, niet hoe ver je bent in deze stappen. Het groeit met wat je deelt en met mijn gesprekken met je team. Je team kan starten bij {threshold}%, en daarna blijf ik leren."
+
+#: src/settings/agent-wakes.tsx
+msgid "How often"
+msgstr "Hoe vaak"
 
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
@@ -7166,6 +7246,10 @@ msgstr "Laatst gehoord {day}"
 #: src/workflows/requests/request-plan.tsx
 msgid "Last month"
 msgstr "Vorige maand"
+
+#: src/settings/agent-wakes.tsx
+msgid "Last ran {when}"
+msgstr "Laatst uitgevoerd op {when}"
 
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
@@ -10471,6 +10555,7 @@ msgstr "Iets onthouden"
 #: src/apps/field-editor.tsx
 #: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/agent-wakes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Remove"
 msgstr "Verwijderen"
@@ -10518,6 +10603,10 @@ msgstr "{value} verwijderen"
 #: src/brain/forget.tsx
 msgid "Remove {what} from the brain?"
 msgstr "{what} uit het brein verwijderen?"
+
+#: src/settings/agent-wakes.tsx
+msgid "Remove {when}, for {person}"
+msgstr "{when}, voor {person}, verwijderen"
 
 #: src/brain/brain-article/kern.tsx
 #: src/brain/brain-transcript.tsx
@@ -12106,6 +12195,10 @@ msgstr "Iemand heeft de organisatie verlaten"
 msgid "Someone no longer here"
 msgstr "Iemand die er niet meer is"
 
+#: src/settings/agent-wakes.tsx
+msgid "Someone no longer in the company"
+msgstr "Iemand die niet meer in het bedrijf zit"
+
 #: src/chat/asked-questions.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
@@ -12489,6 +12582,10 @@ msgstr "Gestopt."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stripe is not linked yet"
 msgstr "Stripe is nog niet gekoppeld"
+
+#: src/settings/agent-wakes.tsx
+msgid "Such as: look for invoices that are overdue and say which."
+msgstr "Bijvoorbeeld: zoek naar facturen die over de vervaldatum zijn en zeg welke."
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: an interview written up short"
@@ -15131,6 +15228,10 @@ msgstr "Wat ze ons vertelden"
 msgid "What they want instead"
 msgstr "Wat ze liever willen"
 
+#: src/settings/agent-wakes.tsx
+msgid "What to ask it each time"
+msgstr "Wat hem elke keer gevraagd wordt"
+
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
 msgstr "Wat er te verbeteren is"
@@ -15240,6 +15341,10 @@ msgstr "Wanneer het het laatst is gewijzigd"
 #: src/apps/indexes-view.tsx
 msgid "When it was added"
 msgstr "Wanneer het is toegevoegd"
+
+#: src/settings/agent-wakes.tsx
+msgid "When it works on its own"
+msgstr "Wanneer hij uit zichzelf werkt"
 
 #: src/apps/field-editor.tsx
 msgid "When the linked record is deleted"

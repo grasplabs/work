@@ -1,4 +1,4 @@
-import type { AgentSettings } from "@grasp-os/shared/agents";
+import type { AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
@@ -34,8 +34,10 @@ const AgentsPage = () => {
     <AgentsSettings
       agents={page.data.agents}
       editable={isMemberAdmin(identity)}
+      people={page.data.people}
       settings={page.data.settings}
       teams={page.data.teams}
+      wakes={page.data.wakes}
     />
   );
 };
@@ -50,6 +52,10 @@ export const Route = createFileRoute("/_shell/settings/agents")({
         session.connections.agents(),
         session.connections.stephenReach(),
       ]);
+      // The people a wake-up can work for: none when core won't say, and
+      // the page still shows the agents.
+      const [listed] = await Promise.allSettled([session.members.list()]);
+      const people = listed.status === "fulfilled" ? listed.value : [];
       // Every agent but the first, whose reach is Settings › Stephen's.
       const others = agents.slice(1);
       const read = await Promise.all(
@@ -58,6 +64,21 @@ export const Route = createFileRoute("/_shell/settings/agents")({
           await session.connections.agentSettings(id),
         ])
       );
-      return { agents, settings: Object.fromEntries(read), teams: reach.teams };
+      // Each agent's wake-ups: none for one core won't say them of.
+      const wakes = await Promise.all(
+        agents.map(async ({ id }): Promise<[string, AgentWake[]]> => {
+          const [woken] = await Promise.allSettled([
+            session.connections.agentWakes(id),
+          ]);
+          return [id, woken.status === "fulfilled" ? woken.value : []];
+        })
+      );
+      return {
+        agents,
+        settings: Object.fromEntries(read),
+        teams: reach.teams,
+        wakes: Object.fromEntries(wakes),
+        people,
+      };
     }),
 });

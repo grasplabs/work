@@ -1,10 +1,17 @@
 // @vitest-environment happy-dom
-import type { Agent, AgentInput, AgentSettings } from "@grasp-os/shared/agents";
+import type {
+  Agent,
+  AgentInput,
+  AgentSettings,
+  AgentWake,
+  AgentWakeInput,
+} from "@grasp-os/shared/agents";
 import { companyToolClasses } from "@grasp-os/shared/connect";
 import type {
   CompanyToolClass,
   ToolClassAudience,
 } from "@grasp-os/shared/connect";
+import type { Member } from "@grasp-os/shared/members";
 import type { AppClassAudience } from "@grasp-os/shared/stephen-reach";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -43,10 +50,20 @@ const stephen: Agent = {
   changedAt: null,
 };
 
+const anna: Member = {
+  userId: "user-anna",
+  name: "Anna de Vries",
+  email: "anna@acme.test",
+  role: "user",
+  joinedAt: "2026-01-05T09:00:00.000Z",
+};
+const people = [anna];
+
 /** Core's agents, kept as an admin makes and changes them, and each change asked. */
 const fakeConnections = () => {
   const asked: unknown[][] = [];
   let agents: Agent[] = [stephen];
+  let wakes: AgentWake[] = [];
   const settings = new Map<string, AgentSettings>();
   const changed = (id: string, change: Partial<Agent>): void => {
     agents = agents.map((agent) =>
@@ -104,6 +121,49 @@ const fakeConnections = () => {
       asked.push(["paused", id, paused]);
       changed(id, { state: paused ? "paused" : "on" });
     },
+    agentWakes: async (agentId: string): Promise<AgentWake[]> => {
+      await Promise.resolve();
+      return wakes.filter((wake) => wake.agentId === agentId);
+    },
+    makeAgentWake: async (
+      agentId: string,
+      input: AgentWakeInput
+    ): Promise<AgentWake> => {
+      await Promise.resolve();
+      asked.push(["wake", agentId, input]);
+      // As core refuses what isn't a wake-up.
+      if (input.opening === "refuse this") {
+        throw new Error("That isn't a wake-up.");
+      }
+      const made: AgentWake = {
+        id: `wake-${wakes.length + 1}`,
+        agentId,
+        cron: input.cron,
+        timeZone: input.timeZone ?? "Europe/Amsterdam",
+        personId: input.personId,
+        opening: input.opening,
+        state: "on",
+        nextAt: "2026-11-12T08:00:00.000Z",
+        lastAt: null,
+        lastOutcome: null,
+      };
+      wakes = [...wakes, made];
+      return made;
+    },
+    setAgentWakePaused: async (wakeId: string, paused: boolean) => {
+      await Promise.resolve();
+      asked.push(["wake paused", wakeId, paused]);
+      wakes = wakes.map((wake) =>
+        wake.id === wakeId
+          ? { ...wake, state: paused ? ("paused" as const) : ("on" as const) }
+          : wake
+      );
+    },
+    deleteAgentWake: async (wakeId: string) => {
+      await Promise.resolve();
+      asked.push(["wake deleted", wakeId]);
+      wakes = wakes.filter((wake) => wake.id !== wakeId);
+    },
     setAgentReach: async (
       id: string,
       on: boolean,
@@ -145,6 +205,7 @@ let root: Root | undefined;
 interface Shown {
   agents: Agent[];
   settings: Record<string, AgentSettings>;
+  wakes: Record<string, AgentWake[]>;
 }
 
 /** The page on the agents its route read. */
@@ -152,8 +213,10 @@ const Page = ({ data, editable }: { data: Shown; editable: boolean }) => (
   <AgentsSettings
     agents={data.agents}
     editable={editable}
+    people={people}
     settings={data.settings}
     teams={teams}
+    wakes={data.wakes}
   />
 );
 
@@ -174,7 +237,17 @@ const shown = async (connections: Connections, editable = true) => {
           await connections.agentSettings(id),
         ])
     );
-    return { agents, settings: Object.fromEntries(read) };
+    const woken = await Promise.all(
+      agents.map(async ({ id }): Promise<[string, AgentWake[]]> => [
+        id,
+        await connections.agentWakes(id),
+      ])
+    );
+    return {
+      agents,
+      settings: Object.fromEntries(read),
+      wakes: Object.fromEntries(woken),
+    };
   };
   const rootRoute = createRootRoute({
     loader: load,
@@ -410,5 +483,78 @@ describe("Settings › Agents", () => {
     await press(toggle("Claire is on"));
     expect(asked.at(-1)).toStrictEqual(["paused", "agent-1", true]);
     expect(field("Instructions").value).toBe("A draft, not saved.");
+  });
+
+  it("adds a time an agent works on its own, as a schedule core keeps, and pauses and removes it", async () => {
+    const { connections, asked } = fakeConnections();
+    await shown(connections);
+    await press(button("Stephen"));
+    await set(field("At, in the company's time zone"), "07:30", "input");
+    await set(
+      field("What to ask it each time"),
+      " Look for invoices that are overdue. ",
+      "input"
+    );
+    await press(button("Add a time"));
+    expect(asked).toStrictEqual([
+      [
+        "wake",
+        "organization",
+        {
+          cron: "30 7 * * 1-5",
+          personId: "user-anna",
+          opening: "Look for invoices that are overdue.",
+        },
+      ],
+    ]);
+    // Shown in words, for whom and with what it is asked.
+    expect(document.body.textContent).toContain("Every weekday at 07:30");
+    expect(document.body.textContent).toContain(
+      "For Anna de Vries: Look for invoices that are overdue."
+    );
+
+    await press(toggle("Every weekday at 07:30, for Anna de Vries, is on"));
+    await press(button("Remove Every weekday at 07:30, for Anna de Vries"));
+    expect(asked.slice(1)).toStrictEqual([
+      ["wake paused", "wake-1", true],
+      ["wake deleted", "wake-1"],
+    ]);
+    expect(document.body.textContent).not.toContain("Every weekday at 07:30");
+  });
+
+  it("offers a member no way to add a time", async () => {
+    const { connections } = fakeConnections();
+    await shown(connections, false);
+    await press(button("Stephen"));
+    expect(document.body.textContent).toContain(
+      "Stephen never works on its own."
+    );
+    expect(document.body.textContent).not.toContain("Add a time");
+  });
+
+  it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
+    const { connections, asked } = fakeConnections();
+    await shown(connections);
+    await press(button("Stephen"));
+    await set(field("What to ask it each time"), "refuse this", "input");
+    // Another change on the panel saves and the page is read again.
+    await press(toggle("Stephen is on"));
+    expect(field("What to ask it each time").value).toBe("refuse this");
+    // Core refuses it: still there to be corrected, and said why.
+    await press(button("Add a time"));
+    expect(asked.at(-1)?.[0]).toBe("wake");
+    expect(field("What to ask it each time").value).toBe("refuse this");
+    expect(document.body.textContent).toContain("That isn't a wake-up.");
+  });
+
+  it("shows the time zone a wake-up was made in", async () => {
+    const { connections } = fakeConnections();
+    await shown(connections);
+    await press(button("Stephen"));
+    await set(field("What to ask it each time"), "Check the inbox.", "input");
+    await press(button("Add a time"));
+    expect(document.body.textContent).toContain(
+      "Every weekday at 09:00 · Europe/Amsterdam"
+    );
   });
 });
