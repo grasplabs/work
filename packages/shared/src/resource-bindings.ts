@@ -174,7 +174,7 @@ export interface PlatformChoice {
  * - `guests`: the App's own active permissions to invite guests.
  *
  * Approving checks the choice again: one that stopped serving since is
- * refused (`resource.target_invalid`). `truncated` says some were left
+ * refused (`permission.target_invalid`). `truncated` says some were left
  * out: a review reads a bounded number of grants and versions, and asks
  * connect a bounded number of times.
  */
@@ -289,12 +289,12 @@ export interface ResourceBindingsApi {
 
 /** Why a binding couldn't be approved, revoked or found. */
 export const resourceBindingErrors = defineErrorFamily({
-  "resource.binding_invalid": "That isn't a valid resource binding.",
-  "resource.binding_not_found": "There's no such resource binding.",
-  "resource.undeclared":
-    "The reviewed version doesn't declare that resource for its actions, or declares it of another kind.",
-  "resource.model_too_small":
-    "That model can't give an answer as long as this resource declares within its window. Choose a model with a larger window, or ask the App's builder for a smaller bound.",
-  "resource.target_invalid":
+  "permission.binding_invalid": "That isn't a valid binding of a permission.",
+  "permission.binding_not_found": "There's no such binding of a permission.",
+  "permission.undeclared":
+    "The reviewed version doesn't declare that permission for its actions, or declares it of another kind.",
+  "permission.model_too_small":
+    "That model can't give an answer as long as this permission declares within its window. Choose a model with a larger window, or ask the App's builder for a smaller bound.",
+  "permission.target_invalid":
     "That can't serve this permission: it isn't the App's own active grant, a model this deployment allows, or an App that serves what it declares.",
 });

@@ -271,13 +271,13 @@ describe("an App calling an outside API", () => {
     });
     expect(created).toMatchObject({
       ok: false,
-      error: { code: "resource.awaiting_confirmation" },
+      error: { code: "permission.awaiting_confirmation" },
     });
     expect(confirmed).toStrictEqual({ ok: true, value: 201 });
     expect(strays).toStrictEqual(
       ["/v1/moved", "/admin", "/v1/../admin"].map(() => ({
         ok: true,
-        value: "resource.not_allowed",
+        value: "permission.not_allowed",
       }))
     );
     // The redirect's request went out; the stray paths' never did. The

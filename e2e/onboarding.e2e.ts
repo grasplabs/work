@@ -4,6 +4,11 @@ import { DatabaseSync } from "node:sqlite";
 
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
+import { flowSteps } from "@grasp-os/shared/onboarding-flow";
+import type {
+  FlowStep,
+  OnboardingFlow,
+} from "@grasp-os/shared/onboarding-flow";
 import { expect } from "@playwright/test";
 import type { Request } from "@playwright/test";
 
@@ -56,6 +61,90 @@ const configuredAdmin = async (): Promise<Person> => {
     core[Symbol.dispose]();
   }
 };
+
+// A company's own flow where nobody is interviewed, and none at all: first
+// of all, as the team isn't told yet, and once it is the interviews stay.
+
+/** A flow with only the steps in `on`, and nothing of Grasp's before them. */
+const flowWithOnly = (on: readonly FlowStep[]): OnboardingFlow => ({
+  on: true,
+  steps: flowSteps.map((id) => ({ id, on: on.includes(id) })),
+  grasp: {
+    kickoff: false,
+    agreements: { processing: false, assessment: false, council: false },
+  },
+});
+
+test("an admin whose company's flow is the AI step alone makes that one choice and is in, and so is the company", async ({
+  page,
+}) => {
+  const admin = await configuredAdmin();
+  await adminCommand({ type: "onboarding.gate.close", payload: {} });
+  await adminCommand({
+    type: "onboarding.flow",
+    payload: { flow: flowWithOnly(["ai"]) },
+  });
+  try {
+    // Nobody is interviewed, but its admin hasn't finished: still closed.
+    const waiting = `person.${crypto.randomUUID()}@acme.test`;
+    await expect(signInAs(waiting)).rejects.toThrow(/not_open_yet/u);
+
+    await signInTo(page.context(), admin);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/setup");
+    await expect(
+      page.getByRole("heading", { name: "Which AI should I think with?" })
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Step \d+$/u })).toHaveCount(
+      1
+    );
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    // The last screen of its flow: the admin is in the platform, and it opened.
+    await page.waitForURL((url) => url.pathname === "/");
+    await expect
+      .poll(async () => {
+        const { gate } = await adminSnapshot();
+        return gate.open;
+      })
+      .toBe(true);
+    await expect(signInAs(waiting)).resolves.toBeTruthy();
+  } finally {
+    // All of it again, and open, for the tests after this one.
+    await adminCommand({ type: "onboarding.flow", payload: { flow: null } });
+    await adminCommand({ type: "onboarding.gate.open", payload: {} });
+  }
+});
+
+test("a company that goes through no onboarding is open at once, and its admin is never sent to one", async ({
+  page,
+}) => {
+  const admin = await configuredAdmin();
+  await adminCommand({ type: "onboarding.gate.close", payload: {} });
+  await adminCommand({
+    type: "onboarding.flow",
+    payload: { flow: { ...flowWithOnly([]), on: false } },
+  });
+  try {
+    const opened = await adminSnapshot();
+    expect(opened.gate.open).toBe(true);
+    const member = `person.${crypto.randomUUID()}@acme.test`;
+    await expect(signInAs(member)).resolves.toBeTruthy();
+
+    // Signed in, the admin stays home; asked for by its address, the onboarding sends them there.
+    await signInTo(page.context(), admin);
+    await page.goto("/");
+    await expect(page).toHaveURL((url) => url.pathname === "/");
+    await page.goto("/setup");
+    await page.waitForURL((url) => url.pathname === "/");
+    await expect(
+      page.getByRole("heading", { name: "Which AI should I think with?" })
+    ).toHaveCount(0);
+  } finally {
+    await adminCommand({ type: "onboarding.flow", payload: { flow: null } });
+    await adminCommand({ type: "onboarding.gate.open", payload: {} });
+  }
+});
 
 test("staff put the agreements in place, and the links that waited go out", async ({
   cspViolations,

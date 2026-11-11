@@ -536,7 +536,7 @@ describe("an action's ctx.notifyPeople", () => {
     expect({
       answer: answerOf(sent),
       told: await toldTo(fx.bob),
-    }).toStrictEqual({ answer: "resource.invalid_args", told: [] });
+    }).toStrictEqual({ answer: "permission.invalid_args", told: [] });
   });
 
   it("holds the App's hourly limit, refusing a send past it whole and auditing it", async () => {
@@ -563,23 +563,23 @@ describe("an action's ctx.notifyPeople", () => {
       told: await titlesTo(fx.bob),
       refused: await detailsOf("app.notification.refused", fx.app),
     }).toStrictEqual({
-      team: "resource.limit_reached",
+      team: "permission.limit_reached",
       bob: { delivered: 1 },
-      past: "resource.limit_reached",
+      past: "permission.limit_reached",
       told: ["One fits"],
       refused: [
         {
           appVersion: 1,
           principal: fx.bob.userId,
           via: "action",
-          reason: "resource.limit_reached",
+          reason: "permission.limit_reached",
           named: 2,
         },
         {
           appVersion: 1,
           principal: fx.bob.userId,
           via: "action",
-          reason: "resource.limit_reached",
+          reason: "permission.limit_reached",
           named: 1,
         },
       ],
@@ -611,7 +611,7 @@ describe("an action's ctx.notifyPeople", () => {
       sent: await countOf("app.notification.sent", fx.app),
       refused: await countOf("app.notification.refused", fx.app),
     }).toStrictEqual({
-      answer: "resource.limit_reached",
+      answer: "permission.limit_reached",
       ada: ["Got there first"],
       bob: [],
       sent: 1,
@@ -842,6 +842,6 @@ describe("a mutation's ctx.notifyPeople", () => {
     expect({
       answer: answerOf(pinged),
       told: await toldTo(fx.ada),
-    }).toStrictEqual({ answer: "resource.unavailable", told: [] });
+    }).toStrictEqual({ answer: "permission.unavailable", told: [] });
   });
 });

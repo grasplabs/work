@@ -629,7 +629,7 @@ describe(
           action === "workflow.call.checked" && target?.id === runId
       );
       expect({ ended, checked }).toStrictEqual({
-        ended: { failed: "resource.unavailable" },
+        ended: { failed: "permission.unavailable" },
         checked: [],
       });
     });

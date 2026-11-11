@@ -1002,7 +1002,7 @@ const visitorPeopleOf = (caller: VisitorCaller): PeopleAccess =>
  * and an `owner` table shows only the visitor's own rows), with nothing
  * else bound. No resource (no connection, Knowledge, model, store, other
  * App or template), no workflow started or sent an event, no one told: a
- * function that asks for any of them is refused (`resource.unavailable`),
+ * function that asks for any of them is refused (`permission.unavailable`),
  * whatever the App holds for its members.
  */
 export const visitorInvocation = async (

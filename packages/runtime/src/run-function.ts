@@ -21,7 +21,7 @@ import type { EventName } from "./workflow-events.ts";
 // the invocation's channel to the trusted host, and calls its handler.
 // Everything the handler does through its context is one call on the
 // channel (a read, a staged write, a call of another of the App's
-// functions, a resource), and the host decides each: the channel is the
+// functions, a permission), and the host decides each: the channel is the
 // only authority App code is handed, and a context only shapes calls on
 // it. The host validates the arguments before it asks for a run and the
 // return after, so the runner validates neither; nor does it trust that
@@ -132,7 +132,7 @@ const eventSendsOf = (channel: FunctionChannel) => {
         // In order: each one's place among the commit's intents. The host
         // resolves the event's alias in the release it runs.
         // oxlint-disable-next-line no-await-in-loop -- see above
-        await channel.resource(event.workflow, "sendEvent", [
+        await channel.permission(event.workflow, "sendEvent", [
           event.alias,
           runId,
           data,
@@ -157,7 +157,7 @@ const workflowsOf = (
     if (declared["~permission"] === "workflows") {
       workflows[declared.alias] = Object.freeze({
         start: async (args?: unknown): Promise<unknown> =>
-          await channel.resource(
+          await channel.permission(
             declared.alias,
             "start",
             // No args travel as no argument, which JSON can carry: the
@@ -178,7 +178,7 @@ const workflowsOf = (
 const notifyPeopleOf =
   (channel: FunctionChannel) =>
   async (to: unknown, notification: unknown): Promise<unknown> =>
-    await channel.resource(peopleAlias, "notify", [to, notification]);
+    await channel.permission(peopleAlias, "notify", [to, notification]);
 
 /** `read`'s answer, or its failure, as data. */
 const settledRead = async (

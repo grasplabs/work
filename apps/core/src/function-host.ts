@@ -140,7 +140,7 @@ import type { WorkflowEventSends } from "./workflow-event-sends.ts";
 //   an alias the App declares as a permission an action reaches
 //   (`actionPermission`), a start or sent event a workflow it declares,
 //   a nested call a function it registers, internal ones included
-//   (`resource.not_allowed`, `function.not_found` otherwise), each then
+//   (`permission.not_allowed`, `function.not_found` otherwise), each then
 //   bound and granted by an admin. No function narrows what the App holds:
 //   the App is one unit of review and of grants, its functions written
 //   together, so a list per function bounded nothing its author couldn't
@@ -208,7 +208,7 @@ import type { WorkflowEventSends } from "./workflow-event-sends.ts";
 //   `internal.unexpected` with the request ID, its cause logged.
 // - App code starts a workflow it didn't declare, or one some other App
 //   binds: a start names an alias the App declares as a workflow
-//   (`resource.not_allowed` otherwise);
+//   (`permission.not_allowed` otherwise);
 //   core starts only what the App binds under that alias, through the
 //   App's own `start` permission, for the call's principal
 //   (`WorkflowStarts`). App code names neither the workflow, its version,
@@ -310,7 +310,7 @@ export interface Invocation {
    * How core starts the workflows the App binds, for this call; none
    * started without it. A workflow run's call (app-functions.ts,
    * `runInvocationFor`) has none, so App code in a run's step starts nothing, now or after its
-   * commit (`resource.unavailable`): a start there would open a lineage of
+   * commit (`permission.unavailable`): a start there would open a lineage of
    * its own, past its run's nesting, descendant, active-time and host-call
    * limits (GRA-669). Letting a run start one needs its root and depth
    * carried to the start, `admitInLineage` as it is admitted, and its attempts
@@ -444,12 +444,12 @@ export interface UseRefusal {
   /** The function whose code asked: its sealed path. */
   readonly function: string;
   readonly use: {
-    readonly kind: "function" | "resource" | "workflow" | "table";
+    readonly kind: "function" | "permission" | "workflow" | "table";
     readonly name: string | null;
   };
   /**
    * Not a permission the App declares or a function it registers
-   * (`use_undeclared`), or a declared resource or workflow asked for what
+   * (`use_undeclared`), or a declared permission or workflow asked for what
    * its declaration doesn't allow (`request_not_allowed`).
    */
   readonly reason: "use_undeclared" | "request_not_allowed";
@@ -553,11 +553,11 @@ const declaresWorkflow = (run: Run, alias: unknown): boolean =>
 /**
  * The use App code asked for under `alias`, refused as one the function's
  * kind can't make or the App doesn't declare: a workflow when the App
- * declares one under it, otherwise a resource, named only when the App's
+ * declares one under it, otherwise a permission, named only when the App's
  * manifest has it.
  */
 const undeclaredUse = (run: Run, alias: unknown): RefusedUse["use"] => ({
-  kind: declaresWorkflow(run, alias) ? "workflow" : "resource",
+  kind: declaresWorkflow(run, alias) ? "workflow" : "permission",
   name: sealedName(run.app.manifest.permissions, alias),
 });
 
@@ -1715,11 +1715,11 @@ const isKnowledgeOperation = (
   typeof method === "string" && Object.hasOwn(knowledgeRequests, method);
 
 /** A request a resource's declaration doesn't allow. */
-const notAllowed = () => functionErrors.create("resource.not_allowed");
+const notAllowed = () => functionErrors.create("permission.not_allowed");
 
 /** An answer a resource's contract doesn't allow. */
 const invalidResult = () =>
-  functionErrors.create("contract.invalid_resource_result");
+  functionErrors.create("contract.invalid_permission_result");
 
 /** What a knowledge search answers: hits of exactly a title and an excerpt. */
 const knowledgeHitsSchema = z
@@ -1875,7 +1875,7 @@ const isAiRequest = (args: readonly Json[]): boolean => {
  * declaration allows it: a connection one of its declared actions with an
  * object of arguments, the Brain one of its declared operations, AI a
  * prompt, another App one of its declared functions, guests one of its
- * operations. `resource.not_allowed` otherwise.
+ * operations. `permission.not_allowed` otherwise.
  */
 const allowedRequest = (
   declaration: AnyPermission,
@@ -1981,7 +1981,7 @@ const checkedResourceResult = (
  * provider couldn't confirm (`effect.outcome_unknown`, connect's
  * `connect.outcome_unknown` included) as that, kept so nobody repeats the
  * effect under a fresh key; a binding whose grant was revoked
- * (`permission.denied`) as `resource.unavailable`; a refusal a binding's
+ * (`permission.denied`) as `permission.unavailable`; a refusal a binding's
  * adapter made in the host's words (an unavailable resource, a budget used
  * up, an effect held for its person, an item it doesn't have, arguments or
  * an answer its contract doesn't allow) as that; anything else
@@ -2006,14 +2006,14 @@ const limitDetailsSchema = z.strictObject({
 
 /** What a binding's adapter may refuse a request with, in the host's words. */
 const adapterRefusals = [
-  "resource.unavailable",
-  "resource.not_allowed",
-  "resource.awaiting_confirmation",
-  "resource.item_not_found",
-  "resource.invalid_args",
-  "resource.declined",
-  "resource.idempotency_conflict",
-  "contract.invalid_resource_result",
+  "permission.unavailable",
+  "permission.not_allowed",
+  "permission.awaiting_confirmation",
+  "permission.item_not_found",
+  "permission.invalid_args",
+  "permission.declined",
+  "permission.idempotency_conflict",
+  "contract.invalid_permission_result",
 ] as const;
 
 const isAdapterRefusal = (
@@ -2027,7 +2027,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
     return hostError(effectErrors.create("effect.outcome_unknown"));
   }
   if (code === "permission.denied") {
-    return hostError(functionErrors.create("resource.unavailable"));
+    return hostError(functionErrors.create("permission.unavailable"));
   }
   // A workflow run's attempt let go of before the request left core
   // (`BindingCaller.requireHolds`): nothing was sent.
@@ -2041,7 +2041,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   }
   // Room held by runs under way, a provider's rate: worth trying again,
   // after the wait computed, the only detail passed on.
-  if (code === "resource.budget_busy" || code === "resource.rate_limited") {
+  if (code === "permission.budget_busy" || code === "permission.rate_limited") {
     return hostError(
       functionErrors.create(
         code,
@@ -2051,7 +2051,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   }
   // A bound of the resource's reached: which one, and for a minute's, when
   // it starts again, the only details passed on.
-  if (code === "resource.limit_reached") {
+  if (code === "permission.limit_reached") {
     return hostError(
       functionErrors.create(
         code,
@@ -2061,7 +2061,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
       )
     );
   }
-  log.error("function.resource_failed", {
+  log.error("function.permission_failed", {
     requestId,
     code,
     ...errorFields(error),
@@ -2083,7 +2083,7 @@ const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
  * an action: only a use its declaration allows (`allowedRequest`), its
  * arguments JSON within the function input limit, through the binding
  * core resolved for it, which must be of the declared kind and serve the
- * declared contract (`resource.unavailable` otherwise, and without a
+ * declared contract (`permission.unavailable` otherwise, and without a
  * binding). Its answer is checked against the contract before App code
  * gets it. A provider's own failure reaches App code only as an expected
  * error the adapter raised (`effect.outcome_unknown` among them), never
@@ -2116,14 +2116,14 @@ const resourceCall = async (
       : undefined;
   const resourceName = sealedName(run.app.manifest.permissions, alias);
   if (declaration === undefined) {
-    throw refusingUse(functionErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
       use: undeclaredUse(run, alias),
       reason: "use_undeclared",
     });
   }
   const notAllowedRequest = () =>
-    refusingUse(functionErrors.create("resource.not_allowed"), {
-      use: { kind: "resource", name: resourceName },
+    refusingUse(functionErrors.create("permission.not_allowed"), {
+      use: { kind: "permission", name: resourceName },
       reason: "request_not_allowed",
     });
   if (typeof method !== "string") {
@@ -2143,7 +2143,7 @@ const resourceCall = async (
   } catch (error) {
     // What its declaration doesn't allow; a declared operation's request
     // outside its contract is the arguments' fault, as it was.
-    throw functionErrors.codeOf(error) === "resource.not_allowed"
+    throw functionErrors.codeOf(error) === "permission.not_allowed"
       ? notAllowedRequest()
       : error;
   }
@@ -2161,7 +2161,7 @@ const resourceCall = async (
     bound.kind !== declaration["~permission"] ||
     bound.contract !== contract
   ) {
-    throw functionErrors.create("resource.unavailable");
+    throw functionErrors.create("permission.unavailable");
   }
   // Cancelled meanwhile: nothing is sent.
   requireNotCancelled(run);
@@ -2177,7 +2177,7 @@ const resourceCall = async (
   }
   const result = jsonOf(answered);
   if (result === undefined || bytesOf(result) > resourceResultMaxBytes) {
-    throw functionErrors.create("contract.invalid_resource_result");
+    throw functionErrors.create("contract.invalid_permission_result");
   }
   return checkedResourceResult(declaration, method, args, result);
 };
@@ -2186,7 +2186,7 @@ const resourceCall = async (
  * The start of workflow `alias` that `fn` asks for with `method`
  * and `args`, if it is an action or a mutation and the App declares a
  * workflow under the alias: its alias and its input, as the declaration
- * normalizes it, within the function input limit. `resource.not_allowed`
+ * normalizes it, within the function input limit. `permission.not_allowed`
  * for anything else, `contract.invalid_args` for input the declaration
  * doesn't take.
  */
@@ -2207,7 +2207,7 @@ const workflowStart = (
       ? sealedName(run.app.manifest.permissions, alias)
       : declaration.alias;
   if (declaration === undefined) {
-    throw refusingUse(functionErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
       reason: "use_undeclared",
     });
@@ -2218,7 +2218,7 @@ const workflowStart = (
     !isJsonArray(args) ||
     args.length > 1
   ) {
-    throw refusingUse(functionErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
       reason: "request_not_allowed",
     });
@@ -2253,10 +2253,10 @@ const workflowStart = (
  * What a start's refusal becomes for App code, from an allow-list: the
  * workflow or its binding unavailable to the App, however (no binding,
  * no grant, a person who can't use the App now, a version gone) as
- * `resource.unavailable`, never saying which; input the bound version
+ * `permission.unavailable`, never saying which; input the bound version
  * doesn't take, or a file in it the start can't hand its run, as
- * `resource.invalid_args`; the person's live runs at
- * their limit as the retryable `resource.budget_busy`; anything else
+ * `permission.invalid_args`; the person's live runs at
+ * their limit as the retryable `permission.budget_busy`; anything else
  * `internal.unexpected`, its cause logged.
  */
 const startFailure = (error: unknown, requestId: string): Error => {
@@ -2271,13 +2271,13 @@ const startFailure = (error: unknown, requestId: string): Error => {
   }
   const code = workflowResourceErrors.codeOf(error);
   if (code === "workflow.start_invalid") {
-    return hostError(functionErrors.create("resource.invalid_args"));
+    return hostError(functionErrors.create("permission.invalid_args"));
   }
   if (code === "workflow.run_limit") {
-    return hostError(functionErrors.create("resource.budget_busy"));
+    return hostError(functionErrors.create("permission.budget_busy"));
   }
   if (code === "workflow.start_conflict") {
-    return hostError(functionErrors.create("resource.idempotency_conflict"));
+    return hostError(functionErrors.create("permission.idempotency_conflict"));
   }
   // A file of the input it can't hand its run (GRA-976): one the person
   // can't read now, or past a run's limits. Never which, nor whether the
@@ -2286,10 +2286,10 @@ const startFailure = (error: unknown, requestId: string): Error => {
     fileErrors.codeOf(error) !== undefined ||
     runFileErrors.codeOf(error) !== undefined
   ) {
-    return hostError(functionErrors.create("resource.invalid_args"));
+    return hostError(functionErrors.create("permission.invalid_args"));
   }
   if (code !== undefined) {
-    return hostError(functionErrors.create("resource.unavailable"));
+    return hostError(functionErrors.create("permission.unavailable"));
   }
   log.error("function.workflow_start_failed", {
     requestId,
@@ -2302,7 +2302,7 @@ const startFailure = (error: unknown, requestId: string): Error => {
  * An action's start of one of the App's workflows (`workflowStart`), under `key`
  * (derived from the action's call key and its place among its starts),
  * through core's `WorkflowStarts` for the invocation, after the one gate
- * (`admit`): its handle once admitted. `resource.unavailable` where core
+ * (`admit`): its handle once admitted. `permission.unavailable` where core
  * starts no workflow for the call.
  */
 const startCall = async (
@@ -2317,7 +2317,7 @@ const startCall = async (
   await admit(run.invocation);
   const starts = run.invocation.workflows;
   if (starts === undefined) {
-    throw functionErrors.create("resource.unavailable");
+    throw functionErrors.create("permission.unavailable");
   }
   // Cancelled, or past its deadline, as the gate was read: nothing is
   // started, and the start asks again just before it is admitted.
@@ -2346,7 +2346,7 @@ const startCall = async (
 /**
  * The person or team and the notification a send to people asks for
  * (`[to, notification]`, the runner's `ctx.notifyPeople`), or
- * `resource.not_allowed` for any other request of `peopleAlias`.
+ * `permission.not_allowed` for any other request of `peopleAlias`.
  */
 const peopleArgs = (method: unknown, args: unknown): [Json, Json] => {
   const asked = jsonOf(args);
@@ -2356,7 +2356,7 @@ const peopleArgs = (method: unknown, args: unknown): [Json, Json] => {
     !isJsonArray(asked) ||
     asked.length !== 2
   ) {
-    throw functionErrors.create("resource.not_allowed");
+    throw functionErrors.create("permission.not_allowed");
   }
   const [to = null, notification = null] = asked;
   return [to, notification];
@@ -2366,7 +2366,7 @@ const peopleArgs = (method: unknown, args: unknown): [Json, Json] => {
  * An action's send to people, under `key` (derived from the action's call
  * key and its place among its sends), through core's `PeopleNotifications`
  * for the invocation, after the one gate (`admit`): how many were told.
- * `resource.unavailable` where core tells nobody for the call.
+ * `permission.unavailable` where core tells nobody for the call.
  */
 const notifyPeopleCall = async (
   run: Run,
@@ -2379,7 +2379,7 @@ const notifyPeopleCall = async (
   await admit(run.invocation);
   const { notifyPeople: people } = run.invocation;
   if (people === undefined) {
-    throw functionErrors.create("resource.unavailable");
+    throw functionErrors.create("permission.unavailable");
   }
   requireNotCancelled(run);
   if (Date.now() >= run.invocation.deadline) {
@@ -2397,7 +2397,7 @@ const notifyPeopleCall = async (
  * `ctx.sendEvent` with the alias of the event its generated reference
  * names), if the App declares the workflow: the event's alias (which
  * core resolves in the release it runs, and refuses unless that release
- * declares it), the run and the data. `resource.not_allowed` for
+ * declares it), the run and the data. `permission.not_allowed` for
  * anything else.
  */
 const workflowEventSend = (
@@ -2413,7 +2413,7 @@ const workflowEventSend = (
   const workflowName = sealedName(run.app.manifest.permissions, request.alias);
   if (declared === undefined) {
     // Named by what the alias is in the App: a connection's is no workflow.
-    throw refusingUse(functionErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
       use: undeclaredUse(run, request.alias),
       reason: "use_undeclared",
     });
@@ -2426,7 +2426,7 @@ const workflowEventSend = (
     args.length !== 3 ||
     typeof eventAlias !== "string"
   ) {
-    throw refusingUse(functionErrors.create("resource.not_allowed"), {
+    throw refusingUse(functionErrors.create("permission.not_allowed"), {
       use: { kind: "workflow", name: workflowName },
       reason: "request_not_allowed",
     });
@@ -2707,7 +2707,7 @@ const trackedCalls = (
       read: track(capabilities.read),
       write: track(capabilities.write),
       call: track(capabilities.call),
-      resource: track(capabilities.resource),
+      permission: track(capabilities.permission),
       emit: track(capabilities.emit),
       people: track(capabilities.people),
     },
@@ -2800,7 +2800,7 @@ const staleRun = new Error("A run's reads went stale");
 interface Capabilities {
   /** Told of every refused or failed use, as the channel's `refused`. */
   readonly onRefused?: (
-    name: "read" | "write" | "call" | "resource" | "emit" | "people",
+    name: "read" | "write" | "call" | "permission" | "emit" | "people",
     error: Error
   ) => void;
   readonly read?: (request: unknown) => Promise<unknown>;
@@ -2810,7 +2810,7 @@ interface Capabilities {
     path: unknown,
     args: unknown
   ) => Promise<unknown>;
-  readonly resource?: (
+  readonly permission?: (
     alias: unknown,
     method: unknown,
     args: unknown
@@ -2831,10 +2831,13 @@ const refusalsOf = {
   query: {
     write: "function.read_only",
     call: "function.read_only",
-    resource: "function.no_resources",
+    permission: "function.no_permissions",
     emit: "function.no_stream",
   },
-  mutation: { resource: "function.no_resources", emit: "function.no_stream" },
+  mutation: {
+    permission: "function.no_permissions",
+    emit: "function.no_stream",
+  },
   action: {
     read: "function.no_database",
     write: "function.no_database",
@@ -2920,7 +2923,7 @@ const keepEvidence = async (
   const errorCode =
     functionErrors.codeOf(error) ??
     dataErrors.codeOf(error) ??
-    "resource.not_allowed";
+    "permission.not_allowed";
   const refusal: UseRefusal = { function: fn.path, ...refused, errorCode };
   const { refusalsKept, consumer } = run.invocation;
   const key = refusalKey(consumer.resourceVersion, refusal);
@@ -2996,9 +2999,9 @@ const keepingEvidence = (
     ...(capabilities.call === undefined
       ? {}
       : { call: keeping(capabilities.call) }),
-    ...(capabilities.resource === undefined
+    ...(capabilities.permission === undefined
       ? {}
-      : { resource: keeping(capabilities.resource) }),
+      : { permission: keeping(capabilities.permission) }),
   };
 };
 
@@ -3486,11 +3489,11 @@ const runMutation = async (
           // Its only reach past the store: starts of the workflows it
           // lists, staged for its commit and made from its outbox after.
           // Any other resource is refused as a mutation's always is.
-          resource: async (alias, method, callArgs) => {
+          permission: async (alias, method, callArgs) => {
             if (alias === peopleAlias) {
               const { notifyPeople: people } = invocation;
               if (people === undefined) {
-                throw functionErrors.create("resource.unavailable");
+                throw functionErrors.create("permission.unavailable");
               }
               const [to, notification] = peopleArgs(method, callArgs);
               // Its place first, as a start's: the commit's bound counts
@@ -3517,7 +3520,7 @@ const runMutation = async (
               });
               const { eventSends } = invocation;
               if (eventSends === undefined) {
-                throw functionErrors.create("resource.unavailable");
+                throw functionErrors.create("permission.unavailable");
               }
               // Its place first, as a start's: the commit's bound counts
               // both, refused before core reads anything.
@@ -3540,7 +3543,8 @@ const runMutation = async (
                 const failure = sendEventFailure(error, invocation.requestId);
                 // An event the release doesn't resolve for the workflow
                 // (another, or a stale reference's) is kept as evidence.
-                throw functionErrors.codeOf(failure) === "resource.not_allowed"
+                throw functionErrors.codeOf(failure) ===
+                  "permission.not_allowed"
                   ? refusingUse(failure, {
                       use: { kind: "workflow", name: asked.workflow },
                       reason: "request_not_allowed",
@@ -3559,7 +3563,7 @@ const runMutation = async (
               // Any resource but one of the App's workflows: a mutation
               // reaches nothing else.
               throw refusingUse(
-                functionErrors.create("function.no_resources"),
+                functionErrors.create("function.no_permissions"),
                 { use: undeclaredUse(run, alias), reason: "use_undeclared" }
               );
             }
@@ -3570,7 +3574,7 @@ const runMutation = async (
             });
             const starts = invocation.workflows;
             if (starts === undefined) {
-              throw functionErrors.create("resource.unavailable");
+              throw functionErrors.create("permission.unavailable");
             }
             // Its place first, synchronously, so a start past the bound is
             // refused before the gate reads anything. Taken for good, the
@@ -3756,7 +3760,7 @@ const runAction = async (
       // way or a call cancelled meanwhile: nothing went out. Anything else
       // may have.
       const code = functionErrors.codeOf(error);
-      if (code !== "resource.budget_busy" && code !== "function.cancelled") {
+      if (code !== "permission.budget_busy" && code !== "function.cancelled") {
         run.onEffect?.();
       }
       throw error;
@@ -3796,7 +3800,7 @@ const runAction = async (
       kind === "query"
         ? await callNested(kind, path, callArgs)
         : await effect(async () => await callNested(kind, path, callArgs)),
-    resource: async (alias, method, callArgs) => {
+    permission: async (alias, method, callArgs) => {
       spendCall(run.budget, "requests");
       // People it tells: its own place among its sends.
       if (alias === peopleAlias) {

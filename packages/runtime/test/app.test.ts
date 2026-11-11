@@ -521,7 +521,7 @@ const recordingChannel = () => {
       read: record("read"),
       write: record("write"),
       call: record("call"),
-      resource: record("resource"),
+      permission: record("permission"),
       emit: record("emit"),
       people: async () => await Promise.resolve(null),
     },
@@ -660,8 +660,8 @@ describe("the App's permissions in a function's context", () => {
       inherited: ["undefined", "undefined", "undefined", "undefined"],
     });
     expect(calls).toStrictEqual([
-      ["resource", "tools", "call", ["send-mail", { to: "ada" }]],
-      ["resource", "grasp", "call", ["statistics.read", { days: 1 }]],
+      ["permission", "tools", "call", ["send-mail", { to: "ada" }]],
+      ["permission", "grasp", "call", ["statistics.read", { days: 1 }]],
     ]);
   });
 
@@ -813,8 +813,18 @@ describe("the App's permissions in a function's context", () => {
     await runFunction(registered, "notes.notify", {}, channel);
     await runFunction(registered, "notes.carried", {}, channel);
     expect(calls).toStrictEqual([
-      ["resource", "followUp", "sendEvent", ["edited", "run1", { title: "a" }]],
-      ["resource", "followUp", "sendEvent", ["edited", "run1", { title: "b" }]],
+      [
+        "permission",
+        "followUp",
+        "sendEvent",
+        ["edited", "run1", { title: "a" }],
+      ],
+      [
+        "permission",
+        "followUp",
+        "sendEvent",
+        ["edited", "run1", { title: "b" }],
+      ],
     ]);
     const refused = await Promise.all(
       forgedEvents.map(async (_event, which) => {
@@ -1041,9 +1051,9 @@ describe(AppError, () => {
     ],
     ["the pages' namespace", "page.invalid", "platform's `page`"],
     [
-      "the resources' namespace",
-      "resource.unavailable",
-      "platform's `resource`",
+      "the permissions' namespace",
+      "permission.unavailable",
+      "platform's `permission`",
     ],
     ["another platform namespace", "auth.unauthenticated", "platform's `auth`"],
     ["one segment", "notfound", "dotted"],
@@ -1136,7 +1146,7 @@ describe("the runner", () => {
       read: async () => await Promise.resolve(null),
       write: async () => await Promise.resolve(null),
       call: async () => await Promise.reject(crossed),
-      resource: async () => await Promise.resolve(null),
+      permission: async () => await Promise.resolve(null),
       emit: async () => await Promise.resolve(null),
       people: async () => await Promise.resolve(null),
     };

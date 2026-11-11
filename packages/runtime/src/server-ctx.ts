@@ -54,10 +54,10 @@ export interface NotifyReceipt {
  * organization who can open the App are told; anyone else is skipped,
  * never refused. Bounded: a title and body within their limits,
  * at most 50 people a send, and an App sends at most 200 notifications an
- * hour, all its calls together (`resource.limit_reached` past it, the
+ * hour, all its calls together (`permission.limit_reached` past it, the
  * whole send refused). Each send is audited, with how many it told and
  * skipped, never what it said. A call a visitor makes, or one from a
- * workflow's run, tells nobody (`resource.unavailable`).
+ * workflow's run, tells nobody (`permission.unavailable`).
  */
 type NotifyPeople<Told> = (
   to: string,
@@ -174,7 +174,7 @@ export interface MutationCtx<
   readonly workflows: Workflows<Grants, void>;
   /**
    * Tells people about what the mutation did, once it has committed
-   * (`NotifyPeople`): checked as it is staged (`resource.invalid_args`
+   * (`NotifyPeople`): checked as it is staged (`permission.invalid_args`
    * for a title or body past its limit), staged with its writes and sent
    * from the store's outbox exactly once. Whom it reaches, and the App's
    * hourly limit, are decided as it is sent: one past the limit then is
@@ -209,7 +209,7 @@ export interface MutationCtx<
  * on the read (a mutation's read set fences it).
  *
  * Called again under the same idempotency key with the same input, an
- * action gets the earlier outcomes of the mutations and resource requests
+ * action gets the earlier outcomes of the mutations and permission requests
  * it makes, matched by their order among those (queries don't count).
  * That order follows the data: if, on the second call, the data has the
  * action run the same mutation at a place with other arguments, it gets

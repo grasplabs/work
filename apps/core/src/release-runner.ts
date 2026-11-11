@@ -132,7 +132,7 @@ const channelOf = (remote) => ({
   read: async (request) => rebuilt(await remote.read(request)),
   write: async (request) => rebuilt(await remote.write(request)),
   call: async (kind, path, args) => rebuilt(await remote.call(kind, path, args)),
-  resource: async (alias, method, args) => rebuilt(await remote.resource(alias, method, args)),
+  permission: async (alias, method, args) => rebuilt(await remote.permission(alias, method, args)),
   emit: async (progress) => rebuilt(await remote.emit(progress)),
   people: async (name, args) => rebuilt(await remote.people(name, args)),
 });
@@ -295,7 +295,7 @@ interface ArrivingChannel {
     path: unknown,
     args: unknown
   ) => Promise<unknown>;
-  readonly resource: (
+  readonly permission: (
     alias: unknown,
     method: unknown,
     args: unknown
@@ -329,13 +329,13 @@ class IsolateChannel extends IsolateChannelTarget {
     );
   }
 
-  async resource(
+  async permission(
     alias: unknown,
     method: unknown,
     args: unknown
   ): Promise<unknown> {
     return await settled(
-      async () => await this.#channel.resource(alias, method, args)
+      async () => await this.#channel.permission(alias, method, args)
     );
   }
 

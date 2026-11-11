@@ -93,7 +93,7 @@ const appModule = `export default {
   "jobs.busy": async () => { for (;;) {} },
   "jobs.waits": async () => { await scheduler.wait(60000); return { n: 0 }; },
   "jobs.hogs": async () => { const held = []; for (;;) { held.push(new Array(1e6).fill(1)); await scheduler.wait(1); } },
-  "jobs.sendsTooMuch": async (channel) => { await channel.resource("mail", "send", { padding: "x".repeat(15 * 1024 * 1024) }); return { n: 1 }; },
+  "jobs.sendsTooMuch": async (channel) => { await channel.permission("mail", "send", { padding: "x".repeat(15 * 1024 * 1024) }); return { n: 1 }; },
   "jobs.chain": async (channel, args) => {
     const got = await channel.call("action", "jobs.middle", { n: args.n + 1 });
     if (got.n !== args.n + 3) throw new Error("middle answered " + JSON.stringify(got));
