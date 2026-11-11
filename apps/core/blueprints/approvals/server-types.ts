@@ -2,8 +2,9 @@
 // the repo's type check and lint: the module the host generates for an
 // App (`serverModuleSource`, @grasp-os/runtime's generate.ts), whose code is
 // the same for every App and whose types come from the App's own
-// schema.ts. Never part of the App: its seal generates the real one, and
-// type-checks its server code against it.
+// schema.ts. A stand-in for the repo only: an App's own is the one every
+// save generates among its files (`server/_generated/server.ts`), and its
+// seal generates it again and type-checks its server code against it.
 import type { Id as SdkId } from "@grasp-os/sdk";
 import type {
   Doc as SdkDoc,

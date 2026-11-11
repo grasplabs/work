@@ -3,6 +3,8 @@ import {
   aiModelChoiceSchema,
   aiProviderAddSchema,
   aiProviderErrors,
+  aiSourceSchema,
+  graspAi,
   organizationProviderIdSchema,
   organizationProviderIds,
   aiProviders,
@@ -16,10 +18,13 @@ import type {
   AiProviderId,
   AiProviderKey,
   AiProviderListed,
+  AiProviderRoutes,
   AiProvidersApi,
   AiProvidersListing,
   AiProviderStatus,
   AiProviderTest,
+  AiSource,
+  GraspAiListed,
 } from "@grasp-os/shared/ai-providers";
 import { actorOf } from "@grasp-os/shared/audit";
 import { log } from "@grasp-os/shared/log";
@@ -33,9 +38,12 @@ import { z } from "zod";
 import {
   aiModelsKind,
   aiRoutesOf,
+  aiSourceKind,
   choiceNow,
   choiceOf,
+  graspAiAvailable,
   isConnectedModel,
+  readAiSource,
   readModelChoice,
   readStoredChoice,
 } from "./ai-model-choice.ts";
@@ -216,15 +224,32 @@ const platformUses = (keyed: readonly AiProviderId[]): AiPlatformUse[] => {
   ];
 };
 
+/** Grasp's AI as an organization's admins see it: its one model, where it runs, and whether it can be chosen here. */
+const graspListed = (routes: AiProviderRoutes): GraspAiListed => {
+  const model = catalogModelsOf(graspAi.provider).find(
+    (each) => each.model === graspAi.model
+  );
+  return {
+    available: model !== undefined && graspAiAvailable(routes),
+    model: model ?? { model: graspAi.model, name: graspAi.model },
+    whereItRuns:
+      platformRouteOf(graspAi.provider)?.whereItRuns ??
+      aiProviders[graspAi.provider].whereItRuns,
+  };
+};
+
 /** The organization's providers, as its admins see them. */
 const listing = async (env: Env): Promise<AiProvidersListing> => {
-  const [keys, health, choice, routes] = await Promise.all([
+  const [keys, health, choice, routes, source] = await Promise.all([
     env.CONNECT.aiProviderKeys(),
     providerHealthOf(env),
     readModelChoice(env),
     env.CONNECT.aiProviderRoutes(),
+    readAiSource(env),
   ]);
   return {
+    source,
+    grasp: graspListed(routes),
     providers: keys.map((key) => listed(key, health)),
     offered: organizationProviderIds.map((provider) => ({
       provider,
@@ -516,6 +541,69 @@ const removeProvider = async (
   await pruneChoice(env, by);
 };
 
+/**
+ * Sets whose key the organization's AI runs on, while `by` is one of its
+ * own admins: never Grasp's staff, who would be choosing what Grasp is
+ * paid for. Grasp's AI only where this deployment has Grasp's key for it.
+ * The write and its audit event in one batch, recorded only when it
+ * changed. Every workflow run held for a working key tries again at once:
+ * on the key now chosen.
+ */
+const setSource = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<void> => {
+  requireOwnAdmin(by);
+  const parsed = aiSourceSchema.safeParse(input);
+  if (!parsed.success) {
+    throw aiProviderErrors.create("ai_provider.invalid");
+  }
+  const source = parsed.data;
+  if (source === "grasp" && !graspListed(await aiRoutesOf(env)).available) {
+    throw aiProviderErrors.create("ai_provider.grasp_unavailable");
+  }
+  const value = JSON.stringify({ source });
+  const now = Date.now();
+  const db = drizzle(env.DB);
+  // A row only while they are still an admin; written only while it
+  // differs, so the same source twice records one change.
+  const whileAdmin = db
+    .select({
+      kind: sql<string>`${aiSourceKind}`.as("kind"),
+      value: sql<string>`${value}`.as("value"),
+      updatedAt: sql<Date>`${now}`.as("updated_at"),
+    })
+    .from(sql`(SELECT 1)`)
+    .where(activeMember(by.userId, ["admin"]));
+  const [written] = await auditedBatch(env, db, [
+    db
+      .insert(orgSettings)
+      .select(whileAdmin)
+      .onConflictDoUpdate({
+        target: orgSettings.kind,
+        set: { value, updatedAt: new Date(now) },
+        setWhere: sql`${orgSettings.value} <> ${value}`,
+      }),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "ai_provider.source_set",
+      target: { type: "organization_ai", id: aiSourceKind },
+      detail: { source },
+    }),
+  ]);
+  if (written.meta.changes === 0) {
+    const still = await db.get<{ admin: number }>(
+      sql`SELECT ${activeMember(by.userId, ["admin"])} AS admin`
+    );
+    if (still.admin !== 1) {
+      throw roleErrors.create("role.forbidden");
+    }
+    return;
+  }
+  await wakeAiWaits(env);
+};
+
 /** The organization's AI providers over `/rpc`, for admins. */
 export class AiProvidersRpc extends CoreRpcTarget implements AiProvidersApi {
   readonly #env: Env;
@@ -557,6 +645,12 @@ export class AiProvidersRpc extends CoreRpcTarget implements AiProvidersApi {
   async remove(provider: AiProviderId): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await removeProvider(this.#env, person, provider);
+    });
+  }
+
+  async setSource(source: AiSource): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await setSource(this.#env, person, source);
     });
   }
 }

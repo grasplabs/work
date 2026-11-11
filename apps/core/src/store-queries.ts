@@ -44,7 +44,7 @@ import { requireSearchable, searchMatch } from "./store-search.ts";
 import type { PhysicalSearch } from "./store-search.ts";
 
 // How a business store answers a read (store-host.ts): a record by ID, or
-// a query's descriptor (sdk/src/database-reader.ts), executed against the store's
+// a query's descriptor (runtime/src/database-reader.ts), executed against the store's
 // own SQLite through the index it names, under the access the caller's
 // pinned schema declares. Everything here runs synchronously inside the
 // store's object, so one read sees one state of the store.

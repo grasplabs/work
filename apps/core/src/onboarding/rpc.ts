@@ -51,6 +51,8 @@ import type {
   OnboardingDocument,
   ShareDocumentInput,
 } from "@grasp-os/shared/onboarding-documents";
+import { setupPlaceSchema } from "@grasp-os/shared/onboarding-flow";
+import type { SetupPlace, SetupStepId } from "@grasp-os/shared/onboarding-flow";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
@@ -360,6 +362,28 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       );
       return await onboardingStore(this.#env).saveChoices(
         parsed,
+        actorOf(person)
+      );
+    });
+  }
+
+  async place(): Promise<SetupPlace> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).place();
+    });
+  }
+
+  async finishSteps(steps: SetupStepId[]): Promise<SetupPlace> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        setupPlaceSchema,
+        { done: steps }
+      );
+      return await onboardingStore(this.#env).finishSteps(
+        parsed.done,
         actorOf(person)
       );
     });

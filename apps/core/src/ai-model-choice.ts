@@ -1,12 +1,18 @@
-import { aiModelChoiceNowSchema } from "@grasp-os/shared/ai-providers";
+import {
+  aiModelChoiceNowSchema,
+  aiSourceSchema,
+  graspAi,
+} from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoiceNow,
   AiProviderId,
   AiProviderRoutes,
+  AiSource,
 } from "@grasp-os/shared/ai-providers";
 import { log } from "@grasp-os/shared/log";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { orgSettings } from "./db/core/schema.ts";
 import { parseModelRef } from "./model-catalog.ts";
@@ -68,6 +74,43 @@ export const readModelChoice = async (
   const stored = await readStoredChoice(env);
   return stored?.choice ?? null;
 };
+
+/** The setting's kind in `org_settings` for whose key the organization's AI runs on. */
+export const aiSourceKind = "ai_source";
+
+const storedSourceSchema = z.strictObject({ source: aiSourceSchema });
+
+/**
+ * Whose key the organization's AI runs on: its own until its admins chose
+ * Grasp's AI, and its own again when what is stored no longer parses.
+ * Never Grasp's key by default or by mistake: Grasp pays for every call
+ * on it.
+ */
+export const readAiSource = async (env: Pick<Env, "DB">): Promise<AiSource> => {
+  const [row] = await drizzle(env.DB)
+    .select({ value: orgSettings.value })
+    .from(orgSettings)
+    .where(eq(orgSettings.kind, aiSourceKind));
+  if (row === undefined) {
+    return "own";
+  }
+  let value: unknown = undefined;
+  try {
+    value = JSON.parse(row.value);
+  } catch {
+    value = undefined;
+  }
+  const parsed = storedSourceSchema.safeParse(value);
+  if (!parsed.success) {
+    log.warn("ai_source.unreadable", {});
+    return "own";
+  }
+  return parsed.data.source;
+};
+
+/** Whether this deployment has Grasp's key for Grasp's AI. */
+export const graspAiAvailable = (routes: AiProviderRoutes): boolean =>
+  routes.platform.includes(graspAi.provider);
 
 /** Whether `model` is one of `providers`. */
 const isModelOf = (
@@ -136,4 +179,22 @@ export const chosenModels = (
             : [now.defaultModel, ...now.fallbacks]
         ),
       ];
+};
+
+/**
+ * The models the organization's calls may use now, in order. On its own
+ * key, the ones its admins chose (`chosenModels`). On Grasp's AI, Grasp's
+ * one model and no other, whatever it chose or connected; none where this
+ * deployment has no key of Grasp's for it, never a model on its own key
+ * instead: a call goes on the key the organization chose, or nowhere.
+ */
+export const usableModels = (
+  routes: AiProviderRoutes,
+  choice: AiModelChoiceNow | null,
+  source: AiSource
+): string[] => {
+  if (source === "grasp") {
+    return graspAiAvailable(routes) ? [graspAi.model] : [];
+  }
+  return chosenModels(routes, choice);
 };

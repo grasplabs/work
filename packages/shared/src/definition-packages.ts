@@ -83,7 +83,11 @@ export const definitionPackageSchema = z.strictObject({
        */
       generated: z.record(z.string().min(1).max(512), sha256Schema),
     }),
-    /** The version's source tree, which hashes to `sourceTreeHash`. */
+    /**
+     * The version's source tree, but what Grasp generates under
+     * `server/_generated/`, which the destination generates anew: with it,
+     * the tree hashes to `sourceTreeHash`.
+     */
     files: filesSchema,
     /**
      * The version's App definition (@grasp-os/runtime's definition.ts), which

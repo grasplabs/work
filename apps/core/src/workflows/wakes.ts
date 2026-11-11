@@ -8,11 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
-import {
-  workflowResourceRuns,
-  workflowRunWakes,
-  workflowRuns,
-} from "../db/core/schema.ts";
+import { workflowResourceRuns, workflowRunWakes } from "../db/core/schema.ts";
 import { runEngine } from "./engine.ts";
 
 // The wakes core owes runs that wait on a person: an answer to one of
@@ -53,30 +49,25 @@ import { runEngine } from "./engine.ts";
 //   for holds connect ends by itself (a disconnect, a person removed, a
 //   binding revoked, an unknown outcome connect may now recover), and for
 //   holds of an App function's call, whose key names no step.
-// - A held side effect wakes only the run its own code waits in: an App's
-//   run for the App's call, an independent workflow's run for the
-//   workflow's (GRA-688), each by the run its key names, of that App or
-//   workflow, while it hasn't ended. An App's call an independent run's
-//   action made wakes nothing: an action's step is tried once
-//   (sealed-run.ts, `triedOnceCalls`), so nothing waits on it.
+// - A held side effect wakes only the run its own code waits in: an
+//   independent workflow's run for the workflow's (GRA-688), by the run
+//   its key names, of that workflow, while it hasn't ended. An App's call
+//   an independent run's action made wakes nothing: an action's step is
+//   tried once (sealed-run.ts, `triedOnceCalls`), so nothing waits on it.
 
 /** A wake a run is owed. */
 export interface Wake {
   /** The delivery's key: the engine takes it once. */
   id: string;
-  /** The run, as the engine knows it: an App's, unless `kind` says. */
+  /** The run, as the engine knows it. */
   runId: string;
-  /** An App's run (`workflow_runs`), or an independent workflow's. */
-  kind?: "app" | "resource";
   /** The event type the run's wait waits for. */
   type: string;
 }
 
-/** The run a wake's row names, an App's or an independent one's. */
-const runOfWake = (wake: {
-  runId: string | null;
-  resourceRunId: string | null;
-}): string => wake.runId ?? wake.resourceRunId ?? "";
+/** The run a wake's row names. */
+const runOfWake = (wake: { resourceRunId: string | null }): string =>
+  wake.resourceRunId ?? "";
 
 /** How long a wake is left to the request that owed it. */
 const repairAfterMs = 30_000;
@@ -140,7 +131,7 @@ export const oweWake = (
   db
     .insert(workflowRunWakes)
     .select(
-      sql`SELECT ${wake.id}, ${wake.kind === "resource" ? null : wake.runId}, ${wake.kind === "resource" ? wake.runId : null}, ${wake.type}, ${now}, ${now + repairAfterMs}, 0, ${resend ? now + resendMs : null} WHERE ${when}`
+      sql`SELECT ${wake.id}, NULL, ${wake.runId}, ${wake.type}, ${now}, ${now + repairAfterMs}, 0, ${resend ? now + resendMs : null} WHERE ${when}`
     )
     .onConflictDoNothing();
 
@@ -195,44 +186,29 @@ export const sendWake = async (env: Env, id: string): Promise<boolean> => {
 };
 
 /**
- * The run held side effect `idempotencyKey` of `subject`'s code waits in,
- * as a wake is owed to it, and what must hold for it to be owed: an App's
- * run of that App, or an independent run of that workflow, its key's,
- * that hasn't ended. None for a key of no step, nor for any other subject.
+ * What must hold for a wake to be owed to the run held side effect
+ * `idempotencyKey` of `subject`'s code waits in: an independent run of
+ * that workflow, its key's, that hasn't ended. None for a key of no step,
+ * nor for any other subject.
  */
 const waitingRunOf = (
   subject: CodeSubject | undefined,
   named: { runId: string }
-): { kind: "app" | "resource"; goesOn: SQL } | undefined => {
-  if (subject?.type === "app") {
-    return {
-      kind: "app",
-      goesOn: sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${and(
-        eq(workflowRuns.id, named.runId),
-        eq(workflowRuns.appId, subject.appId),
-        isNull(workflowRuns.endedAt)
-      )})`,
-    };
-  }
-  if (subject?.type === "workflow") {
-    return {
-      kind: "resource",
-      goesOn: sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${and(
+): SQL | undefined =>
+  subject?.type === "workflow"
+    ? sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${and(
         eq(workflowResourceRuns.id, named.runId),
         eq(workflowResourceRuns.workflowResourceId, subject.workflowId),
         isNull(workflowResourceRuns.endedAt)
-      )})`,
-    };
-  }
-  return undefined;
-};
+      )})`
+    : undefined;
 
 /**
  * Owes, and sends once `decide` is done, the wake of the run whose step's
  * side effect `idempotencyKey` names, when a person decides on it:
  * confirms, declines or resolves it (connect keeps the decision). Owed
- * only to a run `subject`'s code waits in (`waitingRunOf`): an App's run
- * of that App, or an independent run of that workflow, that hasn't ended;
+ * only to a run `subject`'s code waits in (`waitingRunOf`): an independent
+ * run of that workflow, that hasn't ended;
  * a key of no step owes nothing, and its run finds the decision at its
  * next check. Answers what `decide` does. A `decide` that throws wakes
  * the run only if connect decided all the same (`stillWaiting` says it no
@@ -253,7 +229,7 @@ export const wakingHeld = async <T>(
   }
   const db = drizzle(env.DB);
   const type = await heldWakeType(named.step);
-  const runGoesOn = waiting.goesOn;
+  const runGoesOn = waiting;
   // Each decision its own deliveries: one that was refused, and then made
   // again, wakes again. Owed first for a crash while connect decides
   // (`pending`): the repair sends it again, each time anew, until a day
@@ -264,7 +240,6 @@ export const wakingHeld = async <T>(
   const pending: Wake = {
     id: `held:${id}`,
     runId: named.runId,
-    kind: waiting.kind,
     type,
   };
   const decided: Wake = { ...pending, id: `held:${id}:decided` };

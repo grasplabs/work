@@ -5,7 +5,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
 import {
@@ -28,7 +28,6 @@ import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
-import { endLiveRuns } from "./runs.ts";
 import { person as identityOf } from "./sealed-apps.ts";
 import {
   descriptorOf,
@@ -432,8 +431,6 @@ const unavailableMail = async (
 };
 
 describe("a run's trace, read over the session API", () => {
-  afterEach(endLiveRuns);
-
   it("tells a try's retries of a failed step as that one step's attempts", async () => {
     const admin = await identityOf("admin");
     const builder = await signedInBuilder();

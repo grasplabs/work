@@ -1,4 +1,8 @@
-import { declaredWorkflows, workflowFunctions } from "@grasp-os/runtime/host";
+import {
+  declaredWorkflows,
+  workflowFunctions,
+  workflowQueryNames,
+} from "@grasp-os/runtime/host";
 import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
@@ -133,11 +137,27 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   of its journal.
 
 const queryPath =
-  /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})\.queries\.(?<name>run|canStart|runs|history|decisions|decision)$/u;
+  /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})\.queries\.(?<name>\w+)$/u;
+
+const queryNames: ReadonlySet<string> = new Set(workflowQueryNames);
+
+const isQueryName = (name: string | undefined): name is WorkflowQueryName =>
+  name !== undefined && queryNames.has(name);
+
+/** The workflow alias and query `contractId` names, if it names one. */
+const queryOf = (
+  contractId: string
+): { alias: string; name: WorkflowQueryName } | undefined => {
+  const groups = queryPath.exec(contractId)?.groups;
+  const name = groups?.name;
+  return groups?.alias === undefined || !isQueryName(name)
+    ? undefined
+    : { alias: groups.alias, name };
+};
 
 /** Whether `contractId` names one of a workflow reference's queries. */
 export const isWorkflowQueryPath = (contractId: string): boolean =>
-  queryPath.test(contractId);
+  queryOf(contractId) !== undefined;
 
 /**
  * Whether `contractId` names a query a decision's change may change for
@@ -146,26 +166,8 @@ export const isWorkflowQueryPath = (contractId: string): boolean =>
  * (page-workflows.ts, `seenRun`).
  */
 export const isDecisionQueryPath = (contractId: string): boolean => {
-  const name = queryPath.exec(contractId)?.groups?.name;
+  const name = queryOf(contractId)?.name;
   return name === "decisions" || name === "decision" || name === "run";
-};
-
-const names: ReadonlySet<string> = new Set([
-  "run",
-  "canStart",
-  "runs",
-  "history",
-  "decisions",
-  "decision",
-]);
-
-const toName = (name: string): WorkflowQueryName => {
-  if (!names.has(name)) {
-    throw operationErrors.create("function.not_found");
-  }
-  // SAFETY: checked against the query names just above.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return name as WorkflowQueryName;
 };
 
 /** A workflow query a reference resolved to, in a release. */
@@ -192,30 +194,31 @@ export const workflowQueryOf = (
   release: Release,
   reference: { readonly name: string; readonly kind: string }
 ): ResolvedWorkflowQuery => {
-  const match = queryPath.exec(reference.name)?.groups;
-  const alias = match?.alias ?? "";
-  const bound = declaredWorkflows(release.app, release.workflows).find(
-    (workflow) => workflow.alias === alias
-  );
-  const name = match?.name;
-  const operation =
-    bound === undefined || name === undefined
+  const query = queryOf(reference.name);
+  const bound =
+    query === undefined
       ? undefined
-      : workflowFunctions(bound).queries[toName(name)];
-  if (operation === undefined || name === undefined) {
+      : declaredWorkflows(release.app, release.workflows).find(
+          (workflow) => workflow.alias === query.alias
+        );
+  const fn =
+    query === undefined || bound === undefined
+      ? undefined
+      : workflowFunctions(bound).queries[query.name];
+  if (query === undefined || bound === undefined || fn === undefined) {
     throw operationErrors.create("function.not_found");
   }
-  if (reference.kind !== operation.kind) {
+  if (reference.kind !== fn.kind) {
     throw operationErrors.create("function.kind_mismatch");
   }
   return {
-    alias,
-    name: toName(name),
-    args: operation.args,
-    returns: operation.returns,
-    pinned: bound?.pinned,
+    alias: query.alias,
+    name: query.name,
+    args: fn.args,
+    returns: fn.returns,
+    pinned: bound.pinned,
     release,
-    decisionKeys: new Set(Object.keys(bound?.decisions ?? {})),
+    decisionKeys: new Set(Object.keys(bound.decisions ?? {})),
   };
 };
 
@@ -252,6 +255,12 @@ const rowStatuses: Readonly<Record<string, readonly string[]>> = {
 /** The most runs one page holds, and its size unless a page says. */
 const maxPageSize = 100;
 const defaultPageSize = 50;
+
+/** The size of the page `pagination` asks for, within `maxPageSize`. */
+const pageSizeOf = (pagination: Record<string, unknown>): number =>
+  typeof pagination.pageSize === "number"
+    ? Math.min(pagination.pageSize, maxPageSize)
+    : defaultPageSize;
 
 const cursorPattern = /^(?<at>\d{1,16}):(?<id>[\w-]{1,128})$/u;
 
@@ -1228,10 +1237,7 @@ const answerOf = async (
   switch (query.name) {
     case "runs": {
       const pagination = isRecord(args.pagination) ? args.pagination : {};
-      const size =
-        typeof pagination.pageSize === "number"
-          ? Math.min(pagination.pageSize, maxPageSize)
-          : defaultPageSize;
+      const size = pageSizeOf(pagination);
       const after = placeOf(pagination.cursor);
       const until = placeOf(pagination.endCursor);
       const page = await runsPage(
@@ -1257,10 +1263,7 @@ const answerOf = async (
         { query, binding },
         {
           ...(typeof args.runId === "string" ? { runId: args.runId } : {}),
-          size:
-            typeof pagination.pageSize === "number"
-              ? Math.min(pagination.pageSize, maxPageSize)
-              : defaultPageSize,
+          size: pageSizeOf(pagination),
           ...(after === undefined ? {} : { after }),
           ...(until === undefined ? {} : { until }),
         }
@@ -1286,10 +1289,7 @@ const answerOf = async (
         { query, bound: workflowId },
         runIdOf(args),
         {
-          size:
-            typeof pagination.pageSize === "number"
-              ? Math.min(pagination.pageSize, maxPageSize)
-              : defaultPageSize,
+          size: pageSizeOf(pagination),
           cursor: pagination.cursor,
           endCursor: pagination.endCursor,
         }

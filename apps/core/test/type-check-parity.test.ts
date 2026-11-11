@@ -1,5 +1,6 @@
 import { typeCheckerName } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
 import { generateModules } from "@grasp-os/runtime/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -48,7 +49,7 @@ const sealedServer = async (
   }
   return {
     ...files,
-    ...(await generateModules(inspected.manifest)),
+    ...(await generateModules(inspected.manifest, serverFunctionsIn(files))),
   };
 };
 

@@ -19,8 +19,12 @@ import {
   aiCredentialPlaceholder,
   aiProviderErrors,
   featuredModels,
+  graspAi,
 } from "@grasp-os/shared/ai-providers";
-import type { OrganizationProviderId } from "@grasp-os/shared/ai-providers";
+import type {
+  AiSource,
+  OrganizationProviderId,
+} from "@grasp-os/shared/ai-providers";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
@@ -34,14 +38,18 @@ import {
 } from "vite-plus/test";
 import { z } from "zod";
 
-import { spendMonth } from "../src/model-spend.ts";
-import { modelFailureOf, models } from "../src/models.ts";
+import { usableModels } from "../src/ai-model-choice.ts";
+import { monthSpend, spendMonth } from "../src/model-spend.ts";
+import { modelFailureOf, models, modelSettings } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { aiProvidersControlUrl, compatibleHost } from "./ai-providers-fake.ts";
 import type { PlannedReply, ProviderRequest } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformOpenAiKey } from "./connect-providers.ts";
+import {
+  platformAnthropicKey,
+  platformOpenAiKey,
+} from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
 import type { Answer } from "./model-provider.ts";
@@ -334,7 +342,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
     // Each test starts with no provider connected and no model chosen.
     await connectDb().prepare("DELETE FROM ai_provider_keys").run();
     await env.DB.prepare(
-      "DELETE FROM org_settings WHERE kind = 'ai_models'"
+      "DELETE FROM org_settings WHERE kind IN ('ai_models', 'ai_source')"
     ).run();
   });
 
@@ -1331,6 +1339,228 @@ describe("AI providers", { timeout: 60_000 }, () => {
         platform: ["anthropic", "openai", "elevenlabs"],
         noKey: "model.not_allowed",
         notPlatform: "model.invalid_call",
+      });
+    });
+  });
+
+  // Grasp's AI: the organization's own calls on Grasp's key, which Grasp
+  // pays the provider for. The ways it can go wrong, tried first:
+  //
+  // - Grasp's key used for an organization that never chose it: because
+  //   it has no provider of its own, or its own key stopped working.
+  // - Grasp's key used for any model but Grasp's one, or the
+  //   organization's own key used in its place once it chose Grasp's AI.
+  // - Someone but one of its own admins choosing it: a member, or Grasp's
+  //   staff, who would be choosing what Grasp is paid for.
+  // - Its use not told apart from Grasp's own features, or missing from
+  //   what the organization spent.
+  describe("Grasp's AI, on Grasp's key", () => {
+    /** How many requests carried Grasp's Anthropic key so far. */
+    const onGraspKey = async (): Promise<number> => {
+      const carried = await carrying(platformAnthropicKey);
+      return carried.length;
+    };
+
+    it("is never used until one of the organization's own admins chooses it: not with no provider of its own, nor when its own key is refused", async () => {
+      const { admin: by } = await admin();
+      const before = await onGraspKey();
+
+      const listing = await by.api.aiProviders.list();
+      const noProvider = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+      // Its own Anthropic key, which Anthropic refuses.
+      const key = newKey();
+      await added(anthropicCase, key);
+      await by.api.aiProviders.setModels({ defaultModel: graspAi.model });
+      await plan(key, [{ status: 401 }]);
+      const refusedKey = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+
+      expect({
+        source: listing.source,
+        offered: listing.grasp,
+        noProvider,
+        refusedKey,
+        onGraspKey: (await onGraspKey()) - before,
+      }).toStrictEqual({
+        source: "own",
+        offered: {
+          available: true,
+          model: { model: graspAi.model, name: "Claude Sonnet 5.5" },
+          whereItRuns: "Anthropic, United States",
+        },
+        noProvider: "model.no_provider",
+        refusedKey: "model.provider_key_failed",
+        onGraspKey: 0,
+      });
+    });
+
+    it("runs the organization's calls on Grasp's one model with Grasp's key, recorded as its own use of Grasp's AI", async () => {
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      await plan(platformAnthropicKey, [
+        answered("anthropic-messages", "Hello, Ada."),
+      ]);
+      const trigger = newPerson();
+      const before = await monthSpend(env, spendMonth(env));
+
+      const answer = await models(env).call(
+        await callOf(graspAi.model, { trigger })
+      );
+
+      const [event] = await auditedFor(trigger.userId, 1);
+      const rows = await recordedUsage(spendMonth(env), 1, {
+        credential: "platform",
+        personId: trigger.userId,
+      });
+      const spent = await monthSpend(env, spendMonth(env));
+      const { models: usable } = await modelSettings(env);
+      const listing = await by.api.aiProviders.list();
+      expect({
+        text: answer.text,
+        usable,
+        source: listing.source,
+        // What it spent counts as the organization's, on its spend overview.
+        counted: spent.total > before.total,
+      }).toStrictEqual({
+        text: "Hello, Ada.",
+        usable: [graspAi.model],
+        source: "grasp",
+        counted: true,
+      });
+      await expect(placesOf(platformAnthropicKey)).resolves.toStrictEqual(
+        onlyAt(anthropicCase)
+      );
+      expect(event?.detail).toMatchObject({
+        outcome: "answered",
+        credential: "platform",
+        region: "us",
+      });
+      expect(rows).toMatchObject([
+        {
+          model: graspAi.model,
+          credential: "platform",
+          feature: "organization",
+          inputTokens: 1000,
+          outputTokens: 100,
+        },
+      ]);
+    });
+
+    it("refuses every model but Grasp's one on Grasp's AI, and never uses the organization's own key in its place", async () => {
+      const own = await connected(openaiCase);
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      const before = await onGraspKey();
+
+      const ownModel = await outcome(
+        models(env).call(await callOf(openaiCase.model))
+      );
+      const otherClaude = await outcome(
+        models(env).call(await callOf("anthropic/claude-opus-5-5"))
+      );
+      const ownKeyUsed = await carrying(own);
+
+      expect({
+        ownModel,
+        otherClaude,
+        ownKeyUsed: ownKeyUsed.length,
+        onGraspKey: (await onGraspKey()) - before,
+      }).toStrictEqual({
+        ownModel: "model.not_allowed",
+        otherClaude: "model.not_allowed",
+        ownKeyUsed: 0,
+        onGraspKey: 0,
+      });
+    });
+
+    it("goes back to the organization's own key when an admin chooses it again", async () => {
+      const own = await connected(openaiCase);
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      await by.api.aiProviders.setSource("own");
+      await plan(own, [answered(openaiCase.api, "Hello again.")]);
+      const before = await onGraspKey();
+
+      const answer = await models(env).call(await callOf(openaiCase.model));
+      const onGrasp = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+
+      expect({
+        text: answer.text,
+        onGrasp,
+        onGraspKey: (await onGraspKey()) - before,
+      }).toStrictEqual({
+        text: "Hello again.",
+        onGrasp: "model.not_allowed",
+        onGraspKey: 0,
+      });
+      await expect(placesOf(own)).resolves.toStrictEqual(onlyAt(openaiCase));
+    });
+
+    it("is chosen only by the organization's own admins, never a member or Grasp's staff, and on record in the admin's name", async () => {
+      const { admin: by } = await admin();
+      const member = await signedInApi(idp, "user");
+      const { core } = await openRpc(
+        await signedIn(idp, "grasp-staff", staffPerson())
+      );
+      const staff = core.authenticate();
+
+      const byMember = await outcome(member.api.aiProviders.setSource("grasp"));
+      const byStaff = await outcome(staff.aiProviders.setSource("grasp"));
+      const unknown = await outcome(
+        // What the page's own types would never send.
+        by.api.aiProviders.setSource(z.custom<AiSource>().parse("anyone"))
+      );
+      const kept = await by.api.aiProviders.list();
+      await by.api.aiProviders.setSource("grasp");
+      // The same choice again changes nothing, and records nothing.
+      await by.api.aiProviders.setSource("grasp");
+
+      const audited = await auditedFor(by.userId, 1);
+      expect({
+        byMember,
+        byStaff,
+        unknown,
+        kept: kept.source,
+        set: audited
+          .filter(({ action }) => action === "ai_provider.source_set")
+          .map(({ detail }) => detail),
+      }).toStrictEqual({
+        byMember: "role.forbidden",
+        byStaff: "role.forbidden",
+        unknown: "ai_provider.invalid",
+        kept: "own",
+        set: [{ source: "grasp" }],
+      });
+    });
+
+    it("has no model to use where the deployment has no key of Grasp's for it, never the organization's own instead", () => {
+      const choice = { defaultModel: openaiCase.model, fallbacks: [] };
+      const own = { provider: "openai" as const, baseUrl: null };
+      expect({
+        noKey: usableModels(
+          { organization: [own], platform: ["openai"] },
+          choice,
+          "grasp"
+        ),
+        keyed: usableModels(
+          { organization: [own], platform: ["anthropic"] },
+          choice,
+          "grasp"
+        ),
+        own: usableModels(
+          { organization: [own], platform: ["anthropic"] },
+          choice,
+          "own"
+        ),
+      }).toStrictEqual({
+        noKey: [],
+        keyed: [graspAi.model],
+        own: [openaiCase.model],
       });
     });
   });

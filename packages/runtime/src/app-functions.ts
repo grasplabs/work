@@ -36,12 +36,15 @@ const reservedSegments: ReadonlyMap<string, string> = new Map([
 const referenceKeys: ReadonlySet<string> = new Set(["name", "then"]);
 
 /**
- * Refuses `segments`, a function's path, where it can't be one: past the
- * bounds of a path, holding a segment that isn't an identifier or that a
- * reference answers itself, or starting at a segment the platform keeps.
- * `where` names the module or export, for the message.
+ * Why `segments` can't be a function's path, `where` naming the module or
+ * export: past the bounds of a path, holding a segment that isn't an
+ * identifier or that a reference answers itself, or starting at a segment
+ * the platform keeps; undefined when it can be one.
  */
-const checkPath = (segments: readonly string[], where: string): string => {
+const pathProblem = (
+  segments: readonly string[],
+  where: string
+): string | undefined => {
   const path = segments.join(".");
   const named = segments.every((segment) =>
     operationSegmentPattern.test(segment)
@@ -51,23 +54,30 @@ const checkPath = (segments: readonly string[], where: string): string => {
     segments.length > operationPathMaxSegments ||
     path.length > operationPathMaxLength
   ) {
-    refuse(
-      `${where} doesn't make a function path of up to ${operationPathMaxSegments} identifiers (letters, digits and _, not starting with a digit), each folder and file name included${named ? `: \`${path}\`` : ""}.`
-    );
+    return `${where} doesn't make a function path of up to ${operationPathMaxSegments} identifiers (letters, digits and _, not starting with a digit), each folder and file name included${named ? `: \`${path}\`` : ""}.`;
   }
   const answered = segments.find((segment) => referenceKeys.has(segment));
   if (answered !== undefined) {
-    refuse(
-      `${where} can't be a function's path: \`${answered}\` is a name a reference itself answers.`
-    );
+    return `${where} can't be a function's path: \`${answered}\` is a name a reference itself answers.`;
   }
   const reservedFor = reservedSegments.get(segments[0] ?? "");
   if (reservedFor !== undefined) {
-    refuse(
-      `${where} can't be a function's path: \`${segments[0] ?? ""}\` is the platform's, for ${reservedFor}.`
-    );
+    return `${where} can't be a function's path: \`${segments[0] ?? ""}\` is the platform's, for ${reservedFor}.`;
   }
-  return path;
+  return undefined;
+};
+
+/** Whether a function can register at `segments` (`pathProblem`). */
+export const canRegisterAt = (segments: readonly string[]): boolean =>
+  pathProblem(segments, "") === undefined;
+
+/** `segments` as a function's path, refused where it can't be one (`pathProblem`). */
+const checkPath = (segments: readonly string[], where: string): string => {
+  const problem = pathProblem(segments, where);
+  if (problem !== undefined) {
+    refuse(problem);
+  }
+  return segments.join(".");
 };
 
 /**

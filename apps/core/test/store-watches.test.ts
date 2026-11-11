@@ -101,7 +101,6 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
     await objectOf(store).resetData(store.id, {
       actor: { type: "person", userId: "ada" },
       app: "notes",
-      everything: true,
       apply: applied(v1),
     });
 

@@ -7,8 +7,9 @@ import {
 // The modules the host adds to every build of an App's server code
 // before it knows anything of its registration: the server builders and
 // the data model's types under `server/_generated/`, the same for every
-// App. The references (`api`, `internal`) come from its manifest
-// (`generateModules`), or stand in for it until then (`symbolicModules`),
+// App. The references (`api`, `internal`) come from the functions its
+// server modules' syntax declares (`generateModules`), or stand in for
+// them while it is first inspected (`symbolicModules`),
 // and the entry the host runs from its file list (the compiler's build).
 
 /** The modules the host adds to every build of an App's server code. */

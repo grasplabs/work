@@ -1,20 +1,14 @@
 import { brainErrors } from "@grasp-os/brain/contract";
 import type { MemoryPack } from "@grasp-os/brain/contract";
 import { knowledgeErrors } from "@grasp-os/brain/knowledge";
-import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { PinnedVersion, VersionRef } from "@grasp-os/brain/recall-store";
-import { permissionIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, PermissionId, RunId } from "@grasp-os/shared/ids";
-import type { Authority } from "@grasp-os/shared/permissions";
+import type { PermissionId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { runBrainEvidence } from "../db/core/schema.ts";
-import { readAsDelegate } from "../knowledge/binding.ts";
-import { brainOf } from "../knowledge/ports.ts";
-import { authorize } from "../permissions.ts";
 
 // What a workflow run recalled stays pinned to the run (GRA-299; the threat
 // model and its review are on the issue): every document version its
@@ -32,17 +26,6 @@ import { authorize } from "../permissions.ts";
 // reader: a purge that lands between the two pins the text as purged.
 // The purge's erasure records (GRA-1121) close that, from a mark taken
 // before the recall; until they're on main, that gap stays open.
-
-/** The run whose evidence is kept, as the host knows it. */
-export interface EvidenceRun {
-  runId: RunId;
-  app: AppId;
-  authority: Authority;
-}
-
-/** The run's context, as its reads name it. */
-const contextOf = ({ app, runId }: EvidenceRun) =>
-  ({ type: "run", appId: app, runId }) as const;
 
 /**
  * Most document refs one run keeps (one per document and binding): far
@@ -164,49 +147,4 @@ export const isAccessRefusal = (error: unknown): boolean => {
     knowledge === "knowledge.not_found" ||
     permissionErrors.codeOf(error) === "permission.denied"
   );
-};
-
-/**
- * Refuses, as `brain.revoked`, anything leaving a run that recalled what
- * it may no longer read, or what a purge rewrote since: under each
- * binding's own `brain` permission, and the App's grants and its person's
- * access, as they are now. A passing
- * failure (the Brain out of reach, say) propagates as itself.
- */
-export const requireRunEvidenceReadable = async (
-  env: Env,
-  run: EvidenceRun
-): Promise<void> => {
-  const rows = await evidenceOf(env, run.runId);
-  if (rows.length === 0) {
-    return;
-  }
-  const context = contextOf(run);
-  try {
-    for (const permissionId of new Set(rows.map((row) => row.permissionId))) {
-      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
-      await authorize(
-        env,
-        run.authority,
-        { type: "platform" },
-        "brain",
-        permissionIdSchema.parse(permissionId),
-        context
-      );
-    }
-    await readAsDelegate(
-      env,
-      run.authority,
-      context,
-      undefined,
-      async (reader) => {
-        await d1BrainStore(brainOf(env)).requireDocumentsReadable(reader, rows);
-      }
-    );
-  } catch (error) {
-    if (isAccessRefusal(error)) {
-      throw brainErrors.create("brain.revoked");
-    }
-    throw error;
-  }
 };

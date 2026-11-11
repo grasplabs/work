@@ -41,8 +41,9 @@ export const appPathSchema = z
         // the object's prototype, not a file.
         !Object.hasOwn(Object.prototype, path) &&
         // The modules Grasp generates for an App, as Convex's
-        // `_generated/`: never one of its own files.
-        !path.startsWith("server/_generated/")
+        // `_generated/`: never one of its own files, in any case (an
+        // App's paths never differ only in case).
+        !`${path.toLowerCase()}/`.startsWith("server/_generated/")
       );
     },
     {
@@ -928,14 +929,6 @@ export interface AppsApi {
    * audited. Its data, members and grants are kept for `restore`.
    */
   archive: (app: string) => Promise<App>;
-  /**
-   * Resets the data of an App stored before schemas were applied by
-   * stable ID (`migration.metadata_missing`), for its builders, never
-   * Grasp staff: refused for any other (`migration.reset_refused`). Its
-   * current version's schema is applied to the empty store. Audited as
-   * `store.reset`.
-   */
-  resetLegacyData: (app: string) => Promise<void>;
   /**
    * Resets every record of an App for good, for the organization's
    * admins, never Grasp staff nor builders, confirmed by the App's `name`

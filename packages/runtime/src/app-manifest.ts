@@ -12,6 +12,7 @@ import { readPermissionDeclaration } from "./permission-read.ts";
 import type { AppPermission } from "./permission-types.ts";
 import { readSchemaManifest } from "./schema-manifest-read.ts";
 import type { FunctionKind, Visibility } from "./server-function.ts";
+import { builderNames } from "./server-modules.ts";
 import { serverModule } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
@@ -46,16 +47,6 @@ const entriesOf = (value: unknown, what: string): [string, unknown][] => {
   }
   return Object.entries(value);
 };
-
-/** The constructor name for a kind and visibility, e.g. `internalQuery`. */
-const constructorOf = {
-  public: { query: "query", mutation: "mutation", action: "action" },
-  internal: {
-    query: "internalQuery",
-    mutation: "internalMutation",
-    action: "internalAction",
-  },
-} as const;
 
 const kinds: ReadonlySet<unknown> = new Set(["query", "mutation", "action"]);
 const visibilities: ReadonlySet<unknown> = new Set(["public", "internal"]);
@@ -312,7 +303,7 @@ export const readAppManifest = (text: string): AppManifest => {
   for (const { path, kind, visibility, declaration } of functions) {
     const construct: unknown = Reflect.get(
       server,
-      constructorOf[visibility][kind]
+      builderNames[visibility][kind]
     );
     if (typeof construct !== "function") {
       return refuse(`\`${path}\` has no constructor.`);

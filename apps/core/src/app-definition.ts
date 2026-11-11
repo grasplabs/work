@@ -4,6 +4,7 @@ import {
   definitionManifest,
   definitionSources,
   generatedFiles,
+  generatedServerSources,
   validatorSource,
 } from "@grasp-os/runtime/definition";
 import type {
@@ -14,6 +15,11 @@ import type {
   DefinitionOperation,
   ValueDescriptor,
 } from "@grasp-os/runtime/definition";
+import {
+  generatedPaths as hostGeneratedPaths,
+  isGeneratedServerFile,
+  isUnderGeneratedServerFolder,
+} from "@grasp-os/runtime/host";
 import type { AppManifest, SchemaManifest } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type {
@@ -32,20 +38,50 @@ import { catalogOf, planSchemaChange } from "./schema-changes.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 
 // An App's definition (@grasp-os/runtime's definition.ts), what the App is,
-// and the config and schema generated from it among its files. The
-// definition is no file: each version holds it as metadata (apps.ts), a
-// chat's draft its own copy (workspace.ts). Every version the App
-// commits holds its config and schema exactly as its definition generates
-// them (`withDefinitionCode`), and generation goes one way: nothing reads
-// a definition back from code. A chat's agent changes the definition
-// only with the definition tools (`define`): `write` refuses the two
-// generated files, naming the tools, so the definition and the code
-// generated from it never part.
+// and the code generated among its files. The definition is no file:
+// each version holds it as metadata (apps.ts), a chat's draft its own
+// copy (workspace.ts). Every write of an App's files, a draft's and a
+// commit's alike, writes what is generated as `withGeneratedCode`
+// generates it, whatever the files held: the config and schema from the
+// definition, and `server/_generated/` (the references, the server
+// constructors and the data model) from the definition and the server
+// modules' syntax, as Convex's `convex/_generated/` is part of the
+// project. Generation goes one way: nothing reads a definition back from
+// code. A chat's agent changes the definition only with the definition
+// tools (`define`): `write` refuses the generated files, so the
+// definition, the code and what is generated from them never part.
+//
+// Threat model of `server/_generated/` in the App's files, and how each
+// is closed:
+//
+// - A builder or the agent writes it, to reference a function the code
+//   doesn't declare, hide one, or type a page's calls as something else:
+//   no write names a path under `server/_generated/`, in any case (the
+//   path schema, shared's apps.ts; `refuseGeneratedFiles`), and every
+//   write generates it again anyway, dropping anything else there.
+// - A copy that is stale or forged in storage (a tree written another
+//   way, or by an earlier generator): nothing builds from it. A seal
+//   generates what is generated again from the version's files and
+//   definition and seals that (app-releases.ts, `sealedSource`); pages,
+//   previews and checks build with what they generate themselves
+//   (draft-references.ts). A stale copy is only ever an earlier
+//   generator's, which is no reason to refuse a version.
+// - A definition change not reflected in it (a workflow's events, a
+//   files or links permission): it is generated from the very
+//   definition each write saves, and again from it as a version is
+//   sealed.
+// - A function the syntax doesn't read (an alias of a builder, a
+//   wrapper): it has no reference, and a seal refuses it by name
+//   (`version.function_undeclared`), so a page never misses one a
+//   release registers.
 
-/** The files generated from the definition, which only Grasp writes. */
+/** The files Grasp generates among an App's, which only Grasp writes. */
 export const generatedPaths: ReadonlySet<string> = new Set([
   generatedFiles.config,
   generatedFiles.schema,
+  ...Object.values(hostGeneratedPaths).filter((path) =>
+    isGeneratedServerFile(path)
+  ),
 ]);
 
 /**
@@ -54,24 +90,41 @@ export const generatedPaths: ReadonlySet<string> = new Set([
  * the same file.
  */
 export const refuseGeneratedFiles = (paths: Iterable<string>): void => {
-  const named = [...paths].filter((path) =>
-    generatedPaths.has(path.toLowerCase())
+  const generated = new Set(
+    [...generatedPaths].map((path) => path.toLowerCase())
   );
+  const named = [...paths].filter((path) => generated.has(path.toLowerCase()));
   if (named.length > 0) {
     throw appErrors.create("app.generated_file", { issues: named.toSorted() });
   }
 };
 
 /**
- * `files` with their config and schema as `definition` generates them,
- * changed in place, whatever they held: every write of an App's files
- * comes through here, the definition tools' and a commit's alike.
+ * `files` with what is generated among them as `definition` and their
+ * own server modules generate it (`generatedServerSources`), changed in
+ * place, whatever they held: every write of an App's files comes through
+ * here, the definition tools' and a commit's alike, and so does every
+ * seal (app-releases.ts).
  */
-export const withDefinitionCode = (
+export const withGeneratedCode = (
   files: Map<string, string>,
   definition: AppDefinition
 ): void => {
   for (const [path, source] of Object.entries(definitionSources(definition))) {
+    files.set(path, source);
+  }
+  // `server/_generated/` holds what Grasp generates and nothing else,
+  // whatever a tree written another way held there.
+  for (const path of files.keys()) {
+    if (isUnderGeneratedServerFolder(path)) {
+      files.delete(path);
+    }
+  }
+  const generated = generatedServerSources(
+    Object.fromEntries(files),
+    definition
+  );
+  for (const [path, source] of Object.entries(generated)) {
     files.set(path, source);
   }
 };
@@ -485,7 +538,9 @@ export type DraftOperation =
   | {
       /**
        * Declares, for workflow permission `alias`, the events, listen
-       * tasks and decisions version `version` of workflow `workflow` has.
+       * tasks and decisions version `version` of workflow `workflow` has,
+       * and records that version as the one the App binds there once the
+       * App version is current.
        */
       readonly op: "bindWorkflow";
       readonly alias: string;

@@ -7,13 +7,13 @@ import type { Crumb } from "./frame/site-header.tsx";
  * says the reader may open it; otherwise only its name.
  */
 export const decisionSource = (decision: DecisionView): Crumb => {
-  const { workflowResource, workflow } = decision;
-  if (decision.opens === true && workflowResource !== undefined) {
+  const { workflowResource } = decision;
+  if (decision.opens === true) {
     return {
       label: workflowResource.name,
       to: "/workflows/$workflow",
       params: { workflow: workflowResource.id },
     };
   }
-  return { label: workflowResource?.name ?? workflow };
+  return { label: workflowResource.name };
 };

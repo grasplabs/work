@@ -81,9 +81,8 @@ export interface HostedRun {
    */
   rootRunId?: RunId;
   /**
-   * The run its work is charged to, when another than its lineage root,
-   * which it inherits (quotas.ts, `accountClaimed`):
-   * from its row, as the root is. None for a run charged to its lineage's
+   * The run its work is charged to, when another than its lineage root
+   * (quotas.ts, `triggeredAccountClaimed`): from its row, as the root is. None for a run charged to its lineage's
    * own.
    */
   accountRunId?: RunId;
@@ -1421,7 +1420,7 @@ export interface RunKind {
    * (`attemptSettled`) and past every check of the host's, its lease held
    * and its code done: a sealed run writes what the step keeps in its
    * workflow's state (sealed-run.ts). The failure it answers fails the
-   * step instead. An App's run records the step as it is.
+   * step instead. Without it, the step is recorded as it is.
    */
   stepRecording?: (attempt: StepAttempt) => Promise<StepError | undefined>;
   /**

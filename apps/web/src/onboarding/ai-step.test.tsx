@@ -70,7 +70,21 @@ const fakeAiProviders = (tested: (model: string) => AiProviderTest) => {
   const api = {
     list: async (): Promise<AiProvidersListing> => {
       await Promise.resolve();
-      return { providers, offered, choice, platform: [] };
+      return {
+        source: "own",
+        grasp: {
+          available: false,
+          model: {
+            model: "anthropic/claude-sonnet-5-5",
+            name: "Claude Sonnet 5.5",
+          },
+          whereItRuns: "Anthropic, United States",
+        },
+        providers,
+        offered,
+        choice,
+        platform: [],
+      };
     },
     add: async (request: AiProviderAdd): Promise<AiProviderListed> => {
       await Promise.resolve();
