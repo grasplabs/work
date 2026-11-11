@@ -956,6 +956,8 @@ interface Loaded {
     rotationLiveAt: Date | null;
     signIn: string | null;
     staffWindow: string | null;
+    /** The onboarding its company starts with, by name; null for all of it. */
+    startingFlow: string | null;
     teamsBot: string | null;
     /** Where its data is kept: what its Durable Objects are made in. */
     jurisdiction: "eu" | "none";
@@ -1447,6 +1449,7 @@ const coreVarsOf = (
     clientId: loaded.held.clientId,
     signIn: loaded.client.signIn,
     staffWindow: loaded.client.staffWindow,
+    startingFlow: loaded.client.startingFlow,
     domain: context.router.domain,
     apps: context.signInApps ?? {},
     ...(context.router.oauthRelay === undefined
@@ -1526,6 +1529,7 @@ const load = async (
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
       staffWindow: clients.staffWindow,
+      startingFlow: clients.startingFlow,
       teamsBot: clients.teamsBot,
       jurisdiction: clients.jurisdiction,
     })

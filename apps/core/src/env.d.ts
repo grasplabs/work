@@ -35,6 +35,14 @@ interface __BaseEnv_Env {
    */
   PLATFORM_AI_USUAL_HOSTS?: unknown;
   PLATFORM_CHANGE?: unknown;
+  /**
+   * The flow the company's onboarding starts with (src/onboarding/store.ts):
+   * the name of one of the flows staff start from, read with
+   * `startingFlowOf` (the shared onboarding-flow module), as staff chose it
+   * in Grasp's admin when they added the company. Read once, as its
+   * onboarding is first kept; unset, it starts with all of it.
+   */
+  ONBOARDING_START?: unknown;
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
   /**

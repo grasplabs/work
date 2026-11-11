@@ -398,13 +398,19 @@ export interface CoreConfigInputs {
    * own origin, which needs its own OAuth apps.
    */
   oauthRelay?: Stage;
+  /**
+   * The onboarding its company starts with, as its record keeps it
+   * (`clients.startingFlow`); null or absent for all of it.
+   */
+  startingFlow?: string | null;
 }
 
 /**
  * The deployment config vars a deploy derives for a client's core:
  * `RUNTIME_PROFILE`, `CLIENT_ID` and `MAIL_FROM` (`onboardingSender`)
- * always, `SIGN_IN` when its record has sign-in. Every model key is its
- * connect's. `CLIENT_ID` is what core answers the provisioning probe with
+ * always, `SIGN_IN` when its record has sign-in, `ONBOARDING_START` when
+ * its record names the onboarding it starts with (core reads it once, as
+ * its onboarding is first kept). Every model key is its connect's. `CLIENT_ID` is what core answers the provisioning probe with
  * (src/hosting/probe.ts).
  */
 export const derivedCoreConfig = ({
@@ -414,6 +420,7 @@ export const derivedCoreConfig = ({
   apps,
   oauthRelay,
   staffWindow = null,
+  startingFlow = null,
 }: CoreConfigInputs): Record<string, unknown> => {
   const config = signInOf(
     clientId,
@@ -428,5 +435,6 @@ export const derivedCoreConfig = ({
     CLIENT_ID: clientId,
     MAIL_FROM: onboardingSender(clientId, domain),
     ...(config === undefined ? {} : { SIGN_IN: config }),
+    ...(startingFlow === null ? {} : { ONBOARDING_START: startingFlow }),
   };
 };
