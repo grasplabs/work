@@ -2,7 +2,7 @@ import { appLimits } from "@grasp-os/shared/app-limits";
 import { appMaxFunctions } from "@grasp-os/shared/function-limits";
 import { describe, expect, test } from "vite-plus/test";
 
-import { emptyDefinition } from "../src/definition.ts";
+import { emptyDefinition } from "../src/definition-types.ts";
 import { parseProgram } from "../src/oxc-parse.ts";
 import { declaredFunctionsIn } from "../src/server-modules.ts";
 import type { Declared } from "../src/server-modules.ts";

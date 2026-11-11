@@ -2,6 +2,7 @@ import type {
   FileDescription,
   FileType,
 } from "@grasp-os/shared/app-file-limits";
+import { isPlainObject } from "@grasp-os/shared/json";
 
 import { readRejection } from "./call-answers.ts";
 import { clientError, GraspError } from "./client-error.ts";
@@ -9,7 +10,6 @@ import type { FilesReference } from "./file-link-references.ts";
 import { readFileRef, readFilesReference } from "./file-references.ts";
 import type { Declaring, FileRef } from "./file-references.ts";
 import type { FileTransport, TransferProgress } from "./file-transport.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // The session client's files: what `useUpload`, `useFile`
 // and `client.files` do with a files resource the App declared, over the

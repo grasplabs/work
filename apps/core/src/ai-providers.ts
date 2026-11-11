@@ -61,6 +61,7 @@ import { keyReplaced, providerHealthOf } from "./model-usage.ts";
 import type { ProviderHealth } from "./model-usage.ts";
 import { models } from "./models.ts";
 import { platformAi } from "./platform-ai.ts";
+import { usualHostsOf } from "./platform-hosts.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -193,12 +194,14 @@ const refusalOf = (error: unknown): Error => {
  * (`platformRouteOf`).
  */
 const platformProvider = (
+  env: Env,
   provider: AiProviderId
 ): NonNullable<AiPlatformUse["provider"]> => ({
   id: provider,
   label: aiProviders[provider].label,
   whereItRuns:
-    platformRouteOf(provider)?.whereItRuns ?? aiProviders[provider].whereItRuns,
+    platformRouteOf(provider, usualHostsOf(env))?.whereItRuns ??
+    aiProviders[provider].whereItRuns,
 });
 
 /**
@@ -208,25 +211,29 @@ const platformProvider = (
  * conversion stays on the deployment while Grasp has no key for its
  * provider (knowledge/extract.ts, `extractorFor`).
  */
-const platformUses = (keyed: readonly AiProviderId[]): AiPlatformUse[] => {
+const platformUses = (
+  env: Env,
+  keyed: readonly AiProviderId[]
+): AiPlatformUse[] => {
   const { conversion, transcription, speech } = platformAi;
   return [
     {
       feature: "conversion",
       provider: keyed.includes(conversion.provider)
-        ? platformProvider(conversion.provider)
+        ? platformProvider(env, conversion.provider)
         : null,
     },
     {
       feature: "transcription",
-      provider: platformProvider(transcription.provider),
+      provider: platformProvider(env, transcription.provider),
     },
-    { feature: "speech", provider: platformProvider(speech.provider) },
+    { feature: "speech", provider: platformProvider(env, speech.provider) },
   ];
 };
 
 /** Grasp's AI as an organization's admins see it: its one model, where it runs, and whether it can be chosen here. */
 const graspListed = (
+  env: Env,
   routes: AiProviderRoutes,
   month: GraspAiListed["month"]
 ): GraspAiListed => {
@@ -237,7 +244,7 @@ const graspListed = (
     available: model !== undefined && graspAiAvailable(routes),
     model: model ?? { model: graspAi.model, name: graspAi.model },
     whereItRuns:
-      platformRouteOf(graspAi.provider)?.whereItRuns ??
+      platformRouteOf(graspAi.provider, usualHostsOf(env))?.whereItRuns ??
       aiProviders[graspAi.provider].whereItRuns,
     month,
   };
@@ -255,7 +262,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
   ]);
   return {
     source,
-    grasp: graspListed(routes, month),
+    grasp: graspListed(env, routes, month),
     providers: keys.map((key) => listed(key, health)),
     offered: organizationProviderIds.map((provider) => ({
       provider,
@@ -268,7 +275,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       keys.map(({ provider }) => provider),
       choice
     ),
-    platform: platformUses(routes.platform),
+    platform: platformUses(env, routes.platform),
   };
 };
 

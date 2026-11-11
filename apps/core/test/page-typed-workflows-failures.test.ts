@@ -302,7 +302,7 @@ describe(
       }).toStrictEqual({
         canStart: false,
         run: null,
-        runs: "resource.unavailable",
+        runs: "permission.unavailable",
         start: "app.preview_side_effect",
         runsStarted: 1,
       });

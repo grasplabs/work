@@ -153,6 +153,29 @@ describe("the built-in blueprints' build", () => {
     expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });
 
+  it("embeds a built-in without what Grasp generates from its server code, which its install generates again", () => {
+    const out = build(
+      fixture("generated", {
+        ...schema,
+        "server/_generated/server.ts": "export const query = 1;\n",
+        "server/_generated/extra.ts": "export const extra = 1;\n",
+      })
+    );
+    expect(embedded(out)).toStrictEqual([
+      {
+        id: "generated",
+        name: "Fixture",
+        description: "A test's built-in.",
+        collections: [],
+        permissions: [],
+        contracts: [],
+        workflows: [],
+        definition: definitionText(fixtureDefinition),
+        files: schema,
+      },
+    ]);
+  });
+
   it("embeds the workflows a built-in ships, their definitions' text, and the contracts they bind", () => {
     const definition =
       '{"$schema":"https://grasp.work/schemas/grasp-workflow/2.json","steps":[]}';

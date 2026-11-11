@@ -13,6 +13,26 @@
   "compatibilityDate": "2026-09-15",
   "createdAt": "2026-01-01T00:00:00.000Z",
   "manifestVersion": 1,
+  "modelFiles": [
+    {
+      "name": "fixture-int8/tokenizer.bin",
+      "r2Key": "blobs/models/d633ef61176913eab725a8f7d973224f2958468f85617a09f246f3da735aa8c5",
+      "sha256": "d633ef61176913eab725a8f7d973224f2958468f85617a09f246f3da735aa8c5",
+      "size": 8741
+    },
+    {
+      "name": "fixture-int8/encoder-int8.bin",
+      "r2Key": "blobs/models/e8416cfefc9be66a74b2032e85f23d49afbc10124cb4fa36737801c64bb08fd3",
+      "sha256": "e8416cfefc9be66a74b2032e85f23d49afbc10124cb4fa36737801c64bb08fd3",
+      "size": 267328
+    },
+    {
+      "name": "fixture-int8/tokens-int8.bin",
+      "r2Key": "blobs/models/961e61f5be8051cdfcd3017b525f493e96631b4dcdbe65e795a474ec0cd555e9",
+      "sha256": "961e61f5be8051cdfcd3017b525f493e96631b4dcdbe65e795a474ec0cd555e9",
+      "size": 69068
+    }
+  ],
   "notes": "feat(core): a fixture",
   "packages": {
     "zod": "0.0.0-fixture"
@@ -170,6 +190,16 @@
           "type": "durable_object_namespace"
         },
         {
+          "class_name": "BrainStore",
+          "name": "BRAIN_STORE",
+          "type": "durable_object_namespace"
+        },
+        {
+          "class_name": "Embedder",
+          "name": "EMBEDDER",
+          "type": "durable_object_namespace"
+        },
+        {
           "name": "LOADER",
           "type": "worker_loader"
         },
@@ -199,6 +229,12 @@
           "bucket_name": "grasp-os-brain-objects",
           "jurisdiction": "eu",
           "name": "BRAIN_OBJECTS",
+          "type": "r2_bucket"
+        },
+        {
+          "bucket_name": "grasp-os-models",
+          "jurisdiction": "eu",
+          "name": "MODEL_FILES",
           "type": "r2_bucket"
         },
         {
@@ -317,6 +353,18 @@
             "ModelLedger"
           ],
           "tag": "v11"
+        },
+        {
+          "new_sqlite_classes": [
+            "BrainStore"
+          ],
+          "tag": "v12"
+        },
+        {
+          "new_sqlite_classes": [
+            "Embedder"
+          ],
+          "tag": "v13"
         }
       ],
       "keepVars": true,

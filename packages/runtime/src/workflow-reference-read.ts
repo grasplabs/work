@@ -1,3 +1,5 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import type {
   BoundWorkflowDecision,
   BoundWorkflowEvent,
@@ -7,7 +9,6 @@ import type { ClientInternals } from "./client-internals.ts";
 import { namePattern } from "./declaration.ts";
 import type { FunctionReference } from "./function-references.ts";
 import type { PageWorkflow } from "./page-functions.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { WorkflowEventReference } from "./workflow-events.ts";
 import type { RunHandle } from "./workflow-runs.ts";
 import type { RunSnapshot } from "./workflow-view.ts";

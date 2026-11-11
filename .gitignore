@@ -19,6 +19,8 @@ release-out/
 wrangler.deploy.jsonc
 wrangler.local.jsonc
 scripts/lab/out/
+# The Brain evaluation's results (scripts/brain-eval.ts)
+.brain-eval/
 
 # Cloudflare cf CLI build output and generated types (apps/admin)
 .cloudflare/

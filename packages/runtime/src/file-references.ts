@@ -1,7 +1,8 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { clientError } from "./client-error.ts";
 import { namePattern } from "./declaration.ts";
 import type { FilesOperation, FilesReference } from "./file-link-references.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { FileValue } from "./value-types.ts";
 
 /** A reference to one of the App's files: holding it grants nothing. */

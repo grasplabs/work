@@ -1319,13 +1319,13 @@ describe("App code misusing its channel", () => {
       {
         run: misusing(
           async (channel) =>
-            await channel.resource("mail", "call", ["send", {}])
+            await channel.permission("mail", "call", ["send", {}])
         ),
       }
     );
     expect([codeOf(fromQuery), codeOf(fromMutation)]).toStrictEqual([
       "function.read_only",
-      "function.no_resources",
+      "function.no_permissions",
     ]);
     const page = valueOf(
       await call(fixture, owner, "query", "notes.list", { pagination: {} })
@@ -1600,7 +1600,7 @@ describe("App code misusing its channel", () => {
       }
       const refused: unknown[] = [];
       try {
-        await channel.resource("mail", "call", ["send", {}]);
+        await channel.permission("mail", "call", ["send", {}]);
       } catch (error) {
         refused.push(error);
       }

@@ -26,11 +26,15 @@
  *    the work is at most polynomial in the data's size; what bounds it is
  *    the isolate's CPU and memory limits, not the
  *    check.
+ * 7. It nests deep enough to run what reads it out of stack, so it throws
+ *    where it should be refused, or is refused at a depth that moves with
+ *    the runtime's stack (`expressionMaxDepth`).
  */
 import { describe, expect, it } from "vite-plus/test";
 
 import { checkExpression } from "../src/expression-check.ts";
 import { own } from "../src/expression-runtime.ts";
+import { expressionMaxDepth } from "../src/oxc-parse.ts";
 import { parse } from "../src/workflow-generated.ts";
 
 /** The code an expression runs as. */
@@ -450,7 +454,42 @@ describe("splicing into the generated code", () => {
     expect(checked.ok && checked.code).toBe("(args.a)");
   });
 
-  it("refuses one nested too deep to read, rather than throwing", () => {
+  it("reads one nested as deep as an expression may be, however it nests", () => {
+    // Each wraps `n` nodes, one in another, around one leaf: `n + 1` deep.
+    const nested = {
+      // Parsed without recursion, then read by it.
+      sum: (n: number) => `${"1+".repeat(n)}1`,
+      reads: (n: number) => `args${".a".repeat(n)}`,
+      arrays: (n: number) => `${"[".repeat(n)}1${"]".repeat(n)}`,
+      negations: (n: number) => `${"!".repeat(n)}1`,
+      // Dropped from the tree, but each one a level of the parse.
+      parentheses: (n: number) => `${"(".repeat(n)}1${")".repeat(n)}`,
+      templates: (n: number) => `${"`${".repeat(n)}1${"}`".repeat(n)}`,
+    };
+    const shapes = Object.values(nested);
+    const atLimit = expressionMaxDepth - 1;
+    expect(shapes.map((shape) => verdict(shape(atLimit)))).toStrictEqual(
+      shapes.map(() => "ok")
+    );
+    expect(evaluated(nested.sum(atLimit), {})).toBe(expressionMaxDepth);
+    expect(shapes.map((shape) => verdict(shape(atLimit + 1)))).toStrictEqual(
+      shapes.map(() => "expression.syntax")
+    );
+  });
+
+  it("refuses one nested too deep to read, at the node past the limit, rather than throwing", () => {
+    const prefix = "args.a + ";
+    const checked = checkExpression(
+      `${prefix}${"[".repeat(expressionMaxDepth)}1${"]".repeat(expressionMaxDepth)}`
+    );
+    expect(checked.ok || checked.errors).toStrictEqual([
+      expect.objectContaining({
+        code: "expression.syntax",
+        message: `The expression doesn't parse: It nests more than ${expressionMaxDepth} levels deep.`,
+        // Under the sum, the last array is a level too many.
+        offset: prefix.length + expressionMaxDepth - 1,
+      }),
+    ]);
     expect(
       [3000, 9999].map((depth) => verdict(`${"1+".repeat(depth)}1`))
     ).toStrictEqual(["expression.syntax", "expression.syntax"]);

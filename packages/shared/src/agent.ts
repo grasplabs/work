@@ -10,6 +10,8 @@ export const agentErrors = defineErrorFamily({
   "agent.chat_not_found": "There's no such chat.",
   "agent.paused":
     "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
+  "agent.unattended":
+    "Nobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
   "agent.busy":
     "The agent is still working in this chat. Wait for it, or stop it.",
   "agent.invalid_question": "That isn't a question the agent can take.",

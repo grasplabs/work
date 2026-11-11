@@ -295,11 +295,11 @@ describe("an App's skills", setUpTime, () => {
       openTravel: openOf(openTravel.result),
       openRefunds: openOf(openRefunds.result),
     }).toStrictEqual({
-      without: { failed: "resource.unavailable" },
+      without: { failed: "permission.unavailable" },
       refund: { picked: "refunds", read: true },
       payout: { picked: "no_match", read: false },
       travel: { picked: "no_match", read: false },
-      openTravel: { failed: "resource.item_not_found" },
+      openTravel: { failed: "permission.item_not_found" },
       openRefunds: "refunds",
     });
   });
@@ -328,7 +328,7 @@ describe("an App's skills", setUpTime, () => {
       restricted: await isRestricted(env, authority, context),
     }).toStrictEqual({
       salary: { picked: "no_match", read: false },
-      opened: { failed: "resource.item_not_found" },
+      opened: { failed: "permission.item_not_found" },
       restricted: false,
     });
   });
@@ -345,7 +345,7 @@ describe("an App's skills", setUpTime, () => {
       after: pickOf(after.result),
     }).toStrictEqual({
       before: { picked: "refunds", read: true },
-      after: { failed: "resource.unavailable" },
+      after: { failed: "permission.unavailable" },
     });
   });
 

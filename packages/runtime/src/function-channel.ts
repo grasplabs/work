@@ -27,7 +27,7 @@ export interface FunctionChannel {
    * mutation's staged start (`start`) or sent event (`sendEvent`) of one
    * of the App's workflows, and either's send to people (`peopleAlias`).
    */
-  readonly resource: (
+  readonly permission: (
     alias: string,
     method: string,
     args: unknown

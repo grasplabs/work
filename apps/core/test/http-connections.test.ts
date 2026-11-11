@@ -1,5 +1,6 @@
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { FunctionResult } from "@grasp-os/shared/functions";
+import { httpContract } from "@grasp-os/shared/http-contract";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
@@ -9,7 +10,10 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
-import { httpContract, httpReadContract } from "../src/release-contracts.ts";
+import {
+  httpCatalogContract,
+  httpReadCatalogContract,
+} from "../src/release-contracts.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
 import { commitApp, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
@@ -271,13 +275,13 @@ describe("an App calling an outside API", () => {
     });
     expect(created).toMatchObject({
       ok: false,
-      error: { code: "resource.awaiting_confirmation" },
+      error: { code: "permission.awaiting_confirmation" },
     });
     expect(confirmed).toStrictEqual({ ok: true, value: 201 });
     expect(strays).toStrictEqual(
       ["/v1/moved", "/admin", "/v1/../admin"].map(() => ({
         ok: true,
-        value: "resource.not_allowed",
+        value: "permission.not_allowed",
       }))
     );
     // The redirect's request went out; the stray paths' never did. The
@@ -410,7 +414,9 @@ describe("a JSON workflow calling an outside API", () => {
     });
     const workflow = await publishedWorkflow(builder, () =>
       definitionOf(invoicingTasks, {
-        permissions: { connections: { api: { contract: httpContract } } },
+        permissions: {
+          connections: { api: { contract: httpCatalogContract } },
+        },
         status: invoicedStatus,
       })
     );
@@ -426,7 +432,7 @@ describe("a JSON workflow calling an outside API", () => {
       target: {
         kind: "connector",
         permissionId: requested.id,
-        contract: "http.request@1",
+        contract: httpContract,
       },
       reviewed: { version: 1 },
     });
@@ -509,16 +515,18 @@ describe("a JSON workflow's HTTP contract", () => {
             target: {
               kind: "connector",
               permissionId,
-              contract: "http.request@1",
+              contract: httpContract,
             },
             reviewed: { version: 1 },
           })
       );
 
-    const full = await bind(await granted(listingTasks, httpContract));
-    const reads = await bind(await granted(listingTasks, httpReadContract));
+    const full = await bind(await granted(listingTasks, httpCatalogContract));
+    const reads = await bind(
+      await granted(listingTasks, httpReadCatalogContract)
+    );
     const sendOnReads = await failure(
-      async () => await granted(invoicingTasks, httpReadContract)
+      async () => await granted(invoicingTasks, httpReadCatalogContract)
     );
 
     expect({ full, reads, sendOnReads }).toStrictEqual({

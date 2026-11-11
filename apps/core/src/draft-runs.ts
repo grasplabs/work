@@ -82,7 +82,7 @@ import type { Draft } from "./workspace.ts";
 //   invocations bind no resource (no connection, Brain, model, template or
 //   other App), start no workflow, send no run an event and tell no
 //   webhook, so the function host refuses each such request
-//   (`resource.unavailable`); a page's workflow commands and watches, and
+//   (`permission.unavailable`); a page's workflow commands and watches, and
 //   a workflow reference's queries, are refused before anything runs. Its
 //   code runs in the release runner's isolates, with no network and no env.
 // - Someone else's draft, or someone who doesn't build the App: the lease
@@ -506,7 +506,7 @@ const draftCallOf = (
  * reads runs through the App's binding of the workflow, a preview has
  * none of: no run (`run` answers `null`), none it may start (`canStart`
  * answers `false`), so a page built on `useWorkflow` shows as it does
- * before its first start; any other query `resource.unavailable`. The
+ * before its first start; any other query `permission.unavailable`. The
  * draft must declare the workflow, and the arguments be the query's.
  */
 const draftWorkflowQuery = (
@@ -515,7 +515,7 @@ const draftWorkflowQuery = (
 ): FunctionResult => {
   const query = workflowQueryOf(release, call.reference);
   if (query.name !== "run" && query.name !== "canStart") {
-    throw functionErrors.create("resource.unavailable");
+    throw functionErrors.create("permission.unavailable");
   }
   checkedValue(query.args, call.args, "contract.invalid_args");
   return { ok: true, value: query.name === "run" ? null : false };

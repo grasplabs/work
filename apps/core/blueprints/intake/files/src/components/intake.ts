@@ -193,7 +193,7 @@ export const refusal = (code: string): string => {
     case "data.write_denied": {
       return "Only the App's builders take intake.";
     }
-    case "resource.unavailable": {
+    case "permission.unavailable": {
       return "Intake can't do that yet: an admin approves what it uses (its model, its guest chats) first.";
     }
     case "intake.empty_chat": {

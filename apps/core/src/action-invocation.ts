@@ -381,7 +381,7 @@ const nothingRanCodes: ReadonlySet<string> = new Set([
   "function.mode_mismatch",
   "function.sandbox_busy",
   "function.sandbox_unavailable",
-  "resource.budget_busy",
+  "permission.budget_busy",
 ]);
 
 /** How a run ended, as `invokeAppAction` answers it. */

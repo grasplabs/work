@@ -85,6 +85,14 @@ interface __BaseEnv_Env {
   /** Grasp's own ElevenLabs key, for its speech feature alone. */
   ELEVENLABS_API_KEY?: string;
   /**
+   * For testing only, on a staging deployment: the providers whose
+   * platform requests may go to their usual host, not their EU data
+   * residency host, comma-separated (`usualHostProviders`, @grasp-os/
+   * shared/ai-providers). The admin sets it on core and connect alike;
+   * never on production.
+   */
+  PLATFORM_AI_USUAL_HOSTS?: unknown;
+  /**
    * `workerd` on plain workerd (on-prem): only then may an organization's
    * OpenAI-compatible endpoint be on the deployment's own network, and only
    * at a host `AI_PRIVATE_HOSTS` names (src/ai-endpoint-guard.ts).

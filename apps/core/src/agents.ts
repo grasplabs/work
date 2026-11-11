@@ -22,6 +22,8 @@ import { agents } from "./db/core/schema.ts";
 // A chat's turn reads its agent here before the model is asked
 // (`turnAgent`): one that is paused takes no turn. Nothing makes or
 // changes an agent yet.
+// This is the read alone. Nothing makes or changes an agent yet, and a
+// chat's turn doesn't read its agent here yet.
 
 /** One of the company's agents, as core reads it. */
 export interface Agent {
