@@ -231,7 +231,7 @@ export const enLongQuestions: readonly BrainEvalQuestion[] = [
     id: "en-long-vendor-deal-paperwork",
     language: "en",
     question:
-      "How long do we have to hang on to the paperwork for a deal with a vendor once it's over?",
+      "How long do we have to hang on to everything from a deal with a vendor once it's over?",
     expects: answer(
       "paraphrase",
       "en-records-retention",

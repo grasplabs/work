@@ -150,7 +150,7 @@ export const deLongQuestions: readonly BrainEvalQuestion[] = [
   {
     id: "de-long-winterjacken",
     language: "de",
-    question: "Ab wann gibt es die Winterjacke?",
+    question: "Ab wann gibt es die Winterjacken?",
     expects: answer(
       "words",
       "de-protokoll-standortversammlung",
