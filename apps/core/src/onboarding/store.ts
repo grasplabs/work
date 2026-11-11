@@ -3167,23 +3167,31 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Sends someone's latest mail that failed again, from its first try:
-   * staff do it once what stopped it is put right. The audit log has that
-   * they did, and which kind of mail, not for whom. False when none failed.
+   * Sends every mail of someone's that failed again, from its first try,
+   * to their address as the roster has it now: staff do it once what
+   * stopped it is put right, an address the admin corrected among it.
+   * Their link with the reminder, when both failed: the link is what the
+   * company's admin is told failed (`#linkMailFailed`), so it must go too.
+   * The audit log has that staff did, never for whom nor which mail: the
+   * admin reads it, and a reminder goes only to whoever hasn't finished.
+   * False when none failed, or they have no address now to send to.
    */
   sendAgain(person: string, by: AuditActor): boolean {
-    const failed = mailAbout(this.ctx.storage.sql, person).find(
+    const failed = mailAbout(this.ctx.storage.sql, person).filter(
       ({ state }) => state === "failed"
     );
-    if (failed === undefined) {
+    const to = this.#roster()?.people.find(({ id }) => id === person)?.email;
+    if (failed.length === 0 || to === undefined || to === "") {
       return false;
     }
     const now = new Date().toISOString();
-    const [kind = "mail"] = failed.key.split("/");
     this.ctx.storage.transactionSync(() => {
-      queueAgain(this.ctx.storage.sql, failed.key);
-      this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
-      this.#changed(by, "onboarding.mail.resent", { kind });
+      for (const { key } of failed) {
+        const [kind = "mail"] = key.split("/");
+        queueAgain(this.ctx.storage.sql, key, to);
+        this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
+      }
+      this.#changed(by, "onboarding.mail.resent", {});
     });
     this.#deliverAudit();
     this.#deliverMailSoon();
@@ -3230,7 +3238,7 @@ export class Onboarding extends DurableObject<Env> {
           email: person.email,
           path: taken === undefined ? null : await this.linkOf(person.id),
           fresh: taken === null,
-          failedMail: this.#failedMail(person.id),
+          mailFailed: this.#linkMailFailed(person.id),
         };
       })
     );
@@ -4327,7 +4335,11 @@ export class Onboarding extends DurableObject<Env> {
     return kickoffBrief(reading, answers);
   }
 
-  /** Everyone on the roster whose latest mail failed for good, by id: for the admin's snapshot. */
+  /**
+   * Everyone on the roster whose latest mail failed for good, by id: for
+   * Grasp's admin snapshot (staff), never the company's admin, as it says
+   * which mail.
+   */
   failedMails(): Map<string, FailedMail> {
     const failed = new Map<string, FailedMail>();
     for (const { id } of this.#roster()?.people ?? []) {
@@ -4340,8 +4352,8 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Someone's latest mail, when it failed for good: what `sendAgain`
-   * sends again. A mail sent or still queued since means it isn't.
+   * Someone's latest mail, when it failed for good, for staff: which, why
+   * and when. A mail sent or still queued since means it isn't.
    */
   #failedMail(person: string): FailedMail | null {
     const [latest] = mailAbout(this.ctx.storage.sql, person);
@@ -4354,6 +4366,22 @@ export class Onboarding extends DurableObject<Env> {
       reason: latest.reason,
       at: latest.settledAt ?? latest.queuedAt,
     };
+  }
+
+  /**
+   * Whether someone's latest link mail failed for good, and wasn't sent
+   * since: what the company's admin is told, to put their address right
+   * or hand them their link. Only the link, which everyone taking part
+   * gets on their day whatever they do after: a reminder goes only to
+   * whoever hasn't finished, so its failing, its kind, its date, or a
+   * notice that appears once it fails, would tell the admin that of
+   * someone they can name.
+   */
+  #linkMailFailed(person: string): boolean {
+    const link = mailAbout(this.ctx.storage.sql, person).find(({ key }) =>
+      key.startsWith("link/")
+    );
+    return link?.state === "failed";
   }
 
   /**

@@ -156,18 +156,21 @@ export const mailAbout = (storage: SqlStorage, about: string): MailState[] =>
     .map(stateOf);
 
 /**
- * Queues the failed mail `key` again, from its first try: true when there
- * was one. A mail queued or sent stays as it is.
+ * Queues the failed mail `key` again, from its first try, to `to`: the
+ * address as it is now, which may have been put right since. True when
+ * there was one. A mail queued or sent stays as it is.
  */
 export const queueAgain = (
   storage: SqlStorage,
   key: string,
+  to: string,
   now: number = Date.now()
 ): boolean =>
   storage
     .exec(
-      "UPDATE mail_outbox SET state = 'queued', attempts = 0, next_at = ?, settled_at = NULL, reason = NULL WHERE key = ? AND state = 'failed' RETURNING key",
+      "UPDATE mail_outbox SET state = 'queued', attempts = 0, next_at = ?, settled_at = NULL, reason = NULL, to_address = ? WHERE key = ? AND state = 'failed' RETURNING key",
       now,
+      to,
       key
     )
     .toArray().length > 0;

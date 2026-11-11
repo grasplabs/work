@@ -28,8 +28,10 @@ import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 // - A mail in another language than the interviews', or from the company's
 //   own domain rather than Grasp's.
 // - The admin's update naming anyone.
-// - A failed mail lost: staff send it again, and the audit log has that
-//   they did, not for whom.
+// - A failed mail lost: staff send it again, to the address the admin
+//   corrected, and the audit log has that they did, not for whom.
+// - The company's admin told whether someone finished by a failed mail:
+//   its kind, its date, or a notice that appears once the reminder fails.
 
 const idp = mockIdp();
 
@@ -99,6 +101,12 @@ const sentTo = (mail: { sent: EmailMessageBuilder[] }) =>
 
 const linkSubject = "acme.test would like to hear how your work goes";
 const reminderSubject = "A reminder: your interview with Stephen";
+
+/** Whom a mail went to, and whether it was a reminder or the link. */
+const whichTo = ({ to, subject }: EmailMessageBuilder) => [
+  to,
+  subject === reminderSubject ? "reminder" : "link",
+];
 
 describe("the interview link emails", () => {
   it("send a lead's link on the start day, the team's once the lead's turn is over, one reminder on the third working day, and no second", async () => {
@@ -273,10 +281,7 @@ describe("the interview link emails", () => {
           failedMail === null
             ? null
             : { kind: failedMail.kind, reason: failedMail.reason },
-        admin: links.map((link) => [
-          link.person,
-          link.failedMail?.kind ?? null,
-        ]),
+        admin: links.map((link) => [link.person, link.mailFailed]),
       };
     };
     const toldFailed = await told();
@@ -294,15 +299,15 @@ describe("the interview link emails", () => {
       toldFailed: {
         staff: { kind: "link", reason: "E_RECIPIENT_SUPPRESSED" },
         admin: [
-          ["oli", "link"],
-          ["ona", null],
+          ["oli", true],
+          ["ona", false],
         ],
       },
       toldSent: {
         staff: null,
         admin: [
-          ["oli", null],
-          ["ona", null],
+          ["oli", false],
+          ["ona", false],
         ],
       },
     });
@@ -323,8 +328,126 @@ describe("the interview link emails", () => {
         ["mail.link.again", "oli"],
         ["mail.link.sent", "oli"],
       ],
-      resent: [["staff", { kind: "link" }]],
+      resent: [["staff", {}]],
       audited: false,
+    });
+  });
+
+  it("never tell the company's admin whether someone finished, and are sent again to the address the admin corrected", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const store = onboardingStore(env);
+    const start = startMonday();
+    // Uli finishes; Uma doesn't, and her reminder fails; Ute's link fails.
+    // Confirmed: new people on a list saved while a plan is set wait.
+    await api.onboarding.confirmRoster({
+      teams: [{ id: "fin", name: "Finance", lead: null }],
+      people: [
+        { id: "uli", name: "Uli", email: "uli@acme.test", team: "fin" },
+        { id: "uma", name: "Uma", email: "uma@acme.test", team: "fin" },
+        { id: "ute", name: "Ute", email: "ute@acme.test", team: "fin" },
+      ],
+    });
+    await api.onboarding.savePlan({ start, days: 14 });
+    await adminCommands().setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    // Ute's reminder fails too: it goes to the same address.
+    const mail = await captureMail(
+      store,
+      "sent",
+      "sent",
+      "E_RECIPIENT_SUPPRESSED",
+      "E_RECIPIENT_SUPPRESSED",
+      "E_RECIPIENT_SUPPRESSED"
+    );
+    /** What the company's admin is told of each, every field but who. */
+    const who = new Set(["person", "name", "email", "path"]);
+    const told = async () => {
+      const links = await api.onboarding.links();
+      return Object.fromEntries(
+        links.map((link) => [
+          link.person,
+          {
+            ...Object.fromEntries(
+              Object.entries(link).filter(([key]) => !who.has(key))
+            ),
+            out: link.path !== null,
+          },
+        ])
+      );
+    };
+    await store.releaseDue(morning(start));
+    await store.deliverMail(Date.parse(morning(start)));
+    const afterLinks = await told();
+    await store.noteInterview({
+      person: "uli",
+      kind: "own",
+      startedAt: morning(start, 1),
+      completedAt: morning(start, 1),
+    });
+    const reminded = await store.remindDue(morning(start, 3));
+    await store.deliverMail(Date.parse(morning(start, 3)));
+    const afterReminder = await told();
+    const snapshot = await adminSnapshot();
+    const staffSaw = snapshot.links
+      .filter(({ failedMail }) => failedMail !== null)
+      .map(({ person: id, failedMail }) => [id, failedMail?.kind]);
+    // The admin corrects Ute's address; Grasp sends her link again.
+    await api.onboarding.saveRoster({
+      teams: [{ id: "fin", name: "Finance", lead: null }],
+      people: [
+        { id: "uli", name: "Uli", email: "uli@acme.test", team: "fin" },
+        { id: "uma", name: "Uma", email: "uma@acme.test", team: "fin" },
+        { id: "ute", name: "Ute", email: "ute@acme-mail.test", team: "fin" },
+      ],
+    });
+    const sentBefore = mail.sent.length;
+    await adminCommands().sendMailAgain("ute");
+    await store.deliverMail(Date.parse(morning(start, 3)));
+    const afterAgain = await told();
+    const unfinished = { team: "Finance", fresh: true, out: true };
+    expect({
+      reminded,
+      tried: mail.tried.map(whichTo),
+      again: mail.sent.slice(sentBefore).map(whichTo),
+      afterLinks,
+      afterReminder,
+      staffSaw,
+      afterAgain: afterAgain.ute,
+    }).toStrictEqual({
+      reminded: ["uma", "ute"],
+      tried: [
+        ["uli@acme.test", "link"],
+        ["uma@acme.test", "link"],
+        ["ute@acme.test", "link"],
+        ["uma@acme.test", "reminder"],
+        ["ute@acme.test", "reminder"],
+        ["ute@acme-mail.test", "link"],
+        ["ute@acme-mail.test", "reminder"],
+      ],
+      // Both of hers, to the address the admin corrected.
+      again: [
+        ["ute@acme-mail.test", "link"],
+        ["ute@acme-mail.test", "reminder"],
+      ],
+      afterLinks: {
+        uli: { ...unfinished, mailFailed: false },
+        uma: { ...unfinished, mailFailed: false },
+        ute: { ...unfinished, mailFailed: true },
+      },
+      // Uma's reminder failed, Uli finished: to the admin, the same.
+      afterReminder: {
+        uli: { ...unfinished, mailFailed: false },
+        uma: { ...unfinished, mailFailed: false },
+        ute: { ...unfinished, mailFailed: true },
+      },
+      staffSaw: [
+        ["uma", "reminder"],
+        ["ute", "reminder"],
+      ],
+      afterAgain: { ...unfinished, mailFailed: false },
     });
   });
 });

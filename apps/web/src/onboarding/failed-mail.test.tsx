@@ -11,8 +11,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { FailedMailNotice } from "./failed-mail.tsx";
 
 // What the company's admin is told among the interviews when Grasp's mail
-// to someone failed: who, by name, and nothing of the address or the
-// reason, which are for Grasp to sort out.
+// with someone's link failed: who, by name, and nothing of the address.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -30,17 +29,14 @@ const rendered = async (page: ReactNode): Promise<void> => {
 
 const text = (): string => document.body.textContent ?? "";
 
-const link = (
-  person: string,
-  failedMail: LinkToSend["failedMail"]
-): LinkToSend => ({
+const link = (person: string, mailFailed: boolean): LinkToSend => ({
   person,
   name: person === "oli" ? "Oli" : "Ona",
   team: "Ops",
   email: `${person}@acme.test`,
   path: `/interview#${person}`,
   fresh: false,
-  failedMail,
+  mailFailed,
 });
 
 describe("Failed mail notice", () => {
@@ -54,34 +50,23 @@ describe("Failed mail notice", () => {
 
   it("tells the company's admin whose mail failed, by name only", async () => {
     await rendered(
-      <FailedMailNotice
-        links={[
-          link("oli", {
-            kind: "link",
-            reason: "E_RECIPIENT_SUPPRESSED",
-            at: "2026-10-30T09:00:00.000Z",
-          }),
-          link("ona", null),
-        ]}
-      />
+      <FailedMailNotice links={[link("oli", true), link("ona", false)]} />
     );
 
     expect({
       named: text().includes("Our email didn’t reach Oli."),
       others: text().includes("Ona"),
-      reason: text().includes("SUPPRESSED"),
       address: text().includes("@"),
     }).toStrictEqual({
       named: true,
       others: false,
-      reason: false,
       address: false,
     });
   });
 
   it("says nothing while every mail reached its person", async () => {
     await rendered(
-      <FailedMailNotice links={[link("oli", null), link("ona", null)]} />
+      <FailedMailNotice links={[link("oli", false), link("ona", false)]} />
     );
 
     expect(text()).toBe("");

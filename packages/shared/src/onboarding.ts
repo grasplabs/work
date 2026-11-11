@@ -339,15 +339,21 @@ export interface LinkToSend {
   path: string | null;
   /** Out, and not taken by the admin since: new since they last took links. */
   fresh: boolean;
-  /** Their latest mail from Grasp, when it failed; null otherwise. */
-  failedMail: FailedMail | null;
+  /**
+   * Grasp's email with their link failed for good, and hasn't gone since:
+   * their address wants putting right, or the admin hands them the link.
+   * Nothing more: not which mail, why or when. A reminder goes only to
+   * whoever hasn't finished, so one failing is never told here.
+   */
+  mailFailed: boolean;
 }
 
 /**
  * Someone's latest mail from Grasp (their link, or the reminder), when it
- * failed for good: which, why as the mail service said it, and when.
- * Never its words or its address. Staff send it again (`sendMailAgain`)
- * once what stopped it is put right.
+ * failed for good, as Grasp's staff see it: which, why as the mail
+ * service said it, and when. Never its words or its address, and never to
+ * the company's admin (`LinkToSend.mailFailed`). Staff send it again
+ * (`sendMailAgain`) once what stopped it is put right.
  */
 export interface FailedMail {
   kind: "link" | "reminder";
