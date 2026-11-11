@@ -4,9 +4,17 @@ import type {
   FoundChunk,
   Reader,
 } from "@grasp-os/brain-next/contract";
+import {
+  defineWork,
+  enqueueWork,
+  repackPerTick,
+} from "@grasp-os/brain-next/work";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import { workBrain } from "../src/brain-next.ts";
 
 // The vector way of the Brain's store (GRA-1766), through the store's
 // contract: codes are put for chunks of current versions, packed in
@@ -330,6 +338,31 @@ const restart = async (): Promise<void> => {
     }
   });
 };
+
+/** How many blocks hold removed codes, waiting for a repack. */
+const markedBlocks = async (): Promise<number> =>
+  await runInDurableObject(
+    store(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ blocks: number }>(
+          "SELECT count(DISTINCT block) AS blocks FROM vector_removed"
+        )
+        .one().blocks
+  );
+
+/** Runs of `tickWork`, the queue's work in a tick. */
+const tickRuns = { count: 0 };
+
+/** Work for the queue of a tick that also repacks: it counts its runs. */
+const tickWork = defineWork({
+  kind: `test.tick_${crypto.randomUUID().replaceAll("-", "")}`,
+  payload: z.strictObject({}),
+  run: async () => {
+    await Promise.resolve();
+    tickRuns.count += 1;
+  },
+});
 
 /** Repacks one block holding removed codes: true when more are left. */
 const repack = async (): Promise<boolean> => await store().repackVectors();
@@ -691,6 +724,51 @@ describe("the Brain's vector way", () => {
     );
     expect(marked).toBeGreaterThanOrEqual(3);
     await expect(repackCount()).resolves.toBe(marked);
+  });
+
+  it("repacks at most its share of marked blocks a tick of core's clock, the rest the next, and runs the queue in the same tick", async () => {
+    const model = newModel();
+    const person = principal("person");
+    // More marked blocks than a tick repacks: each of a replaced source's
+    // 600 codes and another's 424.
+    const replaced: string[] = [];
+    for (let made = 0; made <= repackPerTick; made += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order: one block each
+      const gone = randomly(await sourceOf(owner(person), 600));
+      // oxlint-disable-next-line no-await-in-loop -- in order: one block each
+      const kept = randomly(await sourceOf(owner(person), 424));
+      // oxlint-disable-next-line no-await-in-loop -- in order: one block each
+      await put(model, [...gone, ...kept]);
+      replaced.push(gone[0]?.chunk.source ?? "");
+    }
+    for (const source of replaced) {
+      // oxlint-disable-next-line no-await-in-loop -- one version at a time
+      await newVersionOf(source, owner(person), 1);
+    }
+    const before = await markedBlocks();
+    await runInDurableObject(store(), (_store, state) => {
+      enqueueWork(state.storage, tickWork, {
+        key: `tick-${crypto.randomUUID()}`,
+        payload: {},
+        priority: "asked",
+      });
+    });
+    const ranBefore = tickRuns.count;
+    await workBrain(env, new Date());
+    const afterOne = await markedBlocks();
+    const ran = tickRuns.count - ranBefore;
+    await workBrain(env, new Date());
+    expect({
+      enough: before > repackPerTick,
+      afterOne,
+      ran,
+      afterTwo: await markedBlocks(),
+    }).toStrictEqual({
+      enough: true,
+      afterOne: before - repackPerTick,
+      ran: 1,
+      afterTwo: Math.max(0, before - 2 * repackPerTick),
+    });
   });
 
   it("takes a centre of -0 as the same centre as one of 0", async () => {

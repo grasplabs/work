@@ -7,20 +7,28 @@ import {
   principalMaxLength,
   sourceIdMaxLength,
   wellFormedString,
+  modelWaitMaxSeconds,
 } from "@grasp-os/brain-next/contract";
 import type {
   Access,
+  AskModel,
   Brain,
+  ModelReply,
   Reader,
   SourceId,
+  WorkOverview,
 } from "@grasp-os/brain-next/contract";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
+import { modelErrors } from "@grasp-os/shared/models";
+import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The Brain, as core reaches it (@grasp-os/brain-next). The Brain knows no
 // people or teams: core names them as principals, a person by their user
@@ -496,9 +504,112 @@ export const readInstructionFilesAs = async (
 };
 
 /**
- * Removes what adds that never finished left in the Brain, as of `at`:
- * core's clock runs it (src/clock.ts). Harmless late or twice.
+ * The gateway's refusals of a call as it is: the item's own failure. Every
+ * other failure is of the way to a model, which the whole queue waits out.
+ * `model.request_refused` is a provider refusing the request itself (a
+ * 4xx other than its key, credit or rate: a bad request, a prompt too
+ * long, a content policy), on any key. `model.failed` is not the item's:
+ * on Grasp's key it is any failure of the provider, and it is connect
+ * out of reach.
  */
-export const sweepBrain = async (env: BrainEnv, at: Date): Promise<void> => {
-  await brain(env).sweep({ at });
+const itemRefusals: ReadonlySet<string> = new Set<ModelErrorCode>([
+  "model.invalid_call",
+  "model.answer_too_long",
+  "model.invalid_output",
+  "model.request_refused",
+]);
+
+/**
+ * The gateway's failures that need someone at the AI account: no model
+ * set up or allowed, a key refused or revoked. Out of credit comes as a
+ * rate limit with no wait to keep (`waitOf`).
+ */
+const accountTroubles: ReadonlySet<string> = new Set<ModelErrorCode>([
+  "model.no_provider",
+  "model.unconfigured",
+  "model.not_allowed",
+  "model.provider_key_failed",
+]);
+
+/**
+ * Room past the call's own time for the gateway's deadline: the call's
+ * signal ends it first, so a call cut off is never taken for anything
+ * else.
+ */
+const gatewayGraceMs = 5000;
+
+/** What `error` of the gateway asks the queue to wait for, and why. */
+const waitOf = (error: unknown): ModelReply => {
+  const code = modelErrors.codeOf(error);
+  if (code !== undefined && accountTroubles.has(code)) {
+    return { kind: "busy", reason: "account" };
+  }
+  if (code !== "model.rate_limited") {
+    return { kind: "busy", reason: "unavailable" };
+  }
+  const wait = isExpectedError(error)
+    ? error.details?.retryAfterSeconds
+    : undefined;
+  // A rate limit names its wait; an account out of credit names none.
+  return typeof wait === "number" && wait > 0
+    ? {
+        kind: "busy",
+        reason: "rate_limited",
+        retryAfterSeconds: Math.min(wait, modelWaitMaxSeconds),
+      }
+    : { kind: "busy", reason: "account" };
 };
+
+/**
+ * The Brain's background work asking a model, through core's gateway like
+ * every model call: the organization's model and key, judged as core's own
+ * upkeep of the Brain (`brain_upkeep`), metered and audited, and cancelled
+ * once the time the queue gave it is up (`timed_out`). One call is one
+ * request: when the provider limits calls or the way to a model fails, the
+ * gateway doesn't wait and retry; the whole queue pauses instead (`busy`).
+ * The gateway's refusal of the call as it is fails the item (`refused`):
+ * no provider's or gateway's words reach the Brain.
+ */
+const askModel =
+  (env: Env): AskModel =>
+  async ({ purpose, system, input, timeoutMs }) => {
+    const signal = AbortSignal.timeout(timeoutMs);
+    try {
+      const { text } = await models(env).call({
+        model: modelForRole(await modelSettings(env), "careful"),
+        system,
+        input,
+        purpose,
+        trigger: { type: "system" },
+        work: { platform: "brain_upkeep" },
+        providerRetries: false,
+        timeoutMs: timeoutMs + gatewayGraceMs,
+        signal,
+      });
+      return { kind: "answer", text };
+    } catch (error) {
+      if (signal.aborted) {
+        // No answer within the call's time, which is the item's: its own.
+        return { kind: "timed_out" };
+      }
+      const code = modelErrors.codeOf(error);
+      if (code !== undefined && itemRefusals.has(code)) {
+        return { kind: "refused" };
+      }
+      return waitOf(error);
+    }
+  };
+
+/**
+ * One tick of the Brain's background work at `at`, the time core's clock
+ * runs it: the store sweeps what adds that never finished left, repacks a
+ * few blocks of vector codes, then runs what is due in its queue, its
+ * model calls through core's gateway. Harmless late or twice.
+ */
+export const workBrain = async (env: Env, at: Date): Promise<void> => {
+  await brain(env).work(askModel(env), at);
+};
+
+/** The Brain's work queue, as staff will see it (GRA-1733). */
+export const brainWorkOverview = async (env: BrainEnv): Promise<WorkOverview> =>
+  await brain(env).workOverview();

@@ -1420,6 +1420,31 @@ describe("AI providers", { timeout: 60_000 }, () => {
       });
     });
 
+    it("tells a call on Grasp's key whose request the provider refused from one whose provider failed", async () => {
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      await plan(platformAnthropicKey, [
+        {
+          status: 400,
+          body: {
+            type: "error",
+            error: { type: "invalid_request_error", message: "Refused." },
+          },
+        },
+        { status: 503 },
+      ]);
+
+      const refused = await outcome(
+        models(env).call(await callOf(graspAi.model))
+      );
+      const down = await outcome(models(env).call(await callOf(graspAi.model)));
+
+      expect({ refused, down }).toStrictEqual({
+        refused: "model.request_refused",
+        down: "model.failed",
+      });
+    });
+
     it("runs the organization's calls on Grasp's one model with Grasp's key, recorded as its own use of Grasp's AI", async () => {
       const { admin: by } = await admin();
       await by.api.aiProviders.setSource("grasp");

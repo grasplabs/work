@@ -8,12 +8,12 @@ import {
   newInstructionsSchema,
   newSourceSchema,
   recallRequestSchema,
-  sweepRequestSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  AskModel,
   CurrentRequest,
   NewInstructions,
   NewSource,
@@ -21,11 +21,11 @@ import type {
   Recalled,
   SourceVersion,
   SourceVersionRef,
-  SweepRequest,
   VectorSearch,
   VectorsFound,
   VectorsToPut,
   VersionRequest,
+  WorkOverview,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
 import { sweepFiles } from "./files.ts";
@@ -33,6 +33,13 @@ import { recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
+import {
+  newWorkState,
+  releaseInterrupted,
+  repackPerTick,
+  workOverview,
+  workTick,
+} from "./work.ts";
 
 /** What the store needs of its host's Worker: the Brain's bucket. */
 export interface BrainStoreEnv {
@@ -53,6 +60,12 @@ const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
   return result.data;
 };
 
+/** How long sweeping waits after a sweep that timed out or failed. */
+const sweepWaitMs = 15 * 60_000;
+
+/** A tick's time: a valid date. */
+const tickAtSchema = z.date();
+
 /**
  * The Brain's store: its sources and their versions, who may read them
  * and their words, in the object's own SQLite, with each version's
@@ -64,11 +77,29 @@ const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
 export class BrainStore extends DurableObject<BrainStoreEnv> {
   readonly #db = drizzle(this.ctx.storage);
 
+  /**
+   * The tick's steps' last failures, cleared by a later success, and the
+   * time before which no sweep runs again: in memory, gone with the
+   * instance.
+   */
+  readonly #stepsFailed: WorkOverview["stepsFailed"] = {
+    sweep: null,
+    repack: null,
+  };
+  #sweepAfter = 0;
+
+  /** This instance's state of its work queue: gone with it. */
+  readonly #work = newWorkState(() => {
+    this.ctx.abort("Handlers past their time held every slot of the queue");
+  });
+
   constructor(ctx: DurableObjectState, env: BrainStoreEnv) {
     super(ctx, env);
-    // The schema is current before the object handles anything.
+    // The schema is current, and what an earlier instance had under way
+    // put back in the queue, before the object handles anything.
     void ctx.blockConcurrencyWhile(async () => {
       await migrate(this.#db, migrations);
+      releaseInterrupted(ctx.storage);
     });
   }
 
@@ -127,14 +158,76 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Sweeps the files nothing points at (files.ts), while the store takes
-   * nothing else, so no add notes a file the sweep is deleting.
+   * One tick of the host's clock at `at`: one batch of the sweep, then up
+   * to `repackPerTick` blocks of vector codes repacked, then the queue,
+   * asking `ask` for its model calls (work.ts). Each step is bounded, so
+   * none starves the next, and the queue runs whatever the others did.
    */
-  async sweep(request: SweepRequest): Promise<void> {
-    const { at } = checked(sweepRequestSchema, request);
-    await this.ctx.blockConcurrencyWhile(async () => {
-      await sweepFiles(this.#db, this.env.BRAIN_OBJECTS, at);
+  async work(ask: AskModel, at: Date): Promise<void> {
+    const tickAt = checked(tickAtSchema, at);
+    await this.#sweep(tickAt);
+    this.#repack(tickAt);
+    await workTick(this.ctx.storage, this.#work, ask, tickAt);
+  }
+
+  /**
+   * Up to `repackPerTick` blocks of vector codes repacked, each in its own
+   * transaction, so one that fails leaves the block as it was. A failure
+   * ends this tick's repacking and never reaches the queue: the lowest
+   * marked block is taken first, so one that keeps failing would
+   * otherwise stop the queue every tick. It is tried again next tick, and
+   * the overview shows when it last failed until one succeeds.
+   */
+  #repack(at: Date): void {
+    try {
+      for (let repacked = 0; repacked < repackPerTick; repacked += 1) {
+        if (!this.repackVectors()) {
+          break;
+        }
+      }
+      this.#stepsFailed.repack = null;
+    } catch {
+      // Nothing of the error is kept: the block stays marked.
+      this.#stepsFailed.repack = { at, reason: "failed" };
+    }
+  }
+
+  /**
+   * One batch of the sweep of files nothing points at (files.ts: at most
+   * 100, one bulk delete in R2), while the store takes nothing else, so no
+   * add notes a file the sweep is deleting. It holds the store for one R2
+   * call, at most `sweepDeleteMs` (10 s), so it runs every tick when files
+   * are due, and a backlog clears a hundred a minute. Nothing it throws
+   * reaches the tick: inside `blockConcurrencyWhile` a throw would reset
+   * the store. One that timed out or failed waits a quarter of an hour
+   * before the next, so a bucket that hangs holds the store 10 s a
+   * quarter of an hour at most.
+   */
+  async #sweep(at: Date): Promise<void> {
+    if (at.getTime() < this.#sweepAfter) {
+      return;
+    }
+    const outcome = await this.ctx.blockConcurrencyWhile(async () => {
+      try {
+        return await sweepFiles(this.#db, this.env.BRAIN_OBJECTS, at);
+      } catch {
+        return "failed" as const;
+      }
     });
+    if (outcome === "swept") {
+      this.#stepsFailed.sweep = null;
+      return;
+    }
+    this.#stepsFailed.sweep = { at, reason: outcome };
+    this.#sweepAfter = at.getTime() + sweepWaitMs;
+  }
+
+  /** The queue, as staff see it. */
+  workOverview(): WorkOverview {
+    return {
+      ...workOverview(this.ctx.storage, this.#work),
+      stepsFailed: { ...this.#stepsFailed },
+    };
   }
 
   /** Keeps vectors of current chunks as their codes, in one transaction. */

@@ -199,9 +199,163 @@ export interface SourceVersion extends SourceVersionRef {
   addedAt: Date;
 }
 
-/** A sweep of the store's leftovers, as of `at`. */
-export const sweepRequestSchema = z.strictObject({ at: z.date() });
-export type SweepRequest = z.infer<typeof sweepRequestSchema>;
+/**
+ * A model call the Brain's background work asks its host to make, through
+ * the host's model gateway: what the call is for (`brain.<kind of work>`),
+ * its instructions, its one message, and how long it may take: what is
+ * left of its item's time, less a moment. The host cancels the call when
+ * that is over, and says so (`timed_out`).
+ */
+export interface ModelRequest {
+  purpose: string;
+  system: string;
+  input: string;
+  timeoutMs: number;
+}
+
+/** Most milliseconds a model call may be given: an item's longest time. */
+export const modelTimeoutMaxMs = 4 * 60_000;
+
+/** Most seconds a host may ask the queue to wait for its model. */
+export const modelWaitMaxSeconds = 3600;
+
+/**
+ * Why the queue waits for its model: the provider limits calls
+ * (`rate_limited`); the AI account needs someone (`account`: no model
+ * set up, a key refused or revoked, out of credit); or the way to a model
+ * doesn't work now (`unavailable`: the provider down or hanging, connect
+ * or the host out of reach).
+ */
+export const modelTroubles = [
+  "rate_limited",
+  "account",
+  "unavailable",
+] as const;
+export type ModelTrouble = (typeof modelTroubles)[number];
+
+/**
+ * What the host's model answered: its text; that it refused the call as it
+ * is (`refused`: the request itself) or that the call ran out of its time
+ * (`timed_out`), which fail the item; or that the queue must pause, why,
+ * and for how many seconds where the provider said, with no item's attempt
+ * spent. A call that throws instead is taken for the host out of reach.
+ */
+export const modelReplySchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("answer"), text: z.string() }),
+  z.strictObject({ kind: z.literal("refused") }),
+  z.strictObject({ kind: z.literal("timed_out") }),
+  z.strictObject({
+    kind: z.literal("busy"),
+    reason: z.enum(modelTroubles),
+    /** What the provider asked, when it said. */
+    retryAfterSeconds: z
+      .number()
+      .positive()
+      .max(modelWaitMaxSeconds)
+      .optional(),
+  }),
+]);
+export type ModelReply = z.infer<typeof modelReplySchema>;
+
+/** The host's model, as the Brain's background work asks it. */
+export type AskModel = (request: ModelRequest) => Promise<ModelReply>;
+
+/**
+ * Why an item's attempt failed, as the queue keeps it: a code it controls,
+ * never text from a handler or a provider, which could carry content.
+ */
+export const workErrors = {
+  failed: "Its work failed.",
+  timed_out: "It ran out of time.",
+  interrupted: "The Brain's store stopped while it ran.",
+  unknown_kind: "No work of its kind is defined.",
+  invalid_payload: "What it carries isn't what its kind takes.",
+  model_refused: "The model gateway refused its call.",
+  invalid_request: "Its call to the model couldn't be sent as it was.",
+  too_many_calls: "It asked the model more often than one attempt may.",
+  unreadable: "What it works on can't be read.",
+} as const;
+export type WorkErrorCode = keyof typeof workErrors;
+
+/** Items of one kind waiting in the queue. */
+export interface WaitingWork {
+  kind: string;
+  count: number;
+  /** When the one waiting longest was added. */
+  oldestAddedAt: Date;
+}
+
+/**
+ * An item parked after too many failures, and why it last failed. It comes
+ * back by itself a day later, until it was parked three times (`final`).
+ */
+export interface ParkedWork {
+  kind: string;
+  key: string;
+  attempts: number;
+  error: WorkErrorCode;
+  /** The error's fixed wording (`workErrors`). */
+  message: string;
+  parkedAt: Date;
+  /** How many times it was parked. */
+  parks: number;
+  /** Parked for good: it no longer comes back by itself. */
+  final: boolean;
+}
+
+/** Most parked items an overview lists. */
+export const parkedListed = 100;
+
+/**
+ * The queue paused for its model: why, since when (with no answer since),
+ * and until when it claims nothing.
+ */
+export interface WorkPause {
+  reason: ModelTrouble;
+  since: Date;
+  until: Date;
+}
+
+/**
+ * An item whose handler ran past its time and its grace, settled as timed
+ * out, still running on its own: its kind and key wait until it ends, and
+ * it holds a slot meanwhile.
+ */
+export interface OverdueWork {
+  kind: string;
+  key: string;
+}
+
+/** The work queue, as staff see it: what waits, what runs, what is parked. */
+export interface WorkOverview {
+  waiting: WaitingWork[];
+  running: number;
+  /** The latest parked first, at most `parkedListed`. */
+  parked: ParkedWork[];
+  /** How many items are parked in all. */
+  parkedCount: number;
+  /** Null while the model answers. */
+  paused: WorkPause | null;
+  /** Handlers still running past their time, holding their key and a slot. */
+  overdue: OverdueWork[];
+  /**
+   * The tick's own steps before its queue, each with its last failure
+   * since the store started, cleared once a later one succeeds: the sweep
+   * of leftover files (sweeping waits a quarter of an hour after one) and
+   * the repack of vector codes (tried again next tick).
+   */
+  stepsFailed: { sweep: StepFailure | null; repack: StepFailure | null };
+}
+
+/**
+ * A step of the tick that didn't finish: when, and why, as a code of the
+ * store's own (R2 didn't answer in time, or the step failed), never an
+ * error's text.
+ */
+export interface StepFailure {
+  at: Date;
+  reason: "timed_out" | "failed";
+}
 
 /** Most dimensions of a vector. */
 export const vectorDimensionsMax = 4096;
@@ -321,10 +475,19 @@ export interface Brain {
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
-   * Removes what an add that never finished left: files no version holds,
-   * once past the time an add takes. Harmless to run late or twice.
+   * One tick of the host's clock, at `at`, the host's time now. First it
+   * removes one batch of what adds that never finished left (files no
+   * version holds, once past the time an add takes). Then it repacks a few
+   * blocks of vector codes that hold removed ones. Then it works the
+   * queue: runs what is due, a few at a time, asking `ask` for the model
+   * calls it makes, and returns once what it started has ended and nothing
+   * more is due, or its time to start more is up. `ask` is used only while
+   * this call is open. A second tick at the same time shares the same
+   * limits and claims nothing the first has under way.
    */
-  sweep: (request: SweepRequest) => Promise<void>;
+  work: (ask: AskModel, at: Date) => Promise<void>;
+  /** The queue, as staff see it. */
+  workOverview: () => Promise<WorkOverview>;
   /**
    * Keeps each vector as the codes of its chunk for `model`, readable as
    * the chunk's version is. A chunk that is not of a current version is
@@ -349,7 +512,8 @@ export interface Brain {
   /**
    * Repacks one block of codes that holds removed ones, dropping them for
    * good: true when more are left. Harmless to run at any time or twice;
-   * for the work queue (GRA-1724) and erasure (GRA-1729).
+   * the store's own tick repacks a few blocks each time (`work`), and
+   * erasure (GRA-1729) may run it too.
    */
   repackVectors: () => Promise<boolean>;
 }

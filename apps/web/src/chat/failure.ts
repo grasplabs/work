@@ -18,6 +18,7 @@ const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.answer_too_long": msg`This model can't give an answer that long. Pick another model, or ask for less.`,
   "model.grasp_limit_reached": msg`This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month.`,
   "model.failed": msg`The model couldn't answer. Try again.`,
+  "model.request_refused": msg`The model couldn't answer. Try again.`,
   "model.invalid_output": msg`The model's answer came back in the wrong shape. Try again.`,
 };
 

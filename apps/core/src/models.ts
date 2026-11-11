@@ -2114,6 +2114,23 @@ const answerCall = async <Output>(
           retryAfterSeconds: sent.rateLimited,
         });
       }
+      // The provider refused the request itself (a 4xx other than its
+      // key, credit or rate: a bad request, a prompt too long for the
+      // model, its content policy), on any key, and nothing cut it off:
+      // asking the same again gets the same. Worded and retried as a
+      // failed call wherever it reaches people (`model.failed`).
+      //
+      // Only here, a call that ends with an error: the streamed answers
+      // (`agent`) end with a message instead, whose missing code their
+      // readers take for exactly this (the interview words it "say it
+      // another way"; a chat, a failed answer), so naming a code there
+      // would change what people are told. Speech (`speak`) is Grasp's own
+      // voice on its own key, read by its own words. Neither is used by
+      // the Brain's work queue, which needs this code to tell an item's
+      // refused request from an outage.
+      if (sent.failure?.kind === "refused" && stopped === undefined) {
+        throw modelErrors.create("model.request_refused");
+      }
       throw modelErrors.create("model.failed");
     }
     if (schema === undefined) {

@@ -39,10 +39,17 @@ import type {
   VectorModel,
   VectorsToPut,
 } from "@grasp-os/brain-next/contract";
+import {
+  defineWork,
+  enqueueWork,
+  workAttemptsMax,
+} from "@grasp-os/brain-next/work";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { z } from "zod";
 
 import * as coreBrain from "../src/brain-next.ts";
 import type {
@@ -388,7 +395,14 @@ const otherKindOf = async (
   ];
 };
 
-/** Times a sweep is asked for: now, far ahead, and long ago. */
+/**
+ * Times a tick is asked for, and with it the sweep it starts with: now,
+ * far ahead, and long ago. The sweep runs as of `min(at, now)`, and no
+ * file is left over past its grace while the harness runs, so these
+ * sweeps delete nothing: they hold a sweep with nothing due to answer,
+ * log and prompt nothing of a marker. A sweep that deletes is covered by
+ * brain-next-sources.test.ts.
+ */
 const sweepTimes = (): Date[] => [
   new Date(),
   new Date(Date.now() + 365 * 86_400_000),
@@ -506,6 +520,66 @@ const hiddenIdsOf = (
 
 /** The kinds of conversation a context names. */
 const conversations = ["own", "direct", "channel"] as const;
+/**
+ * Work whose items carry the markers and whose handler fails with them in
+ * its error, so the queue's surfaces show whether either gets out: its
+ * overview keeps only its own codes, never a payload or a handler's words.
+ * It never asks a model, so a marker in a prompt would be the queue's own.
+ */
+const markedWork = defineWork({
+  kind: `probe.marked_${crypto.randomUUID().replaceAll("-", "")}`,
+  payload: z.strictObject({ marked: z.string() }),
+  timeLimitMs: 1000,
+  run: async ({ marked }) => {
+    await Promise.resolve();
+    throw new Error(`Could not read ${marked}`);
+  },
+});
+
+/** The queue's own time for the probes: only forward, a day a tick. */
+const queueClock = { at: Date.now() };
+const nextDay = (): Date => {
+  queueClock.at = Math.max(queueClock.at, Date.now()) + 24 * 60 * 60_000;
+  return new Date(queueClock.at);
+};
+
+/**
+ * Adds an item of `markedWork` that carries the markers (its key doesn't:
+ * a key is an ID staff see), and works it through `tick` until it is
+ * parked, its failure the handler's words.
+ */
+const workMarked = async (
+  markers: readonly string[],
+  tick: (at: Date) => Promise<unknown>,
+  name: string
+): Promise<Answer[]> => {
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_store, state) => {
+      enqueueWork(state.storage, markedWork, {
+        key: `probe-${crypto.randomUUID()}`,
+        payload: { marked: markers.join(" ") },
+        priority: "asked",
+      });
+    }
+  );
+  const ticked: Answer[] = [];
+  for (let attempt = 0; attempt < workAttemptsMax; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one tick after another
+    const answered = await answer(
+      `${name}, tick ${attempt + 1}`,
+      async () => await tick(nextDay())
+    );
+    ticked.push(answered);
+  }
+  return ticked;
+};
+
+/** The host's model, as a probe hands it: it answers, and holds nothing. */
+const quietModel = async () => {
+  await Promise.resolve();
+  return { kind: "answer" as const, text: "" };
+};
 
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
@@ -618,28 +692,6 @@ export const coreProbes = {
         { producer: "upload", id: `${markers.join("\n")}\u0000` },
         1
       )
-    );
-    return asked;
-  },
-  // What the sweep probes cover, and what they don't: the sweep runs as of
-  // `min(at, now)`, and no file is left over past its grace while the
-  // harness runs, so these sweeps delete nothing. They hold a sweep with
-  // nothing due, and its refusals, to answer, log and prompt nothing of a
-  // marker. A sweep that deletes is covered by brain-next-sources.test.ts
-  // (files and rows gone, held files kept), not for what it logs.
-  sweepBrain: async () => {
-    const asked: Answer[] = [];
-    for (const at of sweepTimes()) {
-      // oxlint-disable-next-line no-await-in-loop -- one sweep at a time
-      const answered = await answer(`as of ${at.toISOString()}`, async () => {
-        await coreBrain.sweepBrain(env, at);
-      });
-      asked.push(answered);
-    }
-    asked.push(
-      await answer("as of no time", async () => {
-        await coreBrain.sweepBrain(env, unchecked("never"));
-      })
     );
     return asked;
   },
@@ -764,6 +816,44 @@ export const coreProbes = {
     );
     return asked;
   },
+  workBrain: async ({ markers }) => {
+    const asked = await workMarked(
+      markers,
+      async (at) => {
+        await coreBrain.workBrain(env, at);
+      },
+      "a marked item worked through core's clock"
+    );
+    for (const at of sweepTimes()) {
+      // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+      const answered = await answer(
+        `a tick as of ${at.toISOString()}`,
+        async () => {
+          await coreBrain.workBrain(env, at);
+        }
+      );
+      asked.push(answered);
+    }
+    asked.push(
+      await answer("a tick at no time", async () => {
+        await coreBrain.workBrain(env, unchecked(markers.join(" ")));
+      })
+    );
+    return asked;
+  },
+  brainWorkOverview: async ({ markers }) => [
+    ...(await workMarked(
+      markers,
+      async (at) => {
+        await store().work(quietModel, at);
+      },
+      "a marked item worked to parking"
+    )),
+    await answer(
+      "the overview, the marked item parked",
+      async () => await coreBrain.brainWorkOverview(env)
+    ),
+  ],
 } satisfies Record<CoreMember, Probe>;
 
 /** Each export of core's instruction-files.ts. */
@@ -1329,28 +1419,6 @@ export const storeProbes = {
     );
     return asked;
   },
-  // As `sweepBrain`: a sweep with nothing due, and its refusals.
-  sweep: async ({ markers }) => {
-    const asked: Answer[] = [];
-    for (const at of sweepTimes()) {
-      // oxlint-disable-next-line no-await-in-loop -- one sweep at a time
-      const answered = await answer(`as of ${at.toISOString()}`, async () => {
-        await store().sweep({ at });
-      });
-      asked.push(answered);
-    }
-    asked.push(
-      await answer("as of no time", async () => {
-        await store().sweep(unchecked({ at: markers.join(" ") }));
-      }),
-      await answer("a request with an unknown field", async () => {
-        await store().sweep(
-          unchecked({ at: new Date(), extra: markers.join(" ") })
-        );
-      })
-    );
-    return asked;
-  },
   recall: async (probing) => {
     const { reader, markers } = probing;
     const recall = async (
@@ -1766,4 +1834,37 @@ export const storeProbes = {
     );
     return asked;
   },
+  work: async ({ markers }) => [
+    ...(await workMarked(
+      markers,
+      async (at) => {
+        await store().work(quietModel, at);
+      },
+      "a marked item worked by the store"
+    )),
+    ...(await Promise.all(
+      sweepTimes().map(
+        async (at) =>
+          await answer(`a tick as of ${at.toISOString()}`, async () => {
+            await store().work(quietModel, at);
+          })
+      )
+    )),
+    await answer("a tick at no time", async () => {
+      await store().work(quietModel, unchecked(markers.join(" ")));
+    }),
+  ],
+  workOverview: async ({ markers }) => [
+    ...(await workMarked(
+      markers,
+      async (at) => {
+        await store().work(quietModel, at);
+      },
+      "a marked item worked to parking"
+    )),
+    await answer(
+      "the store's overview, the marked item parked",
+      async () => await store().workOverview()
+    ),
+  ],
 } satisfies Record<StoreMember, Probe>;
