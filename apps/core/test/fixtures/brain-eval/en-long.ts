@@ -15,7 +15,7 @@ export const enLongSources: readonly BrainEvalSource[] = [
 Group policy POL-RR-03, version 2. Approved by the management team on 21 October 2026 and in force from 1 December 2026. It replaces the retention guidance of 2019 and the separate archiving note that the Duisburg site kept for its own paper files.
 
 1. Scope
-This policy applies to every Groenhaven company and site: the head office in Utrecht, the warehouses in Nieuwegein and Duisburg, the sales office in Lyon and the distribution centre in Valencia. It covers records in any form, whether on paper, in the ERP, on shared drives, in mailboxes or in chat. A record is anything that shows what the company agreed, decided, paid or delivered. Drafts, personal notes and duplicate copies are not records and may be deleted once they are no longer needed. Where local law in Germany, France or Spain requires a longer period than this policy sets, the longer period applies, and the site's line in the retention schedule (annex A) says so.
+This policy applies to every Groenhaven company and site: the head office in Utrecht, the warehouses in Nieuwegein and Duisburg, the sales office in Lyon and the distribution centre in Valencia. It covers records in any form, whether on paper, in the ERP, on shared drives, in mailboxes or in chat. A record is anything that shows what the company agreed, decided, paid or delivered. Drafts, personal notes and duplicate copies are not records and may be deleted once they are no longer needed. Where local law in Germany, France or Spain requires a longer period than this policy sets, the longer period applies, and the site's line in the retention schedule (Annex A) says so.
 
 2. Customer contracts
 Signed customer contracts, framework agreements, price agreements and their amendments are kept for seven years after the contract ends, counted from the end of the calendar year in which it expires or is terminated. The owner is the sales director; in Lyon the head of the sales office acts on her behalf. The signed original is filed in the contract register on the intranet under the customer number, and paper originals are scanned and then kept in the locked contract cabinet at the head office. At the end of the period the owner approves disposal on form RR-21, and the papers are destroyed by the certified shredding service that visits the head office every month.
@@ -36,10 +36,10 @@ When a dispute, a claim, a tax inspection or an investigation is expected, Group
 Paper records that hold personal or commercial information go into the locked shredding consoles, never into the ordinary waste paper bins. Electronic records are deleted by IT on the owner's instruction, including backup copies once their own cycle has run. Old hard drives, USB sticks and other data carriers are handed in at the IT service desk, which has them wiped or physically destroyed. Every disposal of a batch of records is entered in the disposal register with the date, the type of record, the period it covers and the number of the approval form. The disposal register itself is kept permanently.
 
 8. Exceptions
-To keep a record longer than its period, or to dispose of it earlier, send form RR-30 with your reason to Group Legal, which decides within ten working days. Some records are kept longer by rule. Product safety files for barbecues, patio heaters and other gas appliances are kept for 15 years after the last unit of that product was sold, because claims about them can come late. Records of historic value, such as the founding deeds, the minutes of shareholders' meetings and one copy of every product catalogue, are kept permanently in the company archive at the head office.
+To keep a record longer than its period, or to dispose of it earlier, send form RR-30 with your reason to Group Legal, which decides within ten working days. Some records are kept longer by rule. Product safety files for barbecues, patio heaters and other gas appliances are kept for 15 years after the last unit of that product was sold, because claims about them can come late. Records of historical value, such as the founding deeds, the minutes of shareholders' meetings and one copy of every product catalogue, are kept permanently in the company archive at the head office.
 
 9. Who to ask
-The records coordinator is Merel Hoekstra of Group Legal in Utrecht, on extension 2380. Each site also has a local records contact: Ruud Jansen in Nieuwegein, Katrin Vogel in Duisburg, Élodie Marchand in Lyon and Lucía Navarro in Valencia. They can tell you where a type of record belongs, help you fill in the disposal forms and arrange the shredding service. This policy is reviewed every two years; the next review is due in autumn 2028.`,
+The records coordinator is Merel Hoekstra of Group Legal in Utrecht, on extension 2380. Each site also has a local records contact: Wouter Jansen in Nieuwegein, Katrin Vogel in Duisburg, Élodie Marchand in Lyon and Lucía Navarro in Valencia. They can tell you where a type of record belongs, help you fill in the disposal forms and arrange the shredding service. This policy is reviewed every two years; the next review is due in autumn 2028.`,
   },
   {
     key: "en-thread-erp-cutover",
@@ -179,7 +179,7 @@ At year end an accrual is booked for any single item above EUR 5,000 for which g
 3. Stock count valuation
 The year-end stock counts in Nieuwegein, Duisburg and Valencia give the quantities; finance gives the values. Stock is valued at the lower of cost and net realisable value, using the standard cost prices of 2026. The site controller compares the count with the ERP and sends the differences to the site planner. Count differences above EUR 2,000 per item are investigated with the site planner before they are posted, and the outcome is noted in the valuation file STK-VAL-2026.
 
-Slow movers are provided for on the same file. An item with no sales in the last 12 months is provided for at 50% of its cost price, and an item with no sales in the last 24 months is provided for in full. Seasonal stock is not a slow mover just because it is winter: parasols and garden furniture are judged on the sales of the last full season. Damaged stock found at the count is written down to its scrap value straight away.
+Slow movers are provided for in the same file. An item with no sales in the last 12 months is provided for at 50% of its cost price, and an item with no sales in the last 24 months is provided for in full. Seasonal stock is not a slow mover just because it is winter: parasols and garden furniture are judged on the sales of the last full season. Damaged stock found at the count is written down to its scrap value straight away.
 
 4. Intercompany reconciliation
 All balances between the four companies must agree at 31 December. Confirmations close on 13 January: by then each company enters its receivables from and payables to the other three in the intercompany reconciliation tool, and the counterparty either agrees or raises a difference. Differences above EUR 1,000 must be resolved by 15 January; smaller ones are written off in the company that raised the charge. The loan from Groenhaven B.V. to Groenhaven GmbH is reconciled separately, including the interest for 2026, against the loan statement that treasury issues. Do not post intercompany adjustments without the agreement of the other company's controller.
@@ -242,7 +242,7 @@ export const enLongQuestions: readonly BrainEvalQuestion[] = [
   {
     id: "en-long-order-entry-freeze",
     language: "en",
-    question: "From when will order entry be frozen for the cutover?",
+    question: "From what time will order entry be frozen for the cutover?",
     expects: answer(
       "words",
       "en-thread-erp-cutover",
@@ -309,7 +309,7 @@ export const enLongQuestions: readonly BrainEvalQuestion[] = [
     language: "en",
     asker: "sophie",
     question:
-      "How much do we write off on goods nobody has bought for two years?",
+      "How much do we knock off products nobody has bought for two years?",
     expects: answer(
       "paraphrase",
       "en-year-end-close",
@@ -325,6 +325,7 @@ export const enLongQuestions: readonly BrainEvalQuestion[] = [
       "en-year-end-close",
       "from 8 to 26 February 2027",
       "go to the auditors on 5 February",
+      "with one day in Duisburg in the second week",
       "Lindeveld"
     ),
   },

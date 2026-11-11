@@ -11,7 +11,7 @@ export const crossLongQuestions: readonly BrainEvalQuestion[] = [
     id: "x-long-nl-en-klantcontract",
     language: "nl",
     question:
-      "Hoe lang moeten we een ondertekend contract met een klant bewaren als het is afgelopen?",
+      "Hoe lang moeten we een getekende overeenkomst met een klant bewaren nadat die is afgelopen?",
     expects: answer(
       "paraphrase",
       "en-records-retention",
@@ -23,9 +23,9 @@ export const crossLongQuestions: readonly BrainEvalQuestion[] = [
     id: "x-long-nl-de-palletzending",
     language: "nl",
     question:
-      "Tot hoe laat moet een palletzending in Duisburg bij de expediteur zijn aangemeld?",
+      "Wanneer moet een palletzending in Duisburg uiterlijk zijn aangemeld?",
     expects: answer(
-      "paraphrase",
+      "words",
       "de-handbuch-kommissionierung",
       "Speditionsversand ist 11:00 Uhr am Vortag",
       "Paketversand ist 15:00 Uhr"
@@ -34,10 +34,9 @@ export const crossLongQuestions: readonly BrainEvalQuestion[] = [
   {
     id: "x-long-nl-fr-printen",
     language: "nl",
-    question:
-      "Hoe krijg ik op het kantoor in Lyon mijn afdruk uit het apparaat?",
+    question: "Hoe krijg ik op het kantoor in Lyon mijn afdruk uit de printer?",
     expects: answer(
-      "paraphrase",
+      "words",
       "fr-livret-accueil-lyon",
       "lorsque vous présentez votre badge devant l'imprimante"
     ),
@@ -46,7 +45,7 @@ export const crossLongQuestions: readonly BrainEvalQuestion[] = [
     id: "x-long-en-nl-course-repay",
     language: "en",
     question:
-      "If I resign a few months after finishing an expensive course the company paid for, how much of it do I owe back?",
+      "If I resign a few months after finishing an expensive course the company paid for, how much of it do I have to pay back?",
     expects: answer(
       "paraphrase",
       "nl-handboek-opleiding",
@@ -78,7 +77,6 @@ export const crossLongQuestions: readonly BrainEvalQuestion[] = [
   {
     id: "x-long-es-nl-devolucion-tienda-online",
     language: "es",
-    asker: "javier",
     question:
       "¿Cuántos días tiene una tienda online para devolvernos mercancía en buen estado?",
     expects: answer(
@@ -103,7 +101,7 @@ export const crossLongQuestions: readonly BrainEvalQuestion[] = [
     id: "x-long-de-en-generalprobe",
     language: "de",
     question:
-      "Wann findet die Generalprobe für die Umstellung auf ERP 26.12 statt?",
+      "Wann findet die Generalprobe für die Umstellung auf das ERP-Release 26.12 statt?",
     expects: answer(
       "exact",
       "en-thread-erp-cutover",
