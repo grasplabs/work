@@ -23,6 +23,7 @@ import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { DefinitionPlan } from "@grasp-os/shared/data-model";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { functionErrors } from "@grasp-os/shared/functions";
+import { httpContract } from "@grasp-os/shared/http-contract";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ServerLog } from "@grasp-os/shared/pages";
@@ -1901,7 +1902,7 @@ const buildDeclaration = `/**
  * and methods it allows; its credential is connect's and never yours).
  * Never write a URL, key or token into code: add it to the App's
  * permissions (\`addPermission\` with
- * \`permission.connection("billing", { contract: "http.request@1", actions: ["get", "send"] })\`:
+ * \`permission.connection("billing", { contract: "${httpContract}", actions: ["get", "send"] })\`:
  * only the actions you use; \`get\` reads, \`send\` changes), and from
  * an action call \`await ctx.connections.billing.fetch("/v1/invoices?status=open")\` or
  * \`fetch("/v1/invoices", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(invoice) })\`:
