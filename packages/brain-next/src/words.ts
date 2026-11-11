@@ -344,7 +344,11 @@ export const indexWords = (
  * indexes hold of a chunk change, and every store rebuilds its word
  * indexes from its chunks' text (`reindexWords`). The stop words are read
  * from the question alone, so changing them needs no bump. 1: words folded
- * without the primary letters, no stems; 2: stems (GRA-1725).
+ * without the primary letters, no stems; 2: stems (GRA-1725). A store marked
+ * current stays so: rolled back to a release with older rules, it indexes
+ * new chunks by those, and the release after does not rebuild them, since
+ * the store reads current; they are recalled by the older rules until the
+ * number is bumped again (nothing leaks).
  */
 export const wordsVersion = 2;
 

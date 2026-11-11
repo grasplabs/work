@@ -55,6 +55,13 @@ const recalledAs = async (
 /** `word` 150 times: a paragraph too long to share a passage with another. */
 const filler = (word: string): string => `${word} `.repeat(150).trim();
 
+/**
+ * A mark of digits alone: no stemmer rewrites a digit, so a word built on
+ * it keeps the mark whole in every stem, as the index pages hold it.
+ */
+const digitsMark = (): string =>
+  String(crypto.getRandomValues(new Uint32Array(1))[0]);
+
 /** The Brain's one store, as core reaches it. */
 const store = () => env.BRAIN_STORE.getByName("brain");
 
@@ -291,11 +298,12 @@ describe("erasing words", { timeout: 60_000 }, () => {
   it("takes a deleted chunk's words out of both the word and the stem index", async () => {
     const reader = await person();
     // Marks no other word holds, inside words with an ending the stemmers
-    // take off: indexed as written and as stems. Behind "xq" and "zq",
-    // which no other test's words start with: FTS5 stores a term after the
-    // prefix it shares with the one before it, so a shared start could
-    // hide part of a mark from the page search.
-    const [kept, erased] = [unique(), unique()];
+    // take off: indexed as written and as stems. Digits alone, which no
+    // stemmer rewrites, behind "xq" and "zq", which no other test's words
+    // start with: FTS5 stores a term after the prefix it shares with the
+    // one before it, so a mark rewritten inside or a shared start could
+    // hide part of it from the page search.
+    const [kept, erased] = [digitsMark(), digitsMark()];
     await add(`xq${kept}ingen stays`, ownedBy(reader));
     await add(`zq${erased}ingen goes`, ownedBy(reader));
     await expect(indexesFind(`zq${erased}`)).resolves.toStrictEqual([
@@ -370,6 +378,22 @@ const toFirstRules = async (marks: readonly string[]): Promise<void> => {
   });
 };
 
+/** How many of the chunks holding `mark` the words index finds by `term`. */
+const chunksFoundBy = async (mark: string, term: string): Promise<number> =>
+  await runInDurableObject(
+    store(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ found: number }>(
+          `SELECT count(*) AS found FROM chunk_words
+        WHERE chunk_words MATCH ?1
+          AND rowid IN (SELECT row FROM chunks WHERE instr(text, ?2) > 0)`,
+          `"${term}"`,
+          mark
+        )
+        .one().found
+  );
+
 /** The store's word index rules number, and the rebuild's place. */
 const wordIndexState = async () =>
   await runInDurableObject(store(), (_instance, state) =>
@@ -435,6 +459,7 @@ describe(
       const before = {
         invoice: await recalledAs(reader, "factuur"),
         street: await recalledAs(reader, "strasse"),
+        firstRules: await chunksFoundBy(mark, "straße"),
       };
       const ticks = await ticksUntilRebuilt();
 
@@ -444,18 +469,21 @@ describe(
         invoice: await recalledAs(reader, "factuur"),
         street: await recalledAs(reader, "strasse"),
         other: await recalledAs(other, "strasse"),
+        // The first rules' rows went: none is left beside the new ones.
+        firstRules: await chunksFoundBy(mark, "straße"),
       }).toStrictEqual({
-        before: { invoice: [], street: [] },
+        before: { invoice: [], street: [], firstRules: 1 },
         rebuilt: true,
         invoice: [invoices],
         street: [street],
         other: [],
+        firstRules: 0,
       });
     });
 
     it("goes on after the store stops mid-rebuild, and indexes every passage exactly once", async () => {
       const reader = await person();
-      const mark = `m${unique()}`;
+      const mark = `m${digitsMark()}`;
       // Paragraphs too long to share a passage, more than a tick rebuilds.
       const count = 450;
       const paragraphs = Array.from(
