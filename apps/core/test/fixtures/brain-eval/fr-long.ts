@@ -12,7 +12,7 @@ export const frLongSources: readonly BrainEvalSource[] = [
     readers: { team: "sales" },
     text: `Conditions commerciales 2027 : guide pour l'équipe de Lyon
 
-Ce guide reprend les conditions commerciales applicables aux clients français suivis par le bureau de Lyon. Il ne traite pas des prix : ceux-ci figurent dans la grille tarifaire, qu'il complète sans la remplacer. En cas de doute, posez la question à Camille Laurent avant de vous engager auprès d'un client.
+Ce guide reprend les conditions commerciales applicables aux clients français suivis par le bureau de Lyon. Il ne traite pas des prix : ceux-ci figurent dans la grille tarifaire, qu'il complète sans la remplacer. En cas de doute, posez toujours la question à Camille Laurent avant de vous engager auprès d'un client.
 
 Article 1 – Champ d'application
 Les présentes conditions distinguent deux types de clients. Les jardineries indépendantes sont les magasins qui commandent en leur nom propre, y compris lorsqu'ils adhèrent à un groupement d'achat. Les enseignes sont les réseaux d'au moins cinq magasins qui passent par une centrale d'achat et ont signé un contrat de référencement avec Groenhaven. Un client qui change de catégorie en cours d'année conserve ses conditions jusqu'au 31 décembre.
