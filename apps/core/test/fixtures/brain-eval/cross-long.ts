@@ -113,7 +113,7 @@ export const crossLongQuestions: readonly BrainEvalQuestion[] = [
     language: "es",
     asker: "javier",
     question:
-      "¿Cuántos muelles de carga nuevos tendrá la nave nueva que se va a construir en Duisburg?",
+      "¿Cuántos muelles de carga más tendrá la nave que se va a construir en Duisburg?",
     expects: answer(
       "words",
       "de-protokoll-standortversammlung",

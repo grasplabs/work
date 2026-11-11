@@ -201,7 +201,7 @@ process.stdout.write(
 );
 if (uncut.length > 0) {
   process.stdout.write(
-    `\n${uncut.length} uncut chunks: the Brain no longer cuts as the set does; ranks are not comparable.\n${uncut.map(({ id, source, start }) => `  ${id} (${source}: "${start}…")\n`).join("")}`
+    `\n${uncut.length} results with uncut chunks: the Brain no longer cuts as the set does; ranks are not comparable.\n${uncut.map(({ id, source, start }) => `  ${id} (${source}: "${start}…")\n`).join("")}`
   );
 }
 if (passed) {
