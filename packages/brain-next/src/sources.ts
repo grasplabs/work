@@ -142,7 +142,8 @@ const madeBefore = (
  * removes the vector codes of the version it replaces (vectors.ts). Run it
  * in one transaction. Answers `undefined` when the file's row is gone (swept
  * since it was noted), noting it again for the sweep to find what the add
- * wrote.
+ * wrote; and, writing nothing, when a delete of the file may still land
+ * (a sweep gave up waiting for R2 while this add's write was under way).
  */
 const record = (
   db: DrizzleSqliteDODatabase,
@@ -155,6 +156,9 @@ const record = (
     return before;
   }
   const { added, hash } = adding;
+  if (isInDoubt(db, hash)) {
+    return undefined;
+  }
   if (!holdFile(db, hash)) {
     noteWrite(db, hash);
     return undefined;

@@ -529,6 +529,9 @@ const accountTroubles: ReadonlySet<string> = new Set<ModelErrorCode>([
   "model.unconfigured",
   "model.not_allowed",
   "model.provider_key_failed",
+  // Grasp's AI used up for the month: until the next month, or the
+  // organization's own key.
+  "model.grasp_limit_reached",
 ]);
 
 /**

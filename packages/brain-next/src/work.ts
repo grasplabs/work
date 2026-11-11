@@ -329,7 +329,7 @@ export const enqueueWork = <Payload>(
 export interface WorkState {
   turns: Promise<unknown>;
   /** By kind and key (`zombieOf`). */
-  zombies: Map<string, OverdueWork>;
+  zombies: Map<string, OverdueWork & { connection: string | null }>;
   /** Restarts the store: what ends handlers no signal stops. */
   restart: () => void;
 }
@@ -524,8 +524,10 @@ const pick = (
   if (free <= 0) {
     return [];
   }
+  // A handler left running past its time still holds its connection's
+  // place, as it holds its slot.
   const perConnection = new Map<string, number>();
-  for (const { connection } of running) {
+  for (const { connection } of [...running, ...state.zombies.values()]) {
     if (connection !== null) {
       perConnection.set(connection, (perConnection.get(connection) ?? 0) + 1);
     }
@@ -601,7 +603,8 @@ const claim = (
     // A handler left running past its time still holds its slot.
     const free = workAtOnce - running.length - state.zombies.size;
     claimed = pick(storage, state, now, free, running);
-  } else if (running.length === 0) {
+  } else if (running.length === 0 && state.zombies.size === 0) {
+    // Alone: not even beside a handler left running past its time.
     claimed = [alone];
   }
   for (const item of claimed) {
@@ -909,7 +912,11 @@ const runItem = async (
     return;
   }
   const zombie = zombieOf(item);
-  state.zombies.set(zombie, { kind: item.kind, key: item.key });
+  state.zombies.set(zombie, {
+    kind: item.kind,
+    key: item.key,
+    connection: item.connection,
+  });
   settle(
     storage,
     item,
@@ -1056,6 +1063,9 @@ export const workOverview = (
     }),
     parkedCount: parkedCount?.count ?? 0,
     paused,
-    overdue: [...state.zombies.values()],
+    overdue: [...state.zombies.values()].map(({ kind, key }) => ({
+      kind,
+      key,
+    })),
   };
 };
