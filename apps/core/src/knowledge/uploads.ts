@@ -28,7 +28,6 @@ import type {
   UploadExtension,
   UploadMediaType,
 } from "@grasp-os/shared/uploads";
-import { waitUntil } from "cloudflare:workers";
 import { and, asc, count, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -37,7 +36,6 @@ import { stringify } from "yaml";
 
 import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
 import { identify, memberRole, teamsOf } from "../auth/identity.ts";
-import { handOverUpload } from "../brain-producers.ts";
 import { uploadCleanups, uploads } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
 import { routeMember } from "../staff-audit.ts";
@@ -500,61 +498,6 @@ const extractionError = (uploadId: string, error: unknown): unknown => {
 };
 
 /**
- * Whether `version` of document `documentId`, at `path` in
- * `collectionId`, is still that document's current one: no later save
- * moved it on, and the name was not deleted and saved again since.
- */
-const isCurrentVersion = async (
-  env: Env,
-  saved: {
-    collectionId: string;
-    path: string;
-    documentId: string;
-    version: number;
-  }
-): Promise<boolean> => {
-  const current = await findByPath(
-    drizzle(env.KNOWLEDGE),
-    saved.collectionId,
-    saved.path
-  );
-  return (
-    current?.id === saved.documentId && current.currentVersion === saved.version
-  );
-};
-
-/**
- * Hands upload `uploadId`, ready, over to the new Brain
- * (brain-producers.ts): `text`, the text it saved as `version` of
- * document `documentId` at `path` in `collectionId`, for its uploader;
- * nothing from a `sensitive` collection. Only while that version is still
- * the document's current one (`isCurrentVersion`), so a hand-over that
- * lands after a later upload's never puts the older text on top. Whether
- * it was handed over; it never rejects.
- */
-export const handOverReadyUpload = async (
-  env: Env,
-  upload: {
-    uploadId: string;
-    uploadedBy: string;
-    collectionId: string;
-    sensitive: boolean;
-    path: string;
-    documentId: string;
-    version: number;
-    text: string;
-  }
-): Promise<boolean> =>
-  await handOverUpload(env, {
-    uploadId: upload.uploadId,
-    documentId: upload.documentId,
-    uploadedBy: upload.uploadedBy,
-    sensitive: upload.sensitive,
-    text: upload.text,
-    stillCurrent: async () => await isCurrentVersion(env, upload),
-  });
-
-/**
  * The extraction run's one step: extracts the upload's text with the
  * extractor its collection gets (extract.ts), after recording that the
  * file is sent out when it is converted by Grasp's own conversion, and
@@ -652,7 +595,6 @@ export const extractUpload = async (
   if (claimed === undefined) {
     return;
   }
-  const text = documentText(row, markdown);
   // A conflict (someone saved the document meanwhile) throws, and the
   // step's retry saves on top of their version.
   const saved = await writeVersion(
@@ -661,7 +603,7 @@ export const extractUpload = async (
     {
       collection,
       path: row.path,
-      text,
+      text: documentText(row, markdown),
       ifVersion,
       message: `Uploaded ${row.path}`,
       restoredFrom: null,
@@ -695,20 +637,6 @@ export const extractUpload = async (
       },
     }),
   ]);
-  // The new Brain's copy, once the upload is ready: in the background, so
-  // a slow or hung Brain never holds the extraction workflow.
-  waitUntil(
-    handOverReadyUpload(env, {
-      uploadId,
-      uploadedBy: row.uploadedBy,
-      collectionId: row.collectionId,
-      sensitive: collection.sensitive,
-      path: row.path,
-      documentId: saved.id,
-      version: saved.currentVersion,
-      text,
-    })
-  );
 };
 
 /** Most uploads, and cleanups, looked at at once. */

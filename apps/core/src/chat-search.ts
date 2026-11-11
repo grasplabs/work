@@ -44,22 +44,15 @@ export const plainOf = (text: string): string =>
 /**
  * What `message` said, as plain text: a question's words, or an answer's
  * as the person reads them (its links to notes as their text); nothing
- * for a step's result or for core's own bookkeeping. All of it, however
- * long: for the new Brain's copy of a chat, which has its own bound.
+ * for a step's result or for core's own bookkeeping. At most
+ * {@link saidMax} characters, the start of it.
  */
-export const saidInFullOf = (message: Message): string => {
+export const saidOf = (message: Message): string => {
   const shown = chatMessageOf(0, message, new Date(0));
   return shown?.role === "user" || shown?.role === "assistant"
-    ? plainOf(shown.text)
+    ? plainOf(shown.text).slice(0, saidMax)
     : "";
 };
-
-/**
- * What `message` said (`saidInFullOf`) as a search looks through it: at
- * most {@link saidMax} characters, the start of it.
- */
-export const saidOf = (message: Message): string =>
-  saidInFullOf(message).slice(0, saidMax);
 
 /**
  * What a search looks for in what was said, in turn: the whole search as
