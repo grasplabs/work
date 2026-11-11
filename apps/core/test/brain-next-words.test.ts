@@ -270,11 +270,14 @@ describe("erasing words", { timeout: 60_000 }, () => {
   it("takes a deleted chunk's words out of both the word and the stem index", async () => {
     const reader = await person();
     // Marks no other word holds, inside words with an ending the stemmers
-    // take off: indexed as written and as stems.
+    // take off: indexed as written and as stems. Behind "xq" and "zq",
+    // which no other test's words start with: FTS5 stores a term after the
+    // prefix it shares with the one before it, so a shared start could
+    // hide part of a mark from the page search.
     const [kept, erased] = [unique(), unique()];
-    await add(`x${kept}ingen stays`, ownedBy(reader));
-    await add(`z${erased}ingen goes`, ownedBy(reader));
-    await expect(indexesFind(`z${erased}`)).resolves.toStrictEqual([
+    await add(`xq${kept}ingen stays`, ownedBy(reader));
+    await add(`zq${erased}ingen goes`, ownedBy(reader));
+    await expect(indexesFind(`zq${erased}`)).resolves.toStrictEqual([
       true,
       true,
     ]);
@@ -286,10 +289,10 @@ describe("erasing words", { timeout: 60_000 }, () => {
     await runInDurableObject(store(), (_instance, state) => {
       state.storage.sql.exec(
         "DELETE FROM chunks WHERE text = ?",
-        `z${erased}ingen goes`
+        `zq${erased}ingen goes`
       );
     });
-    await expect(indexesFind(`z${erased}`)).resolves.toStrictEqual([
+    await expect(indexesFind(`zq${erased}`)).resolves.toStrictEqual([
       false,
       false,
     ]);
@@ -302,6 +305,6 @@ describe("erasing words", { timeout: 60_000 }, () => {
     });
 
     await expect(indexesStore(erased)).resolves.toStrictEqual([false, false]);
-    await expect(indexesFind(`x${kept}`)).resolves.toStrictEqual([true, true]);
+    await expect(indexesFind(`xq${kept}`)).resolves.toStrictEqual([true, true]);
   });
 });
