@@ -1,4 +1,7 @@
-import { definitionText } from "@grasp-os/runtime/definition";
+import {
+  definitionText,
+  serverFunctionsIn,
+} from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
 import {
   declaredPermission,
@@ -234,7 +237,10 @@ export const draftReferences = async (
     return null;
   }
   const release = await sealed(env, app, version, source);
-  const generated = await generateModules(release.app);
+  const generated = await generateModules(
+    release.app,
+    serverFunctionsIn(Object.fromEntries(source.files))
+  );
   return pageModulesOf(generated) ?? null;
 };
 

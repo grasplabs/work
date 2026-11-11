@@ -1,3 +1,5 @@
+import { errorCategories } from "@grasp-os/shared/error-categories";
+
 import type { FunctionManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
@@ -32,13 +34,15 @@ import { workflowReferenceLimits } from "./workflow-references.ts";
 // literal.
 
 /** The names of the queries a workflow reference exposes. */
-export type WorkflowQueryName =
-  | "run"
-  | "canStart"
-  | "runs"
-  | "history"
-  | "decisions"
-  | "decision";
+export const workflowQueryNames = [
+  "run",
+  "canStart",
+  "runs",
+  "history",
+  "decisions",
+  "decision",
+] as const;
+export type WorkflowQueryName = (typeof workflowQueryNames)[number];
 
 /** The names of the mutations a workflow reference exposes. */
 export type WorkflowMutationName =
@@ -93,15 +97,7 @@ const runRow = v.union(
 const sanitizedError = v.object({
   code: v.string().min(1).max(256),
   message: plainText,
-  category: v.enum([
-    "source",
-    "contract",
-    "domain",
-    "authorization",
-    "operational",
-    "uncertain",
-    "safety",
-  ]),
+  category: v.enum(errorCategories),
   retryable: v.boolean(),
   requestId: idText.nullable(),
 });

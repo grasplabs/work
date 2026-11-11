@@ -27,3 +27,20 @@ CREATE TABLE `agent_tool_classes` (
 	`changed_at` integer NOT NULL,
 	PRIMARY KEY(`agent_id`, `tool_class`)
 );
+--> statement-breakpoint
+CREATE TABLE `agents` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`name_key` text,
+	`face` text NOT NULL,
+	`job` text NOT NULL,
+	`instructions` text NOT NULL,
+	`model_role` text,
+	`state` text NOT NULL,
+	`made_by` text NOT NULL,
+	`made_at` integer NOT NULL,
+	`changed_by` text NOT NULL,
+	`changed_at` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `agents_name_key_idx` ON `agents` (`name_key`);

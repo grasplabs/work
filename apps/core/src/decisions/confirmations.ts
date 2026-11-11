@@ -23,7 +23,6 @@ export const confirmationTtlMs = 5 * 60_000;
 export interface ReviewContext {
   decision: string;
   run: string;
-  app: string;
   workflow: string;
   version: number;
   step: string;
@@ -46,7 +45,6 @@ export const contextFingerprint = async (
     canonicalJson({
       decision: context.decision,
       run: context.run,
-      app: context.app,
       workflow: context.workflow,
       version: context.version,
       step: context.step,

@@ -98,12 +98,9 @@ export const auditActorSchema = z.discriminatedUnion("type", [
      */
     rootRunId: runIdSchema.optional(),
     /**
-     * The run whose allowances the run's work is charged to, for a run of
-     * another App than its lineage root's (a run's own mail starts other
-     * Apps' runs under it), or of the root's App under another App's run:
-     * the first run of its kind in the lineage, read from the engine's
-     * record of the run, never from what the run was given. None for a
-     * run charged to its lineage's own.
+     * The run whose allowances an App's own workflow run's work was
+     * charged to. Nothing makes this actor any more (Apps run no workflows
+     * of their own): kept so past audit events still read.
      */
     accountRunId: runIdSchema.optional(),
     staff: legacyStaff,
@@ -189,35 +186,6 @@ export const delegateActorOf = (
     }
   }
 };
-
-/**
- * A workflow run, acting on its own, as the audit log names it, with the
- * root of its lineage when another run started it.
- */
-export const runActorOf = ({
-  runId,
-  app,
-  workflow,
-  rootRunId,
-  accountRunId,
-}: {
-  runId: string;
-  app: string;
-  workflow: string;
-  rootRunId?: string | null | undefined;
-  accountRunId?: string | null | undefined;
-}): AuditActor => ({
-  type: "workflow",
-  appId: appIdSchema.parse(app),
-  workflowId: workflowIdSchema.parse(workflow),
-  runId: runIdSchema.parse(runId),
-  ...(rootRunId === null || rootRunId === undefined || rootRunId === runId
-    ? {}
-    : { rootRunId: runIdSchema.parse(rootRunId) }),
-  ...(accountRunId === null || accountRunId === undefined
-    ? {}
-    : { accountRunId: runIdSchema.parse(accountRunId) }),
-});
 
 /** The Workers that send audit events. */
 export const auditSourceSchema = z.enum(["core", "connect"]);

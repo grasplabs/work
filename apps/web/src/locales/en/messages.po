@@ -2219,10 +2219,6 @@ msgstr "An App"
 msgid "An App that… (what it shows, and for whom)"
 msgstr "An App that… (what it shows, and for whom)"
 
-#: src/apps/app-settings.tsx
-msgid "An App whose data was stored before this version of Grasp can’t read it any more: reset it, then publish again. Any other App’s data only an admin resets."
-msgstr "An App whose data was stored before this version of Grasp can’t read it any more: reset it, then publish again. Any other App’s data only an admin resets."
-
 #: src/apps/app-status.tsx
 msgid "An archived App is kept as it is and goes offline: nobody opens its pages, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "An archived App is kept as it is and goes offline: nobody opens its pages, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
@@ -9099,10 +9095,6 @@ msgstr "Only an admin makes a collection for everyone or for teams."
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 msgstr "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 
-#: src/apps/app-reset.tsx
-msgid "Only for data stored before this version of Grasp, which can’t be read any more. Every record it holds and every file in them is gone for good, and its current version runs again with no records."
-msgstr "Only for data stored before this version of Grasp, which can’t be read any more. Every record it holds and every file in them is gone for good, and its current version runs again with no records."
-
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Only highlighted turns"
@@ -10674,20 +10666,12 @@ msgid "Reset {name}’s data?"
 msgstr "Reset {name}’s data?"
 
 #: src/apps/app-reset.tsx
-msgid "Reset {name}’s old data?"
-msgstr "Reset {name}’s old data?"
-
-#: src/apps/app-reset.tsx
 msgid "Reset data"
 msgstr "Reset data"
 
 #: src/apps/app-reset.tsx
 msgid "Reset for good"
 msgstr "Reset for good"
-
-#: src/apps/app-reset.tsx
-msgid "Reset old data"
-msgstr "Reset old data"
 
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"

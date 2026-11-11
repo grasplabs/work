@@ -361,6 +361,79 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("never writes server/_generated/ for the agent, in any case or way, and generates it again from each write's code", async () => {
+    const api = "server/_generated/api.ts";
+    const forged = "export const api = { forged: { name: 'notes.secret' } };\n";
+    const tasks = `import { query } from "@server/_generated/server";
+
+export const list = query({ args: {}, handler: async () => [] });
+`;
+    const { chat, existing } = await setUp((app) => [
+      toolStep("writeFile", { app, files: { [api]: forged } }),
+      toolStep("writeFile", {
+        app,
+        files: { "Server/_Generated/api.ts": forged },
+      }),
+      toolStep("readFile", { app, path: api }),
+      toolStep("editFile", {
+        app,
+        path: api,
+        oldText: "export const api",
+        newText: "export const forged",
+      }),
+      codeStep(
+        tryEach({
+          write: `await env.build.write(${JSON.stringify(app)}, { ${JSON.stringify(api)}: ${JSON.stringify(forged)} })`,
+          remove: `await env.build.write(${JSON.stringify(app)}, { ${JSON.stringify(api)}: null })`,
+        })
+      ),
+      toolStep("writeFile", { app, files: { "server/tasks.ts": tasks } }),
+      codeStep(`export default async (self, env) => {
+        const { files } = await env.build.files(${JSON.stringify(app)});
+        return { api: files[${JSON.stringify(api)}] };
+      };`),
+      says("Done."),
+    ]);
+
+    await chat.ask("Add a list of tasks");
+
+    const [written, cased, read, edited, code, tasksWritten, after] =
+      await toolResults(chat.stub, chat.chat.id);
+    const { api: generated } = z
+      .object({ api: z.string() })
+      .parse(returned(after?.text));
+    const draft = await chat.stub.draft(
+      chatIdSchema.parse(chat.chat.id),
+      existing
+    );
+    const refusals = z
+      .record(z.string(), z.string())
+      .parse(returned(code?.text));
+    expect({
+      written: written?.isError,
+      cased: cased?.isError,
+      read: [read?.isError, read?.text.includes("export const api")],
+      edited: edited?.isError,
+      code: Object.keys(refusals).toSorted(),
+      tasks: tasksWritten?.isError,
+      generated: generated.includes('list: { name: "tasks.list" }'),
+      forged: generated.includes("forged"),
+      draftForged: Object.values(draft.changes).some(
+        (content) => content?.includes("forged") === true
+      ),
+    }).toStrictEqual({
+      written: true,
+      cased: true,
+      read: [false, true],
+      edited: true,
+      code: ["remove", "write"],
+      tasks: false,
+      generated: true,
+      forged: false,
+      draftForged: false,
+    });
+  });
+
   it("writes no App code from a restricted chat, though building needs no grant", async () => {
     const calls = tryEach({
       create: `(await env.build.create({ name: "Refused" })).name`,

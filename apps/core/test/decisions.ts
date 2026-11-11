@@ -209,16 +209,6 @@ export const outputOf = async ({
     : { status: ended.status, code: ended.error?.code };
 };
 
-/** Whether `decision`'s deadline has passed, by the database's clock. */
-export const deadlinePassed = async (decision: string): Promise<boolean> => {
-  const row = await env.DB.prepare(
-    "SELECT (julianday('now') - 2440587.5) * 86400000 > expires_at AS past FROM workflow_decisions WHERE id = ?"
-  )
-    .bind(decision)
-    .first<{ past: number }>();
-  return row?.past === 1;
-};
-
 /** An answer to a decision, as a person gives it. */
 type Answer = DecisionAnswerInput;
 

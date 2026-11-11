@@ -15,13 +15,7 @@ import {
 import type { Person } from "./json-workflow-apps.ts";
 import { newTeam } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import {
-  aroundEngine,
-  endLiveRuns,
-  resumed,
-  stopped,
-  whileEngineRefuses,
-} from "./runs.ts";
+import { aroundEngine, resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   callAuth,
@@ -146,10 +140,7 @@ const owed = async (runId: string): Promise<number> => {
 };
 
 describe("decisions", { timeout: 60_000 }, () => {
-  afterEach(async () => {
-    await endLiveResourceRuns();
-    await endLiveRuns();
-  });
+  afterEach(endLiveResourceRuns);
 
   it("say on their page whether the person answering may open the workflow that asks", async () => {
     const people = await owners();

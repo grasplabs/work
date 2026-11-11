@@ -351,11 +351,3 @@ export const dispatchFormSent = async (
   await queueFormSent(env, read.data);
   return "delivered";
 };
-
-/** `submission`, read back from where it was kept; undefined if it isn't one. */
-export const formSubmissionFrom = (
-  value: unknown
-): FormSubmission | undefined => {
-  const read = formSubmissionSchema.safeParse(value);
-  return read.success ? read.data : undefined;
-};

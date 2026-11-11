@@ -475,7 +475,8 @@ const requireOwnEvidenceReadable = async (
 };
 
 /**
- * `requireRunEvidenceReadable` for a run of a JSON workflow (GRA-299): its
+ * Refuses anything leaving a run of a JSON workflow (GRA-299) that recalled
+ * what it may no longer read, as `brain.revoked`: its
  * recalls are each through a knowledge binding, one collection under one
  * permission of the workflow's, so each binding's documents are checked
  * under that permission, as the run reads now: the permission still the
@@ -489,8 +490,8 @@ const requireOwnEvidenceReadable = async (
  * (workflow-reference-queries.ts), a failure as a platform code.
  *
  * It checks, then the caller acts: a revoke, erase or purge landing in
- * between lets that one call through, as on an App's run
- * (run-evidence.ts). Every later one is refused, and the run with it.
+ * between lets that one call through. Every later one is refused, and the
+ * run with it.
  */
 export const requireResourceRunEvidenceReadable = async (
   env: Env,

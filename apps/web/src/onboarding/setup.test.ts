@@ -9,10 +9,12 @@ import {
   closesOn,
   documentSources,
   dotsOf,
+  finishedAt,
   heldAt,
   keptAt,
   listeningOf,
   openItems,
+  reachedByPlace,
   reachedOf,
   settledAs,
   sourcesFor,
@@ -343,6 +345,32 @@ describe("the AI step", () => {
       first: afterAi(stepIndex("ai")),
       sentBack: afterAi(listening),
     }).toStrictEqual({ first: "about", sentBack: "listening" });
+  });
+});
+
+describe("how far the admin went, as core keeps it", () => {
+  it("is the screen after the furthest one they finished, wherever they finished it", () => {
+    expect({
+      none: reachedByPlace({ done: [] }),
+      unknown: reachedByPlace(null),
+      some: reachedByPlace({ done: ["welcome", "ai", "about"] }),
+      // Finished out of order: the furthest one counts.
+      apart: reachedByPlace({ done: ["welcome", "leads"] }),
+      all: reachedByPlace({ done: [...steps] }),
+    }).toStrictEqual({
+      none: 0,
+      unknown: 0,
+      some: stepIndex("company"),
+      apart: stepIndex("team"),
+      all: steps.length - 1,
+    });
+  });
+
+  it("tells core every screen before the one they reached", () => {
+    expect({
+      start: finishedAt(0),
+      company: finishedAt(stepIndex("company")),
+    }).toStrictEqual({ start: [], company: ["welcome", "ai", "about"] });
   });
 });
 

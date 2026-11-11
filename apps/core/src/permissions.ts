@@ -1475,8 +1475,8 @@ const changesThings = (object: PermissionObject, action: string): boolean =>
 
 /**
  * That `version` of `app` is one no admin approved (`madeCurrent`), as
- * SQL; each a value, or a column of the query it runs in. A version from
- * before approvals (null) counts as approved. The host always names a
+ * SQL; each a value, or a column of the query it runs in. A version never
+ * made current (null) is not one. The host always names a
  * version the App has; an independent workflow's start also requires the
  * version to exist (workflow-starts.ts).
  */
@@ -1485,22 +1485,6 @@ const unapprovedSql = (
   version: number | SQLWrapper
 ): SQL =>
   sql`EXISTS (SELECT 1 FROM ${appVersions} WHERE ${appVersions.appId} = ${app} AND ${appVersions.version} = ${version} AND ${appVersions.approved} = 0)`;
-
-/**
- * Whether `version` of App `app` is one an admin approved, as
- * `allowingPermissionSql` requires of a version whose code changes
- * things: one from before approvals counts as approved.
- */
-export const isApprovedVersion = async (
-  env: Env,
-  app: AppId,
-  version: number
-): Promise<boolean> => {
-  const row = await drizzle(env.DB).get<{ unapproved: number }>(
-    sql`SELECT ${unapprovedSql(app, version)} AS unapproved`
-  );
-  return row.unapproved === 0;
-};
 
 /**
  * The permissions that allow `action` on `object` for `subject`, as SQL
@@ -1555,59 +1539,6 @@ export const allowingPermissionSql = (
       holdsIn(where)
     ) ?? sql`0`
   );
-};
-
-/**
- * The permissions on connections through which App `appId`, running
- * `appVersion` (columns of the query it runs in), could hear events, as
- * SQL for a WHERE on `permissions`: `allowingPermissionSql`'s rule for an
- * action on a connection, for any connection, resource and action. Where
- * connect listens for events (workflows/connector-events.ts); each event
- * is checked by `allowingPermissionSql` itself as it is delivered.
- */
-export const listeningPermissionSql = (
-  appId: SQLWrapper,
-  appVersion: SQLWrapper
-): SQL =>
-  and(
-    eq(permissions.subjectType, "app"),
-    eq(permissions.subjectId, appId),
-    eq(permissions.status, "active"),
-    eq(permissions.objectType, "connection"),
-    sql`NOT ${unapprovedSql(appId, appVersion)}`,
-    holdsIn()
-  ) ?? sql`0`;
-
-/**
- * Refuses with `permission.denied` code of `version` of `app` that no admin
- * approved, while the App holds a permission that changes things, as
- * `authorize` does: for a run on it calling its App's server methods
- * (workflows/host.ts), which run the current version as the run's person
- * and can't be told apart by what they change, and at every protected step
- * of a function it calls in its pinned release (`runInvocationFor`,
- * app-functions.ts). An App with no such permission changes nothing for
- * the person but its own data, so the refusal holds only while one is
- * active: a version nobody approved runs again once none is.
- */
-export const requireApprovedVersion = async (
-  env: Env,
-  app: AppId,
-  version: number,
-  /** Records the refusal, before it is thrown (`runInvocationFor`). */
-  refused?: () => Promise<void>
-): Promise<void> => {
-  const changing = and(
-    ofSubject({ type: "app", appId: app }),
-    eq(permissions.status, "active"),
-    changesThingsSql
-  );
-  const row = await drizzle(env.DB).get<{ unapproved: number }>(
-    sql`SELECT (${unapprovedSql(app, version)} AND EXISTS (SELECT 1 FROM ${permissions} WHERE ${changing})) AS unapproved`
-  );
-  if (row.unapproved !== 0) {
-    await refused?.();
-    throw permissionErrors.create("permission.denied", { action: "call" });
-  }
 };
 
 /** A version of an App becoming current (`madeCurrent`). */

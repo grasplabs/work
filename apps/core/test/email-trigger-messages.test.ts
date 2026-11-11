@@ -1,5 +1,5 @@
 import type { Role } from "@grasp-os/shared/roles";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   addedSince,
@@ -11,7 +11,6 @@ import {
   storedObjects,
 } from "./email-triggers.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // Email triggers (email-triggers.ts): what of a message reaches the run it
@@ -94,8 +93,6 @@ const nestedMail = (depth: number): string =>
   ].join("\r\n");
 
 describe("email triggers", () => {
-  afterEach(endLiveRuns);
-
   it("keep nothing of a message without attachments, or with inline ones only", async () => {
     const { id, to } = await triggerAt("unkept");
     const before = await storedObjects();

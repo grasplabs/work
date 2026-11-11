@@ -14,6 +14,7 @@ import { startOxc } from "@grasp-os/compiler/oxc";
 import { oxcWasmModule } from "@grasp-os/compiler/oxc-wasm";
 import { pageServerImports } from "@grasp-os/compiler/page-imports";
 import { routeTree } from "@grasp-os/compiler/route-tree";
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
 import {
   dataModelSource,
   generatedPaths,
@@ -24,6 +25,7 @@ import {
   serverModuleSource,
   symbolicModules,
 } from "@grasp-os/runtime/host";
+import { serverModuleOf } from "@grasp-os/runtime/server-modules";
 import type { Code, Nodes } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { describe, expect, it } from "vite-plus/test";
@@ -125,14 +127,6 @@ const write = (dir: string, files: Files): void => {
   }
 };
 
-/** Whether `file` is one of the App's server modules, as the host reads it. */
-const isServerModule = (file: string): boolean =>
-  file.startsWith("server/") &&
-  file !== "server/schema.ts" &&
-  !file.startsWith("server/_generated/") &&
-  !file.startsWith("server/migrations/") &&
-  file.endsWith(".ts");
-
 /** What an imported module exports, by name. */
 const exportsOf = (module: unknown): Record<string, unknown> =>
   typeof module === "object" && module !== null
@@ -142,7 +136,8 @@ const exportsOf = (module: unknown): Record<string, unknown> =>
 /**
  * The modules Grasp generates for the App in `dir`: its server modules
  * imported, registered and inspected, as the host's inspection does, and
- * its references generated from the manifest that gives.
+ * its references generated from the manifest that gives and the
+ * functions their syntax declares.
  */
 const generated = async (dir: string, files: Files): Promise<Files> => {
   const config = exportsOf(await import(path.join(dir, "grasp.config.ts")));
@@ -151,12 +146,17 @@ const generated = async (dir: string, files: Files): Promise<Files> => {
   // registers them.
   const modules = Object.fromEntries(
     await Promise.all(
-      Object.keys(files)
-        .filter(isServerModule)
-        .map(async (file): Promise<[string, Record<string, unknown>]> => [
-          file.slice("server/".length, -".ts".length),
-          exportsOf(await import(path.join(dir, file))),
-        ])
+      Object.keys(files).flatMap((file) => {
+        const module = serverModuleOf(file);
+        return module === undefined
+          ? []
+          : [
+              (async (): Promise<[string, Record<string, unknown>]> => [
+                module,
+                exportsOf(await import(path.join(dir, file))),
+              ])(),
+            ];
+      })
     )
   );
   // SAFETY: registerApp checks at run time that it was given a config
@@ -170,7 +170,10 @@ const generated = async (dir: string, files: Files): Promise<Files> => {
     migrations: [],
   } as Parameters<typeof registerApp>[0];
   const { manifest } = inspectApp(registerApp(parts));
-  return await generateModules(readAppManifest(JSON.stringify(manifest)));
+  return await generateModules(
+    readAppManifest(JSON.stringify(manifest)),
+    serverFunctionsIn(files)
+  );
 };
 
 /** The repo's TypeScript: 7, tsgo (this package has 6, for TypeDoc). */

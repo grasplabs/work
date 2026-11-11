@@ -1,3 +1,4 @@
+import type { ErrorCategory } from "./error-categories.ts";
 import { platformErrorNamespaces } from "./error-namespaces.ts";
 import {
   defineErrorFamily,
@@ -14,16 +15,6 @@ import { valueDepth } from "./value-depth.ts";
 // Never more: no cause, stack, SQL, provider error or credential reaches
 // a caller, whatever the App's code threw (core's operation host,
 // apps/core/src/operations.ts, decides what each failure becomes).
-
-/** Why a failure happened, as the host classifies it. */
-export type ErrorCategory =
-  | "source"
-  | "contract"
-  | "domain"
-  | "authorization"
-  | "operational"
-  | "uncertain"
-  | "safety";
 
 /** A failed operation, as its caller gets it. */
 export interface AppErrorPayload {
@@ -259,6 +250,7 @@ export const draftSealFailures: ReadonlySet<string> = new Set([
   "version.build_failed",
   "version.inspection_failed",
   "version.invalid_manifest",
+  "version.function_undeclared",
 ]);
 
 /**

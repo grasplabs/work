@@ -30,3 +30,8 @@ export {
 } from "./definition-operations.ts";
 export type { DefinitionOperation } from "./definition-operations.ts";
 export { definitionSources, validatorSource } from "./definition-source.ts";
+export {
+  generatedServerSources,
+  serverFunctionsIn,
+  undeclaredFunctions,
+} from "./server-syntax.ts";

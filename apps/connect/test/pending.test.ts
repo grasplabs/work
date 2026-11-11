@@ -168,7 +168,11 @@ const originOf = (appId: string) => ({
 /** Where a run's call comes from, as core signs it. */
 const runOrigin = {
   permissionId: "permission-mail",
-  context: { type: "run" as const, appId: "app-crm", runId: "run-1" },
+  context: {
+    type: "workflowRun" as const,
+    workflowId: "workflow-crm",
+    runId: "run-1",
+  },
 };
 
 /** How a run's call ended: its output, or its code and the held action. */

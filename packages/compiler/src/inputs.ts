@@ -1,9 +1,15 @@
-import { dataModelSource, serverModuleSource } from "@grasp-os/runtime/host";
+import {
+  dataModelSource,
+  generatedPaths,
+  generatedServerFolder,
+  serverModuleSource,
+} from "@grasp-os/runtime/host";
 /**
  * What a build reads of an App's files, and how much of it a build takes.
  * Core uses these before it hashes and sends the files; the compiler again
  * on what it is sent.
  */
+import { serverModuleOf } from "@grasp-os/runtime/server-modules";
 import {
   appLimits,
   appManifestMaxBytes,
@@ -132,11 +138,8 @@ const defaultRoot = `import { createRootRoute } from "@tanstack/react-router";
 export const Route = createRootRoute();
 `;
 
-/** Where the generated modules App code imports are, as Convex has them. */
-export const generatedServerFolder = "server/_generated/";
-
 /** Where the generated module of the server constructors is (`@server/_generated/server`). */
-const serverModulePath = "server/_generated/server.ts";
+const serverModulePath = generatedPaths.server;
 
 /**
  * Whether `path` is App server code the references' types read
@@ -149,14 +152,9 @@ const serverModulePath = "server/_generated/server.ts";
 export const isServerTypeFile = (path: string): boolean =>
   path === "grasp.config.ts" ||
   path === "values.ts" ||
-  path === "server/_generated/internal.ts" ||
-  (path.startsWith("server/") &&
-    !path.startsWith(generatedServerFolder) &&
-    !path.startsWith("server/migrations/") &&
-    path.endsWith(".ts") &&
-    !path.endsWith(".d.ts") &&
-    !path.endsWith(".test.ts") &&
-    hasAppPathSegments(path));
+  path === generatedPaths.internal ||
+  path === "server/schema.ts" ||
+  (serverModuleOf(path) !== undefined && !path.endsWith(".test.ts"));
 
 /**
  * Whether `path`, one of a pages build's files (`buildFiles`), is there
@@ -167,6 +165,18 @@ export const isTypeOnlyFile = (path: string): boolean =>
   isServerTypeFile(path) ||
   path === serverModulePath ||
   path === pageDataModel.path;
+
+/**
+ * Whether any of `files`' front end names the references
+ * (`@server/_generated/api`), so a build of its pages reads them.
+ */
+export const importsReferences = (
+  files: Readonly<Record<string, string>>
+): boolean =>
+  Object.entries(files).some(
+    ([path, source]) =>
+      path.startsWith(sourceFolder) && source.includes(pageReferences.specifier)
+  );
 
 /**
  * The files a build reads: the App's front end and declarations, the
@@ -183,21 +193,32 @@ export const isTypeOnlyFile = (path: string): boolean =>
 export const buildFiles = (
   files: Record<string, string>
 ): Record<string, string> => {
-  const read = Object.fromEntries(
+  const own = Object.fromEntries(
     Object.entries(files).filter(
       ([path]) =>
         path !== routeTreePath &&
-        (path.startsWith(sourceFolder) ||
-          declarationFile.test(path) ||
-          path === pageReferences.path ||
-          path === pageFunctions.path)
+        (path.startsWith(sourceFolder) || declarationFile.test(path))
     )
   );
-  // Only for a front end: an App of server code alone has no pages to build.
+  // Only for a front end: an App of server code alone has no pages to
+  // build. Its references only for one that imports them, so a build
+  // reads the same files whether or not they hold their own copy of
+  // `server/_generated/` (every save writes one).
   const [schema] = pageDataModel.reads;
-  const frontEnd = Object.keys(read).some((path) =>
+  const frontEnd = Object.keys(own).some((path) =>
     path.startsWith(sourceFolder)
   );
+  const read = importsReferences(own)
+    ? {
+        ...own,
+        ...Object.fromEntries(
+          [pageReferences.path, pageFunctions.path].flatMap((path) => {
+            const source = Object.hasOwn(files, path) ? files[path] : undefined;
+            return source === undefined ? [] : [[path, source]];
+          })
+        ),
+      }
+    : own;
   const typed =
     frontEnd && Object.hasOwn(files, schema)
       ? {
@@ -318,7 +339,8 @@ export const limitErrors = (files: Record<string, string>): Diagnostic[] => {
  * (`server/_generated/`, `.grasp/`), apart from the App's own files, so an App at its limits
  * still builds. The host writes them, never the App: each is derived from
  * the App's manifest, which the host has already read and bounded
- * (`appManifestMaxBytes`, whatever the size of the App's source), and
+ * (`appManifestMaxBytes`, whatever the size of the App's source), or
+ * from its definition and the names of the functions it registers, and
  * restates its descriptors at most a few times over (as types and as
  * values). So these bounds admit every manifest the platform accepts,
  * and still cap what one build hands the compiler.
@@ -333,9 +355,9 @@ const generatedLimits = {
 export const hostGeneratedFolder = ".grasp/";
 
 /**
- * Whether `path` is one the host generates (`server/_generated/`,
- * `.grasp/`, the route tree): never an App's own file, so an App's files
- * never hold one.
+ * Whether `path` is one Grasp generates (`server/_generated/`, `.grasp/`,
+ * the route tree), never one a builder writes: a build generates its own,
+ * whatever the files hold of it.
  */
 export const isGeneratedPath = (path: string): boolean =>
   path.startsWith(generatedServerFolder) ||

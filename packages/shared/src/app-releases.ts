@@ -15,26 +15,11 @@ import { defineErrorFamily } from "./errors.ts";
 // and approval or revocation is the host's own record of its hash.
 
 /**
- * The format of `ReleaseManifest` and of the check evidence it names:
- * version 2 records the evidence (`checkEvidenceSchema`) every load
- * verifies; version 3 seals an App's pages as its file routes in
- * `src/routes/` (`pages.json`), where earlier ones sealed its screens;
- * version 4 names the SDK it seals by `sdkVersion` alone, the platform
- * release's own, never gated on; version 5 seals a runner whose
- * `installMutationRuntime` the host's isolate module imports, so an older
- * one is refused rather than failing each call; version 6 records the one
- * inspection a seal makes, where earlier ones recorded two; version 7
- * seals an SDK whose writes and reads assert no revision and whose
- * records carry no `_rev`, which a store no longer takes or answers, so
- * an older one is refused rather than failing each call; version 8
- * stores an App manifest without `preferences`, which the platform no
- * longer answers; version 9 seals the hash of the version's definition
- * (`definitionHash`), held apart from its source tree, which no longer
- * holds it, so a version from before has none to apply its schema by.
- * A release sealed in another format is
- * refused as such (`version.format_unsupported`), sealing it again
- * included, since its manifest is stored for good: a new version
- * replaces it, and none is read as this.
+ * The format of `ReleaseManifest` and of the check evidence it names. A
+ * release sealed in another format is refused as such
+ * (`version.format_unsupported`), sealing it again included, since its
+ * manifest is stored for good: a new version replaces it, and none is
+ * read as this.
  */
 export const releaseFormatVersion = 9;
 
@@ -232,6 +217,8 @@ export const versionErrors = defineErrorFamily({
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",
+  "version.function_undeclared":
+    "A server function of this version isn't declared as `export const name = query({ … })`, with one of the six builders of @server/_generated/server called by name, so the App's references can't name it. These details name each one: declare it that way, not through an alias of a builder or a wrapper.",
   "version.unpublished":
     "This version hasn't been published, or its release was deleted since. Publish it again.",
   "version.export_too_large":

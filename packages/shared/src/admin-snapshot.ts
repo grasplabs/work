@@ -383,6 +383,11 @@ export const adminSnapshotSchema = z.object({
   flow: z
     .object({ flow: onboardingFlowSchema, changed: z.boolean() })
     .optional(),
+  /**
+   * Where the company's admin is in their own onboarding: the screens
+   * they finished, by name. Absent from a core that keeps none yet.
+   */
+  place: z.object({ done: z.array(z.string().max(64)).max(32) }).optional(),
   kickoff: z
     .object({
       at: isoTime,
