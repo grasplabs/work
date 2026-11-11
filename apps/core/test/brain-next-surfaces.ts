@@ -72,36 +72,61 @@ export interface Answer {
 /** Calls one surface every way it can answer; returns what came back each time. */
 export type Probe = (probing: Probing) => Promise<Answer[]>;
 
-/** Deepest an error's causes and fields are followed. */
-const unfoldDepth = 6;
+/**
+ * Every key of `value`: its own, named or Symbol, and for an error those
+ * its prototypes define as far as `Error.prototype`, so a getter of an
+ * error's class is read too.
+ */
+const keysOf = (value: object): PropertyKey[] => {
+  const keys = new Set<PropertyKey>(Reflect.ownKeys(value));
+  if (value instanceof Error) {
+    for (
+      let prototype: unknown = Object.getPrototypeOf(value);
+      typeof prototype === "object" && prototype !== null;
+      prototype =
+        prototype === Error.prototype ? null : Object.getPrototypeOf(prototype)
+    ) {
+      for (const key of Reflect.ownKeys(prototype)) {
+        keys.add(key);
+      }
+    }
+  }
+  keys.delete("constructor");
+  return [...keys];
+};
+
+/** `value[key]`, or what reading it threw. */
+const fieldOf = (value: object, key: PropertyKey): unknown => {
+  try {
+    return Reflect.get(value, key);
+  } catch (error) {
+    return { "[threw]": error };
+  }
+};
 
 /**
- * `value` with every error in it opened up: its name, message, stack and
- * every own property, enumerable or not (`cause`, an AggregateError's
- * `errors`), followed into whatever they hold.
+ * `value` with every error in it opened up, however deep: its name,
+ * message and stack, every key it has (enumerable or not, Symbol keys
+ * too), and the getters of its class, followed into whatever they hold:
+ * `cause` after `cause`, an AggregateError's `errors`. An object met again
+ * (a `cause` that points back) is written "[cycle]".
  */
-const unfolded = (value: unknown, depth = 0): unknown => {
-  if (depth > unfoldDepth || typeof value !== "object" || value === null) {
+const unfolded = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (typeof value !== "object" || value === null) {
     return value;
   }
-  if (Array.isArray(value)) {
-    return value.map((item: unknown) => unfolded(item, depth + 1));
+  if (seen.has(value)) {
+    return "[cycle]";
   }
-  const keys =
-    value instanceof Error
-      ? new Set([
-          "name",
-          "message",
-          "stack",
-          "cause",
-          ...Object.getOwnPropertyNames(value),
-        ])
-      : new Set(Object.keys(value));
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item: unknown) => unfolded(item, seen));
+  }
   return Object.fromEntries(
-    [...keys].map((key) => {
-      const field: unknown = Reflect.get(value, key);
-      return [key, unfolded(field, depth + 1)];
-    })
+    keysOf(value).map((key) => [
+      String(key),
+      unfolded(fieldOf(value, key), seen),
+    ])
   );
 };
 

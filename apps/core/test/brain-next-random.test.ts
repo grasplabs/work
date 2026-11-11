@@ -29,10 +29,14 @@ import { testBinding } from "./test-env.ts";
 //
 // The brute-force answer is the specification of ranking, written once:
 // the issues that change ranking (chunks, stemming, exact matches,
-// vectors) change it here, on purpose. Every text of a scenario has a
-// length of its own, so no two readable sources tie; what decides between
-// ties (when a source was added, then its random ID) is out of its reach,
-// and so is a leak that shows only in how ties fall.
+// vectors) change it here, on purpose. Length is the characters of the
+// text as given; the texts here are ASCII, so code units agree. Every
+// text of a scenario has a length of its own, so no two readable sources
+// tie; what decides between ties (when a source was added, then its
+// random ID) is out of its reach, and so is a leak that shows only in how
+// ties fall. Questions stay under the store's limit of 16 words, so
+// cutting a question short, and taking out words that fold alike, are not
+// part of this specification.
 //
 // A failure names its seed, what to run to see it again, and only what
 // bears on it: the moment, the reader's teams, the question, the changes
