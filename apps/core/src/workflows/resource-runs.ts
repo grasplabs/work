@@ -21,6 +21,7 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
 import type { AttemptLease } from "@grasp-os/workerflow/run";
+import { waitUntil } from "cloudflare:workers";
 import {
   and,
   asc,
@@ -50,6 +51,7 @@ import {
 } from "../audit-outbox.ts";
 import { currentMembership } from "../auth/auth.ts";
 import type { Acting } from "../auth/identity.ts";
+import { handOverRun } from "../brain-producers.ts";
 import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
 import {
   members,
@@ -1418,6 +1420,18 @@ export const projectResourceRun = async (
   const now = ended ? await runOf(env, id) : undefined;
   if (now !== undefined) {
     await settleCancels(env, now);
+    // The new Brain's copy, for the person it acted for
+    // (brain-producers.ts): in the background, so the engine's
+    // notification is never held up; it never rejects.
+    waitUntil(
+      handOverRun(env, {
+        runId: now.id,
+        principalId: now.principalId,
+        restricted: now.restricted,
+        status: now.status,
+        readEnd: async () => await resultOf(env, now),
+      })
+    );
   }
   // Every status the engine takes is a revision of the run's snapshot.
   await tellQueryFollowers(env, id);
