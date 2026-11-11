@@ -22,8 +22,10 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -65,64 +67,82 @@ const target = path.join(
 const sha256Of = (bytes: Buffer): string =>
   createHash("sha256").update(bytes).digest("hex");
 
-/** The files in `dir` whose bytes differ from their pinned hash. */
-const changedIn = (dir: string): string[] =>
-  Object.entries(files)
-    .filter(
-      ([file, hash]) => sha256Of(readFileSync(path.join(dir, file))) !== hash
-    )
-    .map(([file]) => file);
+/**
+ * What in `dir` is not the release's own: each of `files` that is missing
+ * or whose bytes differ from its pinned hash, and anything else the folder
+ * holds (lint skips the folder as generated, so a file of our own there
+ * would go unchecked). The licence is one of `files`.
+ */
+export const problemsIn = (dir: string): string[] => [
+  ...Object.entries(files)
+    .filter(([file, hash]) => {
+      const at = path.join(dir, file);
+      return !existsSync(at) || sha256Of(readFileSync(at)) !== hash;
+    })
+    .map(([file]) => `${file} differs from the release`),
+  ...readdirSync(dir)
+    .filter((name) => !Object.hasOwn(files, name))
+    .map((name) => `${name} is not one of the release's files`),
+];
 
-if (process.argv.includes("--check")) {
-  const changed = changedIn(target);
-  if (changed.length > 0) {
+/** Checks the committed files; exits 1 naming what differs. */
+const check = (): void => {
+  const problems = problemsIn(target);
+  if (problems.length > 0) {
     process.stderr.write(
-      `Snowball ${release}: ${changed.join(", ")} differ from the release. These files are generated, never edited: run node scripts/brain-snowball.ts to restore them.\n`
+      `Snowball ${release}: ${problems.join("; ")}. The folder holds the release's files alone, never edited: restore them with node scripts/brain-snowball.ts and remove anything else.\n`
     );
     process.exit(1);
   }
-  process.exit(0);
-}
+};
 
-const response = await fetch(
-  `https://snowballstem.org/dist/jsstemmer-${release}.tar.gz`
-);
-if (!response.ok) {
-  throw new Error(`Snowball ${release}: HTTP ${response.status}`);
-}
-const archive = Buffer.from(await response.arrayBuffer());
-const digest = sha256Of(archive);
-if (digest !== archiveSha256) {
-  throw new Error(
-    `Snowball ${release}: the archive's SHA-256 is ${digest}, not ${archiveSha256}`
+/** Downloads the pinned release and writes its files. */
+const download = async (): Promise<void> => {
+  const response = await fetch(
+    `https://snowballstem.org/dist/jsstemmer-${release}.tar.gz`
   );
-}
-
-const work = mkdtempSync(path.join(tmpdir(), "snowball-"));
-try {
-  writeFileSync(path.join(work, "jsstemmer.tar.gz"), archive);
-  execFileSync("tar", ["-xzf", "jsstemmer.tar.gz"], { cwd: work });
-  const unpacked = path.join(work, `jsstemmer-${release}`);
-  const staged = path.join(work, "files");
-  mkdirSync(staged);
-  for (const file of Object.keys(files)) {
-    const from =
-      file === "COPYING"
-        ? path.join(unpacked, file)
-        : path.join(unpacked, "javascript", file);
-    copyFileSync(from, path.join(staged, file));
+  if (!response.ok) {
+    throw new Error(`Snowball ${release}: HTTP ${response.status}`);
   }
-  const changed = changedIn(staged);
-  if (changed.length > 0) {
+  const archive = Buffer.from(await response.arrayBuffer());
+  const digest = sha256Of(archive);
+  if (digest !== archiveSha256) {
     throw new Error(
-      `Snowball ${release}: ${changed.join(", ")} differ from their pinned hashes`
+      `Snowball ${release}: the archive's SHA-256 is ${digest}, not ${archiveSha256}`
     );
   }
-  mkdirSync(target, { recursive: true });
-  for (const file of Object.keys(files)) {
-    copyFileSync(path.join(staged, file), path.join(target, file));
+  const work = mkdtempSync(path.join(tmpdir(), "snowball-"));
+  try {
+    writeFileSync(path.join(work, "jsstemmer.tar.gz"), archive);
+    execFileSync("tar", ["-xzf", "jsstemmer.tar.gz"], { cwd: work });
+    const unpacked = path.join(work, `jsstemmer-${release}`);
+    const staged = path.join(work, "files");
+    mkdirSync(staged);
+    for (const file of Object.keys(files)) {
+      const from =
+        file === "COPYING"
+          ? path.join(unpacked, file)
+          : path.join(unpacked, "javascript", file);
+      copyFileSync(from, path.join(staged, file));
+    }
+    const problems = problemsIn(staged);
+    if (problems.length > 0) {
+      throw new Error(`Snowball ${release}: ${problems.join("; ")}`);
+    }
+    mkdirSync(target, { recursive: true });
+    for (const file of Object.keys(files)) {
+      copyFileSync(path.join(staged, file), path.join(target, file));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
-} finally {
-  rmSync(work, { recursive: true, force: true });
+  process.stdout.write(`Snowball ${release} stemmers in ${target}\n`);
+};
+
+if (import.meta.main) {
+  if (process.argv.includes("--check")) {
+    check();
+  } else {
+    await download();
+  }
 }
-process.stdout.write(`Snowball ${release} stemmers in ${target}\n`);
