@@ -254,10 +254,12 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
 
     // Where a mark is part of the letter, words that differ by it stay
     // distinct: Japanese "school" and "cuckoo", Devanagari "book" and a
-    // word without its vowel sign.
+    // word without its vowel sign, Thai "eat" and the same consonants
+    // without the vowel.
     for (const [one, other] of [
       ["がっこう", "かっこう"],
       ["किताब", "कताब"],
+      ["กิน", "กน"],
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one pair at a time
       const [first, second] = [await add(one, owner), await add(other, owner)];
@@ -266,10 +268,24 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one pair at a time
       await expect(recalledAs(reader, other)).resolves.toStrictEqual([second]);
     }
-    // Hebrew vowel points are optional, as accents are: a pointed word is
-    // found by its plain spelling.
+    // Hebrew and Arabic vowel marks are optional, as accents are: a pointed
+    // word is found by its plain spelling.
     const pointed = await add("שָׁלוֹם", owner);
     await expect(recalledAs(reader, "שלום")).resolves.toStrictEqual([pointed]);
+    const vowelled = await add("مُدَرِّسَة", owner);
+    await expect(recalledAs(reader, "مدرسة")).resolves.toStrictEqual([
+      vowelled,
+    ]);
+  });
+
+  it("takes a letter with a long run of marks in its stride, and keeps answering", async () => {
+    const reader = await person();
+    const owner = { kind: "owner", personId: reader } as const;
+    await add(`a${"́".repeat(100_000)}`, owner);
+    const after = word();
+    const id = await add(`Added after it: ${after}`, owner);
+
+    await expect(recalledAs(reader, after)).resolves.toStrictEqual([id]);
   });
 
   it("counts a word once however the question spells it", async () => {

@@ -11,9 +11,14 @@
  * out, so a pointed word is found by its plain spelling. Everywhere else a
  * mark is part of the letter (Japanese "が" and "か", Devanagari vowel
  * signs, Thai vowels) and stays, so distinct words stay distinct.
+ *
+ * Matched as the letter and the whole run of marks after it, and replaced
+ * by the letter: one pass, linear in the text however many marks follow a
+ * letter. (A lookbehind over the run would scan it again for every mark:
+ * quadratic, seconds for a letter with 20,000 marks.)
  */
 const marks =
-  /(?<=[\p{sc=Latin}\p{sc=Greek}\p{sc=Cyrillic}\p{sc=Hebrew}\p{sc=Arabic}]\p{M}*)\p{M}/gu;
+  /(?<letter>[\p{sc=Latin}\p{sc=Greek}\p{sc=Cyrillic}\p{sc=Hebrew}\p{sc=Arabic}])\p{M}+/gu;
 
 /**
  * What a word is made of: letters, digits, the marks that are part of
@@ -31,7 +36,11 @@ const maxTerms = 16;
  * "financiele", composed or decomposed alike), lowercased.
  */
 export const foldForSearch = (text: string): string =>
-  text.normalize("NFKD").replace(marks, "").normalize("NFC").toLowerCase();
+  text
+    .normalize("NFKD")
+    .replace(marks, "$<letter>")
+    .normalize("NFC")
+    .toLowerCase();
 
 /**
  * A question's distinct words, folded and deduplicated on their folded
