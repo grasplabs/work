@@ -1,14 +1,22 @@
-// The embedder through its Durable Object, on the tiny model in fixtures/
+// The embedder through its Durable Object, on the tiny models in fixtures/
 // (scripts/make-fixture.py): its vectors and token IDs against Hugging
-// Face's, the same bits from every integer kernel, its model files checked
-// before use, and a reload after an eviction.
+// Face's, the same bits from every integer kernel, a model of another depth
+// and shape run from its file alone, its model files checked before use,
+// and a reload after an eviction.
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { Embedder, questionEmbedder } from "../src/embedder.ts";
+import type { Kernel } from "../src/engine.ts";
 import { modelFileKey } from "../src/model-files.ts";
 import type { EmbedModel } from "../src/model-files.ts";
+import deepEncoderFloat from "./fixtures/deep/encoder-float.bin";
+import deepEncoderInt8 from "./fixtures/deep/encoder-int8.bin";
+import deepInt8Bits from "./fixtures/deep/int8-bits.json";
+import deepReference from "./fixtures/deep/reference.json";
+import deepTokensFloat from "./fixtures/deep/tokens-float.bin";
+import deepTokensInt8 from "./fixtures/deep/tokens-int8.bin";
 import encoderFloat from "./fixtures/encoder-float.bin";
 import encoderInt8 from "./fixtures/encoder-int8.bin";
 import int8Bits from "./fixtures/int8-bits.json";
@@ -16,7 +24,12 @@ import reference from "./fixtures/reference.json";
 import tokenizer from "./fixtures/tokenizer.bin";
 import tokensFloat from "./fixtures/tokens-float.bin";
 import tokensInt8 from "./fixtures/tokens-int8.bin";
-import { floatModel, int8Model } from "./worker.ts";
+import {
+  deepFloatModel,
+  deepInt8Model,
+  floatModel,
+  int8Model,
+} from "./worker.ts";
 import type { CustomEmbedder, Int8Embedder } from "./worker.ts";
 
 /**
@@ -42,6 +55,16 @@ const floatFiles: Files = {
   tokenizer,
   encoder: encoderFloat,
   tokens: tokensFloat,
+};
+const deepInt8Files: Files = {
+  tokenizer,
+  encoder: deepEncoderInt8,
+  tokens: deepTokensInt8,
+};
+const deepFloatFiles: Files = {
+  tokenizer,
+  encoder: deepEncoderFloat,
+  tokens: deepTokensFloat,
 };
 const everyFile: Which[] = ["tokenizer", "encoder", "tokens"];
 
@@ -87,6 +110,21 @@ const twoEmbeds = async (
 const pad16 = (n: number): number => Math.ceil(n / 16) * 16;
 /** The bytes of one rotary table (cos or sin) for `maxTokens` tokens. */
 const tableBytes = (maxTokens: number): number => maxTokens * 32 * 4;
+/**
+ * The encoder file's header words (rust/src/encoder.rs): the model's, then
+ * four per layer (kind, heads, feed-forward width, float channels).
+ */
+const headerWord = {
+  version: 1,
+  hidden: 3,
+  layers: 4,
+  maxTokens: 5,
+  tables: 7,
+};
+const modelWords = 8;
+const layerWord = (layer: number, which: 0 | 1 | 2 | 3): number =>
+  modelWords + 4 * layer + which;
+const [kind, heads, feedForward, floatChannels] = [0, 1, 2, 3] as const;
 
 const hex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -98,7 +136,8 @@ const hex = (bytes: Uint8Array): string =>
  */
 const customEmbedder = async (
   name: string,
-  files: Record<Which, Uint8Array>
+  files: Record<Which, Uint8Array>,
+  kernel: Kernel = "auto"
 ): Promise<DurableObjectStub<CustomEmbedder>> => {
   const named = async (bytes: Uint8Array) => ({
     sha256: hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))),
@@ -112,8 +151,36 @@ const customEmbedder = async (
   };
   await upload(model, files);
   const stub = env.CUSTOM.getByName(name);
-  await stub.use(model);
+  await stub.use(model, kernel);
   return stub;
+};
+
+/**
+ * The int8 fixture's encoder with one group of 4 weights that feeds a
+ * 16-bit lane of the pair kernel (layer 0's qkv, first panel, output 0,
+ * k 0, 1, 4 and 5) set to 127 each: sum |w| = 508, past the 258 the pair
+ * kernel needs (`pairable`), so its matrices can't run it exactly.
+ */
+const unpairableEncoder = (): Uint8Array => {
+  const bytes = Uint8Array.from(new Uint8Array(encoderInt8));
+  const view = new DataView(bytes.buffer);
+  const word = (i: number): number => view.getUint32(i * 4, true);
+  const [hidden, layers, maxTokens, tables] = [
+    word(headerWord.hidden),
+    word(headerWord.layers),
+    word(headerWord.maxTokens),
+    word(headerWord.tables),
+  ];
+  const qkv =
+    pad16((modelWords + 4 * layers) * 4) +
+    2 * pad16(hidden * 4) +
+    2 * tables * tableBytes(maxTokens);
+  // Panel layout [k/4][2 halves][4 outputs][4 ks]: k 0 and 1 in the first
+  // 4 bytes' first two, k 4 and 5 one k4 step (32 bytes) on.
+  for (const at of [0, 1, 32, 33]) {
+    bytes[qkv + at] = 127;
+  }
+  return bytes;
 };
 
 /** The float fixture's encoder with header word `index` set to `value`. */
@@ -137,8 +204,13 @@ const withMaxTokens = (
   const source = new Uint8Array(encoder);
   const view = new DataView(source.buffer);
   const word = (i: number): number => view.getUint32(i * 4, true);
-  const [hidden, layers, oldMax, tables] = [word(3), word(6), word(7), word(9)];
-  const headerBytes = pad16((10 + layers) * 4);
+  const [hidden, layers, oldMax, tables] = [
+    word(headerWord.hidden),
+    word(headerWord.layers),
+    word(headerWord.maxTokens),
+    word(headerWord.tables),
+  ];
+  const headerBytes = pad16((modelWords + 4 * layers) * 4);
   const normsEnd = headerBytes + 2 * pad16(hidden * 4);
   const layersStart = normsEnd + 2 * tables * tableBytes(oldMax);
   const out = new Uint8Array(
@@ -152,7 +224,7 @@ const withMaxTokens = (
     source.subarray(layersStart),
     normsEnd + 2 * tables * tableBytes(maxTokens)
   );
-  new DataView(out.buffer).setUint32(7 * 4, maxTokens, true);
+  new DataView(out.buffer).setUint32(headerWord.maxTokens * 4, maxTokens, true);
   // Each table is its cosines, then its sines.
   for (let table = 0; table < tables; table += 1) {
     const at = normsEnd + 2 * table * tableBytes(maxTokens);
@@ -182,39 +254,38 @@ const withRowsOf = (
  * buffers need over 136 MB, past the module's 64 MiB.
  */
 const tooLargeEncoder = (): Uint8Array => {
-  const [hidden, heads, ff, layers, maxTokens, window, tables] = [
-    64, 1, 16_384, 1, 1024, 8, 1,
-  ];
-  const header = new Uint8Array(pad16((10 + layers) * 4));
+  const [hidden, ff, maxTokens, window, tables] = [64, 16_384, 1024, 8, 1];
+  const header = new Uint8Array(pad16((modelWords + 4) * 4));
   const words = new DataView(header.buffer);
   header.set(new TextEncoder().encode("GENC"));
   for (const [i, value] of [
-    1,
+    2,
     0,
     hidden,
-    heads,
-    ff,
-    layers,
+    1,
     maxTokens,
     window,
     tables,
+    // The layer: global, no attention norm, one head, no float channels.
+    0,
+    1,
+    ff,
     0,
   ].entries()) {
     words.setUint32((i + 1) * 4, value, true);
   }
   const floats = (n: number): number => pad16(n * 4);
   const layer =
-    floats(3 * hidden * hidden) +
-    floats(hidden * hidden) +
+    floats(3 * 64 * hidden) +
+    floats(hidden * 64) +
     floats(2 * ff * hidden) +
-    16 +
     floats(hidden * ff) +
     2 * floats(hidden);
   const out = new Uint8Array(
     header.byteLength +
       2 * floats(hidden) +
       2 * tables * tableBytes(maxTokens) +
-      layers * layer
+      layer
   );
   out.set(header);
   return out;
@@ -291,6 +362,45 @@ describe("embedder", () => {
     }
   });
 
+  it("says which kernels run, mixed when a matrix can't run the pairs exactly, with the same bits", async () => {
+    const files = {
+      tokenizer: new Uint8Array(tokenizer),
+      tokens: new Uint8Array(tokensInt8),
+    };
+    const [pairs, dotOnly, mixed, mixedDot] = await Promise.all([
+      customEmbedder(
+        "kernel-pairs",
+        { ...files, encoder: new Uint8Array(encoderInt8) },
+        "pairs"
+      ),
+      customEmbedder(
+        "kernel-dot",
+        { ...files, encoder: new Uint8Array(encoderInt8) },
+        "dot"
+      ),
+      customEmbedder(
+        "kernel-mixed",
+        { ...files, encoder: unpairableEncoder() },
+        "pairs"
+      ),
+      customEmbedder(
+        "kernel-mixed-dot",
+        { ...files, encoder: unpairableEncoder() },
+        "dot"
+      ),
+    ]);
+    await expect(
+      Promise.all(
+        [pairs, dotOnly, mixed, mixedDot].map(
+          async (stub) => await stub.kernelInUse()
+        )
+      )
+    ).resolves.toStrictEqual(["pairs", "dot", "mixed", "dot"]);
+    const text = reference.embeddings.at(-1)?.text ?? "";
+    const [a, b] = await Promise.all([mixed.embed(text), mixedDot.embed(text)]);
+    expect(bitsOf(a.vector)).toBe(bitsOf(b.vector));
+  });
+
   it("names the model and the build that made each vector", async () => {
     await Promise.all([
       upload(int8Model, int8Files),
@@ -321,6 +431,48 @@ describe("embedder", () => {
       })
     );
     expect(bits).toStrictEqual(int8Bits);
+  });
+
+  it("runs a model of another depth, other local layers and pruned widths from its file alone, as its reference does", async () => {
+    // fixtures/deep: 5 layers, the first local and without an attention
+    // norm, one head in layer 2 and a feed-forward width of 32 in layer 3.
+    const runs: [string, EmbedModel, Files, Kernel][] = [
+      ["deep-float", deepFloatModel, deepFloatFiles, "auto"],
+      ["deep-int8", deepInt8Model, deepInt8Files, "auto"],
+      ["deep-dot", deepInt8Model, deepInt8Files, "dot"],
+      ["deep-pairs", deepInt8Model, deepInt8Files, "pairs"],
+    ];
+    const stubs = await Promise.all(
+      runs.map(async ([name, model, files, kernel]) => {
+        await upload(model, files);
+        const stub = env.CUSTOM.getByName(name);
+        await stub.use(model, kernel);
+        return stub;
+      })
+    );
+    const bits: string[] = [];
+    for (const { text, vector } of deepReference.embeddings) {
+      // oxlint-disable-next-line no-await-in-loop -- each object embeds one text at a time
+      const [float, ...int8] = await Promise.all(
+        stubs.map(async (stub) => {
+          const embedding = await stub.embed(text);
+          return embedding.vector;
+        })
+      );
+      const furthest = Math.max(
+        ...Array.from(float ?? [], (value, i) =>
+          Math.abs(value - (vector[i] ?? 0))
+        )
+      );
+      expect(furthest).toBeLessThanOrEqual(floatTolerance);
+      const [auto, ...forced] = int8.map((v) => bitsOf(v));
+      expect(dot(int8[0] ?? [], vector)).toBeGreaterThanOrEqual(
+        int8LeastCosine
+      );
+      expect(forced).toStrictEqual([auto, auto]);
+      bits.push(auto ?? "");
+    }
+    expect(bits).toStrictEqual(deepInt8Bits);
   });
 
   it("keeps attention's integer sums in range at the most tokens a model may read, for small and huge scores", async () => {
@@ -458,17 +610,47 @@ describe("embedder", () => {
     const sizes = "The encoder file has sizes that don't add up.";
     const cases: [string, Uint8Array, string][] = [
       ["truncated", new Uint8Array(encoderFloat.slice(0, 5000)), sizes],
+      // Cut inside the per-layer header words.
+      ["header-cut", new Uint8Array(encoderFloat.slice(0, 40)), sizes],
+      ["width", withHeaderWord(headerWord.hidden, 120), shape],
+      ["layers", withHeaderWord(headerWord.layers, 2 ** 30), shape],
       // A head count whose product with the head width wraps on 32 bits.
-      ["heads", withHeaderWord(4, 2 ** 26 + 1), shape],
-      ["feed-forward", withHeaderWord(5, 0xff_ff_ff_f0), shape],
-      ["layers", withHeaderWord(6, 2 ** 30), shape],
+      ["heads", withHeaderWord(layerWord(1, heads), 2 ** 26 + 1), shape],
+      ["no-heads", withHeaderWord(layerWord(0, heads), 0), shape],
+      [
+        "feed-forward",
+        withHeaderWord(layerWord(0, feedForward), 0xff_ff_ff_f0),
+        shape,
+      ],
+      [
+        "feed-forward-step",
+        withHeaderWord(layerWord(1, feedForward), 72),
+        shape,
+      ],
+      // As many float channels as the feed-forward has, or a remainder the
+      // integer kernels can't step through.
+      [
+        "float-channels",
+        withHeaderWord(layerWord(1, floatChannels), 64),
+        shape,
+      ],
+      ["float-step", withHeaderWord(layerWord(1, floatChannels), 8), shape],
+      // A kind bit nobody defined, and a rotary table the file doesn't have
+      // (table 2 in bits 8 to 15; the fixture has two).
+      ["kind", withHeaderWord(layerWord(0, kind), 4), shape],
+      ["rotary-table", withHeaderWord(layerWord(0, kind), 2 * 256), shape],
       // Within the bounds, but more than the file holds.
-      ["declared-larger", withHeaderWord(5, 16_384), sizes],
+      [
+        "declared-larger",
+        withHeaderWord(layerWord(0, feedForward), 16_384),
+        sizes,
+      ],
+      ["declared-smaller", withHeaderWord(layerWord(1, heads), 1), sizes],
       // Past 1,024 tokens attention's integer sums could overflow.
       ["token-limit", withMaxTokens(encoderFloat, 1032), shape],
       [
         "version",
-        withHeaderWord(1, 2),
+        withHeaderWord(headerWord.version, 1),
         "The encoder file isn't an encoder file of this version.",
       ],
     ];

@@ -14,6 +14,14 @@ export type RowFormat = "float" | "int8";
 export type Kernel = "auto" | "dot" | "pairs";
 
 const kernelCodes: Record<Kernel, number> = { auto: 0, dot: 1, pairs: 2 };
+
+/** What runs (rust/src/lib.rs `kernel`). */
+export type RunningKernel = "dot" | "pairs" | "mixed";
+const runningKernels: Record<number, RunningKernel> = {
+  1: "dot",
+  2: "pairs",
+  3: "mixed",
+};
 const rowFormatCodes: Record<RowFormat, number> = { float: 0, int8: 1 };
 
 const call = z.custom<(...args: number[]) => number>(
@@ -31,6 +39,7 @@ const exportsSchema = z.object({
   vocab_size: call,
   longest_token: call,
   set_kernel: call,
+  kernel: call,
   text_buf: call,
   text_cap: call,
   tokenize: call,
@@ -81,6 +90,12 @@ export const rowBytes = (format: RowFormat, dim: number): number =>
 
 export class Engine {
   readonly dim: number;
+  /**
+   * The integer kernels this instance runs, `auto` resolved for this CPU:
+   * `mixed` when the pairs are chosen but a matrix of the model can't run
+   * them exactly, so every matrix runs the dot and only attention the pairs.
+   */
+  readonly kernel: RunningKernel;
   readonly maxTokens: number;
   readonly vocabSize: number;
   /**
@@ -121,6 +136,7 @@ export class Engine {
       );
     }
     this.exports.set_kernel(kernelCodes[kernel]);
+    this.kernel = runningKernels[this.exports.kernel()] ?? "dot";
     this.dim = this.exports.dim();
     this.maxTokens = this.exports.max_tokens();
     this.vocabSize = this.exports.vocab_size();

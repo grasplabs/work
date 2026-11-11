@@ -1,7 +1,8 @@
 //! The encoder of a ModernBERT-style model: pre-norm layers without biases, rotary positions, GeGLU feed-forward,
 //! global attention on some layers and a sliding window on the others, then a final norm, mean pooling and L2
-//! normalisation. Its shape (width, heads, layers, which layers are local, the window) comes from the encoder file
-//! (`parse`); only the head width is fixed, at 64.
+//! normalisation. Its shape comes from the encoder file (`parse`): the width, the layers, and for each layer whether
+//! it is local, whether it has an attention norm, its heads and its feed-forward width. Only the head width is fixed,
+//! at 64.
 //!
 //! Two variants: float32 weights (the verification path, compared with the reference within a tolerance) and
 //! int8 weights with 7-bit activations and int8 attention (what runs in production). The integer path computes
@@ -32,7 +33,14 @@ struct Lin {
 
 struct Layer {
     local: bool,
+    /// Whether the attention block starts with a norm (every layer but a ModernBERT's first).
+    norm: bool,
     rope: usize,
+    /// Attention heads, and the attention's width (heads x 64). Per layer, as a model pruned head by head keeps
+    /// fewer heads in some layers than in others (the training work prunes heads gradually).
+    nh: usize,
+    a: usize,
+    ff: usize,
     qkv: Lin,
     o: Lin,
     ff1: Lin,
@@ -49,8 +57,6 @@ struct Layer {
 pub struct Model {
     int8: bool,
     h: usize,
-    nh: usize,
-    ff: usize,
     maxn: usize,
     window: usize,
     eln: *const f32,
@@ -99,10 +105,14 @@ pub enum Kernel {
 }
 
 const MAGIC_ENC: [u8; 4] = *b"GENC";
-const VERSION: u32 = 1;
-/// Header: magic, version, variant (0 float, 1 int8), hidden, heads, ff, layers, max tokens, window, rotary
-/// tables, then one word per layer (bit 0: local; bits 8 and up: its rotary table), padded to 16 bytes.
-const HEADER_WORDS: usize = 10;
+const VERSION: u32 = 2;
+/// Header: magic, version, variant (0 float, 1 int8), hidden, layers, max tokens, window, rotary tables, then four
+/// words per layer: its kind (bit 0 local, bit 1 attention norm, bits 8 to 15 its rotary table), heads,
+/// feed-forward width, and how many of those channels stay in float. Padded to 16 bytes.
+const HEADER_WORDS: usize = 8;
+const LAYER_WORDS: usize = 4;
+const LOCAL: usize = 1;
+const NORM: usize = 2;
 
 pub enum InitError {
     Header = -1,
@@ -117,8 +127,10 @@ fn alloc<T>(n: usize) -> *mut T {
 }
 
 /// The most of each size an encoder file may declare: well past any model of the family, and small enough that
-/// no size computed from them overflows (the largest buffer, (1024 + 16) x 2 x 16384 floats, is 136 MB).
+/// no size computed from them overflows (the largest buffer, (1024 + 16) x 2 x 16384 floats, is 136 MB, which the
+/// module's 64 MiB refuses at load: `alloc` traps).
 const MAX_HEADS: usize = 64;
+const MAX_HIDDEN: usize = MAX_HEADS * HD;
 const MAX_FF: usize = 16384;
 const MAX_LAYERS: usize = 64;
 /// The token limit is what keeps the integer sums inside i32. Every one, by its worst case (n tokens, k inputs):
@@ -127,7 +139,8 @@ const MAX_LAYERS: usize = 64;
 ///   which fits 2^31 - 1 = 2,147,483,647 up to n = 1,032. Hence 1,024 (the models we ship read 512).
 /// - `att_softmax`'s sum of P: n x 16,385.
 /// - `att_scores`: 64 dims x 127 x 127 = 1,032,256, and the zero-point term 127 x 64 x 127, the same.
-/// - `tile_dot`: k x 127 x 127 with k <= 16,384 (`MAX_FF`): 264,257,536, and the zero-point term the same.
+/// - `tile_dot`: k x 127 x 127 with k <= 16,384 (a linear layer's inputs: the width or the attention's, at most
+///   `MAX_HIDDEN` = 4,096, or a feed-forward width, at most `MAX_FF`): 264,257,536, and the zero-point term the same.
 /// - the 16-bit pair kernels (`tile_pairs`, `att_scores::<_, true>`): each i16 lane at most 258 x 127 = 32,766
 ///   (the exporter's and `pack_head_i8`'s bound, checked by `pairable`), then widened into the i32 sums above.
 /// Pooling, norms and the float feed-forward channels are float32.
@@ -141,13 +154,12 @@ impl Model {
         if blob.get(0..4) != Some(&MAGIC_ENC[..]) || word(1) != Some(VERSION as usize) {
             return Err(InitError::Header);
         }
-        let w = |i: usize| word(i).ok_or(InitError::Header);
-        let (variant, h, nh, ff, nl, maxn, window, nrope) = (w(2)?, w(3)?, w(4)?, w(5)?, w(6)?, w(7)?, w(8)?, w(9)?);
+        // Past the magic and version, a header cut short is a file shorter than it says.
+        let w = |i: usize| word(i).ok_or(InitError::Size);
+        let (variant, h, nl, maxn, window, nrope) = (w(2)?, w(3)?, w(4)?, w(5)?, w(6)?, w(7)?);
         let shape_ok = variant <= 1
-            && (1..=MAX_HEADS).contains(&nh)
-            && h == nh * HD
-            && (1..=MAX_FF).contains(&ff)
-            && ff % 16 == 0
+            && (16..=MAX_HIDDEN).contains(&h)
+            && h % 16 == 0
             && (1..=MAX_LAYERS).contains(&nl)
             && (1..=MAX_TOKENS).contains(&maxn)
             && maxn % 8 == 0
@@ -156,16 +168,26 @@ impl Model {
         if !shape_ok {
             return Err(InitError::Shape);
         }
-        let mut kinds = Vec::with_capacity(nl);
+        // Each layer's shape: every width a multiple of 16 (the kernels' steps), the float channels fewer than the
+        // feed-forward's and leaving a multiple of 16 for the integer kernels.
+        let mut shapes = Vec::with_capacity(nl);
         for l in 0..nl {
-            let k = w(HEADER_WORDS + l)?;
-            if k & !0xff01 != 0 || (k >> 8) >= nrope {
+            let at = HEADER_WORDS + l * LAYER_WORDS;
+            let (kind, nh, ff, nod) = (w(at)?, w(at + 1)?, w(at + 2)?, w(at + 3)?);
+            let ok = kind & !(0xff00 | NORM | LOCAL) == 0
+                && (kind >> 8) < nrope
+                && (1..=MAX_HEADS).contains(&nh)
+                && (16..=MAX_FF).contains(&ff)
+                && ff % 16 == 0
+                && nod < ff
+                && (ff - nod) % 16 == 0;
+            if !ok {
                 return Err(InitError::Shape);
             }
-            kinds.push((k & 1 == 1, k >> 8));
+            shapes.push((kind, nh, ff, nod));
         }
         let int8 = variant == 1;
-        let mut off = ((HEADER_WORDS + nl) * 4 + 15) & !15;
+        let mut off = ((HEADER_WORDS + nl * LAYER_WORDS) * 4 + 15) & !15;
         // Each part starts 16-aligned. The sum saturates rather than wrap, so a file that declares more than it
         // holds ends past `len` and fails the size check below, however large its sizes.
         let mut take = |bytes: usize| -> *const u8 {
@@ -192,26 +214,24 @@ impl Model {
             }
         };
         let mut layers = Vec::with_capacity(nl);
-        for &(local, rope) in &kinds {
-            let qkv = lin(&mut take, 3 * h, h);
-            let o = lin(&mut take, h, h);
+        for &(kind, nh, ff, nod) in &shapes {
+            let a = nh * HD;
+            let qkv = lin(&mut take, 3 * a, h);
+            let o = lin(&mut take, h, a);
             let ff1 = lin(&mut take, 2 * ff, h);
-            // How many feed-forward channels stay in float, which sizes the rest of the layer.
-            let nod_at = take(16) as usize - base as usize;
-            let nod = word(nod_at / 4).ok_or(InitError::Size)?;
-            if nod >= ff || (ff - nod) % 16 != 0 {
-                return Err(InitError::Shape);
-            }
             let ff2 = lin(&mut take, h, ff - nod);
             let gq = take(h * 4) as *const f32;
             let gf = take(h * 4) as *const f32;
             let wod = if nod > 0 { take(h * nod * 4) as *const f32 } else { core::ptr::null() };
-            layers.push(Layer { local, rope, qkv, o, ff1, ff2, gq, gf, nod, wod });
+            layers.push(Layer { local: kind & LOCAL != 0, norm: kind & NORM != 0, rope: kind >> 8, nh, a, ff, qkv, o, ff1, ff2, gq, gf, nod, wod });
         }
         if off != len {
             return Err(InitError::Size);
         }
-        let mut m = Model { int8, h, nh, ff, maxn, window, eln, fln, ropes, layers, pairs_exact: false, b: Bufs::new(h, ff, maxn, int8) };
+        // The buffers fit the widest layer.
+        let a = layers.iter().map(|l| l.a).max().unwrap_or(0);
+        let ff = layers.iter().map(|l| l.ff).max().unwrap_or(0);
+        let mut m = Model { int8, h, maxn, window, eln, fln, ropes, layers, pairs_exact: false, b: Bufs::new(h, a, ff, maxn, int8) };
         m.pairs_exact = int8 && m.layers.iter().all(|l| [&l.qkv, &l.o, &l.ff1, &l.ff2].iter().all(|lin| unsafe { pairable(lin) }));
         Ok(m)
     }
@@ -222,13 +242,18 @@ impl Model {
     pub fn max_tokens(&self) -> usize {
         self.maxn
     }
+    /// Whether the matrices run the i16 pairs when they are chosen (`pairable` holds for all of them).
+    pub fn pairs_exact(&self) -> bool {
+        self.pairs_exact
+    }
     pub fn rows_buf(&self) -> *mut u8 {
         self.b.rows
     }
 }
 
 impl Bufs {
-    fn new(h: usize, ff: usize, maxn: usize, int8: bool) -> Bufs {
+    /// For width h, attention width a and feed-forward width ff at most.
+    fn new(h: usize, a: usize, ff: usize, maxn: usize, int8: bool) -> Bufs {
         let padn = maxn + 16;
         // Each path's attention buffers, only for the path the model runs.
         let float = |n: usize| if int8 { core::ptr::null_mut() } else { alloc(n) };
@@ -238,9 +263,9 @@ impl Bufs {
         Bufs {
             x: alloc(padn * h),
             h: alloc(padn * h),
-            big: alloc(padn * (2 * ff).max(3 * h)),
-            ctx: alloc(padn * h),
-            xq: alloc(padn * ff.max(h)),
+            big: alloc(padn * (2 * ff).max(3 * a)),
+            ctx: alloc(padn * a),
+            xq: alloc(padn * ff.max(h).max(a)),
             xsc: alloc(padn),
             xzp: alloc(padn),
             rows: alloc(maxn * 4 * h),
@@ -544,18 +569,18 @@ unsafe fn embed(m: &Model, n: usize, fmt: RowFormat) {
     }
 }
 
-/// Rotary positions (rotate-half form) on the q and k parts of big[n][3h], head by head.
+/// Rotary positions (rotate-half form) on the q and k parts of big[n][3a], head by head.
 #[inline(never)]
-unsafe fn rope(m: &Model, table: usize, n: usize) {
-    let (h, big) = (m.h, m.b.big);
-    let (cos, sin) = m.ropes[table];
+unsafe fn rope(m: &Model, l: &Layer, n: usize) {
+    let (a, big) = (l.a, m.b.big);
+    let (cos, sin) = m.ropes[l.rope];
     unsafe {
         for i in 0..n {
             let c = cos.add(i * HALF);
             let s = sin.add(i * HALF);
             for part in 0..2 {
-                for hh in 0..m.nh {
-                    let p = big.add(i * 3 * h + part * h + hh * HD);
+                for hh in 0..l.nh {
+                    let p = big.add(i * 3 * a + part * a + hh * HD);
                     for d in (0..HALF).step_by(4) {
                         let (a, b) = (ld(p.add(d)), ld(p.add(d + HALF)));
                         let (cv, sv) = (ld(c.add(d)), ld(s.add(d)));
@@ -617,11 +642,11 @@ fn keep(local: bool, window: usize, i: usize, j: usize, n: usize) -> bool {
     j < n && (!local || i.abs_diff(j) <= window)
 }
 
-unsafe fn attention_f32(m: &Model, n: usize, local: bool) {
-    let (h, b) = (m.h, &m.b);
+unsafe fn attention_f32(m: &Model, l: &Layer, n: usize) {
+    let (h, b, local) = (l.a, &m.b, l.local);
     let n8 = (n + 7) & !7;
     unsafe {
-        for hh in 0..m.nh {
+        for hh in 0..l.nh {
             for jb in 0..n8 / 8 {
                 for d in 0..HD {
                     for jj in 0..8 {
@@ -682,8 +707,8 @@ unsafe fn attention_f32(m: &Model, n: usize, local: bool) {
 /// Quantises head hh: Q (u7 per row), K (i8 per row, packed [j/8][d/4][j%8/4][j%4][d%4], scale times log2 e) and
 /// V (i8 per column, i16 panels [d/8][j/2][d%8/4][d%4][j%2]).
 #[inline(never)]
-unsafe fn pack_head_i8(m: &Model, n: usize, hh: usize) {
-    let (h, b) = (m.h, &m.b);
+unsafe fn pack_head_i8(m: &Model, h: usize, n: usize, hh: usize) {
+    let b = &m.b;
     let qkv = 3 * h;
     let n8 = (n + 7) & !7;
     let n16 = (n + 15) & !15;
@@ -864,8 +889,8 @@ unsafe fn att_softmax<const R: usize>(m: &Model, jlo: usize, jhi: usize, rmax: &
 }
 
 #[inline(always)]
-unsafe fn att_pv<const R: usize>(m: &Model, n: usize, hh: usize, i0: usize, jlo: usize, jhi: usize, inv: &[f32; R]) {
-    let (h, b) = (m.h, &m.b);
+unsafe fn att_pv<const R: usize>(m: &Model, h: usize, n: usize, hh: usize, i0: usize, jlo: usize, jhi: usize, inv: &[f32; R]) {
+    let b = &m.b;
     let stride = m.maxn + 16;
     let n16 = (n + 15) & !15;
     unsafe {
@@ -894,27 +919,27 @@ unsafe fn att_pv<const R: usize>(m: &Model, n: usize, hh: usize, i0: usize, jlo:
 }
 
 #[inline(never)]
-unsafe fn att_block<const R: usize>(m: &Model, kernel: Kernel, n: usize, hh: usize, i0: usize, local: bool) {
+unsafe fn att_block<const R: usize>(m: &Model, kernel: Kernel, a: usize, n: usize, hh: usize, i0: usize, local: bool) {
     let n8 = (n + 7) & !7;
     let (jlo, jhi) = if local { (i0.saturating_sub(m.window) & !7, ((i0 + R + m.window + 7) & !7).min(n8)) } else { (0, n8) };
     unsafe {
         let rmax = if kernel == Kernel::Pairs { att_scores::<R, true>(m, n, i0, jlo, jhi, local) } else { att_scores::<R, false>(m, n, i0, jlo, jhi, local) };
         let inv = att_softmax::<R>(m, jlo, jhi, &rmax);
-        att_pv::<R>(m, n, hh, i0, jlo, jhi, &inv);
+        att_pv::<R>(m, a, n, hh, i0, jlo, jhi, &inv);
     }
 }
 
-unsafe fn attention_i8(m: &Model, kernel: Kernel, n: usize, local: bool) {
+unsafe fn attention_i8(m: &Model, kernel: Kernel, l: &Layer, n: usize) {
     unsafe {
-        for hh in 0..m.nh {
-            pack_head_i8(m, n, hh);
+        for hh in 0..l.nh {
+            pack_head_i8(m, l.a, n, hh);
             let mut i = 0;
             while i + ROWS <= n {
-                att_block::<ROWS>(m, kernel, n, hh, i, local);
+                att_block::<ROWS>(m, kernel, l.a, n, hh, i, l.local);
                 i += ROWS;
             }
             while i < n {
-                att_block::<1>(m, kernel, n, hh, i, local);
+                att_block::<1>(m, kernel, l.a, n, hh, i, l.local);
                 i += 1;
             }
         }
@@ -924,25 +949,27 @@ unsafe fn attention_i8(m: &Model, kernel: Kernel, n: usize, local: bool) {
 /// Runs the encoder on the n token rows (1 <= n <= max tokens) the host wrote into `rows` in format `fmt`.
 /// Returns the L2-normalised, mean-pooled embedding (`dim` floats).
 pub unsafe fn forward(m: &Model, kernel: Kernel, n: usize, fmt: RowFormat) -> *const f32 {
-    let (h, ff, b) = (m.h, m.ff, &m.b);
+    let (h, b) = (m.h, &m.b);
     let x = b.x;
     unsafe {
         embed(m, n, fmt);
-        for (li, l) in m.layers.iter().enumerate() {
-            // Attention block. The first layer has no attention norm; later norms' gains are folded into Wqkv.
-            if li == 0 {
-                scale_rows(h, x, b.h, n, l.gq);
-            } else {
+        for l in &m.layers {
+            let (a, ff) = (l.a, l.ff);
+            // Attention block. A layer without an attention norm only scales by its gains; a norm's own gains are
+            // folded into Wqkv.
+            if l.norm {
                 ln_rows(h, x, b.h, n, l.gq);
-            }
-            linear::<false>(m, kernel, &l.qkv, b.h, h, n, b.big, 3 * h);
-            rope(m, l.rope, n);
-            if m.int8 {
-                attention_i8(m, kernel, n, l.local);
             } else {
-                attention_f32(m, n, l.local);
+                scale_rows(h, x, b.h, n, l.gq);
             }
-            linear::<true>(m, kernel, &l.o, b.ctx, h, n, x, h);
+            linear::<false>(m, kernel, &l.qkv, b.h, h, n, b.big, 3 * a);
+            rope(m, l, n);
+            if m.int8 {
+                attention_i8(m, kernel, l, n);
+            } else {
+                attention_f32(m, l, n);
+            }
+            linear::<true>(m, kernel, &l.o, b.ctx, a, n, x, h);
             // Feed-forward block.
             ln_rows(h, x, b.h, n, l.gf);
             linear::<false>(m, kernel, &l.ff1, b.h, h, n, b.big, 2 * ff);

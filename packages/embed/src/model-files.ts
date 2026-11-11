@@ -62,8 +62,8 @@ export const bekkoA8m: EmbedModel = {
     size: 6_891_222,
   },
   encoder: {
-    sha256: "bb5d777c8f9bfa320d0ac43eeb036f5d0a462a13d34a6bd58f616a8d164729e3",
-    size: 7_967_872,
+    sha256: "43662f5b7dd31378ddc793b6c67e64f1333ccbd9af7a39ab60fe978eac811f3d",
+    size: 7_967_840,
   },
   tokens: {
     sha256: "5aebd1a04902551573cce96abae376d88bef5ba527fe009f69f2d6d818f1cfc9",

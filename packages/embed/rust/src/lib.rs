@@ -99,6 +99,23 @@ pub extern "C" fn set_kernel(k: u32) {
     unsafe { KERNEL = Some(kernel) }
 }
 
+/// Which integer kernels run: 1 the i32 dot, 2 the i16 pairs (as `set_kernel` numbers them), 3 mixed: the pairs
+/// chosen, but a matrix of the model isn't `pairable`, so every matrix runs the i32 dot and only attention's scores
+/// (whose keys are bounded as they are packed) run the pairs.
+#[unsafe(no_mangle)]
+pub extern "C" fn kernel() -> u32 {
+    unsafe {
+        if KERNEL.is_none() {
+            set_kernel(0);
+        }
+        match (KERNEL, MODEL.as_ref()) {
+            (Some(Kernel::Pairs), Some(m)) if !m.pairs_exact() => 3,
+            (Some(Kernel::Pairs), _) => 2,
+            _ => 1,
+        }
+    }
+}
+
 /// Where the host writes a text's UTF-8 bytes, `text_cap` at most.
 #[unsafe(no_mangle)]
 pub extern "C" fn text_buf() -> *mut u8 {

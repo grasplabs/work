@@ -13,10 +13,21 @@ activations kept in float. Every int8 linear layer keeps each group of 4 weights
 sum |w| <= 258, so the embedder's 16-bit kernels give the same bits as its 32-bit ones. Without calibration texts
 the int8 encoder is quantised plainly.
 
+The encoder file's header says the model's shape: its width, its layers, and for each layer whether it is local,
+whether it has an attention norm, its heads and its feed-forward width (read from the weights, so a model pruned
+layer by layer exports as it is). The embedder runs any shape the header says, within its bounds.
+
 The encoder reads at most --max-tokens tokens (default 512, as the reference truncates); its buffers and rotary
 tables are sized to that, not to the config's max_position_embeddings, which the module's memory may not hold.
 
-Usage: python -I export.py <model dir> <out dir> [--float] [--calibration texts.json] [--max-tokens 512]
+Which layers are local comes from config.json's layer_types, one per layer. A model whose layers were cut must list
+them, each kept layer's kind from its original position: transformers would otherwise derive kinds from each layer's
+new index, which is wrong after a cut. A config without the list (any ModernBERT saved before transformers 5, such as
+the published bekko-a8m) is refused unless --uncut asserts that the checkpoint is an unmodified published model, whose
+kinds transformers derives from its config (global every n layers); then its layer count and its attention norms
+(none on the first layer, one on every other) are checked against its weights.
+
+Usage: python -I export.py <model dir> <out dir> [--float] [--calibration texts.json] [--max-tokens 512] [--uncut]
 Needs numpy, torch, transformers, safetensors and tokenizers."""
 import argparse
 import json
@@ -25,11 +36,15 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from safetensors import safe_open
 from safetensors.torch import load_file
 from tokenizers import Tokenizer
-from transformers import AutoConfig, AutoModel
+from transformers import AutoConfig, ModernBertModel
 
 HD = 64  # the head width the runtime is written for
+EPS = 1e-5  # the runtime's norm epsilon (rust/src/encoder.rs)
+MLM_HEAD = ("head.", "decoder.")  # a masked-LM checkpoint's head, not part of the encoder
+LOCAL, NORM = 1, 2  # a layer's kind: local attention, an attention norm; bits 8 to 15 its rotary table
 SMOOTH = {"qkv": 0.6, "o": 0.0, "ff1": 0.6, "ff2": 0.8}  # per-channel rescaling strength at each linear input
 FLOAT_CHANNELS = 16  # feed-forward channels of the last layer kept in float
 PAIR_LIMIT = 258  # largest sum |w| over the 4 weights feeding one 16-bit lane
@@ -86,11 +101,37 @@ def rope_table(theta: float, max_tokens: int) -> tuple[np.ndarray, np.ndarray]:
     return freqs.cos().numpy(), freqs.sin().numpy()
 
 
+def load_model(src: Path) -> ModernBertModel:
+    """The float32 model with eager attention, built as the checkpoint is: each layer's linear layers sized as its
+    weights are, and an attention norm on exactly the layers whose weights have one. A model pruned layer by layer
+    (fewer heads or a narrower feed-forward in some layers, or layers cut so that the first kept one has a norm)
+    loads as it is and runs as the exported encoder does, where from_pretrained would size every layer by the config
+    and give only layer 0 no norm."""
+    cfg = AutoConfig.from_pretrained(src, attn_implementation="eager")
+    model = ModernBertModel(cfg)
+    state = {k.removeprefix("model."): v.float() for k, v in load_file(src / "model.safetensors").items()}
+    # A masked-LM checkpoint's head is not the encoder's; any other key the encoder lacks fails the strict load.
+    state = {k: v for k, v in state.items() if not k.startswith(MLM_HEAD)}
+    for l, layer in enumerate(model.layers):
+        if f"layers.{l}.attn_norm.weight" in state:
+            layer.attn_norm = torch.nn.LayerNorm(cfg.hidden_size, eps=cfg.norm_eps, bias=False)
+        else:
+            layer.attn_norm = torch.nn.Identity()
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.Linear) and f"{name}.weight" in state:
+            out, inp = state[f"{name}.weight"].shape
+            if (out, inp) != (module.out_features, module.in_features):
+                parent, _, child = name.rpartition(".")
+                setattr(model.get_submodule(parent), child, torch.nn.Linear(inp, out, bias=False))
+    model.load_state_dict(state, strict=True)
+    return model.eval()
+
+
 def calibrate(src: Path, texts: list[str], max_tokens: int) -> dict[str, np.ndarray]:
     """Per-input-channel abs max at every linear layer's input, over the calibration texts."""
     tok = Tokenizer.from_file(str(src / "tokenizer.json"))
     tok.enable_truncation(max_tokens)
-    model = AutoModel.from_pretrained(src, attn_implementation="eager", dtype=torch.float32).eval()
+    model = load_model(src)
     acc: dict[str, np.ndarray] = {}
 
     def hook(name: str):
@@ -111,25 +152,70 @@ def calibrate(src: Path, texts: list[str], max_tokens: int) -> dict[str, np.ndar
     return acc
 
 
+def check_model(src: Path, cfg, uncut: bool = False) -> None:
+    """Refuses a model the runtime would run wrongly without noticing: everything the encoder file doesn't say and
+    the runtime assumes (rust/src/encoder.rs). Each layer's widths and norms are read from its weights."""
+    assert cfg.model_type == "modernbert", cfg.model_type  # pre-norm layers, rotate-half rotary, GeGLU (value, gate)
+    # Which layers are local, and their rotary bases, come from the config's layer_types, one per kept layer in
+    # order. Without it transformers derives them from each layer's new index (global every n layers), which is
+    # wrong for a model whose layers were cut: so it must be written out, or the model asserted uncut (--uncut).
+    raw = json.loads((src / "config.json").read_text())
+    if "layer_types" in raw:
+        assert len(raw["layer_types"]) == cfg.num_hidden_layers, "config.json lists layer_types for another layer count"
+    else:
+        assert uncut, (
+            "config.json lists no layer_types, so which layers are local can't be known for a model whose layers were "
+            "cut. If this is an unmodified published model, pass --uncut: it asserts that, and the kinds transformers "
+            "derives from the config are used."
+        )
+        with safe_open(src / "model.safetensors", "pt") as f:
+            keys = {k.removeprefix("model.") for k in f.keys()}
+        layers = {int(k.split(".")[1]) for k in keys if k.startswith("layers.")}
+        assert layers == set(range(cfg.num_hidden_layers)), f"weights for layers {sorted(layers)}, config says {cfg.num_hidden_layers}"
+        norms = [f"layers.{l}.attn_norm.weight" in keys for l in range(cfg.num_hidden_layers)]
+        assert norms == [l > 0 for l in range(cfg.num_hidden_layers)], f"attention norms {norms}: not an uncut ModernBERT"
+    # The head width: 64, which the kernels, the attention scale and the rotary tables are written for. A pruned
+    # model drops whole heads, so the config's head width stays the model's.
+    head = getattr(cfg, "head_dim", None) or cfg.hidden_size // cfg.num_attention_heads
+    assert head == HD and cfg.hidden_size % cfg.num_attention_heads == 0, f"head width {head}, the runtime runs {HD}"
+    assert not cfg.norm_bias and not cfg.attention_bias and not cfg.mlp_bias, "biases"
+    assert cfg.hidden_activation == "gelu", cfg.hidden_activation  # exact erf GELU in GeGLU
+    assert cfg.norm_eps == EPS, cfg.norm_eps
+    for t in cfg.layer_types:
+        rope = cfg.rope_parameters[t]
+        assert t in ("full_attention", "sliding_attention") and rope["rope_type"] == "default", (t, rope)
+        assert rope.get("partial_rotary_factor", 1.0) == 1.0, rope  # the whole head rotates
+    # Mean pooling, as the runtime pools. A sentence-transformers model says how it pools; a bare encoder is taken as
+    # mean-pooled (the test fixtures).
+    modules = src / "modules.json"
+    if modules.exists():
+        kinds = [m["type"].rsplit(".", 1)[-1] for m in json.loads(modules.read_text())]
+        assert kinds in (["Transformer", "Pooling"], ["Transformer", "Pooling", "Normalize"]), kinds
+        pool = next(m for m in json.loads(modules.read_text()) if m["type"].endswith("Pooling"))
+        modes = json.loads((src / pool["path"] / "config.json").read_text())
+        on = sorted(k for k, v in modes.items() if k.startswith("pooling_mode_") and v)
+        assert on == ["pooling_mode_mean_tokens"] and modes.get("include_prompt", True), modes
+
+
 def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn: int) -> bytes:
     T = {k: v.float().numpy() for k, v in load_file(src / "model.safetensors").items()}
     T = {k.removeprefix("model."): v for k, v in T.items()}
-    h, nh, ff, nl = cfg.hidden_size, cfg.num_attention_heads, cfg.intermediate_size, cfg.num_hidden_layers
-    assert h == nh * HD, f"head width {h // nh}, the runtime runs {HD}"
-    assert not cfg.norm_bias and not cfg.attention_bias and not cfg.mlp_bias and cfg.hidden_activation == "gelu"
+    h, nl = cfg.hidden_size, cfg.num_hidden_layers
     thetas = sorted({cfg.rope_parameters[t]["rope_theta"] for t in cfg.layer_types})
-    assert all(cfg.rope_parameters[t]["rope_type"] == "default" for t in cfg.layer_types)
-    kinds = [(t == "sliding_attention") | (thetas.index(cfg.rope_parameters[t]["rope_theta"]) << 8) for t in cfg.layer_types]
-    header = struct.pack(f"<4s{9 + nl}I", b"GENC", 1, int(int8), h, nh, ff, nl, maxn, cfg.sliding_window, len(thetas), *kinds)
-    parts: list[bytes] = [pad16(header), pad16(le(T["embeddings.norm.weight"])), pad16(le(T["final_norm.weight"]))]
+    shapes: list[int] = []
+    parts: list[bytes] = [pad16(le(T["embeddings.norm.weight"])), pad16(le(T["final_norm.weight"]))]
     for theta in thetas:
         parts += [pad16(le(a)) for a in rope_table(theta, maxn)]
     for l in range(nl):
         g = lambda n: T[f"layers.{l}.{n}"]  # noqa: E731
-        gn = g("attn_norm.weight") if l > 0 else np.ones(h, np.float32)
+        # Each layer's widths, from its weights: the attention's (heads x the head width) and the feed-forward's.
+        a, ff = g("attn.Wo.weight").shape[1], g("mlp.Wo.weight").shape[1]
+        assert a % HD == 0 and g("attn.Wqkv.weight").shape == (3 * a, h) and g("mlp.Wi.weight").shape == (2 * ff, h), l
+        norm = f"layers.{l}.attn_norm.weight" in T
+        gn = g("attn_norm.weight") if norm else np.ones(h, np.float32)
         mlp_norm = g("mlp_norm.weight")
         wqkv = g("attn.Wqkv.weight").copy()
-        wqkv[:h] *= HD**-0.5  # the attention's scale, folded into Wq
+        wqkv[:a] *= HD**-0.5  # the attention's scale, folded into Wq
         wqkv = wqkv * gn[None, :]
         wo = g("attn.Wo.weight").copy()
         wi = g("mlp.Wi.weight") * mlp_norm[None, :]
@@ -139,11 +225,11 @@ def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn:
         if int8 and cal is not None:
             act = lambda k: cal[f"L{l}.{k}"].astype(np.float64)  # noqa: E731
             # Exact: each rescaling is undone in the gain or the weights before it.
-            sq = smoothing(act("qkv") / (np.maximum(np.abs(gn), 1e-6) if l > 0 else 1), wqkv, SMOOTH["qkv"])
+            sq = smoothing(act("qkv") / (np.maximum(np.abs(gn), 1e-6) if norm else 1), wqkv, SMOOTH["qkv"])
             wqkv, gq = wqkv * sq[None, :], 1 / sq
             if SMOOTH["o"]:
                 so = smoothing(act("o"), wo, SMOOTH["o"])
-                wo, wqkv[2 * h :] = wo * so[None, :], wqkv[2 * h :] / so[:, None]
+                wo, wqkv[2 * a :] = wo * so[None, :], wqkv[2 * a :] / so[:, None]
             sf = smoothing(act("ff1") / np.maximum(np.abs(mlp_norm), 1e-6), wi, SMOOTH["ff1"])
             wi, gf = wi * sf[None, :], 1 / sf
             s2 = smoothing(act("ff2"), wo2, SMOOTH["ff2"])
@@ -155,10 +241,10 @@ def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn:
                 perm = np.concatenate([np.setdiff1d(np.arange(ff), kept), kept])
                 wi = np.concatenate([wi[:ff][perm], wi[ff:][perm]])
                 wo2 = wo2[:, perm]
-        for w in (wqkv, wo, wi, None, wo2[:, : ff - nod]):
-            if w is None:
-                parts.append(pad16(le(np.array([nod, 0, 0, 0], "<i4"))))
-            elif int8:
+        kind = (LOCAL if cfg.layer_types[l] == "sliding_attention" else 0) | (NORM if norm else 0)
+        shapes += [kind | thetas.index(cfg.rope_parameters[cfg.layer_types[l]]["rope_theta"]) << 8, a // HD, ff, nod]
+        for w in (wqkv, wo, wi, wo2[:, : ff - nod]):
+            if int8:
                 wq, s = quantize(w.astype(np.float32))
                 parts += [pad16(le(dot4(wq))), pad16(le(s)), pad16(le(wq.astype(np.int32).sum(axis=1).astype("<i4")))]
             else:
@@ -166,7 +252,8 @@ def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn:
         parts += [pad16(le(gq.astype(np.float32))), pad16(le(gf.astype(np.float32)))]
         if nod:
             parts.append(pad16(le(panel8(wo2[:, ff - nod :]))))
-    return b"".join(parts)
+    header = struct.pack(f"<4s{7 + len(shapes)}I", b"GENC", 2, int(int8), h, nl, maxn, cfg.sliding_window, len(thetas), *shapes)
+    return pad16(header) + b"".join(parts)
 
 
 def tokens(src: Path, int8: bool) -> bytes:
@@ -231,12 +318,13 @@ def tokenizer(src: Path) -> bytes:
     return blob + b"".join(pieces)
 
 
-def export(src: Path, out: Path, float_files: bool, calibration: list[str] | None, max_tokens: int = MAX_TOKENS) -> dict[str, int]:
+def export(src: Path, out: Path, float_files: bool, calibration: list[str] | None, max_tokens: int = MAX_TOKENS, uncut: bool = False) -> dict[str, int]:
     """Writes the three model files into `out`; returns their sizes."""
     cfg = AutoConfig.from_pretrained(src)
     # At most 1,024: past it attention's integer sums could overflow, and the embedder refuses the file
     # (rust/src/encoder.rs, MAX_TOKENS).
     assert 2 <= max_tokens <= min(1024, cfg.max_position_embeddings) and max_tokens % 8 == 0, max_tokens
+    check_model(src, cfg, uncut)
     out.mkdir(parents=True, exist_ok=True)
     int8 = not float_files
     cal = calibrate(src, calibration, max_tokens) if int8 and calibration else None
@@ -252,6 +340,11 @@ if __name__ == "__main__":
     ap.add_argument("model", type=Path)
     ap.add_argument("out", type=Path)
     ap.add_argument("--float", action="store_true", help="float32 encoder and token table, for verification")
+    ap.add_argument(
+        "--uncut",
+        action="store_true",
+        help="assert the checkpoint is an unmodified published model: needed when config.json lists no layer_types",
+    )
     ap.add_argument("--calibration", type=Path, help="JSON list of calibration texts for the int8 encoder")
     ap.add_argument(
         "--max-tokens",
@@ -263,4 +356,4 @@ if __name__ == "__main__":
     )
     args = ap.parse_args()
     texts = json.loads(args.calibration.read_text()) if args.calibration else None
-    print(export(args.model, args.out, args.float, texts, args.max_tokens))
+    print(export(args.model, args.out, args.float, texts, args.max_tokens, args.uncut))
