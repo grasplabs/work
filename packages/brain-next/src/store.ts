@@ -6,19 +6,27 @@ import { z } from "zod";
 import {
   newSourceSchema,
   recallRequestSchema,
-  sourceIdSchema,
+  versionRequestSchema,
 } from "./contract.ts";
 import type {
   NewSource,
   RecallRequest,
   Recalled,
-  SourceId,
+  SourceVersion,
+  SourceVersionRef,
+  VersionRequest,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
-import { sources } from "./db/schema.ts";
-import { readerSetOf } from "./reader-sets.ts";
+import { sweepFiles } from "./files.ts";
 import { recall } from "./recall.ts";
-import { indexWords } from "./words.ts";
+import { addVersion, readVersion } from "./sources.ts";
+import type { SourcesStore } from "./sources.ts";
+
+/** What the store needs of its host's Worker: the Brain's bucket. */
+export interface BrainStoreEnv {
+  /** Where the original files of source versions are kept (files.ts). */
+  readonly BRAIN_OBJECTS: R2Bucket;
+}
 
 /**
  * `input` as `schema` reads it, or an error that says why not: its paths
@@ -34,16 +42,17 @@ const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
 };
 
 /**
- * The Brain's store: its sources, who may read them and their words, in
- * the object's own SQLite. Its public methods are the contract
- * (contract.ts `Brain`), and they are all there is: nothing else can read
- * its storage. Each checks what it is given, so nothing malformed is
- * stored or asked; who the reader is, is the host's to say.
+ * The Brain's store: its sources and their versions, who may read them
+ * and their words, in the object's own SQLite, with each version's
+ * original file in the host's Brain bucket. Its public methods are the
+ * contract (contract.ts `Brain`), and they are all there is: nothing else
+ * can read its storage. Each checks what it is given, so nothing
+ * malformed is stored or asked; who the reader is, is the host's to say.
  */
-export class BrainStore extends DurableObject<unknown> {
+export class BrainStore extends DurableObject<BrainStoreEnv> {
   readonly #db = drizzle(this.ctx.storage);
 
-  constructor(ctx: DurableObjectState, env: unknown) {
+  constructor(ctx: DurableObjectState, env: BrainStoreEnv) {
     super(ctx, env);
     // The schema is current before the object handles anything.
     void ctx.blockConcurrencyWhile(async () => {
@@ -51,28 +60,52 @@ export class BrainStore extends DurableObject<unknown> {
     });
   }
 
-  /**
-   * Adds a source, its readers and its words, in one transaction: whole
-   * or not at all. The text is kept as given; its words are indexed folded.
-   */
-  addSource(source: NewSource): { id: SourceId } {
-    const { text, access } = checked(newSourceSchema, source);
-    const id = sourceIdSchema.parse(crypto.randomUUID());
-    this.ctx.storage.transactionSync(() => {
-      const readerSet = readerSetOf(this.#db, access);
-      const { row } = this.#db
-        .insert(sources)
-        .values({ id, readerSet, text, addedAt: new Date() })
-        .returning({ row: sources.row })
-        .get();
-      indexWords(this.ctx.storage.sql, row, text);
-    });
-    return { id };
+  /** The parts sources.ts works with, the bucket as the env has it now. */
+  get #sources(): SourcesStore {
+    return {
+      storage: this.ctx.storage,
+      db: this.#db,
+      bucket: this.env.BRAIN_OBJECTS,
+    };
   }
 
-  /** What the reader may read of the sources holding the question's words. */
+  /**
+   * Adds a version of a source: its file, then the version, its readers,
+   * chunks and words, in one transaction, visible only once whole. The
+   * same text and readers as the current version answer with it.
+   */
+  async addSource(source: NewSource): Promise<SourceVersionRef> {
+    return await addVersion(this.#sources, checked(newSourceSchema, source));
+  }
+
+  /** What the reader may read of current versions holding the question's words. */
   recall(request: RecallRequest): Recalled {
     const { question, reader } = checked(recallRequestSchema, request);
     return recall(this.ctx.storage.sql, question, reader);
+  }
+
+  /** A version, current or history, whole: if the reader may read it. */
+  async readVersion(request: VersionRequest): Promise<SourceVersion | null> {
+    return await readVersion(
+      this.#sources,
+      checked(versionRequestSchema, request)
+    );
+  }
+
+  /**
+   * Sweeps the files nothing points at (files.ts), while the store takes
+   * nothing else, so no add notes a file the sweep is deleting.
+   */
+  override async alarm(): Promise<void> {
+    await this.ctx.blockConcurrencyWhile(async () => {
+      const next = await sweepFiles(
+        this.#db,
+        this.env.BRAIN_OBJECTS,
+        Date.now()
+      );
+      if (next !== null) {
+        await this.ctx.storage.setAlarm(next);
+      }
+    });
   }
 }

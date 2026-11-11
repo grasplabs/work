@@ -1,7 +1,7 @@
 // How text becomes words to search: one folding for what is indexed and
 // for what is asked, so the two can never drift apart. A source is kept
-// whole as given; only its folded form goes into the word index
-// (`source_words`). Later ways of matching words (stemming per language)
+// whole as given; only its chunks' folded form goes into the word index
+// (`chunk_words`). Later ways of matching words (stemming per language)
 // extend `foldForSearch`, and with it both sides at once.
 
 /**
@@ -52,14 +52,14 @@ export const termsOf = (question: string): string[] =>
     .slice(0, maxTerms)
     .map((term) => `"${term}"`);
 
-/** Indexes the words of the source at `row`, in the caller's transaction. */
+/** Indexes the words of the chunk at `row`, in the caller's transaction. */
 export const indexWords = (
   sql: SqlStorage,
   row: number,
   text: string
 ): void => {
   sql.exec(
-    "INSERT INTO source_words (rowid, text) VALUES (?, ?)",
+    "INSERT INTO chunk_words (rowid, text) VALUES (?, ?)",
     row,
     foldForSearch(text)
   );

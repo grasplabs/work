@@ -25,14 +25,24 @@ export const readerGroupsMax = 1000;
 /** Most characters of a principal's ID. */
 export const principalMaxLength = 256;
 
-/** Most sources one recall returns. */
+/** Most chunks one recall returns. */
 export const recallLimit = 10;
+
+/** Most characters of a source's identity. */
+export const sourceIdMaxLength = 256;
 
 const principalSchema = z.string().min(1).max(principalMaxLength);
 
-/** A source, as the Brain names it. */
-export const sourceIdSchema = z.string().min(1).max(64).brand<"SourceId">();
+/**
+ * A source's identity, given by its producer (this upload, this chat): the
+ * same for every version of it, so a new version of the same thing is
+ * added under the same identity.
+ */
+export const sourceIdSchema = z.string().min(1).max(sourceIdMaxLength);
 export type SourceId = z.infer<typeof sourceIdSchema>;
+
+/** A version of a source: 1 for its first, counting up. */
+export const versionSchema = z.int().positive();
 
 /**
  * Who may read a source: one person (`owner`: theirs alone, admins
@@ -46,8 +56,12 @@ export const accessSchema = z.discriminatedUnion("kind", [
 ]);
 export type Access = z.infer<typeof accessSchema>;
 
-/** A source to add: its text, and who may read it. */
+/**
+ * A version of a source to add: which source, its text, and who may read
+ * this version.
+ */
 export const newSourceSchema = z.strictObject({
+  source: sourceIdSchema,
   text: z
     .string()
     .min(1)
@@ -76,26 +90,56 @@ export const recallRequestSchema = z.strictObject({
 });
 export type RecallRequest = z.infer<typeof recallRequestSchema>;
 
-/** A source a recall found. */
-export interface RecalledSource {
-  id: SourceId;
+/** A version of a source, as an add records it. */
+export interface SourceVersionRef {
+  source: SourceId;
+  version: number;
+}
+
+/** A chunk a recall found: a passage of a source's current version. */
+export interface RecalledChunk extends SourceVersionRef {
   text: string;
 }
 
 /** What a recall found the reader may read, best first. */
 export interface Recalled {
-  sources: RecalledSource[];
+  chunks: RecalledChunk[];
+}
+
+/** A version to read whole, and who reads it. */
+export const versionRequestSchema = z.strictObject({
+  source: sourceIdSchema,
+  version: versionSchema,
+  reader: readerSchema,
+});
+export type VersionRequest = z.infer<typeof versionRequestSchema>;
+
+/** A version of a source, whole: its original text, and when it was added. */
+export interface SourceVersion extends SourceVersionRef {
+  text: string;
+  addedAt: Date;
 }
 
 /** The Brain, as its host calls it. */
 export interface Brain {
-  /** Adds `source`, readable as its access says. */
-  addSource: (source: NewSource) => Promise<{ id: SourceId }>;
   /**
-   * The sources the reader may read that hold the question's words, best
-   * first: those holding more of them, then shorter, then newer.
+   * Adds a version of `source.source` with this text, readable as its
+   * access says, and makes it the source's current one. The same text
+   * and readers as the current version add nothing and answer with that
+   * version, so an add is safe to repeat after a lost reply.
+   */
+  addSource: (source: NewSource) => Promise<SourceVersionRef>;
+  /**
+   * The chunks of current versions the reader may read that hold the
+   * question's words, best first: those holding more of them, then
+   * shorter, then newer.
    */
   recall: (request: RecallRequest) => Promise<Recalled>;
+  /**
+   * A version of a source, current or history, whole as it was added:
+   * `null` when there is none or the reader may not read it, alike.
+   */
+  readVersion: (request: VersionRequest) => Promise<SourceVersion | null>;
 }
 
 /** The one store's name: the Brain holds everything in one store for now. */

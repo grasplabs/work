@@ -1,0 +1,454 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "73399537-f3c3-4eb9-a0ed-e562f6c6edbe",
+  "prevId": "95bf47d4-f8b5-4076-b4e7-21c06462b1a2",
+  "tables": {
+    "chunks": {
+      "name": "chunks",
+      "columns": {
+        "row": {
+          "name": "row",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version_row": {
+          "name": "version_row",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "chunks_version_position_unique": {
+          "name": "chunks_version_position_unique",
+          "columns": [
+            "version_row",
+            "position"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "chunks_version_row_source_versions_row_fk": {
+          "name": "chunks_version_row_source_versions_row_fk",
+          "tableFrom": "chunks",
+          "tableTo": "source_versions",
+          "columnsFrom": [
+            "version_row"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "current_versions": {
+      "name": "current_versions",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version_row": {
+          "name": "version_row",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "current_versions_version_row_unique": {
+          "name": "current_versions_version_row_unique",
+          "columns": [
+            "version_row"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "current_versions_version_row_source_versions_row_fk": {
+          "name": "current_versions_version_row_source_versions_row_fk",
+          "tableFrom": "current_versions",
+          "tableTo": "source_versions",
+          "columnsFrom": [
+            "version_row"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "files": {
+      "name": "files",
+      "columns": {
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bytes": {
+          "name": "bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "refs": {
+          "name": "refs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "written_at": {
+          "name": "written_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "files_unreferenced_idx": {
+          "name": "files_unreferenced_idx",
+          "columns": [
+            "refs",
+            "written_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "files_refs": {
+          "name": "files_refs",
+          "value": "\"files\".\"refs\" >= 0"
+        }
+      }
+    },
+    "reader_set_members": {
+      "name": "reader_set_members",
+      "columns": {
+        "reader_set": {
+          "name": "reader_set",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "principal": {
+          "name": "principal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "reader_set_members_principal_idx": {
+          "name": "reader_set_members_principal_idx",
+          "columns": [
+            "kind",
+            "principal",
+            "reader_set"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "reader_set_members_reader_set_reader_sets_id_fk": {
+          "name": "reader_set_members_reader_set_reader_sets_id_fk",
+          "tableFrom": "reader_set_members",
+          "tableTo": "reader_sets",
+          "columnsFrom": [
+            "reader_set"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "reader_set_members_reader_set_kind_principal_pk": {
+          "columns": [
+            "reader_set",
+            "kind",
+            "principal"
+          ],
+          "name": "reader_set_members_reader_set_kind_principal_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "reader_set_members_kind": {
+          "name": "reader_set_members_kind",
+          "value": "\"reader_set_members\".\"kind\" IN ('person', 'group')"
+        }
+      }
+    },
+    "reader_sets": {
+      "name": "reader_sets",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "reader_sets_key_unique": {
+          "name": "reader_sets_key_unique",
+          "columns": [
+            "key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "source_versions": {
+      "name": "source_versions",
+      "columns": {
+        "row": {
+          "name": "row",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "file": {
+          "name": "file",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reader_set": {
+          "name": "reader_set",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "added_at": {
+          "name": "added_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "source_versions_reader_set_idx": {
+          "name": "source_versions_reader_set_idx",
+          "columns": [
+            "reader_set"
+          ],
+          "isUnique": false
+        },
+        "source_versions_file_idx": {
+          "name": "source_versions_file_idx",
+          "columns": [
+            "file"
+          ],
+          "isUnique": false
+        },
+        "source_versions_source_version_unique": {
+          "name": "source_versions_source_version_unique",
+          "columns": [
+            "source",
+            "version"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "source_versions_file_files_hash_fk": {
+          "name": "source_versions_file_files_hash_fk",
+          "tableFrom": "source_versions",
+          "tableTo": "files",
+          "columnsFrom": [
+            "file"
+          ],
+          "columnsTo": [
+            "hash"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "source_versions_reader_set_reader_sets_id_fk": {
+          "name": "source_versions_reader_set_reader_sets_id_fk",
+          "tableFrom": "source_versions",
+          "tableTo": "reader_sets",
+          "columnsFrom": [
+            "reader_set"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sources": {
+      "name": "sources",
+      "columns": {
+        "row": {
+          "name": "row",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reader_set": {
+          "name": "reader_set",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "added_at": {
+          "name": "added_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sources_id_unique": {
+          "name": "sources_id_unique",
+          "columns": [
+            "id"
+          ],
+          "isUnique": true
+        },
+        "sources_reader_set_idx": {
+          "name": "sources_reader_set_idx",
+          "columns": [
+            "reader_set"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "sources_reader_set_reader_sets_id_fk": {
+          "name": "sources_reader_set_reader_sets_id_fk",
+          "tableFrom": "sources",
+          "tableTo": "reader_sets",
+          "columnsFrom": [
+            "reader_set"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

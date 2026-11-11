@@ -76,18 +76,23 @@ const inTeams = async (userId: string, count: number): Promise<void> => {
   );
 };
 
+/** Adds `text` as a source of its own, answering its identity. */
 const add = async (text: string, readers: SourceReaders): Promise<SourceId> => {
-  const { id } = await addSource(env, { text, readers });
-  return id;
+  const { source } = await addSource(env, {
+    source: `test:${crypto.randomUUID()}`,
+    text,
+    readers,
+  });
+  return source;
 };
 
-/** What the member `personId` recalls for `question`, by ID, best first. */
+/** What the member `personId` recalls for `question`, by source, best first. */
 const recalledAs = async (
   personId: string,
   question: string
 ): Promise<SourceId[]> => {
-  const { sources } = await recallAs(env, personId, question);
-  return sources.map(({ id }) => id);
+  const { chunks } = await recallAs(env, personId, question);
+  return chunks.map(({ source }) => source);
 };
 
 /** Adds `text` for `readers` as given, unchecked, as a caller outside TypeScript could. */
@@ -95,8 +100,12 @@ const addUnchecked = async (text: string, readers: unknown): Promise<unknown> =>
   // SAFETY: core and the store check what they are given; these tests
   // hand them what the type rules out, as a call from outside TypeScript
   // could.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  await addSource(env, { text, readers: readers as SourceReaders });
+  await addSource(env, {
+    source: `test:${crypto.randomUUID()}`,
+    text,
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    readers: readers as SourceReaders,
+  });
 
 /** `text` in full-width forms (Ａ for A), as some sources hold it. */
 const fullWidth = (text: string): string =>
