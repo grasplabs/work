@@ -4,6 +4,7 @@ import { createAuditEvent, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -18,7 +19,6 @@ import type {
   AppNotificationMessage,
   AppNotificationReceipt,
 } from "@grasp-os/shared/notifications";
-import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { workflowStartIntentSchema } from "@grasp-os/shared/workflow-resources";
@@ -27,7 +27,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { decidedAppRole, operationRoles } from "./app-access.ts";
+import { decidedAppRole, functionRoles } from "./app-access.ts";
 import { readerOf, sourcesOf, unreadableBy } from "./app-provenance.ts";
 import type { AppSources } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
@@ -148,7 +148,7 @@ const checkedOf = (
   const recipient = appNotificationRecipientSchema.safeParse(to);
   const message = appNotificationMessageSchema.safeParse(notification);
   if (!recipient.success || !message.success) {
-    throw operationErrors.create("resource.invalid_args");
+    throw functionErrors.create("resource.invalid_args");
   }
   return { to: recipient.data, notification: message.data };
 };
@@ -317,7 +317,7 @@ const deliver = async (
     .where(eq(apps.id, send.app))
     .get();
   if (app === undefined || app.removedAt !== null) {
-    throw operationErrors.create("resource.unavailable");
+    throw functionErrors.create("resource.unavailable");
   }
   const named = await namedBy(env, send.to);
   const asked = named.slice(0, appNotificationMaxRecipients);
@@ -408,7 +408,7 @@ const deliver = async (
     .tuple([z.object({ stored: z.number(), within: z.number() })])
     .parse(results.at(-1));
   if (outcome.stored === 0 && outcome.within === 0) {
-    throw operationErrors.create("resource.limit_reached", { limit: "hour" });
+    throw functionErrors.create("resource.limit_reached", { limit: "hour" });
   }
   return { delivered: outcome.stored };
 };
@@ -520,7 +520,7 @@ export const dispatchAppNotifyIntent = async (
     if (member === undefined) {
       throw appErrors.create("app.not_found");
     }
-    await operationRoles(env, member, intent.app);
+    await functionRoles(env, member, intent.app);
     await requireAgentAllowed(env, intent.app, intent.principal, intent.agent);
     requireLive(entry.signal);
     await deliver(env, send);

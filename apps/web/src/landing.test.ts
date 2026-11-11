@@ -1,6 +1,7 @@
+import { defaultFlow, setupSteps } from "@grasp-os/shared/onboarding-flow";
 import { describe, expect, it } from "vite-plus/test";
 
-import { landingAfterSignIn } from "./landing.ts";
+import { landingAfterSignIn, onboardingBehind } from "./landing.ts";
 
 // Where someone lands right after signing in: a company's admin whose
 // organization is still onboarding goes into the onboarding; everyone
@@ -52,5 +53,52 @@ describe("landing right after signing in", () => {
       to: null,
       asked: false,
     });
+  });
+});
+
+/** The default flow's steps, with those in `off` switched off. */
+const flowWithout = (off: readonly string[], on = true) => ({
+  ...defaultFlow,
+  on,
+  steps: defaultFlow.steps.map((step) => ({
+    ...step,
+    on: !off.includes(step.id),
+  })),
+});
+
+describe("an admin's onboarding being behind them", () => {
+  it("is so at once where the company goes through no onboarding, or one with every step off", () => {
+    expect([
+      onboardingBehind({ flow: flowWithout([], false), done: [], open: false }),
+      onboardingBehind({
+        flow: flowWithout(defaultFlow.steps.map(({ id }) => id)),
+        done: [],
+        open: false,
+      }),
+    ]).toStrictEqual([true, true]);
+  });
+
+  it("waits for Grasp's go where its people are interviewed, whatever the admin finished", () => {
+    const done = [...setupSteps];
+    expect([
+      onboardingBehind({ flow: defaultFlow, done, open: false }),
+      onboardingBehind({ flow: defaultFlow, done: [], open: true }),
+    ]).toStrictEqual([false, true]);
+  });
+
+  it("is so once they finished every screen where nobody is interviewed, open or not", () => {
+    const flow = flowWithout(["about", "pulse", "leads", "interviews"]);
+    expect([
+      onboardingBehind({
+        flow,
+        done: ["welcome", "ai", "company", "sources"],
+        open: true,
+      }),
+      onboardingBehind({
+        flow,
+        done: ["welcome", "ai", "company", "sources", "documents"],
+        open: false,
+      }),
+    ]).toStrictEqual([false, true]);
   });
 });

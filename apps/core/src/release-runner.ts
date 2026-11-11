@@ -11,7 +11,7 @@ import { whenAborted } from "@grasp-os/shared/deadline";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
-  operationResultMaxBytes,
+  functionResultMaxBytes,
 } from "@grasp-os/shared/function-limits";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -35,8 +35,8 @@ import type { Release } from "./app-releases.ts";
 import type { CallTree, RunnerCall } from "./call-tree.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { sdkReleaseManifests } from "./db/core/schema.ts";
+import type { HostedApp, Runner } from "./function-host.ts";
 import { hostJsonModule, hostJsonSource } from "./host-json.ts";
-import type { HostedApp, Runner } from "./operations.ts";
 import {
   capability,
   runInSession,
@@ -50,8 +50,8 @@ import { sessionHost } from "./sandboxed.ts";
 // Running an App's server functions from its sealed release (spec 6, 8,
 // 16, 32.6): the App's code runs in an isolate of its own for every
 // invocation, loaded from the release's verified artifacts, and holds
-// nothing but that invocation's channel to core's operation host
-// (operations.ts), which decides everything the call may do. Threat
+// nothing but that invocation's channel to core's function host
+// (function-host.ts), which decides everything the call may do. Threat
 // model, and how each is closed:
 //
 // - App code keeps something of one caller's for another's call (a value
@@ -98,7 +98,7 @@ export const startMutation = installMutationRuntime();
 `;
 
 /** The longest answer, in characters, an isolate hands back as text. */
-const answerMaxLength = operationResultMaxBytes;
+const answerMaxLength = functionResultMaxBytes;
 
 /**
  * The isolate's main module: the SDK's runner, over the invocation's
@@ -362,7 +362,7 @@ const parsed = (text: string | undefined): unknown => {
 
 /**
  * The session each caller's call runs its functions in on-prem, by that
- * call (operations.ts `CallTree`), while it's open: how to run one more
+ * call (function-host.ts `CallTree`), while it's open: how to run one more
  * function in it.
  */
 const openSessions = new WeakMap<CallTree, { run: NestedRun }>();
@@ -374,7 +374,7 @@ const openSessions = new WeakMap<CallTree, { run: NestedRun }>();
  * nested call deep enough to wait on a place its own callers hold), and
  * never in a session of its own: once that session is over, it's refused.
  * The function a caller named opens the session, open until every nested
- * call the operation host started has settled, authorized or not yet.
+ * call the function host started has settled, authorized or not yet.
  */
 const inSession = async (
   host: Fetcher,
@@ -423,7 +423,7 @@ const inSession = async (
               openSessions.set(tree, entry);
             },
             answered: answer,
-            // Every nested call the operation host started, those they
+            // Every nested call the function host started, those they
             // start too: from the moment it starts each (`CallTree`).
             drain: async () => {
               await tree.settled();
@@ -442,7 +442,7 @@ const inSession = async (
   })();
   tree.holdSession(session);
   // Answered as the function answers. The session stays open behind it for
-  // the calls the function started and didn't wait for, which the operation
+  // the calls the function started and didn't wait for, which the function
   // host waits for in turn, or gives up on at its deadline (`signal`).
   return await Promise.race([answered, session]);
 };
@@ -605,7 +605,7 @@ export const releaseRunner =
                   }),
               cpuMs: sandbox.limits.cpuMs,
               // The host's own deadline ends the invocation before this
-              // (operations.ts), and frees the process (`signal`); this only
+              // (function-host.ts), and frees the process (`signal`); this only
               // bounds the session.
               wallMs: callTimeoutMs(env),
             },
@@ -621,7 +621,7 @@ export const releaseRunner =
     if (!data.ok) {
       const { name, message, code, details, detailsTooLarge } = data.error;
       // Details past their bound make the error one its contract doesn't
-      // allow, as the host decides of any (operations.ts).
+      // allow, as the host decides of any (function-host.ts).
       throw Object.assign(new Error(message), {
         name,
         ...(code === undefined ? {} : { code }),
@@ -637,12 +637,12 @@ export const releaseRunner =
     }
     if (data.answer === "too_large") {
       // Past every bound: the host refuses it as any return too large.
-      return "x".repeat(operationResultMaxBytes + 1);
+      return "x".repeat(functionResultMaxBytes + 1);
     }
     return data.answer === "json" ? parsed(data.text) : undefined;
   };
 
-/** `release` as the operation host runs it, each isolate tailed by `tailOf`, if given. */
+/** `release` as the function host runs it, each isolate tailed by `tailOf`, if given. */
 export const hostedRelease = (
   env: Env,
   release: Release,

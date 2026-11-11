@@ -108,6 +108,8 @@ import {
   loadWorkflowBuild,
   reviewedTasksOf,
   releaseBuild,
+  requireManifestFormat,
+  workflowManifestFormat,
   storeBuild,
 } from "./workflow-builds.ts";
 import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
@@ -640,15 +642,15 @@ const bytesOf = (text: string): number =>
   new TextEncoder().encode(text).byteLength;
 
 /**
- * A version's contract, as stored: the SDK descriptors of its input and
- * output, its parameters' descriptors, labels and sensitivity, and its
- * listen tasks, by task ID, each with the event binding it listens
- * through and the types its filters name: what an App binding it may be
- * held at, and sent (bound-workflow-events.ts).
+ * A version's contract, as stored: the SDK descriptors of what a run
+ * takes (`args`) and answers (`returns`), its parameters' descriptors,
+ * labels and sensitivity, and its listen tasks, by task ID, each with the
+ * event binding it listens through and the types its filters name: what
+ * an App binding it may be held at, and sent (bound-workflow-events.ts).
  */
 const storedContractSchema = z.strictObject({
-  input: z.json(),
-  output: z.json(),
+  args: z.json(),
+  returns: z.json(),
   listens: z.record(
     z.string(),
     z.strictObject({ alias: z.string(), types: z.array(z.string()) })
@@ -722,8 +724,8 @@ const contractOf = (checked: CheckedWorkflow): StoredContract => {
     };
   }
   return {
-    input: z.json().parse(structuredClone(checked.contract.args)),
-    output: z.json().parse(structuredClone(checked.contract.returns)),
+    args: z.json().parse(structuredClone(checked.contract.args)),
+    returns: z.json().parse(structuredClone(checked.contract.returns)),
     // Each event wait, by its step's ID: what an App may send the run.
     listens: Object.fromEntries(
       eachStep(checked.document.steps).flatMap(({ step }) =>
@@ -1242,6 +1244,8 @@ const manifestBindingsSchema = z.object({
 const sealedBindingsOf = (
   row: typeof workflowResourceVersions.$inferSelect
 ): PinnedContract[] => {
+  // A version of another format never gets here: its review
+  // lists it as refused (`formatRefusalOf`).
   const parsed = manifestBindingsSchema.safeParse(JSON.parse(row.manifest));
   if (!parsed.success) {
     throw corrupt(row.workflowResourceId, row.version);
@@ -1403,6 +1407,30 @@ const versionTasksOf = async (
 };
 
 /**
+ * Why version `row` is refused as one to publish again, if its manifest is
+ * of another format (`requireManifestFormat`): a listing shows it so,
+ * where its run, start, review and export are refused.
+ */
+const formatRefusalOf = (
+  row: typeof workflowResourceVersions.$inferSelect
+): WorkflowResourceVersion["refused"] => {
+  try {
+    requireManifestFormat(parsedJson(row.manifest));
+    return undefined;
+  } catch (error) {
+    if (
+      workflowResourceErrors.codeOf(error) !== "workflow.format_unsupported"
+    ) {
+      throw error;
+    }
+    return {
+      code: "workflow.format_unsupported",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+/**
  * A version's row, as the registry answers it: only once its manifest
  * still hashes to what was sealed, since its build is read from it (`workflow.version_corrupt` otherwise).
  */
@@ -1414,6 +1442,24 @@ const versionOf = async (
 ): Promise<WorkflowResourceVersion> => {
   if ((await sha256Hex(row.manifest)) !== row.manifestHash) {
     throw corrupt(row.workflowResourceId, row.version);
+  }
+  const refused = formatRefusalOf(row);
+  if (refused !== undefined) {
+    return {
+      resourceId: row.workflowResourceId,
+      version: row.version,
+      definitionVersion: row.definitionVersion,
+      profile: row.profileVersion,
+      definitionHash: row.definitionJsonHash,
+      contractHash: row.contractHash,
+      manifestHash: row.manifestHash,
+      bindings,
+      modelSteeredWrites: [],
+      build: null,
+      refused,
+      author: row.authorId,
+      createdAt: row.createdAt.toISOString(),
+    };
   }
   const sealedBindings = sealedBindingsOf(row);
   const modelSteeredWrites = await steeringReview(
@@ -1478,12 +1524,14 @@ export const bindingsOf = async (
   return byVersion;
 };
 
-/** A version's contract: its input, output and parameters. */
+/** A version's contract: its args, returns and parameters. */
 export type VersionContract = StoredContract;
 
 /**
- * The contract of version `version` of workflow `id`, checked against its
- * hash (`workflow.version_corrupt` otherwise); undefined for a version it
+ * The contract of version `version` of workflow `id`, read once its
+ * manifest hashes to what was sealed and is of this host's format
+ * (`workflow.format_unsupported` otherwise), and checked against its hash
+ * (`workflow.version_corrupt` otherwise); undefined for a version it
  * never published.
  */
 export const versionContract = async (
@@ -1495,6 +1543,8 @@ export const versionContract = async (
     .select({
       contract: workflowResourceVersions.contract,
       contractHash: workflowResourceVersions.contractHash,
+      manifest: workflowResourceVersions.manifest,
+      manifestHash: workflowResourceVersions.manifestHash,
     })
     .from(workflowResourceVersions)
     .where(
@@ -1507,6 +1557,10 @@ export const versionContract = async (
   if (row === undefined) {
     return undefined;
   }
+  if ((await sha256Hex(row.manifest)) !== row.manifestHash) {
+    throw corrupt(id, version);
+  }
+  requireManifestFormat(parsedJson(row.manifest));
   if ((await sha256Hex(row.contract)) !== row.contractHash) {
     throw corrupt(id, version);
   }
@@ -1614,7 +1668,7 @@ const writeVersion = async (
     majorOf(await firstFreeVersion(env, workflow.name)) + BigInt(version - 1)
   }.0.0`;
   const manifest = canonicalJson({
-    formatVersion: 1,
+    formatVersion: workflowManifestFormat,
     target: "workflow",
     resourceId: workflow.id,
     resourceVersion: version,
@@ -2114,7 +2168,8 @@ export const exportedWorkflowVersion = async (
     version,
     row.manifestHash
   );
-  const pinned = manifestBindingsSchema.safeParse(parsedJson(row.manifest));
+  const manifest = parsedJson(row.manifest);
+  const pinned = manifestBindingsSchema.safeParse(manifest);
   if (!pinned.success) {
     throw corrupt(workflow.id, version);
   }

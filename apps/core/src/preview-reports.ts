@@ -1,7 +1,7 @@
 import type { PreviewProblem } from "@grasp-os/shared/chat";
+import { isDraftFault } from "@grasp-os/shared/functions";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { ChatId } from "@grasp-os/shared/ids";
-import { isDraftFault } from "@grasp-os/shared/operations";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { ServerLog } from "@grasp-os/shared/pages";
 
 // What a chat's preview of its draft ran into (preview.ts), for the
@@ -73,7 +73,7 @@ const functionOf = (request: unknown): string => {
 };
 
 /** The refusals of a draft that a change of its code fixes (draft-runs.ts). */
-export { draftSealFailures } from "@grasp-os/shared/operations";
+export { draftSealFailures } from "@grasp-os/shared/functions";
 
 /**
  * What a preview's call of a function of a draft of spec 8's layout
@@ -86,7 +86,7 @@ export { draftSealFailures } from "@grasp-os/shared/operations";
  */
 export const functionProblem = (
   request: unknown,
-  result: OperationResult,
+  result: FunctionResult,
   /** What the draft's code threw, when the call hid it (`draftFailure`). */
   thrown?: string
 ): PreviewProblem | undefined => {

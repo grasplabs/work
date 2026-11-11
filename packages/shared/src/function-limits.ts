@@ -1,6 +1,6 @@
 // The bounds and rules of an App's server functions (queries, mutations and
 // actions) that both sides check: the SDK where they are declared and
-// thrown from, and core's operation host, which trusts nothing App code
+// thrown from, and core's function host, which trusts nothing App code
 // sends. Free of dependencies, like store-limits.ts, because the SDK's
 // root module can't bring Zod along.
 
@@ -8,29 +8,29 @@ import { platformErrorNamespaces } from "./error-namespaces.ts";
 import { platformLimits } from "./platform-limits.ts";
 
 /**
- * The most bytes of one operation's input, as UTF-8 JSON: the public
- * operation input limit of spec 18.1, checked on the input as sent, before
+ * The most bytes of one function's arguments, as UTF-8 JSON: the public
+ * function input limit of spec 18.1, checked on the input as sent, before
  * it is validated, for a call from a page, an agent, a workflow or
  * another of the App's functions alike. A store's own bound on one
  * transaction (`commitMaxInputBytes`) is larger and separate.
  */
-export const operationInputMaxBytes = platformLimits.operationInputBytes;
+export const functionArgsMaxBytes = platformLimits.functionArgsBytes;
 
 /**
  * The most bytes of one call's request as a page or agent sends it, as
  * UTF-8 JSON: the input's own bound and room for the reference and options
  * around it. Every transport reads no more than this before parsing.
  */
-export const functionRequestMaxBytes = operationInputMaxBytes + 4 * 1024;
+export const functionRequestMaxBytes = functionArgsMaxBytes + 4 * 1024;
 
 /**
- * The most bytes of what one operation returns, as UTF-8 JSON: the public
- * operation output limit of spec 18.1, for a query, a mutation or an
+ * The most bytes of what one function returns, as UTF-8 JSON: the public
+ * function output limit of spec 18.1, for a query, a mutation or an
  * action, whoever called it, and an App's export answering another App.
  * Larger data is paginated. It fits a workflow step's result, and leaves
  * a mutation's commit room for its writes (`stagedMaxBytes`).
  */
-export const operationResultMaxBytes = platformLimits.operationOutputBytes;
+export const functionResultMaxBytes = platformLimits.functionResultBytes;
 
 /**
  * The most times one caller's call reads the store, the function it named
@@ -91,16 +91,16 @@ export const isAppErrorCode = (code: unknown): code is string =>
  * A registered path's segment: a letter, then letters, digits or
  * underscores, as a module export is named.
  */
-export const operationSegmentPattern = /^[A-Za-z][A-Za-z0-9_]*$/u;
+export const functionSegmentPattern = /^[A-Za-z][A-Za-z0-9_]*$/u;
 
 /** The most segments of one registered path, e.g. `notes.create` has 2. */
-export const operationPathMaxSegments = 4;
+export const functionPathMaxSegments = 4;
 
 /** The most code units of one registered path, dots included. */
-export const operationPathMaxLength = 200;
+export const functionPathMaxLength = 200;
 
 /** The most functions one App registers, public and internal together. */
-export const appMaxOperations = 256;
+export const appMaxFunctions = 256;
 
 /**
  * A permission's alias, as `ctx.connections.<alias>` names it: a letter, then
@@ -123,10 +123,10 @@ export { searchQueryMaxLength as knowledgeSearchMaxLength } from "@grasp-os/brai
 
 /**
  * The most bytes of one progress snapshot, as UTF-8 JSON: what an
- * operation may return (`operationResultMaxBytes`), since a snapshot is
+ * function may return (`functionResultMaxBytes`), since a snapshot is
  * delivered to a page as an answer is.
  */
-export const streamProgressMaxBytes = operationResultMaxBytes;
+export const streamProgressMaxBytes = functionResultMaxBytes;
 
 /**
  * The most snapshots one invocation emits: past it, `ctx.emit` is refused

@@ -201,10 +201,8 @@ export const schemaIdsOf = (
  * functions a version gives stable IDs, which a workflow may call. An
  * action reaches outside systems, and is never one.
  */
-const exportedFunctionPaths = (
-  app: Pick<AppManifest, "operations">
-): string[] =>
-  Object.values(app.operations).flatMap(({ path, kind, visibility }) =>
+const exportedFunctionPaths = (app: Pick<AppManifest, "functions">): string[] =>
+  Object.values(app.functions).flatMap(({ path, kind, visibility }) =>
     visibility === "public" && kind !== "action" ? [path] : []
   );
 
@@ -220,7 +218,7 @@ const exportedFunctionPaths = (
  */
 export const functionIdsOf = (
   definition: AppDefinition,
-  app: Pick<AppManifest, "operations">
+  app: Pick<AppManifest, "functions">
 ): ReadonlyMap<string, string> => {
   const exported = new Set(exportedFunctionPaths(app));
   return new Map(

@@ -86,7 +86,7 @@ export const workflowStartForm = async (
   if (contract === undefined) {
     return { version, args: null, people: null };
   }
-  const descriptor = descriptorFromText(JSON.stringify(contract.input));
+  const descriptor = descriptorFromText(JSON.stringify(contract.args));
   const input = startSchemaOf(descriptor);
   if (!takesPerson(descriptor)) {
     return { version, args: input, people: null };

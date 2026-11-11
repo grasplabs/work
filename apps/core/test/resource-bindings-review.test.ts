@@ -26,7 +26,7 @@ import { appWith, failure, person } from "./sealed-apps.ts";
 
 // An App's declared resources reach real providers only through bindings
 // an admin approved, and the live grant each names, through core's
-// operation host (spec 12, 32.3). Each request resolves its binding again,
+// function host (spec 12, 32.3). Each request resolves its binding again,
 // so revoking it, changing the declaration or losing the target stops the
 // next one; the model gateway is the real one, with only the model
 // provider behind connect faked.

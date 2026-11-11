@@ -2,7 +2,7 @@
 // 10.7.2, 10.7.3), against workflow references as the generator writes
 // them: a run's args and result are inferred from the reference without
 // a cast or generic argument; a wrong table's ID, an unknown field, an
-// operation's reference, an internal or string one are refused; a result
+// function's reference, an internal or string one are refused; a result
 // exists only once completed and an error only once failed, each read off
 // the narrowed view itself; the compensating variant carries its cause;
 // the pending control and the waits narrow by kind. Type-checked by
@@ -165,7 +165,7 @@ export const useWaitChecks = (): void => {
 export const useRefusedReferences = (): void => {
   // @ts-expect-error -- a hand-written workflow name
   void useWorkflow("summarizeNote");
-  // @ts-expect-error -- an operation's reference, not a workflow's
+  // @ts-expect-error -- a function's reference, not a workflow's
   void useWorkflow(api.notes.create);
   // @ts-expect-error -- a workflow's own event, not the workflow
   void useWorkflow(workflows.summarizeNote.events.styleChosen);

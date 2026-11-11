@@ -2,9 +2,9 @@ import type { FunctionChannel } from "@grasp-os/runtime/host";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
 import { isAppErrorCode } from "@grasp-os/shared/function-limits";
+import { jsonOf, functionErrors } from "@grasp-os/shared/functions";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import {
@@ -13,7 +13,7 @@ import {
 } from "@grasp-os/shared/stores";
 
 // The one authority an App's code is handed for one invocation of one of
-// its server functions (operations.ts): a read, a staged write, a call of
+// its server functions (function-host.ts): a read, a staged write, a call of
 // another of its functions, a resource, a streaming action's progress
 // (`emit`), each decided here, by the host, for the invocation's kind. App
 // code can hold on to the channel, or pass it on, so:
@@ -28,12 +28,12 @@ import {
 //   and resource requests (100), counted as each reaches it, refused or
 //   not, and none after that (`function.call_limit`): a loop of them ends
 //   there, and a function's nested calls, each an invocation of its own
-//   with its own channel, are bounded by the call's budget (operations.ts).
+//   with its own channel, are bounded by the call's budget (function-host.ts).
 //   Staged writes aren't counted: a commit bounds them
 //   (`commitMaxWrites`), and counting them would leave a mutation that
 //   reads anything short of a whole commit. Nor are a streaming action's
 //   progress snapshots (`emit`), which have a budget of their own
-//   (`streamMaxEmits`, operations.ts): a run that streams 1000 of them
+//   (`streamMaxEmits`, function-host.ts): a run that streams 1000 of them
 //   still has its 100 calls. Nor is the runner's one read of who calls
 //   (`people`), which every invocation makes as it starts. This holds an App's functions (queries,
 //   mutations, actions); Code Mode counts its own;
@@ -70,7 +70,7 @@ export interface ChannelCapabilities {
   readonly write?: Capability;
   readonly call?: Capability;
   readonly resource?: Capability;
-  /** A streaming action's progress snapshot (operations.ts `runAction`). */
+  /** A streaming action's progress snapshot (function-host.ts `runAction`). */
   readonly emit?: Capability;
   /** Who calls, and the organization's people (app-people.ts). */
   readonly people?: Capability;
@@ -87,9 +87,7 @@ export interface ChannelCapabilities {
    * one without its own).
    */
   readonly refusals: Readonly<
-    Partial<
-      Record<CapabilityName, Parameters<typeof operationErrors.create>[0]>
-    >
+    Partial<Record<CapabilityName, Parameters<typeof functionErrors.create>[0]>>
   >;
 }
 
@@ -109,7 +107,7 @@ const plainArgs = (args: readonly unknown[]): unknown[] =>
       copy = undefined;
     }
     if (copy === undefined) {
-      throw operationErrors.create("contract.invalid_request");
+      throw functionErrors.create("contract.invalid_request");
     }
     return copy;
   });
@@ -129,7 +127,7 @@ const copyOf = (error: CodedError): CodedError => {
   return copy;
 };
 
-/** An `AppError` as the host rebuilt it for App code (operations.ts). */
+/** An `AppError` as the host rebuilt it for App code (function-host.ts). */
 const isAppFailure = (error: unknown): boolean =>
   error instanceof Error &&
   error.name === "AppError" &&
@@ -209,16 +207,16 @@ class Channel extends ChannelTarget implements FunctionChannel {
         this.#state.uses += 1;
       }
       if (this.#state.ended) {
-        throw operationErrors.create("function.ended");
+        throw functionErrors.create("function.ended");
       }
       // A write is never refused for the reads and calls before it.
       if (counted && this.#state.uses > platformLimits.invocationHostCalls) {
-        throw operationErrors.create("function.call_limit", {
+        throw functionErrors.create("function.call_limit", {
           maxHostCalls: platformLimits.invocationHostCalls,
         });
       }
       if (capability === undefined) {
-        throw operationErrors.create(
+        throw functionErrors.create(
           this.#capabilities.refusals[name] ?? "function.not_found"
         );
       }

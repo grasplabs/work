@@ -1,4 +1,4 @@
-import { readJsonValue } from "@grasp-os/shared/operations";
+import { readJsonValue } from "@grasp-os/shared/functions";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 
 // The host's reading of what App code answers, as a module of its own in

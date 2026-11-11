@@ -39,8 +39,8 @@ const cards = {
   access: { read: "appMembers", write: "appMembers" },
 };
 
-/** The board's operations: list the cards, add one, move one on. */
-const operations = `import { v } from "@grasp-os/sdk";
+/** The board's functions: list the cards, add one, move one on. */
+const serverCode = `import { v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 
 import { columns } from "../values.ts";
@@ -154,8 +154,8 @@ const Board = () => {
 export const Route = createFileRoute("/")({ component: Board });
 `;
 
-/** The board's operations with a type error on their line 16. */
-const mistyped = operations.replace('column: "todo" }', 'column: "later" }');
+/** The board's serverCode with a type error on their line 16. */
+const mistyped = serverCode.replace('column: "todo" }', 'column: "later" }');
 
 /** Code that calls the draft of `app`'s `cards.list`, and nothing more. */
 const calling = (app: string) =>
@@ -197,7 +197,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       codeStep(calling(app.id)),
       toolStep("writeFile", {
         app: app.id,
-        files: { "server/cards.ts": operations },
+        files: { "server/cards.ts": serverCode },
       }),
       codeStep(calling(app.id)),
       says("The board is drafted.")

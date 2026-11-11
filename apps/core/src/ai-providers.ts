@@ -56,6 +56,7 @@ import {
 import { activeMember } from "./auth/auth.ts";
 import { orgSettings } from "./db/core/schema.ts";
 import { catalogModelsOf, parseModelRef } from "./model-catalog.ts";
+import { graspAiMonth, spendMonth } from "./model-spend.ts";
 import { keyReplaced, providerHealthOf } from "./model-usage.ts";
 import type { ProviderHealth } from "./model-usage.ts";
 import { models } from "./models.ts";
@@ -225,7 +226,10 @@ const platformUses = (keyed: readonly AiProviderId[]): AiPlatformUse[] => {
 };
 
 /** Grasp's AI as an organization's admins see it: its one model, where it runs, and whether it can be chosen here. */
-const graspListed = (routes: AiProviderRoutes): GraspAiListed => {
+const graspListed = (
+  routes: AiProviderRoutes,
+  month: GraspAiListed["month"]
+): GraspAiListed => {
   const model = catalogModelsOf(graspAi.provider).find(
     (each) => each.model === graspAi.model
   );
@@ -235,21 +239,23 @@ const graspListed = (routes: AiProviderRoutes): GraspAiListed => {
     whereItRuns:
       platformRouteOf(graspAi.provider)?.whereItRuns ??
       aiProviders[graspAi.provider].whereItRuns,
+    month,
   };
 };
 
 /** The organization's providers, as its admins see them. */
 const listing = async (env: Env): Promise<AiProvidersListing> => {
-  const [keys, health, choice, routes, source] = await Promise.all([
+  const [keys, health, choice, routes, source, month] = await Promise.all([
     env.CONNECT.aiProviderKeys(),
     providerHealthOf(env),
     readModelChoice(env),
     env.CONNECT.aiProviderRoutes(),
     readAiSource(env),
+    graspAiMonth(env, spendMonth(env)),
   ]);
   return {
     source,
-    grasp: graspListed(routes),
+    grasp: graspListed(routes, month),
     providers: keys.map((key) => listed(key, health)),
     offered: organizationProviderIds.map((provider) => ({
       provider,
@@ -560,7 +566,7 @@ const setSource = async (
     throw aiProviderErrors.create("ai_provider.invalid");
   }
   const source = parsed.data;
-  if (source === "grasp" && !graspListed(await aiRoutesOf(env)).available) {
+  if (source === "grasp" && !graspAiAvailable(await aiRoutesOf(env))) {
     throw aiProviderErrors.create("ai_provider.grasp_unavailable");
   }
   const value = JSON.stringify({ source });

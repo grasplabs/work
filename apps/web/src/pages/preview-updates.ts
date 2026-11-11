@@ -5,7 +5,7 @@ import type {
   PreviewRefresh,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
-import { draftSealFailures } from "@grasp-os/shared/operations";
+import { draftSealFailures } from "@grasp-os/shared/functions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 
 // The page's side of a chat's preview taking its draft's writes in the

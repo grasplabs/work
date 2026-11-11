@@ -476,7 +476,7 @@ describe("the page's bridge to a page", () => {
     }).toStrictEqual({ exactReached: 1, pastReached: 0 });
   });
 
-  it("hands the frame an answer as large as a public operation's output", async () => {
+  it("hands the frame an answer as large as a public function's output", async () => {
     const value = "x".repeat(pageLimits.answerBytes - 2);
     const frame = framed({ result: { ok: true, value } });
     const answered = await outcome(frame.page.callFunction("{}"));

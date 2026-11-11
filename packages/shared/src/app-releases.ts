@@ -21,7 +21,7 @@ import { defineErrorFamily } from "./errors.ts";
  * manifest is stored for good: a new version replaces it, and none is
  * read as this.
  */
-export const releaseFormatVersion = 9;
+export const releaseFormatVersion = 10;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
@@ -50,7 +50,7 @@ export const dataStoreBindingSchema = z.strictObject({
   storeId: z.string().min(1).max(128),
   schemaVersion: z.int().min(1),
   schemaHash: sha256Schema,
-  operationManifestHash: sha256Schema,
+  functionManifestHash: sha256Schema,
 });
 
 /** A resource a release calls, as an approved binding identifies it. */

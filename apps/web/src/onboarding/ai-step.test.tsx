@@ -79,6 +79,7 @@ const fakeAiProviders = (tested: (model: string) => AiProviderTest) => {
             name: "Claude Sonnet 5.5",
           },
           whereItRuns: "Anthropic, United States",
+          month: { spentUsd: 0, limitUsd: 100, reached: false },
         },
         providers,
         offered,

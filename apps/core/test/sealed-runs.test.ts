@@ -15,6 +15,12 @@ import { z } from "zod";
 
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
+import {
+  exportedWorkflowVersion,
+  publishWorkflowVersion,
+  versionContract,
+  workflowVersions,
+} from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
@@ -106,21 +112,32 @@ import { unique } from "./sign-in.ts";
 // and a model's.
 /**
  * A sealed workflow whose version 1 is as one published before: its
- * manifest as `change` makes it, under the hash every pin reads it by.
+ * manifest as `change` makes it, and its contract as `changeContract`
+ * does, each under the hash every pin reads it by.
  */
-const publishedBefore = async (change: (manifest: string) => string) => {
+const publishedBefore = async (
+  change: (manifest: string) => string,
+  changeContract: (contract: string) => string = (contract) => contract
+) => {
   const old = await sealedWorkflow();
   const row = await env.DB.prepare(
-    "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    "SELECT manifest, contract FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
   )
     .bind(old.workflow.id)
-    .first<{ manifest: string }>();
+    .first<{ manifest: string; contract: string }>();
   const manifest = change(row?.manifest ?? "");
+  const contract = changeContract(row?.contract ?? "");
   await env.DB.batch([
     env.DB.prepare("DROP TRIGGER workflow_resource_versions_immutable_update"),
     env.DB.prepare(
-      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
-    ).bind(manifest, await sha256Hex(manifest), old.workflow.id),
+      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ?, contract = ?, contract_hash = ? WHERE workflow_resource_id = ? AND version = 1"
+    ).bind(
+      manifest,
+      await sha256Hex(manifest),
+      contract,
+      await sha256Hex(contract),
+      old.workflow.id
+    ),
     env.DB.prepare(
       "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
     ),
@@ -139,6 +156,21 @@ const startOfFirst = async (old: Sealed): Promise<unknown> =>
         { version: 1, args: { who: "Ada" }, key: unique() }
       )
   );
+
+/** A manifest of format 1, as releases before format 2 sealed one. */
+const ofFormat1 = (manifest: string): string =>
+  JSON.stringify({
+    ...z.looseObject({}).parse(JSON.parse(manifest)),
+    formatVersion: 1,
+  });
+
+/** A contract as format 1 stored it: its `args` and `returns` as `input` and `output`. */
+const contractOfFormat1 = (contract: string): string => {
+  const { args, returns, ...rest } = z
+    .looseObject({ args: z.json(), returns: z.json() })
+    .parse(JSON.parse(contract));
+  return JSON.stringify({ ...rest, input: args, output: returns });
+};
 
 /** How a test's engine ends an activation it evicts. */
 const eviction = (): Error => new Error("The activation was evicted");
@@ -828,7 +860,7 @@ return { before, after: await late };
     });
   });
 
-  it("refuses a version an earlier platform release built as one to publish again, not as one changed", async () => {
+  it("refuses a version an earlier platform release built, or sealed in an earlier format, as one to publish again, not as one changed", async () => {
     // As a version published while builds named a protocol.
     const earlier = await publishedBefore((manifest) =>
       manifest.replace('"build":{', '"build":{"protocol":9,')
@@ -836,6 +868,60 @@ return { before, after: await late };
     await expect(startOfFirst(earlier)).resolves.toBe(
       "workflow.format_unsupported"
     );
+    // As a version published before format 2, its contract as it stored it.
+    const format1 = await publishedBefore(ofFormat1, contractOfFormat1);
+    const { workflow, by } = format1;
+    // A new version beside it, published as any is.
+    const first = await env.DB.prepare(
+      "SELECT definition FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ definition: string }>();
+    const definition = z
+      .looseObject({ result: z.json() })
+      .parse(JSON.parse(first?.definition ?? "{}"));
+    await publishWorkflowVersion(env, by, workflow.id, {
+      definition: JSON.stringify({
+        ...definition,
+        result: { status: "done again" },
+      }),
+      basedOn: 1,
+    });
+    const listed = await workflowVersions(env, by, workflow.id);
+    expect({
+      start: await startOfFirst(format1),
+      exported: await codeOf(
+        async () => await exportedWorkflowVersion(env, by, workflow.id, 1)
+      ),
+      contract: await codeOf(
+        async () => await versionContract(env, workflow.id, 1)
+      ),
+      // Listed beside the new one, refused, never failing the listing.
+      listed: listed.map(({ version, refused, build }) => ({
+        version,
+        refused: refused?.code,
+        told: refused?.message.includes("Publish it again"),
+        built: build !== null,
+      })),
+    }).toStrictEqual({
+      start: "workflow.format_unsupported",
+      exported: "workflow.format_unsupported",
+      contract: "workflow.format_unsupported",
+      listed: [
+        {
+          version: 2,
+          refused: undefined,
+          told: undefined,
+          built: true,
+        },
+        {
+          version: 1,
+          refused: "workflow.format_unsupported",
+          told: true,
+          built: false,
+        },
+      ],
+    });
   });
 });
 

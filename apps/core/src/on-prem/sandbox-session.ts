@@ -1,7 +1,7 @@
 /**
  * A session on the on-prem sandbox host (sandbox-host.ts): one call of an
  * isolate whose code reaches back into core through capabilities, such as
- * an App function's operation channel or a workflow run's host.
+ * an App function's function channel or a workflow run's host.
  *
  * Core opens a WebSocket per call through the supervisor
  * (scripts/workerd-sandbox.ts) and speaks capnweb over it

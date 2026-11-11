@@ -174,13 +174,13 @@ export const Route = createFileRoute("/")({ component: Writer });
   }
 );
 
-/** The operation at `path` of `release`. */
-export const operationAt = (release: Release, path: string) => {
-  const operation = release.app.operations[path];
-  if (operation === undefined) {
+/** The function at `path` of `release`. */
+export const functionAt = (release: Release, path: string) => {
+  const fn = release.app.functions[path];
+  if (fn === undefined) {
     throw new Error(`The release has no ${path}`);
   }
-  return operation;
+  return fn;
 };
 
 /**
@@ -199,7 +199,7 @@ export const streamTo = <Args, Return, Progress>(
   release: Release,
   path: string
 ): FunctionReference<"action", "public", Args, Return, Progress> => {
-  if (operationAt(release, path).stream === null) {
+  if (functionAt(release, path).stream === null) {
     throw new Error(`${path} doesn't stream`);
   }
   return referenceTo<Args, Return, "action", Progress>(release, path);

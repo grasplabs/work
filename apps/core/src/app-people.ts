@@ -12,9 +12,9 @@ import type {
   User,
 } from "@grasp-os/runtime/host";
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { functionErrors } from "@grasp-os/shared/functions";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -107,7 +107,7 @@ const checkedArgs = (
   }
   const result = schema["~standard"].validate(args);
   if (result.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   // SAFETY: an object descriptor admits a JSON object only.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -125,7 +125,7 @@ export const answerPeople = async (
   args: unknown
 ): Promise<Json> => {
   if (!isPeopleFunctionName(name)) {
-    throw operationErrors.create("function.not_found");
+    throw functionErrors.create("function.not_found");
   }
   const checked = checkedArgs(name, args);
   if (name === "user") {
@@ -155,10 +155,10 @@ export const peopleReadOf = (reference: {
     return undefined;
   }
   if (rest.length > 0 || !isPeopleFunctionName(name)) {
-    throw operationErrors.create("function.not_found");
+    throw functionErrors.create("function.not_found");
   }
   if (reference.kind !== "query") {
-    throw operationErrors.create("function.kind_mismatch");
+    throw functionErrors.create("function.kind_mismatch");
   }
   return name;
 };
@@ -227,7 +227,7 @@ const offsetOf = (cursor: Json | undefined): number => {
     return 0;
   }
   if (typeof cursor !== "string" || !offsetPattern.test(cursor)) {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   return Number(cursor);
 };
@@ -312,7 +312,7 @@ const directoryReads: Readonly<
       (query.match(letterOrDigit)?.length ?? 0) <
       peopleLimits.queryMinCharacters
     ) {
-      throw operationErrors.create("contract.invalid_args");
+      throw functionErrors.create("contract.invalid_args");
     }
     // LIKE folds ASCII case itself; any other letter matches as written.
     const pattern = `%${likeLiteral(query)}%`;

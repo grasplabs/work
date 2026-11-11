@@ -31,10 +31,10 @@ export class Submissions {
   readonly #submissions = new Map<string, Submission>();
   /**
    * The keys of submissions whose outcome was left unknown, scoped by App
-   * and operation as the host scopes them (`uncertainScope`), by the
+   * and function as the host scopes them (`uncertainScope`), by the
    * generation they were sent under: one is sent again only within it,
    * never for someone who signed in since, as the host scopes keys by
-   * person. Another operation under the same key never clears it.
+   * person. Another function under the same key never clears it.
    */
   readonly #uncertainKeys = new Map<string, number>();
 

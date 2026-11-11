@@ -215,6 +215,17 @@ describe("an onboarding flow", () => {
     ]);
   });
 
+  it("puts the interviews' screens last, wherever the flow has the step", () => {
+    const early = withStepMoved(defaultFlow, "interviews", 4);
+    expect({
+      step: order(early)[4],
+      screens: flowScreens(early).slice(-5),
+    }).toStrictEqual({
+      step: "interviews",
+      screens: ["leads", "team", "listening", "review", "open"],
+    });
+  });
+
   it("moves a step to another place, the others keeping their order", () => {
     expect({
       first: order(withStepMoved(defaultFlow, "documents", 0)).slice(0, 3),
