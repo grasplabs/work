@@ -22,8 +22,10 @@ import { outcome, unique } from "./sign-in.ts";
 // recorded with the App version the draft becomes, and bound as that
 // version is made current, in the same switch, never before
 // (app-workflow-bindings.ts). These tests start from the ways that can
-// fail: the person who bound it loses their role in the workflow, or
-// whoever makes the version current has none; the workflow is deleted, or
+// fail: the person who bound it loses their role in the workflow before
+// it is first current, or whoever makes the version current, first or
+// again, has none; a rollback is held to an author who left since; the
+// workflow is deleted, or
 // the App version unpublished, between the check and the switch; the
 // version's declaration and the version it binds no longer agree (a
 // definition committed by hand); a rollback leaves the App's pages and its
@@ -454,6 +456,59 @@ export const Route = createFileRoute("/")({ component: Desk });
         binderLost: "workflow.app_version_binding_unavailable",
         currentVersion: first,
         bound: { review: { workflowId: flow, version: 1 } },
+      });
+    });
+
+    it("makes a version current again on the authority of whoever does it, after its binding's author lost their role, while no one without a role in the workflow does", async () => {
+      const [admin, owner, builder, otherBuilder] = await Promise.all([
+        signedIn("admin"),
+        signedIn("builder"),
+        signedIn("builder"),
+        signedIn("builder"),
+      ]);
+      const flow = await threeVersions(admin, owner, [builder]);
+      const { app, first, second } = await proposedRebind(builder, flow);
+      await builder.api.apps.versions.setCurrent(app, second);
+      await builder.api.apps.versions.setCurrent(app, first);
+      await builder.api.apps.members.add(app, {
+        type: "person",
+        id: otherBuilder.userId,
+        role: "builder",
+      });
+      await owner.api.workflowResources.unshare(flow, {
+        type: "person",
+        id: builder.userId,
+      });
+
+      // Neither the author, who lost their role, nor a builder of the App
+      // who never had one binds the workflow by making it current again.
+      const author = await outcome(
+        builder.api.apps.versions.setCurrent(app, second)
+      );
+      const noRole = await outcome(
+        otherBuilder.api.apps.versions.setCurrent(app, second)
+      );
+      const refused = await boundOf(admin, app);
+      // An admin has a role in every workflow.
+      const withRole = await outcome(
+        admin.api.apps.versions.setCurrent(app, second)
+      );
+      const { currentVersion } = await admin.api.apps.get(app);
+
+      expect({
+        author,
+        noRole,
+        refused,
+        withRole,
+        currentVersion,
+        bound: await boundOf(admin, app),
+      }).toStrictEqual({
+        author: "workflow.app_version_binding_unavailable",
+        noRole: "workflow.app_version_binding_unavailable",
+        refused: { review: { workflowId: flow, version: 1 } },
+        withRole: "ok",
+        currentVersion: second,
+        bound: { review: { workflowId: flow, version: 2 } },
       });
     });
 

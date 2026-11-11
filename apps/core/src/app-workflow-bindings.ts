@@ -106,15 +106,22 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   current: the workflow is live and published that version, its
 //   contract is the one the App version declares, the person making the
 //   version current has a role in it, and so has the version's author for
-//   a binding the version recorded of its own. Grasp staff never make a
-//   version current that binds one.
-// - Whoever bound it lost their role in the workflow before it is made
-//   current: refused, the whole switch with it
+//   a binding the version recorded of its own, the first time it is made
+//   current. Grasp staff never make a version current that binds one.
+// - Whoever bound it lost their role in the workflow before it is first
+//   made current: refused, the whole switch with it
 //   (`workflow.app_version_binding_unavailable`), as is a version made
 //   current by someone without one. The author answers for what their
 //   version records unlike its parent; a binding a later version only
 //   carries over binds on the authority of whoever makes that one
 //   current, who must have a role in it too.
+// - A version made current before, made current again (a rollback): its
+//   author was held then to whatever it changed, and a version never
+//   changes, so nothing was laundered into it since. It binds on the
+//   authority of whoever makes it current again alone, who must have a
+//   role in each workflow it binds, as at its first; its author may have
+//   left the workflow, or the company, since. Its contracts are checked
+//   as for any switch.
 // - The workflow deleted, the App version unpublished, or the alias
 //   rebound directly, as the switch lands: the switch's own statement
 //   requires each workflow version it binds live, each alias still binding
@@ -405,26 +412,28 @@ export const requireRecordableBindings = async (
 };
 
 /**
- * That `by` may make each of `changes`, and `author`, read now, each the
- * version recorded of its own: a former member binds nothing, and Grasp
- * staff none (`role.forbidden`).
+ * That `by` may make each of `changes`, and `author` (none on a rollback,
+ * whose author was held to it the first time), read now, each the version recorded of
+ * its own: a former member binds nothing, and Grasp staff none
+ * (`role.forbidden`).
  */
 const requireMayMake = async (
   env: Env,
   by: Acting,
-  author: string,
+  author: string | undefined,
   changes: readonly BindingChange[]
 ): Promise<void> => {
   if (changes.length > 0) {
     requireNotStaff(by);
   }
-  const authorNow = changes.some(({ recordedBy }) => recordedBy !== undefined)
-    ? await memberOf(env.DB, author)
-    : undefined;
+  const answering =
+    author !== undefined &&
+    changes.some(({ recordedBy }) => recordedBy !== undefined);
+  const authorNow = answering ? await memberOf(env.DB, author) : undefined;
   for (const change of changes) {
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
     await requireMayBind(env, by, change);
-    if (change.recordedBy !== undefined) {
+    if (answering && change.recordedBy !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- as above
       await requireMayBind(env, authorNow, change);
     }
@@ -447,8 +456,9 @@ export interface BindingSwitch {
  * each workflow version its release (`release`) seals where App `app`
  * binds another now. Each it binds must be one `by` may bind, and, for one
  * the version recorded (`recorded`, from its definition), one its author
- * (`author`) still may (`workflow.app_version_binding_unavailable`
- * otherwise); Grasp staff bind none (`role.forbidden`). Then what
+ * (`author`) still may, unless the version was current before
+ * (`workflow.app_version_binding_unavailable` otherwise); Grasp staff
+ * bind none (`role.forbidden`). Then what
  * every alias it declares binds once it is current, sealed or bound now,
  * must have the contract it declares
  * (`workflow.app_binding_contract_changed` otherwise).
@@ -461,8 +471,14 @@ export const versionBindingChanges = async (
     author,
     recorded,
     chosen,
+    currentBefore,
   }: {
     readonly author: string;
+    /**
+     * Whether the version was current before (a rollback): its author
+     * was held then to whatever it changed.
+     */
+    readonly currentBefore: boolean;
     /** What it records unlike its parent: what its author answers for. */
     readonly recorded: readonly DefinedWorkflowBinding[];
     /** What it records unlike the version current now: never kept over. */
@@ -547,7 +563,7 @@ export const versionBindingChanges = async (
           }),
     });
   }
-  await requireMayMake(env, by, author, changes);
+  await requireMayMake(env, by, currentBefore ? undefined : author, changes);
   for (const { alias } of declared) {
     // What its release seals, which its pages read runs of, otherwise
     // what the App binds now, which the switch leaves; one it keeps over
