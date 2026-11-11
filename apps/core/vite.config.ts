@@ -409,6 +409,8 @@ export default coreProject({
     "test/brain-baseline*.test.ts",
     "test/brain-recall-e02.test.ts",
     "test/brain-scale-*-of-*.test.ts",
+    // The Brain evaluation, on request only: vite.brain-eval.config.ts.
+    "test/brain-eval.test.ts",
     // Stephen's eval, in a group of its own: vite.stephen.config.ts.
     "test/stephen-eval*.test.ts",
     // Stephen's eval against a real model, which costs money, on request
