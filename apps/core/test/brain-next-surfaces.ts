@@ -546,6 +546,19 @@ const probeModel = (): VectorModel => ({
 /** A chunk and the vector it is put with. */
 type Coded = VectorsToPut["vectors"][number];
 
+/**
+ * A put, and whatever it answers: nothing today, as its type says, so an
+ * answer a later put gives, for one chunk and not another, shows. Called
+ * through `Reflect.apply`, which keeps the answer the type would drop.
+ */
+const putAnswering = async (request: unknown): Promise<unknown> => {
+  const brain = store();
+  const answered: unknown = await Reflect.apply(brain.putVectors, brain, [
+    request,
+  ]);
+  return answered;
+};
+
 /** Puts `coded` for `model`, as many puts as it takes. */
 const putAll = async (
   model: VectorModel,
@@ -837,11 +850,33 @@ export const storeProbes = {
     const { question, ownCoded, search } = await vectorScene(reader);
     const words = markedText(markers);
     const put = async (name: string, model: unknown, vectors: unknown) =>
-      await answer(name, async () => {
-        await store().putVectors(unchecked({ model, vectors }));
-      });
-    const missing = probeModel();
+      await answer(name, async () => await putAnswering({ model, vectors }));
+    /**
+     * A put of `chunks` at the question, to a model of its own holding the
+     * reader's own codes: what the put answered, and what the reader then
+     * finds. Two calls shaped alike, so any difference is the chunks'.
+     */
+    const putThenSearch = async (
+      name: string,
+      chunks: ChunkRef[],
+      about: Answer["about"]
+    ) => {
+      const model = probeModel();
+      await putAll(model, ownCoded);
+      return await answer(
+        name,
+        async () => ({
+          put: await putAnswering({
+            model,
+            vectors: placedAt(chunks, question),
+          }),
+          found: await search(model),
+        }),
+        about
+      );
+    };
     const hidden = probeModel();
+    await putAll(hidden, ownCoded);
     const missingChunk = {
       source: keyOf(missingSource()),
       version: 1,
@@ -850,26 +885,10 @@ export const storeProbes = {
     const chunk = firstChunksOf(hiddenVersions)[0] ?? missingChunk;
     const one = [{ chunk, vector: question }];
     return [
-      await put("the reader's own", missing, ownCoded),
-      await put("the reader's own, beside the hidden", hidden, ownCoded),
-      await put(
-        "a chunk no one added",
-        missing,
-        placedAt([missingChunk], question)
-      ),
-      await put(
+      await putThenSearch("a chunk no one added", [missingChunk], "nothing"),
+      await putThenSearch(
         "every hidden version's first chunk",
-        hidden,
-        placedAt(firstChunksOf(hiddenVersions), question)
-      ),
-      await answer(
-        "a search after a put for a chunk no one added",
-        async () => await search(missing),
-        "nothing"
-      ),
-      await answer(
-        "a search after a put for every hidden version",
-        async () => await search(hidden),
+        firstChunksOf(hiddenVersions),
         "hidden"
       ),
       await put(
