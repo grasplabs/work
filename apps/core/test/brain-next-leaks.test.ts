@@ -8,7 +8,7 @@ import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { BrainStore } from "../src/index.ts";
-import { coreProbes, storeProbes } from "./brain-next-surfaces.ts";
+import { coreProbes, storeProbes, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
@@ -52,7 +52,7 @@ const markersIn = (
   found: unknown,
   forbidden: Readonly<Record<string, string>>
 ): string[] => {
-  const text = (JSON.stringify(found) ?? "").toLowerCase();
+  const text = textOf(found).toLowerCase();
   return Object.entries(forbidden)
     .filter(([, marker]) => text.includes(marker))
     .map(([name]) => name);
@@ -111,12 +111,11 @@ const findingsIn = (
   const unlike = answers
     .filter(
       ({ about, got }) =>
-        about === "hidden" &&
-        JSON.stringify(got) !== JSON.stringify(nothing?.got)
+        about === "hidden" && textOf(got) !== textOf(nothing?.got)
     )
     .map(
       ({ call, got }) =>
-        `"${call}" answered ${JSON.stringify(got)}, unlike "${nothing?.call}": ${JSON.stringify(nothing?.got)}`
+        `"${call}" answered ${textOf(got)}, unlike "${nothing?.call}": ${textOf(nothing?.got)}`
     );
   const thin = answers.some(({ got }) => "value" in got)
     ? []

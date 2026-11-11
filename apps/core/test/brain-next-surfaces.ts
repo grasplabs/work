@@ -104,14 +104,26 @@ const fieldOf = (value: object, key: PropertyKey): unknown => {
   }
 };
 
+/** Bytes as text, so words in them show. */
+const decoded = (bytes: ArrayBuffer | ArrayBufferView): string =>
+  new TextDecoder().decode(bytes);
+
 /**
- * `value` with every error in it opened up, however deep: its name,
- * message and stack, every key it has (enumerable or not, Symbol keys
- * too), and the getters of its class, followed into whatever they hold:
- * `cause` after `cause`, an AggregateError's `errors`. An object met again
- * (a `cause` that points back) is written "[cycle]".
+ * `value` as plain data, every part of it opened up, however deep: an
+ * error's name, message and stack, every key of an object (enumerable or
+ * not, Symbol keys too) and the getters of an error's class, followed
+ * into whatever they hold (`cause` after `cause`, an AggregateError's
+ * `errors`); the entries of a Map or Set; bytes as text; a bigint, symbol
+ * or function by what it says. An object met again (a `cause` that
+ * points back) is written "[cycle]".
  */
 const unfolded = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (typeof value === "bigint" || typeof value === "symbol") {
+    return String(value);
+  }
+  if (typeof value === "function") {
+    return `[function ${value.name}]`;
+  }
   if (typeof value !== "object" || value === null) {
     return value;
   }
@@ -122,6 +134,23 @@ const unfolded = (value: unknown, seen = new WeakSet<object>()): unknown => {
   if (Array.isArray(value)) {
     return value.map((item: unknown) => unfolded(item, seen));
   }
+  if (value instanceof Map) {
+    return {
+      "[Map]": [...value].map(([key, item]: [unknown, unknown]) => [
+        unfolded(key, seen),
+        unfolded(item, seen),
+      ]),
+    };
+  }
+  if (value instanceof Set) {
+    return { "[Set]": [...value].map((item: unknown) => unfolded(item, seen)) };
+  }
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    return { "[bytes]": decoded(value) };
+  }
+  if (value instanceof Date) {
+    return String(value);
+  }
   return Object.fromEntries(
     keysOf(value).map((key) => [
       String(key),
@@ -129,6 +158,14 @@ const unfolded = (value: unknown, seen = new WeakSet<object>()): unknown => {
     ])
   );
 };
+
+/**
+ * `value` as text, every part of it opened up (`unfolded`): the one way
+ * the harness reads anything for a marker, whether an answer, a log line
+ * or a request to a model.
+ */
+export const textOf = (value: unknown): string =>
+  JSON.stringify(unfolded(value)) ?? "";
 
 /** Calls `call` and keeps what came back as an answer. */
 const answer = async (
