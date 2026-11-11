@@ -710,7 +710,8 @@ jobs:
           if ! vp exec playwright install-deps "$BROWSER"; then
             [ "$EXACT_CACHE" = true ] && [ ${#debs[@]} -gt 0 ] || exit 1
             echo "::warning::Ubuntu's mirrors failed; installing the cached packages instead"
-            sudo apt-get install -y --no-download "${debs[@]}"
+            sudo apt-get install -y --no-install-recommends --print-uris "${debs[@]}" | grep "^'" || true
+            sudo apt-get install -y --no-download --no-install-recommends "${debs[@]}"
           fi
           rm -f ~/playwright-debs/*.deb
           for deb in /var/cache/apt/archives/*.deb; do
