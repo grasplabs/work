@@ -1035,14 +1035,14 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.3(@cloudflare/workers-types@5.20261023.1)(@opentelemetry/api@1.9.1)(kysely@0.29.6)
+        version: 0.45.3(@cloudflare/workers-types@5.20261104.1)(@opentelemetry/api@1.9.1)(kysely@0.29.6)
       zod:
         specifier: 'catalog:'
         version: 4.6.7
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
-        version: 5.20261023.1
+        version: 5.20261104.1
       drizzle-kit:
         specifier: 'catalog:'
         version: 0.31.11
@@ -1204,21 +1204,21 @@ importers:
         specifier: 'catalog:'
         version: 4.6.7
     devDependencies:
-      '@cloudflare/vitest-pool-workers':
+      '@cloudflare/vitest-plugin':
         specifier: 'catalog:'
-        version: 0.22.0(patch_hash=187b71e76c9b81a1c4c5e9bdd00018696f2860ae4ce8a9cba98bf6f482cd5ecd)(@cloudflare/workers-types@5.20261023.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
+        version: 1.6.0(@cloudflare/workers-types@5.20261104.1)(@types/node@26.6.2)(vitest@4.1.11)
       '@cloudflare/workers-types':
         specifier: 'catalog:'
-        version: 5.20261023.1
+        version: 5.20261104.1
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.2
       workerd:
         specifier: 'catalog:'
-        version: 1.20261023.1
+        version: 1.20261104.1
       wrangler:
         specifier: 'catalog:'
-        version: 4.154.0(@cloudflare/workers-types@5.20261023.1)(@types/node@26.6.2)
+        version: 4.158.0(@cloudflare/workers-types@5.20261104.1)(@types/node@26.6.2)
 
   packages/runtime:
     dependencies:
