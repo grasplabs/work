@@ -35,7 +35,7 @@ import {
 import { sandboxWaitMs, SandboxUnavailableError } from "./sandboxed.ts";
 
 // One call of an isolate that reaches back into core, on the on-prem
-// sandbox host (on-prem/sandbox-session.ts): an App function's operation
+// sandbox host (on-prem/sandbox-session.ts): an App function's
 // channel, a workflow run's host, Code Mode's APIs. workerd can't send a
 // stub to another process, so core opens a WebSocket per call through the
 // sandbox supervisor (scripts/workerd-sandbox.ts) and passes the call's

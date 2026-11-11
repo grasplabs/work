@@ -10,7 +10,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 /**
  * What a paginated list shows: the ordered records of its loaded pages,
  * whether more follow, whether it is loading, and how to load more.
- * Pagination controls, not an operation result.
+ * Pagination controls, not a function result.
  */
 export interface PaginatedQueryView<Item = unknown> {
   readonly items: Item[];

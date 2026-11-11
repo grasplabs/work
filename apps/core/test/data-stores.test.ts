@@ -53,7 +53,7 @@ const builder: Acting = {
 };
 
 // Business stores through core's own way in (data-stores.ts) and each
-// store's Durable Object (data-store.ts): what the operations to come
+// store's Durable Object (data-store.ts): what the functions to come
 // rely on when they read and commit records. Each test makes stores of
 // its own.
 
@@ -62,14 +62,14 @@ const grace = { userId: "grace" };
 const storeManifest = tablesManifest("notes", "drafts");
 const schemaHash = await manifestHash(storeManifest);
 
-/** Who commits in these tests: one operation's pinned contract, for Ada. */
+/** Who commits in these tests: one function's pinned contract, for Ada. */
 const scope = {
   principal: "ada",
   resource: "notes-app",
   binding: null,
   contractId: "notes.update",
   contractVersion: 1,
-  operationKind: "mutation",
+  functionKind: "mutation",
 } as const;
 
 /** Some input's hash: these commits each claim a key of their own. */

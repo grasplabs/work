@@ -1,7 +1,7 @@
 import { peopleReferences } from "@grasp-os/runtime/host";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -202,7 +202,7 @@ const requestOf = (release: Release, path: string, input: unknown): string =>
   JSON.stringify({
     reference: {
       name: path,
-      kind: release.app.operations[path]?.kind ?? "query",
+      kind: release.app.functions[path]?.kind ?? "query",
     },
     args: input,
   });
@@ -213,7 +213,7 @@ const call = async (
   by: Caller,
   path: string,
   input: unknown = {}
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const { result } = await callAppFunction(
     env,
     by,
@@ -244,7 +244,7 @@ const read = async (
   input: unknown,
   /** What the page sends of the reference in place of the SDK's. */
   forged: Record<string, unknown> = {}
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const { result } = await callAppFunction(
     env,
     by,
@@ -255,7 +255,7 @@ const read = async (
 };
 
 /** The JSON text a call answered, parsed; the refusal's code otherwise. */
-const answerOf = (result: OperationResult): unknown => {
+const answerOf = (result: FunctionResult): unknown => {
   if (!result.ok) {
     return result.error.code;
   }
@@ -276,7 +276,7 @@ const callerSchema = z.object({
 });
 
 /** Who a call answered was calling, or the code it was refused with. */
-const callerOf = (result: OperationResult): unknown => {
+const callerOf = (result: FunctionResult): unknown => {
   const answer = answerOf(result);
   return typeof answer === "string" ? answer : callerSchema.parse(answer);
 };
@@ -294,7 +294,7 @@ const namesOf = (page: unknown): unknown =>
     : pageSchema.parse(page).people.map(({ name }) => name);
 
 /** The value a call answered, or its refusal's code. */
-const valueOf = (result: OperationResult): Json =>
+const valueOf = (result: FunctionResult): Json =>
   result.ok ? result.value : result.error.code;
 
 /** The directory reads recorded in `events`: who read, and what. */

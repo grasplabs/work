@@ -139,6 +139,12 @@ const SelfApprovedBadge = ({ lifecycle }: { lifecycle: WorkflowLifecycle }) =>
     </Badge>
   ) : null;
 
+/**
+ * The published versions, each with the writes its model tasks may steer.
+ * A version an earlier platform release published, in a format this one
+ * doesn't read (`refused`), never runs: it says so, and to publish it
+ * again, in place of a review of a build it doesn't have.
+ */
 const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
   const { t } = useLingui();
   const captionId = useId();
@@ -174,7 +180,15 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
                   {formatDateTime(version.createdAt)}
                 </TableCell>
                 <TableCell variant="roomy">
-                  <SteeredWrites writes={version.modelSteeredWrites} />
+                  {version.refused === undefined ? (
+                    <SteeredWrites writes={version.modelSteeredWrites} />
+                  ) : (
+                    <Badge variant="attention">
+                      <Trans>
+                        Made by an earlier platform release: publish it again
+                      </Trans>
+                    </Badge>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

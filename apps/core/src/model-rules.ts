@@ -48,6 +48,7 @@ export interface Refusal {
     | "model.no_provider"
     | "model.not_allowed"
     | "model.answer_too_long"
+    | "model.grasp_limit_reached"
     | "permission.context_invalid";
   because?: string;
 }

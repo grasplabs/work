@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { categoryOf, jsonWithin } from "../src/operations.ts";
+import { categoryOf, jsonWithin } from "../src/functions.ts";
 import { isRetryable } from "../src/workflows.ts";
 
 // Reading a value as bounded JSON, and how a failure's code is classified:

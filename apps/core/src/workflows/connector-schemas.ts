@@ -1,6 +1,6 @@
+import { jsonOf } from "@grasp-os/shared/functions";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { jsonOf } from "@grasp-os/shared/operations";
 
 import { readContractSchema } from "../connector-contracts.ts";
 import type { ReadSchema } from "../connector-contracts.ts";

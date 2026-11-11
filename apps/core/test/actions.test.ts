@@ -16,11 +16,11 @@ import type { FunctionChannel } from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { streamMaxEmits } from "@grasp-os/shared/function-limits";
+import { effectErrors, functionErrors } from "@grasp-os/shared/functions";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { effectErrors, operationErrors } from "@grasp-os/shared/operations";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
@@ -28,7 +28,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { keepsReceipt } from "../src/action-invocation.ts";
-import { operationRoles } from "../src/app-access.ts";
+import { functionRoles } from "../src/app-access.ts";
 import { invocationFor } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
@@ -41,9 +41,9 @@ import { appMembers } from "../src/db/core/schema.ts";
 import {
   callMaxDepth,
   callMaxResourceRequests,
-  callOperation,
+  hostFunctionCall,
   useEvidenceWaitMs,
-} from "../src/operations.ts";
+} from "../src/function-host.ts";
 import type {
   BoundResource,
   ProgressSink,
@@ -51,7 +51,7 @@ import type {
   ResourceContext,
   Runner,
   UseRefusal,
-} from "../src/operations.ts";
+} from "../src/function-host.ts";
 import { hostedRelease } from "../src/release-runner.ts";
 import { testApp } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
@@ -62,7 +62,7 @@ import { applied } from "./store-schemas.ts";
 // Actions (spec 7.4, 12): server functions with no database, which
 // compose the App's queries and mutations, each its own invocation, and
 // reach outside only through the permissions the App declares. Run through
-// core's operation host against a real store and the App's real roles.
+// core's function host against a real store and the App's real roles.
 // The resource adapters below stand for the outside providers (connect's
 // connectors, the model gateway): the only thing mocked.
 
@@ -669,8 +669,8 @@ const call = async (
     onEffect,
     refusedUse,
   }: CallOptions = {}
-): Promise<OperationResult> =>
-  await callOperation(
+): Promise<FunctionResult> =>
+  await hostFunctionCall(
     { manifest, run },
     {
       principal: owner.userId,
@@ -683,7 +683,7 @@ const call = async (
       deadline: Date.now() + within,
       runId: null,
       authorize:
-        authorize ?? (async () => await operationRoles(env, owner, appId)),
+        authorize ?? (async () => await functionRoles(env, owner, appId)),
       ...(resources === undefined ? {} : { resources }),
       ...(refusedUse === undefined ? {} : { refusedUse }),
     },
@@ -697,7 +697,7 @@ const call = async (
     }
   );
 
-const valueOf = (result: OperationResult): Json => {
+const valueOf = (result: FunctionResult): Json => {
   if (!result.ok) {
     throw new Error(`The call failed: ${result.error.code}`);
   }
@@ -705,7 +705,7 @@ const valueOf = (result: OperationResult): Json => {
 };
 
 /** A failed call's error without its request ID, which must be there. */
-const failureOf = (result: OperationResult) => {
+const failureOf = (result: FunctionResult) => {
   if (result.ok) {
     throw new Error("The call succeeded");
   }
@@ -714,7 +714,7 @@ const failureOf = (result: OperationResult) => {
   return rest;
 };
 
-const codeOf = (result: OperationResult): string =>
+const codeOf = (result: FunctionResult): string =>
   result.ok ? "ok" : result.error.code;
 
 /** How many notes the store holds for the fixture's owner. */
@@ -764,7 +764,7 @@ const bindingsOf =
 describe("the one admission", () => {
   it("admits each resource request as each commit is admitted, by the same authorize", async () => {
     const fixture = await notes();
-    const roles = await operationRoles(env, fixture.owner, fixture.appId);
+    const roles = await functionRoles(env, fixture.owner, fixture.appId);
     // Counts its calls, and refuses from the `refuseFrom`th on.
     const counted = (refuseFrom = Number.POSITIVE_INFINITY) => {
       const seen = { calls: 0 };
@@ -1403,7 +1403,7 @@ describe("what an action's invocation keeps", () => {
   const busy = bindingsOf({
     mail: bound("connections", "microsoft-365.mail@1", async () => {
       await Promise.resolve();
-      throw operationErrors.create("resource.budget_busy");
+      throw functionErrors.create("resource.budget_busy");
     }),
   });
 
@@ -2454,7 +2454,7 @@ describe("evidence of a refused use", () => {
         run: misusing(
           "notes.create",
           async (channel) =>
-            await channel.resource("mail", "notify", [
+            await channel.resource("mail", "sendEvent", [
               "sent",
               "run-1",
               {},
@@ -2520,7 +2520,7 @@ export const stamp = mutation({
     const appId = appIdSchema.parse(fixture.app);
     const run = async (path: string, kind: "query" | "mutation") => {
       const requestId = crypto.randomUUID();
-      const result = await callOperation(
+      const result = await hostFunctionCall(
         { manifest: release.app, run: hostedRelease(env, release).run },
         await invocationFor(env, release, {
           by: fixture.owner,
@@ -2716,7 +2716,7 @@ export const both = action({
       args: Json = {}
     ) => {
       const requestId = crypto.randomUUID();
-      const result = await callOperation(
+      const result = await hostFunctionCall(
         { manifest: release.app, run: hostedRelease(env, release).run },
         await invocationFor(env, release, {
           by,
@@ -2847,7 +2847,7 @@ export const probe = action({ args: {}, returns: v.null(), handler: async () => 
     };
     const appId = appIdSchema.parse(fixture.app);
     const personRequest = crypto.randomUUID();
-    const byPerson = await callOperation(
+    const byPerson = await hostFunctionCall(
       { manifest: release.app, run },
       await invocationFor(env, release, {
         by: fixture.owner,

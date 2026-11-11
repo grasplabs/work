@@ -104,7 +104,7 @@ const tableOf = (shape: ValueShape, state: TableState): AnyTable => {
 
 /**
  * A table of `fields`: a map of field names to `v` schemas, which may be
- * shared with operations' arguments. Field names are identifiers, never
+ * shared with functions' arguments. Field names are identifiers, never
  * starting with `_` (the managed fields are the host's) nor a filter's
  * `AND`, `OR` or `NOT`, and distinct ignoring case. Chain `.index(name,
  * fields)` for each index. Throws `SchemaDefinitionError` (or

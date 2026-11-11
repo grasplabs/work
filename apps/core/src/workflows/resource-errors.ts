@@ -1,5 +1,5 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
-import { categoryOf, isRetryableCode } from "@grasp-os/shared/operations";
+import { categoryOf, isRetryableCode } from "@grasp-os/shared/functions";
 import type { SealedTask } from "@grasp-os/workflow-schema/sealed";
 
 import type { StepError } from "./sealed-isolate.ts";

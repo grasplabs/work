@@ -13,10 +13,17 @@
  * `cf-r2-metadata-size`. An answer is the object's metadata as JSON, then
  * its body; a failure is a status and `cf-r2-error`.
  *
- * Each bucket is one SQLite Durable Object, named by its binding. A body is
- * kept in chunks under SQLite's row limit, written under a version of its
- * own, so a put never holds a whole object in memory and only replaces the
- * object once all of it is in.
+ * Each bucket is one SQLite Durable Object, named by its binding, holding
+ * the index: a row per object with its metadata, which a list reads in key
+ * order. The bodies are files on the local disk, in workerd's disk service
+ * (`DISK`), so a bucket grows with the disk, not within one SQLite
+ * database. Every put streams to a file of its own, under a new version:
+ * the disk service writes it to a temporary file and moves it into place
+ * only once all of it is in, and the index points at it only after that,
+ * so a put that fails midway never replaces the object. A version is noted
+ * in `files` before its file is written and forgotten once the file is
+ * gone, so whatever a crash leaves behind is removed when the bucket
+ * starts again.
  *
  * Not here: multipart upload, which core doesn't use; it is refused.
  */
@@ -26,6 +33,8 @@ import { DurableObject } from "cloudflare:workers";
 interface R2Env {
   /** One object per bucket. */
   BUCKETS: DurableObjectNamespace<R2Store>;
+  /** Where the bodies are kept: a writable directory, workerd's disk service. */
+  DISK: Fetcher;
 }
 
 /** Which bucket an R2 binding's client is: its binding name. */
@@ -37,8 +46,6 @@ const requestHeader = "cf-r2-request";
 const metadataSizeHeader = "cf-r2-metadata-size";
 const errorHeader = "cf-r2-error";
 
-/** Below the 2 MB a SQLite row in a Durable Object may hold. */
-const chunkSize = 1024 * 1024;
 const maxKeyBytes = 1024;
 const maxCustomMetadataBytes = 2048;
 const maxListKeys = 1000;
@@ -56,11 +63,8 @@ CREATE TABLE IF NOT EXISTS objects (
   http_metadata TEXT NOT NULL,
   custom_metadata TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS chunks (
-  version TEXT NOT NULL,
-  seq INTEGER NOT NULL,
-  data BLOB NOT NULL,
-  PRIMARY KEY (version, seq)
+CREATE TABLE IF NOT EXISTS files (
+  version TEXT PRIMARY KEY
 );`;
 
 /** The hashes R2 knows, by the index its client numbers them with. */
@@ -500,26 +504,44 @@ const readPrefix = async (
   return [prefix, value];
 };
 
-/** `rest`, with `first` in front of it. */
+/**
+ * `rest`, with `first` in front of it. `onEnd` is called once, when it
+ * ends, fails or is cancelled.
+ */
 const prepended = (
   first: Uint8Array,
-  rest: ReadableStream<Uint8Array>
+  rest: ReadableStream<Uint8Array> | null,
+  onEnd: () => void
 ): ReadableStream<Uint8Array> => {
-  const reader = rest.getReader();
+  const reader = rest?.getReader();
+  let ended = false;
+  const end = (): void => {
+    if (!ended) {
+      ended = true;
+      onEnd();
+    }
+  };
   return new ReadableStream<Uint8Array>({
     start: (controller) => {
       controller.enqueue(first);
     },
     pull: async (controller) => {
-      const { done, value } = await reader.read();
-      if (done) {
-        controller.close();
-      } else {
-        controller.enqueue(value);
+      try {
+        const next = await reader?.read();
+        if (next === undefined || next.done) {
+          end();
+          controller.close();
+        } else {
+          controller.enqueue(next.value);
+        }
+      } catch (error) {
+        end();
+        controller.error(error);
       }
     },
     cancel: async (reason) => {
-      await reader.cancel(reason);
+      end();
+      await reader?.cancel(reason);
     },
   });
 };
@@ -636,6 +658,34 @@ const delimitedPrefixOf = (
   return at === -1 ? undefined : key.slice(0, at + delimiter.length);
 };
 
+/**
+ * What `answer` settles with: its response, or the error it failed with.
+ * It never fails, so a request can be waited for after its body is sent.
+ */
+const settled = async (
+  answer: Promise<Response>
+): Promise<Response | Error> => {
+  try {
+    return await answer;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+};
+
+/**
+ * The error a put fails with when the disk service fails its file: with
+ * the status it answered, or what its request threw.
+ */
+const diskFailed = (cause: unknown): Error => {
+  let reason = String(cause);
+  if (cause instanceof Response) {
+    reason = `it answered ${cause.status}`;
+  } else if (cause instanceof Error) {
+    reason = cause.message;
+  }
+  return new Error(`The disk failed to store the object's body: ${reason}`);
+};
+
 /** One bucket: a SQLite Durable Object that answers R2's client. */
 export class R2Store extends DurableObject<R2Env> {
   /** The versions being read now, with how many reads each. */
@@ -647,16 +697,27 @@ export class R2Store extends DurableObject<R2Env> {
     super(ctx, env);
     const { sql } = ctx.storage;
     sql.exec(schema);
-    // Chunks of a put that stopped before it replaced the object.
-    sql.exec(
-      "DELETE FROM chunks WHERE version NOT IN (SELECT version FROM objects)"
-    );
+    // The files of puts that stopped before they replaced their object, and
+    // of objects replaced or deleted before their file was removed. Nothing
+    // is being written or read yet, so every file no object names can go.
+    void ctx.blockConcurrencyWhile(async () => {
+      const left = sql
+        .exec<{ version: string }>(
+          "SELECT version FROM files WHERE version NOT IN (SELECT version FROM objects)"
+        )
+        .toArray();
+      await Promise.all(
+        left.map(async ({ version }) => {
+          await this.#remove(version);
+        })
+      );
+    });
   }
 
   override async fetch(request: Request): Promise<Response> {
     try {
       if (request.method === "GET") {
-        return this.#read(
+        return await this.#read(
           requestOf(JSON.parse(request.headers.get(requestHeader) ?? "null"))
         );
       }
@@ -675,7 +736,17 @@ export class R2Store extends DurableObject<R2Env> {
       .toArray()[0];
   }
 
-  #read(request: R2Request): Response {
+  /**
+   * A version's directory in `DISK`, which holds its file. One directory a
+   * version, so removing it also removes the temporary file a put cut off
+   * by a crash left in it. The first two characters of the version spread
+   * the directories over 256 others, so none grows too large to list.
+   */
+  #directory(version: string): string {
+    return `https://disk/${this.ctx.id.toString()}/${version.slice(0, 2)}/${version}`;
+  }
+
+  async #read(request: R2Request): Promise<Response> {
     if (request.method === "list") {
       return metadataResponse(this.#list(request));
     }
@@ -703,9 +774,13 @@ export class R2Store extends DurableObject<R2Env> {
     const metadata = new TextEncoder().encode(
       JSON.stringify(propertiesOf(row, { offset: range.start, length }))
     );
-    const body = this.#body(row.version, range.start, length);
+    const { body, release } = await this.#open(
+      row.version,
+      range.start,
+      length
+    );
     // Its length known, so the client can read the metadata off its front.
-    const framed = prepended(metadata, body).pipeThrough(
+    const framed = prepended(metadata, body, release).pipeThrough(
       new FixedLengthStream(metadata.byteLength + length)
     );
     return new Response(framed, {
@@ -716,20 +791,18 @@ export class R2Store extends DurableObject<R2Env> {
     });
   }
 
-  /** A version's bytes from `start`, `length` of them, a chunk at a time. */
-  #body(
+  /**
+   * A version's bytes from `start`, `length` of them, read from its file.
+   * The file is kept until `release`, even if the object is replaced or
+   * deleted meanwhile.
+   */
+  async #open(
     version: string,
     start: number,
     length: number
-  ): ReadableStream<Uint8Array> {
-    const { sql } = this.ctx.storage;
+  ): Promise<{ body: ReadableStream<Uint8Array> | null; release: () => void }> {
     this.#reading.set(version, (this.#reading.get(version) ?? 0) + 1);
-    let done = false;
     const release = (): void => {
-      if (done) {
-        return;
-      }
-      done = true;
       const left = (this.#reading.get(version) ?? 1) - 1;
       if (left > 0) {
         this.#reading.set(version, left);
@@ -737,49 +810,53 @@ export class R2Store extends DurableObject<R2Env> {
       }
       this.#reading.delete(version);
       if (this.#released.delete(version)) {
-        sql.exec("DELETE FROM chunks WHERE version = ?", version);
+        this.ctx.waitUntil(this.#remove(version));
       }
     };
-    let position = start;
-    const end = start + length;
-    return new ReadableStream<Uint8Array>({
-      pull: (controller) => {
-        if (position >= end) {
-          release();
-          controller.close();
-          return;
-        }
-        const seq = Math.floor(position / chunkSize);
-        const [chunk] = sql
-          .exec<{ data: ArrayBuffer }>(
-            "SELECT data FROM chunks WHERE version = ? AND seq = ?",
-            version,
-            seq
-          )
-          .toArray();
-        if (chunk === undefined) {
-          release();
-          controller.error(new Error("The object's body is missing."));
-          return;
-        }
-        const from = position - seq * chunkSize;
-        const to = Math.min(chunk.data.byteLength, end - seq * chunkSize);
-        controller.enqueue(new Uint8Array(chunk.data.slice(from, to)));
-        position = seq * chunkSize + to;
-      },
-      cancel: release,
-    });
+    // Nothing to read: no range of the file is empty.
+    if (length === 0) {
+      return { body: null, release };
+    }
+    try {
+      const response = await this.env.DISK.fetch(
+        `${this.#directory(version)}/body`,
+        { headers: { range: `bytes=${start}-${start + length - 1}` } }
+      );
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error("The object's body is missing.");
+      }
+      return { body: response.body, release };
+    } catch (error) {
+      release();
+      throw error;
+    }
   }
 
-  /** Drops a version's chunks, or marks them to go once no read is left. */
-  #drop(version: string): void {
+  /** Removes a version's file, or marks it to go once no read is left. */
+  async #drop(version: string): Promise<void> {
     if (this.#reading.has(version)) {
       this.#released.add(version);
-    } else {
-      this.ctx.storage.sql.exec(
-        "DELETE FROM chunks WHERE version = ?",
-        version
-      );
+      return;
+    }
+    await this.#remove(version);
+  }
+
+  /**
+   * Removes a version's directory, then forgets the version. It never
+   * fails: one the disk service can't remove stays in `files`, for the
+   * next start, so a put or delete that already committed is never
+   * answered as failed.
+   */
+  async #remove(version: string): Promise<void> {
+    const response = await settled(
+      this.env.DISK.fetch(this.#directory(version), { method: "DELETE" })
+    );
+    if (
+      response instanceof Response &&
+      (response.ok || response.status === 404)
+    ) {
+      this.ctx.storage.sql.exec("DELETE FROM files WHERE version = ?", version);
     }
   }
 
@@ -797,11 +874,14 @@ export class R2Store extends DurableObject<R2Env> {
           `You can delete up to ${maxDeleteKeys} keys at once.`
         );
       }
-      this.#delete(keys.map(keyOf));
+      await this.#delete(keys.map(keyOf));
       return new Response();
     }
     if (metadata.method === "put") {
-      return await this.#put(metadata, value);
+      // The client sends a body of known length: the metadata, then the value.
+      const length =
+        Number(request.headers.get("content-length") ?? Number.NaN) - size;
+      return await this.#put(metadata, value, length);
     }
     throw r2Error(
       `${metadata.method} is not supported by the on-prem R2 service`,
@@ -809,25 +889,29 @@ export class R2Store extends DurableObject<R2Env> {
     );
   }
 
-  #delete(keys: readonly string[]): void {
-    this.ctx.storage.transactionSync(() => {
-      for (const key of keys) {
-        const [gone] = this.ctx.storage.sql
+  async #delete(keys: readonly string[]): Promise<void> {
+    const { sql } = this.ctx.storage;
+    const gone = this.ctx.storage.transactionSync(() =>
+      keys.flatMap((key) =>
+        sql
           .exec<{ version: string }>(
             "DELETE FROM objects WHERE key = ? RETURNING version",
             key
           )
-          .toArray();
-        if (gone !== undefined) {
-          this.#drop(gone.version);
-        }
-      }
-    });
+          .toArray()
+      )
+    );
+    await Promise.all(
+      gone.map(async ({ version }) => {
+        await this.#drop(version);
+      })
+    );
   }
 
   async #put(
     request: R2Request,
-    value: ReadableStream<Uint8Array>
+    value: ReadableStream<Uint8Array>,
+    length: number
   ): Promise<Response> {
     const key = keyOf(request.object);
     const customMetadata = request.customFields;
@@ -841,15 +925,90 @@ export class R2Store extends DurableObject<R2Env> {
         { status: 400, code: 10_012 }
       );
     }
+    if (!Number.isSafeInteger(length) || length < 0) {
+      await value.cancel();
+      throw invalidArgument("The value's length is not known.");
+    }
     // Checked before the body is read, and again when it replaces the
     // object, as another put may have come in between.
     if (
       request.onlyIf !== undefined &&
       !holds(request.onlyIf, this.#row(key))
     ) {
-      await value.cancel();
+      // Read to its end, unkept: workerd's client fails a put answered
+      // before all of its body is read, where R2 answers with nothing.
+      await value.pipeTo(new WritableStream());
       throw preconditionFailed();
     }
+    const version = newVersion();
+    const { sql } = this.ctx.storage;
+    sql.exec("INSERT INTO files (version) VALUES (?)", version);
+    let row: ObjectRow;
+    let previous: ObjectRow | undefined;
+    try {
+      const { md5 = "", ...others } = await this.#store(
+        request,
+        version,
+        value,
+        length
+      );
+      row = {
+        key,
+        version,
+        size: length,
+        etag: md5,
+        uploaded: Date.now(),
+        checksums: JSON.stringify(others),
+        http_metadata: JSON.stringify(request.httpFields),
+        custom_metadata: JSON.stringify(customMetadata),
+      };
+      const stored = row;
+      previous = this.ctx.storage.transactionSync(() => {
+        const replaced = this.#row(key);
+        if (request.onlyIf !== undefined && !holds(request.onlyIf, replaced)) {
+          throw preconditionFailed();
+        }
+        sql.exec(
+          `INSERT OR REPLACE INTO objects
+            (key, version, size, etag, uploaded, checksums, http_metadata, custom_metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          stored.key,
+          stored.version,
+          stored.size,
+          stored.etag,
+          stored.uploaded,
+          stored.checksums,
+          stored.http_metadata,
+          stored.custom_metadata
+        );
+        return replaced;
+      });
+    } catch (error) {
+      // Read to its end, unkept, so the client gets the error rather than a
+      // lost connection; settled either way, as the body may have failed.
+      await Promise.allSettled([value.pipeTo(new WritableStream())]);
+      await this.#remove(version);
+      throw error;
+    }
+    if (previous !== undefined) {
+      await this.#drop(previous.version);
+    }
+    return metadataResponse(propertiesOf(row));
+  }
+
+  /**
+   * Streams a put's value into the file of `version`, `length` bytes of
+   * it. Resolves with its checksums once the file is in place, having
+   * checked them against those the put came with. A value that ends early
+   * or fails aborts the file, which the disk service then never moves into
+   * place.
+   */
+  async #store(
+    request: R2Request,
+    version: string,
+    value: ReadableStream<Uint8Array>,
+    length: number
+  ): Promise<Partial<Record<Algorithm, string>>> {
     const wanted = algorithms.filter(
       ({ field }) => field === "md5" || request.checksums[field] !== undefined
     );
@@ -858,109 +1017,64 @@ export class R2Store extends DurableObject<R2Env> {
       stream: new crypto.DigestStream(name),
     }));
     const writers = digests.map(({ stream }) => stream.getWriter());
-    const version = newVersion();
-    const { sql } = this.ctx.storage;
-    let total = 0;
-    let seq = 0;
-    let pending: Uint8Array[] = [];
-    let pendingBytes = 0;
-    const flush = (): void => {
-      const chunk = new Uint8Array(pendingBytes);
-      let at = 0;
-      for (const part of pending) {
-        chunk.set(part, at);
-        at += part.byteLength;
+    // Of known length, so the disk service fails a file that ends early
+    // rather than keep what came.
+    const file = new FixedLengthStream(length);
+    const stored = settled(
+      this.env.DISK.fetch(`${this.#directory(version)}/body`, {
+        method: "PUT",
+        body: file.readable,
+      })
+    );
+    const fileWriter = file.writable.getWriter();
+    const all = [...writers, fileWriter];
+    /**
+     * Writes to the digests and the file. Only the file can fail, when the
+     * disk service stops taking it: said as such, not as what it threw.
+     */
+    const toFile = async (
+      step: (writer: (typeof all)[number]) => Promise<void>
+    ): Promise<void> => {
+      try {
+        await Promise.all(all.map(step));
+      } catch (error) {
+        throw diskFailed(error);
       }
-      sql.exec(
-        "INSERT INTO chunks (version, seq, data) VALUES (?, ?, ?)",
-        version,
-        seq,
-        chunk.buffer
-      );
-      seq += 1;
-      pending = [];
-      pendingBytes = 0;
     };
     try {
-      for await (const part of value) {
-        await Promise.all(
-          writers.map(async (writer) => {
-            await writer.write(part);
-          })
-        );
-        total += part.byteLength;
-        let rest = part;
-        while (pendingBytes + rest.byteLength >= chunkSize) {
-          const taken = chunkSize - pendingBytes;
-          pending.push(rest.subarray(0, taken));
-          pendingBytes += taken;
-          flush();
-          rest = rest.subarray(taken);
-        }
-        if (rest.byteLength > 0) {
-          pending.push(rest);
-          pendingBytes += rest.byteLength;
-        }
+      // Not cancelled on a failure: `#put` reads the rest before it answers.
+      for await (const part of value.values({ preventCancel: true })) {
+        await toFile(async (writer) => {
+          await writer.write(part);
+        });
       }
-      if (pendingBytes > 0) {
-        flush();
-      }
-      await Promise.all(
-        writers.map(async (writer) => {
-          await writer.close();
-        })
-      );
-      const checksums: Partial<Record<Algorithm, string>> = {};
-      for (const { field, stream } of digests) {
-        // oxlint-disable-next-line no-await-in-loop -- each settled at close
-        const computed = toHex(await stream.digest);
-        const provided = request.checksums[field];
-        if (provided !== undefined && provided !== computed) {
-          throw r2Error(
-            `The ${field} checksum you specified did not match what we received.`,
-            { status: 400, code: 10_037 }
-          );
-        }
-        checksums[field] = computed;
-      }
-      const { md5 = "", ...others } = checksums;
-      const row: ObjectRow = {
-        key,
-        version,
-        size: total,
-        etag: md5,
-        uploaded: Date.now(),
-        checksums: JSON.stringify(others),
-        http_metadata: JSON.stringify(request.httpFields),
-        custom_metadata: JSON.stringify(customMetadata),
-      };
-      this.ctx.storage.transactionSync(() => {
-        const previous = this.#row(key);
-        if (request.onlyIf !== undefined && !holds(request.onlyIf, previous)) {
-          throw preconditionFailed();
-        }
-        sql.exec(
-          `INSERT OR REPLACE INTO objects
-            (key, version, size, etag, uploaded, checksums, http_metadata, custom_metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          row.key,
-          row.version,
-          row.size,
-          row.etag,
-          row.uploaded,
-          row.checksums,
-          row.http_metadata,
-          row.custom_metadata
-        );
-        if (previous !== undefined) {
-          this.#drop(previous.version);
-        }
+      await toFile(async (writer) => {
+        await writer.close();
       });
-      return metadataResponse(propertiesOf(row));
+      const answer = await stored;
+      if (answer instanceof Error || !answer.ok) {
+        throw diskFailed(answer);
+      }
     } catch (error) {
-      sql.exec("DELETE FROM chunks WHERE version = ?", version);
+      // Settled either way: the file may have failed already.
+      await Promise.allSettled([fileWriter.abort(error)]);
+      await stored;
       throw error;
     }
+    const checksums: Partial<Record<Algorithm, string>> = {};
+    for (const { field, stream } of digests) {
+      // oxlint-disable-next-line no-await-in-loop -- each settled at close
+      const computed = toHex(await stream.digest);
+      const provided = request.checksums[field];
+      if (provided !== undefined && provided !== computed) {
+        throw r2Error(
+          `The ${field} checksum you specified did not match what we received.`,
+          { status: 400, code: 10_037 }
+        );
+      }
+      checksums[field] = computed;
+    }
+    return checksums;
   }
 
   /**

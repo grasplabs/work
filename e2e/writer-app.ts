@@ -8,7 +8,7 @@ import type { TestApp } from "../apps/core/test/app-definitions.ts";
  * and an outline to switch to.
  */
 
-const operations = `import { v } from "@grasp-os/sdk";
+const serverCode = `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
 const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,7 +109,7 @@ export const writerAppFiles = (): TestApp =>
       },
     },
     {
-      "server/writer.ts": operations,
+      "server/writer.ts": serverCode,
       "src/routes/index.tsx": appPage,
     }
   );

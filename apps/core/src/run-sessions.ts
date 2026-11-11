@@ -1,4 +1,4 @@
-import { operationErrors } from "@grasp-os/shared/operations";
+import { functionErrors } from "@grasp-os/shared/functions";
 
 // The sandbox session each Code Mode run holds on-prem, by the run's ID,
 // while it's open: an App function the run calls (env.apps.call) runs in
@@ -54,7 +54,7 @@ export const inTurn = async <T>(
   }
   const count = queued.get(key) ?? 0;
   if (count >= maxQueuedPerRun) {
-    throw operationErrors.create("function.sandbox_busy");
+    throw functionErrors.create("function.sandbox_busy");
   }
   queued.set(key, count + 1);
   const before = turns.get(key) ?? Promise.resolve();
@@ -86,7 +86,7 @@ export const inTurn = async <T>(
     ]);
     waited.abort();
     if (!turnCame) {
-      throw operationErrors.create("function.deadline_exceeded");
+      throw functionErrors.create("function.deadline_exceeded");
     }
     return await work();
   } finally {

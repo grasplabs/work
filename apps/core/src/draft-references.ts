@@ -25,7 +25,7 @@ import type { BuildOptions } from "./pages.ts";
 // call by name in the release that answers it, the App's current one,
 // refuses a name it doesn't hold or a function of another kind, and
 // checks the arguments with that function's own validator
-// (app-functions.ts, `publicOperationOf`).
+// (app-functions.ts, `publicFunctionOf`).
 //
 // Generation is deterministic: the same files make the same references
 // (from the functions their syntax declares, as every save writes them

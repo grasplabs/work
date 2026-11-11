@@ -371,7 +371,7 @@ export const memberOf = async (opened: Opened) => {
  * (`secrets`), and its query and mutation.
  */
 export const withSecrets = (): TestApp => {
-  const operations = files.files["server/notes.ts"] ?? "";
+  const serverCode = files.files["server/notes.ts"] ?? "";
   return withFiles(
     definedWith(files, {
       op: "addTable",
@@ -380,7 +380,7 @@ export const withSecrets = (): TestApp => {
       access: { read: "appBuilders", write: "appBuilders" },
     }),
     {
-      "server/notes.ts": `${operations}
+      "server/notes.ts": `${serverCode}
 export const secrets = query({
   args: {},
   returns: v.array(doc("secrets")),

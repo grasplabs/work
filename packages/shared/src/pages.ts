@@ -365,7 +365,7 @@ export const liveReadLimitsOf = (
 
 /**
  * What core pushes to a page following a query (`watchQuery`): the
- * query's result (spec 32.6's `OperationResult`, as a function call
+ * query's result (spec 32.6's `FunctionResult`, as a function call
  * answers it), numbered. Each push of one subscription has a greater
  * `revision` than the one before; a page drops any that doesn't.
  */

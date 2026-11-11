@@ -264,7 +264,7 @@ const sentOnly = async (
       [pageLeaseHeader]: sender.lease,
     },
     body: JSON.stringify({
-      reference: { name: path, kind: release.app.operations[path]?.kind },
+      reference: { name: path, kind: release.app.functions[path]?.kind },
       args: input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     }),
@@ -289,7 +289,7 @@ const sent = async (
   by?: Sender
 ): Promise<unknown> => {
   const result = await sentOnly(open, path, input, key, by);
-  if (open.release.app.operations[path]?.kind === "mutation") {
+  if (open.release.app.functions[path]?.kind === "mutation") {
     await storeHandsOver(open);
   }
   return result;
@@ -317,7 +317,7 @@ const streamed = async (
       [pageLeaseHeader]: lease,
     },
     body: JSON.stringify({
-      reference: { name: path, kind: release.app.operations[path]?.kind },
+      reference: { name: path, kind: release.app.functions[path]?.kind },
       args: input,
       idempotencyKey: key,
     }),
@@ -334,7 +334,7 @@ const streamed = async (
 /** The reference of `path` in the open page's release. */
 const referenceOf = ({ release }: Open, path: string) => ({
   name: path,
-  kind: release.app.operations[path]?.kind ?? "action",
+  kind: release.app.functions[path]?.kind ?? "action",
 });
 
 /** The error `result`, a call's as core answers it, carries, if any. */
@@ -653,14 +653,14 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
           event: "form_sent",
           app: open.app,
           submission: "form-2",
-          operation: "notes.create",
+          function: "notes.create",
           values: { title: "After" },
         },
         {
           event: "form_sent",
           app: open.app,
           submission: "form-3",
-          operation: "notes.add",
+          function: "notes.add",
           values: { title: "By action" },
         },
       ],
@@ -1277,13 +1277,13 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
 
     expect({
       answered: answers.map((answer) => okOf(answer)),
-      told: payloads.map(({ submission, operation }) => ({
+      told: payloads.map(({ submission, function: fn }) => ({
         submission,
-        operation,
+        function: fn,
       })),
     }).toStrictEqual({
       answered: [true, true, true],
-      told: [{ submission: "s-1", operation: undefined }],
+      told: [{ submission: "s-1", function: undefined }],
     });
   });
 
@@ -1580,7 +1580,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
         args: { title: "Twice" },
       },
       key: "twice",
-      operation: "notes.add",
+      path: "notes.add",
       startedAt: Date.now(),
     });
 
@@ -1701,7 +1701,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
         args: { title: "Gone" },
       },
       key: "gone-app",
-      operation: "notes.add",
+      path: "notes.add",
       startedAt: Date.now(),
     });
     await open.builder.api.apps.archive(open.app);
@@ -1743,9 +1743,9 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     expect({
       answered: okOf(answered),
       told: payloads.map(
-        ({ submission, operation, values, valuesLeftOut }) => ({
+        ({ submission, function: fn, values, valuesLeftOut }) => ({
           submission,
-          operation,
+          function: fn,
           values,
           valuesLeftOut,
         })
@@ -1755,7 +1755,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       told: [
         {
           submission: "fill-1",
-          operation: "notes.fill",
+          function: "notes.fill",
           values: undefined,
           valuesLeftOut: true,
         },
@@ -1818,15 +1818,15 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       failed: okOf(failed),
       afterFailure,
       ran: okOf(ran),
-      told: payloads.map(({ submission, operation }) => ({
+      told: payloads.map(({ submission, function: fn }) => ({
         submission,
-        operation,
+        function: fn,
       })),
     }).toStrictEqual({
       failed: false,
       afterFailure: 0,
       ran: true,
-      told: [{ submission: "resolved-2", operation: "notes.add" }],
+      told: [{ submission: "resolved-2", function: "notes.add" }],
     });
   });
 });

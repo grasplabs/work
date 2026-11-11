@@ -149,7 +149,7 @@ const requestFor = (
   idempotencyKey?: string
 ): string =>
   JSON.stringify({
-    reference: { name: path, kind: release.app.operations[path]?.kind },
+    reference: { name: path, kind: release.app.functions[path]?.kind },
     args: input,
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
   });

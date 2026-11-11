@@ -24,7 +24,7 @@ export interface FunctionChannel {
   ) => Promise<unknown>;
   /**
    * One call of one of the App's permissions: an action's only, but a
-   * mutation's staged start (`start`) or notification (`notify`) of one
+   * mutation's staged start (`start`) or sent event (`sendEvent`) of one
    * of the App's workflows, and either's send to people (`peopleAlias`).
    */
   readonly resource: (

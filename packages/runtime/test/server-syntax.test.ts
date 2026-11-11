@@ -1,5 +1,5 @@
 import { appLimits } from "@grasp-os/shared/app-limits";
-import { appMaxOperations } from "@grasp-os/shared/function-limits";
+import { appMaxFunctions } from "@grasp-os/shared/function-limits";
 import { describe, expect, test } from "vite-plus/test";
 
 import { emptyDefinition } from "../src/definition.ts";
@@ -156,7 +156,7 @@ export const sum = ${"a+".repeat(10_000)}a;
 
   test("are at most as many as an App may register, the same ones whatever order the modules come in", () => {
     const many = `import { query } from "@server/_generated/server";
-${Array.from({ length: appMaxOperations }, (_, index) => `export const f${index} = query({ args: {}, handler: async () => 1 });`).join("\n")}
+${Array.from({ length: appMaxFunctions }, (_, index) => `export const f${index} = query({ args: {}, handler: async () => 1 });`).join("\n")}
 `;
     const one = serverFunctionsIn({
       "server/many.ts": many,
@@ -173,7 +173,7 @@ ${Array.from({ length: appMaxOperations }, (_, index) => `export const f${index}
         Object.keys(other).toSorted().join(","),
       first: Object.keys(one).filter((path) => path.startsWith("tasks."))
         .length,
-    }).toStrictEqual({ count: appMaxOperations, same: true, first: 0 });
+    }).toStrictEqual({ count: appMaxFunctions, same: true, first: 0 });
   });
 
   test("make the same generated modules whatever order the modules come in", () => {

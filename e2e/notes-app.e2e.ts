@@ -94,7 +94,7 @@ test("a person creates, loads, edits and deletes notes, and two saves of differe
   const appPage = await openNotes(page, app);
   await expect(appPage.getByText("No notes yet.")).toBeVisible();
 
-  // A title of only spaces fails the operation's own check, in the
+  // A title of only spaces fails the function's own check, in the
   // browser: nothing is sent, the field says why and gets focus.
   const create = appPage.getByRole("form", { name: "New note" });
   const title = create.getByLabel("Title");

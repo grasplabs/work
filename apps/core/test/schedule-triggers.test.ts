@@ -1200,7 +1200,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       input: await create(scheduleConfig("* * * * *", "UTC", { job: "x" })),
       tooLarge: await create(
         scheduleConfig("* * * * *", "UTC", {
-          report: "x".repeat(platformLimits.operationInputBytes),
+          report: "x".repeat(platformLimits.functionArgsBytes),
         })
       ),
       backlog: await create({

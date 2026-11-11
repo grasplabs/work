@@ -7,7 +7,11 @@ import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
-import { landingAfterSignIn, takeJustSignedIn } from "../landing.ts";
+import {
+  landingAfterSignIn,
+  onboardingBehind,
+  takeJustSignedIn,
+} from "../landing.ts";
 import { AppPanelProvider } from "../pages/app-panel-context.tsx";
 import { AppPanelSlot } from "../pages/app-panel.tsx";
 import { RouteError } from "../route-error.tsx";
@@ -111,19 +115,28 @@ export const Route = createFileRoute("/_shell")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/staff", replace: true });
     }
-    // Just back from signing in, an admin whose organization is still
-    // onboarding starts in the onboarding. Core out of reach for it: home, as ever.
+    // Just back from signing in, an admin with screens of their company's
+    // onboarding left starts in the onboarding. Core out of reach for it: home, as ever.
     const landing = takeJustSignedIn()
       ? await landingAfterSignIn({
           path: location.pathname,
           identity,
           open: async () => {
             try {
-              const gate = await readWithin(
+              const [gate, flow, place] = await readWithin(
                 core,
-                async (session) => await session.onboardingGate.view()
+                async (session) =>
+                  await Promise.all([
+                    session.onboardingGate.view(),
+                    session.onboarding.flow(),
+                    session.onboarding.place(),
+                  ])
               );
-              return gate.open;
+              return onboardingBehind({
+                flow,
+                done: place.done,
+                open: gate.open,
+              });
             } catch {
               return true;
             }
