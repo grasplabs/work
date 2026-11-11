@@ -15,16 +15,17 @@
 # entries ahead of it), so it is the one gate that matters: only a merge
 # an admin makes outside the queue lands without it. A pull request's run,
 # draft or not, is fast feedback for review: the fast checks (static,
-# generated, wasm), the release build and core on plain workerd, a few
-# minutes on six runners. Marking a draft ready runs them again, so its
-# title and description, which become the commit on main, are checked as
-# they stood then (an edit after that isn't). The test shards, the e2e
-# stack and its parts, and the admin's journeys run on the merge queue, a
-# run by hand and the nightly run. A full run is 61 jobs, never more than
-# 60 at once (`check` and the e2e jobs start later), the account's 60
-# concurrent runners: at 63 a full run alone left jobs waiting for runners. A pull request's full
-# run beside the queue's left one of them waiting for runners, minutes at
-# a time (November 2026): one full run per merge halves that.
+# generated, wasm), the release build, the admin's build and core on
+# plain workerd, a few minutes on seven runners. Marking a draft ready
+# runs them again, so its title and description, which become the commit
+# on main, are checked as they stood then (an edit after that isn't). The
+# test shards, the e2e stack and its parts, and the admin's journeys run
+# on the merge queue, a run by hand and the nightly run. A full run is 62
+# jobs, never more than 60 at once (`check` and the e2e jobs start
+# later), the account's 60 concurrent runners: at 63 a full run alone
+# left jobs waiting for runners. A pull request's full run beside the
+# queue's left one of them waiting for runners, minutes at a time
+# (November 2026): one full run per merge halves that.
 #
 # A full run runs everything at once: every test project, every journey,
 # the builds. Only `check`, and the e2e jobs on e2e-build's stack, wait
@@ -415,6 +416,7 @@ jobs:
         generated,
         test,
         release,
+        admin-build,
         workerd,
         e2e-build,
         e2e,
@@ -427,10 +429,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: |
-          echo "event: $EVENT; static: $STATIC, generated: $GENERATED, wasm: $WASM, release: $RELEASE, workerd: $WORKERD; test shards: $TEST, e2e-build: $E2E_BUILD, e2e parts: $E2E, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E"
+          echo "event: $EVENT; static: $STATIC, generated: $GENERATED, wasm: $WASM, release: $RELEASE, admin-build: $ADMIN_BUILD, workerd: $WORKERD; test shards: $TEST, e2e-build: $E2E_BUILD, e2e parts: $E2E, e2e browsers: $E2E_BROWSERS, admin-e2e: $ADMIN_E2E"
           # Each job by its own name: when e2e-build fails, the parts it
           # holds back show as skipped, and the build is what failed.
-          fast=("static=$STATIC" "generated=$GENERATED" "wasm=$WASM" "release=$RELEASE" "workerd=$WORKERD")
+          fast=("static=$STATIC" "generated=$GENERATED" "wasm=$WASM" "release=$RELEASE" "admin-build=$ADMIN_BUILD" "workerd=$WORKERD")
           full=("test shards=$TEST" "e2e-build=$E2E_BUILD" "e2e parts=$E2E" "e2e browsers=$E2E_BROWSERS" "admin-e2e=$ADMIN_E2E")
           case "$EVENT" in
             pull_request) required=("${fast[@]}") ;;
@@ -462,6 +464,7 @@ jobs:
           STATIC: ${{ needs.static.result }}
           GENERATED: ${{ needs.generated.result }}
           RELEASE: ${{ needs.release.result }}
+          ADMIN_BUILD: ${{ needs.admin-build.result }}
           WORKERD: ${{ needs.workerd.result }}
           # A matrix job's result: a failure if any shard or part failed.
           TEST: ${{ needs.test.result }}
@@ -799,11 +802,9 @@ jobs:
 
   # Builds a release bundle as main will publish it (core, connect, the
   # frontend's static files and D1 migrations, with its manifest) and checks
-  # every blob against the manifest, and builds the admin, which isn't part
-  # of a release. For a pull request or the merge queue, that's all: part
-  # of the required `check` (above). On a push to main it's the commit's
-  # only build: the bundle
-  # is the run's `release` artifact, which publish-release publishes as
+  # every blob against the manifest. For a pull request or the merge queue,
+  # that's all: part of the required `check` (above). On a push to main
+  # it's the commit's only build: the bundle is the run's `release` artifact, which publish-release publishes as
   # it is, so the release an admin rolls out is the one CI tested, byte
   # for byte.
   release:
@@ -819,49 +820,10 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           save: ${{ github.event_name == 'push' }}
-      # The admin isn't part of a release (see Deploy platform): check that
-      # it builds, for each stage, into a Worker cf would deploy
-      # (cloudflare.config.ts). Vite records the stage as its mode, which
-      # the deploy names again. No credentials needed. Beside the
-      # release's build, not after it: one after the other they took about
-      # 35 s more (November 2026). Its log follows the release's.
-      - run: |
-          set -euo pipefail
-          admin=""
-          if [ "$EVENT" != push ]; then
-            (
-              cd apps/admin
-              for stage in staging production; do
-                vp build --mode "$stage"
-                vp exec cf deploy --prebuilt --mode "$stage" --dry-run
-              done
-            ) > "$RUNNER_TEMP/admin-build.log" 2>&1 &
-            admin=$!
-          fi
-          # Both builds end and print before the step fails, whichever
-          # failed: a failed release still shows the admin's log.
-          release_status=0
-          vp run release:build --out release-out || release_status=$?
-          admin_status=0
-          if [ -n "$admin" ]; then
-            wait "$admin" || admin_status=$?
-            echo "::group::The admin's builds"
-            cat "$RUNNER_TEMP/admin-build.log"
-            echo "::endgroup::"
-          fi
-          if [ "$release_status" != 0 ]; then
-            echo "::error::The release didn't build (exit $release_status): its log is above."
-            exit "$release_status"
-          fi
-          if [ "$admin_status" != 0 ]; then
-            echo "::error::The admin didn't build (exit $admin_status): its log is above."
-            exit "$admin_status"
-          fi
-        env:
-          EVENT: ${{ github.event_name }}
-      # The builds above regenerate the route trees, which must be committed
-      # (generated, above, checks the other generated files without
-      # building).
+      - run: vp run release:build --out release-out
+      # The build above regenerates the frontend's route tree, which must be
+      # committed (generated, above, checks the other generated files
+      # without building; admin-build, below, checks the admin's).
       - if: github.event_name != 'push'
         run: git diff --exit-code -- '*routeTree.gen.ts'
       # Every file but the build's `.grasp-release` marker, which only
@@ -874,6 +836,36 @@ jobs:
           path: release-out/
           if-no-files-found: error
           retention-days: 14
+
+  # The admin isn't part of a release (see Deploy platform): check that it
+  # builds, for each stage, into a Worker cf would deploy
+  # (cloudflare.config.ts), and that its route tree is committed. Vite
+  # records the stage as its mode, which the deploy names again. No
+  # credentials needed. A job of its own, not beside release:build on
+  # release's runner: there it took 4 CPUs' share from the frontend's and
+  # core's builds, and release:build ran a median 107 s on pull requests
+  # against 85.5 s on pushes to main, which skip the admin (November
+  # 2026). Here it ends well inside release (setup and about 35 s of
+  # builds). On a push to main, Deploy platform builds it for real. Part
+  # of the required `check` (above).
+  admin-build:
+    name: admin-build
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - working-directory: apps/admin
+        run: |
+          set -euo pipefail
+          for stage in staging production; do
+            vp build --mode "$stage"
+            vp exec cf deploy --prebuilt --mode "$stage" --dry-run
+          done
+      - run: git diff --exit-code -- '*routeTree.gen.ts'
 
   # Core's tests' global-setup builds on main, where every run can read
   # them (the merge queue's, a run by hand, the nightly), built without a test
