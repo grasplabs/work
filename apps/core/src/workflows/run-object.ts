@@ -3,85 +3,69 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   DefinitionIdentity,
   WorkflowDefinition,
-  WorkflowError,
 } from "@grasp-os/workerflow/contracts";
 import { WorkflowRun } from "@grasp-os/workerflow/run";
 import type { RunNotification } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
-import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { projectCandidateRun } from "./candidate-runs.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
-import type { PinnedResourceRun, RunPin } from "./engine.ts";
-import { newAiCalls, waitKeyOf, waitStepPrefix } from "./host.ts";
+import type { RunPin } from "./engine.ts";
+import { newAiCalls } from "./host.ts";
 import type { AiCalls } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
 import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import type { StepError } from "./sealed-isolate.ts";
 import type { RunModelCalls, SentCalls } from "./sealed-run.ts";
-import { sealedStepOf, sealedStepsOf } from "./sealed-steps.ts";
-
-/**
- * The key of the task step a step of core's own is a round or a wait of
- * (`$grasp:wait:<key>:…`, host.ts, `waitKeyOf` of the task step's name);
- * none for any other step.
- */
-const coreRoundKey = new RegExp(
-  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):`,
-  "u"
-);
-
-/**
- * The task step `name` is of: its own, by `tasks` (task steps by name), or,
- * for a round or a wait of core's own, the task of the step it is keyed by
- * (`waitKeyOf` of its name), followed through each such step it is a
- * round of in turn (a call held inside a retry's round): `steps` is every
- * step's name of the journal. None for a step of no task.
- */
-const taskOfStep = async (
-  name: string,
-  tasks: ReadonlyMap<string, string>,
-  steps: ReadonlySet<string>
-): Promise<string | null> => {
-  const byKey = new Map<string, string>();
-  for (const step of steps) {
-    // oxlint-disable-next-line no-await-in-loop -- a digest each
-    byKey.set(await waitKeyOf(step), step);
-  }
-  let step: string | undefined = name;
-  // Each step at most once: a key leads only to an earlier step.
-  for (let hops = 0; step !== undefined && hops <= steps.size; hops += 1) {
-    const task = tasks.get(step);
-    if (task !== undefined) {
-      return task;
-    }
-    const key: string | undefined = coreRoundKey.exec(step)?.groups?.key;
-    step = key === undefined ? undefined : byKey.get(key);
-  }
-  return null;
-};
-
-/**
- * Whether a step's error (`step`) is the run's (`run`): the same code, and
- * the same message as far as both kept it (the isolate cuts what it sends
- * shorter than the journal keeps a step's: host.ts).
- */
-const sameError = (step: WorkflowError | null, run: WorkflowError): boolean =>
-  step !== null &&
-  step.code === run.code &&
-  (step.message.startsWith(run.message) ||
-    run.message.startsWith(step.message));
-
-/** The most records one page of the run's history holds (workerflow's). */
-const historyPage = 500;
 
 /** Whether the run's own table is there: a run removed keeps nothing. */
 const runIsThere = (sql: SqlStorage): boolean =>
   sql
     .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'")
     .toArray().length > 0;
+
+/**
+ * Where a sealed build's run keeps the task whose step's failure it ended
+ * with, as its host named it (resource-runs.ts, `keepFailedTask`): a
+ * table of its object's SQLite, dropped with the run by the engine's
+ * removal of it. Written as the run fails, before the engine records the
+ * failure, and read as its end is told (`notify`).
+ */
+const failedTaskTable = "grasp_run_failed_task";
+
+/** Keeps `task` as the one the run in `sql` failed at, while it is there. */
+const keepFailedTaskIn = (sql: SqlStorage, task: string): void => {
+  if (!runIsThere(sql)) {
+    return;
+  }
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS ${failedTaskTable} (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), task TEXT NOT NULL)`
+  );
+  sql.exec(
+    `INSERT INTO ${failedTaskTable} (singleton, task) VALUES (1, ?) ON CONFLICT (singleton) DO UPDATE SET task = excluded.task`,
+    task
+  );
+};
+
+/** The task the run in `sql` failed at (`keepFailedTaskIn`), if kept. */
+const failedTaskIn = (sql: SqlStorage): string | null => {
+  const there =
+    sql
+      .exec(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        failedTaskTable
+      )
+      .toArray().length > 0;
+  if (!there) {
+    return null;
+  }
+  const [row] = sql
+    .exec<{ task: string }>(`SELECT task FROM ${failedTaskTable}`)
+    .toArray();
+  return row?.task ?? null;
+};
 
 /** A kept failure, as the host kept it: a step's error, or nothing. */
 const keptFailureSchema = z.object({
@@ -352,6 +336,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         return await runPinned(this.env, pin, event, step, {
           modelCalls: modelCallsIn(this.ctx.storage.sql),
           sentCalls: sentCallsIn(this.ctx.storage.sql),
+          keepFailedTask: (task) => {
+            keepFailedTaskIn(this.ctx.storage.sql, task);
+          },
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
           ...(this.#activation === undefined
@@ -650,7 +637,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           engine,
           failureCode,
           async () =>
-            failure === undefined ? null : await this.#failedTask(pin, failure)
+            await Promise.resolve(
+              failure === undefined ? null : failedTaskIn(this.ctx.storage.sql)
+            )
         )
       : projectCandidateRun(this.env, latest.instanceId, engine, failureCode));
     // A page's pause or resume of it settles from where the engine has
@@ -671,74 +660,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     if (run !== undefined) {
       await this.#sharesReleased(run, marked);
     }
-  }
-
-  /**
-   * The task whose step's failure ended the run, as its row keeps it
-   * (`failed_task`): the last step in its own journal that failed with the
-   * error the run ended with (`sameError`), as its build's table of
-   * tasks places it (`sealedStepOf`), or, for a round or a wait of core's
-   * own (a retry, a held call timed out: host.ts), the task step it is of,
-   * by its key. Read once, as the run ends failed. None when no step of a
-   * task did: a raise ended it, say, after a step whose failure a catch
-   * took. A build that can't be read names none, logged: the run's end
-   * never waits on it, as a run whose build was tampered with fails for
-   * that very reason.
-   */
-  async #failedTask(
-    pin: PinnedResourceRun,
-    failure: WorkflowError
-  ): Promise<string | null> {
-    let steps: ReturnType<typeof sealedStepsOf>;
-    try {
-      steps = sealedStepsOf(
-        await loadWorkflowBuild(
-          this.env,
-          pin.workflow,
-          pin.version,
-          pin.manifest
-        )
-      );
-    } catch (error) {
-      log.error("workflow.failed_task_unread", {
-        runId: this.instanceId(),
-        ...errorFields(error),
-      });
-      return null;
-    }
-    // The journal's steps, its task steps by name, and the last step that
-    // failed with the run's error: every page in one synchronous turn.
-    const names = new Set<string>();
-    const tasks = new Map<string, string>();
-    let failed: string | undefined;
-    let after = 0;
-    let more = true;
-    while (more) {
-      const page = this.history({ after, limit: historyPage });
-      if (page === undefined || page.records.length === 0) {
-        break;
-      }
-      for (const record of page.records) {
-        after = record.eventId;
-        if (record.unreadable || record.step === null) {
-          continue;
-        }
-        const { name } = record.step;
-        names.add(name);
-        const placed = sealedStepOf(name, steps);
-        if (placed !== undefined) {
-          tasks.set(name, placed.task);
-        }
-        if (
-          record.type === "step_errored" &&
-          sameError(record.error, failure)
-        ) {
-          failed = name;
-        }
-      }
-      ({ more } = page);
-    }
-    return failed === undefined ? null : await taskOfStep(failed, tasks, names);
   }
 
   /**

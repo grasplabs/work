@@ -10,6 +10,7 @@ import {
   chooseModel,
   endOf,
   ended,
+  greetStep,
   greetingWorkflow,
   person,
   providerAnswering,
@@ -29,15 +30,19 @@ const dayMs = 24 * 60 * 60 * 1000;
 const rounded = (amount: number): number => Math.round(amount * 1e6) / 1e6;
 
 /**
- * The day the signals are computed as of: some weeks from now, at noon
- * UTC, so the runs made now are in its window and no other test file's
- * day is the same one.
+ * The day the signals are computed as of, `ahead` days from now, at noon
+ * UTC: some weeks on, so the runs made now are in its window and no other
+ * test file's day is the same one. Each test its own: a day is computed
+ * once.
  */
-const computedOn = (): Date => {
+const computedOn = (ahead: number): Date => {
   const day = new Date();
   day.setUTCHours(12, 0, 0, 0);
-  return new Date(day.getTime() + 25 * dayMs);
+  return new Date(day.getTime() + ahead * dayMs);
 };
+
+/** An expression that fails as it is evaluated: `who` has no 10,000th letter. */
+const failing = 'args.who.split("")[9999].toUpperCase()';
 
 /** Workflow `name`'s signals of `kind`, as an admin reads them. */
 const signalsOf = <Kind extends ImprovementSignal["kind"]>(
@@ -81,7 +86,7 @@ describe("an independent workflow's run signals", () => {
     const costOf = (run: string): number =>
       spent.results.find((row) => row.run === run)?.cost ?? 0;
 
-    await refreshDailySignals(env, computedOn());
+    await refreshDailySignals(env, computedOn(25));
     const { api } = await signedInApi(idp, "admin");
     const { signals } = await api.signals.list();
 
@@ -125,6 +130,55 @@ describe("an independent workflow's run signals", () => {
               ),
           },
         },
+      ],
+    });
+  });
+
+  it("blame no task for a run that failed outside every step, after a task whose failure a catch took", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Its opening greeting's input fails to evaluate, and a catch takes
+    // that; its greeting runs and ends well; then the condition of an `if`,
+    // outside any step, fails with the same code, and the run with it.
+    const { workflow } = await greetingWorkflow(ada, admin, {
+      before: [
+        {
+          id: "opening",
+          type: "try",
+          try: [{ ...greetStep("first"), input: { who: { $expr: failing } } }],
+          catch: { code: "expression.failed" },
+        },
+      ],
+      after: [
+        {
+          id: "check",
+          type: "if",
+          condition: { $expr: `${failing} === "A"` },
+          // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+          then: [{ id: "never", type: "wait", for: "1 second" }],
+        },
+      ],
+    });
+    await providerAnswering(answer('{"line":"Hello Ada"}'));
+    const failed = await ended(
+      ada,
+      workflow.id,
+      await started(ada, workflow.id)
+    );
+
+    await refreshDailySignals(env, computedOn(26));
+    const { api } = await signedInApi(idp, "admin");
+    const { signals } = await api.signals.list();
+
+    expect({
+      end: endOf(failed),
+      failing: signalsOf(signals, "failing_step", workflow.name).map(
+        ({ subject, evidence }) => ({ subject, errors: evidence.errors })
+      ),
+    }).toStrictEqual({
+      end: { status: "failed", code: "expression.failed" },
+      failing: [
+        { subject: null, errors: [{ code: "expression.failed", count: 1 }] },
       ],
     });
   });
