@@ -376,16 +376,18 @@ export const wordIndex = sqliteTable(
   () => [check("word_index_one", sql.raw("id = 1"))]
 );
 
-// Erasure (erasure.ts). Each erasure is in the ledger in the Brain's
-// bucket first, then here: `erasures` keeps each one the store applied,
-// by its ledger key, and is how an erased source's key stays closed;
-// `erasing_versions` the versions an erasure hid and the tick has still
-// to delete, row by row.
+// Erasure (erasure.ts). `erasures` keeps each erasure the store applied,
+// by its key in the ledger in the Brain's bucket, and is how an erased
+// source's key stays closed; `erasing_versions` the versions an erasure
+// hid and the tick has still to delete; `source_subjects` each source's
+// key as the ledger names it, so a replay finds a source by SQL.
 
 /**
  * An erasure the store applied, as its ledger entry names it: no content
- * and no plain id. Never deleted: it closes an erased source's key, and
- * its key is where a replay of the ledger starts.
+ * and no plain id. Recorded before its ledger entry is written, then
+ * confirmed once the entry is in the bucket. Never deleted: it closes an
+ * erased source's key, and the confirmed ones are where a replay of the
+ * ledger starts.
  */
 export const erasures = sqliteTable(
   "erasures",
@@ -398,10 +400,22 @@ export const erasures = sqliteTable(
     /** Why (contract.ts `erasureReasons`). */
     reason: text().notNull(),
     erasedAt: integer("erased_at", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * A person's erasure: what it hid, as its ledger entry holds it, the
+     * versions by number under each source's subject (erasure.ts). Null
+     * for a source's, which hides every version.
+     */
+    hidden: text(),
+    /** Whether its ledger entry is known to be in the bucket. */
+    confirmed: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
-    // An add looks up whether its source was erased.
+    // An add looks up whether its source, or its one reader, was erased.
     index("erasures_subject_idx").on(table.kind, table.subject),
+    // The tick confirms what isn't yet.
+    index("erasures_unconfirmed_idx")
+      .on(table.key)
+      .where(sql.raw("confirmed = 0")),
     check("erasures_kind", sql`${table.kind} IN ('source', 'person')`),
   ]
 );
@@ -409,7 +423,8 @@ export const erasures = sqliteTable(
 /**
  * A version an erasure hid, still to delete: found by nothing (recall,
  * history and current reads leave it out), deleted with everything it
- * holds by the tick (erasure.ts `eraseBatch`).
+ * holds by the tick (erasure.ts `eraseBatch`). One that failed to delete
+ * goes behind the others, and is tried again.
  */
 export const erasingVersions = sqliteTable(
   "erasing_versions",
@@ -420,6 +435,26 @@ export const erasingVersions = sqliteTable(
     erasure: text()
       .notNull()
       .references(() => erasures.key),
+    /** How often deleting it failed. */
+    failures: integer().notNull().default(0),
   },
-  (table) => [index("erasing_versions_erasure_idx").on(table.erasure)]
+  (table) => [
+    index("erasing_versions_erasure_idx").on(table.erasure),
+    // A batch takes the next by failures, then by row.
+    index("erasing_versions_next_idx").on(table.failures, table.versionRow),
+  ]
+);
+
+/**
+ * A source's key as the erasure ledger names it: its SHA-256, written
+ * with the source's first version, so a replay finds the source the
+ * ledger names in SQL, and a person's erasure names the sources it hid.
+ */
+export const sourceSubjects = sqliteTable(
+  "source_subjects",
+  {
+    source: text().primaryKey(),
+    subject: text().notNull(),
+  },
+  (table) => [index("source_subjects_subject_idx").on(table.subject)]
 );

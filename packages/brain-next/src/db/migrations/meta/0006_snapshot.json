@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a2e7c69b-e4bd-41e7-8396-c6be00c9c486",
+  "id": "5ea74e6a-b975-4b2c-b8bc-cce00d6076ab",
   "prevId": "ae2f8dfe-f3f5-4204-81da-42c642cbbf79",
   "tables": {
     "chunks": {
@@ -127,6 +127,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "failures": {
+          "name": "failures",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         }
       },
       "indexes": {
@@ -134,6 +142,14 @@
           "name": "erasing_versions_erasure_idx",
           "columns": [
             "erasure"
+          ],
+          "isUnique": false
+        },
+        "erasing_versions_next_idx": {
+          "name": "erasing_versions_next_idx",
+          "columns": [
+            "failures",
+            "version_row"
           ],
           "isUnique": false
         }
@@ -207,6 +223,21 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "hidden": {
+          "name": "hidden",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "confirmed": {
+          "name": "confirmed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         }
       },
       "indexes": {
@@ -217,6 +248,14 @@
             "subject"
           ],
           "isUnique": false
+        },
+        "erasures_unconfirmed_idx": {
+          "name": "erasures_unconfirmed_idx",
+          "columns": [
+            "key"
+          ],
+          "isUnique": false,
+          "where": "confirmed = 0"
         }
       },
       "foreignKeys": {},
@@ -432,6 +471,38 @@
           "name": "source_changes_source_change_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "source_subjects": {
+      "name": "source_subjects",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "source_subjects_subject_idx": {
+          "name": "source_subjects_subject_idx",
+          "columns": [
+            "subject"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

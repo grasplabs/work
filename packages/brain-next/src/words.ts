@@ -395,7 +395,11 @@ export const markWordsCurrentIfEmpty = (sql: SqlStorage): void => {
  *
  * Recall goes on meanwhile: a chunk not yet rebuilt answers by the rules
  * it was indexed by, so a word folded or stemmed otherwise now may miss it
- * until its turn. New and changed sources are indexed by the current rules
+ * until its turn; after migration 0006 made the indexes anew and empty
+ * (rules number 0), a chunk is found by no word at all until the rebuild
+ * reaches it, `reindexPerTick` (200) chunks a tick, so a store of 100,000
+ * chunks is whole again after 500 ticks. New and changed sources are
+ * indexed by the current rules
  * as they are added; one added during a rebuild may be rewritten once more
  * by it, the same.
  */

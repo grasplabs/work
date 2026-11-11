@@ -348,6 +348,8 @@ export interface WorkState {
   turns: Promise<unknown>;
   /** By kind and key (`zombieOf`). */
   zombies: Map<string, OverdueWork & { connection: string | null }>;
+  /** The signals of the attempts under way, by their items' keys. */
+  underWay: Map<string, Set<AbortController>>;
   /**
    * Restarts the store once what it wrote is on disk: what ends handlers
    * no signal stops. Called through `restartStore` only.
@@ -361,9 +363,25 @@ export interface WorkState {
 export const newWorkState = (restart: () => void): WorkState => ({
   turns: Promise.resolve(),
   zombies: new Map(),
+  underWay: new Map(),
   restart,
   restarting: false,
 });
+
+/**
+ * Stops the attempts under way of items keyed by any of `keys`: their
+ * signals abort, with `erased`. For an erasure, which deleted their rows
+ * in the same step: what such a handler still writes goes through the
+ * store's own checks that what it works on is current, which an erased
+ * source no longer is, and nothing of it is settled or run again.
+ */
+export const stopWorkOn = (state: WorkState, keys: readonly string[]): void => {
+  for (const key of keys) {
+    for (const controller of state.underWay.get(key) ?? []) {
+      controller.abort(new WorkError("erased"));
+    }
+  }
+};
 
 /** Restarts the store (rule 6), once however often asked. */
 const restartStore = (state: WorkState): void => {
@@ -913,6 +931,9 @@ const runItem = async (
   }
   const controller = new AbortController();
   const { signal } = controller;
+  const ofKey = state.underWay.get(item.key) ?? new Set<AbortController>();
+  ofKey.add(controller);
+  state.underWay.set(item.key, ofKey);
   const limit = setTimeout(() => {
     controller.abort(new WorkError("timed_out"));
   }, runner.timeLimitMs);
@@ -935,6 +956,10 @@ const runItem = async (
       return { done: false, error, timedOut: signal.aborted };
     } finally {
       clearTimeout(limit);
+      ofKey.delete(controller);
+      if (ofKey.size === 0 && state.underWay.get(item.key) === ofKey) {
+        state.underWay.delete(item.key);
+      }
       // Nothing of it asks the model once it ended: not an `ask` it left behind.
       controller.abort(new WorkError("timed_out"));
     }

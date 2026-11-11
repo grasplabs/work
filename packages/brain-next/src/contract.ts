@@ -274,6 +274,7 @@ export const workErrors = {
   invalid_request: "Its call to the model couldn't be sent as it was.",
   too_many_calls: "It asked the model more often than one attempt may.",
   unreadable: "What it works on can't be read.",
+  erased: "What it works on was erased.",
 } as const;
 export type WorkErrorCode = keyof typeof workErrors;
 
@@ -346,8 +347,13 @@ export interface WorkOverview {
   erasing: number;
   /**
    * The tick's own steps before its queue, each with its last failure
-   * since the store started: the erasure of what erasures still hold,
-   * cleared once a later batch finishes (tried again next tick); the sweep
+   * since the store started: the erasure ledger, read as the store starts
+   * and written for each erasure, cleared once it was read whole and every
+   * entry written (until it is read, the store answers nothing but this
+   * overview, each call refused with why); the erasure of what erasures
+   * still hold, set when a version failed to delete, which goes behind the
+   * others and is tried again, cleared once a batch deletes all it takes;
+   * the sweep
    * of leftover files, cleared once a
    * later sweep reached R2 and had its answer (one with nothing due
    * clears nothing; sweeping waits a quarter of an hour after a failure),
@@ -356,6 +362,7 @@ export interface WorkOverview {
    * after their rules changed, cleared once a later batch finishes.
    */
   stepsFailed: {
+    ledger: StepFailure | null;
     erase: StepFailure | null;
     sweep: StepFailure | null;
     repack: StepFailure | null;

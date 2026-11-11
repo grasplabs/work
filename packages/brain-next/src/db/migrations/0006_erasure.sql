@@ -1,21 +1,32 @@
 CREATE TABLE `erasing_versions` (
 	`version_row` integer PRIMARY KEY NOT NULL,
 	`erasure` text NOT NULL,
+	`failures` integer DEFAULT 0 NOT NULL,
 	FOREIGN KEY (`version_row`) REFERENCES `source_versions`(`row`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`erasure`) REFERENCES `erasures`(`key`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE INDEX `erasing_versions_erasure_idx` ON `erasing_versions` (`erasure`);--> statement-breakpoint
+CREATE INDEX `erasing_versions_next_idx` ON `erasing_versions` (`failures`,`version_row`);--> statement-breakpoint
 CREATE TABLE `erasures` (
 	`key` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
 	`subject` text NOT NULL,
 	`reason` text NOT NULL,
 	`erased_at` integer NOT NULL,
+	`hidden` text,
+	`confirmed` integer DEFAULT false NOT NULL,
 	CONSTRAINT "erasures_kind" CHECK("erasures"."kind" IN ('source', 'person'))
 );
 --> statement-breakpoint
 CREATE INDEX `erasures_subject_idx` ON `erasures` (`kind`,`subject`);--> statement-breakpoint
+CREATE INDEX `erasures_unconfirmed_idx` ON `erasures` (`key`) WHERE confirmed = 0;--> statement-breakpoint
+CREATE TABLE `source_subjects` (
+	`source` text PRIMARY KEY NOT NULL,
+	`subject` text NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `source_subjects_subject_idx` ON `source_subjects` (`subject`);--> statement-breakpoint
 -- The first slice's sources (GRA-1720), unread and unwritten since
 -- versions (0002): a place content could be, whose contentless index can't
 -- erase. Dropped, with their triggers and their words.
@@ -57,10 +68,11 @@ END;
 --> statement-breakpoint
 UPDATE `word_index` SET `version` = 0, `target` = 0, `cursor` = 0 WHERE `id` = 1;
 --> statement-breakpoint
--- An erasure is applied once and never changed; a version an erasure hid
--- stays hidden until it is deleted.
-CREATE TRIGGER `erasures_no_update` BEFORE UPDATE ON `erasures` BEGIN
-	SELECT RAISE(ABORT, 'erasures are recorded, never updated');
+-- An erasure is recorded once and never changed, only confirmed once its
+-- ledger entry is in the bucket; never deleted, as it closes a source's
+-- key.
+CREATE TRIGGER `erasures_no_update` BEFORE UPDATE OF `key`, `kind`, `subject`, `reason`, `erased_at`, `hidden` ON `erasures` BEGIN
+	SELECT RAISE(ABORT, 'erasures are recorded, never changed but confirmed');
 END;
 --> statement-breakpoint
 CREATE TRIGGER `erasures_no_delete` BEFORE DELETE ON `erasures` BEGIN

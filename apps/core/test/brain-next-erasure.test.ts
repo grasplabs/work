@@ -4,7 +4,7 @@ import type {
   ChunkRef,
   VectorModel,
 } from "@grasp-os/brain-next/contract";
-import { defineWork, enqueueWork } from "@grasp-os/brain-next/work";
+import { defineWork, enqueueWork, WorkError } from "@grasp-os/brain-next/work";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -226,6 +226,12 @@ const ledgerOf = async (id: string): Promise<string[]> => {
   return listed.objects
     .map(({ key }) => key)
     .filter((key) => key.endsWith(`-${subject}`));
+};
+
+/** How many entries of the ledger name `source`. */
+const ledgerCount = async (source: SourceRef): Promise<number> => {
+  const entries = await ledgerOf(keyOf(source));
+  return entries.length;
 };
 
 /** Moves the clock, for `Date` alone, to `ms` from now. */
@@ -607,7 +613,7 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       ],
       ledger: [1, 1],
       lateAdd: {
-        error: "Error: The Brain refused it: this source was erased",
+        error: "Error: The Brain refused it: what this adds was erased",
       },
       fileBefore: null,
       again: text,
@@ -637,7 +643,9 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       file: await fileOf(text),
       tables: await tablesHolding([mark]),
     }).toStrictEqual({
-      added: { error: "Error: The Brain refused it: this source was erased" },
+      added: {
+        error: "Error: The Brain refused it: what this adds was erased",
+      },
       recalled: [],
       file: null,
       tables: [],
@@ -932,7 +940,7 @@ describe(
         tables: [],
         objects: [],
         lateAdd: {
-          error: "Error: The Brain refused it: this source was erased",
+          error: "Error: The Brain refused it: what this adds was erased",
         },
       });
     });
@@ -981,7 +989,7 @@ describe(
         tables: [],
         objects: [],
         lateAdd: {
-          error: "Error: The Brain refused it: this source was erased",
+          error: "Error: The Brain refused it: what this adds was erased",
         },
       });
     });
@@ -994,20 +1002,539 @@ describe(
       await add(whole, "Whole file", owner(reader));
       // As a restore brings back a version whose file the sweep deleted.
       await env.BRAIN_OBJECTS.delete(`sources/${await hashOf(goneText)}`);
+      const warned = vi.spyOn(console, "warn");
       const current = await brain().readCurrent({
         sources: [keyOf(gone), keyOf(whole)],
         reader: { person: reader, groups: [] },
       });
-
-      expect({
+      const history = {
         gone: await historyAs(reader, gone, 1),
         whole: await historyAs(reader, whole, 1),
+      };
+      const warnings = warned.mock.calls;
+      warned.mockRestore();
+
+      expect({
+        ...history,
         current: current.map(({ text }) => text),
+        // Noticed, one fixed event a read, with nothing of what it held.
+        warnings,
       }).toStrictEqual({
         gone: null,
         whole: "Whole file",
         current: ["Whole file"],
+        warnings: [
+          [{ event: "brain.version_file_missing" }],
+          [{ event: "brain.version_file_missing" }],
+        ],
       });
     });
   }
 );
+
+/** What the recording work's handler saw, by its item's key. */
+const handled = new Map<
+  string,
+  { runs: number; abortedAfter?: string | undefined }
+>();
+
+/** What the recording work's handler does for a key, if anything. */
+const handling = new Map<string, (signal: AbortSignal) => Promise<void>>();
+
+/** Work about a source whose handler records each run, and waits if told. */
+const recordingWork = defineWork({
+  kind: `test.erasing_${crypto.randomUUID().replaceAll("-", "")}`,
+  payload: z.strictObject({ key: z.string() }),
+  run: async ({ key }, { signal }) => {
+    const seen = handled.get(key) ?? { runs: 0 };
+    seen.runs += 1;
+    handled.set(key, seen);
+    await handling.get(key)?.(signal);
+  },
+});
+
+/** Queues an item of the recording work about `source`, first of all. */
+const queueRecorded = async (source: SourceRef): Promise<void> => {
+  await runInDurableObject(store(), (_instance, state) => {
+    enqueueWork(state.storage, recordingWork, {
+      key: keyOf(source),
+      payload: { key: keyOf(source) },
+      priority: "asked",
+    });
+  });
+};
+
+/** How many items wait or run about `source` in the queue. */
+const queuedAbout = async (source: SourceRef): Promise<number> =>
+  await runInDurableObject(
+    store(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM work_items WHERE key = ?",
+          keyOf(source)
+        )
+        .one().count
+  );
+
+/** The rows of the chunks of `source`'s current version, by position. */
+const currentChunksOf = async (source: SourceRef): Promise<ChunkRef[]> =>
+  await runInDurableObject(store(), (_instance, state) =>
+    state.storage.sql
+      .exec<{ version: number; position: number }>(
+        `SELECT source_versions.version AS version, chunks.position AS position
+        FROM source_versions
+        JOIN chunks ON chunks.version_row = source_versions.row
+        WHERE source_versions.source = ?
+        ORDER BY source_versions.version, chunks.position`,
+        keyOf(source)
+      )
+      .toArray()
+      .map(({ version, position }) => ({
+        source: keyOf(source),
+        version,
+        position,
+      }))
+  );
+
+describe("an add under way as an erasure lands", { timeout: 120_000 }, () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("refuses an add for a person alone that was writing its file as they were erased, and keeps one begun after", async () => {
+    const leaver = await person();
+    const [inFlight, after] = [newMark(), newMark()];
+    const source = newSource();
+    const gate = await holdNextBucketPut();
+    const adding = settled(
+      add(source, `In flight ${wordOf(inFlight)}`, owner(leaver))
+    );
+    await vi.waitFor(() => {
+      expect(gate.reached).toBeTruthy();
+    });
+    await erasePerson(env, { personId: leaver, reason: "withdrawn" });
+    gate.released = true;
+    const added = await adding;
+    // Begun after the erasure returned: new, and kept.
+    const afterwardSource = newSource();
+    await add(afterwardSource, `Afterwards ${wordOf(after)}`, owner(leaver));
+    await tickUntilErased();
+    await tickPastGrace();
+
+    expect({
+      added,
+      recalled: await recalledAs(leaver, wordOf(inFlight)),
+      history: await historyAs(leaver, source, 1),
+      tables: await tablesHolding([inFlight]),
+      objects: await objectsHolding([inFlight]),
+      afterwards: await historyAs(leaver, afterwardSource, 1),
+    }).toStrictEqual({
+      added: {
+        error: "Error: The Brain refused it: what this adds was erased",
+      },
+      recalled: [],
+      history: null,
+      tables: [],
+      objects: [],
+      afterwards: `Afterwards ${wordOf(after)}`,
+    });
+  });
+
+  it("refuses a version only they may read of a source others read, under way as they were erased, and keeps the others' version", async () => {
+    const [leaver, colleague] = await Promise.all([person(), person()]);
+    const team = await teamOf(leaver, colleague);
+    const [teamMark, theirs] = [newMark(), newMark()];
+    const source = newSource();
+    await add(source, `Team plan ${wordOf(teamMark)}`, {
+      kind: "team",
+      teamId: team,
+    });
+    const gate = await holdNextBucketPut();
+    const adding = settled(
+      add(source, `My plan ${wordOf(theirs)}`, owner(leaver))
+    );
+    await vi.waitFor(() => {
+      expect(gate.reached).toBeTruthy();
+    });
+    await erasePerson(env, { personId: leaver, reason: "person_erased" });
+    gate.released = true;
+    const added = await adding;
+    await tickPastGrace();
+
+    expect({
+      added,
+      current: await recalledAs(colleague, wordOf(teamMark)),
+      version2: await historyAs(leaver, source, 2),
+      tables: await tablesHolding([theirs]),
+    }).toStrictEqual({
+      added: {
+        error: "Error: The Brain refused it: what this adds was erased",
+      },
+      current: [`Team plan ${wordOf(teamMark)}`],
+      version2: null,
+      tables: [],
+    });
+  });
+});
+
+describe("queued work about what is erased", { timeout: 120_000 }, () => {
+  it("drops an item waiting about an erased source before any tick, and its handler never runs", async () => {
+    const reader = await person();
+    const source = newSource();
+    await add(source, `Queued ${wordOf(newMark())}`, owner(reader));
+    await queueRecorded(source);
+    const before = await queuedAbout(source);
+
+    await eraseSource(env, { source, reason: "deleted" });
+    const atOnce = await queuedAbout(source);
+    await workBrain(env, new Date());
+    await workBrain(env, new Date());
+
+    expect({ before, atOnce, ran: handled.get(keyOf(source)) }).toStrictEqual({
+      before: 1,
+      atOnce: 0,
+      ran: undefined,
+    });
+  });
+
+  it("stops an item running about a source as it is erased: its signal aborts, its row goes, it never runs again, and what it would write for the source is not kept", async () => {
+    const reader = await person();
+    const source = newSource();
+    const access: Access = { kind: "owner", person: reader };
+    await chunkedSource(source, access, 3, `Running ${wordOf(newMark())}`);
+    const chunks = await currentChunksOf(source);
+    const gate = { reached: false, released: false };
+    handling.set(keyOf(source), async (signal) => {
+      gate.reached = true;
+      while (!gate.released) {
+        // oxlint-disable-next-line no-await-in-loop -- until the test says
+        await scheduler.wait(10);
+      }
+      const seen = handled.get(keyOf(source));
+      if (seen !== undefined) {
+        const reason: unknown = signal.reason;
+        seen.abortedAfter =
+          signal.aborted && reason instanceof WorkError
+            ? reason.code
+            : undefined;
+      }
+    });
+    await queueRecorded(source);
+    const ticking = settled(workBrain(env, new Date()));
+    await vi.waitFor(() => {
+      expect(gate.reached).toBeTruthy();
+    });
+
+    await eraseSource(env, { source, reason: "deleted" });
+    const queuedAtOnce = await queuedAbout(source);
+    gate.released = true;
+    await ticking;
+    // As an embedding handler would, once it ends: its codes for the
+    // erased chunks are refused by the store's own check.
+    const model = modelOf();
+    await putCodes(model, chunks);
+    const rows = await chunkRowsOf(source);
+    await workBrain(env, new Date());
+
+    expect({
+      queuedAtOnce,
+      seen: handled.get(keyOf(source)),
+      queued: await queuedAbout(source),
+      rows,
+      codes: await runInDurableObject(
+        store(),
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              `SELECT count(*) AS count FROM vector_codes
+              WHERE model = (SELECT id FROM vector_models WHERE name = ?)`,
+              model.name
+            )
+            .one().count
+      ),
+    }).toStrictEqual({
+      queuedAtOnce: 0,
+      seen: {
+        runs: 1,
+        abortedAfter: "erased",
+      },
+      queued: 0,
+      rows: [],
+      codes: 0,
+    });
+  });
+});
+
+describe(
+  "a person's erasure replayed after a restore",
+  { timeout: 120_000 },
+  () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("erases again what it erased, though the older copy's readers say the source was shared then", async () => {
+      const [leaver, colleague] = await Promise.all([person(), person()]);
+      const team = await teamOf(leaver, colleague);
+      const mark = newMark();
+      const source = newSource();
+      await add(source, `Team draft ${wordOf(mark)}`, {
+        kind: "team",
+        teamId: team,
+      });
+      const backup = await copyOfStore();
+      // Narrowed to the leaver, then the leaver erased: the source goes
+      // whole, its first version, the team's, too.
+      await add(source, `Mine now ${wordOf(newMark())}`, owner(leaver));
+      await erasePerson(env, { personId: leaver, reason: "person_erased" });
+      await tickUntilErased();
+      await tickPastGrace();
+
+      await restoreStore(backup);
+      const atOnce = {
+        recalled: await recalledAs(colleague, wordOf(mark)),
+        history: await historyAs(colleague, source, 1),
+      };
+      await tickUntilErased();
+
+      expect({ atOnce, tables: await tablesHolding([mark]) }).toStrictEqual({
+        atOnce: { recalled: [], history: null },
+        tables: [],
+      });
+    });
+
+    it("erases again only what it erased, though the older copy's readers say a source was theirs alone then", async () => {
+      const [leaver, colleague] = await Promise.all([person(), person()]);
+      const team = await teamOf(leaver, colleague);
+      const [teamFirst, theirs, teamNow] = [newMark(), newMark(), newMark()];
+      const source = newSource();
+      await add(source, `Team first ${wordOf(teamFirst)}`, {
+        kind: "team",
+        teamId: team,
+      });
+      await add(source, `Theirs ${wordOf(theirs)}`, owner(leaver));
+      const backup = await copyOfStore();
+      // Shared again, then the leaver erased: only their own version goes.
+      await add(source, `Team now ${wordOf(teamNow)}`, {
+        kind: "team",
+        teamId: team,
+      });
+      await erasePerson(env, { personId: leaver, reason: "person_erased" });
+      await tickUntilErased();
+
+      await restoreStore(backup);
+      await tickUntilErased();
+
+      // The team's first version was not erased, and is still kept; the
+      // leaver's own is gone. (Without a current version, which the copy
+      // had as theirs, the source answers no one: the team's latest version
+      // came after the copy.)
+      const teamFirstTables = await tablesHolding([teamFirst]);
+      expect({
+        tables: await tablesHolding([theirs]),
+        teamFirstKept: teamFirstTables.includes("chunks"),
+      }).toStrictEqual({
+        tables: [],
+        teamFirstKept: true,
+      });
+    });
+  }
+);
+
+describe(
+  "an erasure that takes more than one batch, or that fails",
+  { timeout: 120_000 },
+  () => {
+    it("hides a version of a source others read from its person's history before the batch that deletes it", async () => {
+      const [leaver, colleague] = await Promise.all([person(), person()]);
+      const team = await teamOf(leaver, colleague);
+      const access: Access = { kind: "owner", person: leaver };
+      // Two of their own sources, more than one batch, before the version.
+      await chunkedSource(newSource(), access, 600, "Archive one");
+      await chunkedSource(newSource(), access, 600, "Archive two");
+      const source = newSource();
+      const theirs = `Mine first ${wordOf(newMark())}`;
+      await add(source, theirs, owner(leaver));
+      await add(source, "Ours now", { kind: "team", teamId: team });
+      const before = await historyAs(leaver, source, 1);
+
+      await erasePerson(env, { personId: leaver, reason: "withdrawn" });
+      const { erasing } = await brainWorkOverview(env);
+
+      expect({
+        before,
+        erasing,
+        history: await historyAs(leaver, source, 1),
+        current: await historyAs(colleague, source, 2),
+      }).toStrictEqual({
+        before: theirs,
+        erasing: 1,
+        history: null,
+        current: "Ours now",
+      });
+    });
+
+    it("goes on with the erasures behind a version that keeps failing, says so, and deletes it once it can", async () => {
+      const reader = await person();
+      const [stuck, free] = [newSource(), newSource()];
+      const [stuckMark, freeMark] = [newMark(), newMark()];
+      await add(stuck, `Stuck ${wordOf(stuckMark)}`, owner(reader));
+      await add(free, `Free ${wordOf(freeMark)}`, owner(reader));
+      // Deleting the stuck source's version fails, as a fault would.
+      await runInDurableObject(store(), (_instance, state) => {
+        state.storage.sql.exec(
+          `CREATE TRIGGER test_stuck_version BEFORE DELETE ON source_versions
+        WHEN OLD.source = '${keyOf(stuck)}'
+        BEGIN SELECT RAISE(ABORT, 'stuck by the test'); END`
+        );
+      });
+
+      await eraseSource(env, { source: stuck, reason: "deleted" });
+      await eraseSource(env, { source: free, reason: "deleted" });
+      await workBrain(env, new Date());
+      const failing = await brainWorkOverview(env);
+      const whileStuck = {
+        erasing: failing.erasing,
+        failed: failing.stepsFailed.erase?.reason,
+        free: await tablesHolding([freeMark]),
+        stuckHidden: await recalledAs(reader, wordOf(stuckMark)),
+      };
+      await runInDurableObject(store(), (_instance, state) => {
+        state.storage.sql.exec("DROP TRIGGER test_stuck_version");
+      });
+      await workBrain(env, new Date());
+      const after = await brainWorkOverview(env);
+
+      expect({
+        whileStuck,
+        after: {
+          erasing: after.erasing,
+          failed: after.stepsFailed.erase,
+          stuck: await tablesHolding([stuckMark]),
+        },
+      }).toStrictEqual({
+        whileStuck: {
+          erasing: 1,
+          failed: "failed",
+          free: [],
+          stuckHidden: [],
+        },
+        after: { erasing: 0, failed: null, stuck: [] },
+      });
+    });
+  }
+);
+
+describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps an erasure whose ledger write failed hidden, writes it at the next tick, and erases it again after a restore", async () => {
+    const reader = await person();
+    const mark = newMark();
+    const source = newSource();
+    await add(source, `Unwritten ${wordOf(mark)}`, owner(reader));
+    const backup = await copyOfStore();
+    await nextBucketPut(async () => {
+      await Promise.resolve();
+      throw new Error("R2 failed, by the test");
+    });
+
+    const erased = await settled(
+      eraseSource(env, { source, reason: "deleted" })
+    );
+    const unwritten = {
+      recalled: await recalledAs(reader, wordOf(mark)),
+      ledger: await ledgerCount(source),
+    };
+    await workBrain(env, new Date());
+    const written = await ledgerCount(source);
+    const { stepsFailed } = await brainWorkOverview(env);
+    await restoreStore(backup);
+    const restored = await recalledAs(reader, wordOf(mark));
+
+    expect({
+      erased,
+      unwritten,
+      written,
+      ledgerFailed: stepsFailed.ledger,
+      restored,
+    }).toStrictEqual({
+      erased: {
+        error: "Error: The Brain could not record the erasure: erase it again",
+      },
+      unwritten: { recalled: [], ledger: 0 },
+      written: 1,
+      ledgerFailed: null,
+      restored: [],
+    });
+  });
+
+  it("writes one entry for an erasure whose write landed though its answer was lost, retried", async () => {
+    const reader = await person();
+    const source = newSource();
+    await add(source, `Landed ${wordOf(newMark())}`, owner(reader));
+    await nextBucketPut(async (_state, write) => {
+      await write();
+      throw new Error("The answer lost, by the test");
+    });
+
+    const first = await settled(
+      eraseSource(env, { source, reason: "deleted" })
+    );
+    const retried = await settled(
+      eraseSource(env, { source, reason: "deleted" })
+    );
+
+    expect({
+      first: "error" in first,
+      retried,
+      ledger: await ledgerCount(source),
+    }).toStrictEqual({
+      first: true,
+      retried: { value: undefined },
+      ledger: 1,
+    });
+  });
+
+  it("answers nothing but its overview while it can't read its ledger, with why, and everything once it can", async () => {
+    const reader = await person();
+    const source = newSource();
+    await add(source, "Readable", owner(reader));
+    const bucket = env.BRAIN_OBJECTS;
+    const unreachable = {
+      list: async () => {
+        await Promise.resolve();
+        throw new Error("R2 out of reach, by the test");
+      },
+    };
+    Reflect.set(env, "BRAIN_OBJECTS", unreachable);
+    try {
+      await killStore();
+      const refused = await settled(historyAs(reader, source, 1));
+      const overview = await settled(brainWorkOverview(env));
+      Reflect.set(env, "BRAIN_OBJECTS", bucket);
+      // Read again once its wait is over.
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 31_000 });
+      const read = await historyAs(reader, source, 1);
+
+      expect({
+        refused,
+        ledger:
+          "value" in overview ? overview.value.stepsFailed.ledger?.reason : "",
+        read,
+      }).toStrictEqual({
+        refused: {
+          error:
+            "Error: The Brain can't read its erasure ledger yet, so it answers nothing: try again shortly",
+        },
+        ledger: "failed",
+        read: "Readable",
+      });
+    } finally {
+      Reflect.set(env, "BRAIN_OBJECTS", bucket);
+    }
+  });
+});

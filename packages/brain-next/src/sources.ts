@@ -1,3 +1,4 @@
+import { log } from "@grasp-os/shared/log";
 import { and, eq, max } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
@@ -16,7 +17,13 @@ import {
   sourceChanges,
   sourceVersions,
 } from "./db/schema.ts";
-import { isErased, subjectOf } from "./erasure.ts";
+import {
+  erasuresSoFar,
+  isErased,
+  isPersonErasedSince,
+  keepSubject,
+  subjectOf,
+} from "./erasure.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -69,17 +76,24 @@ interface Adding {
   readonly added: NewSource;
   /** The source's key as the erasure ledger names it (erasure.ts). */
   readonly subject: string;
+  /**
+   * When readable by one person alone: that person as the erasure ledger
+   * names them, and where the record of erasures was as the add began,
+   * before its file was written: an erasure of them since may have missed
+   * it (`record`).
+   */
+  readonly onlyFor?: { subject: string; soFar: number };
   readonly hash: string;
   readonly readers: string;
   readonly indexed: boolean;
 }
 
 /**
- * What an add to an erased source says: its key is closed, and an add to
- * it is refused for good (erasure.ts). Said only to the producer that
- * names the source.
+ * What an add says that an erasure closed: to an erased source, whose key
+ * is closed for good, or for a person alone that began before that
+ * person's erasure (erasure.ts). Said only to the producer that adds it.
  */
-const erasedSource = "The Brain refused it: this source was erased";
+const erasedSource = "The Brain refused it: what this adds was erased";
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
 const versionFields = {
@@ -161,8 +175,16 @@ const record = (
   storage: DurableObjectStorage,
   adding: Adding
 ): SourceVersionRef | undefined => {
-  // Erased while this add wrote its file: closed for good.
-  if (isErased(storage.sql, adding.subject)) {
+  // Erased while this add wrote its file: closed for good. Or for one
+  // person alone, whose erasure came after it began and before this: it
+  // may have missed it, so it is refused, writing nothing (its file is
+  // left to the sweep). An add that begins after it is new, and kept.
+  const { onlyFor } = adding;
+  if (
+    isErased(storage.sql, adding.subject) ||
+    (onlyFor !== undefined &&
+      isPersonErasedSince(storage.sql, onlyFor.subject, onlyFor.soFar))
+  ) {
     throw new Error(erasedSource);
   }
   // The same change, or the same text and readers, added meanwhile.
@@ -209,6 +231,7 @@ const record = (
   db.insert(sourceChanges)
     .values({ source: added.source, change: added.change, versionRow: row })
     .run();
+  keepSubject(storage.sql, added.source, adding.subject);
   // The version before stops being found by meaning as it stops being
   // current: its chunks' vector codes go with the pointer.
   const replaced = db
@@ -244,10 +267,14 @@ export const addVersion = async (
   added: NewSource,
   { indexed }: { indexed: boolean }
 ): Promise<SourceVersionRef> => {
+  const soFar = erasuresSoFar(storage.sql);
   const body = encoder.encode(added.text);
   const adding: Adding = {
     added,
     subject: await subjectOf(added.source),
+    ...(added.access.kind === "owner"
+      ? { onlyFor: { subject: await subjectOf(added.access.person), soFar } }
+      : {}),
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
     indexed,
@@ -290,7 +317,13 @@ const textOf = async (
   file: string
 ): Promise<string | null> => {
   const object = await bucket.get(fileKeyOf(file));
-  return object === null ? null : await object.text();
+  if (object === null) {
+    // One fixed event and no ids, so a file deleted by mistake is noticed
+    // and nothing of what it held is told.
+    log.warn("brain.version_file_missing", {});
+    return null;
+  }
+  return await object.text();
 };
 
 /**
