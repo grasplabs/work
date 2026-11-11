@@ -15,8 +15,11 @@ import { readableSql } from "./reader-sets.ts";
 // - a 1-bit code, a bit per dimension set where the vector is above the
 //   model's centre, which every search scans, all of it, by Hamming
 //   distance;
-// - an 8-bit code of the unit vector, which re-scores the
-//   `rescoreCandidates` nearest by Hamming into a cosine.
+// - an 8-bit code, which re-scores the `rescoreCandidates` nearest by
+//   Hamming: the score is the cosine of the question's code and the
+//   chunk's, each by its own length, so it is within -1 to 1, a code
+//   scores 1 against itself, and one direction scores alike at every
+//   magnitude.
 //
 // The scan is exact; the final order is the cosine's only among the
 // candidates, so a chunk whose 1-bit code falls outside them is missed
@@ -82,28 +85,47 @@ const bitsOf = (
   return bits;
 };
 
+/** The dot product of two 8-bit codes. */
+const dotOf = (a: Int8Array, b: Int8Array): number => {
+  let sum = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    sum += (a[index] ?? 0) * (b[index] ?? 0);
+  }
+  return sum;
+};
+
 /**
- * `vector`'s 8-bit code: its unit vector in steps of `scale`, the largest
- * component `fineSteps` steps. Divided by its largest component before
- * anything is squared, so no magnitude a finite, non-zero vector can have
- * underflows to zero or overflows to infinity.
+ * `vector`'s 8-bit code, its largest component `fineSteps` steps, and one
+ * over the code's own length. Divided by its largest component first, so
+ * no magnitude a finite, non-zero vector can have underflows to zero or
+ * overflows to infinity. The length is the rounded code's, so the cosine
+ * of two codes (`cosineOf`) is 1 for a code with itself, and codes of one
+ * direction score alike whatever their magnitudes.
  */
 const fineOf = (
   vector: readonly number[]
-): { scale: number; fine: Int8Array<ArrayBuffer> } => {
+): { inverseLength: number; fine: Int8Array<ArrayBuffer> } => {
   const largest = Math.max(...vector.map((value) => Math.abs(value)));
-  let squares = 0;
-  for (const value of vector) {
-    const part = value / largest;
-    squares += part * part;
-  }
-  return {
-    scale: 1 / (fineSteps * Math.sqrt(squares)),
-    fine: Int8Array.from(vector, (value) =>
-      Math.round((value / largest) * fineSteps)
-    ),
-  };
+  const fine = Int8Array.from(vector, (value) =>
+    Math.round((value / largest) * fineSteps)
+  );
+  // At least one step is `fineSteps` (the largest component), so the
+  // length is never zero.
+  return { inverseLength: 1 / Math.sqrt(dotOf(fine, fine)), fine };
 };
+
+/**
+ * The cosine of two 8-bit codes, by one over each one's length: within -1
+ * to 1 however floating point rounds it.
+ */
+const cosineOf = (
+  a: { inverseLength: number; fine: Int8Array },
+  b: { inverseLength: number; fine: Int8Array }
+): number =>
+  Math.min(
+    1,
+    Math.max(-1, dotOf(a.fine, b.fine) * a.inverseLength * b.inverseLength)
+  );
 
 /**
  * The bytes of `view`, as SQLite takes a blob: every array here owns its
@@ -256,15 +278,15 @@ export const putVectors = (
       .toArray()
       .at(0);
     if (found !== undefined) {
-      const { scale, fine } = fineOf(vector);
+      const { inverseLength, fine } = fineOf(vector);
       sql.exec(
-        `INSERT INTO vector_codes (chunk, model, reader_set, bits, scale, fine)
+        `INSERT INTO vector_codes (chunk, model, reader_set, bits, inverse_length, fine)
         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (chunk, model) DO NOTHING`,
         found.chunk,
         stored.id,
         found.reader_set,
         bytesOf(bitsOf(vector, stored.centre)),
-        scale,
+        inverseLength,
         bytesOf(fine)
       );
       groups.add(found.reader_set);
@@ -312,22 +334,26 @@ export const removeVectorsOf = (sql: SqlStorage, versionRow: number): void => {
 };
 
 /**
- * Repacks the block with the most removed codes: its other codes go back
- * to their group's tail, which packs again, and the block and its marks
- * are deleted. Run it in one transaction. True when another block holds
+ * The marked block a repack takes: the first by id, in the marks' own
+ * primary key, so it reads one mark however many wait. Which block comes
+ * first doesn't matter: every marked one is repacked in its turn, and
+ * none is read by a scan for its removed codes meanwhile.
+ */
+const nextMarkedSql = `
+SELECT vector_blocks.id AS block, vector_blocks.model AS model,
+  vector_blocks.reader_set AS reader_set
+FROM (SELECT block FROM vector_removed ORDER BY block LIMIT 1) AS marked
+CROSS JOIN vector_blocks ON vector_blocks.id = marked.block`;
+
+/**
+ * Repacks one block holding removed codes: its other codes go back to
+ * their group's tail, which packs again, and the block and its marks are
+ * deleted. Run it in one transaction. True when another block holds
  * removed codes.
  */
 export const repackVectors = (sql: SqlStorage): boolean => {
   const marked = sql
-    .exec<{ block: number; model: number; reader_set: number }>(
-      `SELECT vector_removed.block AS block, vector_blocks.model AS model,
-        vector_blocks.reader_set AS reader_set
-      FROM vector_removed
-      JOIN vector_blocks ON vector_blocks.id = vector_removed.block
-      GROUP BY vector_removed.block
-      ORDER BY count(*) DESC, vector_removed.block
-      LIMIT 1`
-    )
+    .exec<{ block: number; model: number; reader_set: number }>(nextMarkedSql)
     .toArray()
     .at(0);
   if (marked === undefined) {
@@ -500,7 +526,8 @@ CROSS JOIN vector_codes INDEXED BY vector_codes_group_idx
  */
 const candidatesSql = `
 WITH ${readableSql}
-SELECT vector_codes.chunk AS chunk, vector_codes.scale AS scale,
+SELECT vector_codes.chunk AS chunk,
+  vector_codes.inverse_length AS inverse_length,
   vector_codes.fine AS fine, source_versions.source AS source,
   source_versions.version AS version, chunks.position AS position
 FROM json_each(?4) AS candidate
@@ -526,20 +553,11 @@ const maskOf = (removed: string, size: number): Uint8Array | undefined => {
   return mask;
 };
 
-/** The dot product of two 8-bit codes. */
-const dotOf = (a: Int8Array, b: Int8Array): number => {
-  let sum = 0;
-  for (let index = 0; index < a.length; index += 1) {
-    sum += (a[index] ?? 0) * (b[index] ?? 0);
-  }
-  return sum;
-};
-
 /**
  * The chunks of current versions `reader` may read whose codes for the
  * model are nearest `vector`, nearest first: the `rescoreCandidates`
  * nearest by Hamming distance over every such code, block by block, then
- * re-scored by their 8-bit codes into a cosine. Ties go to the older
+ * re-scored by the cosine of their 8-bit codes. Ties go to the older
  * chunk. Memory stays at one block and the candidates.
  */
 export const searchVectors = (
@@ -597,20 +615,23 @@ export const searchVectors = (
   const scored = sql
     .exec<{
       chunk: number;
-      scale: number;
+      inverse_length: number;
       fine: ArrayBuffer;
       source: string;
       version: number;
       position: number;
     }>(candidatesSql, stored.id, person, readerJson, JSON.stringify(candidates))
     .toArray()
-    .map(({ chunk, scale, fine, source, version, position }) => ({
+    .map(({ chunk, inverse_length, fine, source, version, position }) => ({
       chunk,
       found: {
         source,
         version,
         position,
-        score: asked.scale * scale * dotOf(asked.fine, new Int8Array(fine)),
+        score: cosineOf(asked, {
+          inverseLength: inverse_length,
+          fine: new Int8Array(fine),
+        }),
       } satisfies FoundChunk,
     }));
   scored.sort((a, b) => b.found.score - a.found.score || a.chunk - b.chunk);

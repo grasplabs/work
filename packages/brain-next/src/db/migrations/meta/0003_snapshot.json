@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bc5c0865-5fe7-46a0-96e9-31a895797ccb",
+  "id": "373caea2-47cb-4f75-916a-fe8f314368e0",
   "prevId": "6168eea4-21a8-48d3-94da-1c41821dc149",
   "tables": {
     "chunks": {
@@ -598,8 +598,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "scale": {
-          "name": "scale",
+        "inverse_length": {
+          "name": "inverse_length",
           "type": "real",
           "primaryKey": false,
           "notNull": true,

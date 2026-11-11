@@ -334,6 +334,10 @@ const restart = async (): Promise<void> => {
 /** Repacks one block holding removed codes: true when more are left. */
 const repack = async (): Promise<boolean> => await store().repackVectors();
 
+/** How many repacks it takes until no block holds removed codes. */
+const repackCount = async (done = 0): Promise<number> =>
+  (await repack()) ? await repackCount(done + 1) : done + 1;
+
 /** Repacks until no block holds removed codes. */
 const repackAll = async (): Promise<void> => {
   if (await repack()) {
@@ -616,8 +620,8 @@ describe("the Brain's vector way", () => {
       const { sql } = state.storage;
       for (const chunk of [hidden, stale]) {
         sql.exec(
-          `INSERT INTO vector_codes (chunk, model, reader_set, bits, scale, fine)
-          SELECT ?, model, reader_set, bits, scale, fine FROM vector_codes
+          `INSERT INTO vector_codes (chunk, model, reader_set, bits, inverse_length, fine)
+          SELECT ?, model, reader_set, bits, inverse_length, fine FROM vector_codes
           WHERE chunk = ? AND model = (SELECT id FROM vector_models WHERE name = ?)`,
           chunk,
           ownRow,
@@ -628,6 +632,65 @@ describe("the Brain's vector way", () => {
     expect(rounded(await search(model, question, reader))).toStrictEqual(
       rounded(bruteForce(question, own))
     );
+  });
+
+  it("scores a vector of unequal components 1 against itself, and one direction alike at every magnitude, ties to the older chunk", async () => {
+    const model = newModel();
+    const reader = { person: readers.few, groups: [] };
+    // Components that don't round evenly to 8 bits: 1, 0.5 and the rest.
+    const direction = randomReals().map((value, index) => {
+      if (index === 0) {
+        return 1;
+      }
+      return index === 1 ? 0.5 : value / 4;
+    });
+    const [first, second, ...rest] = company.own;
+    if (first === undefined || second === undefined) {
+      throw new Error("No chunks");
+    }
+    await put(model, [
+      { chunk: first, vector: direction.map((value) => value * 3) },
+      { chunk: second, vector: direction },
+      ...rest.map((chunk) => ({ chunk, vector: randomReals() })),
+    ]);
+    const found = await search(model, direction, reader, 2);
+    expect(found.map(placeOf)).toStrictEqual([first, second]);
+    for (const { score } of found) {
+      expect(score).toBeLessThanOrEqual(1);
+      expect(score).toBeCloseTo(1, 12);
+    }
+  });
+
+  it("repacks one marked block a call, however many are marked", async () => {
+    const model = newModel();
+    const person = principal("person");
+    // Three blocks, each of a replaced source's 600 codes and another's
+    // 424.
+    const replaced: string[] = [];
+    for (let made = 0; made < 3; made += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order: one block each
+      const gone = randomly(await sourceOf(owner(person), 600));
+      // oxlint-disable-next-line no-await-in-loop -- in order: one block each
+      const kept = randomly(await sourceOf(owner(person), 424));
+      // oxlint-disable-next-line no-await-in-loop -- in order: one block each
+      await put(model, [...gone, ...kept]);
+      replaced.push(gone[0]?.chunk.source ?? "");
+    }
+    for (const source of replaced) {
+      // oxlint-disable-next-line no-await-in-loop -- one version at a time
+      await newVersionOf(source, owner(person), 1);
+    }
+    const marked = await runInDurableObject(
+      store(),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ blocks: number }>(
+            "SELECT count(DISTINCT block) AS blocks FROM vector_removed"
+          )
+          .one().blocks
+    );
+    expect(marked).toBeGreaterThanOrEqual(3);
+    await expect(repackCount()).resolves.toBe(marked);
   });
 
   it("takes a centre of -0 as the same centre as one of 0", async () => {

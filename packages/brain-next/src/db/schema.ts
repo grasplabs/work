@@ -247,9 +247,9 @@ export const vectorCodes = sqliteTable(
       .references(() => readerSets.id),
     /** The 1-bit code: a bit per dimension, as uint32s. */
     bits: blob({ mode: "buffer" }).notNull(),
-    /** What one step of the 8-bit code is worth. */
-    scale: real().notNull(),
-    /** The 8-bit code: the unit vector in steps of `scale`, as int8s. */
+    /** One over the 8-bit code's own length, so scores are its cosine. */
+    inverseLength: real("inverse_length").notNull(),
+    /** The 8-bit code: the vector, its largest component 127 steps, as int8s. */
     fine: blob({ mode: "buffer" }).notNull(),
     block: integer().references(() => vectorBlocks.id),
     slot: integer(),

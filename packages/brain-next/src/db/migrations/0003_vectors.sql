@@ -14,7 +14,7 @@ CREATE TABLE `vector_codes` (
 	`model` integer NOT NULL,
 	`reader_set` integer NOT NULL,
 	`bits` blob NOT NULL,
-	`scale` real NOT NULL,
+	`inverse_length` real NOT NULL,
 	`fine` blob NOT NULL,
 	`block` integer,
 	`slot` integer,
