@@ -542,6 +542,8 @@ describe("embedder", () => {
     const sizes = "The encoder file has sizes that don't add up.";
     const cases: [string, Uint8Array, string][] = [
       ["truncated", new Uint8Array(encoderFloat.slice(0, 5000)), sizes],
+      // Cut inside the per-layer header words.
+      ["header-cut", new Uint8Array(encoderFloat.slice(0, 40)), sizes],
       ["width", withHeaderWord(headerWord.hidden, 120), shape],
       ["layers", withHeaderWord(headerWord.layers, 2 ** 30), shape],
       // A head count whose product with the head width wraps on 32 bits.

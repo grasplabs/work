@@ -34,6 +34,7 @@ from tokenizers import Tokenizer
 from transformers import AutoConfig, ModernBertModel
 
 HD = 64  # the head width the runtime is written for
+EPS = 1e-5  # the runtime's norm epsilon (rust/src/encoder.rs)
 LOCAL, NORM = 1, 2  # a layer's kind: local attention, an attention norm; bits 8 to 15 its rotary table
 SMOOTH = {"qkv": 0.6, "o": 0.0, "ff1": 0.6, "ff2": 0.8}  # per-channel rescaling strength at each linear input
 FLOAT_CHANNELS = 16  # feed-forward channels of the last layer kept in float
@@ -96,7 +97,11 @@ def load_model(src: Path) -> ModernBertModel:
     model pruned layer by layer (fewer heads or a narrower feed-forward in some layers) loads as it is, where
     from_pretrained would size every layer by the config."""
     model = ModernBertModel(AutoConfig.from_pretrained(src, attn_implementation="eager"))
+    # The encoder's weights only: a masked-LM checkpoint's head (head.*, decoder.*) is not part of it. Every encoder
+    # weight must be there (strict below).
+    names = set(model.state_dict())
     state = {k.removeprefix("model."): v.float() for k, v in load_file(src / "model.safetensors").items()}
+    state = {k: v for k, v in state.items() if k in names}
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear) and f"{name}.weight" in state:
             out, inp = state[f"{name}.weight"].shape
@@ -132,13 +137,38 @@ def calibrate(src: Path, texts: list[str], max_tokens: int) -> dict[str, np.ndar
     return acc
 
 
+def check_model(src: Path, cfg) -> None:
+    """Refuses a model the runtime would run wrongly without noticing: everything the encoder file doesn't say and
+    the runtime assumes (rust/src/encoder.rs). Each layer's widths and norms are read from its weights."""
+    assert cfg.model_type == "modernbert", cfg.model_type  # pre-norm layers, rotate-half rotary, GeGLU (value, gate)
+    # The head width: 64, which the kernels, the attention scale and the rotary tables are written for. A pruned
+    # model drops whole heads, so the config's head width stays the model's.
+    head = getattr(cfg, "head_dim", None) or cfg.hidden_size // cfg.num_attention_heads
+    assert head == HD and cfg.hidden_size % cfg.num_attention_heads == 0, f"head width {head}, the runtime runs {HD}"
+    assert not cfg.norm_bias and not cfg.attention_bias and not cfg.mlp_bias, "biases"
+    assert cfg.hidden_activation == "gelu", cfg.hidden_activation  # exact erf GELU in GeGLU
+    assert cfg.norm_eps == EPS, cfg.norm_eps
+    for t in cfg.layer_types:
+        rope = cfg.rope_parameters[t]
+        assert t in ("full_attention", "sliding_attention") and rope["rope_type"] == "default", (t, rope)
+        assert rope.get("partial_rotary_factor", 1.0) == 1.0, rope  # the whole head rotates
+    # Mean pooling, as the runtime pools. A sentence-transformers model says how it pools; a bare encoder is taken as
+    # mean-pooled (the test fixtures).
+    modules = src / "modules.json"
+    if modules.exists():
+        kinds = [m["type"].rsplit(".", 1)[-1] for m in json.loads(modules.read_text())]
+        assert kinds in (["Transformer", "Pooling"], ["Transformer", "Pooling", "Normalize"]), kinds
+        pool = next(m for m in json.loads(modules.read_text()) if m["type"].endswith("Pooling"))
+        modes = json.loads((src / pool["path"] / "config.json").read_text())
+        on = sorted(k for k, v in modes.items() if k.startswith("pooling_mode_") and v)
+        assert on == ["pooling_mode_mean_tokens"] and modes.get("include_prompt", True), modes
+
+
 def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn: int) -> bytes:
     T = {k: v.float().numpy() for k, v in load_file(src / "model.safetensors").items()}
     T = {k.removeprefix("model."): v for k, v in T.items()}
     h, nl = cfg.hidden_size, cfg.num_hidden_layers
-    assert not cfg.norm_bias and not cfg.attention_bias and not cfg.mlp_bias and cfg.hidden_activation == "gelu"
     thetas = sorted({cfg.rope_parameters[t]["rope_theta"] for t in cfg.layer_types})
-    assert all(cfg.rope_parameters[t]["rope_type"] == "default" for t in cfg.layer_types)
     shapes: list[int] = []
     parts: list[bytes] = [pad16(le(T["embeddings.norm.weight"])), pad16(le(T["final_norm.weight"]))]
     for theta in thetas:
@@ -261,6 +291,7 @@ def export(src: Path, out: Path, float_files: bool, calibration: list[str] | Non
     # At most 1,024: past it attention's integer sums could overflow, and the embedder refuses the file
     # (rust/src/encoder.rs, MAX_TOKENS).
     assert 2 <= max_tokens <= min(1024, cfg.max_position_embeddings) and max_tokens % 8 == 0, max_tokens
+    check_model(src, cfg)
     out.mkdir(parents=True, exist_ok=True)
     int8 = not float_files
     cal = calibrate(src, calibration, max_tokens) if int8 and calibration else None

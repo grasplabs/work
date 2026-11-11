@@ -36,7 +36,8 @@ struct Layer {
     /// Whether the attention block starts with a norm (every layer but a ModernBERT's first).
     norm: bool,
     rope: usize,
-    /// Attention heads, and the attention's width (heads x 64).
+    /// Attention heads, and the attention's width (heads x 64). Per layer, as a model pruned head by head keeps
+    /// fewer heads in some layers than in others (the training work prunes heads gradually).
     nh: usize,
     a: usize,
     ff: usize,
@@ -153,7 +154,8 @@ impl Model {
         if blob.get(0..4) != Some(&MAGIC_ENC[..]) || word(1) != Some(VERSION as usize) {
             return Err(InitError::Header);
         }
-        let w = |i: usize| word(i).ok_or(InitError::Header);
+        // Past the magic and version, a header cut short is a file shorter than it says.
+        let w = |i: usize| word(i).ok_or(InitError::Size);
         let (variant, h, nl, maxn, window, nrope) = (w(2)?, w(3)?, w(4)?, w(5)?, w(6)?, w(7)?);
         let shape_ok = variant <= 1
             && (16..=MAX_HIDDEN).contains(&h)
