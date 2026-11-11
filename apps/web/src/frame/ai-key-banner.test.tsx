@@ -9,13 +9,14 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, createContext, use } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { formatSince } from "../format.ts";
-import { AiKeyBanner } from "./ai-key-banner.tsx";
+import { AiKeyBanner, failingUpFront } from "./ai-key-banner.tsx";
+import type { FailingProvider } from "./ai-key-banner.tsx";
 
 // The banner over every page while one of the organization's AI provider
 // providers fails its calls, from what core's listing says of each one:
@@ -104,6 +105,24 @@ const limiting = {
 const since = formatSince(failingSince);
 
 let root: Root | undefined;
+
+/** What the shell handed the banner, read as it was entered. */
+const Handed = createContext<FailingProvider[] | undefined>(undefined);
+
+/** Someone of the organization with `role`, signed in. */
+const personWith = (role: Identity["role"]): Identity => ({
+  userId: "user-1",
+  email: "someone@example.com",
+  name: "Someone",
+  teams: [],
+  expiresAt: new Date(Date.now() + minute).toISOString(),
+  role,
+  staff: false,
+});
+
+/** Core not answering a read in time. */
+const unreachable = async (): Promise<AiProvidersListing> =>
+  await Promise.reject(new Error("Grasp can't be reached right now."));
 
 /** What the banner says for `identity`, core listing `listing`. */
 const bannerFor = async (
@@ -225,6 +244,67 @@ describe("the AI key banner", () => {
     );
 
     expect(replaced).toStrictEqual({ said: "", links: [] });
+  });
+
+  it("comes with the page when read before it showed, and keeps it when the page is loaded again without a read", async () => {
+    const asAdmin = personWith("admin");
+    let reads = 0;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const Banner = () => (
+      <AiKeyBanner
+        failing={use(Handed)}
+        identity={asAdmin}
+        // Core never answers the banner's own read: what shows is what was
+        // read before the page showed.
+        providers={async () => {
+          reads += 1;
+          return await Promise.withResolvers<never>().promise;
+        }}
+      />
+    );
+    // In a router, as the shell has it, handed what the shell read.
+    const router = createRouter({
+      routeTree: createRootRoute({ component: Banner }),
+      history: createMemoryHistory(),
+    });
+    const pageWith = (failing?: FailingProvider[]) => (
+      <I18nProvider i18n={i18n}>
+        <Handed value={failing}>
+          <RouterProvider router={router} />
+        </Handed>
+      </I18nProvider>
+    );
+    // Read as the shell was entered.
+    const entered = await failingUpFront(
+      asAdmin,
+      async () => await Promise.resolve(listingWith(refused))
+    );
+    await act(async () => {
+      root = createRoot(host);
+      root.render(pageWith(entered));
+      await router.load();
+    });
+    const asEntered = host.textContent;
+    // Loaded again (`invalidate`): the shell reads nothing then.
+    act(() => {
+      root?.render(pageWith());
+    });
+
+    expect({ asEntered, reloaded: host.textContent, reads }).toStrictEqual({
+      asEntered: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`,
+      reloaded: `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`,
+      reads: 0,
+    });
+  });
+
+  it("is read before the page only for the organization's own admins, and otherwise left to the banner, as when core doesn't answer", async () => {
+    const listing = async () => await Promise.resolve(listingWith(refused));
+
+    expect({
+      member: await failingUpFront(personWith("user"), listing),
+      adminOffline: await failingUpFront(personWith("admin"), unreachable),
+    }).toStrictEqual({ member: undefined, adminOffline: undefined });
   });
 
   it("says nothing of the organization's own key while its AI runs on Grasp's AI", async () => {

@@ -13,9 +13,11 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { KeyRoundIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { readWithin } from "../core-connection.ts";
+import type { CoreConnection } from "../core-connection.ts";
 import { formatSince } from "../format.ts";
 
 // What the organization's own admins see over every page while one of its
@@ -120,6 +122,32 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
   );
 };
 
+/** The organization's providers as core lists them, read over `core`. */
+export const providersOf =
+  (core: Pick<CoreConnection, "withSession">) =>
+  async (): Promise<AiProvidersListing> =>
+    await readWithin(core, async (session) => await session.aiProviders.list());
+
+/**
+ * The failing providers `identity` is shown, read before the page shows.
+ * Unread (undefined), which leaves it to the banner, for anyone but the
+ * organization's own admins (the banner reads at once should they become
+ * one while on the page) and when core doesn't answer in time.
+ */
+export const failingUpFront = async (
+  identity: Identity,
+  providers: () => Promise<AiProvidersListing>
+): Promise<FailingProvider[] | undefined> => {
+  if (!isMemberAdmin(identity)) {
+    return undefined;
+  }
+  try {
+    return failingProviders(await providers());
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * A banner over the page for each AI provider whose calls fail,
  * for the organization's own admins; nothing for anyone else, or while
@@ -128,13 +156,24 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
 export const AiKeyBanner = ({
   identity,
   providers,
+  failing: readBefore,
 }: {
   identity: Identity;
   /** The organization's providers as core lists them (`aiProviders.list`). */
   providers: () => Promise<AiProvidersListing>;
+  /**
+   * The failing providers, read before the page showed (`failingUpFront`):
+   * the banner then comes with the page, and never pushes it down under
+   * the person's pointer as it arrives. Without it, read once mounted.
+   * Only what it had as it mounted counts: after that it reads again
+   * itself, every minute.
+   */
+  failing?: FailingProvider[];
 }) => {
-  const [failing, setFailing] = useState<FailingProvider[]>([]);
+  const [failing, setFailing] = useState<FailingProvider[]>(readBefore ?? []);
   const shown = isMemberAdmin(identity);
+  // As it was mounted: the shell hands it over once, as it is entered.
+  const readAtMount = useRef(readBefore !== undefined);
   useEffect(() => {
     let live = true;
     const read = async () => {
@@ -150,7 +189,9 @@ export const AiKeyBanner = ({
         // Not read just now: the banner stays as it was until the next read.
       }
     };
-    void read();
+    if (!readAtMount.current) {
+      void read();
+    }
     const timer = shown
       ? setInterval(() => {
           void read();
