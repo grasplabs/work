@@ -442,6 +442,16 @@ describe("instruction files", setUpTime, () => {
       expect(texts).not.toContain(marker);
       expect(texts).toContain(`agent ${agentId}`);
     }
+    // A control character, which could split a key, is refused.
+    for (const file of [
+      { scope: "agent", agentId: `a\npe${personId}` },
+      { scope: "person", personId: `${personId}\u0000` },
+    ] satisfies InstructionFile[]) {
+      // oxlint-disable-next-line no-await-in-loop -- two, in order
+      await expect(saveOutcome(asPerson(admin), file)).resolves.toMatch(
+        /^(?:Error: Refused|permission\.invalid)/u
+      );
+    }
   });
 
   it("refuses a context that isn't one, whole", async () => {
