@@ -39,11 +39,15 @@ CREATE INDEX `source_versions_file_idx` ON `source_versions` (`file`);--> statem
 CREATE UNIQUE INDEX `source_versions_source_version_unique` ON `source_versions` (`source`,`version`);--> statement-breakpoint
 -- The words of every chunk, for recall (recall.ts): its text as search
 -- reads it (words.ts `foldForSearch`), written by the store in the same
--- transaction as the chunk. Recall reads it from here on; `sources` and
--- `source_words` (0000, 0001) are left for a later migration to drop.
+-- transaction as the chunk. Contentless, as `source_words` (0001): the
+-- chunk's text is in `chunks`, and recall reads back only the rowid. Recall
+-- reads it from here on; `sources` and `source_words` are left for a later
+-- migration to drop (expand, then contract).
 CREATE VIRTUAL TABLE `chunk_words` USING fts5(
 	text,
-	tokenize = 'unicode61 remove_diacritics 2'
+	content = '',
+	contentless_delete = 1,
+	tokenize = 'unicode61 remove_diacritics 2 categories ''L* N* Co M*'''
 );
 --> statement-breakpoint
 CREATE TRIGGER `chunks_words_delete` AFTER DELETE ON `chunks` BEGIN
