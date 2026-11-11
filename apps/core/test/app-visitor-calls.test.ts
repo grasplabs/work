@@ -760,11 +760,12 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       "portal.keep",
       "portal.peek",
     ]);
-    const ana = await visitor(mail, link, `ana@${domain}`);
+    const address = `ana@${domain}`;
+    const ana = await visitor(mail, link, address);
     const session = await env.DB.prepare(
-      "SELECT id FROM app_visitor_sessions WHERE app_id = ?"
+      "SELECT id FROM app_visitor_sessions WHERE app_id = ? AND address = ?"
     )
-      .bind(app)
+      .bind(app, address)
       .first<{ id: string }>();
     const appId = appIdSchema.parse(app);
 

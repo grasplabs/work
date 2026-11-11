@@ -70,7 +70,9 @@ import { requireNotStaff } from "./sharing.ts";
 // - Unseen. Every call admitted is audited as the visitor, with the
 //   function granted and the version. Every refusal is audited too: not
 //   granted (an action and core's own queries included), too many calls,
-//   and a page build refused before or after it ran. Granting is audited as the builder, one event per
+//   and a page build refused before or after it ran, and what the App's
+//   store or the host refuses a call (`app.use.refused`, at most once a
+//   call, by their session alone). Granting is audited as the builder, one event per
 //   function granted or taken away, with the version.
 
 /** The functions App `app`'s version `version` grants visitors, by path. */
