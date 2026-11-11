@@ -13,11 +13,6 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
-import {
-  handOverChatTurn,
-  handOverRun,
-  handOverUpload,
-} from "../src/brain-producers.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { BrainStore } from "../src/index.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
@@ -25,7 +20,6 @@ import { published } from "./apps.ts";
 import {
   coreProbes,
   instructionProbes,
-  producerProbes,
   storeProbes,
   textOf,
 } from "./brain-next-surfaces.ts";
@@ -53,9 +47,7 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 //
 // The same runs again across a change in membership, which counts from
 // the very next recall, and as a reader of everything but the source
-// nobody may read. Markers are planted through core's producers too
-// (brain-producers.ts): the holder's upload, chat turn and run are the
-// holder's alone, never a team-mate's or an admin's.
+// nobody may read.
 
 const idp = mockIdp();
 
@@ -118,10 +110,6 @@ const surfaces: [string, Probe][] = [
   ]),
   ...Object.entries(instructionProbes).map(([name, probe]): [string, Probe] => [
     `instructions ${name}`,
-    probe,
-  ]),
-  ...Object.entries(producerProbes).map(([name, probe]): [string, Probe] => [
-    `producer ${name}`,
     probe,
   ]),
   ...Object.entries(storeProbes).map(([name, probe]): [string, Probe] => [
@@ -291,24 +279,19 @@ describe(
   "the new Brain leaks nothing to a reader without access",
   { timeout: 120_000 },
   () => {
-    it("has a probe for every member core, its producers and the Brain's store expose", async () => {
+    it("has a probe for every member core and the Brain's store expose", async () => {
       const coreMembers = Object.keys(await import("../src/brain-next.ts"));
       const instructionMembers = Object.keys(
         await import("../src/instruction-files.ts")
-      );
-      const producerMembers = Object.keys(
-        await import("../src/brain-producers.ts")
       );
 
       expect({
         core: coreMembers.toSorted(),
         instructions: instructionMembers.toSorted(),
-        producers: producerMembers.toSorted(),
         store: storeMethods().toSorted(),
       }).toStrictEqual({
         core: Object.keys(coreProbes).toSorted(),
         instructions: Object.keys(instructionProbes).toSorted(),
-        producers: Object.keys(producerProbes).toSorted(),
         store: Object.keys(storeProbes).toSorted(),
       });
     });
@@ -319,19 +302,12 @@ describe(
       await answeringProvider(() => {});
       // The holder builds Apps, so they can make the outsider a user of
       // two.
-      const [
-        holderApi,
-        { userId: outsider },
-        { userId: teamMate },
-        { userId: admin },
-      ] = await Promise.all([
+      const [holderApi, { userId: outsider }] = await Promise.all([
         signedInApi(idp, "builder"),
         signedInWithRole(idp, "user"),
-        signedInWithRole(idp, "user"),
-        signedInWithRole(idp, "admin"),
       ]);
       const holder = holderApi.userId;
-      const secretTeam = await newTeam(holder, teamMate);
+      const secretTeam = await newTeam(holder);
       const ownTeam = await newTeam(outsider);
       const sharedWord = `s${unique()}`;
       const unknownWord = `u${unique()}`;
@@ -344,9 +320,6 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
-        "the holder's upload": markerWord(),
-        "the holder's chat turn": markerWord(),
-        "the holder's run": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -357,9 +330,6 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
-        "the holder's upload": uploadMarker,
-        "the holder's chat turn": chatMarker,
-        "the holder's run": runMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -482,60 +452,6 @@ describe(
         narrowedId
       );
 
-      // Through core's producers, each the holder's own.
-      const uploadSource: SourceRef = {
-        producer: "upload",
-        id: crypto.randomUUID(),
-      };
-      const chatSource: SourceRef = {
-        producer: "chat",
-        id: crypto.randomUUID(),
-      };
-      const runSource: SourceRef = { producer: "run", id: crypto.randomUUID() };
-      const handedOver = [
-        await handOverUpload(env, {
-          uploadId: crypto.randomUUID(),
-          documentId: uploadSource.id,
-          uploadedBy: holder,
-          sensitive: false,
-          text: `Uploaded contract ${sharedWord} ${uploadMarker}`,
-          stillCurrent: async () => await Promise.resolve(true),
-        }),
-        await handOverChatTurn(env, {
-          chatId: chatSource.id,
-          answerId: 1,
-          personId: holder,
-          restricted: false,
-          said: [
-            { role: "user", text: `Asked ${sharedWord} ${chatMarker}` },
-            { role: "assistant", text: "Answered" },
-          ],
-        }),
-        await handOverRun(env, {
-          runId: runSource.id,
-          principalId: holder,
-          restricted: false,
-          status: "completed",
-          readEnd: async () =>
-            await Promise.resolve({ result: { note: runMarker } }),
-        }),
-      ];
-      // The producers' markers, as the holder's own.
-      const producerMarkers = [uploadMarker, chatMarker, runMarker];
-      const producerSources = everyVersionOf(
-        uploadSource,
-        chatSource,
-        runSource
-      );
-      // Whether each text the holder recalls holds its marker: not the
-      // producers' format, which is theirs to change.
-      const holderFinds = await Promise.all(
-        producerMarkers.map(async (marker) => {
-          const texts = await textsFor(holder, marker);
-          return texts.map((text) => text.includes(marker));
-        })
-      );
-
       // The markers are there to find for those who may read them.
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
         teamSource,
@@ -558,12 +474,8 @@ describe(
           noneMarker,
           narrowedMarker,
           ...instructionMarkers,
-          ...producerMarkers,
         ],
-        hiddenVersions: [
-          ...everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
-          ...producerSources,
-        ],
+        hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         usedApps,
         instructionGroups,
@@ -590,12 +502,8 @@ describe(
             noneMarker,
             narrowedMarker,
             ...instructionMarkers,
-            ...producerMarkers,
           ],
-          hiddenVersions: [
-            ...everyVersionOf(...ownerIds, noneId, narrowedId),
-            ...producerSources,
-          ],
+          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
         },
         notJoined,
         { inRecall }
@@ -659,67 +567,6 @@ describe(
               String
             );
 
-      // A team-mate of the holder reads the team's source, and none of the
-      // holder's own, the producers' included.
-      const { "a team's source the outsider isn't in": _team, ...notTeam } =
-        markers;
-      const asTeamMate = await findingsOf(
-        "a team-mate of the holder",
-        {
-          personId: teamMate,
-          reader: { person: teamMate, groups: [`team:${secretTeam}`] },
-          sharedWord,
-          unknownWord,
-          markers: [
-            ownerMarker,
-            noneMarker,
-            narrowedMarker,
-            ...instructionMarkers,
-            ...producerMarkers,
-          ],
-          hiddenVersions: [
-            ...everyVersionOf(...ownerIds, noneId, narrowedId),
-            ...producerSources,
-          ],
-          // They neither build nor use the holder's Apps.
-          hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
-          instructionGroups,
-        },
-        notTeam,
-        { inRecall }
-      );
-
-      // An admin gets no reading right of their own in the Brain.
-      const asAdmin = await findingsOf(
-        "an admin",
-        {
-          personId: admin,
-          reader: { person: admin, groups: [] },
-          sharedWord,
-          unknownWord,
-          markers: Object.values(markers),
-          hiddenVersions: [
-            ...everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
-            ...producerSources,
-          ],
-          // An admin builds every App (app-access.ts), so the holder's App's
-          // file is theirs to get when they work on it.
-          hiddenInstructionFiles: [holderFile, agentFile, appFile],
-          instructionGroups,
-        },
-        markers,
-        {
-          inRecall,
-          // An admin may write the company's and each agent's instruction
-          // file (instruction-files.ts): saving is probed as the others
-          // only, so the admin's pass never writes marked text into the
-          // files that later passes read.
-          among: surfaces.filter(
-            ([name]) => name !== "instructions saveInstructionFile"
-          ),
-        }
-      );
-
       // Any request any provider got, whoever's key it carried.
       const prompted: Finding[] = [];
       for (const [name, marker] of Object.entries(markers)) {
@@ -740,12 +587,8 @@ describe(
           ...inTheTeam,
           ...outAgain,
           ...asHolder,
-          ...asTeamMate,
-          ...asAdmin,
           ...prompted,
         ],
-        handedOver,
-        holderFinds,
         outsiderFinds,
         joinedFinds,
         leftFinds,
@@ -753,8 +596,6 @@ describe(
         outsiderOpens,
       }).toStrictEqual({
         findings: [],
-        handedOver: [true, true, true],
-        holderFinds: [[true], [true], [true]],
         outsiderFinds: [handbook],
         joinedFinds: [teamSource],
         leftFinds: [],

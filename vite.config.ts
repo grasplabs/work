@@ -300,12 +300,8 @@ export default defineConfig({
       {
         // The modules that reach the Brain through core's module, each
         // probed by the permission harness: the instruction files' rules,
-        // the clock's sweep, and core's producers.
-        files: [
-          "apps/core/src/instruction-files.ts",
-          "apps/core/src/clock.ts",
-          "apps/core/src/brain-producers.ts",
-        ],
+        // and the clock's sweep.
+        files: ["apps/core/src/instruction-files.ts", "apps/core/src/clock.ts"],
         rules: {
           "no-restricted-imports": [
             "error",

@@ -84,7 +84,6 @@ import {
   gt,
   inArray,
   isNull,
-  lt,
   max,
   sql,
 } from "drizzle-orm";
@@ -120,8 +119,6 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
-import { handOverChatTurn } from "./brain-producers.ts";
-import type { Said } from "./brain-producers.ts";
 import {
   channelText,
   heldWriteRefusal,
@@ -139,8 +136,6 @@ import type {
 } from "./chat-harness.ts";
 import { chatMessageOf, noteLinksOf, partialOf } from "./chat-messages.ts";
 import {
-  saidInFullOf,
-  saidMax,
   saidOf,
   searchTermsOf,
   snippetOf,
@@ -393,18 +388,6 @@ const storedMessageSchema = z.custom<Message>(
 );
 
 /**
- * All a stored message said (`saidInFullOf`), from its JSON: nothing for
- * one that can't be read as a message.
- */
-const saidInFullOfStored = (stored: string): string => {
-  try {
-    return saidInFullOf(storedMessageSchema.parse(JSON.parse(stored)));
-  } catch {
-    return "";
-  }
-};
-
-/**
  * `shown` with the files its question carried, by its ID in `carried`;
  * as it is for any other message, or a question that carried none.
  */
@@ -647,33 +630,6 @@ const copiedSchema = z.object({
   answer: z.number().optional(),
 });
 
-/**
- * The latest final answer of a chat its turns' captures named, as
- * `answered:<chat>` (`captureTurn`): the new Brain's copy of the chat is
- * as of it. A capture's answer ended its turn; the last answer its
- * copies kept (`copied:`) can be a step that called a tool mid-turn.
- */
-const answeredKeyPrefix = "answered:";
-
-/**
- * Messages a chat's hand-over reads at a time, newest first, until what
- * they said reaches {@link saidReadBytes} or none are left.
- */
-const saidBatch = 32;
-
-/**
- * UTF-8 bytes of what was said a chat's hand-over reads, newest first,
- * before it stops: the Brain's own bound on a source's text (1,000,000
- * bytes, `sourceTextMaxBytes`, which only brain-next.ts may import). That
- * is past the producer's cut (`textMaxBytes` in brain-producers.ts,
- * 900,000 bytes, labels included), which alone decides what is kept: a
- * message the read stops after is one that cut would leave out anyway.
- * Here only so a long chat is never read whole for its latest messages.
- */
-const saidReadBytes = 1_000_000;
-
-const encoder = new TextEncoder();
-
 /** Most characters of what a chat read that its writes are traced to. */
 const traceCharsMax = 200_000;
 
@@ -830,8 +786,8 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Set once its person's erasure began (`erasePerson`): from then on no
-   * capture of a turn is delivered to today's Brain, so none lands after
-   * the erasure took out what today's Brain held of their chats.
+   * capture of a turn is delivered to the Brain, so none lands after the
+   * erasure took out what the Brain held of their chats.
    */
   #erasing = false;
 
@@ -847,15 +803,6 @@ export class Workspace extends DurableObject<Env> {
    * In memory, for the one call that deletes: a restart ends that call.
    */
   readonly #deleting = new Set<ChatId>();
-
-  /**
-   * The last hand-over to the new Brain queued for each chat
-   * (`#queueHandOver`), each starting once the one before it settled. In
-   * memory: the Workspace is one Durable Object, so this orders every
-   * hand-over of its chats; one cut off by eviction is lost, as any
-   * hand-over in the background is.
-   */
-  readonly #handOvers = new Map<ChatId, Promise<void>>();
 
   /** How long the alarm waits before delivering audit events again. */
   #auditRetryMs = auditRetryMs.first;
@@ -1489,168 +1436,6 @@ export class Workspace extends DurableObject<Env> {
       .onConflictDoNothing({ target: brainCaptureIntents.eventId })
       .run();
     this.ctx.waitUntil(this.#captureSoon());
-    // The new Brain's copy (brain-producers.ts), in the background so the
-    // turn never waits; it never rejects. As of the latest final answer a
-    // capture of the chat named, not the turn's own: a capture handed over
-    // late, after a later turn's, would otherwise add the older
-    // conversation as the chat's current version. Never as of a later
-    // turn's step still under way, which can be a call to a tool: only a
-    // capture names an answer that ended its turn. Keyed by that answer,
-    // so every capture that finds the same latest answer, early, late or
-    // delivered again, is the same text under the same change: one
-    // version, never older text on top. Queued behind the chat's earlier
-    // hand-overs (`#queueHandOver`), so two captures' hand-overs land in
-    // the order their answers were named. Nothing once its person's
-    // erasure began: the producer checks core's record of the erasure
-    // itself, as for every producer. Neither `deleteChat` nor
-    // `erasePerson` waits for one under way: until the Brain can delete,
-    // waiting gains nothing, and it would hold a person's delete on a slow
-    // Brain.
-    const answerId = this.#advanceLatestAnswer(chatId, capture.answerId);
-    if (answerId === undefined) {
-      return;
-    }
-    const { personId } = chat;
-    this.#queueHandOver(chatId, answerId, async () => {
-      let said: Said[];
-      try {
-        said = this.#saidUpTo(chatId, answerId);
-      } catch {
-        // Only a storage error reaches here (`#saidUpTo` passes over a
-        // message it can't read): nothing is handed over, and the capture
-        // above stands; the next turn's capture hands the chat over whole.
-        return;
-      }
-      await handOverChatTurn(this.env, {
-        chatId,
-        answerId,
-        personId,
-        // Never, past the guard above: said to the producer all the same.
-        restricted: false,
-        said,
-      });
-    });
-  }
-
-  /**
-   * Runs `handOver`, chat `chatId`'s hand-over as of answer `answerId`, in
-   * the background once the chat's hand-over queued before it settled,
-   * the turn never waiting. Two captures' hand-overs started side by side
-   * could land in either order: the earlier one, landing last, would add
-   * its unseen `answer-<id>` as a new version, so the older conversation
-   * would become current. Passed over when it starts if a later answer
-   * was named meanwhile (`answeredKeyPrefix`): a hand-over queued after it
-   * carries that answer, and all this one said with it. Never rejects, so
-   * one failing never stops the next; the chat's entry goes once its last
-   * hand-over settled.
-   */
-  #queueHandOver(
-    chatId: ChatId,
-    answerId: number,
-    handOver: () => Promise<void>
-  ): void {
-    const before = this.#handOvers.get(chatId) ?? Promise.resolve();
-    const queued = (async () => {
-      await before;
-      try {
-        if (this.#latestAnswer(chatId) > answerId) {
-          return;
-        }
-        await handOver();
-      } catch {
-        // A storage error reading the latest answer: this one is lost, as
-        // one cut off by eviction is; the next capture hands the chat over.
-      }
-    })();
-    this.#handOvers.set(chatId, queued);
-    this.ctx.waitUntil(
-      (async () => {
-        await queued;
-        if (this.#handOvers.get(chatId) === queued) {
-          this.#handOvers.delete(chatId);
-        }
-      })()
-    );
-  }
-
-  /** The latest final answer a capture of chat `chatId` named; 0 for none. */
-  #latestAnswer(chatId: ChatId): number {
-    const stored = this.ctx.storage.kv.get(`${answeredKeyPrefix}${chatId}`);
-    return typeof stored === "number" ? stored : 0;
-  }
-
-  /**
-   * The latest final answer of chat `chatId`: the later of a capture's own
-   * (`answerId`, the answer that ended its turn) and the latest an earlier
-   * capture named (`answeredKeyPrefix`), kept as the latest; none when
-   * neither is.
-   */
-  #advanceLatestAnswer(
-    chatId: ChatId,
-    answerId: number | null
-  ): number | undefined {
-    const before = this.#latestAnswer(chatId);
-    const latest = Math.max(answerId ?? 0, before);
-    if (latest > before) {
-      this.ctx.storage.kv.put(`${answeredKeyPrefix}${chatId}`, latest);
-    }
-    return latest > 0 ? latest : undefined;
-  }
-
-  /**
-   * What was said in chat `chatId` up to message `lastId`, in order: the
-   * plain text the Workspace keeps of each message for searches
-   * (`#keepSaid`), so a step's result, which says nothing, stays out,
-   * labelled by the role its stored message names. Where that row may
-   * have been cut ({@link saidMax}) or is missing (a message kept before
-   * searches were), all it said is read from the message itself, so a
-   * long answer keeps its ending; one that can't be read is passed over,
-   * never blocking the rest. Read newest first, {@link saidBatch} at a
-   * time, until what was said reaches {@link saidReadBytes}: the producer
-   * keeps the latest messages only, so a long chat's oldest are never
-   * read. Synchronous reads.
-   */
-  #saidUpTo(chatId: ChatId, lastId: number): Said[] {
-    const newestFirst: Said[] = [];
-    let bytes = 0;
-    let below = lastId + 1;
-    while (bytes <= saidReadBytes) {
-      const batch = this.#db
-        .select({
-          id: chatMessages.id,
-          said: chatSearchText.said,
-          // Read only where SQLite reads it as JSON: a malformed message
-          // has no role, so it says nothing.
-          role: sql<
-            string | null
-          >`case when json_valid(${chatMessages.message}) then json_extract(${chatMessages.message}, '$.role') end`,
-          // The message itself only where its row is missing or may have
-          // been cut: as many UTF-8 bytes as `saidMax`, which a text of
-          // `saidMax` UTF-16 code units always has at least.
-          whole: sql<
-            string | null
-          >`case when ${chatSearchText.said} is null or length(cast(${chatSearchText.said} as blob)) >= ${saidMax} then ${chatMessages.message} end`,
-        })
-        .from(chatMessages)
-        .leftJoin(chatSearchText, eq(chatSearchText.messageId, chatMessages.id))
-        .where(and(eq(chatMessages.chatId, chatId), lt(chatMessages.id, below)))
-        .orderBy(desc(chatMessages.id))
-        .limit(saidBatch)
-        .all();
-      for (const { said, role, whole } of batch) {
-        const text = whole === null ? (said ?? "") : saidInFullOfStored(whole);
-        if ((role === "user" || role === "assistant") && text !== "") {
-          newestFirst.push({ role, text });
-          bytes += encoder.encode(text).byteLength;
-        }
-      }
-      const oldest = batch.at(-1);
-      if (oldest === undefined || batch.length < saidBatch) {
-        break;
-      }
-      below = oldest.id;
-    }
-    return newestFirst.toReversed();
   }
 
   async #captureSoon(): Promise<void> {
@@ -3854,7 +3639,6 @@ export class Workspace extends DurableObject<Env> {
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
-        this.ctx.storage.kv.delete(`${answeredKeyPrefix}${id}`);
         this.#outboxed(by, "chat.deleted", id, { declined });
       });
       this.#deliverAudit();
