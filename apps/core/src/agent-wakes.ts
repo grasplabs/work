@@ -4,9 +4,10 @@ import type { AgentWake } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { modelErrors } from "@grasp-os/shared/models";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { nextScheduledRun } from "@grasp-os/shared/workflows";
-import { and, asc, eq, isNull, lte, or } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { requireAgentReaches } from "./agent-reach.ts";
@@ -58,6 +59,9 @@ const shortestGapMs = 60 * 60 * 1000;
 
 /** How long after a fire that couldn't start it is tried once more. */
 const retryAfterMs = 5 * 60 * 1000;
+
+/** A value to insert, as a column of the select that inserts it. */
+const value = <T>(literal: T, column: string) => sql<T>`${literal}`.as(column);
 
 /** Most characters of the opening line the chat is named with. */
 const titleLength = 60;
@@ -167,13 +171,9 @@ export const makeAgentWake = async (
     throw agentErrors.create("agent.wake_invalid");
   }
   const db = drizzle(env.DB);
-  const [organization, person, existing] = await Promise.all([
+  const [organization, person] = await Promise.all([
     readOrganization(env),
     memberOf(env.DB, parsed.data.personId),
-    db
-      .select({ id: agentWakes.id })
-      .from(agentWakes)
-      .where(eq(agentWakes.agentId, agent.id)),
   ]);
   const schedule = {
     cron: parsed.data.cron,
@@ -183,8 +183,7 @@ export const makeAgentWake = async (
   if (
     person === undefined ||
     nextAt === undefined ||
-    !firesRarely(schedule, now) ||
-    existing.length >= wakesPerAgent
+    !firesRarely(schedule, now)
   ) {
     throw agentErrors.create("agent.wake_invalid");
   }
@@ -206,7 +205,33 @@ export const makeAgentWake = async (
     changedAt: now,
   };
   await auditedBatch(env, db, [
-    db.insert(agentWakes).values(row),
+    // Only while the agent has room for one more, counted in the statement
+    // that inserts it: two made at once can't both be the last.
+    db.insert(agentWakes).select(
+      db
+        .select({
+          id: value(row.id, "id"),
+          agentId: value(row.agentId, "agent_id"),
+          cron: value(row.cron, "cron"),
+          timeZone: value(row.timeZone, "time_zone"),
+          personId: value(row.personId, "person_id"),
+          opening: value(row.opening, "opening"),
+          state: value(row.state, "state"),
+          nextAt: value(nextAt.getTime(), "next_at"),
+          retryAt: value(null, "retry_at"),
+          chatId: value(null, "chat_id"),
+          lastAt: value(null, "last_at"),
+          lastOutcome: value(null, "last_outcome"),
+          madeBy: value(row.madeBy, "made_by"),
+          madeAt: value(now.getTime(), "made_at"),
+          changedBy: value(row.changedBy, "changed_by"),
+          changedAt: value(now.getTime(), "changed_at"),
+        })
+        .from(sql`(SELECT 1)`)
+        .where(
+          sql`(SELECT count(*) FROM ${agentWakes} WHERE ${agentWakes.agentId} = ${row.agentId}) < ${wakesPerAgent}`
+        )
+    ),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
       action: "agent.wake.made",
@@ -221,6 +246,15 @@ export const makeAgentWake = async (
       },
     }),
   ]);
+  const kept = await db
+    .select({ id: agentWakes.id })
+    .from(agentWakes)
+    .where(eq(agentWakes.id, row.id))
+    .get();
+  if (kept === undefined) {
+    // The agent had all it may have by the time this one was written.
+    throw agentErrors.create("agent.wake_invalid");
+  }
   return wakeOf(row);
 };
 
@@ -330,6 +364,23 @@ const startTurn = async (env: Env, row: WakeRow): Promise<void> => {
       }
     }
   }
+  // No chat for someone who is no longer a member, or for a wake-up that
+  // was deleted meanwhile (as erasing its person does): read last, right
+  // before the chat is made.
+  const [member, still] = await Promise.all([
+    memberOf(env.DB, row.personId),
+    drizzle(env.DB)
+      .select({ id: agentWakes.id })
+      .from(agentWakes)
+      .where(eq(agentWakes.id, row.id))
+      .get(),
+  ]);
+  if (member === undefined) {
+    throw permissionErrors.create("permission.person_inactive");
+  }
+  if (still === undefined) {
+    throw agentErrors.create("agent.wake_unknown");
+  }
   const chat = await chats.createChat(
     row.opening.slice(0, titleLength),
     row.personId,
@@ -395,7 +446,16 @@ const fire = async (env: Env, row: WakeRow, now: Date): Promise<void> => {
         ? { retryAt: new Date(now.getTime() + retryAfterMs) }
         : {}),
     })
-    .where(eq(agentWakes.id, row.id));
+    // Only the wake-up as it was claimed: one an admin paused, or paused
+    // and turned back on, meanwhile keeps what they set, its cleared retry
+    // included.
+    .where(
+      and(
+        eq(agentWakes.id, row.id),
+        eq(agentWakes.state, "on"),
+        eq(agentWakes.changedAt, row.changedAt)
+      )
+    );
 };
 
 /**

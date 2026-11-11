@@ -291,4 +291,51 @@ describe("an agent's wake-ups", setUpTime, () => {
       "Returned:\nNobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
     ]);
   });
+
+  it("make no chat for someone who left the company, and keep why", async () => {
+    const { person, wakes } = await setUp();
+    const gateway = await fakeProvider(says("Nothing."));
+    const made = await wakes.makeAgentWake(chatAgentId, said(person.userId));
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(person.userId)
+      .run();
+    await startDueAgentWakes(env, dueOf(made));
+    const kept = await keptOf(wakes, made.id);
+    const chats = await workspace(
+      env,
+      personalWorkspaceId(person.userId)
+    ).chats(person.userId);
+    expect({
+      outcome: kept?.lastOutcome,
+      chats,
+      asked: gateway.requests.length,
+    }).toStrictEqual({
+      outcome: "permission.person_inactive",
+      chats: [],
+      asked: 0,
+    });
+  });
+
+  it("give one agent no more wake-ups than it may have, however many are made at once", async () => {
+    const { person, wakes } = await setUp();
+    // One short of all it may have, then three more at the same moment.
+    for (let made = 0; made < 19; made += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another, as an admin makes them
+      await wakes.makeAgentWake(chatAgentId, said(person.userId));
+    }
+    const outcomes = await Promise.all(
+      [1, 2, 3].map(
+        async () =>
+          await outcome(wakes.makeAgentWake(chatAgentId, said(person.userId)))
+      )
+    );
+    const kept = await wakes.agentWakes(chatAgentId);
+    expect({
+      kept: kept.length,
+      outcomes: outcomes.toSorted(),
+    }).toStrictEqual({
+      kept: 20,
+      outcomes: ["agent.wake_invalid", "agent.wake_invalid", "ok"],
+    });
+  });
 });
