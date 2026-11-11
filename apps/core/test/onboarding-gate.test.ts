@@ -4,6 +4,7 @@ import { noContext } from "@grasp-os/shared/onboarding-context";
 import {
   defaultFlow,
   flowPresets,
+  flowScreens,
   setupSteps,
 } from "@grasp-os/shared/onboarding-flow";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
@@ -370,6 +371,35 @@ describe("a company's Grasp opening by its flow", { timeout: 60_000 }, () => {
       finished: true,
       openings: [["person", "finished"]],
       member: true,
+    });
+  });
+
+  it("stays closed once staff closed it again, whatever its admin says they finished", async () => {
+    const commands = adminCommands();
+    await commands.close();
+    await commands.setFlow(flowPresets.setup);
+    const admin = await asAdmin();
+    await admin.onboarding.finishSteps(flowScreens(flowPresets.setup));
+    const opened = await gateNow();
+    await commands.close();
+
+    const events = await auditedDuring(async () => {
+      await admin.onboarding.finishSteps([]);
+      await admin.onboarding.finishSteps(flowScreens(flowPresets.setup));
+    });
+    const closed = await gateNow();
+    const member = await signIn(idp, "microsoft", entraPerson(acmeTenant));
+
+    expect({
+      opened: opened.open,
+      closed: closed.open,
+      openings: openings(events),
+      member: member.session,
+    }).toStrictEqual({
+      opened: true,
+      closed: false,
+      openings: [],
+      member: undefined,
     });
   });
 

@@ -394,20 +394,25 @@ export const setGateThreshold = async (
 
 /**
  * Opens the gate where the company's flow says it opens by itself, as
- * `by`, who just changed the flow or finished a screen: at once where it
- * goes through no onboarding; and where nobody is interviewed, once its
- * admin finished every screen the flow has. A flow with interviews opens
- * only on Grasp's go. Opening is all it does: a flow never closes the
- * gate, which stays staff's to do, and an open gate is left as it is.
+ * `by`, on what they just did. Staff who `set` the flow open it at once
+ * where the company goes through no onboarding, and where nobody is
+ * interviewed and its admin already finished every screen the flow has.
+ * The admin who `finished` a screen opens it only where nobody is
+ * interviewed and that made every screen finished: callers say so only
+ * for a screen newly finished, so an admin can't open again a gate staff
+ * closed after it. A flow with interviews opens only on Grasp's go.
+ * Opening is all it does: a flow never closes the gate, which stays
+ * staff's to do, and an open gate is left as it is.
  */
 export const openAsFlowSays = async (
   env: Env,
-  by: AuditActor
+  by: AuditActor,
+  on: "set" | "finished"
 ): Promise<void> => {
   const store = onboardingStore(env);
   const { flow } = await store.flow();
   const opening = flowOpening(flow);
-  if (opening === "go") {
+  if (opening === "go" || (on === "finished" && opening !== "finished")) {
     return;
   }
   if (opening === "finished") {

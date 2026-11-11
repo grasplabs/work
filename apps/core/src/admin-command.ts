@@ -185,7 +185,7 @@ const applyChange = async (
       await store.releaseDue();
       // A flow that opens by itself opens the company's Grasp now: no
       // onboarding at all, or one its admin already finished.
-      await openAsFlowSays(env, by);
+      await openAsFlowSays(env, by, "set");
       return;
     }
     default: {

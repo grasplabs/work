@@ -382,13 +382,15 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         setupPlaceSchema,
         { done: steps }
       );
-      const place = await onboardingStore(this.#env).finishSteps(
-        parsed.done,
-        actorOf(person)
-      );
+      const store = onboardingStore(this.#env);
+      const before = await store.place();
+      const place = await store.finishSteps(parsed.done, actorOf(person));
       // The last screen of an onboarding that interviews nobody opens the
-      // company's Grasp, as its admin.
-      await openAsFlowSays(this.#env, actorOf(person));
+      // company's Grasp, as its admin: only as they finish it, so saying
+      // it again never opens a gate staff closed since.
+      if (place.done.length > before.done.length) {
+        await openAsFlowSays(this.#env, actorOf(person), "finished");
+      }
       return place;
     });
   }
