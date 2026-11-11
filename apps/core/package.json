@@ -37,6 +37,7 @@
     "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/pi-durable": "catalog:",
     "@grasp-os/brain": "workspace:*",
+    "@grasp-os/brain-next": "workspace:*",
     "@grasp-os/chat": "workspace:*",
     "@grasp-os/compiler": "workspace:*",
     "@grasp-os/connector-kit": "workspace:*",

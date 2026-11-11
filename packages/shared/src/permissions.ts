@@ -243,6 +243,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // One chat's agent (core's src/chat-session.ts).
   "CHAT_SESSIONS",
   "BRAIN_OBJECTS",
+  // The Brain's store (core's src/brain-next.ts).
+  "BRAIN_STORE",
   "BUILD_WAIT_MS",
   "BUILTINS",
   "CAPABILITY_SIGNING_KEY",
