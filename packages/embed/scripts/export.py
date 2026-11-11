@@ -20,7 +20,14 @@ layer by layer exports as it is). The embedder runs any shape the header says, w
 The encoder reads at most --max-tokens tokens (default 512, as the reference truncates); its buffers and rotary
 tables are sized to that, not to the config's max_position_embeddings, which the module's memory may not hold.
 
-Usage: python -I export.py <model dir> <out dir> [--float] [--calibration texts.json] [--max-tokens 512]
+Which layers are local comes from config.json's layer_types, one per layer. A model whose layers were cut must list
+them, each kept layer's kind from its original position: transformers would otherwise derive kinds from each layer's
+new index, which is wrong after a cut. A config without the list (any ModernBERT saved before transformers 5, such as
+the published bekko-a8m) is refused unless --uncut asserts that the checkpoint is an unmodified published model, whose
+kinds transformers derives from its config (global every n layers); then its layer count and its attention norms
+(none on the first layer, one on every other) are checked against its weights.
+
+Usage: python -I export.py <model dir> <out dir> [--float] [--calibration texts.json] [--max-tokens 512] [--uncut]
 Needs numpy, torch, transformers, safetensors and tokenizers."""
 import argparse
 import json
@@ -29,6 +36,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from safetensors import safe_open
 from safetensors.torch import load_file
 from tokenizers import Tokenizer
 from transformers import AutoConfig, ModernBertModel
@@ -144,15 +152,28 @@ def calibrate(src: Path, texts: list[str], max_tokens: int) -> dict[str, np.ndar
     return acc
 
 
-def check_model(src: Path, cfg) -> None:
+def check_model(src: Path, cfg, uncut: bool = False) -> None:
     """Refuses a model the runtime would run wrongly without noticing: everything the encoder file doesn't say and
     the runtime assumes (rust/src/encoder.rs). Each layer's widths and norms are read from its weights."""
     assert cfg.model_type == "modernbert", cfg.model_type  # pre-norm layers, rotate-half rotary, GeGLU (value, gate)
     # Which layers are local, and their rotary bases, come from the config's layer_types, one per kept layer in
     # order. Without it transformers derives them from each layer's new index (global every n layers), which is
-    # wrong for a model whose layers were cut: so it must be written out, and match the layer count.
+    # wrong for a model whose layers were cut: so it must be written out, or the model asserted uncut (--uncut).
     raw = json.loads((src / "config.json").read_text())
-    assert len(raw.get("layer_types", [])) == cfg.num_hidden_layers, "config.json must list layer_types, one per layer"
+    if "layer_types" in raw:
+        assert len(raw["layer_types"]) == cfg.num_hidden_layers, "config.json lists layer_types for another layer count"
+    else:
+        assert uncut, (
+            "config.json lists no layer_types, so which layers are local can't be known for a model whose layers were "
+            "cut. If this is an unmodified published model, pass --uncut: it asserts that, and the kinds transformers "
+            "derives from the config are used."
+        )
+        with safe_open(src / "model.safetensors", "pt") as f:
+            keys = {k.removeprefix("model.") for k in f.keys()}
+        layers = {int(k.split(".")[1]) for k in keys if k.startswith("layers.")}
+        assert layers == set(range(cfg.num_hidden_layers)), f"weights for layers {sorted(layers)}, config says {cfg.num_hidden_layers}"
+        norms = [f"layers.{l}.attn_norm.weight" in keys for l in range(cfg.num_hidden_layers)]
+        assert norms == [l > 0 for l in range(cfg.num_hidden_layers)], f"attention norms {norms}: not an uncut ModernBERT"
     # The head width: 64, which the kernels, the attention scale and the rotary tables are written for. A pruned
     # model drops whole heads, so the config's head width stays the model's.
     head = getattr(cfg, "head_dim", None) or cfg.hidden_size // cfg.num_attention_heads
@@ -297,13 +318,13 @@ def tokenizer(src: Path) -> bytes:
     return blob + b"".join(pieces)
 
 
-def export(src: Path, out: Path, float_files: bool, calibration: list[str] | None, max_tokens: int = MAX_TOKENS) -> dict[str, int]:
+def export(src: Path, out: Path, float_files: bool, calibration: list[str] | None, max_tokens: int = MAX_TOKENS, uncut: bool = False) -> dict[str, int]:
     """Writes the three model files into `out`; returns their sizes."""
     cfg = AutoConfig.from_pretrained(src)
     # At most 1,024: past it attention's integer sums could overflow, and the embedder refuses the file
     # (rust/src/encoder.rs, MAX_TOKENS).
     assert 2 <= max_tokens <= min(1024, cfg.max_position_embeddings) and max_tokens % 8 == 0, max_tokens
-    check_model(src, cfg)
+    check_model(src, cfg, uncut)
     out.mkdir(parents=True, exist_ok=True)
     int8 = not float_files
     cal = calibrate(src, calibration, max_tokens) if int8 and calibration else None
@@ -319,6 +340,11 @@ if __name__ == "__main__":
     ap.add_argument("model", type=Path)
     ap.add_argument("out", type=Path)
     ap.add_argument("--float", action="store_true", help="float32 encoder and token table, for verification")
+    ap.add_argument(
+        "--uncut",
+        action="store_true",
+        help="assert the checkpoint is an unmodified published model: needed when config.json lists no layer_types",
+    )
     ap.add_argument("--calibration", type=Path, help="JSON list of calibration texts for the int8 encoder")
     ap.add_argument(
         "--max-tokens",
@@ -330,4 +356,4 @@ if __name__ == "__main__":
     )
     args = ap.parse_args()
     texts = json.loads(args.calibration.read_text()) if args.calibration else None
-    print(export(args.model, args.out, args.float, texts, args.max_tokens))
+    print(export(args.model, args.out, args.float, texts, args.max_tokens, args.uncut))
