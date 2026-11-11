@@ -7,6 +7,8 @@ import {
   newSourceSchema,
   recallRequestSchema,
   sweepRequestSchema,
+  vectorSearchSchema,
+  vectorsToPutSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
@@ -16,6 +18,9 @@ import type {
   SourceVersion,
   SourceVersionRef,
   SweepRequest,
+  VectorSearch,
+  VectorsFound,
+  VectorsToPut,
   VersionRequest,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
@@ -23,6 +28,7 @@ import { sweepFiles } from "./files.ts";
 import { recall } from "./recall.ts";
 import { addVersion, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
+import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
 
 /** What the store needs of its host's Worker: the Brain's bucket. */
 export interface BrainStoreEnv {
@@ -103,5 +109,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.ctx.blockConcurrencyWhile(async () => {
       await sweepFiles(this.#db, this.env.BRAIN_OBJECTS, at);
     });
+  }
+
+  /** Keeps vectors of current chunks as their codes, in one transaction. */
+  putVectors(request: VectorsToPut): void {
+    const vectors = checked(vectorsToPutSchema, request);
+    this.ctx.storage.transactionSync(() => {
+      putVectors(this.ctx.storage.sql, vectors);
+    });
+  }
+
+  /** What the reader may read of current chunks, nearest the vector first. */
+  searchVectors(request: VectorSearch): VectorsFound {
+    return searchVectors(
+      this.ctx.storage.sql,
+      checked(vectorSearchSchema, request)
+    );
+  }
+
+  /** Repacks one block holding removed codes: true when more are left. */
+  repackVectors(): boolean {
+    return this.ctx.storage.transactionSync(() =>
+      repackVectors(this.ctx.storage.sql)
+    );
   }
 }
