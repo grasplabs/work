@@ -121,7 +121,7 @@ Datum: 9 november 2026
 Niet doorsturen. Tot 1 december blijft deze memo binnen HR en de directie.
 
 1. Aanleiding
-Elk najaar leggen we vast hoe de salarissen per 1 januari worden aangepast. In deze memo staat het voorstel voor 2027 voor alle vestigingen, met de bonusregeling, een blijfregeling voor sleutelfuncties en het tijdpad tot en met de loonstroken van januari. Het voorstel past binnen de personeelsbegroting die Finance voor 2027 opstelt. Over de cijfers is nog niet met medewerkers of leidinggevenden gesproken.
+Elk najaar leggen we vast hoe de salarissen per 1 januari worden aangepast. In deze memo staat het voorstel voor 2027 voor alle vestigingen, met de bonusregeling, een blijfregeling voor sleutelfuncties en het tijdpad tot en met de loonstroken van januari. Het voorstel past binnen de personeelsbegroting die Finance voor 2027 opstelt. Over de cijfers is nog niet met de medewerkers of leidinggevenden gesproken.
 
 2. Budget voor de salarisronde
 Voor de salarisronde 2027 is in totaal 3,1 procent van de loonsom beschikbaar, ongeveer 412.000 euro. Daarvan gaat 1,8 procent naar een algemene verhoging voor iedereen en 1,3 procent naar individuele verhogingen op basis van functioneren. Valt een wettelijke of collectieve verhoging in een land hoger uit dan de algemene verhoging, dan volgen we die en halen we het verschil uit het individuele deel van dat land. In Duitsland, Frankrijk en Spanje zetten de lokale HR-contactpersonen de verdeling om naar de eigen schalen, binnen hetzelfde totaalbudget.
