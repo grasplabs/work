@@ -17,7 +17,7 @@ import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
-import { sweepBrain } from "./brain-next.ts";
+import { workBrain } from "./brain-next.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
@@ -77,6 +77,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: reconcileConsolidation,
   },
+  // The new Brain's work queue: what is due, a few at a time
+  // (src/brain-next.ts, @grasp-os/brain-next's work.ts).
+  { name: "brain.work", period: "minute", run: workBrain },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
   {
@@ -204,9 +207,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
       await indexApps(env);
     },
   },
-  // Files in the new Brain's bucket that adds which never finished left
-  // (src/brain-next.ts).
-  { name: "brain.source_files", period: "quarterHour", run: sweepBrain },
   // Brain command receipts past their retention (src/knowledge/memories.ts).
   {
     name: "knowledge.brain_receipts",

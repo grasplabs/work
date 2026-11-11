@@ -16,7 +16,14 @@ import {
   sourceChanges,
   sourceVersions,
 } from "./db/schema.ts";
-import { fileKeyOf, hashOf, holdFile, isHeld, noteWrite } from "./files.ts";
+import {
+  fileKeyOf,
+  hashOf,
+  holdFile,
+  isHeld,
+  isInDoubt,
+  noteWrite,
+} from "./files.ts";
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { removeVectorsOf } from "./vectors.ts";
 import { indexWords } from "./words.ts";
@@ -135,7 +142,8 @@ const madeBefore = (
  * removes the vector codes of the version it replaces (vectors.ts). Run it
  * in one transaction. Answers `undefined` when the file's row is gone (swept
  * since it was noted), noting it again for the sweep to find what the add
- * wrote.
+ * wrote; and, writing nothing, when a delete of the file may still land
+ * (a sweep gave up waiting for R2 while this add's write was under way).
  */
 const record = (
   db: DrizzleSqliteDODatabase,
@@ -148,6 +156,9 @@ const record = (
     return before;
   }
   const { added, hash } = adding;
+  if (isInDoubt(db, hash)) {
+    return undefined;
+  }
   if (!holdFile(db, hash)) {
     noteWrite(db, hash);
     return undefined;
@@ -201,6 +212,9 @@ const record = (
   return { source: added.source, version };
 };
 
+/** What an add that must be made again says: the same words as a lost file's. */
+const addAgain = "The Brain lost the file while adding it: add it again";
+
 /**
  * Adds `added` as a version of its source, or answers with the version it
  * already is (above): the file first, then the version whole. So an add
@@ -224,6 +238,11 @@ export const addVersion = async (
   if (before !== undefined) {
     return before;
   }
+  // A delete of this file may still land (a sweep gave up waiting for R2):
+  // writing it now could lose it under a version. Added again later.
+  if (isInDoubt(db, adding.hash)) {
+    throw new Error(addAgain);
+  }
   if (!isHeld(db, adding.hash)) {
     noteWrite(db, adding.hash);
     // R2 checks the bytes against the hash as it takes them.
@@ -234,7 +253,7 @@ export const addVersion = async (
   }
   const recorded = storage.transactionSync(() => record(db, storage, adding));
   if (recorded === undefined) {
-    throw new Error("The Brain lost the file while adding it: add it again");
+    throw new Error(addAgain);
   }
   return recorded;
 };

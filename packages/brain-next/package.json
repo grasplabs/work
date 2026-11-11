@@ -7,12 +7,14 @@
   "sideEffects": false,
   "exports": {
     "./contract": "./src/contract.ts",
-    "./store": "./src/store.ts"
+    "./store": "./src/store.ts",
+    "./work": "./src/work.ts"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@grasp-os/shared": "workspace:*",
     "drizzle-orm": "catalog:",
     "zod": "catalog:"
   },

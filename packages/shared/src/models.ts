@@ -18,6 +18,12 @@ export const modelErrors = defineErrorFamily({
   "model.grasp_limit_reached":
     "This month's limit for Grasp's AI is reached, so this call wasn't answered. An admin can switch to the organization's own AI provider key in Settings › AI providers; Grasp's AI is back next month.",
   "model.failed": "The model call failed. Try again later.",
+  /**
+   * The provider refused the request itself, as it was (a bad request, a
+   * prompt too long for the model, its content policy): asking the same
+   * again gets the same. Worded as `model.failed` for people.
+   */
+  "model.request_refused": "The model call failed. Try again later.",
   "model.invalid_output":
     "The model's answer didn't match the expected shape, also when asked again.",
 });

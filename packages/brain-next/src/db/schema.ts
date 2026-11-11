@@ -9,6 +9,7 @@ import {
   sqliteTable,
   text,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 // The store's tables. Who may read is kept once per distinct set of
@@ -87,6 +88,12 @@ export const files = sqliteTable(
     refs: integer().notNull(),
     /** When an add last wrote, or was about to write, the file to R2. */
     writtenAt: integer("written_at", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * Until when a delete of the file may still land: a sweep gave up
+     * waiting for R2 (files.ts). No add writes the file meanwhile. Null
+     * when none is in doubt. Added by the work queue's migration (0004).
+     */
+    inDoubtUntil: integer("in_doubt_until", { mode: "timestamp_ms" }),
   },
   (table) => [
     // The sweep finds the files nothing points at.
@@ -277,4 +284,97 @@ export const vectorRemoved = sqliteTable(
     slot: integer().notNull(),
   },
   (table) => [primaryKey({ columns: [table.block, table.slot] })]
+);
+
+/**
+ * The work queue (work.ts): one row per item of the Brain's background
+ * work still to do, deleted once it succeeded. At most one row of a kind
+ * and key waits (or is parked) at a time: a newer item replaces it. One
+ * more may run beside it, on what was there before.
+ */
+export const workItems = sqliteTable(
+  "work_items",
+  {
+    id: integer().primaryKey(),
+    /** Which work it is: the kind its handler is defined for. */
+    kind: text().notNull(),
+    /** What it is about, such as a source. */
+    key: text().notNull(),
+    /** What its handler is given, as JSON. */
+    payload: text().notNull(),
+    /** Its class, the first first (work.ts `workPriorities`). */
+    priority: integer().notNull(),
+    /** The connection it belongs to, if any: each has its own limit at once. */
+    connection: text(),
+    addedAt: integer("added_at", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * Not claimed before this, in the queue's time (milliseconds): its
+     * backoff after a failure, or the model's wait. 0 when due at once.
+     */
+    notBefore: integer("not_before").notNull(),
+    /** Attempts started, each counted before its work starts; given back when a wait ended it. */
+    attempts: integer().notNull().default(0),
+    /** Times it was parked: it comes back a day later until it was parked three times. */
+    parks: integer().notNull().default(0),
+    /** Whether the object's running instance has it under way. */
+    running: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * Whether the object stopped while it ran: until it settles it runs
+     * alone, so a crash is put down to the item that caused it.
+     */
+    interrupted: integer({ mode: "boolean" }).notNull().default(false),
+    /** When it was parked after too many failures; null while it may run. */
+    parkedAt: integer("parked_at", { mode: "timestamp_ms" }),
+    /** Why its last attempt failed: a code of the queue's (contract.ts `workErrors`). */
+    lastError: text("last_error"),
+  },
+  // Each of the queue's lookups is one of these partial indexes; their
+  // conditions are written as the queue's own SQL writes them (work.ts),
+  // literals and not parameters, so SQLite can use them.
+  (table) => [
+    // What waits of a kind and key: one at most, replaced by a newer one.
+    uniqueIndex("work_items_waiting_key")
+      .on(table.kind, table.key)
+      .where(sql.raw("running = 0")),
+    // What runs: its keys, connections and whether it runs alone.
+    index("work_items_running_idx")
+      .on(table.kind, table.key, table.connection, table.interrupted)
+      .where(sql.raw("running = 1")),
+    // The next items to claim, by connection (none first), the first
+    // first: a claim reads the first few of each, never the backlog of a
+    // connection at its limit.
+    index("work_items_waiting_idx")
+      .on(table.connection, table.priority, table.id)
+      .where(sql.raw("running = 0 AND parked_at IS NULL AND interrupted = 0")),
+    // The interrupted ones, each to run alone first.
+    index("work_items_interrupted_idx")
+      .on(table.priority, table.id)
+      .where(sql.raw("running = 0 AND parked_at IS NULL AND interrupted = 1")),
+    // The parked ones, the latest first, for staff.
+    index("work_items_parked_idx")
+      .on(table.parkedAt, table.id)
+      .where(sql.raw("parked_at IS NOT NULL")),
+    check("work_items_priority", sql.raw("priority BETWEEN 0 AND 4")),
+  ]
+);
+
+/**
+ * The queue's one bucket of model calls (work.ts): its tokens and when
+ * they were counted, in the queue's time; and the model's wait: until
+ * when, since when there was no answer, and why. One row at most.
+ */
+export const workModelBucket = sqliteTable(
+  "work_model_bucket",
+  {
+    id: integer().primaryKey(),
+    tokens: real().notNull(),
+    at: integer().notNull(),
+    pausedUntil: integer("paused_until").notNull(),
+    /** When the pause began, with no answer since; null once one came. */
+    pausedSince: integer("paused_since"),
+    pauseReason: text("pause_reason", {
+      enum: ["rate_limited", "unavailable", "account"],
+    }),
+  },
+  () => [check("work_model_bucket_one", sql.raw("id = 1"))]
 );

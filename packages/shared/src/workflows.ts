@@ -414,6 +414,8 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "connect.server_unavailable",
   "connect.call_in_progress",
   "model.failed",
+  // A request its provider refused: retried as `model.failed` was before.
+  "model.request_refused",
   // A provider that didn't answer: what `model.failed` said of it before.
   "model.provider_unavailable",
   // Nothing was sent; a provider's rate comes back as its window passes.

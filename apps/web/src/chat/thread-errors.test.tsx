@@ -39,6 +39,7 @@ const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.rate_limited": true,
   "model.answer_too_long": true,
   "model.failed": true,
+  "model.request_refused": true,
   "model.invalid_output": true,
 };
 

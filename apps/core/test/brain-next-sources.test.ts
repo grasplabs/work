@@ -9,7 +9,7 @@ import {
   addSource,
   readSourceVersionAs,
   recallAs,
-  sweepBrain,
+  workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
@@ -857,13 +857,13 @@ describe(
 
       // Within an add's time, the sweep leaves the file for the add, even
       // when its caller's clock runs ahead.
-      await sweepBrain(env, new Date());
-      await sweepBrain(env, new Date(Date.now() + fileGraceMs + 60_000));
+      await workBrain(env, new Date());
+      await workBrain(env, new Date(Date.now() + fileGraceMs + 60_000));
       const withinTime = await fileOf(lostText);
       later(fileGraceMs + 1);
-      await sweepBrain(env, new Date());
+      await workBrain(env, new Date());
       // Late or twice is harmless.
-      await sweepBrain(env, new Date());
+      await workBrain(env, new Date());
       const pastTime = {
         file: await fileOf(lostText),
         count: await countOn(lostText),
@@ -895,17 +895,17 @@ describe(
 
       later(fileGraceMs + 1);
       const restore = await refuseDeleting(stuckText);
-      await sweepBrain(env, new Date());
+      await workBrain(env, new Date());
       restore();
       const afterRefusal = {
         stuck: await fileOf(stuckText),
         free: await fileOf(freeText),
       };
       // Noted afresh: it waits a grace before it is tried again.
-      await sweepBrain(env, new Date());
+      await workBrain(env, new Date());
       const sameTick = await fileOf(stuckText);
       later(fileGraceMs + 1);
-      await sweepBrain(env, new Date());
+      await workBrain(env, new Date());
 
       expect({
         afterRefusal,
@@ -938,7 +938,7 @@ describe(
       await vi.waitFor(() => {
         expect(gate.reached).toBeTruthy();
       });
-      await sweepBrain(env, new Date());
+      await workBrain(env, new Date());
       gate.released = true;
 
       expect({
@@ -970,7 +970,7 @@ describe(
         expect(gate.reached).toBeTruthy();
       });
       later(fileGraceMs + 60_000);
-      await sweepBrain(env, new Date());
+      await workBrain(env, new Date());
       gate.released = true;
       const outcome = await stalled;
       expect("error" in outcome ? String(outcome.error) : "added").toMatch(

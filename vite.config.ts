@@ -51,10 +51,15 @@ const unboundedTargetPaths = [
 /**
  * The Brain's store and its files: reached only through its contract
  * (`@grasp-os/brain-next/contract`). Core's entry point alone imports the
- * store, to register its class.
+ * store, to register its class. Its work queue (`/work`) is the store's
+ * own too: its handlers run inside the store.
  */
 const brainStoreImports = {
-  group: ["@grasp-os/brain-next/store", "**/brain-next/src/**"],
+  group: [
+    "@grasp-os/brain-next/store",
+    "@grasp-os/brain-next/work",
+    "**/brain-next/src/**",
+  ],
   message:
     "Reach the Brain through @grasp-os/brain-next/contract (core's src/brain-next.ts), never its store.",
 };
@@ -223,6 +228,28 @@ export default defineConfig({
         excludeFiles: ["packages/brain-next/**"],
         rules: {
           "no-restricted-imports": ["error", { patterns: [brainStoreImports] }],
+        },
+      },
+      {
+        // The work queue's tests (its own, and the leak harness's probes)
+        // define kinds of work whose handlers they control, and add items.
+        files: [
+          "apps/core/test/brain-next-work.test.ts",
+          "apps/core/test/brain-next-surfaces.ts",
+          "apps/core/test/brain-next-vectors.test.ts",
+        ],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  ...brainStoreImports,
+                  group: ["@grasp-os/brain-next/store", "**/brain-next/src/**"],
+                },
+              ],
+            },
+          ],
         },
       },
       {

@@ -36,6 +36,13 @@ export const fileGraceMs = 15 * 60 * 1000;
 /** Files swept at once: as many as one statement can name. */
 const sweepBatch = 100;
 
+/**
+ * How long a sweep waits for R2 to delete its batch: well under the time
+ * workerd lets the store be held (`blockConcurrencyWhile`, about 30 s),
+ * so a bucket that hangs never resets the store.
+ */
+export const sweepDeleteMs = 10_000;
+
 /** The file of `hash`'s key in the bucket. */
 export const fileKeyOf = (hash: string): string => `sources/${hash}`;
 
@@ -57,12 +64,32 @@ export const isHeld = (db: DrizzleSqliteDODatabase, hash: string): boolean => {
   return file !== undefined && file.refs > 0;
 };
 
+/**
+ * Whether a delete of the file of `hash` may still land: a sweep gave up
+ * waiting for R2 within the last `fileGraceMs` (`sweepFiles`).
+ */
+export const isInDoubt = (
+  db: DrizzleSqliteDODatabase,
+  hash: string
+): boolean => {
+  const file = db
+    .select({ until: files.inDoubtUntil })
+    .from(files)
+    .where(eq(files.hash, hash))
+    .get();
+  const until = file?.until ?? null;
+  return until !== null && until.getTime() > Date.now();
+};
+
 /** Notes that the file of `hash` is about to be written, now. */
 export const noteWrite = (db: DrizzleSqliteDODatabase, hash: string): void => {
   const writtenAt = new Date();
   db.insert(files)
     .values({ hash, refs: 0, writtenAt })
-    .onConflictDoUpdate({ target: files.hash, set: { writtenAt } })
+    .onConflictDoUpdate({
+      target: files.hash,
+      set: { writtenAt, inDoubtUntil: null },
+    })
     .run();
 };
 
@@ -126,7 +153,7 @@ export const sweepFiles = async (
   db: DrizzleSqliteDODatabase,
   bucket: R2Bucket,
   at: Date
-): Promise<void> => {
+): Promise<"swept" | "idle" | "timed_out"> => {
   const asOf = Math.min(at.getTime(), Date.now());
   const unreferenced = and(
     eq(files.refs, 0),
@@ -141,9 +168,29 @@ export const sweepFiles = async (
     .all()
     .map(({ hash }) => hash);
   if (due.length === 0) {
-    return;
+    return "idle";
   }
-  const deleted = await deleteFiles(bucket, due);
+  // R2 that hangs: the batch is kept, as if R2 refused it, and tried again
+  // a grace later. Its deletes may still land after this gave up, so each
+  // file is in doubt for that grace: no add notes or writes it meanwhile
+  // (sources.ts refuses, to be added again), or a late delete could take a
+  // file a version holds. A delete that hasn't landed within the grace is
+  // taken as never landing: an assumption, as nothing found bounds how
+  // long R2 may carry out a delete its caller stopped waiting for. Past the
+  // doubt the file is an ordinary leftover the next sweep deletes. The
+  // unverified edge above, in this shape: the continuation of an add that
+  // began before the sweep, if it ran during `blockConcurrencyWhile` (local
+  // workerd can't make it), would freshen `written_at` (`noteWrite`), so
+  // the timeout would not mark that row in doubt and a late delete could
+  // land after that add's write; it rests on the same premise as before.
+  const { promise: timedOut, resolve: giveUp } =
+    Promise.withResolvers<"timed_out">();
+  const timer = setTimeout(() => {
+    giveUp("timed_out");
+  }, sweepDeleteMs);
+  const answered = await Promise.race([deleteFiles(bucket, due), timedOut]);
+  clearTimeout(timer);
+  const deleted = answered === "timed_out" ? [] : answered;
   if (deleted.length > 0) {
     db.delete(files)
       .where(and(unreferenced, inArray(files.hash, deleted)))
@@ -151,9 +198,16 @@ export const sweepFiles = async (
   }
   const kept = due.filter((hash) => !deleted.includes(hash));
   if (kept.length > 0) {
+    const now = Date.now();
     db.update(files)
-      .set({ writtenAt: new Date() })
+      .set({
+        writtenAt: new Date(now),
+        ...(answered === "timed_out"
+          ? { inDoubtUntil: new Date(now + fileGraceMs) }
+          : {}),
+      })
       .where(and(unreferenced, inArray(files.hash, kept)))
       .run();
   }
+  return answered === "timed_out" ? "timed_out" : "swept";
 };

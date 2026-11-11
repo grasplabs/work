@@ -547,6 +547,8 @@ describe("model gateway", { timeout: 30_000 }, () => {
     [mistral, 429, "rate_limit_error", 3, "model.rate_limited"],
     // Never asked again: the provider may have taken it on, and billed it.
     [anthropic, 503, "overloaded_error", 1, "model.provider_unavailable"],
+    // The request itself refused: the same again gets the same.
+    [anthropic, 400, "invalid_request_error", 1, "model.request_refused"],
   ])(
     "audits a call to %s the provider refuses with %i, with the status and error type only",
     async (model, status, errorType, requests, told) => {
