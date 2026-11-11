@@ -30,7 +30,7 @@ Article 5 – Échantillons
 Chaque commercial peut faire envoyer des échantillons à un client ou à un prospect, dans la limite de 250 € HT par client et par saison. Les échantillons se commandent dans le CRM avec le type de commande ECH ; ils partent du centre de distribution de Valence, en Espagne, et ne sont pas facturés. Au-delà du plafond, l'échantillon est facturé au client à moitié prix, sauf accord de Camille Laurent. Les meubles prêtés à un client pour son espace d'exposition restent la propriété de Groenhaven et sont repris en fin de saison.
 
 Article 6 – Précommandes de saison
-Les précommandes pour la saison de printemps sont ouvertes du 1er octobre au 31 janvier. Elles se saisissent dans le CRM avec le code campagne PRE-27, en indiquant la semaine de livraison souhaitée, entre la semaine 8 et la semaine 16. Le client peut modifier sa précommande sans frais jusqu'à trois semaines avant la semaine de livraison choisie. Une annulation plus tardive entraîne des frais de 15 % du montant annulé, sauf pour les articles que nous ne sommes pas en mesure de livrer à la date prévue.
+Les précommandes pour la saison de printemps sont ouvertes du 1er octobre au 31 janvier. Elles se saisissent dans le CRM avec le code campagne PRE-27, en indiquant la semaine de livraison souhaitée, entre la semaine 8 et la semaine 16. Le client peut modifier sa précommande sans frais jusqu'à trois semaines avant la semaine de livraison choisie. Une modification à la baisse ou une annulation plus tardive entraîne des frais de 15 % du montant annulé, sauf pour les articles que nous ne sommes pas en mesure de livrer à la date prévue.
 
 Article 7 – Litiges à la livraison
 Un colis endommagé ou manquant doit faire l'objet de réserves précises sur le bon de livraison du transporteur, en présence du chauffeur. Le client confirme ensuite ses réserves par écrit dans les 48 heures, avec des photos ; passé ce délai, le transporteur refuse toute prise en charge. Vous ouvrez alors un dossier de litige dans le CRM avec le formulaire LIT-03. Un avoir de 800 € HT au plus peut être accordé directement par le commercial ; au-delà, il doit être validé par Camille Laurent.
@@ -107,7 +107,7 @@ export const frLongQuestions: readonly BrainEvalQuestion[] = [
     language: "fr",
     question: "Quand ouvre-t-on la précommande de printemps ?",
     expects: answer(
-      "forms",
+      "words",
       "fr-conditions-vente",
       "ouvertes du 1er octobre au 31 janvier"
     ),
@@ -128,7 +128,7 @@ export const frLongQuestions: readonly BrainEvalQuestion[] = [
     question:
       "Une jardinerie cliente a constaté de la casse à la livraison : combien de temps a-t-elle pour confirmer ses réserves au transporteur ?",
     expects: answer(
-      "forms",
+      "words",
       "fr-conditions-vente",
       "par écrit dans les 48 heures, avec des photos"
     ),
