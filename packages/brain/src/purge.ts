@@ -1162,9 +1162,11 @@ const documentsNamed = async (
   by: Writer,
   { documentIds }: ContentPurge,
   /**
-   * The purge was begun and isn't finished: a document named that is gone
-   * since (another purge deleted it) has nothing left to erase, and is
-   * left out, so the purge can go on and finish.
+   * `by` began the purge and it isn't finished (`purgeUnfinished`): a
+   * document named that is gone since (another purge deleted it) has
+   * nothing left to erase, and is left out, so the purge can go on and
+   * finish. Never one `by` may not name: that is refused as ever, or a
+   * purge begun would answer otherwise than a missing document does.
    */
   begun = false
 ): Promise<Named[]> => {
@@ -1175,9 +1177,10 @@ const documentsNamed = async (
     .where(inList(documents.id, documentIds))
     .orderBy(asc(documents.id));
   const found = rows.filter(({ collection }) => nameable(by, collection));
+  const hidden = rows.length > found.length;
   const existing = new Set(found.map(({ document }) => document.id));
   const missing = documentIds.filter((id) => !existing.has(id));
-  if (missing.length > 0 && !begun) {
+  if (missing.length > 0 && (!begun || hidden)) {
     throw knowledgeErrors.create("knowledge.not_found", {
       documentIds: missing,
     });
@@ -1917,7 +1920,7 @@ const purgeContent = async <C>(
     db,
     by,
     input,
-    await purgeUnfinished(brain, input)
+    await purgeUnfinished(brain, by, input)
   );
   const matcher = matcherOf(input.terms, { countLeft: false });
   // Read before anything changes: whether a term is part of a longer
@@ -2172,7 +2175,7 @@ export const preparePurge = async <C>(
       db,
       by,
       parsed,
-      await purgeUnfinished(brain, parsed)
+      await purgeUnfinished(brain, by, parsed)
     );
     originals = await onErase.countFiles(
       named.map(({ document }) => filesNamed(document))

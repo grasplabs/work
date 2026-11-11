@@ -9,12 +9,13 @@ import { mockIdp } from "./idp.ts";
 import {
   newAgent,
   purged,
+  rebuildFailingOnce,
   rememberAs,
   saveOver,
   setUpTime,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
-import { storedVersionTexts as versionTexts } from "./knowledge.ts";
+import { newTeam, storedVersionTexts as versionTexts } from "./knowledge.ts";
 import { auditedDuring, refusal, signedInApi, unique } from "./sign-in.ts";
 
 // A content purge and a person's own collections (access `me`: their
@@ -35,17 +36,26 @@ const personOf = async (role: Role) => await signedInApi(idp, role);
 const notFound =
   "There's no such collection, document or version, or you can't see it.";
 
-/** What a refusal tells its caller, with `id` written as `<id>`. */
-const answerOf = (error: unknown, id: string): unknown => {
+/**
+ * What a refusal tells its caller, with `id` written as `<id>`, or each ID
+ * of `id` as its label.
+ */
+const answerOf = (
+  error: unknown,
+  id: string | Record<string, string>
+): unknown => {
   if (typeof error !== "object" || error === null) {
     return error;
   }
   const code = "code" in error ? error.code : undefined;
   const details = "details" in error ? error.details : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return JSON.parse(
-    JSON.stringify({ code, message, details }).replaceAll(id, "<id>")
-  );
+  const labels = typeof id === "string" ? { [id]: "<id>" } : id;
+  let told = JSON.stringify({ code, message, details });
+  for (const [each, label] of Object.entries(labels)) {
+    told = told.replaceAll(each, label);
+  }
+  return JSON.parse(told);
 };
 
 /** `owner`'s USER.md, holding `text`, and a document in a collection of their own. */
@@ -288,6 +298,147 @@ describe(
           occurrences: 1,
           texts: ["# Shared\nAsk (removed).", "# Shared\nAsk (removed)."],
         },
+      });
+    });
+
+    it("tells another admin nothing of an unfinished purge its owner began there, and lets the owner finish it", async () => {
+      const owner = await personOf("admin");
+      const other = await personOf("admin");
+      const secret = `Pension${unique()}`;
+      const { note } = await privateDocumentsOf(owner, `My ${secret} plan.`);
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [note.id],
+        terms: [secret],
+        reason: "erasure_request",
+      };
+      // The owner's own purge, left unfinished: its index rebuild fails.
+      const failing = await rebuildFailingOnce(owner);
+      const first = await owner.api.knowledge.preparePurge(input);
+      const left = await refusal(failing.knowledge.purge(input, first.token));
+      const missing = crypto.randomUUID();
+      let answers: unknown[] = [];
+      const events = await auditedDuring(async () => {
+        answers = [
+          // The same purge, and another term, against the owner's note.
+          answerOf(
+            await refusal(other.api.knowledge.preparePurge(input)),
+            note.id
+          ),
+          answerOf(
+            await refusal(
+              other.api.knowledge.preparePurge({
+                ...input,
+                terms: [`Other${unique()}`],
+              })
+            ),
+            note.id
+          ),
+          // As for a document that doesn't exist.
+          answerOf(
+            await refusal(
+              other.api.knowledge.preparePurge({
+                ...input,
+                documentIds: [missing],
+              })
+            ),
+            missing
+          ),
+        ];
+      });
+      const finished = await purged(owner, input);
+      const status = await owner.api.knowledge.purgeStatus(
+        finished.result.purgeId
+      );
+      const notFoundAnswer = {
+        code: "knowledge.not_found",
+        message: notFound,
+        details: { documentIds: ["<id>"] },
+      };
+      expect({
+        left:
+          typeof left === "object" && left !== null && "code" in left
+            ? left.code
+            : left,
+        answers,
+        events: events.map(({ action }) => action),
+        status: status.state,
+      }).toStrictEqual({
+        left: "knowledge.purge_index_pending",
+        answers: [notFoundAnswer, notFoundAnswer, notFoundAnswer],
+        events: [],
+        status: "complete",
+      });
+    });
+
+    it("names someone else's private document where it stands among documents that don't exist", async () => {
+      const admin = await personOf("admin");
+      const owner = await personOf("user");
+      const { note } = await privateDocumentsOf(owner, "Nothing to see.");
+      const handbook = await admin.api.knowledge.createCollection({
+        name: `Handbook ${unique()}`,
+        access: "everyone",
+      });
+      const shared = await saveOver(
+        admin,
+        handbook.id,
+        "shared.md",
+        "# Shared\nHere."
+      );
+      const [first, last, instead] = [
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+      ];
+      const asked = async (second: string) =>
+        await refusal(
+          admin.api.knowledge.preparePurge({
+            type: "content",
+            documentIds: [first, second, shared.id, last],
+            terms: ["Here"],
+            reason: "erasure_request",
+          })
+        );
+      const labels = { [first]: "<1>", [shared.id]: "<3>", [last]: "<4>" };
+      expect(
+        answerOf(await asked(note.id), { ...labels, [note.id]: "<2>" })
+      ).toStrictEqual(
+        answerOf(await asked(instead), { ...labels, [instead]: "<2>" })
+      );
+    });
+
+    it("still lets an admin purge a team's collection they aren't in", async () => {
+      const admin = await personOf("admin");
+      const keeper = await personOf("admin");
+      const member = await personOf("user");
+      const teamId = await newTeam(keeper, [member]);
+      const name = `Jansen${unique()}`;
+      const teamNotes = await keeper.api.knowledge.createCollection({
+        name: `Team ${unique()}`,
+        access: "teams",
+        teams: [teamId],
+      });
+      const note = await saveOver(
+        keeper,
+        teamNotes.id,
+        "note.md",
+        `# Note\nAsk ${name}.`
+      );
+      const read = await refusal(admin.api.knowledge.getDocument(note.id));
+      const { plan } = await purged(admin, {
+        type: "content",
+        documentIds: [note.id],
+        terms: [name],
+        reason: "erasure_request",
+      });
+      expect({
+        read: answerOf(read, note.id),
+        occurrences: plan.occurrences,
+        texts: await versionTexts(note.id),
+      }).toStrictEqual({
+        read: { code: "knowledge.not_found", message: notFound },
+        occurrences: 1,
+        texts: ["# Note\nAsk (removed).", "# Note\nAsk (removed)."],
       });
     });
   }

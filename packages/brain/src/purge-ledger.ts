@@ -367,11 +367,14 @@ export const openPurge = async <C>(
 };
 
 /**
- * Whether a purge of `input` was begun and isn't finished: run again, what
- * it named may be gone since (another purge deleted it), and it goes on.
+ * Whether `by` began a purge of `input` that isn't finished: run again,
+ * what it named may be gone since (another purge deleted it), and it goes
+ * on. Only their own: whether a purge of exactly these documents and
+ * terms is under way says what someone else is removing, and from what.
  */
 export const purgeUnfinished = async <C>(
   brain: Brain<C>,
+  by: Writer,
   input: PurgeInput
 ): Promise<boolean> => {
   const key = await keyOf(brain, input);
@@ -381,6 +384,7 @@ export const purgeUnfinished = async <C>(
     .where(
       and(
         eq(brainPurges.key, key),
+        eq(brainPurges.by, by.userId),
         isNull(brainPurges.completedAt),
         isNull(brainPurges.supersededBy)
       )
