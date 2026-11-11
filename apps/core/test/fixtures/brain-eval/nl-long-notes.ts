@@ -154,7 +154,7 @@ Onderwerp: RE: Ombouw hal 2: definitieve planning
 
 Hoi Daan,
 
-Ik heb op 7 en 8 januari per dag twee ritten ingepland bij Transport Brinkhorst. Stuur me uiterlijk maandag 4 januari de palletlijst met artikelnummers, dan zet ik de locaties in hal A alvast klaar in het WMS en kunnen we de orders voor de barbecues hier gewoon picken.
+Ik heb op 7 en 8 januari per dag twee ritten ingepland bij vervoerder Transport Brinkhorst. Stuur me uiterlijk maandag 4 januari de palletlijst met artikelnummers, dan maak ik de locaties in hal A alvast aan in het WMS en kunnen we de orders voor de barbecues hier gewoon picken.
 
 Groeten,
 Lukas`,
@@ -170,7 +170,7 @@ Aanwezig: Eva (voorzitter), Daan Bakker, Lukas Becker, Javier Moreno, Sophie Tur
 Notulen: Daan Bakker
 
 1. Opening
-Eva opent het overleg. De notulen van het tweede kwartaal worden ongewijzigd vastgesteld. Alle cijfers hieronder komen uit het WMS en de urenregistratie, met peildatum 30 september. Zoals afgesproken bespreekt elke locatie dezelfde vier cijfers: pickfouten, zendingen die op tijd de deur uit gingen, ziekteverzuim en overuren.
+Eva opent het overleg. De notulen van het vorige kwartaaloverleg worden ongewijzigd vastgesteld. Alle cijfers hieronder komen uit het WMS en de urenregistratie, met peildatum 30 september. Zoals afgesproken bespreekt elke locatie dezelfde vier cijfers: pickfouten, zendingen die op tijd de deur uitgingen, ziekteverzuim en overuren.
 
 2. Nieuwegein
 Daan licht de cijfers van Nieuwegein toe. Het pickfoutpercentage in Nieuwegein kwam in het derde kwartaal uit op 0,42 procent, tegen 0,51 procent in het tweede kwartaal. In Nieuwegein ging 96,8 procent van de zendingen op tijd de deur uit; de norm is 97 procent. Het ziekteverzuim in Nieuwegein was 4,1 procent, en er zijn 1.310 overuren gemaakt, vooral in juli.
@@ -180,12 +180,12 @@ Dat Nieuwegein de norm voor tijdig verzenden net niet haalde, komt vooral door d
 3. Duisburg
 Lukas licht de cijfers van Duisburg toe. Het pickfoutpercentage in Duisburg kwam in het derde kwartaal uit op 0,31 procent, tegen 0,35 procent in het tweede kwartaal. In Duisburg ging 98,1 procent van de zendingen op tijd de deur uit; de norm is 97 procent. Het ziekteverzuim in Duisburg was 6,2 procent, en er zijn 2.040 overuren gemaakt.
 
-Het hoge verzuim in Duisburg komt grotendeels door drie langdurig zieken in de expeditie; Lukas volgt dit samen met de bedrijfsarts. Om de expeditie in Duisburg toch bemand te houden, is in augustus en september veel overgewerkt. Lukas vraagt of een collega uit Nieuwegein in november twee weken kan bijspringen; Daan bekijkt dat.
+Het hoge verzuim in Duisburg komt grotendeels door drie langdurig zieken in de expeditie; vestigingsleider Jörg Pfeiffer volgt dit samen met de bedrijfsarts. Om de expeditie in Duisburg toch bemand te houden, is in augustus en september veel overgewerkt. Lukas vraagt of een collega uit Nieuwegein in november twee weken kan bijspringen; Daan bekijkt dat.
 
 4. Valencia
 Javier licht de cijfers van Valencia toe. Het pickfoutpercentage in Valencia kwam in het derde kwartaal uit op 0,58 procent, tegen 0,49 procent in het tweede kwartaal. In Valencia ging 94,3 procent van de zendingen op tijd de deur uit; de norm is 97 procent. Het ziekteverzuim in Valencia was 3,4 procent, en er zijn 860 overuren gemaakt.
 
-De meeste pickfouten in Valencia gingen over parasolvoeten van 25 en 30 kilo, die in dozen zitten die er bijna hetzelfde uitzien. Javier legt ze op aparte locaties en laat op de handscanner een foto van het artikel zien. De te late zendingen uit Valencia waren grotendeels voor Andalusië, waar de vervoerder in juli te weinig wagens had.
+De meeste pickfouten in Valencia gingen over parasolvoeten van 25 en 30 kilo, die in dozen zitten die er bijna hetzelfde uitzien. Javier geeft ze aparte locaties en zorgt dat de handscanner bij die artikelen een foto laat zien.
 
 5. Vervoerders
 Pakketvervoerder Velpaq heeft per 1 januari een tariefverhoging van 6,5 procent aangekondigd, voor alle drie de locaties. Eva vindt dat te veel voor de kwaliteit die we krijgen: in het derde kwartaal raakten bij Velpaq 23 pakketten zoek. We vragen voor 2027 offertes op bij twee andere pakketvervoerders; Sophie zet de prijzen naast elkaar. Voor het palletvervoer verandert er niets.
@@ -194,22 +194,22 @@ Pakketvervoerder Velpaq heeft per 1 januari een tariefverhoging van 6,5 procent 
 In juli liep de temperatuur in de hal in Valencia op sommige middagen op tot 34 graden. Javier laat daarom vóór de zomer van 2027 vier grote plafondventilatoren ophangen; de goedkoopste van drie offertes is 18.600 euro, en Sophie neemt het bedrag op in de investeringen voor Valencia. In Nieuwegein en Duisburg speelt dit niet, maar Eva vraagt Daan en Lukas wel om bij de volgende hittegolf de temperatuur in de hallen bij te houden, zodat we weten waar we staan.
 
 7. Verpakking
-Vanaf 1 januari wikkelen we pallets op alle drie de locaties niet meer in stretchfolie. De lading zetten we dan vast met kartonnen hoekprofielen en spanbanden. Dat scheelt naar schatting 14 ton folie per jaar. Sophie heeft uitgerekend dat het per pallet 0,40 euro goedkoper is dan folie, de aanschaf van de spanapparaten meegerekend. Javier wil in december eerst een maand proefdraaien in Valencia, omdat de zendingen naar de Canarische Eilanden onderweg op een schip worden overgeslagen.
+Vanaf 1 januari wikkelen we pallets op alle drie de locaties niet meer in stretchfolie. De lading zetten we dan vast met kartonnen hoekprofielen en spanbanden. Dat scheelt naar schatting 14 ton folie per jaar. Sophie heeft uitgerekend dat het per pallet 0,40 euro goedkoper is dan folie, de aanschaf van de spanapparaten meegerekend. Javier wil in december eerst een maand proef doen in Valencia, omdat de zendingen naar de Canarische Eilanden onderweg op een schip worden overgeslagen.
 
 8. Veiligheid
-Ilse geeft het overzicht van de veiligheidsincidenten in het derde kwartaal: twee in Nieuwegein, één in Duisburg en geen in Valencia. Niemand raakte gewond. De ernstigste staat in melding VM-2026-031: in Nieuwegein reed een heftruck achteruit tegen een stellingpoot in hal 1, waarna de stelling werd ontruimd en gekeurd. Vanaf november loopt Ilse elke maand per locatie een veiligheidsronde met de planner.
+Ilse geeft het overzicht van de veiligheidsincidenten in het derde kwartaal: twee in Nieuwegein, één in Duisburg en geen in Valencia. Er raakte niemand gewond. De ernstigste staat in melding VM-2026-031: in Nieuwegein reed een heftruck achteruit tegen een stellingpoot in hal 1, waarna de stelling werd ontruimd en gekeurd. Vanaf november loopt Ilse elke maand per locatie een veiligheidsronde met de planner.
 
 9. Actielijst
 A1 Daan: nieuwe looproutes in hal 1 invoeren, gereed vóór 1 december.
 A2 Daan: nagaan of iemand uit Nieuwegein in november in Duisburg kan bijspringen, vóór 16 oktober.
 A3 Javier: aparte locaties en artikelfoto's voor parasolvoeten, gereed vóór 1 november.
 A4 Sophie: offertes van twee pakketvervoerders vergelijken, vóór 1 december.
-A5 Javier: proef met spanbanden in Valencia, uitkomst bespreken in het volgende overleg.
+A5 Javier: proef met spanbanden in Valencia in december, uitkomst rondsturen vóór 23 december.
 A6 Ilse: de planning van de veiligheidsrondes per locatie rondsturen, vóór 23 oktober.
 A7 Javier: opdracht voor de plafondventilatoren in Valencia geven, vóór 1 maart.
 
 10. Rondvraag
-Lukas vraagt of de kwartaalcijfers voortaan een week vóór het overleg rondgaan, zodat iedereen ze kan voorbereiden. Afgesproken: Daan stuurt ze voortaan op de eerste maandag na het kwartaal. Javier meldt dat er in Valencia in december een nieuwe teamleider op de vroege dienst begint, intern doorgegroeid uit de expeditie.
+Lukas vraagt of de kwartaalcijfers voortaan een week vóór het overleg rondgaan, zodat iedereen zich kan voorbereiden. Afgesproken: Daan stuurt ze voortaan op de eerste maandag na afloop van het kwartaal. Javier meldt dat er in Valencia in december een nieuwe teamleider op de vroege dienst begint, intern doorgegroeid uit de expeditie.
 
 11. Volgend overleg
 Het kwartaaloverleg over het vierde kwartaal is op donderdag 21 januari 2027 in Duisburg.`,
@@ -229,14 +229,14 @@ Opgesteld: 9 november 2026
 Tot dit jaar bestelden tuincentra bij Groenhaven per mail, telefonisch of via hun accountmanager. De binnendienst zette elke order met de hand in het ERP, en bij drukte liep dat dagen achter. Klanten konden bovendien niet zelf zien wat er op voorraad was en belden daarom vaak na. In januari 2026 besloot het managementteam tot een eigen bestelportaal, waarin een tuincentrum zijn eigen prijzen en de actuele voorraad ziet en op elk moment van de dag een order kan plaatsen.
 
 2. Verloop
-Het portaal is gebouwd door ontwikkelbureau Vlietwerk in Delft, met een koppeling op ons ERP. De oorspronkelijke livedatum was maandag 1 juni, vóór de zomer. Bij de acceptatietest in mei bleek de prijskoppeling niet te kloppen: staffelkortingen en actieprijzen kwamen niet goed mee, en ongeveer één op de acht orderregels had in het portaal een andere prijs dan later op de factuur. Na twee herstelrondes ging het portaal uiteindelijk op maandag 7 september live, ruim drie maanden later dan gepland.
+Het portaal is gebouwd door ontwikkelbureau Vlietwerk in Delft en gekoppeld aan ons ERP. De oorspronkelijke livedatum was maandag 1 juni, vóór de zomer. Bij de acceptatietest in mei bleek de prijskoppeling niet te kloppen: staffelkortingen en actieprijzen kwamen niet goed mee, en ongeveer één op de acht orderregels had in het portaal een andere prijs dan later op de factuur. Na twee herstelrondes ging het portaal uiteindelijk op maandag 7 september live, ruim drie maanden later dan gepland.
 
-Van 6 juli tot en met 28 augustus draaide een pilot van het bestelportaal met drie klanten: Tuincentrum De Vlasakker in Ede, Tuinwereld Hoornbeek in Zwolle en Jardinerie du Vieux Pont in Villeurbanne. Samen plaatsten zij in die acht weken 214 orders. Onze accountmanagers zaten de eerste twee weken bij hun inkopers om mee te kijken. Elke vrijdag hielden we met de drie klanten een kort telefonisch overleg over wat er misging.
+Van 6 juli tot en met 28 augustus draaide een pilot van het bestelportaal met drie klanten: Tuincentrum De Vlasakker in Ede, Tuinwereld Hoornbeek in Zwolle en Tuincentrum Ter Hoevelinde in Mol. Samen plaatsten zij in die acht weken 214 orders. Onze accountmanagers zaten de eerste twee weken bij hun inkopers om mee te kijken. Elke vrijdag hielden we met de drie klanten een kort telefonisch overleg over wat er misging.
 
 Na de pilot hebben we de binnendienst in Utrecht en alle accountmanagers in twee middagen opgeleid. Voor klanten kwam er een korte handleiding, en wie voor het eerst inlogt, krijgt een rondleiding van vijf schermen langs zoeken, de winkelwagen en de orderhistorie. De accountmanagers hebben in augustus elke klant in hun rayon gebeld om de livegang aan te kondigen.
 
 3. Wat ging goed
-De pilotklanten vonden het portaal eenvoudig. De inkoper van De Vlasakker plaatst zijn bijbestellingen nu met de tablet vanaf de winkelvloer, zodra hij ziet dat een schap leeg raakt. Doordat de voorraad in het portaal elk kwartier wordt bijgewerkt, bellen klanten de binnendienst veel minder vaak om te vragen of iets leverbaar is. Ook de samenwerking met Vlietwerk liep goed: problemen werden binnen een dag opgepakt, ook in de zomer.
+De pilotklanten vonden het portaal eenvoudig in gebruik. De inkoper van De Vlasakker plaatst zijn bijbestellingen nu met de tablet vanaf de winkelvloer, zodra hij ziet dat een schap leeg raakt. Doordat de voorraad in het portaal elk kwartier wordt bijgewerkt, bellen klanten de binnendienst veel minder vaak om te vragen of iets leverbaar is. Ook de samenwerking met Vlietwerk liep goed: problemen werden binnen een dag opgepakt, ook in de zomer.
 
 Ook intern pakte het goed uit. De binnendienst gebruikt de vrijgekomen tijd om offertes sneller rond te maken, en de accountmanagers praten bij klantbezoeken weer over het assortiment in plaats van over losse bestellingen. Een tuincentrum in Breda liet ons na een maand al weten dat bijbestellen nu net zo makkelijk gaat als boodschappen doen.
 
@@ -246,13 +246,13 @@ De scope groeide onderweg. Halverwege de bouw kwam de wens om ook retouren via h
 Ook de ondersteuning na de livegang was te krap geregeld. In de eerste twee weken kwamen er ruim 140 vragen binnen, terwijl we op hooguit 50 hadden gerekend. Er was geen apart nummer voor het portaal, waardoor vragen over inloggen en prijzen tussen de gewone bestellingen in de wachtrij belandden. Pas in de derde week hebben we twee collega's van de binnendienst vrijgemaakt voor vragen over het portaal.
 
 5. Cijfers
-Op 31 oktober, ruim zeven weken na de livegang, hadden 87 van de 236 tuincentra die bij Groenhaven bestellen een actief account in het bestelportaal; 61 daarvan plaatsten in oktober minstens één order. In oktober kwam 34 procent van alle orderregels van tuincentra via het portaal binnen. Een portaalorder kost de binnendienst gemiddeld 2 minuten, tegen 11 minuten voor een order die met de hand wordt ingevoerd. BP-26 had een budget van 240.000 euro; de werkelijke kosten kwamen uit op 281.000 euro, vooral door de extra bouwtijd voor de prijskoppeling.
+Op 31 oktober, bijna acht weken na de livegang, hadden 87 van de 236 tuincentra die bij Groenhaven bestellen een actief account in het bestelportaal; 61 daarvan plaatsten in oktober minstens één order. In oktober kwam 34 procent van alle orderregels van tuincentra via het portaal binnen. Een portaalorder kost de binnendienst gemiddeld 2 minuten, tegen 11 minuten voor een order die met de hand wordt ingevoerd. BP-26 had een budget van 240.000 euro; de werkelijke kosten kwamen uit op 281.000 euro, vooral door de extra bouwtijd voor de prijskoppeling.
 
 6. Lessen
-Test een koppeling vanaf het begin met echte klantgegevens en echte prijsafspraken, niet met een verzonnen testset; de prijsfouten hadden we dan in maart al gezien. Leg de scope vast na het ontwerp: nieuwe wensen gaan op een lijst voor de volgende fase. Neem vertalingen vanaf dag één op in de planning. Kies pilotklanten van verschillende grootte, niet alleen klanten die al veel bestellen. En noem klanten pas een livedatum als de acceptatietest is goedgekeurd.
+Test een koppeling vanaf het begin met echte klantgegevens en echte prijsafspraken, niet met een verzonnen testset; de prijsfouten hadden we dan in maart al gezien. Leg de scope vast na het ontwerp: nieuwe wensen gaan op een lijst voor de volgende fase. Neem vertalingen vanaf dag één op in de planning. Kies pilotklanten van verschillende grootte, niet alleen klanten die al veel bestellen. En noem klanten pas een livedatum als de acceptatietest is geslaagd.
 
 7. Vervolg
-Fase 2 begint in januari 2027; daarin komen het volgen van zendingen in het portaal en het melden van retouren erbij, plus een koppeling voor grote klanten die rechtstreeks vanuit hun eigen kassasysteem bijbestellen. Het doel is 150 actieve accounts op 1 april 2027. De accountmanagers krijgen per klant een lijst van wie nog niet via het portaal bestelt, en Camille benadert de Franse klanten zelf. Thijs blijft ook na fase 2 eigenaar van het portaal.`,
+Fase 2 begint in januari 2027; daarin komen het volgen van zendingen in het portaal en het melden van retouren erbij, plus een koppeling voor grote klanten die rechtstreeks vanuit hun eigen kassasysteem bijbestellen. Het doel is 150 actieve accounts op 1 april 2027. De accountmanagers krijgen een lijst van de klanten in hun rayon die nog niet via het portaal bestellen, en Camille benadert de Franse klanten zelf. Thijs blijft ook na fase 2 eigenaar van het portaal.`,
   },
 ];
 
@@ -273,7 +273,7 @@ export const nlLongNotesQuestions: readonly BrainEvalQuestion[] = [
   {
     id: "nl-long-inpakker-training",
     language: "nl",
-    question: "Wanneer krijgt een inpakker nu eigenlijk zijn training?",
+    question: "Wanneer worden de inpakkers nu eigenlijk getraind?",
     expects: answer(
       "forms",
       "nl-mailwisseling-inpakstraat",
@@ -295,7 +295,7 @@ export const nlLongNotesQuestions: readonly BrainEvalQuestion[] = [
     id: "nl-long-stroom-verpakkingslijn",
     language: "nl",
     question:
-      "Welke firma zorgt voor de stroomvoorziening van de verpakkingslijn na de verbouwing?",
+      "Welke firma zorgt ervoor dat de verpakkingslijn straks genoeg stroom krijgt?",
     expects: answer(
       "paraphrase",
       "nl-mailwisseling-inpakstraat",
@@ -380,9 +380,10 @@ export const nlLongNotesQuestions: readonly BrainEvalQuestion[] = [
     ),
   },
   {
-    id: "nl-long-webshop-uitproberen",
+    id: "nl-long-b2b-uitproberen",
     language: "nl",
-    question: "Welke afnemers mochten de webshop vóór iedereen uitproberen?",
+    question:
+      "Welke afnemers mochten onze nieuwe B2B-omgeving vóór iedereen uitproberen?",
     expects: answer(
       "paraphrase",
       "nl-evaluatie-bestelportaal",
