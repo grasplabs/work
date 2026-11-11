@@ -20,12 +20,13 @@
 # runs them again, so its title and description, which become the commit
 # on main, are checked as they stood then (an edit after that isn't). The
 # test shards, the e2e stack and its parts, and the admin's journeys run
-# on the merge queue, a run by hand and the nightly run. A full run is 62
-# jobs, never more than 60 at once (`check` and the e2e jobs start
-# later), the account's 60 concurrent runners: at 63 a full run alone
-# left jobs waiting for runners. A pull request's full run beside the
-# queue's left one of them waiting for runners, minutes at a time
-# (November 2026): one full run per merge halves that.
+# on the merge queue, a run by hand and the nightly run. A full run is 63
+# jobs, within the account's 60 concurrent runners because the e2e jobs
+# start only once e2e-build is done, when the quick jobs have ended (at
+# 67 jobs the most running at once was 52 to 56, November 2026). A pull
+# request's full run beside the queue's left one of them waiting for
+# runners, minutes at a time (November 2026): one full run per merge
+# halves that.
 #
 # A full run runs everything at once: every test project, every journey,
 # the builds. Only `check`, and the e2e jobs on e2e-build's stack, wait
