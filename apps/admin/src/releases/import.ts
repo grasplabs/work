@@ -6,9 +6,11 @@
  * `releases/<id>/manifest.json`, last, so a release is listed only once its
  * manifest exists. Each new one has every blob checked against its manifest
  * (`verifyReleaseBlobs`, the check CI ran before publishing) and is then
- * recorded with its audit event. This protects against partial or
- * corrupted uploads, not against whoever can write to the bucket: a
- * release that's consistent with its own manifest imports.
+ * recorded with its audit event. Its model files, about 100 MB and never
+ * read whole here, are checked by what R2 reports of each: there, at its
+ * size, with the SHA-256 R2 computed when CI stored it. This protects
+ * against partial or corrupted uploads, not against whoever can write to
+ * the bucket: a release that's consistent with its own manifest imports.
  *
  * A release with more blobs than one run reads is checked a batch at a
  * time, over as many runs as it takes: each run records how many of its
@@ -25,6 +27,7 @@
  * that overlapped this one is recorded, and audited, once.
  */
 
+import { toHex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   blobCount,
@@ -57,6 +60,9 @@ import { recordBlobs } from "./blobs.ts";
  * published.
  */
 export type ReleaseStore = Pick<R2Bucket, "get" | "list">;
+
+/** The releases bucket as the import reads it: its objects' heads too. */
+export type ImportStore = ReleaseStore & Pick<R2Bucket, "head">;
 
 const RELEASES_PREFIX = "releases/";
 
@@ -137,10 +143,16 @@ const newestFirst = (a: string, b: string): number => compareReleaseIds(b, a);
 /** Reads from `store`, counting the reads. */
 class Reader {
   reads = 0;
-  readonly #store: ReleaseStore;
+  readonly #store: ImportStore;
 
-  constructor(store: ReleaseStore) {
+  constructor(store: ImportStore) {
     this.#store = store;
+  }
+
+  /** The head of the object at `key`, or null when there's none. */
+  async head(key: string): Promise<R2Object | null> {
+    this.reads += 1;
+    return await this.#store.head(key);
   }
 
   /**
@@ -184,6 +196,36 @@ const parseManifest = (
     );
   }
   return { manifest, text };
+};
+
+/**
+ * Throws unless the bucket holds each model file `manifest` names at its
+ * size, stored with its SHA-256: R2 computes and checks that when CI
+ * stores it (scripts/release/upload-release.ts), so its head says what
+ * the bytes are without this reading them. One stored without it is
+ * refused, not read.
+ */
+const checkModelFiles = async (
+  reader: Reader,
+  manifest: ReleaseManifest
+): Promise<void> => {
+  for (const file of manifest.modelFiles) {
+    // oxlint-disable-next-line no-await-in-loop -- a few files
+    const head = await reader.head(file.r2Key);
+    if (head === null) {
+      throw new Error(
+        `${file.r2Key} (${file.name}) is missing from the release`
+      );
+    }
+    const stored = head.checksums.sha256;
+    if (
+      head.size !== file.size ||
+      stored === undefined ||
+      toHex(new Uint8Array(stored)) !== file.sha256
+    ) {
+      throw new Error(`${file.r2Key} (${file.name}) doesn't match its hash`);
+    }
+  }
 };
 
 /**
@@ -239,6 +281,11 @@ const importRelease = async (
       await reader.read(key, (actual) => actual === size, String(size)),
     { concurrency: READ_CONCURRENCY, from, to }
   );
+  if (to === blobs) {
+    // Once, with its last batch: a head per file, a few reads past the
+    // run's bound at most.
+    await checkModelFiles(reader, manifest);
+  }
   if (to < blobs) {
     const updatedAt = new Date();
     await db
@@ -341,7 +388,7 @@ const recordFailure = async (
  * passed over until its next attempt is due.
  */
 export const importReleases = async (
-  store: ReleaseStore,
+  store: ImportStore,
   db: AdminDatabase,
   { now = new Date() }: { now?: Date } = {}
 ): Promise<ImportResult> => {

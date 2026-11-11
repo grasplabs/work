@@ -20,6 +20,7 @@ export { WorkflowsApi } from "./agent-workflows.ts";
 export { Builtins } from "./builtins.ts";
 export { Onboarding } from "./onboarding/store.ts";
 export { DataStore } from "./data-store.ts";
+export { Embedder } from "./embedder.ts";
 export { AppTail } from "./server-logs.ts";
 export { ConnectionBinding } from "./bindings.ts";
 export { CollectionBinding } from "./knowledge/binding.ts";

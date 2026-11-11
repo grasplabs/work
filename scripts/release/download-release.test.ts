@@ -22,10 +22,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { buffer, text } from "node:stream/consumers";
 
-import { manifestKey } from "@grasp-os/shared/release";
+import { manifestKey, modelBlobKey } from "@grasp-os/shared/release";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { builds, info } from "./fixture-release.ts";
+import { builds, fixtureModelFiles, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
 const STAGING = "grasp-releases-staging";
@@ -86,8 +86,18 @@ describe("promoting a release from staging's bucket to production's", () => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-promote-test-"));
     const built = path.join(dir, "built");
     writeRelease(built, manifest, fixture);
+    // Staging's bucket holds the model files, put there once
+    // (upload-model-files.ts); production's doesn't yet.
     buckets = new Map([
-      [STAGING, new Map()],
+      [
+        STAGING,
+        new Map(
+          fixtureModelFiles.map(({ sha256: hash, file }) => [
+            modelBlobKey(hash),
+            readFileSync(file),
+          ])
+        ),
+      ],
       [PRODUCTION, new Map()],
     ]);
     const current = buckets;
@@ -154,12 +164,25 @@ describe("promoting a release from staging's bucket to production's", () => {
       )
     );
 
-  it("publishes to production exactly what staging holds: every blob and the manifest", async () => {
+  it("publishes to production exactly what staging holds: every blob, the model files and the manifest", async () => {
     await promote();
     expect(contents(PRODUCTION)).toStrictEqual(contents(STAGING));
     expect(Object.keys(contents(PRODUCTION))).toStrictEqual(
-      expect.arrayContaining([manifestKey(manifest.releaseId)])
+      expect.arrayContaining([
+        manifestKey(manifest.releaseId),
+        ...manifest.modelFiles.map(({ r2Key }) => r2Key),
+      ])
     );
+  });
+
+  it("publishes nothing when a model file in staging's bucket isn't the release's", async () => {
+    const [file] = manifest.modelFiles;
+    if (file === undefined) {
+      throw new Error("expected a model file");
+    }
+    buckets.get(STAGING)?.set(file.r2Key, Buffer.from("other weights"));
+    await expect(promote()).rejects.toThrow(/doesn't match its hash/u);
+    expect(buckets.get(PRODUCTION)?.size).toBe(0);
   });
 
   it("leaves a non-empty directory that isn't a release untouched, and replaces one it downloaded before", async () => {

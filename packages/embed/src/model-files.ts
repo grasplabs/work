@@ -5,7 +5,15 @@
  * object's storage and is read row by row. Each file is named by its
  * SHA-256 and found in the model files bucket under `modelFileKey`, so a
  * file is never replaced in place and every copy can be checked.
+ *
+ * The model is data: its name and its files' hashes and sizes. Each
+ * release names the files of `shippedModel` (scripts/release), and each
+ * deploy copies them into the deployment's model files bucket
+ * (@grasp-os/shared/release), so changing the model is changing this
+ * data and nothing else.
  */
+import { deployedModelKey } from "@grasp-os/shared/release";
+
 import type { RowFormat } from "./engine.ts";
 import { wasmSha256 } from "./wasm-sha256.ts";
 
@@ -32,7 +40,16 @@ export interface ModelIdentity {
 
 /** Where a model file is in the model files bucket. */
 export const modelFileKey = (file: ModelFile): string =>
-  `embed-models/${file.sha256}`;
+  deployedModelKey(file.sha256);
+
+/** The model's three files, each with what it is. */
+export const modelFilesOf = (
+  model: EmbedModel
+): ({ which: "tokenizer" | "encoder" | "tokens" } & ModelFile)[] => [
+  { which: "tokenizer", ...model.tokenizer },
+  { which: "encoder", ...model.encoder },
+  { which: "tokens", ...model.tokens },
+];
 
 /**
  * bekko-embedding-v1-a8m (hotchpotch, MIT): 4 layers of width 384, 256,000
@@ -92,6 +109,9 @@ export interface TokensHeader {
   dim: number;
   rows: number;
 }
+
+/** The model core runs and every release names: the one an `Embedder` loads unless told otherwise. */
+export const shippedModel: EmbedModel = bekkoA8m;
 
 /** Reads the token table file's header; null when it isn't one of this version. */
 export const readTokensHeader = (bytes: Uint8Array): TokensHeader | null => {

@@ -4,9 +4,9 @@
  * each release and deploys those exact bytes into client accounts.
  *
  * Blobs are content-addressed, in two schemes on purpose:
- * - Worker modules and D1 migrations by their full SHA-256 (hex): our own
- *   scheme, for deduplication in R2 and for checking that what the admin
- *   deploys is what CI built.
+ * - Worker modules, D1 migrations and model files by their full SHA-256
+ *   (hex): our own scheme, for deduplication in R2 and for checking that
+ *   what the admin deploys is what CI built.
  * - Static assets by the content key of Cloudflare's assets-upload API:
  *   SHA-256 of base64(contents) plus the file's extension, hex, cut to 32
  *   characters. The API treats it as an opaque key per file (Wrangler
@@ -21,6 +21,15 @@
  * The placeholder list is closed: the admin refuses a `$` token it doesn't
  * know, so the generator and the admin change together, behind
  * MANIFEST_VERSION.
+ *
+ * Model files (the embedder's weights, @grasp-os/embed) are named by the
+ * release but not carried in each build: at about 100 MB they aren't in
+ * git, and each is put in the releases bucket once, under its hash
+ * (scripts/release/upload-model-file.ts). A release names them by hash and
+ * size; publishing it checks the bucket holds them, the admin's import
+ * checks them by R2's own SHA-256, and a deploy copies each into the
+ * client's models bucket, at `deployedModelKey`, where core's embedder
+ * reads and checks it again.
  *
  * Nothing but Web APIs, so CI (Node) and the admin (workerd) verify a
  * release with the same code.
@@ -67,6 +76,31 @@ export const workerNameSchema = z
 export const d1IdPlaceholder = (binding: string): string => `$D1_${binding}_ID`;
 
 const commitSchema = z.string().regex(/^[0-9a-f]{40}$/u);
+
+/** Where a model file is stored in the releases bucket. */
+export const modelBlobKey = (hash: string): string => `blobs/models/${hash}`;
+
+/**
+ * Where a deployment keeps a model file: in the bucket core binds as
+ * `modelFilesBinding`, where the embedder reads it by its hash.
+ */
+export const deployedModelKey = (hash: string): string =>
+  `embed-models/${hash}`;
+
+/** What every key `deployedModelKey` makes starts with. */
+export const deployedModelPrefix = deployedModelKey("");
+
+/** The binding core reads model files through, and the deploy copies them into. */
+export const modelFilesBinding = "MODEL_FILES";
+
+/** A model file the release names, stored at its content address. */
+const modelFileSchema = fileRef.refine(
+  (file) => file.r2Key === modelBlobKey(file.sha256),
+  "A model file is stored at its content address"
+);
+
+/** A model file a release names. */
+export type ModelFileRef = z.infer<typeof modelFileSchema>;
 
 const workerEntrySchema = z.strictObject({
   /** The Worker's name in every client account. */
@@ -147,6 +181,12 @@ export const releaseManifestSchema = z.object({
   workers: z.record(z.string(), workerEntrySchema),
   /** Every asset blob, by content key. */
   assets: z.record(assetHash, z.strictObject({ size, r2Key: z.string() })),
+  /**
+   * The model files core's embedder runs, in the releases bucket but not
+   * in the build (see the header comment). A release from before they were
+   * named names none.
+   */
+  modelFiles: z.array(modelFileSchema).default([]),
 });
 
 export type ReleaseManifest = z.infer<typeof releaseManifestSchema>;
@@ -398,7 +438,8 @@ const check = async (
 /**
  * Checks a release's blobs against its manifest: every module, migration
  * and asset is stored at its content address, is present, and its bytes
- * hash to it; every entry in the asset index is one a Worker serves. Each
+ * hash to it (not its model files, which aren't in a build and are each
+ * checked where they're stored, without reading 100 MB whole); every entry in the asset index is one a Worker serves. Each
  * blob is read once, through `read`, at most `concurrency` at a time, and
  * checked for every place the manifest names it; a reader that keeps what
  * it returns holds exactly the bytes that were checked. Throws on the
@@ -439,15 +480,16 @@ export const verifyReleaseBlobs = async (
   );
 };
 
-/** How many blobs a release names: what verifying it reads, besides its manifest. */
+/** How many blobs verifying a release reads, besides its manifest (its model files aren't read). */
 export const blobCount = (manifest: ReleaseManifest): number =>
   expectationsOf(manifest).size;
 
 /**
- * Every blob key the manifest names. Blobs are content-addressed, so
- * releases share them: one may leave the bucket only once no kept release
- * names it.
+ * Every blob key the manifest names, its model files' included. Blobs are
+ * content-addressed, so releases share them: one may leave the bucket
+ * only once no kept release names it.
  */
 export const blobKeys = (manifest: ReleaseManifest): string[] => [
   ...expectationsOf(manifest).keys(),
+  ...manifest.modelFiles.map((file) => file.r2Key),
 ];

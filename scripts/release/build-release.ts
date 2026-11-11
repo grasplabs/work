@@ -11,6 +11,11 @@
  * `.grasp-release` marker: an existing `--out` is replaced only when it's
  * empty or holds one.
  *
+ * The manifest names the embedder's model files (`shippedModel` of the
+ * embed package) by hash, but the build doesn't carry them: they are put
+ * in the releases bucket once (upload-model-files.ts), and publishing
+ * checks they are there.
+ *
  * Usage: vp run release:build --out <dir> [--release-id <id>]
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -21,6 +26,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 
+import { modelFilesOf, shippedModel } from "@grasp-os/embed/model-files";
 import { z } from "zod";
 
 import { parseJsonc } from "../wrangler-config-rules.ts";
@@ -227,6 +233,11 @@ const manifest = generateManifest(
     notes: run("git", ["log", "-1", "--format=%s", commit]),
     wranglerVersion,
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
+    modelFiles: modelFilesOf(shippedModel).map(({ which, sha256, size }) => ({
+      name: `${shippedModel.name}/${which}`,
+      sha256,
+      size,
+    })),
   },
   workers
 );

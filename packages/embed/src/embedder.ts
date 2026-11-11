@@ -24,10 +24,10 @@ import type { FileBytes, Kernel, RowFormat } from "./engine.ts";
 import { HashingReader } from "./hashing-reader.ts";
 import {
   ModelFilesError,
-  bekkoA8m,
   modelFileKey,
   modelIdentity,
   readTokensHeader,
+  shippedModel,
   tokensHeaderBytes,
 } from "./model-files.ts";
 import type { EmbedModel, ModelFile, ModelIdentity } from "./model-files.ts";
@@ -73,7 +73,7 @@ const isRowFormat = (value: string): value is RowFormat =>
 
 export class Embedder extends DurableObject<EmbedderEnv> {
   /** The model this object runs. */
-  protected readonly model: EmbedModel = bekkoA8m;
+  protected readonly model: EmbedModel = shippedModel;
   /** Which integer kernels run: the fastest for this CPU, unless a test picks one. */
   protected readonly kernel: Kernel = "auto";
   private loading: Promise<Loaded> | undefined;

@@ -51,6 +51,14 @@ interface __BaseEnv_Env {
    */
   SANDBOX_HOST?: Fetcher;
   /**
+   * On-prem only: the install's release directory's model files
+   * (`blobs/models/<sha256>`), read-only, as workerd's disk service
+   * (scripts/workerd-model-files.ts). The clock copies the model's files
+   * from it into `MODEL_FILES` (src/embedder.ts). On Cloudflare the admin's
+   * deploy copies them, and this is unbound.
+   */
+  MODEL_SOURCE?: Fetcher;
+  /**
    * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts),
    * and for an extraction, a page build and a package build on the
    * sandbox host (src/knowledge/extract.ts, src/platform-sandbox.ts).

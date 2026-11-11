@@ -5,8 +5,9 @@
  * copies a release staging ran into production's bucket, byte for byte.
  *
  * The manifest is read first and every blob it names is checked against it
- * as it arrives (`verifyReleaseBlobs`); one that is missing or doesn't
- * match stops the download. The manifest is written as it is stored,
+ * as it arrives (`verifyReleaseBlobs`), its model files by their SHA-256
+ * too, so the release can be published to a bucket that lacks them; one
+ * that is missing or doesn't match stops the download. The manifest is written as it is stored,
  * never re-encoded, so what's promoted is what staging published. Reads
  * only.
  *
@@ -21,6 +22,7 @@ import { parseArgs } from "node:util";
 import {
   manifestKey,
   releaseManifestSchema,
+  sha256OfBytes,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
 import type { Bytes } from "@grasp-os/shared/release";
@@ -107,5 +109,19 @@ await verifyReleaseBlobs(manifest, async (key) => {
   }
   return bytes;
 });
+for (const file of manifest.modelFiles) {
+  // oxlint-disable-next-line no-await-in-loop -- a few large files, one at a time
+  const bytes = await read(file.r2Key);
+  if (
+    bytes?.byteLength !== file.size ||
+    // oxlint-disable-next-line no-await-in-loop -- a few large files, one at a time
+    (await sha256OfBytes(bytes)) !== file.sha256
+  ) {
+    throw new Error(
+      `${file.r2Key} (${file.name}) is missing or doesn't match its hash`
+    );
+  }
+  write(file.r2Key, bytes);
+}
 write("manifest.json", manifestBytes);
 console.info(`Release ${releaseId} fetched from ${bucket} and verified`);

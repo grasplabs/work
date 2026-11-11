@@ -14,6 +14,7 @@ import type {
 import { clock } from "./clock.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import { holdsModelFiles } from "./embedder.ts";
 import { callSandboxed } from "./sandboxed.ts";
 
 // The admin's provisioning probe (spec 40.2 step 7,
@@ -168,6 +169,7 @@ const objectNamespaces = (
   CHAT_STATE: env.CHAT_STATE,
   CHAT_SESSIONS: env.CHAT_SESSIONS,
   BRAIN_STORE: env.BRAIN_STORE,
+  EMBEDDER: env.EMBEDDER,
 });
 
 /** A namespace's no-op: an object's ID in core's jurisdiction, made but never used. */
@@ -191,6 +193,17 @@ const d1 = (database: D1Database) => async () =>
 const r2 = (bucket: R2Bucket) => async () => await bucket.head(absentKey);
 
 /**
+ * The model files bucket answers, and holds every file of the model core
+ * runs at its size: the deploy copied them in before core went live, so a
+ * deployment without them stops here rather than at its first question.
+ */
+const modelFiles = (bucket: R2Bucket) => async () => {
+  if (!(await holdsModelFiles(bucket))) {
+    throw new Error("The model's files aren't in the bucket");
+  }
+};
+
+/**
  * Core as the probe finds it: each private binding asked its no-op;
  * connect asked to arm its clock, which also says its binding answers;
  * core's own clock armed.
@@ -203,6 +216,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     files,
     auditArchive,
     brainObjects,
+    models,
     loader,
     connectBindings,
     connectAnswering,
@@ -215,6 +229,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     answers("FILES", r2(env.FILES)),
     answers("AUDIT_ARCHIVE", r2(env.AUDIT_ARCHIVE)),
     answers("BRAIN_OBJECTS", r2(env.BRAIN_OBJECTS)),
+    answers("MODEL_FILES", modelFiles(env.MODEL_FILES)),
     answers("LOADER", sandbox(env)),
     connectProbe(env),
     connectVersion(env),
@@ -234,6 +249,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
       FILES: files,
       AUDIT_ARCHIVE: auditArchive,
       BRAIN_OBJECTS: brainObjects,
+      MODEL_FILES: models,
       LOADER: loader,
       CONNECT: connect !== null,
       ...Object.fromEntries(

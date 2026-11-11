@@ -147,6 +147,13 @@ export interface CloudflareApi {
   /** The same, with the page it was: for lists. */
   page: <T>(call: ApiCall, schema: z.ZodType<T>) => Promise<Page<T>>;
   /**
+   * The answer to `call` as it came, for one that isn't the API's
+   * envelope (an R2 object's bytes): retried as `page` retries, and
+   * answered with any status but one it retried (a 404 included). The
+   * caller reads or cancels its body.
+   */
+  response: (call: ApiCall) => Promise<Response>;
+  /**
    * The data a GraphQL Analytics API `query` answers with `variables`,
    * checked against `schema`. Data it answers alongside errors (a field it
    * couldn't read) is taken; errors alone throw.
@@ -369,9 +376,33 @@ export const cloudflareApi = ({
     return await graphql(query, variables, schema, attempt + 1, waited + wait);
   };
 
+  /** Sends `call`, retrying as `page` does; `attempt` counts from 0. */
+  const response = async (
+    call: ApiCall,
+    attempt = 0,
+    waited = 0
+  ): Promise<Response> => {
+    await call.beforeSend?.();
+    const answer = await send(call);
+    const status = answer?.status ?? 0;
+    if (answer !== null && status !== 429 && status < 500) {
+      return answer;
+    }
+    await answer?.body?.cancel();
+    const wait = retryable(call, status, attempt)
+      ? waitBefore(answer, attempt, waited)
+      : undefined;
+    if (wait === undefined) {
+      throw new CloudflareApiError(call.method, call.path, status, []);
+    }
+    await pause(call, wait);
+    return await response(call, attempt + 1, waited + wait);
+  };
+
   return {
     page,
     graphql,
+    response,
     call: async (call, schema) => {
       const { result } = await page(call, schema);
       return result;

@@ -417,6 +417,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: 'catalog:'
         version: 21.2.3
+      '@grasp-os/embed':
+        specifier: workspace:*
+        version: link:packages/embed
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:packages/runtime
@@ -686,6 +689,9 @@ importers:
       '@grasp-os/connector-kit':
         specifier: workspace:*
         version: link:../../packages/connector-kit
+      '@grasp-os/embed':
+        specifier: workspace:*
+        version: link:../../packages/embed
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -1200,6 +1206,9 @@ importers:
 
   packages/embed:
     dependencies:
+      '@grasp-os/shared':
+        specifier: workspace:*
+        version: link:../shared
       zod:
         specifier: 'catalog:'
         version: 4.6.7

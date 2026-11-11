@@ -41,6 +41,7 @@
     "@grasp-os/chat": "workspace:*",
     "@grasp-os/compiler": "workspace:*",
     "@grasp-os/connector-kit": "workspace:*",
+    "@grasp-os/embed": "workspace:*",
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",

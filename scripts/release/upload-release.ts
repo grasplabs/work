@@ -10,6 +10,12 @@
  * checksum R2 reports, or, for an object stored without one, the hash of
  * its bytes. One that doesn't match fails the upload, before the manifest.
  *
+ * The model files a release names aren't in a build (@grasp-os/shared/
+ * release): each must be in the bucket already, put there once by
+ * upload-model-files.ts, stored with the SHA-256 the manifest names, or
+ * nothing is published. A release directory that holds them (Promote
+ * release's download) uploads them as any blob.
+ *
  * The manifest goes up last, to `releases/<id>/manifest.json`: the admin
  * imports only releases whose manifest exists, so an upload that stops
  * halfway never leaves a manifest pointing at missing blobs. It's
@@ -111,6 +117,34 @@ const storedSha256 = async (
     throw new Error(`GET ${key}: ${get.status}`);
   }
   return sha256Base64(new Uint8Array(await get.arrayBuffer()));
+};
+
+/** SHA-256 hex as R2's checksum header writes it, base64. */
+const hexToBase64 = (hex: string): string =>
+  Buffer.from(hex, "hex").toString("base64");
+
+/**
+ * Throws unless the bucket holds every model file the release names and
+ * the directory doesn't carry, each stored with the SHA-256 the manifest
+ * names: a release whose model isn't there would deploy an embedder with
+ * nothing to load.
+ */
+const assertModelFilesStored = async (
+  bucket: ReleasesBucket
+): Promise<void> => {
+  for (const file of manifest.modelFiles) {
+    if (blobs.has(file.r2Key)) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a few files
+    const stored = await storedSha256(bucket, file.r2Key);
+    if (stored === undefined) {
+      throw new Error(
+        `Model file ${file.name} isn't in the bucket at ${file.r2Key}: put it there once with release:model-files; nothing published`
+      );
+    }
+    assertStored(file.r2Key, stored, hexToBase64(file.sha256));
+  }
 };
 
 const uploadBlobs = async (bucket: ReleasesBucket): Promise<void> => {
@@ -311,6 +345,7 @@ if (args["dry-run"]) {
     ? ((await publishedAs(bucket)) ?? (await publishedUnmarked(bucket)))
     : undefined;
   if (earlier === undefined) {
+    await assertModelFilesStored(bucket);
     await uploadBlobs(bucket);
     await (args["assign-id"]
       ? publishWithNextId(bucket)

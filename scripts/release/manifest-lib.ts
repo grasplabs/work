@@ -26,9 +26,12 @@ import {
   d1IdPlaceholder,
   MANIFEST_VERSION,
   migrationKey,
+  modelBlobKey,
+  modelFilesBinding,
   moduleKey,
   observabilitySchema,
   releaseManifestSchema,
+  sha256OfBytes,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
@@ -287,6 +290,14 @@ const workerEntry = (
   };
 };
 
+/** A model file a release names: not in the build, but in the releases bucket. */
+export interface ModelFileInfo {
+  /** What it is, such as `bekko-embedding-v1-a8m/tokens`. */
+  name: string;
+  sha256: string;
+  size: number;
+}
+
 /** Release metadata that isn't read from the Workers' builds. */
 export interface ReleaseInfo {
   releaseId: string;
@@ -295,6 +306,8 @@ export interface ReleaseInfo {
   notes: string;
   wranglerVersion: string;
   packages: Record<string, string>;
+  /** The model files the Worker that binds `modelFilesBinding` runs. */
+  modelFiles: ModelFileInfo[];
 }
 
 const mebibytes = (bytes: number): string =>
@@ -368,14 +381,38 @@ const checkBudget = (build: WorkerBuild): void => {
   }
 };
 
+/**
+ * Throws unless the release names model files exactly when a Worker binds
+ * the bucket they're copied into: files nothing reads, or a binding with
+ * nothing to read, is a release that can't embed.
+ */
+const checkModelFiles = (
+  modelFiles: readonly ModelFileInfo[],
+  workers: WorkerBuild[]
+): void => {
+  const binds = workers.some((build) =>
+    build.config.r2_buckets.some(
+      (bucket) => bucket.binding === modelFilesBinding
+    )
+  );
+  if (binds !== modelFiles.length > 0) {
+    throw new Error(
+      binds
+        ? `A Worker binds ${modelFilesBinding}, but the release names no model files`
+        : `The release names model files, but no Worker binds ${modelFilesBinding}`
+    );
+  }
+};
+
 /** Assembles the manifest from each Worker's build. */
 export const generateManifest = (
-  info: ReleaseInfo,
+  { modelFiles, ...info }: ReleaseInfo,
   workers: WorkerBuild[]
 ): ReleaseManifest => {
   for (const build of workers) {
     checkBudget(build);
   }
+  checkModelFiles(modelFiles, workers);
   const dates = new Set(workers.map((w) => w.config.compatibility_date));
   const [compatibilityDate] = dates;
   if (compatibilityDate === undefined || dates.size > 1) {
@@ -399,6 +436,10 @@ export const generateManifest = (
     compatibilityDate,
     workers: entries,
     assets,
+    modelFiles: modelFiles.map((file) => ({
+      ...file,
+      r2Key: modelBlobKey(file.sha256),
+    })),
   });
 };
 
@@ -439,8 +480,9 @@ export const clearReleaseDir = (outDir: string): void => {
 };
 
 /**
- * Writes a release directory laid out as it's stored in R2: every blob at
- * its key, then `manifest.json`, last. Replaces an earlier release in
+ * Writes a release directory laid out as it's stored in R2: every blob of
+ * the build at its key (not the model files, which no build has), then
+ * `manifest.json`, last. Replaces an earlier release in
  * `outDir`, and refuses any other non-empty directory.
  */
 export const writeRelease = (
@@ -468,14 +510,19 @@ export interface VerifiedRelease {
   manifest: ReleaseManifest;
   /** The bytes of `manifest.json` that were parsed. */
   manifestBytes: Buffer;
-  /** Every blob, by its R2 key: the bytes that were hashed. */
+  /**
+   * Every blob, by its R2 key: the bytes that were hashed. The model files
+   * are among them only where the directory holds them (a download of a
+   * published release does; a build doesn't).
+   */
   blobs: Map<string, Buffer>;
 }
 
 /**
  * Checks a release directory against its manifest, as the admin checks
- * a release in R2 (`verifyReleaseBlobs`). Each file is read once, and
- * those bytes are returned, so what's published is what was checked.
+ * a release in R2 (`verifyReleaseBlobs`), and each model file the
+ * directory holds by its hash. Each file is read once, and those bytes are
+ * returned, so what's published is what was checked.
  */
 export const verifyRelease = async (
   outDir: string
@@ -496,5 +543,22 @@ export const verifyRelease = async (
     }
     return bytes;
   });
+  for (const file of manifest.modelFiles) {
+    // The schema keeps r2Key a content address under blobs/.
+    const at = path.join(outDir, file.r2Key);
+    if (!existsSync(at)) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a few files, read one at a time
+    const bytes = await readFile(at);
+    if (
+      bytes.byteLength !== file.size ||
+      // oxlint-disable-next-line no-await-in-loop -- a few files, read one at a time
+      (await sha256OfBytes(new Uint8Array(bytes))) !== file.sha256
+    ) {
+      throw new Error(`${file.r2Key} (${file.name}) doesn't match its hash`);
+    }
+    blobs.set(file.r2Key, bytes);
+  }
   return { manifest, manifestBytes, blobs };
 };
