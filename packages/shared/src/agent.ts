@@ -8,6 +8,8 @@ import { defineErrorFamily } from "./errors.ts";
 /** Why a chat's agent refused a question. */
 export const agentErrors = defineErrorFamily({
   "agent.chat_not_found": "There's no such chat.",
+  "agent.paused":
+    "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
   "agent.not_for_you":
     "This agent isn't set up to answer you here. An admin decides who may use it, and where.",
   "agent.unattended":

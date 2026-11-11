@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { ModelRole } from "@grasp-os/shared/deployment-config";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -18,6 +19,9 @@ import { agents } from "./db/core/schema.ts";
 // Grasp ships it. Any other ID without a row is no agent at all: nothing
 // may run, be granted to or be remembered under an ID nobody made.
 //
+// A chat's turn reads its agent here before the model is asked
+// (`turnAgent`): one that is paused takes no turn. Nothing makes or
+// changes an agent yet.
 // This is the read alone. Nothing makes or changes an agent yet, and a
 // chat's turn doesn't read its agent here yet.
 
@@ -92,4 +96,25 @@ export const readAgent = async (
     changedBy: row.changedBy,
     changedAt: row.changedAt.toISOString(),
   };
+};
+
+/**
+ * The agent a chat's turn runs as, or undefined for an ID the company
+ * keeps no agent under. Throws `agent.paused` for one an admin paused,
+ * which takes no turn.
+ *
+ * An ID without a record still takes its turn, told nothing more: until
+ * an agent can be deleted, no chat can hold the ID of one that is gone,
+ * and a Workspace object is free to name its own agent, as it always was.
+ * Refusing such an ID belongs with deleting agents.
+ */
+export const turnAgent = async (
+  env: Env,
+  id: string
+): Promise<Agent | undefined> => {
+  const agent = await readAgent(env, id);
+  if (agent?.state === "paused") {
+    throw agentErrors.create("agent.paused");
+  }
+  return agent;
 };

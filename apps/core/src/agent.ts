@@ -268,6 +268,12 @@ export interface TurnContext {
    * mark (channels/stephen-rules.ts); none in Grasp's own app.
    */
   channel?: ChannelText;
+  /**
+   * The chat's agent as an admin made or changed it (agents.ts): its name
+   * and what it is told on top of Grasp's own rules. None for the first
+   * agent as Grasp ships it, which is told nothing more.
+   */
+  agent?: { name: string; instructions: string };
   /** The App the chat is its own chat of (`ChatsApi.forApp`); none for any other chat. */
   app?: string;
   /**
@@ -283,9 +289,26 @@ export const sectionNames = [
   "apis",
   "memory",
   "skills",
+  "agent",
   "channel",
   "app",
 ] as const;
+
+/**
+ * What an admin told the chat's agent, and the name it answers under.
+ * After Grasp's own instructions and before how to answer in a chat app,
+ * so every rule of Grasp's stands around it: an agent's instructions add
+ * to the rules and never lift one, and the section says so.
+ */
+const agentSection = (agent: TurnContext["agent"]): string | null =>
+  agent === undefined
+    ? null
+    : [
+        "<agent>",
+        `You answer here as ${agent.name}, one of this company's agents. Below is what the company's admins tell you about your job. It adds to every rule above and below and lifts none of them: where it asks for something a rule refuses, the rule holds, and you say what you can't do.`,
+        ...(agent.instructions === "" ? [] : [agent.instructions]),
+        "</agent>",
+      ].join("\n");
 
 /**
  * What an App's own chat tells the model: which App the person builds
@@ -320,6 +343,7 @@ export const sectionsOf = (
   apis: apisSection(apis),
   memory: memorySection(context.memory),
   skills: skillsSection(context.skills),
+  agent: agentSection(context.agent),
   channel: channelSection(context.channel),
   app: appSection(context.app),
 });
