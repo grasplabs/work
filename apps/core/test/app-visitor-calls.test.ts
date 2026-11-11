@@ -110,6 +110,24 @@ export const secrets = query({
   handler: async (ctx) => (await ctx.db.query("secrets").take(100)).map(({ text }) => text),
 });
 
+/** Reads members' secrets twice, each refusal swallowed: its codes. */
+export const peek = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => {
+    const codes: string[] = [];
+    for (const attempt of ["first", "second"]) {
+      try {
+        await ctx.db.query("secrets").take(1);
+        codes.push(attempt);
+      } catch (error) {
+        codes.push(String(Reflect.get(Object(error), "code")));
+      }
+    }
+    return codes;
+  },
+});
+
 /** Keeps a note, then starts the follow-up once it commits. */
 export const kick = mutation({
   args: {},
@@ -551,7 +569,11 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         version,
         principal: "visitor:test",
         email: "test@example.test",
-        actor: { type: "visitor", appId: appIdSchema.parse(app) },
+        actor: {
+          type: "visitor",
+          appId: appIdSchema.parse(app),
+          sessionId: "test",
+        },
         stillAllowed: async () => {
           await Promise.resolve();
         },
@@ -725,6 +747,91 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         detail: { reason: "not_granted", function: "portal.secrets", version },
       },
     ]);
+  });
+
+  it("have what the App's store refuses them audited as the visitor, by their session alone, at most once a call", async () => {
+    const domain = newDomain();
+    const { builder, app, link, version } = await portal(domain);
+    const mail = await mailbox();
+    await builder.api.apps.setVisitorGrants(app, [
+      "portal.add",
+      "portal.mine",
+      "portal.secrets",
+      "portal.keep",
+      "portal.peek",
+    ]);
+    const address = `ana@${domain}`;
+    const ana = await visitor(mail, link, address);
+    const session = await env.DB.prepare(
+      "SELECT id FROM app_visitor_sessions WHERE app_id = ? AND address = ?"
+    )
+      .bind(app, address)
+      .first<{ id: string }>();
+    const appId = appIdSchema.parse(app);
+
+    let answers: Record<string, unknown> = {};
+    const events = await auditedDuring(async () => {
+      // A visitor calling what the store refuses them, again and again.
+      const looped: unknown[] = [];
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        looped.push(await call(app, version, ana, "portal.secrets"));
+      }
+      answers = {
+        looped,
+        // Refused twice in one call, both swallowed.
+        peeked: await call(app, version, ana, "portal.peek"),
+        kept: await call(app, version, ana, "portal.keep", { text: "x" }),
+        // What is allowed stays allowed, and unaudited as refused.
+        added: await call(app, version, ana, "portal.add", { text: "hi" }),
+        mine: await call(app, version, ana, "portal.mine"),
+      };
+    });
+    const refused = events.filter(
+      (event) => event.action === "app.use.refused" && event.target?.id === app
+    );
+    const visitorActor = {
+      type: "visitor",
+      appId,
+      sessionId: session?.id,
+    };
+    const tableRefusal = (fn: string, errorCode: string) => ({
+      actor: visitorActor,
+      detail: {
+        version,
+        runId: null,
+        function: fn,
+        useKind: "table",
+        useName: "secrets",
+        reason: "request_not_allowed",
+        errorCode,
+      },
+    });
+
+    expect({
+      answers,
+      // Who they are by their session alone: no person, no address.
+      refused: refused.map(({ actor, detail }) => ({ actor, detail })),
+    }).toStrictEqual({
+      answers: {
+        looped: [
+          "data.access_denied",
+          "data.access_denied",
+          "data.access_denied",
+        ],
+        peeked: ["data.access_denied", "data.access_denied"],
+        kept: "data.write_denied",
+        added: null,
+        mine: ["hi"],
+      },
+      refused: [
+        tableRefusal("portal.secrets", "data.access_denied"),
+        tableRefusal("portal.secrets", "data.access_denied"),
+        tableRefusal("portal.secrets", "data.access_denied"),
+        tableRefusal("portal.peek", "data.access_denied"),
+        tableRefusal("portal.keep", "data.write_denied"),
+      ],
+    });
   });
 
   it("grant 50 long-named functions, and audit every one granted and taken away in full", async () => {
