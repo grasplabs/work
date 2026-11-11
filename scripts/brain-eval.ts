@@ -26,6 +26,7 @@ import { parseArgs } from "node:util";
 import { z } from "zod";
 
 import {
+  comparable,
   compareRuns,
   latencyTargetsMs,
   questionResultSchema,
@@ -155,7 +156,13 @@ process.stdout.write(
     before === undefined
       ? null
       : compareRuns(results, before.results, {
-          setChanged: before.identity.run.setDigest !== info.setDigest,
+          judged: comparable(
+            {
+              ...before.identity.run,
+              resultBudget: before.identity.resultBudget,
+            },
+            { ...info, resultBudget }
+          ),
         })
   )}\n\nResult: ${file}\n`
 );

@@ -8,10 +8,12 @@ import type {
 import {
   brainEvalSet,
   leaksOf,
+  questionDigestOf,
   rankOf,
+  setDigestOf,
   setProblems,
 } from "./fixtures/brain-eval/set.ts";
-import type { Returned } from "./fixtures/brain-eval/set.ts";
+import type { BrainEvalSet, Returned } from "./fixtures/brain-eval/set.ts";
 
 // The Brain evaluation's own checks (fixtures/brain-eval/set.ts): what
 // counts as a leak, the one hard gate, and where a question's source
@@ -115,5 +117,39 @@ describe("the Brain evaluation's checks", () => {
     expect(
       rankOf(question, { keys: ["nl-verlof"], texts: ["Verlofregeling"] })
     ).toBeNull();
+  });
+
+  it("gives the set another digest when who may read what changes, version bumped or not", async () => {
+    const digest = await setDigestOf(brainEvalSet);
+    const daanInHr: BrainEvalSet = {
+      ...brainEvalSet,
+      teams: { ...brainEvalSet.teams, hr: [...brainEvalSet.teams.hr, "daan"] },
+    };
+    const lukasAsks: BrainEvalSet = { ...brainEvalSet, defaultAsker: "lukas" };
+    await expect(setDigestOf(daanInHr)).resolves.not.toBe(digest);
+    await expect(setDigestOf(lukasAsks)).resolves.not.toBe(digest);
+    await expect(setDigestOf({ ...brainEvalSet })).resolves.toBe(digest);
+  });
+
+  it("gives a question another digest when its asker, or the teams they are in, change", async () => {
+    const asked: BrainEvalQuestion = {
+      id: "constructed",
+      language: "nl",
+      question: "?",
+      expects: answer("words", "nl-verlof", "25 vakantiedagen per jaar"),
+    };
+    const digest = await questionDigestOf(brainEvalSet, asked);
+    await expect(
+      questionDigestOf({ ...brainEvalSet, defaultAsker: "lukas" }, asked)
+    ).resolves.not.toBe(digest);
+    await expect(
+      questionDigestOf(
+        {
+          ...brainEvalSet,
+          teams: { ...brainEvalSet.teams, sales: ["camille"] },
+        },
+        asked
+      )
+    ).resolves.not.toBe(digest);
   });
 });

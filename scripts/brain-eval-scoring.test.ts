@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  comparable,
   compareRuns,
   estimate,
   signTest,
@@ -34,7 +35,7 @@ const many = (count: number, rank: number | null, prefix = "q") =>
 const group = (results: readonly QuestionResult[], name: string) =>
   summarize(results).groups.find((each) => each.group === name);
 
-const unchanged = { setChanged: false };
+const unchanged = { judged: true };
 
 describe("the Brain evaluation's scoring", () => {
   it("gives the same interval for the same values, around their mean", () => {
@@ -162,8 +163,16 @@ describe("the Brain evaluation's scoring", () => {
 
   it("shows changes without a verdict when the set changed between the runs", () => {
     const [all] = compareRuns(many(30, 1), many(30, null), {
-      setChanged: true,
+      judged: false,
     });
     expect(all).toMatchObject({ gained: 30, lost: 0, judged: false });
+  });
+
+  it("compares runs only on the same set, result limit and result budget", () => {
+    const measure = { setDigest: "set", recallLimit: 10, resultBudget: 5 };
+    expect(comparable(measure, { ...measure })).toBeTruthy();
+    expect(comparable(measure, { ...measure, setDigest: "other" })).toBeFalsy();
+    expect(comparable(measure, { ...measure, recallLimit: 20 })).toBeFalsy();
+    expect(comparable(measure, { ...measure, resultBudget: 3 })).toBeFalsy();
   });
 });

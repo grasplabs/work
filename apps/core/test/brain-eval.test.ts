@@ -1,5 +1,4 @@
 import { recallLimit } from "@grasp-os/brain-next/contract";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -25,7 +24,9 @@ import {
   brainEvalSet,
   grepRecall,
   leaksOf,
+  questionDigestOf,
   rankOf,
+  setDigestOf,
   setProblems,
 } from "./fixtures/brain-eval/set.ts";
 import type { Returned } from "./fixtures/brain-eval/set.ts";
@@ -50,14 +51,6 @@ const idp = mockIdp();
 
 const sourceOf = (key: string): BrainEvalSource | undefined =>
   sources.find((source) => source.key === key);
-
-/** A question's digest: it and the source it asks for, as they are now. */
-const digestOf = async (question: BrainEvalQuestion): Promise<string> => {
-  const { expects } = question;
-  const source = expects.kind === "absent" ? null : sourceOf(expects.source);
-  const digest = await sha256Hex(JSON.stringify({ question, source }));
-  return digest.slice(0, 16);
-};
 
 const sourceLanguageOf = (question: BrainEvalQuestion) => {
   const { expects } = question;
@@ -149,7 +142,7 @@ describe("the Brain evaluation", () => {
     console.log(
       `BRAIN_EVAL_RUN ${JSON.stringify({
         set: version,
-        setDigest: await sha256Hex(JSON.stringify(brainEvalSet)),
+        setDigest: await setDigestOf(brainEvalSet),
         sources: sources.length,
         questions: questions.length,
         recallLimit,
@@ -181,7 +174,7 @@ describe("the Brain evaluation", () => {
         `BRAIN_EVAL_RESULT ${JSON.stringify({
           id: question.id,
           // oxlint-disable-next-line no-await-in-loop -- one per question
-          digest: await digestOf(question),
+          digest: await questionDigestOf(brainEvalSet, question),
           language: question.language,
           sourceLanguage: sourceLanguageOf(question),
           expects: expects.kind,

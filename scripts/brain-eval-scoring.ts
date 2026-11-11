@@ -319,21 +319,41 @@ export interface GroupChange extends SignTest {
   group: string;
   /** Questions in both runs, each unchanged. */
   paired: number;
-  /** Whether a verdict is given: not when the set changed between runs. */
+  /** Whether a verdict is given: only when the runs are comparable. */
   judged: boolean;
 }
+
+/**
+ * What else decides a run's numbers, besides the Brain: the set (its
+ * digest covers every source, reader, question, asker and team), the most
+ * results a recall returns, and the result budget recall is counted at.
+ */
+export interface RunMeasure {
+  setDigest: string;
+  recallLimit: number;
+  resultBudget: number;
+}
+
+/**
+ * Whether two runs differ only in the Brain, so a difference in their
+ * results is the Brain's: the same set, limit and budget.
+ */
+export const comparable = (before: RunMeasure, now: RunMeasure): boolean =>
+  before.setDigest === now.setDigest &&
+  before.recallLimit === now.recallLimit &&
+  before.resultBudget === now.resultBudget;
 
 /**
  * The Brain's recall now against an earlier run's, per group, paired by
  * question: only questions in both whose digest is unchanged count, and
  * the sign test says whether more were gained than lost. A question's
- * rank depends on every other source too, so when the set changed
- * (`setChanged`) the counts are shown without a verdict.
+ * rank depends on every other source and on who may read it, so when the
+ * runs aren't {@link comparable} the counts are shown without a verdict.
  */
 export const compareRuns = (
   now: readonly QuestionResult[],
   before: readonly QuestionResult[],
-  { setChanged }: { setChanged: boolean }
+  { judged }: { judged: boolean }
 ): GroupChange[] => {
   const earlier = new Map(before.map((result) => [result.id, result]));
   const pairs = now.flatMap((result) => {
@@ -353,9 +373,9 @@ export const compareRuns = (
     return {
       group: name,
       paired: paired.length,
-      judged: !setChanged,
+      judged,
       ...test,
-      verdict: setChanged ? "same" : test.verdict,
+      verdict: judged ? test.verdict : "same",
     };
   });
 };
@@ -440,12 +460,12 @@ export const report = (
       : `Latency per recall (${latency.recalls}): p50 ${latency.p50Ms} ms, p95 ${latency.p95Ms} ms, max ${latency.maxMs} ms; within ${latencyTargetsMs.p50} ms ${Math.round(latency.withinP50TargetShare * 100)}%, within ${latencyTargetsMs.p95} ms ${Math.round(latency.withinP95TargetShare * 100)}%.`,
   ];
   if (changes !== null) {
-    const setChanged = changes.some(({ judged }) => !judged);
+    const judged = changes.every((change) => change.judged);
     lines.push(
       "",
-      setChanged
-        ? "The set changed since that run, and every rank depends on every source: changes are shown, not judged."
-        : judgedLine,
+      judged
+        ? judgedLine
+        : "The set, the result limit or the result budget changed since that run, and every rank depends on them: changes are shown, not judged.",
       table(
         ["Against that run", "paired", "gained", "lost", "p", "verdict"],
         changes.map((change) => [

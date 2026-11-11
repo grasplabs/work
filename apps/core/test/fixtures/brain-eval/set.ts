@@ -1,12 +1,16 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
+
 import {
   brainEvalDefaultAsker,
   brainEvalSetVersion,
+  brainEvalTeamNames,
   brainEvalTeams,
 } from "./company.ts";
 import type {
   BrainEvalPerson,
   BrainEvalQuestion,
   BrainEvalSource,
+  BrainEvalTeam,
 } from "./company.ts";
 import { crossQuestions } from "./cross.ts";
 import { deQuestions, deSources } from "./de.ts";
@@ -19,7 +23,20 @@ import { nlQuestions, nlSources } from "./nl.ts";
 // anything: a question that could pass or fail for the wrong reason is a
 // broken set, not a result.
 
-export const brainEvalSet = {
+/**
+ * Everything that decides a run's results, apart from the Brain itself:
+ * the sources and who may read them, the questions and who asks them, who
+ * is in each team, and who asks when a question doesn't say.
+ */
+export interface BrainEvalSet {
+  version: string;
+  sources: readonly BrainEvalSource[];
+  questions: readonly BrainEvalQuestion[];
+  teams: Readonly<Record<BrainEvalTeam, readonly BrainEvalPerson[]>>;
+  defaultAsker: BrainEvalPerson;
+}
+
+export const brainEvalSet: BrainEvalSet = {
   version: brainEvalSetVersion,
   sources: [
     ...nlSources,
@@ -36,10 +53,41 @@ export const brainEvalSet = {
     ...esQuestions,
     ...crossQuestions,
   ],
-} as const satisfies {
-  version: string;
-  sources: readonly BrainEvalSource[];
-  questions: readonly BrainEvalQuestion[];
+  teams: brainEvalTeams,
+  defaultAsker: brainEvalDefaultAsker,
+};
+
+/**
+ * The set's digest: all of it, so a change to any source, reader, question,
+ * asker or team is a different set, version bumped or not. A run compared
+ * with one of another set gives no verdicts, since every rank depends on
+ * every source and on who may read it.
+ */
+export const setDigestOf = async (set: BrainEvalSet): Promise<string> =>
+  await sha256Hex(JSON.stringify(set));
+
+/**
+ * A question's digest: the question, who asks it and the teams they are
+ * in, and the source it asks for with its readers. A comparison pairs a
+ * question with its earlier result only when this is unchanged.
+ */
+export const questionDigestOf = async (
+  set: BrainEvalSet,
+  question: BrainEvalQuestion
+): Promise<string> => {
+  const asker = question.asker ?? set.defaultAsker;
+  const askerTeams = brainEvalTeamNames.filter((team) =>
+    set.teams[team].includes(asker)
+  );
+  const { expects } = question;
+  const source =
+    expects.kind === "absent"
+      ? null
+      : (set.sources.find(({ key }) => key === expects.source) ?? null);
+  const digest = await sha256Hex(
+    JSON.stringify({ question, asker, askerTeams, source })
+  );
+  return digest.slice(0, 16);
 };
 
 /** Who asks `question`. */
