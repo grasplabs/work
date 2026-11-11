@@ -13,6 +13,10 @@ activations kept in float. Every int8 linear layer keeps each group of 4 weights
 sum |w| <= 258, so the embedder's 16-bit kernels give the same bits as its 32-bit ones. Without calibration texts
 the int8 encoder is quantised plainly.
 
+The encoder file's header says the model's shape: its width, its layers, and for each layer whether it is local,
+whether it has an attention norm, its heads and its feed-forward width (read from the weights, so a model pruned
+layer by layer exports as it is). The embedder runs any shape the header says, within its bounds.
+
 The encoder reads at most --max-tokens tokens (default 512, as the reference truncates); its buffers and rotary
 tables are sized to that, not to the config's max_position_embeddings, which the module's memory may not hold.
 
@@ -27,9 +31,10 @@ import numpy as np
 import torch
 from safetensors.torch import load_file
 from tokenizers import Tokenizer
-from transformers import AutoConfig, AutoModel
+from transformers import AutoConfig, ModernBertModel
 
 HD = 64  # the head width the runtime is written for
+LOCAL, NORM = 1, 2  # a layer's kind: local attention, an attention norm; bits 8 to 15 its rotary table
 SMOOTH = {"qkv": 0.6, "o": 0.0, "ff1": 0.6, "ff2": 0.8}  # per-channel rescaling strength at each linear input
 FLOAT_CHANNELS = 16  # feed-forward channels of the last layer kept in float
 PAIR_LIMIT = 258  # largest sum |w| over the 4 weights feeding one 16-bit lane
@@ -86,11 +91,27 @@ def rope_table(theta: float, max_tokens: int) -> tuple[np.ndarray, np.ndarray]:
     return freqs.cos().numpy(), freqs.sin().numpy()
 
 
+def load_model(src: Path) -> ModernBertModel:
+    """The float32 model with eager attention, each layer's linear layers sized as the checkpoint's weights are: a
+    model pruned layer by layer (fewer heads or a narrower feed-forward in some layers) loads as it is, where
+    from_pretrained would size every layer by the config."""
+    model = ModernBertModel(AutoConfig.from_pretrained(src, attn_implementation="eager"))
+    state = {k.removeprefix("model."): v.float() for k, v in load_file(src / "model.safetensors").items()}
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.Linear) and f"{name}.weight" in state:
+            out, inp = state[f"{name}.weight"].shape
+            if (out, inp) != (module.out_features, module.in_features):
+                parent, _, child = name.rpartition(".")
+                setattr(model.get_submodule(parent), child, torch.nn.Linear(inp, out, bias=False))
+    model.load_state_dict(state, strict=True)
+    return model.eval()
+
+
 def calibrate(src: Path, texts: list[str], max_tokens: int) -> dict[str, np.ndarray]:
     """Per-input-channel abs max at every linear layer's input, over the calibration texts."""
     tok = Tokenizer.from_file(str(src / "tokenizer.json"))
     tok.enable_truncation(max_tokens)
-    model = AutoModel.from_pretrained(src, attn_implementation="eager", dtype=torch.float32).eval()
+    model = load_model(src)
     acc: dict[str, np.ndarray] = {}
 
     def hook(name: str):
@@ -114,22 +135,24 @@ def calibrate(src: Path, texts: list[str], max_tokens: int) -> dict[str, np.ndar
 def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn: int) -> bytes:
     T = {k: v.float().numpy() for k, v in load_file(src / "model.safetensors").items()}
     T = {k.removeprefix("model."): v for k, v in T.items()}
-    h, nh, ff, nl = cfg.hidden_size, cfg.num_attention_heads, cfg.intermediate_size, cfg.num_hidden_layers
-    assert h == nh * HD, f"head width {h // nh}, the runtime runs {HD}"
+    h, nl = cfg.hidden_size, cfg.num_hidden_layers
     assert not cfg.norm_bias and not cfg.attention_bias and not cfg.mlp_bias and cfg.hidden_activation == "gelu"
     thetas = sorted({cfg.rope_parameters[t]["rope_theta"] for t in cfg.layer_types})
     assert all(cfg.rope_parameters[t]["rope_type"] == "default" for t in cfg.layer_types)
-    kinds = [(t == "sliding_attention") | (thetas.index(cfg.rope_parameters[t]["rope_theta"]) << 8) for t in cfg.layer_types]
-    header = struct.pack(f"<4s{9 + nl}I", b"GENC", 1, int(int8), h, nh, ff, nl, maxn, cfg.sliding_window, len(thetas), *kinds)
-    parts: list[bytes] = [pad16(header), pad16(le(T["embeddings.norm.weight"])), pad16(le(T["final_norm.weight"]))]
+    shapes: list[int] = []
+    parts: list[bytes] = [pad16(le(T["embeddings.norm.weight"])), pad16(le(T["final_norm.weight"]))]
     for theta in thetas:
         parts += [pad16(le(a)) for a in rope_table(theta, maxn)]
     for l in range(nl):
         g = lambda n: T[f"layers.{l}.{n}"]  # noqa: E731
-        gn = g("attn_norm.weight") if l > 0 else np.ones(h, np.float32)
+        # Each layer's widths, from its weights: the attention's (heads x the head width) and the feed-forward's.
+        a, ff = g("attn.Wo.weight").shape[1], g("mlp.Wo.weight").shape[1]
+        assert a % HD == 0 and g("attn.Wqkv.weight").shape == (3 * a, h) and g("mlp.Wi.weight").shape == (2 * ff, h), l
+        norm = f"layers.{l}.attn_norm.weight" in T
+        gn = g("attn_norm.weight") if norm else np.ones(h, np.float32)
         mlp_norm = g("mlp_norm.weight")
         wqkv = g("attn.Wqkv.weight").copy()
-        wqkv[:h] *= HD**-0.5  # the attention's scale, folded into Wq
+        wqkv[:a] *= HD**-0.5  # the attention's scale, folded into Wq
         wqkv = wqkv * gn[None, :]
         wo = g("attn.Wo.weight").copy()
         wi = g("mlp.Wi.weight") * mlp_norm[None, :]
@@ -139,11 +162,11 @@ def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn:
         if int8 and cal is not None:
             act = lambda k: cal[f"L{l}.{k}"].astype(np.float64)  # noqa: E731
             # Exact: each rescaling is undone in the gain or the weights before it.
-            sq = smoothing(act("qkv") / (np.maximum(np.abs(gn), 1e-6) if l > 0 else 1), wqkv, SMOOTH["qkv"])
+            sq = smoothing(act("qkv") / (np.maximum(np.abs(gn), 1e-6) if norm else 1), wqkv, SMOOTH["qkv"])
             wqkv, gq = wqkv * sq[None, :], 1 / sq
             if SMOOTH["o"]:
                 so = smoothing(act("o"), wo, SMOOTH["o"])
-                wo, wqkv[2 * h :] = wo * so[None, :], wqkv[2 * h :] / so[:, None]
+                wo, wqkv[2 * a :] = wo * so[None, :], wqkv[2 * a :] / so[:, None]
             sf = smoothing(act("ff1") / np.maximum(np.abs(mlp_norm), 1e-6), wi, SMOOTH["ff1"])
             wi, gf = wi * sf[None, :], 1 / sf
             s2 = smoothing(act("ff2"), wo2, SMOOTH["ff2"])
@@ -155,10 +178,10 @@ def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn:
                 perm = np.concatenate([np.setdiff1d(np.arange(ff), kept), kept])
                 wi = np.concatenate([wi[:ff][perm], wi[ff:][perm]])
                 wo2 = wo2[:, perm]
-        for w in (wqkv, wo, wi, None, wo2[:, : ff - nod]):
-            if w is None:
-                parts.append(pad16(le(np.array([nod, 0, 0, 0], "<i4"))))
-            elif int8:
+        kind = (LOCAL if cfg.layer_types[l] == "sliding_attention" else 0) | (NORM if norm else 0)
+        shapes += [kind | thetas.index(cfg.rope_parameters[cfg.layer_types[l]]["rope_theta"]) << 8, a // HD, ff, nod]
+        for w in (wqkv, wo, wi, wo2[:, : ff - nod]):
+            if int8:
                 wq, s = quantize(w.astype(np.float32))
                 parts += [pad16(le(dot4(wq))), pad16(le(s)), pad16(le(wq.astype(np.int32).sum(axis=1).astype("<i4")))]
             else:
@@ -166,7 +189,8 @@ def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn:
         parts += [pad16(le(gq.astype(np.float32))), pad16(le(gf.astype(np.float32)))]
         if nod:
             parts.append(pad16(le(panel8(wo2[:, ff - nod :]))))
-    return b"".join(parts)
+    header = struct.pack(f"<4s{7 + len(shapes)}I", b"GENC", 2, int(int8), h, nl, maxn, cfg.sliding_window, len(thetas), *shapes)
+    return pad16(header) + b"".join(parts)
 
 
 def tokens(src: Path, int8: bool) -> bytes:

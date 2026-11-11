@@ -4,16 +4,16 @@
     "size": 8741
   },
   "encoder-float.bin": {
-    "sha256": "c0a428a8e6033966537abf6812d866e6338c1454c685c80ff19c24b362404e9d",
-    "size": 789584
+    "sha256": "bbba2e7d8c7a755be6ad498a82030b5886b9303d36e744b77804a95286a00d4a",
+    "size": 789568
   },
   "tokens-float.bin": {
     "sha256": "d62ecb7423e3a01241e7e1d59b369927bd4ff3e9d89b02d4fa456338506bd36d",
     "size": 267808
   },
   "encoder-int8.bin": {
-    "sha256": "4946b0295db6d1ccb07866bba10721d0548814800edae4ac44c937e6b55cd525",
-    "size": 267344
+    "sha256": "e8416cfefc9be66a74b2032e85f23d49afbc10124cb4fa36737801c64bb08fd3",
+    "size": 267328
   },
   "tokens-int8.bin": {
     "sha256": "961e61f5be8051cdfcd3017b525f493e96631b4dcdbe65e795a474ec0cd555e9",
