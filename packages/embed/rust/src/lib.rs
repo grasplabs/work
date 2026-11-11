@@ -75,7 +75,7 @@ pub extern "C" fn dim() -> usize {
 pub extern "C" fn max_tokens() -> usize {
     unsafe { MODEL.as_ref().map_or(0, |m| m.max_tokens()) }
 }
-/// The most bytes of text one token covers (the host's whitespace rule, engine.ts).
+/// The most bytes of text one token covers (the host's buffer rule, engine.ts).
 #[unsafe(no_mangle)]
 pub extern "C" fn longest_token() -> usize {
     unsafe { TOK.as_ref().map_or(0, |t| t.longest_token()) }

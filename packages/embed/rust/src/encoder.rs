@@ -843,13 +843,16 @@ unsafe fn att_softmax<const R: usize>(m: &Model, jlo: usize, jhi: usize, rmax: &
     unsafe {
         for r in 0..R {
             let row = b.srow.add(r * stride);
-            let off = f32x4_splat(rmax[r] - 14.0);
+            // (s - max) + 14, not s - (max - 14): s - max is exact for the row's maximum (0) at any magnitude, so
+            // the exponent never passes 14 and P never passes 16,385, the bound MAX_TOKENS rests on.
+            let (mv, fourteen) = (f32x4_splat(rmax[r]), f32x4_splat(14.0));
+            let p = |s: v128| round_i32(exp2_fast(f32x4_add(f32x4_sub(s, mv), fourteen)));
             let mut sum = i32x4_splat(0);
             let pr = b.prow16.add(r * stride);
             let mut j = jlo;
             while j < jhi {
-                let u0 = round_i32(exp2_fast(f32x4_sub(ld(row.add(j)), off)));
-                let u1 = round_i32(exp2_fast(f32x4_sub(ld(row.add(j + 4)), off)));
+                let u0 = p(ld(row.add(j)));
+                let u1 = p(ld(row.add(j + 4)));
                 sum = i32x4_add(sum, i32x4_add(u0, u1));
                 v128_store(pr.add(j) as *mut v128, i16x8_narrow_i32x4(u0, u1));
                 j += 8;

@@ -20,7 +20,11 @@ pub struct Tok {
     added: HashMap<&'static [u8], (u32, bool)>,
     /// The added tokens' distinct lengths, longest first.
     added_lens: Vec<usize>,
-    first: [bool; 256],
+    /// The byte pairs an added token starts with, as bits (first byte x 256 + second); a one-byte added token
+    /// sets all its pairs. A position no pair matches is skipped without a lookup.
+    starts: Vec<u64>,
+    /// The bytes that are an added token by themselves, for the text's last byte.
+    single: [bool; 256],
     /// The longest piece in the vocabulary, in bytes.
     longest: usize,
     table: Vec<u32>,
@@ -68,12 +72,20 @@ impl Tok {
         let mlen = blob.get(o..o.checked_add(m)?)?;
         o = (o + m + 3) & !3;
         let mut added = HashMap::with_capacity(nadd);
-        let mut first = [false; 256];
+        let mut starts = vec![0u64; 1024];
+        let mut single = [false; 256];
         for _ in 0..nadd {
             let id = words(blob, o, 3)?;
             let l = id[2] as usize;
             let b = blob.get(o + 12..o.checked_add(12 + l)?)?;
-            first[*b.first()? as usize] = true;
+            let b0 = *b.first()? as usize;
+            match b.get(1) {
+                Some(&b1) => starts[(b0 << 2) | (b1 as usize >> 6)] |= 1 << (b1 & 63),
+                None => {
+                    single[b0] = true;
+                    starts[b0 << 2..(b0 + 1) << 2].fill(u64::MAX);
+                }
+            }
             added.entry(b).or_insert((id[0], id[1] != 0));
             o = (o + 12 + l + 3) & !3;
         }
@@ -106,7 +118,7 @@ impl Tok {
             table[h] = id as u32;
         }
         let longest = offs.windows(2).map(|p| (p[1] - p[0]) as usize).max().unwrap_or(1).max(1);
-        Some(Tok { offs, pieces, moffs, mrank, mlen, byte_id, added, added_lens, first, longest, table, mask, bos, eos })
+        Some(Tok { offs, pieces, moffs, mrank, mlen, byte_id, added, added_lens, starts, single, longest, table, mask, bos, eos })
     }
 
     pub fn vocab_size(&self) -> usize {
@@ -272,6 +284,14 @@ impl Tok {
             }
         }
     }
+    /// Whether an added token could start at the start of `s`, by its first two bytes.
+    fn may_start(&self, s: &[u8]) -> bool {
+        match s {
+            [b0, b1, ..] => self.starts[((*b0 as usize) << 2) | (*b1 as usize >> 6)] >> (b1 & 63) & 1 == 1,
+            [b0] => self.single[*b0 as usize],
+            [] => false,
+        }
+    }
     /// The longest added token `s` starts with: one hash lookup per distinct added-token length, longest first.
     fn match_added(&self, s: &[u8]) -> Option<(usize, u32, bool)> {
         self.added_lens.iter().find_map(|&len| {
@@ -290,7 +310,7 @@ impl Tok {
         let mut start = 0;
         let mut i = 0;
         while i < s.len() && ids.len() < lim {
-            if self.first[s[i] as usize] {
+            if self.may_start(&s[i..]) {
                 if let Some((len, id, lstrip)) = self.match_added(&s[i..]) {
                     let mut st = i;
                     if lstrip {

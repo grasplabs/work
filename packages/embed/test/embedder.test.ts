@@ -125,10 +125,15 @@ const withHeaderWord = (index: number, value: number): Uint8Array => {
 
 /**
  * A fixture encoder declaring `maxTokens` tokens, with rotary tables of
- * that size that are all zeros: every query and key is then zero, so every
- * attention score is equal.
+ * that size whose cosines are all `cos` and sines all zero: every position
+ * then rotates alike, so equal tokens get equal queries and keys, scaled by
+ * `cos` (zero by default: every score zero).
  */
-const withMaxTokens = (encoder: ArrayBuffer, maxTokens: number): Uint8Array => {
+const withMaxTokens = (
+  encoder: ArrayBuffer,
+  maxTokens: number,
+  cos = 0
+): Uint8Array => {
   const source = new Uint8Array(encoder);
   const view = new DataView(source.buffer);
   const word = (i: number): number => view.getUint32(i * 4, true);
@@ -148,6 +153,26 @@ const withMaxTokens = (encoder: ArrayBuffer, maxTokens: number): Uint8Array => {
     normsEnd + 2 * tables * tableBytes(maxTokens)
   );
   new DataView(out.buffer).setUint32(7 * 4, maxTokens, true);
+  // Each table is its cosines, then its sines.
+  for (let table = 0; table < tables; table += 1) {
+    const at = normsEnd + 2 * table * tableBytes(maxTokens);
+    new Float32Array(out.buffer, at, tableBytes(maxTokens) / 4).fill(cos);
+  }
+  return out;
+};
+
+/** A token table file with the rows of tokens `copies` replaced by the row of token `from`. */
+const withRowsOf = (
+  table: ArrayBuffer,
+  rowBytes: number,
+  from: number,
+  copies: number[]
+): Uint8Array => {
+  const out = Uint8Array.from(new Uint8Array(table));
+  const row = out.slice(32 + from * rowBytes, 32 + (from + 1) * rowBytes);
+  for (const id of copies) {
+    out.set(row, 32 + id * rowBytes);
+  }
   return out;
 };
 
@@ -298,70 +323,83 @@ describe("embedder", () => {
     expect(bits).toStrictEqual(int8Bits);
   });
 
-  it("keeps attention's integer sums in range at the most tokens a model may read", async () => {
-    // Zero rotary tables zero every query and key, so all 1,024 scores in
-    // a row are equal: each P is 16,383, and each value lane sums
+  it("keeps attention's integer sums in range at the most tokens a model may read, for small and huge scores", async () => {
+    // 1,024 equal tokens (<bos> and <eos> given the same row) under rotary
+    // tables that rotate every position alike: every score in a row is
+    // equal, so each P is the most it can be and each value lane sums
     // 1,024 x 16,383 x 127 at a column's largest value, the most att_pv
-    // can reach (rust/src/encoder.rs, MAX_TOKENS). The float path is the
-    // scalar reference.
-    const model = (encoder: ArrayBuffer, tokens: ArrayBuffer) => ({
-      tokenizer: new Uint8Array(tokenizer),
-      encoder: withMaxTokens(encoder, 1024),
-      tokens: new Uint8Array(tokens),
-    });
-    const [int8, float] = await Promise.all([
-      customEmbedder("uniform-int8", model(encoderInt8, tokensInt8)),
-      customEmbedder("uniform-float", model(encoderFloat, tokensFloat)),
-    ]);
-    const text = "a ".repeat(2000);
-    const ids = await int8.tokenize(text);
-    expect(ids).toHaveLength(1024);
-    expect(new Set(ids.slice(1, -1)).size).toBe(1);
-    const [quantised, reference32] = await Promise.all([
-      int8.embed(text),
-      float.embed(text),
-    ]);
-    expect(dot(quantised.vector, reference32.vector)).toBeGreaterThanOrEqual(
-      int8LeastCosine
-    );
-  });
-
-  it("tokenizes whitespace past the text buffer as the reference does", async () => {
-    // The texts are built here as make-fixture.py builds them; reference.json
-    // keeps only their IDs.
-    const texts: Record<string, string> = {
-      "spaces-then-mask": `${" ".repeat(262_144)}<mask>`,
-      "newlines-then-mask": `Hallo${"\n".repeat(300_000)}<mask> Welt`,
-    };
+    // can reach (rust/src/encoder.rs, MAX_TOKENS). Cosines of 0 make the
+    // scores zero; cosines of 10,000 scale them by 10^8, past 2^25, where
+    // float32 rounds max - 14 by several units (att_softmax). The float
+    // path is the scalar reference.
     await upload(int8Model, int8Files);
-    const embedder = env.INT8.getByName("whitespace");
-    for (const { name, ids } of reference.generated) {
-      // oxlint-disable-next-line no-await-in-loop -- one object, one text at a time
-      await expect(embedder.tokenize(texts[name] ?? "")).resolves.toStrictEqual(
-        ids
-      );
+    const text = "a ".repeat(2000);
+    // The fixture reads 128 tokens: enough to learn which IDs the text has.
+    const ids = await env.INT8.getByName("uniform-ids").tokenize(text);
+    const [bos, a, eos] = [ids[0] ?? 0, ids[1] ?? 0, ids.at(-1) ?? 0];
+    expect(new Set(ids.slice(1, -1))).toStrictEqual(new Set([a]));
+    for (const cos of [0, 10_000]) {
+      const model = (
+        encoder: ArrayBuffer,
+        tokens: ArrayBuffer,
+        rowBytes: number
+      ) => ({
+        tokenizer: new Uint8Array(tokenizer),
+        encoder: withMaxTokens(encoder, 1024, cos),
+        tokens: withRowsOf(tokens, rowBytes, a, [bos, eos]),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one case at a time
+      const [int8, float] = await Promise.all([
+        customEmbedder(
+          `uniform-int8-${cos}`,
+          model(encoderInt8, tokensInt8, 4 + 128)
+        ),
+        customEmbedder(
+          `uniform-float-${cos}`,
+          model(encoderFloat, tokensFloat, 4 * 128)
+        ),
+      ]);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await expect(int8.tokenize(text)).resolves.toHaveLength(1024);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const [quantised, reference32] = await Promise.all([
+        int8.embed(text),
+        float.embed(text),
+      ]);
+      expect(
+        dot(quantised.vector, reference32.vector),
+        `cosines ${String(cos)}`
+      ).toBeGreaterThanOrEqual(int8LeastCosine);
     }
   });
 
-  it("refuses a text past the buffer that is too much whitespace to cut exactly", async () => {
+  it("refuses a text past the buffer when cutting it there could change its tokens", async () => {
     await upload(int8Model, int8Files);
     const stub = env.INT8.getByName("refused");
-    // Runs of alternating whitespace, which the run rule leaves alone.
-    const text = `${" \n".repeat(200_000)}<mask>`;
-    const outcome = await runInDurableObject(stub, async (instance) => {
+    // Whitespace an lstrip token could take (the reference gives <bos>
+    // <mask> <eos> for the first), so what follows the cut could change
+    // the tokens before it.
+    const texts = [
+      `${" ".repeat(262_144)}<mask>`,
+      `${" \n".repeat(200_000)}<mask>`,
+    ];
+    const outcomes = await runInDurableObject(stub, async (instance) => {
       if (!(instance instanceof Embedder)) {
         throw new TypeError("Not an embedder.");
       }
-      try {
-        await instance.embed(text);
-        return "embedded";
-      } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-      }
+      const attempt = async (text: string): Promise<string> => {
+        try {
+          await instance.embed(text);
+          return "embedded";
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      };
+      return [await attempt(texts[0] ?? ""), await attempt(texts[1] ?? "")];
     });
-    expect(outcome).toBe(
-      "The text is too long to tokenize exactly: its first 256 KiB are mostly whitespace. Cut it before embedding."
-    );
+    const refused =
+      "The text is longer than the embedder's 256 KiB text buffer, and cutting it there could change its tokens. Cut it before embedding.";
+    expect(outcomes).toStrictEqual([refused, refused]);
   });
 
   it("answers questions from an object of their own, with the same model", async () => {

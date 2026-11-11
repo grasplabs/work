@@ -83,10 +83,11 @@ export class Engine {
   readonly dim: number;
   readonly maxTokens: number;
   readonly vocabSize: number;
-  /** How many times one whitespace character may repeat before a run is shortened (`tokenize`). */
-  private readonly runLimit: number;
-  /** A run of one whitespace character, repeated more than `runLimit` times. */
-  private readonly longRuns: RegExp;
+  /**
+   * Bytes of non-whitespace that certainly make more tokens than the model
+   * reads: max tokens x the most bytes one token covers (`tokenize`).
+   */
+  private readonly certainlyOver: number;
   private readonly exports: Exports;
   private readonly encoder = new TextEncoder();
 
@@ -123,11 +124,7 @@ export class Engine {
     this.dim = this.exports.dim();
     this.maxTokens = this.exports.max_tokens();
     this.vocabSize = this.exports.vocab_size();
-    this.runLimit = this.maxTokens * this.exports.longest_token() + 1;
-    this.longRuns = new RegExp(
-      String.raw`(\p{White_Space})\1{${String(this.runLimit)},}`,
-      "gu"
-    );
+    this.certainlyOver = this.maxTokens * this.exports.longest_token();
   }
 
   /** How much memory the module holds now. */
@@ -158,41 +155,33 @@ export class Engine {
 
   /**
    * The text's token IDs, `<bos>` and `<eos>` included, cut at the most
-   * tokens the model reads, as the reference tokenizer gives them for every
-   * text it tokenizes within that limit. Two steps keep a text of any size
-   * within the module's 256 KiB text buffer without changing that:
+   * tokens the model reads: the reference tokenizer's for every text within
+   * that limit, or a refusal.
    *
-   * - A run of one whitespace character repeated more than `runLimit`
-   *   times keeps `runLimit` of them. In a text within the limit such a
-   *   run can only be whitespace an added token with lstrip takes, past a
-   *   head of at most max tokens x the longest token's bytes (each token
-   *   covers at most that much), so the same tokens come out. In a text
-   *   beyond the limit, the run alone still fills it.
-   * - A text still longer than the buffer is cut there only when what is
-   *   kept holds at least max tokens x the longest token's bytes of
-   *   non-whitespace, which no lstrip can take: the text is then certainly
-   *   beyond the limit, where the tokens kept near the cut may differ from
-   *   the reference's (as for a long word, rust/src/tokenizer.rs).
-   *   Otherwise it is refused: cut it before embedding.
+   * A text longer than the module's 256 KiB text buffer is cut there only
+   * when what is kept holds at least `certainlyOver` bytes of
+   * non-whitespace, which no added token's lstrip can take and each token
+   * covers at most the longest token's bytes of: the text is then certainly
+   * beyond the limit, where tokens near the cut may differ from the
+   * reference's. Otherwise it is refused: a caller cuts it first.
+   *
+   * Linear in the text: one encode, one pass that drops whitespace, and the
+   * module's tokenizer (rust/src/tokenizer.rs).
    */
   tokenize(text: string): Int32Array {
-    const bounded = text.replace(this.longRuns, (_run, char: string) =>
-      char.repeat(this.runLimit)
-    );
     // The buffer first: allocating it may grow the memory.
     const at = this.exports.text_buf();
     const { read, written } = this.encoder.encodeInto(
-      bounded,
+      text,
       this.bytes().subarray(at, at + this.exports.text_cap())
     );
     if (
-      read < bounded.length &&
-      this.encoder.encode(bounded.slice(0, read).replaceAll(whitespace, ""))
-        .byteLength <
-        this.runLimit - 1
+      read < text.length &&
+      this.encoder.encode(text.slice(0, read).replaceAll(whitespace, ""))
+        .byteLength < this.certainlyOver
     ) {
       throw new RangeError(
-        "The text is too long to tokenize exactly: its first 256 KiB are mostly whitespace. Cut it before embedding."
+        "The text is longer than the embedder's 256 KiB text buffer, and cutting it there could change its tokens. Cut it before embedding."
       );
     }
     const count = this.exports.tokenize(written);

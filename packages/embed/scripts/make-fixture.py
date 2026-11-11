@@ -30,9 +30,6 @@ MAX_TOKENS = 128
 SPECIAL = ["<pad>", "<eos>", "<bos>", "<unk>"]
 # (content, lstrip): what Gemma's tokenizer adds, in small.
 ADDED = [("<mask>", True), ("<b>", False), ("</b>", False), ("<unused3>", False), ("\t\t", False), ("\t\t\t\t", False), ("\n\n", False)]
-# Texts too large to commit, built the same way by the tests (embedder.test.ts): a whitespace run that an lstrip
-# token takes, past the module's 256 KiB text buffer, and one of newlines that the newline-pair token takes, past the limit.
-GENERATED = {"spaces-then-mask": " " * 262_144 + "<mask>", "newlines-then-mask": "Hallo" + "\n" * 300_000 + "<mask> Welt"}
 
 
 def make_tokenizer(texts: list[str]) -> Tokenizer:
@@ -98,8 +95,7 @@ def main() -> None:
                 v = ref(input_ids=torch.tensor([ids])).last_hidden_state[0].mean(0).double().numpy()
             embeddings.append({"text": t, "ids": ids, "vector": [round(float(x), 9) for x in v / np.linalg.norm(v)]})
         tokens = [{"text": t, "ids": tk.encode(t).ids} for t in tricky]
-        generated = [{"name": name, "ids": tk.encode(text).ids} for name, text in GENERATED.items()]
-    (FIXTURES / "reference.json").write_text(json.dumps({"embeddings": embeddings, "tokens": tokens, "generated": generated}, ensure_ascii=False))
+    (FIXTURES / "reference.json").write_text(json.dumps({"embeddings": embeddings, "tokens": tokens}, ensure_ascii=False))
     # What the tests' model descriptions name each file by.
     files = {name: {"sha256": hashlib.sha256((FIXTURES / name).read_bytes()).hexdigest(), "size": size} for name, size in sizes.items()}
     (FIXTURES / "files.json").write_text(json.dumps(files, indent=2) + "\n")
