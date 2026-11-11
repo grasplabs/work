@@ -81,8 +81,12 @@ export { WorkError } from "./work-error.ts";
 //    the attempt spent, due after the backoff), and the restart waits until
 //    that is on disk: it spends no attempt of its own and comes once for
 //    each such wait. Until it lands, nothing more is claimed and no tick
-//    works. Errors are kept as the queue's own codes (`workErrors`), never
-//    as text a handler or a provider wrote.
+//    works. The restart also ends whatever else the store is doing then:
+//    an add, a read or a vector put under way fails and its caller
+//    retries; a write such a call made after the flush is dropped whole,
+//    never half; nothing acknowledged is lost. Errors are kept as the
+//    queue's own codes (`workErrors`), never as text a handler or a
+//    provider wrote.
 //
 // Time: the queue's own time is the tick's (`at`, core's clock's time
 // now) with the real time since the tick began added. Backoffs, pauses,

@@ -215,10 +215,27 @@ const pause = async (ms: number): Promise<void> => {
   await scheduler.wait(ms);
 };
 
+/** The store's instance as a request reaches it now. */
+const instanceOf = async (): Promise<unknown> =>
+  await runInDurableObject(store(), (instance) => instance);
+
+/** Whether the store restarted since `before`: waits up to 5 s for it. */
+const restartedFrom = async (before: unknown): Promise<boolean> => {
+  const giveUpAt = Date.now() + 5000;
+  // oxlint-disable-next-line no-await-in-loop -- until it changed
+  while ((await instanceOf()) === before) {
+    if (Date.now() > giveUpAt) {
+      return false;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- until it changed
+    await pause(20);
+  }
+  return true;
+};
+
 /** The store's instance now, once a restart under way has landed. */
 const instanceNow = async (): Promise<unknown> => {
-  const read = async (): Promise<unknown> =>
-    await runInDurableObject(store(), (instance) => instance);
+  const read = instanceOf;
   let last = await read();
   for (;;) {
     // A restart lands once what it wrote is on disk: a moment after.
@@ -1544,7 +1561,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     await enqueueAll(normal, { priority: "archive" });
     const before = await instanceNow();
     await failed(tick());
-    const restarted = (await instanceNow()) !== before;
+    const restarted = await restartedFrom(before);
     // The four settled before the restart, to be retried later; the fifth,
     // never claimed, runs on its own beside the rest.
     const rows = Object.values(await rowsOf(hung)).map((row) =>
@@ -1712,7 +1729,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     const before = await instanceNow();
     await failed(tick());
     const tickAt = clock.at;
-    const restarted = (await instanceNow()) !== before;
+    const restarted = await restartedFrom(before);
     const rows = await rowsOf([hung, interrupted]);
     await tick();
     expect({

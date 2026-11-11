@@ -92,9 +92,17 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   readonly #work = newWorkState(() => {
     // Only once what it wrote is on disk: an abort drops the writes not
     // yet confirmed, the settles of the handlers it is to end among them.
+    // A flush that fails still ends in the restart. The restart also ends
+    // whatever else the store is doing then: an add, a read or a vector
+    // put under way fails and its caller retries; a write such a call made
+    // after the flush is dropped whole, never half; nothing acknowledged
+    // is lost.
     void (async () => {
-      await this.ctx.storage.sync();
-      this.ctx.abort("Handlers past their time held up the queue");
+      try {
+        await this.ctx.storage.sync();
+      } finally {
+        this.ctx.abort("Handlers past their time held up the queue");
+      }
     })();
   });
 
