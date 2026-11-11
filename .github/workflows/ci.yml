@@ -20,14 +20,15 @@
 # title and description, which become the commit on main, are checked as
 # they stood then (an edit after that isn't). The test shards, the e2e
 # stack and its parts, and the admin's journeys run on the merge queue, a
-# run by hand and the nightly run. A full run is 61 jobs, 60 at once
-# (`check` waits for the rest), the account's 60 concurrent runners: at 63
-# a full run alone left jobs waiting for runners. A pull request's full
+# run by hand and the nightly run. A full run is 61 jobs, never more than
+# 60 at once (`check` and the e2e jobs start later), the account's 60
+# concurrent runners: at 63 a full run alone left jobs waiting for runners. A pull request's full
 # run beside the queue's left one of them waiting for runners, minutes at
 # a time (November 2026): one full run per merge halves that.
 #
 # A full run runs everything at once: every test project, every journey,
-# the builds. No job waits for another but `check`: a plan job ahead of
+# the builds. Only `check`, and the e2e jobs on e2e-build's stack, wait
+# for another job: a plan job ahead of
 # the tests (which projects a change reaches) cost 45 s on every run's
 # critical path (November 2026). A nightly run on main runs it all again:
 # the only full run a merge an admin makes outside the queue gets. When it
