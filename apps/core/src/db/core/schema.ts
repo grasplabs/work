@@ -4320,6 +4320,15 @@ export const workflowResourceRuns = sqliteTable(
      * Null for a root.
      */
     accountRunId: text("account_run_id"),
+    /**
+     * The task whose step a failed run failed at last, as its journal had
+     * it when it ended (run-object.ts, `#failedTask`): the task's ID in
+     * its version, never a step's key or anything the run read. Null for
+     * a run that failed at no step of a task (a raise, or a start core
+     * abandoned). What the improvement signals count failures by
+     * (signals.ts).
+     */
+    failedTask: text("failed_task"),
   },
   (table) => [
     // Dropped with its column (GRA-1589).
