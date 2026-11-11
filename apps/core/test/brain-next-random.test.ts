@@ -1,5 +1,4 @@
-import { brainOf, recallLimit } from "@grasp-os/brain-next/contract";
-import type { Brain, Reader } from "@grasp-os/brain-next/contract";
+import { recallLimit } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -10,7 +9,6 @@ import { organizationId } from "../src/auth/auth.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
 import { seededRandom } from "./brain-scoring.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
@@ -18,20 +16,26 @@ import { testBinding } from "./test-env.ts";
 
 // The random permission test (GRA-1722). From a seed: teams, sources with
 // random words and readers, and changes in who is in which team between
-// rounds of recalls, all through core, with membership in core's own
-// records. Every recall is checked against a brute-force answer written
-// here, apart from the store's SQL:
+// recalls, all through core, with membership in core's own records. Every
+// recall must return exactly the answer a brute-force reading of the
+// contract builds here, apart from the store's SQL and its folding: the
+// sources the reader may read that hold one of the question's words, those
+// holding more of its words first, then the shorter, at most
+// `recallLimit`, and nothing else in the answer. So no result may be one
+// the reader may not read, none may be missing because hidden ones took
+// its place, hidden ones may not move the order, and no field may tell
+// that hidden ones exist. A membership change counts from the very next
+// recall: the person it changed asks at once.
 //
-// - every result is a source the reader may read and that holds one of
-//   the question's words;
-// - none is missing because hidden ones took its place: the reader gets
-//   as many as they may read, up to the limit;
-// - hidden sources change nothing: the sources the reader may read, added
-//   again alone under words of their own, give the same results in the
-//   same order.
+// The brute-force answer is the specification of ranking, written once:
+// the issues that change ranking (chunks, stemming, exact matches,
+// vectors) change it here, on purpose. Every text of a scenario has a
+// length of its own, so no two readable sources tie; what decides between
+// ties (when a source was added, then its random ID) is out of its reach,
+// and so is a leak that shows only in how ties fall.
 //
 // A failure names its seed, what to run to see it again, and only what
-// bears on it: the round, the reader's teams, the question, the changes
+// bears on it: the moment, the reader's teams, the question, the changes
 // in membership so far and the sources holding its words. CI runs the
 // first `defaultSeeds`; vite.brain-random.config.ts as many as asked.
 //
@@ -62,8 +66,8 @@ const rounds = 3;
 /** Most sources a round adds. */
 const addedPerRound = 12;
 
-/** Questions each person asks each round. */
-const questionsPerRound = 2;
+/** Most questions each person asks each round: 1 to this many. */
+const mostQuestionsPerRound = 3;
 
 /** Most words a source holds, before its filler. */
 const mostWordsPerSource = 4;
@@ -102,18 +106,15 @@ interface Planned {
   readers: Readers;
   /**
    * The length of its text, which no other source of the scenario has:
-   * its words, then filler up to it. So the order the contract states
-   * (more of the question's words, then shorter) leaves no ties for the
-   * time it was added to break, which a copy added later can't repeat.
+   * its words, then filler up to it, so no two sources tie.
    */
   length: number;
 }
 
 /**
- * Words no other scenario or copy has: each letter behind a prefix of its
- * own, all of one length, so a copy's texts are as long as the
- * original's. Lowercase ASCII letters and digits, which search reads as
- * they are: the brute-force answer compares letters, never folds.
+ * Words no other scenario has: each letter behind a prefix of its own.
+ * Lowercase ASCII letters and digits, which search reads as they are: the
+ * brute-force answer compares letters, never folds.
  */
 const vocabulary = () => {
   const prefix = `r${crypto.randomUUID().slice(0, 8)}`;
@@ -184,34 +185,56 @@ const describeSource = ({ index, words, readers, length }: Planned): string => {
 const names = (indexes: readonly number[]): string =>
   `[${indexes.map((index) => `s${index}`).join(", ")}]`;
 
-/** The store, by its contract: for the copies only a control reader reads. */
-const store = (): Brain => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+/**
+ * What `person` may read of what holds one of `asked`'s words, best first,
+ * as the contract states it: more of the question's distinct words, then
+ * shorter, at most `recallLimit`.
+ */
+const expectedOf = (
+  planned: readonly Planned[],
+  person: number,
+  membership: Membership,
+  asked: readonly string[]
+): Planned[] => {
+  const distinct = [...new Set(asked)];
+  const scoreOf = ({ words }: Planned): number =>
+    distinct.filter((letter) => words.includes(letter)).length;
+  return planned
+    .filter(
+      (source) => mayRead(source, person, membership) && holds(source, asked)
+    )
+    .toSorted((a, b) => scoreOf(b) - scoreOf(a) || a.length - b.length)
+    .slice(0, recallLimit);
+};
 
-/** What one recall broke of the three rules, if anything. */
+/** What one recall broke, if anything: by source, then the whole answer. */
 const problemsOf = ({
   got,
-  allowed,
-  alone,
+  expected,
+  answer,
+  expectedAnswer,
 }: {
   got: readonly number[];
-  allowed: readonly number[];
-  alone: readonly number[];
+  expected: readonly number[];
+  answer: unknown;
+  expectedAnswer: unknown;
 }): string[] => {
   const problems: string[] = [];
-  const outside = got.filter((index) => !allowed.includes(index));
+  const outside = got.filter((index) => !expected.includes(index));
   if (outside.length > 0) {
     problems.push(
-      `got ${names(outside)}, which the reader may not read or which hold none of its words`
+      `got ${names(outside)}, which the reader may not read, which hold none of its words, or which come past the limit`
     );
   }
-  if (got.length !== Math.min(allowed.length, recallLimit)) {
-    problems.push(
-      `got ${names(got)}, but may read ${names(allowed)} (at most ${recallLimit})`
-    );
+  if (JSON.stringify(got) !== JSON.stringify(expected)) {
+    problems.push(`got ${names(got)}, but expected ${names(expected)}`);
   }
-  if (JSON.stringify(got) !== JSON.stringify(alone)) {
+  if (
+    problems.length === 0 &&
+    JSON.stringify(answer) !== JSON.stringify(expectedAnswer)
+  ) {
     problems.push(
-      `got ${names(got)}, but ${names(alone)} with no hidden sources`
+      `answered ${JSON.stringify(answer)}, but expected exactly ${JSON.stringify(expectedAnswer)}`
     );
   }
   return problems;
@@ -320,42 +343,8 @@ const scenario = (people: readonly string[], seed: number) => {
     }
   };
 
-  /**
-   * What `person` may read now, added again alone, in the same order,
-   * under words no other source holds, for a reader nobody else is.
-   */
-  const controlFor = async (person: number) => {
-    const controlWord = vocabulary();
-    const reader: Reader = {
-      person: `control-${crypto.randomUUID()}`,
-      groups: [],
-    };
-    const indexOf = new Map<string, number>();
-    for (const source of planned) {
-      if (mayRead(source, person, membership)) {
-        // oxlint-disable-next-line no-await-in-loop -- in the same order
-        const { id } = await store().addSource({
-          text: textOf(source, controlWord),
-          access: { kind: "owner", person: reader.person },
-        });
-        indexOf.set(id, source.index);
-      }
-    }
-    return async (asked: readonly string[]): Promise<number[]> => {
-      const { sources } = await store().recall({
-        question: asked.map(controlWord).join(" "),
-        reader,
-      });
-      return sources.map(({ id }) => indexOf.get(id) ?? -1);
-    };
-  };
-
-  /** Asks as `person`; what went wrong, with what bears on it. */
-  const ask = async (
-    round: number,
-    person: number,
-    alone: (asked: readonly string[]) => Promise<number[]>
-  ): Promise<string[]> => {
+  /** Asks as `person` once; what went wrong, with what bears on it. */
+  const ask = async (moment: string, person: number): Promise<string[]> => {
     const asked = draws.letters(3);
     // Sometimes in capitals: search reads a word whatever its case.
     const question = asked
@@ -363,16 +352,18 @@ const scenario = (people: readonly string[], seed: number) => {
         draws.chance(0.2) ? wordOf(letter).toUpperCase() : wordOf(letter)
       )
       .join(" ");
-    const { sources } = await recallAs(env, personId(person), question);
+    const answer = await recallAs(env, personId(person), question);
+    const expected = expectedOf(planned, person, membership, asked);
     const problems = problemsOf({
-      got: sources.map(({ id }) => ids.indexOf(id)),
-      allowed: planned
-        .filter(
-          (source) =>
-            mayRead(source, person, membership) && holds(source, asked)
-        )
-        .map(({ index }) => index),
-      alone: await alone(asked),
+      got: answer.sources.map(({ id }) => ids.indexOf(id)),
+      expected: expected.map(({ index }) => index),
+      answer,
+      expectedAnswer: {
+        sources: expected.map((source) => ({
+          id: ids[source.index],
+          text: textOf(source, wordOf),
+        })),
+      },
     });
     if (problems.length === 0) {
       return [];
@@ -381,7 +372,7 @@ const scenario = (people: readonly string[], seed: number) => {
       .filter((key) => key.startsWith(`${person}:`))
       .map((key) => `t${key.slice(key.indexOf(":") + 1)}`);
     return [
-      `round ${round}, p${person} (in ${inTeams.join(", ") || "no team"}) asks "${asked.join(" ")}":`,
+      `${moment}, p${person} (in ${inTeams.join(", ") || "no team"}) asks "${asked.join(" ")}":`,
       ...problems,
       `membership: ${history.join("; ") || "nobody in a team"}`,
       `sources holding its words: ${planned
@@ -398,19 +389,28 @@ const scenario = (people: readonly string[], seed: number) => {
       // oxlint-disable-next-line no-await-in-loop -- round after round
       await addSources(round);
       for (let person = 0; person < peopleCount; person += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- one reader at a time
-        const alone = await controlFor(person);
-        for (let question = 0; question < questionsPerRound; question += 1) {
+        const questions = 1 + draws.below(mostQuestionsPerRound);
+        for (let question = 0; question < questions; question += 1) {
           // oxlint-disable-next-line no-await-in-loop -- one recall at a time
-          const problems = await ask(round, person, alone);
+          const problems = await ask(`round ${round}`, person);
           if (problems.length > 0) {
             return problems;
           }
         }
       }
       for (let change = 1 + draws.below(2); change > 0; change -= 1) {
+        const person = draws.below(peopleCount);
         // oxlint-disable-next-line no-await-in-loop -- one change at a time
-        await toggle(draws.below(peopleCount), draws.below(teamIds.length));
+        await toggle(person, draws.below(teamIds.length));
+        // The very next recall counts the change.
+        // oxlint-disable-next-line no-await-in-loop -- one change at a time
+        const problems = await ask(
+          `round ${round}, just after "${history.at(-1) ?? ""}"`,
+          person
+        );
+        if (problems.length > 0) {
+          return problems;
+        }
       }
     }
     return [];

@@ -15,15 +15,10 @@ const from = Number(process.env.BRAIN_RANDOM_FROM ?? "1");
 /** How many seeds, one after another from `from`: 500 unless asked. */
 const count = Number(process.env.BRAIN_RANDOM_SEEDS ?? "500");
 
-/** Hours the run may take before Vitest stops it. */
-const maxHours = 2;
-
 export default coreProject(
   {
     name: "@grasp-os/core:brain-random",
     include: ["test/brain-next-random.test.ts"],
-    testTimeout: maxHours * 60 * 60 * 1000,
-    hookTimeout: maxHours * 60 * 60 * 1000,
   },
   { bindings: { BRAIN_RANDOM: { from, count } } }
 );

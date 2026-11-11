@@ -4,13 +4,19 @@
  * answer as a reader who may not read the marked sources: finding
  * something, finding nothing, refusing. It returns all that came back; the
  * harness looks for the markers in that, in the logs written meanwhile and
- * in what reached a model.
+ * in what reached a model, and holds each answer to what the reader asked
+ * only of hidden sources to the answer to words nothing holds.
  *
  * Two lists, checked against what exists: `coreProbes` has one entry per
  * export of core's `brain-next.ts`, `storeProbes` one per public method
  * of the Brain's store (its contract, and anything else a holder of its
  * namespace could call). A member without an entry fails the type check
- * and the harness. A new surface is one more entry here.
+ * and the harness. A new surface is one more entry here:
+ *
+ * - one that answers about a single item probes it with `hiddenIds`;
+ * - one with no reader (an overview, a step the clock runs) ignores the
+ *   reader: what it returns, logs or sends a model must hold no marker in
+ *   any pass.
  */
 import {
   brainOf,
@@ -38,29 +44,77 @@ export interface Probing {
   reader: Reader;
   /** A word in the reader's own source and in every marked one. */
   sharedWord: string;
+  /** A word no source holds. */
+  unknownWord: string;
   /**
    * Words only in sources the reader may not read. Probes ask for them
    * and put them in what they add, so a value echoed anywhere shows.
    */
   markers: readonly string[];
+  /** The IDs of sources the reader may not read. */
+  hiddenIds: readonly string[];
+}
+
+/** One call a probe made, and what came back. */
+export interface Answer {
+  /** What was called, for a failure. */
+  call: string;
+  /** Its value, or everything its error carried. */
+  got: { value: unknown } | { error: unknown };
+  /**
+   * `hidden`: asked only of what the reader may not read; `nothing`: asked
+   * of what nothing holds. Every `hidden` answer of a probe must equal its
+   * `nothing` answer exactly.
+   */
+  about?: "hidden" | "nothing";
 }
 
 /** Calls one surface every way it can answer; returns what came back each time. */
-export type Probe = (probing: Probing) => Promise<unknown[]>;
+export type Probe = (probing: Probing) => Promise<Answer[]>;
 
-/** What a call gave: its value, or what its error carried. */
-const outcome = async (call: () => Promise<unknown>): Promise<unknown> => {
+/** Deepest an error's causes and fields are followed. */
+const unfoldDepth = 6;
+
+/**
+ * `value` with every error in it opened up: its name, message, stack and
+ * every own property, enumerable or not (`cause`, an AggregateError's
+ * `errors`), followed into whatever they hold.
+ */
+const unfolded = (value: unknown, depth = 0): unknown => {
+  if (depth > unfoldDepth || typeof value !== "object" || value === null) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item: unknown) => unfolded(item, depth + 1));
+  }
+  const keys =
+    value instanceof Error
+      ? new Set([
+          "name",
+          "message",
+          "stack",
+          "cause",
+          ...Object.getOwnPropertyNames(value),
+        ])
+      : new Set(Object.keys(value));
+  return Object.fromEntries(
+    [...keys].map((key) => {
+      const field: unknown = Reflect.get(value, key);
+      return [key, unfolded(field, depth + 1)];
+    })
+  );
+};
+
+/** Calls `call` and keeps what came back as an answer. */
+const answer = async (
+  callName: string,
+  call: () => Promise<unknown>,
+  about?: Answer["about"]
+): Promise<Answer> => {
   try {
-    return await call();
+    return { call: callName, got: { value: await call() }, about };
   } catch (error) {
-    if (!(error instanceof Error)) {
-      return { error: String(error) };
-    }
-    return {
-      error: error.message,
-      stack: error.stack,
-      ...Object.fromEntries(Object.entries(error)),
-    };
+    return { call: callName, got: { error: unfolded(error) }, about };
   }
 };
 
@@ -85,22 +139,47 @@ const markedText = (markers: readonly string[]): string =>
 const oversizedText = (markers: readonly string[]): string =>
   markedText(markers).padEnd(sourceTextMaxBytes + 1, " x");
 
+/** A question a reader asks, and what it asks of. */
+interface Question {
+  name: string;
+  text: string;
+  about?: Answer["about"];
+}
+
 /**
- * Questions a reader asks: by the markers, by the shared word (found:
- * their own source), by both, as search syntax, as a prefix, empty, and
- * past the longest question (refused).
+ * Questions a reader asks: by the markers, as search syntax and as a
+ * prefix (only what they may not read); by a word nothing holds; by the
+ * shared word (found: their own source); by both; empty; and past the
+ * longest question (refused).
  */
-const questionsOf = ({ sharedWord, markers }: Probing): string[] => {
+const questionsOf = ({
+  sharedWord,
+  unknownWord,
+  markers,
+}: Probing): Question[] => {
   const hidden = markers.join(" ");
   const [first = ""] = markers;
   return [
-    hidden,
-    sharedWord,
-    `${sharedWord} ${hidden}`,
-    `${first}* OR "${hidden}" NEAR(${hidden}) text:${first} ^${first}`,
-    first.slice(0, -1),
-    "",
-    `${hidden} `.repeat(questionMaxLength).slice(0, questionMaxLength + 1),
+    { name: "the markers", text: hidden, about: "hidden" },
+    {
+      name: "the markers as search syntax",
+      text: `${first}* OR "${hidden}" NEAR(${hidden}) text:${first} ^${first}`,
+      about: "hidden",
+    },
+    { name: "a marker's prefix", text: first.slice(0, -1), about: "hidden" },
+    { name: "a word nothing holds", text: unknownWord, about: "nothing" },
+    { name: "the shared word", text: sharedWord },
+    {
+      name: "the shared word and the markers",
+      text: `${sharedWord} ${hidden}`,
+    },
+    { name: "nothing", text: "" },
+    {
+      name: "too long a question",
+      text: `${hidden} `
+        .repeat(questionMaxLength)
+        .slice(0, questionMaxLength + 1),
+    },
   ];
 };
 
@@ -114,37 +193,42 @@ type CoreMember = keyof typeof coreBrain;
 export const coreProbes = {
   addSource: async ({ markers }) => {
     const text = markedText(markers);
-    const add = async (readers: SourceReaders, as = text) =>
-      await outcome(
+    const add = async (name: string, readers: SourceReaders, as = text) =>
+      await answer(
+        name,
         async () => await coreBrain.addSource(env, { text: as, readers })
       );
     return [
-      // Kept, for someone else; and for nobody.
-      await add({ kind: "owner", personId: stranger() }),
-      await add({ kind: "none" }),
-      // Refused.
-      await add(unchecked({ kind: "everyone" })),
-      await add(unchecked({ kind: "owner", personId: "" })),
-      await add(unchecked({ kind: "team", teamId: markers.join("") })),
-      await add({ kind: "owner", personId: stranger() }, ""),
+      await add("for someone else", { kind: "owner", personId: stranger() }),
+      await add("for nobody", { kind: "none" }),
+      await add("an unknown kind", unchecked({ kind: "everyone" })),
+      await add("no person", unchecked({ kind: "owner", personId: "" })),
       await add(
+        "a team named by the markers",
+        unchecked({ kind: "team", teamId: markers.join("") })
+      ),
+      await add("no text", { kind: "owner", personId: stranger() }, ""),
+      await add(
+        "too much text",
         { kind: "owner", personId: stranger() },
         oversizedText(markers)
       ),
     ];
   },
   recallAs: async (probing) => {
-    const asked: unknown[] = [];
-    for (const question of questionsOf(probing)) {
+    const asked: Answer[] = [];
+    for (const { name, text, about } of questionsOf(probing)) {
       // oxlint-disable-next-line no-await-in-loop -- one question at a time
-      const answer = await outcome(
-        async () => await coreBrain.recallAs(env, probing.personId, question)
+      const answered = await answer(
+        name,
+        async () => await coreBrain.recallAs(env, probing.personId, text),
+        about
       );
-      asked.push(answer);
+      asked.push(answered);
     }
-    // Someone who isn't a member (refused), asking for the markers.
     asked.push(
-      await outcome(
+      await answer(
+        "the markers, as someone who isn't a member",
         async () =>
           await coreBrain.recallAs(env, stranger(), probing.markers.join(" "))
       )
@@ -172,20 +256,32 @@ type StoreMember = {
 export const storeProbes = {
   addSource: async ({ markers }) => {
     const text = markedText(markers);
-    const add = async (access: Access, as = text) =>
-      await outcome(async () => await store().addSource({ text: as, access }));
+    const add = async (name: string, access: Access, as = text) =>
+      await answer(
+        name,
+        async () => await store().addSource({ text: as, access })
+      );
     return [
-      // Kept, for someone else; and for nobody.
-      await add({ kind: "owner", person: stranger() }),
-      await add({ kind: "audience", group: stranger() }),
-      await add({ kind: "none" }),
-      // Refused.
-      await add(unchecked({ kind: "everyone" })),
-      await add(unchecked({ kind: "audience", group: "" })),
-      await add(unchecked({ kind: "owner", person: text.repeat(300) })),
-      await add(unchecked({ kind: "none", person: markers.join("") })),
-      await add({ kind: "owner", person: stranger() }, oversizedText(markers)),
-      await outcome(
+      await add("for someone else", { kind: "owner", person: stranger() }),
+      await add("for a group", { kind: "audience", group: stranger() }),
+      await add("for nobody", { kind: "none" }),
+      await add("an unknown kind", unchecked({ kind: "everyone" })),
+      await add("no group", unchecked({ kind: "audience", group: "" })),
+      await add(
+        "too long a person",
+        unchecked({ kind: "owner", person: text.repeat(300) })
+      ),
+      await add(
+        "a field the kind hasn't",
+        unchecked({ kind: "none", person: markers.join("") })
+      ),
+      await add(
+        "too much text",
+        { kind: "owner", person: stranger() },
+        oversizedText(markers)
+      ),
+      await answer(
+        "an unknown field",
         async () =>
           await store().addSource(
             unchecked({ text, access: { kind: "none" }, extra: text })
@@ -195,26 +291,42 @@ export const storeProbes = {
   },
   recall: async (probing) => {
     const { reader, markers } = probing;
-    const recall = async (question: string, as: Reader = reader) =>
-      await outcome(async () => await store().recall({ question, reader: as }));
-    const asked: unknown[] = [];
-    for (const question of questionsOf(probing)) {
+    const recall = async (
+      name: string,
+      question: string,
+      as: Reader = reader,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => await store().recall({ question, reader: as }),
+        about
+      );
+    const asked: Answer[] = [];
+    for (const { name, text, about } of questionsOf(probing)) {
       // oxlint-disable-next-line no-await-in-loop -- one question at a time
-      const answer = await recall(question);
-      asked.push(answer);
+      const answered = await recall(name, text, reader, about);
+      asked.push(answered);
     }
     const hidden = markers.join(" ");
     asked.push(
-      // Refused: too many groups, a principal too long, an unknown field.
-      await recall(hidden, {
+      await recall("too many groups", hidden, {
         ...reader,
         groups: Array.from({ length: readerGroupsMax + 1 }, () =>
           markers.join("")
         ),
       }),
-      await recall(hidden, { ...reader, person: hidden.repeat(300) }),
-      await recall(hidden, unchecked({ ...reader, extra: hidden })),
-      await outcome(
+      await recall("too long a person", hidden, {
+        ...reader,
+        person: hidden.repeat(300),
+      }),
+      await recall(
+        "a reader with an unknown field",
+        hidden,
+        unchecked({ ...reader, extra: hidden })
+      ),
+      await answer(
+        "a request with an unknown field",
         async () =>
           await store().recall(
             unchecked({ question: hidden, reader, extra: hidden })
@@ -224,46 +336,3 @@ export const storeProbes = {
     return asked;
   },
 } satisfies Record<StoreMember, Probe>;
-
-/**
- * Cases the design's access tests name whose feature isn't built yet. The
- * issue that builds it adds the case to the harness (a probe above, or a
- * test in brain-next-leaks.test.ts or brain-next-random.test.ts) and takes
- * its line out of this list.
- */
-export const casesStillToCover = [
-  {
-    case: "A revoked share stops answering within a stated time",
-    issue: "GRA-1761",
-  },
-  {
-    case: "An email from outside never becomes a standing instruction",
-    issue: "GRA-1737",
-  },
-  {
-    case: "A model that saw a restricted source can't produce a company-readable fact",
-    issue: "GRA-1737",
-  },
-  {
-    case: "Markers in memories drawn from restricted sources stay out of every surface",
-    issue: "GRA-1737",
-  },
-  {
-    case: "Markers in entity names and company terms stay out of every surface",
-    issue: "GRA-1740",
-  },
-  {
-    case: "The pack's counts, gaps and suggestions of where to look hold no marker",
-    issue: "GRA-1728",
-  },
-  {
-    // The provider stub already sees every prompt sent while the probes
-    // run; the first work that prompts a model must run then too.
-    case: "Background work that prompts a model runs while the markers are planted",
-    issue: "GRA-1737",
-  },
-  {
-    case: "Erased content stays gone after a restore",
-    issue: "GRA-1729",
-  },
-] as const;
