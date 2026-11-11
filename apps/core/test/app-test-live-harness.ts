@@ -152,9 +152,9 @@ export const requestFor = (
   path: string,
   input: unknown
 ): string => {
-  const operation = release.app.operations[path];
+  const fn = release.app.functions[path];
   return JSON.stringify({
-    reference: { name: path, kind: operation?.kind },
+    reference: { name: path, kind: fn?.kind },
     args: input,
   });
 };

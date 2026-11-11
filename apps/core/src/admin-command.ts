@@ -23,7 +23,12 @@ import { signInConfig } from "./auth/config.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { adminCommands } from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
-import { closeGate, openGate, setGateThreshold } from "./onboarding/gate.ts";
+import {
+  closeGate,
+  openAsFlowSays,
+  openGate,
+  setGateThreshold,
+} from "./onboarding/gate.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
 // Commands from Grasp's admin (`@grasp-os/shared/admin-command`, which
@@ -178,6 +183,9 @@ const applyChange = async (
       );
       // Links that only waited for an agreement no longer asked go out now.
       await store.releaseDue();
+      // A flow that opens by itself opens the company's Grasp now: no
+      // onboarding at all, or one its admin already finished.
+      await openAsFlowSays(env, by, "set");
       return;
     }
     default: {

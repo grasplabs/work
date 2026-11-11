@@ -84,7 +84,7 @@ export interface AppWebhookPayload {
   occurredAt: string;
   version?: number;
   submission?: string;
-  operation?: string;
+  function?: string;
   values?: Json;
   valuesLeftOut?: true;
 }

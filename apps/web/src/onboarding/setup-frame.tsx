@@ -10,8 +10,8 @@ import { LanguageButton } from "../language-picker.tsx";
 import { SoundControls } from "../voice/sound-controls.tsx";
 import { KnowledgeCorner } from "./knowledge-bar.tsx";
 import type { Knowledge } from "./knowledge-bar.tsx";
-import { stepIndex, steps, waysFrom, wizardSteps } from "./setup.ts";
-import type { SetupStep } from "./setup.ts";
+import { stepIndex, waysFrom, wizardOf } from "./setup.ts";
+import type { SetupPath, SetupStep } from "./setup.ts";
 import { wasHeard } from "./visit.ts";
 
 // The frame of every onboarding screen (prototype
@@ -45,10 +45,13 @@ const dotOf = (at: number, index: number): string => {
 /** The dots for the wizard's steps, each a way back, and on as far as you have been. */
 const StepDots = ({
   index,
+  path,
   open,
   onGo,
 }: {
   index: number;
+  /** The screens this company's admin goes through. */
+  path: SetupPath;
   /** Whether the step at a place can be gone to. */
   open: (at: number) => boolean;
   onGo: (step: SetupStep) => void;
@@ -56,7 +59,7 @@ const StepDots = ({
   const { t } = useLingui();
   return (
     <span className="animate-in fade-in flex items-center">
-      {steps.slice(0, wizardSteps).map((each, at) => {
+      {wizardOf(path).map((each, at) => {
         const n = at + 1;
         return (
           <button
@@ -101,8 +104,16 @@ export const Arriving = ({
   return <span className={cn(className, !still && motion)}>{children}</span>;
 };
 
+/** The screens before Grasp knows anything of the company, where how much it knows isn't shown. */
+const beforeKnowing: ReadonlySet<SetupStep> = new Set([
+  "welcome",
+  "ai",
+  "about",
+]);
+
 export const SetupFrame = ({
   step,
+  path,
   reached,
   knowledge,
   onGo,
@@ -110,6 +121,8 @@ export const SetupFrame = ({
   children,
 }: {
   step: SetupStep;
+  /** The screens this company's admin goes through, in order. */
+  path: SetupPath;
   reached: number;
   knowledge: Knowledge;
   onGo: (step: SetupStep) => void;
@@ -117,14 +130,14 @@ export const SetupFrame = ({
   children: ReactNode;
 }) => {
   const { t } = useLingui();
-  const index = stepIndex(step);
+  const index = stepIndex(step, path);
   const words: Partial<Record<SetupStep, string>> = {
     listening: t`Talking to your team`,
     review: t`Almost there`,
     open: t`Ready`,
   };
   const word = words[step];
-  const { back, on, open } = waysFrom(index, reached);
+  const { back, on, open } = waysFrom(index, reached, path);
   // Back on a step finished before, what turns up around it is there at once, too.
   const settled = wasHeard(step);
 
@@ -184,12 +197,12 @@ export const SetupFrame = ({
             </Arriving>
           )}
         </nav>
-        {index >= stepIndex("company") ? (
+        {beforeKnowing.has(step) ? (
+          <span />
+        ) : (
           <Arriving settled={settled}>
             <KnowledgeCorner {...knowledge} />
           </Arriving>
-        ) : (
-          <span />
         )}
       </header>
       {/* A step fits between the two rows, a long list scrolling in its own panel; only where a window is too small even for that, on a phone, does the step scroll between them. */}
@@ -201,7 +214,7 @@ export const SetupFrame = ({
         <GraspMark className="size-5" />
         <nav aria-label={t`Onboarding steps`} className="flex items-center">
           {word === undefined ? (
-            <StepDots index={index} onGo={onGo} open={open} />
+            <StepDots index={index} onGo={onGo} open={open} path={path} />
           ) : (
             <span
               className="text-muted-foreground animate-in fade-in slide-in-from-bottom-1 duration-200"

@@ -53,10 +53,9 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 // - Kept forever: chats deleted 30 days after they end.
 //
 // A workflow never reaches guest chats: an independent workflow calls an
-// App only through a business store's public queries and mutations
-// (store-operations.ts), never an action, and the guests resource is an
-// action's (store-operations.test.ts, "approved only for a public query or
-// mutation of the contract's exact shape, through its own permission").
+// App only through its public queries and mutations
+// (workflows/app-calls.ts), never an action, and the guests resource is an
+// action's.
 // The test of a run listing, reading and revoking chats through
 // `env.APP.callFunction` went with App-owned TypeScript workflows.
 

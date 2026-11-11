@@ -386,10 +386,10 @@ export const stillOpenTo = (by: Person, app: AppId): SQL => {
  * `team` row rules match, store-rules.ts: read here on every call, never
  * from the session, so a team left or joined counts from the next read or
  * commit). Refuses as `requireAppRole` does, `app.not_found` when they
- * have no role. For the operation host, which asks again just before a
- * mutation commits (operations.ts).
+ * have no role. For the function host, which asks again just before a
+ * mutation commits (function-host.ts).
  */
-export const operationRoles = async (
+export const functionRoles = async (
   env: Env,
   by: Pick<Identity, "userId" | "role">,
   app: AppId,

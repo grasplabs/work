@@ -22,7 +22,7 @@ import { valueDepth } from "./value-depth.ts";
 // tables; a table holds records, each one JSON document of the fields its
 // schema declares plus the managed fields only the host sets. These are
 // the shapes core hands a store: never App code, which reaches records
-// only through the operations of its pinned schema.
+// only through the functions of its pinned schema.
 
 /** A logical table's name, as the schema's map key gives it. */
 export const tableNameSchema = z
@@ -45,21 +45,21 @@ export const documentMaxBytes = platformLimits.persistedRowBytes;
 /**
  * The most bytes of one commit's writes and intents, as UTF-8 JSON: the
  * host's own bound on one store transaction, the size spec 18.1 gives a
- * workflow step's input and result. A public operation's own input limit
- * is checked where operations are called, not here.
+ * workflow step's input and result. A public function's own input limit
+ * is checked where functions are called, not here.
  */
 export const commitMaxInputBytes = platformLimits.stepPayloadBytes;
 
 /**
  * The most bytes of writes one mutation may stage, as UTF-8 JSON: what is
- * left of a commit's bound after its result (at most a public operation's
- * output, `operationResultMaxBytes`) and its read set (at most 64
+ * left of a commit's bound after its result (at most a public function's
+ * output, `functionResultMaxBytes`) and its read set (at most 64
  * tables, well within 64 KiB), so a mutation that stages within it
- * always fits its commit. The operation host refuses the write that
+ * always fits its commit. The function host refuses the write that
  * passes it.
  */
 export const stagedMaxBytes =
-  commitMaxInputBytes - platformLimits.operationOutputBytes - 64 * 1024;
+  commitMaxInputBytes - platformLimits.functionResultBytes - 64 * 1024;
 
 /**
  * How deeply a record's JSON may nest: a field's value gets `valueDepth`
@@ -70,7 +70,7 @@ export const documentMaxDepth = valueDepth;
 
 /**
  * How deep an argument App code in a sandboxed isolate sends core may be
- * (the operation channel, its forwarders, a test's or an action's host):
+ * (the function channel, its forwarders, a test's or an action's host):
  * a write's request (`WriteRequest`) around its fields around a field as
  * deep as a record keeps, the deepest shape any of them takes. Deeper
  * than a page's (`rpcArgumentDepth`, which nothing on a page needs past
@@ -222,9 +222,9 @@ const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 /**
  * What a mutation's receipt is scoped to, besides its store and key: the
  * person it is for, the resource and binding it came through, the pinned
- * operation contract and the kind of operation. The same key under any
+ * function contract and the kind of function. The same key under any
  * other scope is another receipt, so a key never reaches another
- * caller's or operation's outcome.
+ * caller's or function's outcome.
  */
 export const receiptScopeSchema = z.strictObject({
   principal: identifierSchema,
@@ -232,7 +232,7 @@ export const receiptScopeSchema = z.strictObject({
   binding: identifierSchema.nullable(),
   contractId: identifierSchema,
   contractVersion: z.number().int().min(1),
-  operationKind: z.literal("mutation"),
+  functionKind: z.literal("mutation"),
 });
 export type ReceiptScope = z.infer<typeof receiptScopeSchema>;
 
@@ -288,14 +288,14 @@ export type Claimed =
 export const commitMaxIntents = 16;
 
 /**
- * A workflow notification or start a commit stages, or the form a page
+ * An event sent to a workflow run or a start a commit stages, or the form a page
  * sent as the mutation, for its App's webhooks: its content is defined
  * where it is delivered.
  */
 export const storeIntentKinds = [
   "app.form_sent",
   "app.notify",
-  "workflow.notify",
+  "workflow.send_event",
   "workflow.start",
 ] as const;
 
@@ -540,7 +540,7 @@ export const migrationErrors = defineErrorFamily({
 });
 
 /**
- * Why a query operation's reads couldn't be answered as one state of the
+ * Why a query's reads couldn't be answered as one state of the
  * store: retryable, as spec 6.3 says (`details.retryable`).
  */
 export const queryErrors = defineErrorFamily({

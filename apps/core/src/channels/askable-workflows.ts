@@ -25,12 +25,12 @@ export interface AskableWorkflow {
   args: Json | null;
 }
 
-const contractSchema = z.looseObject({ input: z.json().optional() });
+const contractSchema = z.looseObject({ args: z.json().optional() });
 
-/** The input schema of `contract`, a version's canonical JSON contract. */
-const inputOf = (contract: string): Json | null => {
+/** The args schema of `contract`, a version's canonical JSON contract. */
+const argsOf = (contract: string): Json | null => {
   try {
-    return contractSchema.parse(JSON.parse(contract)).input ?? null;
+    return contractSchema.parse(JSON.parse(contract)).args ?? null;
   } catch {
     return null;
   }
@@ -78,6 +78,6 @@ export const askableFor = async (
     const row = found.get(id);
     return row?.version === null || row === undefined
       ? []
-      : [{ id, name, version: row.version, args: inputOf(row.contract) }];
+      : [{ id, name, version: row.version, args: argsOf(row.contract) }];
   });
 };

@@ -219,9 +219,9 @@ import {
 // - A key is reused with other input: `submission.key_conflict`; a key
 //   whose receipt expired is `submission.expired` while its tombstone is
 //   kept.
-// - A key crosses callers or operations: a receipt's ID hashes the store,
+// - A key crosses callers or functions: a receipt's ID hashes the store,
 //   the whole scope (person, resource, binding, contract and its version,
-//   operation kind) and the key, and a commit is refused unless its
+//   function kind) and the key, and a commit is refused unless its
 //   principal is the receipt's.
 // - A receipt expires under a commit: every claim keeps it a retention
 //   from then, and the commit another from the commit; a receipt whose

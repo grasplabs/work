@@ -6,8 +6,8 @@ import { isPlainObject } from "./value-descriptor.ts";
 /**
  * A role in an App a row rule may name: `builder`, or `user`, which
  * everyone with a role in the App holds: its builders too, and whoever
- * calls the public operations of a store it serves (another App's or a
- * workflow's people, who are its members for those operations).
+ * calls the public functions of a store it serves (another App's or a
+ * workflow's people, who are its members for those functions).
  */
 export type RowRole = "builder" | "user";
 

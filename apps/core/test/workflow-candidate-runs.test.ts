@@ -558,7 +558,7 @@ describe("test runs of a workflow's draft", () => {
       fixtures: {},
     });
     const tamper = env.DB.prepare(
-      "UPDATE workflow_candidate_runs SET manifest = replace(manifest, '\"formatVersion\":1', '\"formatVersion\":1 ') WHERE id = ?"
+      "UPDATE workflow_candidate_runs SET manifest = manifest || ' ' WHERE id = ?"
     ).bind(runId);
     // Its row keeps what it pins: a change goes only around the trigger.
     const refusedTamper = await outcome(tamper.run());

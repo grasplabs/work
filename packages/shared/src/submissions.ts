@@ -48,14 +48,18 @@ export const submissionErrors = defineErrorFamily({
 
 /**
  * What a committed submission can still have to tell others, through its
- * outbox (committed in its batch): a notification for a workflow run, a
+ * outbox (committed in its batch): an event sent to a workflow run, a
  * workflow run to start, people to tell (`app.notify`), or a page's form to its App's webhooks. Each is handed over after the commit, never as
  * part of it: no change spans the store and a run. A kind is staged only
  * once something takes it (its consumer). Its content is defined where it
  * is delivered.
  */
 export interface SubmissionIntent {
-  kind: "app.form_sent" | "app.notify" | "workflow.notify" | "workflow.start";
+  kind:
+    | "app.form_sent"
+    | "app.notify"
+    | "workflow.send_event"
+    | "workflow.start";
   data: Json;
 }
 export type SubmissionIntentKind = SubmissionIntent["kind"];

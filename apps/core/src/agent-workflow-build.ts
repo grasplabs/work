@@ -227,7 +227,7 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * The host catalog's contracts with their terms: what a definition can
-   * bind for a model, a person's decision, a connector, an operation or
+   * bind for a model, a person's decision, a connector or
    * an event, besides other workflows.
    */
   async catalog(): Promise<CatalogContractTerms[]> {
@@ -468,9 +468,9 @@ interface WorkflowDraft {
 interface CatalogContract {
   key: string;
   kind: ${catalogBindingKinds.map((kind) => JSON.stringify(kind)).join(" | ")};
-  /** What a call passes (operation, decision). */
+  /** What a call passes (decision). */
   input?: unknown;
-  /** What it returns (operation). */
+  /** What it returns. */
   output?: unknown;
   /** What a person answers with besides \`approved\` (decision). */
   response?: unknown;

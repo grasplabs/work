@@ -1,7 +1,7 @@
+import { functionErrors } from "@grasp-os/shared/functions";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { keepsState } from "@grasp-os/workflow-schema/sealed";
 import { and, asc, eq, inArray, isNull, lt } from "drizzle-orm";
@@ -197,7 +197,7 @@ export const startFixtureRun = async (
           task.call.name === "grasp.model"
       )
     ) {
-      throw operationErrors.create("contract.invalid_args");
+      throw functionErrors.create("contract.invalid_args");
     }
   }
   const runId = crypto.randomUUID();
@@ -268,7 +268,7 @@ export const fixtureActivation = async (
   }
   // Its test is over: nothing more of it runs.
   if (Date.now() > row.deadline.getTime()) {
-    throw operationErrors.create("function.cancelled");
+    throw functionErrors.create("function.cancelled");
   }
   const build = await loadWorkflowBuild(
     env,
@@ -317,7 +317,7 @@ export const fixtureActivation = async (
       // answered by its fixture, never a model's.
       maxModelCalls: limits.lineageModelRequests,
     },
-    output: JSON.stringify(contract.output),
+    output: JSON.stringify(contract.returns),
     owner: testRunOwnerOf(row.appId),
     admission: "fixture",
     // The fault its test gave it, unless it fired already.
@@ -574,7 +574,7 @@ export const fixtureTaskCompletions = async (
 ): Promise<number> => {
   const parsed = taskIdSchema.safeParse(task);
   if (!parsed.success) {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   return (
     (await runEngine(env).succeededSteps(

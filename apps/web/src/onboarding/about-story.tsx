@@ -544,7 +544,7 @@ const useScript = (data: StepProps["data"]): Script => {
  * Last, the plan is summed up, the bar settles back to what is known now,
  * and the way on fades in.
  */
-export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
+export const About = ({ data, parts, percent, onward, onStory }: StepProps) => {
   const { t } = useLingui();
   const { onExplained } = useContext(Explained);
   const { threshold } = data.gate;
@@ -646,7 +646,7 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
       </div>
       <Primary
         onClick={() => {
-          go("company");
+          onward();
         }}
       >
         {t`Continue`}

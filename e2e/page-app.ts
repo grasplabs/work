@@ -13,7 +13,7 @@ import type { TestApp } from "../apps/core/test/app-definitions.ts";
  * its sealed release.
  */
 
-const operations = `import { v } from "@grasp-os/sdk";
+const serverCode = `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
 /** Every note, each with who wrote it. */
@@ -223,7 +223,7 @@ export const pageAppFiles = (attacker: string): TestApp =>
       },
     },
     {
-      "server/notes.ts": operations,
+      "server/notes.ts": serverCode,
       "src/routes/index.tsx": pageCode(attacker),
     }
   );

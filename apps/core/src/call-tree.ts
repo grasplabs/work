@@ -1,11 +1,11 @@
 // One caller's call of an App function, as every function it runs shares
-// it (operations.ts `Run.call`), and as its runner sees it: on-prem, the
+// it (function-host.ts `Run.call`), and as its runner sees it: on-prem, the
 // sandbox session the function the caller named runs in keeps open until
 // every function nested in it has settled (app-functions.ts).
 
 /**
  * The nested calls one caller's call has started and not yet settled,
- * each from the moment the operation host starts it, before it's
+ * each from the moment the function host starts it, before it's
  * authorized or reaches its runner.
  */
 export class CallTree {
@@ -28,7 +28,7 @@ export class CallTree {
 
   /**
    * On-prem, the sandbox session, by its call ID, the function the caller
-   * named runs in, once open: a shared store's operation called on its
+   * named runs in, once open: a shared store's function called on its
    * behalf runs in a child of it.
    */
   get session(): string | undefined {

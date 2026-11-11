@@ -1,6 +1,6 @@
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -30,7 +30,7 @@ import { signedInApi } from "./sign-in.ts";
 // discarded once the call answers, so a late write through a kept channel
 // can't even be attempted, and its refusal can't be observed from here.
 // That a channel refuses every use once its invocation ended
-// (`function.ended`) is operations.test.ts's, where the host's channel
+// (`function.ended`) is function-host.test.ts's, where the host's channel
 // is reached directly.
 
 type Sealed = Fixture & { release: Release };
@@ -59,14 +59,14 @@ const call = async (
   by: Caller,
   path: string,
   input: Json = {}
-): Promise<OperationResult> => {
-  const operation = release.app.operations[path];
+): Promise<FunctionResult> => {
+  const fn = release.app.functions[path];
   const { result } = await callAppFunction(
     env,
     by,
     app,
     JSON.stringify({
-      reference: { name: path, kind: operation?.kind },
+      reference: { name: path, kind: fn?.kind },
       args: input,
     })
   );

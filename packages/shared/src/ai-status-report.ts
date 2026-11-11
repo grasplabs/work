@@ -101,5 +101,18 @@ export const aiStatusReportSchema = z.strictObject({
       lastMonth: platformMonthSpendSchema,
     })
     .optional(),
+  /**
+   * The organization's use of Grasp's AI this month against its limit,
+   * in millionths of a US dollar, while it runs its AI on Grasp's key.
+   * Optional: absent from a core on an earlier release, and from an
+   * organization on its own key.
+   */
+  graspAi: z
+    .strictObject({
+      spentMicros: z.int().min(0),
+      limitMicros: z.int().min(0),
+      reached: z.boolean(),
+    })
+    .optional(),
 });
 export type AiStatusReport = z.infer<typeof aiStatusReportSchema>;

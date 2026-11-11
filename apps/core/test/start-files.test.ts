@@ -368,7 +368,7 @@ const calledAs = async (
     by.acting,
     release.manifest.resourceId,
     JSON.stringify({
-      reference: { name: path, kind: release.app.operations[path]?.kind },
+      reference: { name: path, kind: release.app.functions[path]?.kind },
       args: input,
     })
   );

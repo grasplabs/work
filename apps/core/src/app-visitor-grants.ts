@@ -156,13 +156,13 @@ export const setAppVisitorGrants = async (
   const release = await loadRelease(env, found.id, version);
   const wanted = [...new Set(parsed.data)].toSorted();
   for (const path of wanted) {
-    const operation = Object.hasOwn(release.app.operations, path)
-      ? release.app.operations[path]
+    const fn = Object.hasOwn(release.app.functions, path)
+      ? release.app.functions[path]
       : undefined;
     if (
-      operation === undefined ||
-      operation.visibility !== "public" ||
-      operation.kind === "action"
+      fn === undefined ||
+      fn.visibility !== "public" ||
+      fn.kind === "action"
     ) {
       throw appVisitorErrors.create("visitor.invalid");
     }

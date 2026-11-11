@@ -1253,7 +1253,7 @@ describe("approving a store's operation", () => {
           permissionId: crypto.randomUUID(),
           storeId: store,
           operation: "notes.list",
-          operationKind: "query",
+          functionKind: "query",
         },
         reviewed: { version: 1 },
       })

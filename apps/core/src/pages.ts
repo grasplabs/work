@@ -583,7 +583,7 @@ export const buildPages = async (
 
 /**
  * Builds an App's server code of spec 8's layout (its schema, values,
- * registration and operations, with the modules the host generated for it
+ * registration and functions, with the modules the host generated for it
  * under `.grasp/`) into ES modules, in the compiler's isolate, each file
  * held to what its kind may import. Cached in R2 like the others: the
  * generated modules are among the files the key hashes.

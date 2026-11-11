@@ -5,7 +5,7 @@ import type { TestApp } from "./app-definitions.ts";
 
 // An App that keeps a record as deep as a table may declare one, for the
 // tests that hold every bound on its way to the store to it: the
-// operation channel's, workerd's and the on-prem sandbox session's.
+// function channel's, workerd's and the on-prem sandbox session's.
 
 /**
  * How deep a table's field may be declared: a schema nests at most
@@ -16,7 +16,7 @@ export const fieldDepth = valueDepth - 1;
 /**
  * An App whose `deep.put` keeps a field as deep as a table may declare
  * one (`fieldDepth`, within `documentMaxDepth`), built in the function,
- * and whose `deep.read` reads it back: every level crosses the operation
+ * and whose `deep.read` reads it back: every level crosses the function
  * channel to the store and back.
  */
 export const deepFiles: TestApp = testApp(

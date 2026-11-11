@@ -1755,7 +1755,15 @@ export const makeCurrent = async (
       env,
       by,
       appId,
-      { author: row.authorId, recorded, chosen },
+      {
+        author: row.authorId,
+        recorded,
+        chosen,
+        // Approved or not only once it was made current (`madeCurrent`):
+        // a rollback. A blueprint copy's first version comes approved, but
+        // records no binding (app-blueprints.ts).
+        currentBefore: row.approved !== null,
+      },
       release
     );
   // Refused here before the store changes; checked again once it has
