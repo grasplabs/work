@@ -335,15 +335,14 @@ export const removeVectorsOf = (sql: SqlStorage, versionRow: number): void => {
 
 /**
  * The marked block a repack takes: the first by id, in the marks' own
- * primary key, so it reads one mark however many wait. Which block comes
+ * primary key, then the block by its id, so it reads one mark and one
+ * block however many wait. Which block comes
  * first doesn't matter: every marked one is repacked in its turn, and
  * none is read by a scan for its removed codes meanwhile.
  */
 const nextMarkedSql = `
-SELECT vector_blocks.id AS block, vector_blocks.model AS model,
-  vector_blocks.reader_set AS reader_set
-FROM (SELECT block FROM vector_removed ORDER BY block LIMIT 1) AS marked
-CROSS JOIN vector_blocks ON vector_blocks.id = marked.block`;
+SELECT id AS block, model, reader_set FROM vector_blocks
+WHERE id = (SELECT block FROM vector_removed ORDER BY block LIMIT 1)`;
 
 /**
  * Repacks one block holding removed codes: its other codes go back to
