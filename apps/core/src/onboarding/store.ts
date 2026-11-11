@@ -70,6 +70,7 @@ import {
   flowAgreementsOf,
   flowInterviews,
   setupPlaceSchema,
+  startingFlowOf,
   storedFlowOf,
   withDone,
 } from "@grasp-os/shared/onboarding-flow";
@@ -807,8 +808,16 @@ export class Onboarding extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
-    // The one row everything else updates, there before anything asks.
-    this.#db.insert(onboarding).values({ id: 1 }).onConflictDoNothing().run();
+    // The one row everything else updates, there before anything asks. As
+    // it is first made it takes the flow staff chose when they added the
+    // company (`ONBOARDING_START`), so that is in place before anyone
+    // signs in; from then on the flow is only what staff set (`setFlow`).
+    const start = startingFlowOf(env.ONBOARDING_START);
+    this.#db
+      .insert(onboarding)
+      .values({ id: 1, flow: start === null ? null : JSON.stringify(start) })
+      .onConflictDoNothing()
+      .run();
     // Woken with work due and no alarm set (a migration made a team due,
     // say, on an onboarding long finished): the alarm is set for it.
     void ctx.blockConcurrencyWhile(async () => {
