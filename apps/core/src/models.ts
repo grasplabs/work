@@ -1493,20 +1493,29 @@ const record = async (
           estimated: used.estimated,
         };
   const health = healthOf(route, sent, outcome, failure?.stopped);
-  await recordResponse(env, {
-    entry: auditEntry(route, {
-      ...used,
-      logId,
-      attempt,
-      outcome,
-      status: failure?.status ?? status,
-      errorType: failure?.errorType,
-    }),
-    at: Date.now(),
-    spend: call,
-    ...(usage === undefined ? {} : { usage }),
-    ...(health === undefined ? {} : { health }),
-  });
+  await recordResponse(
+    env,
+    {
+      entry: auditEntry(route, {
+        ...used,
+        logId,
+        attempt,
+        outcome,
+        status: failure?.status ?? status,
+        errorType: failure?.errorType,
+      }),
+      at: Date.now(),
+      spend: call,
+      ...(usage === undefined ? {} : { usage }),
+      ...(health === undefined ? {} : { health }),
+    },
+    // What Grasp's AI cost is written before its answer is given: the
+    // month's limit is read off it, so the call after one that reached
+    // the limit is refused, not let through while the write is under way.
+    {
+      awaited: way.credential === "platform" && way.feature === "organization",
+    }
+  );
 };
 
 /**
@@ -1562,7 +1571,9 @@ const refuse = async (
  * Refuses a call on Grasp's AI past its month's limit, audited. It fails
  * as a provider limiting requests does, which billed nothing: a workflow
  * run waits and tries again (workflows/host.ts), and goes on once the
- * organization's AI answers, on its own key or in the next month.
+ * organization's AI answers, on its own key or in the next month, for
+ * as long as a step waits for its AI at all (`aiKeyHoldMsOf`,
+ * workflows/host.ts): past that the step fails.
  */
 const refuseAtLimit = async (env: Env, call: Session): Promise<never> => {
   log.warn("model.refused", { reason: "model.grasp_limit_reached" });

@@ -42,7 +42,7 @@ import { z } from "zod";
 
 import { usableModels } from "../src/ai-model-choice.ts";
 import { modelUsage } from "../src/db/core/schema.ts";
-import { monthSpend, spendMonth } from "../src/model-spend.ts";
+import { graspAiMonth, monthSpend, spendMonth } from "../src/model-spend.ts";
 import { modelFailureOf, models, modelSettings } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -1629,6 +1629,24 @@ describe("AI providers", { timeout: 60_000 }, () => {
         month: { limitUsd: graspAi.monthlyLimitUsd, reached: true },
         audited: ["model.refused", "model.grasp_limit_reached"],
         ownKey: "On our own key.",
+      });
+    });
+
+    it("refuses the call right after the one whose answer took the month's use to its limit", async () => {
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setSource("grasp");
+      // So close under the limit that what one answer costs reaches it,
+      // counting what this month's answered calls cost already.
+      const { spentUsd } = await graspAiMonth(env, spendMonth(env));
+      await spentOnGraspAi(graspAi.monthlyLimitUsd - spentUsd - 1e-9);
+      await plan(platformAnthropicKey, [
+        answered("anthropic-messages", "The last one."),
+      ]);
+      const last = await models(env).call(await callOf(graspAi.model));
+      const next = await outcome(models(env).call(await callOf(graspAi.model)));
+      expect({ last: last.text, next }).toStrictEqual({
+        last: "The last one.",
+        next: "model.grasp_limit_reached",
       });
     });
 
