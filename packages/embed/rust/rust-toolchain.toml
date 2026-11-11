@@ -1,5 +1,5 @@
 # The exact toolchain embed.wasm is built with: its bytes depend on it, and
-# CI's embed-wasm job builds it again and compares (../build.sh).
+# CI's wasm job builds it again and compares (../build.sh).
 [toolchain]
 channel = "1.99.1"
 targets = ["wasm32-unknown-unknown"]
