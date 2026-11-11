@@ -528,14 +528,13 @@ const refusedByStore = (
     typeof details === "object" && details !== null && "table" in details
       ? details.table
       : undefined;
-  refusedUses.set(error, {
+  return refusingUse(error, {
     use: {
       kind: "table",
       name: typeof table === "string" && tables.has(table) ? table : null,
     },
     reason: "request_not_allowed",
   });
-  return error;
 };
 
 /** `name` when the App's manifest has it in `table`, else null. */
@@ -3617,7 +3616,7 @@ const runMutation = async (
     }
     // The gate, then the commit: a revocation, a membership ended or a
     // grant made between the two (an admin granting for a later version,
-    // which leaves this one unapproved, `requireApprovedVersion`) doesn't
+    // which leaves this one unapproved, `allowingPermissionSql`) doesn't
     // stop this commit; the next protected step is refused. It can't be
     // atomic with it: what the gate reads lives in core's D1 and the write
     // in the store's own Durable Object, with no transaction across the

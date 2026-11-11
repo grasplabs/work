@@ -1,6 +1,8 @@
 import type { ValueSchema } from "@grasp-os/runtime/app";
 import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { isEventType } from "@grasp-os/shared/sealed-builds";
+import { catalogBindingKinds } from "@grasp-os/shared/workflow-resources";
+import type { CatalogBindingKind } from "@grasp-os/shared/workflow-resources";
 
 import type { BindingKind } from "./format.ts";
 
@@ -8,22 +10,10 @@ import type { BindingKind } from "./format.ts";
 // a definition names contracts; the host's approved catalog says what
 // each one is. A binding is a requirement, never a grant: this reads what
 // the host has, within its limits, so a check can hold a
-// definition to it. The catalog holds contracts of more kinds than a
-// grasp-workflow/2 step binds (`bindingKinds`, format.ts): Apps and their
-// pages bind the rest.
+// definition to it.
 
 /** Every kind of contract the host catalog holds. */
-export const contractKinds = [
-  "operation",
-  "connector",
-  "model",
-  "workflow",
-  "decision",
-  "event",
-  "knowledge",
-  "files",
-] as const;
-export type ContractKind = (typeof contractKinds)[number];
+export type ContractKind = CatalogBindingKind;
 
 /**
  * The kind of contract a binding of `kind` names in the catalog: its own,
@@ -33,19 +23,13 @@ export type ContractKind = (typeof contractKinds)[number];
 export const contractKindOf = (kind: BindingKind): ContractKind =>
   kind === "brain" ? "knowledge" : kind;
 
-/** The binding kind that names a contract of `kind`, as `contractKindOf` maps it. */
-export const bindingKindOf = (kind: ContractKind): string =>
-  kind === "knowledge" ? "brain" : kind;
-
 /** A value contract: the JSON text of an SDK value descriptor. */
 export type DescriptorText = string;
 
 export interface CatalogContract {
   kind: ContractKind;
-  /** operation, decision and workflow: what a call passes. */
+  /** decision: what a call passes. */
   input?: DescriptorText;
-  /** operation and workflow: what it returns. */
-  output?: DescriptorText;
   /** decision: what a recipient answers with. */
   response?: DescriptorText;
   /** connector: the operations it allows, by name. */
@@ -72,8 +56,6 @@ export interface CatalogContract {
   events?: Readonly<
     Record<string, { readonly data: DescriptorText; readonly browser: boolean }>
   >;
-  /** workflow: the exact workflow the binding pins. */
-  workflow?: { namespace: string; name: string; version: string };
 }
 
 /** Looks a contract key up; `undefined` when there is no such contract. */
@@ -92,7 +74,6 @@ const catalogLimits = {
 export interface ResolvedContract {
   kind: ContractKind;
   input?: ValueSchema<unknown, unknown>;
-  output?: ValueSchema<unknown, unknown>;
   response?: ValueSchema<unknown, unknown>;
   operations?: ReadonlyMap<
     string,
@@ -108,7 +89,6 @@ export interface ResolvedContract {
     string,
     { data: ValueSchema<unknown, unknown>; browser: boolean }
   >;
-  workflow?: { namespace: string; name: string; version: string };
 }
 
 class CatalogError extends Error {
@@ -204,7 +184,7 @@ const schemaOf = (
 
 const optionalSchema = (
   contract: unknown,
-  key: "input" | "output" | "response",
+  key: "input" | "response",
   budget: CatalogBudget
 ): ValueSchema<unknown, unknown> | undefined => {
   const value = ownData(contract, key);
@@ -268,19 +248,8 @@ const readEvents = (
   return events;
 };
 
-const readWorkflow = (value: unknown): ResolvedContract["workflow"] => {
-  if (value === undefined) {
-    return undefined;
-  }
-  return {
-    namespace: text(ownData(value, "namespace"), catalogLimits.nameLength),
-    name: text(ownData(value, "name"), catalogLimits.nameLength),
-    version: text(ownData(value, "version"), catalogLimits.nameLength),
-  };
-};
-
 const isContractKind = (value: unknown): value is ContractKind =>
-  contractKinds.some((kind) => kind === value);
+  catalogBindingKinds.some((kind) => kind === value);
 
 /**
  * The fields each kind can't do without. A contract missing one would
@@ -290,10 +259,8 @@ const isContractKind = (value: unknown): value is ContractKind =>
 const requiredFields: Readonly<
   Record<ContractKind, readonly (keyof ResolvedContract)[]>
 > = {
-  operation: ["input", "output"],
   connector: ["operations"],
   model: [],
-  workflow: ["workflow", "input", "output"],
   decision: ["input", "response"],
   event: ["events"],
   // Served by the host's own contract (search, read and recall).
@@ -323,16 +290,11 @@ const readContract = (
   }
   const resolved: ResolvedContract = { kind };
   const input = optionalSchema(contract, "input", budget);
-  const output = optionalSchema(contract, "output", budget);
   const response = optionalSchema(contract, "response", budget);
   const operations = readOperations(ownData(contract, "operations"), budget);
   const events = readEvents(ownData(contract, "events"), budget);
-  const workflow = readWorkflow(ownData(contract, "workflow"));
   if (input !== undefined) {
     resolved.input = input;
-  }
-  if (output !== undefined) {
-    resolved.output = output;
   }
   if (response !== undefined) {
     resolved.response = response;
@@ -343,9 +305,6 @@ const readContract = (
   if (events !== undefined) {
     resolved.events = events;
     resolved.eventTypes = new Set(events.keys());
-  }
-  if (workflow !== undefined) {
-    resolved.workflow = workflow;
   }
   checkComplete(resolved);
   return resolved;

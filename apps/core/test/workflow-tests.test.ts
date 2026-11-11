@@ -1232,7 +1232,12 @@ export default appTest(schema, {
       await runInDurableObject(runObjectOf(env, runId), (_object, state) =>
         state.storage.sql.exec("SELECT wake_at FROM run").one()
       );
-    const before = await wakeOf();
+    // Its wake is kept just after the sleep's event goes out.
+    const before = await vi.waitFor(async () => {
+      const wake = await wakeOf();
+      expect(wake).not.toStrictEqual({ wake_at: null });
+      return wake;
+    });
     const moved = await runObjectOf(env, runId)
       .advanceFixtureClock(60 * 60 * 1000)
       .then(() => "moved")

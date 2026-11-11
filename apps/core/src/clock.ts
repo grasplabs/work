@@ -10,11 +10,11 @@ import {
 import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 
 import { retryAccessRevocations } from "./access-revocations.ts";
+import { cancelArchivedRuns } from "./app-status.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
 import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
-import { reconcileRunCaptures } from "./brain-capture.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
@@ -28,7 +28,6 @@ import { indexApps } from "./knowledge/apps-collection.ts";
 import { advanceExports } from "./knowledge/brain-export.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
-import { sweepLegacyPreviewStores } from "./legacy-preview-stores.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { checkReadings } from "./onboarding/documents.ts";
@@ -43,7 +42,6 @@ import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { sweepConnectorTriggerHolds } from "./workflows/connector-triggers.ts";
-import { cancelArchivedRuns, repairControls } from "./workflows/controls.ts";
 import { sweepEventWaits } from "./workflows/event-waits.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import {
@@ -69,7 +67,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // stopped hearing (src/connector-source-notices.ts).
   { name: "audit.drain", period: "minute", run: drainAuditOutboxesNoticing },
   // Settled runs' outcomes the Brain doesn't have yet (src/brain-capture.ts).
-  { name: "brain.capture", period: "minute", run: reconcileRunCaptures },
   // Scopes whose few new episodes waited long enough to be consolidated
   // into lesson candidates (src/brain-consolidation.ts).
   {
@@ -149,9 +146,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: repairResourceTerminations,
   },
-  { name: "workflows.controls", period: "minute", run: repairControls },
   {
-    // An archived App's runs, cancelled in bounded passes (app-status.ts).
+    // The runs archived Apps started, stopped in bounded passes
+    // (app-status.ts).
     name: "apps.archived_runs",
     period: "minute",
     run: async (env) => {
@@ -271,12 +268,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "pages.frames",
     period: "quarterHour",
     run: sweepPageFrames,
-  },
-  // CONTRACT: goes with `preview_fixture_stores` (legacy-preview-stores.ts).
-  {
-    name: "pages.previews",
-    period: "quarterHour",
-    run: sweepLegacyPreviewStores,
   },
   { name: "pages.builds", period: "quarterHour", run: sweepBuilds },
   {

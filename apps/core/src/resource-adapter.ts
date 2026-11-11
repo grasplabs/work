@@ -131,8 +131,7 @@ export interface BindingCaller {
   /**
    * Who the audit log names as making each request, and whose spend a
    * model request counts in besides the binding's own: the App, for a
-   * page's or an agent's call (`delegateActorOf`); the workflow run, for
-   * a run's (`runActorOf`), so its workflow and run lineage count it too.
+   * page's or an agent's call (`delegateActorOf`).
    */
   readonly actor: AuditActor;
   /**

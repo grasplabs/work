@@ -37,7 +37,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
-import { changeStatus } from "../src/app-status.ts";
+import { cancelArchivedRuns, changeStatus } from "../src/app-status.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
@@ -70,7 +70,6 @@ import {
 } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { cancelArchivedRuns } from "../src/workflows/controls.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import {
   repairResourceStarts,

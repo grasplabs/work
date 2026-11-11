@@ -69,9 +69,15 @@ import {
   flowAgreements,
   flowAgreementsOf,
   flowInterviews,
+  setupPlaceSchema,
   storedFlowOf,
+  withDone,
 } from "@grasp-os/shared/onboarding-flow";
-import type { OnboardingFlow } from "@grasp-os/shared/onboarding-flow";
+import type {
+  OnboardingFlow,
+  SetupPlace,
+  SetupStepId,
+} from "@grasp-os/shared/onboarding-flow";
 import {
   drawnWorkSchema,
   orgRulesSchema,
@@ -3590,6 +3596,52 @@ export class Onboarding extends DurableObject<Env> {
       this.#db.select({ person: links.person }).from(links).limit(1).all()
         .length > 0
     );
+  }
+
+  /** Where the company's admin is in their onboarding: the screens they finished. */
+  place(): SetupPlace {
+    const [row] = this.#db
+      .select({ place: onboarding.place })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const stored = row?.place ?? null;
+    if (stored === null) {
+      return { done: [] };
+    }
+    // One kept before a screen was renamed reads as none finished: they go through them again.
+    const read = setupPlaceSchema.safeParse(JSON.parse(stored));
+    return read.success ? read.data : { done: [] };
+  }
+
+  /**
+   * Notes that the admin finished `steps`: added to what they finished
+   * before, never taken away, so going back a screen loses nothing. In
+   * the log and the audit log by the screens' names, only when one is new.
+   */
+  finishSteps(steps: readonly SetupStepId[], by: AuditActor): SetupPlace {
+    const changed = this.ctx.storage.transactionSync(() => {
+      const before = this.place();
+      const next = withDone(before, steps);
+      if (next.done.length === before.done.length) {
+        return false;
+      }
+      this.#db
+        .update(onboarding)
+        .set({ place: JSON.stringify(next) })
+        .where(eq(onboarding.id, 1))
+        .run();
+      this.#changed(by, "onboarding.place.set", {
+        finished: next.done
+          .filter((step) => !before.done.includes(step))
+          .join(" "),
+      });
+      return true;
+    });
+    if (changed) {
+      this.#deliverAudit();
+    }
+    return this.place();
   }
 
   /** How much onboarding the company goes through, and whether staff set it. */

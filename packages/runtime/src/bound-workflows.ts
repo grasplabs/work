@@ -101,7 +101,7 @@ export const sameEventContract = (
  * throws: a reference is made only for a declaration.
  */
 export const declaredWorkflows = (
-  manifest: AppManifest,
+  manifest: Pick<AppManifest, "permissions">,
   bound: readonly WorkflowBindingExtras[]
 ): BoundWorkflow[] => {
   const pins = new Map<string, WorkflowPin>();

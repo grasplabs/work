@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "012aeab0-e8b0-4115-9d0a-350b08a26cbd",
-  "prevId": "129bb6cc-9e93-4d35-b82c-2a3440ad42fd",
+  "id": "646f731e-74e6-49fe-b535-fb3e16ec324d",
+  "prevId": "f5922123-b79f-4ca9-9294-ff3d098bc41e",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -676,6 +676,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "face": {
           "name": "face",
           "type": "text",
@@ -740,7 +747,15 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "agents_name_key_idx": {
+          "name": "agents_name_key_idx",
+          "columns": [
+            "name_key"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

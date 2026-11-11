@@ -46,13 +46,8 @@ import type { Authentication } from "./authentication-results.ts";
 import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
 import type { Outcome, Taker } from "./connector-triggers.ts";
 import { parsedOf, postalMime, stagedAttachmentKey } from "./kept-email.ts";
-import {
-  learnMailDomain,
-  mailRecipient,
-  runsOwnMail,
-  stampedMessageRun,
-} from "./mail-stamps.ts";
-import type { MailStamp, StampedRun } from "./mail-stamps.ts";
+import { stampedMessageRun } from "./mail-stamps.ts";
+import type { StampedRun } from "./mail-stamps.ts";
 import { runFileTypeShown } from "./office-files.ts";
 import { heldRunOf } from "./resource-authority.ts";
 import { admitRunEvent, eventIdOf, notStartedYet } from "./run-events.ts";
@@ -98,9 +93,7 @@ import type { StartFiles } from "./start-files.ts";
 // Email Routing hands the message over, so it needs no setting of its
 // own, and can't be set wrong. A message from a person's mailbox at the
 // client's own domain still starts runs: people forward mail to their
-// workflows. Each message also tells core its mail domain, from the
-// envelope recipient Email Routing sets, which no sender chooses
-// (mail-stamps.ts).
+// workflows.
 // Each message then takes the steps a connector event does
 // (connector-triggers.ts, `startOnce`): its start, its refusals and its
 // drops once each, by the message. Threat model, and how each is closed:
@@ -115,10 +108,10 @@ import type { StartFiles } from "./start-files.ts";
 //   domain is dropped, audited, as above. A run's own mail joins its
 //   lineage by the stamp its message carries (`stampHeader`,
 //   `stampedMessageRun`), one level deeper (`causeOf`), until the
-//   lineage's limits refuse it; a token or stamp of a run that isn't
-//   independent can't join an independent lineage and is refused, audited
-//   with the run, never started as a new root. A recorded stamp counts for at
-//   most a few messages at the address (`maxClaimsPerSource`). Besides, a
+//   lineage's limits refuse it; a stamp of a run no longer kept is
+//   refused, audited with the run, never started as a new root. A
+//   recorded stamp counts for at most a few messages at the address
+//   (`maxClaimsPerSource`). Besides, a
 //   trigger starts and refuses at most `triggeredRunsPerHour` messages an
 //   hour, loop drops included, so mail can't write the audit log without
 //   end; past that the delivery fails for now, for its sender to try again
@@ -581,17 +574,12 @@ interface ReadMessage {
 }
 
 /**
- * `message` read and parsed, its domain learned (mail-stamps.ts); none,
- * rejected, when too large or unreadable.
+ * `message` read and parsed; none, rejected, when too large or unreadable.
  */
 const readMessage = async (
-  message: InboundMessage,
-  env: Env
+  message: InboundMessage
 ): Promise<ReadMessage | undefined> => {
   const domain = domainOf(message.to);
-  if (domain !== undefined) {
-    await learnMailDomain(env, domain);
-  }
   const raw = await readAtMost(message.raw, maxMessageBytes);
   if (raw === undefined) {
     message.setReject("The message is too large.");
@@ -733,8 +721,8 @@ const messageFiles = (
 };
 
 /**
- * Takes a message to `taker`, the email trigger at `address` (its token
- * `recorded`, if any, gone): starts its run, the message mapped into its
+ * Takes a message to `taker`, the email trigger at `address`: starts its
+ * run, the message mapped into its
  * input, acting for its creator; bounces it, drops it (audited), or fails
  * it for now, as the threat model above says. Logs the message's hash
  * alone: never the address or the trigger.
@@ -743,10 +731,9 @@ const receiveForTrigger = async (
   message: InboundMessage,
   env: Env,
   address: string,
-  taker: Taker,
-  recorded: MailStamp | undefined
+  taker: Taker
 ): Promise<void> => {
-  const read = await readMessage(message, env);
+  const read = await readMessage(message);
   if (read === undefined) {
     return;
   }
@@ -754,22 +741,19 @@ const receiveForTrigger = async (
   const messageKey = await messageKeyOf(parsed, id);
   // Mail that may loop is refused for good, as a start refused is.
   const loop = loopOf(message.to, message.from, parsed);
-  // A run's own mail: an App run's token, or a run's stamp, each only to
-  // this address from one of the run's senders.
+  // A run's own mail: a run's stamp, only to this address from one of the
+  // run's senders. Mail refused as a loop claims no place of a stamp.
   const to = `${address}@${domain ?? ""}`;
-  const token = runsOwnMail(recorded, to, message.from);
-  let stamped: StampedRun | undefined =
-    token === undefined ? undefined : { kind: "app", runId: token.run };
-  if (stamped === undefined && loop === undefined) {
-    // Mail refused as a loop claims no place of a stamp.
-    stamped = await stampedMessageRun(
-      env,
-      stampOf(parsed),
-      to,
-      message.from,
-      messageKey
-    );
-  }
+  const stamped: StampedRun | undefined =
+    loop === undefined
+      ? await stampedMessageRun(
+          env,
+          stampOf(parsed),
+          to,
+          message.from,
+          messageKey
+        )
+      : undefined;
   const same =
     stamped === undefined
       ? messageKey
@@ -938,7 +922,7 @@ const receiveReply = async (
     message.setReject("No such address.");
     return;
   }
-  const read = await readMessage(message, env);
+  const read = await readMessage(message);
   if (read === undefined) {
     return;
   }
@@ -1028,24 +1012,18 @@ export const receiveEmail = async (
   message: InboundMessage,
   env: Env
 ): Promise<void> => {
-  // Who receives it first: mail nobody receives is never read. A token
-  // core recorded goes, and names the run that may have sent it
-  // (mail-stamps.ts).
+  // Who receives it first: mail nobody receives is never read.
   const at = message.to.lastIndexOf("@");
   const local = message.to.slice(0, Math.max(at, 0)).toLowerCase();
   // A run's reply address first: no trigger may take its shape
-  // (email-addresses.ts), and it carries no recorded token.
+  // (email-addresses.ts).
   if (replyLocalPattern.test(local)) {
     await receiveReply(message, env, local.slice(replyPrefix.length));
     return;
   }
-  const { local: address, stamp: recorded } =
-    local === ""
-      ? { local: "", stamp: undefined }
-      : await mailRecipient(env, local);
-  const taker = address === "" ? undefined : await emailTakerAt(env, address);
+  const taker = local === "" ? undefined : await emailTakerAt(env, local);
   if (taker !== undefined) {
-    await receiveForTrigger(message, env, address, taker, recorded);
+    await receiveForTrigger(message, env, local, taker);
     return;
   }
   message.setReject("No such address.");

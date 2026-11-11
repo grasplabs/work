@@ -27,7 +27,7 @@ import {
 } from "./store-schemas.ts";
 
 // Reads of a business store through core's way in and the store's Durable
-// Object: what `ctx.db` (sdk/src/database-reader.ts) asks, as the store answers
+// Object: what `ctx.db` (runtime/src/database-reader.ts) asks, as the store answers
 // it, under the access the caller's pinned schema declares. The cases
 // follow the threat model in store-queries.ts: what a caller may see,
 // through every terminal; what a descriptor can't name; what no query can

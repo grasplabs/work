@@ -1,4 +1,3 @@
-import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 
 // What a workflow's `ctx` calls take and answer: their options and
@@ -216,6 +215,3 @@ export interface GenerateRequest {
   readonly instructions: unknown;
   readonly input: unknown;
 }
-
-/** A recorded value as JSON, for what a step's record holds. */
-export type Recorded = Json;

@@ -1,4 +1,3 @@
-import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
@@ -10,14 +9,12 @@ import type { RunNotification } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
 import { projectCandidateRun } from "./candidate-runs.ts";
-import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
 import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
-import { completeCancel, projectStatus } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import type { StepError } from "./sealed-isolate.ts";
 import type { RunModelCalls, SentCalls } from "./sealed-run.ts";
@@ -172,7 +169,7 @@ export const modelCallsIn = (sql: SqlStorage): RunModelCalls => ({
 });
 
 /**
- * Where a run's object keeps that the run was cancelled (`markCancelled`):
+ * Where a run's object keeps that the run was stopped (`markStopped`):
  * a table of its SQLite beside the engine's journal, which the engine's
  * removal of the run drops with it.
  */
@@ -207,7 +204,7 @@ const releasedThrough = (sql: SqlStorage): number => {
 /** How long a cancel's request has to finish it before the object does. */
 const cancelRepairMs = 5000;
 
-/** Whether the run in `sql` was marked cancelled (`markCancelled`). */
+/** Whether the run in `sql` was marked stopped (`markStopped`). */
 const cancelledIn = (sql: SqlStorage): boolean =>
   sql
     .exec(
@@ -217,45 +214,34 @@ const cancelledIn = (sql: SqlStorage): boolean =>
     .toArray().length > 0;
 
 /**
- * The cancel a run is marked with (`markCancelled`): whether it is done
- * (`settled`), and when the object next tries it if it isn't (`due`).
+ * The stop a run is marked with (`markStopped`): whether the object has
+ * terminated the run (`settled`), and when it next tries if it hasn't
+ * (`due`).
  */
 interface CancelMark {
-  runId: string;
-  actor: AuditActor;
-  at: number;
-  settled?: boolean;
-  due?: number;
+  settled: boolean;
+  due: number;
 }
 
-/** The cancel kept in `sql`, if any (`markCancelled`). */
+/** The stop kept in `sql`, if any (`markStopped`). */
 const cancelMarkIn = (sql: SqlStorage): CancelMark | undefined => {
   if (!cancelledIn(sql)) {
     return undefined;
   }
   const [row] = sql
     .exec<{
-      run_id: string;
-      actor: string;
-      at: number;
       settled: number;
       due: number;
-    }>(`SELECT run_id, actor, at, settled, due FROM ${cancelTable} LIMIT 1`)
+    }>(`SELECT settled, due FROM ${cancelTable} LIMIT 1`)
     .toArray();
   return row === undefined
     ? undefined
-    : {
-        runId: row.run_id,
-        actor: auditActorSchema.parse(JSON.parse(row.actor)),
-        at: row.at,
-        settled: row.settled === 1,
-        due: row.due,
-      };
+    : { settled: row.settled === 1, due: row.due };
 };
 
 /** Whether `mark` leaves the object something to do (`alarm`). */
 const unfinished = (mark: CancelMark | undefined): mark is CancelMark =>
-  mark !== undefined && mark.settled !== true;
+  mark !== undefined && !mark.settled;
 
 // The object every workflow run lives in (`WORKFLOW_RUNS`): Workerflow's
 // run object, one per run, which core reaches only through engine.ts. It
@@ -267,7 +253,7 @@ const unfinished = (mark: CancelMark | undefined): mark is CancelMark =>
 //
 // It tells core of each status a run takes, through its durable outbox, in
 // order and at least once (`notify`): core's record of the run follows the
-// engine, and only the engine (runs.ts, `projectStatus`).
+// engine, and only the engine (resource-runs.ts, `projectResourceRun`).
 //
 // No route reaches it: it is registered privately, its namespace bound to
 // core alone.
@@ -297,9 +283,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         // The activation this execution runs in: an older one taken over
         // runs nothing more (`current`).
         const generation = this.generation();
-        // Marked cancelled: an activation that starts now (an event came,
+        // Marked stopped: an activation that starts now (an event came,
         // a wait's alarm fired) runs nothing of the run, and finishes the
-        // cancel instead (`#finishCancel`).
+        // stop instead (`#finishCancel`).
         const mark = cancelMarkIn(this.ctx.storage.sql);
         if (mark !== undefined) {
           await this.#finishCancel(mark);
@@ -335,34 +321,21 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   }
 
   /**
-   * Marks the run cancelled in its object, the first step of a cancel and
-   * its record (controls.ts, `cancelRun`): who cancelled it and when, kept with
-   * the run until the cancel is done in core's database and the engine
-   * (`settleCancel`). From then on no attempt of the run holds
-   * (`#leaseOf`), so every fenced call of it is refused at once, in this
-   * object, with no read of core's database, whatever happens to the rest
-   * of the cancel. A second cancel finds the first's mark and finishes it.
-   * Should the rest of the cancel fail, or its request die, the object
-   * finishes it on its next alarm (`alarm`), which is armed here. A run
-   * the engine has no journal of yet has no attempt to fence, and nothing
-   * is kept: its start, should it come, finds its row cancelled. Answers
-   * the cancel the run is marked with.
+   * Marks the run stopped in its object (`markStopped`), with who stopped
+   * it and when, kept with the run until the object terminated it. From
+   * then on no attempt of the run holds (`#leaseOf`), so every fenced call
+   * of it is refused at once, in this object, with no read of core's
+   * database, whatever happens to the rest of the stop. A second stop
+   * finds the first's mark. Should the stop's request not terminate the
+   * run, the object does on its next alarm (`alarm`), which is armed
+   * here.
    */
-  async markCancelled(
+  async #markCancelled(
     runId: string,
     actor: AuditActor,
     at: number
-  ): Promise<CancelMark> {
+  ): Promise<void> {
     const { sql } = this.ctx.storage;
-    const hasRun =
-      sql
-        .exec(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'"
-        )
-        .toArray().length > 0;
-    if (!hasRun) {
-      return { runId, actor, at };
-    }
     sql.exec(
       `CREATE TABLE IF NOT EXISTS ${cancelTable} (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL)`
     );
@@ -377,18 +350,17 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     }
     const mark = cancelMarkIn(sql);
     if (mark === undefined) {
-      throw new Error(`Run ${runId}'s cancel wasn't kept`);
+      throw new Error(`Run ${runId}'s stop wasn't kept`);
     }
-    // Armed for the cancel's repair, should its request not finish it;
-    // the engine's own alarms keep it (`extraAlarm`).
-    await this.#armRepair(mark.due ?? Date.now() + cancelRepairMs);
-    return mark;
+    // Armed for the stop's repair, should its request not finish it; the
+    // engine's own alarms keep it (`extraAlarm`).
+    await this.#armRepair(mark.due);
   }
 
   /**
    * Marks an independent workflow's run stopped by `actor` (resource-runs.ts,
-   * `stopResourceRun`), as `markCancelled` marks an App run's cancel: from
-   * then on no attempt of it holds, and should its request not terminate
+   * `stopResourceRun`) (`#markCancelled`): from then on no attempt of it
+   * holds, and should its request not terminate
    * it, the object does on its next alarm, seconds on. Unless the run is
    * rolling back, which a stop doesn't cut short (spec 10.7.3): then
    * nothing is marked. Decided and marked from the run's own journal with
@@ -415,23 +387,20 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     ) {
       return "ended";
     }
-    await this.markCancelled(runId, actor, at);
+    await this.#markCancelled(runId, actor, at);
     return "marked";
   }
 
   /**
-   * Finishes the cancel `mark` records, as its request does: the run's
-   * row tombstoned and the
-   * cancel audited, once whoever gets there first (runs.ts,
-   * `completeCancel`), the run terminated and the mark settled.
+   * Finishes the stop `mark` records, as its request does: the run
+   * terminated and the mark settled.
    */
   async #finishCancel(mark: CancelMark): Promise<void> {
-    if (mark.settled === true) {
+    if (mark.settled) {
       return;
     }
-    await completeCancel(this.env, mark);
     await this.terminate({ rollback: false });
-    this.settleCancel();
+    this.ctx.storage.sql.exec(`UPDATE ${cancelTable} SET settled = 1`);
   }
 
   /** Moves the cancel's next repair a while on, and arms it. */
@@ -458,7 +427,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   // oxlint-disable-next-line grasp/no-unbounded-rpc-target -- the engine's hook, as `definition`
   protected override extraAlarm(): number | null {
     const mark = cancelMarkIn(this.ctx.storage.sql);
-    return unfinished(mark) ? (mark.due ?? null) : null;
+    return unfinished(mark) ? mark.due : null;
   }
 
   /**
@@ -505,14 +474,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       : pinOf(identity)?.type === "fixture";
   }
 
-  /** Records that the run's cancel is done (`markCancelled`). */
-  settleCancel(): void {
-    const { sql } = this.ctx.storage;
-    if (cancelledIn(sql)) {
-      sql.exec(`UPDATE ${cancelTable} SET settled = 1`);
-    }
-  }
-
   /**
    * Aborts once the alarm running the run's activation returns
    * (`RunMemory.over`): only an alarm runs one.
@@ -520,10 +481,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   #activation: AbortController | undefined;
 
   /**
-   * Finishes a cancel its request didn't (`markCancelled`), then does what
-   * the engine's alarm does. The cancel is finished as its request would:
-   * the run's row tombstoned and the cancel audited, once whoever gets
-   * there first, and the run terminated.
+   * Finishes a stop its request didn't (`markStopped`), terminating the
+   * run, then does what the engine's alarm does.
    */
   override async alarm(): Promise<void> {
     const mark = cancelMarkIn(this.ctx.storage.sql);
@@ -534,7 +493,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         // Tried again a while on (`extraAlarm`), whatever the engine does
         // with the alarm meanwhile.
         log.error("workflow.cancel_repair_failed", {
-          runId: mark.runId,
+          runId: this.instanceId(),
           ...errorFields(error),
         });
         await this.#repairLater();
@@ -555,7 +514,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
 
   /**
    * The engine's lease of an attempt (`attemptLease`), unless the run was
-   * marked cancelled (`markCancelled`): then no attempt of it holds.
+   * marked stopped (`markStopped`): then no attempt of it holds.
    */
   #leaseOf(key: string, attempt: number) {
     return cancelledIn(this.ctx.storage.sql)
@@ -566,7 +525,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   /**
    * Takes the run's status changes: the newest of each batch is all core's
    * record needs, as a later status replaces an earlier one. A run of
-   * core's own (an upload's extraction, a build) has no row to follow it.
+   * core's own (an upload's extraction, a build), or one an App's test
+   * started, has no row to follow it.
    * A failure is thrown, so the engine hands the batch over again.
    */
   // oxlint-disable-next-line grasp/no-unbounded-rpc-target -- the engine's hook, as `definition`
@@ -583,38 +543,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     });
     if (pin?.type === "resource" || pin?.type === "candidate") {
       await this.#independentNotified(pin.type, latest);
-      return;
-    }
-    if (pin?.type !== "app") {
-      return;
-    }
-    // The run this object holds, from its own journal: a batch naming
-    // another is no notification of this run, and acts on none.
-    const run = this.instanceId();
-    if (
-      run === undefined ||
-      notifications.some(({ instanceId }) => instanceId !== run)
-    ) {
-      log.warn("workflow.notify_foreign_run", {
-        runId: run,
-        named: latest.instanceId,
-      });
-      return;
-    }
-    const mark = cancelMarkIn(this.ctx.storage.sql);
-    // Beside the run's record, never behind it: whatever its attempts the
-    // engine has fenced still hold of the client's shares comes back now,
-    // not at their deadlines (`#sharesReleased`), whether or not what
-    // core records of the run goes through, and without keeping that
-    // record waiting. It depends on nothing the record writes.
-    const released = this.#sharesReleased(run, mark !== undefined);
-    const recorded = this.#statusRecorded(run, latest, mark);
-    const [release, record] = await Promise.allSettled([released, recorded]);
-    if (release.status === "rejected") {
-      throw release.reason;
-    }
-    if (record.status === "rejected") {
-      throw record.reason;
     }
   }
 
@@ -635,7 +563,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       type === "resource" ? projectResourceRun : projectCandidateRun;
     // A run marked stopped (`markStopped`) that fails before its
     // termination lands, its attempts refused from the stop on, ended
-    // by the stop: cancelled, as a marked App run is, not failed. Unless
+    // by the stop: cancelled, not failed. Unless
     // its journal says it rolled back: then how its compensation went is
     // what it ended with (spec 10.7.3), a failed one
     // `workflow.compensation_failed`, never masked as a cancel. No
@@ -661,7 +589,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     );
     // A page's pause or resume of it settles from where the engine has
     // the run now, and which controls it took, read together here from
-    // its journal, as an App run's do (resource-runs.ts).
+    // its journal (resource-runs.ts).
     if (type === "resource") {
       await settleResourceControls(
         this.env,
@@ -670,7 +598,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       );
     }
     // Then what its fenced attempts still hold of the client's shares
-    // comes back, as an App run's does: after its row, so a run that
+    // comes back: after its row, so a run that
     // ended cancelled has its attempts charged up to their deadlines
     // (quotas.ts, `sharesReleased`).
     const run = this.instanceId();
@@ -709,36 +637,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
                 : { cause: "failure", code: cause.error.code ?? null },
           }),
     };
-  }
-
-  /**
-   * Makes core's record of run `run` follow the engine's `latest` status
-   * (runs.ts, `projectStatus`), its cancel (`mark`) recorded first.
-   */
-  async #statusRecorded(
-    run: string,
-    latest: RunNotification,
-    mark: CancelMark | undefined
-  ): Promise<void> {
-    // A run marked cancelled ends cancelled, however it ended: its cancel
-    // is recorded in core first (`completeCancel`, once), so its row reads
-    // it, rather than a failure its refused attempts led to.
-    if (mark !== undefined && mark.settled !== true) {
-      await completeCancel(this.env, mark);
-    }
-    await projectStatus(this.env, run, {
-      status: latest.status,
-      at: latest.timestamp,
-      sequence: latest.sequence,
-      ...(latest.firstActivatedAt === null
-        ? {}
-        : { startedAt: latest.firstActivatedAt }),
-      ...this.#compensationOf(latest.status),
-    });
-    // A pause or resume settles from where the engine has the run now,
-    // and which controls it took, read together here from its journal,
-    // not from the notification.
-    await settleControls(this.env, run, this.controlState());
   }
 
   /**
