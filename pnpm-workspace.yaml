@@ -74,6 +74,8 @@ catalog:
 
   # Workers runtime and data
   "@cloudflare/vite-plugin": 1.66.0
+  # Pins its own Wrangler and miniflare: the same as the catalog's
+  # Wrangler, so tests run the workerd deploys run with. Bump them together.
   "@cloudflare/vitest-plugin": 1.6.0
   "@cloudflare/workers-types": 5.20261104.1
   capnweb: 0.12.0
@@ -288,11 +290,6 @@ catalogs:
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
-  # The test plugin's miniflare, kept in lockstep with Wrangler's so tests
-  # run the workerd production deploys with (and the patched one, below).
-  "@cloudflare/vitest-plugin>miniflare": 5.20261104.0-beta
-  # The test plugin pins zod 4.6.6; the workspace's one zod instead.
-  "@cloudflare/vitest-plugin>zod": "catalog:"
 
 peerDependencyRules:
   allowedVersions:

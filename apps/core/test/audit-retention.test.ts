@@ -430,14 +430,14 @@ describe("audit log retention", () => {
     await logged(log);
 
     // The alarm fires (which uses it up), and storage refuses the next one.
-    await runInDurableObject(log, async (instance, state) => {
+    await runInDurableObject(log, async (instance: AuditLog, state) => {
       await state.storage.deleteAlarm();
       const refused = vi
         .spyOn(state.storage, "setAlarm")
         .mockRejectedValueOnce(new Error("Storage unavailable"));
       try {
         // Thrown, so the platform retries the alarm too.
-        await expect(instance.alarm?.()).rejects.toThrow("Storage unavailable");
+        await expect(instance.alarm()).rejects.toThrow("Storage unavailable");
       } finally {
         refused.mockRestore();
       }

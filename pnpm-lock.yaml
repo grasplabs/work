@@ -403,8 +403,6 @@ catalogs:
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11
-  '@cloudflare/vitest-plugin>miniflare': 5.20261104.0-beta
-  '@cloudflare/vitest-plugin>zod': 4.6.7
 
 patchedDependencies:
   miniflare@5.20261104.0-beta: 183679469e06acbb262c35b252138578afa9fceb97856d70eb51288d56e25236
@@ -11809,7 +11807,7 @@ snapshots:
       miniflare: 5.20261104.0-beta(patch_hash=183679469e06acbb262c35b252138578afa9fceb97856d70eb51288d56e25236)(@types/node@26.6.2)
       vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/browser-playwright@4.1.11)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(happy-dom@21.0.4)
       wrangler: 4.158.0(@cloudflare/workers-types@5.20261104.1)(@types/node@26.6.2)
-      zod: 4.6.7
+      zod: 4.6.6
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@types/node'
