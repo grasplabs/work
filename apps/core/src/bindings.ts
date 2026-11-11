@@ -53,6 +53,12 @@ export interface CallGrant {
    */
   readOnly?: boolean;
   /**
+   * The call comes from a turn nobody was there for
+   * (`AgentScope.unattended`): connect holds its side effects for its
+   * person, and the classes that reach other people aren't offered.
+   */
+  unattended?: boolean;
+  /**
    * The call's input holds a value core keeps from people (a workflow's
    * sensitive parameter as a binding argument): connect keeps none of it.
    */
@@ -95,6 +101,7 @@ export const signedCall = async (
     connection,
     permissionId,
     readOnly,
+    unattended,
     sensitive,
     notAfter,
     heldUntil,
@@ -109,7 +116,13 @@ export const signedCall = async (
   const restricted = await isRestricted(env, authority, context);
   // The chat's agent may call only the classes the company turned on for
   // its person: one that is off never reaches connect (tool-classes.ts).
-  const classed = await requireToolClassOn(env, authority, connection, action);
+  const classed = await requireToolClassOn(
+    env,
+    authority,
+    connection,
+    action,
+    unattended === true
+  );
   const scope = {
     connectionId: connection.connectionId,
     resource: connection.resource,
@@ -123,6 +136,7 @@ export const signedCall = async (
       ...scope,
       restricted,
       readOnly,
+      unattended,
       sensitive,
       notAfter,
       heldUntil,
@@ -222,6 +236,8 @@ export const requireStepKey = (
 export interface StubCaller {
   authority: Authority;
   readOnly?: boolean;
+  /** It comes from a turn nobody was there for (`CallGrant.unattended`). */
+  unattended?: boolean;
   /** Its input holds a sensitive value (`CallGrant.sensitive`). */
   sensitive?: boolean;
   /** When the work it comes from must end: the capability expires by then. */
@@ -283,6 +299,7 @@ const signedStub = async (
       {
         authority: caller.authority,
         readOnly: caller.readOnly,
+        unattended: caller.unattended,
         sensitive: caller.sensitive,
         notAfter: caller.notAfter,
         heldUntil: caller.heldUntil,

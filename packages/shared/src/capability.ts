@@ -116,6 +116,14 @@ export const capabilityClaimsSchema = z.strictObject({
    */
   readOnly: z.boolean().default(false),
   /**
+   * The call comes from a turn nobody asked for there and then: an agent
+   * woken by a schedule or an event, with no person in the chat. Connect
+   * holds every side effect of it for its person, whatever else the
+   * capability says, and only with an end (`heldUntil`), so what nobody
+   * answers ends with the company's day. Only the capability says it.
+   */
+  unattended: z.boolean().default(false),
+  /**
    * The call's input holds a value core keeps from people: a workflow's
    * sensitive parameter, put in as a binding argument. Connect keeps none
    * of its input under its key, so no listing of a call of unknown
@@ -188,6 +196,7 @@ export interface CapabilityScope extends CapabilityCall {
   restricted?: boolean | undefined;
   /** The caller may only read: signed, not compared. */
   readOnly?: boolean | undefined;
+  unattended?: boolean | undefined;
   /** The call's input holds a sensitive value: signed, not compared. */
   sensitive?: boolean | undefined;
   /** What core checks again when a held call is confirmed: signed. */
@@ -260,6 +269,7 @@ export const signCapability = async (
     idempotencyKey: scope.idempotencyKey ?? null,
     restricted: scope.restricted === true,
     readOnly: scope.readOnly === true,
+    ...(scope.unattended === true ? { unattended: true } : {}),
     sensitive: scope.sensitive === true,
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
