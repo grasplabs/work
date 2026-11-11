@@ -270,6 +270,23 @@ export const signInStaff = async (): Promise<Person> => {
 };
 
 /**
+ * The admin the deployment names, signed in now: let in while the
+ * platform waits for Grasp's go, and never signed out by the gate.
+ * Grasp's staff have nothing to do in the workspace (apps/web's
+ * routes/staff.tsx).
+ */
+export const signInConfiguredAdmin = async (): Promise<Person> => {
+  const cookie = await signInAs(localAdmin);
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { userId, role } = await api.whoami();
+    return { userId, email: localAdmin, role, cookie };
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
  * Ends the person's session as signing out elsewhere does: their cookie
  * stays in the browser, and no longer says who they are.
  */

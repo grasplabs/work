@@ -59,6 +59,17 @@ const askedIn = (request: Request): Asked => {
   return asked;
 };
 
+/** What a line asked of the voice says, and in what tone. */
+export const lineOf = (request: Request): { text: string; tone: unknown } => {
+  const body: unknown = request.postDataJSON();
+  return typeof body === "object" &&
+    body !== null &&
+    "text" in body &&
+    typeof body.text === "string"
+    ? { text: body.text, tone: "tone" in body ? body.tone : undefined }
+    : { text: "", tone: undefined };
+};
+
 /** Answers the page's speech requests as core does, and keeps what was asked. */
 export const answerSpeech = async (page: Page): Promise<Asked[]> => {
   const asked: Asked[] = [];
