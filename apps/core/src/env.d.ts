@@ -26,6 +26,14 @@ interface __BaseEnv_Env {
    * `{by, what, release, at}`, set by the admin on every version it
    * deploys.
    */
+  /**
+   * For testing only, on a staging deployment: the providers whose
+   * platform features go to their usual host, not their EU data residency
+   * host, comma-separated (`usualHostProviders`, @grasp-os/shared/
+   * ai-providers). The admin sets it on core and connect alike; never on
+   * production.
+   */
+  PLATFORM_AI_USUAL_HOSTS?: unknown;
   PLATFORM_CHANGE?: unknown;
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;

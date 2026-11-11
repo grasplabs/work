@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   deploySecrets,
   MissingStoreSecretError,
+  usualHostsOf,
 } from "../src/deploy/context.ts";
 import {
   emptyStoreSecret,
@@ -99,5 +100,30 @@ describe("a deploy's shared secrets", () => {
       core: [],
       some: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY"],
     });
+  });
+});
+
+// Sending a platform feature to its provider's usual host is for testing
+// on staging. These start from the way it can fail: production's admin
+// giving the setting to a client, so what its people are told leaves the
+// EU by a var.
+describe("the providers a deploy sends to their usual host", () => {
+  it("are staging's alone, and only the ones that have a usual host: production gives none, whatever its vars say", () => {
+    const named = "elevenlabs, openai, anthropic";
+    expect([
+      usualHostsOf({ STAGE: "staging", PLATFORM_AI_USUAL_HOSTS: named }),
+      usualHostsOf({ STAGE: "production", PLATFORM_AI_USUAL_HOSTS: named }),
+      usualHostsOf({ PLATFORM_AI_USUAL_HOSTS: named }),
+      usualHostsOf({ STAGE: "Staging", PLATFORM_AI_USUAL_HOSTS: named }),
+      usualHostsOf({ STAGE: "staging", PLATFORM_AI_USUAL_HOSTS: "anthropic" }),
+      usualHostsOf({ STAGE: "staging" }),
+    ]).toStrictEqual([
+      "elevenlabs,openai",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });

@@ -292,6 +292,7 @@ export interface ProvisionContext {
   store: ReleaseStore;
   secrets: DeploySecrets;
   signInApps?: SignInApps;
+  usualHosts?: string;
   now?: () => Date;
   router: {
     hosts: RouterHosts;
@@ -1465,15 +1466,23 @@ const coreVarsOf = (
 
 /**
  * The vars Worker `app` runs with: core's (`coreVarsOf`, read once and
- * passed as `core`), and the client's Teams bot on connect and core, as a
- * deploy gives them (src/clients/teams-bot.ts).
+ * passed as `core`), the client's Teams bot on connect and core, as a
+ * deploy gives them (src/clients/teams-bot.ts), and, on staging set up
+ * for it, the providers whose platform features go to their usual host
+ * (`ProvisionContext.usualHosts`).
  */
 const varsOf = (
+  context: ProvisionContext,
   loaded: Loaded,
   app: App,
   core: Readonly<Record<string, unknown>>
 ): Record<string, unknown> => ({
   ...(app === "core" ? core : {}),
+  // On both Workers alike: core routes a platform feature by it and
+  // connect pins the request to the same host.
+  ...(context.usualHosts === undefined
+    ? {}
+    : { PLATFORM_AI_USUAL_HOSTS: context.usualHosts }),
   ...teamsBotVars(app, teamsBotOf(loaded.client.teamsBot)),
 });
 
@@ -1586,7 +1595,7 @@ const validate = async (
     assertRunnable(loaded, worker);
     // oxlint-disable-next-line no-await-in-loop -- two Workers
     const secrets = await secretsOf(context, loaded, app);
-    checkBindingNames(worker, varsOf(loaded, app, vars), secrets);
+    checkBindingNames(worker, varsOf(context, loaded, app, vars), secrets);
   }
   await assertHolds(db, held);
   await allocateClientResources(db, "system", {
@@ -2050,6 +2059,7 @@ const upload = async (
   }
   const target = targetOf(loaded, inventory, app);
   const vars = varsOf(
+    context,
     loaded,
     app,
     app === "core" ? coreVarsOf(context, loaded) : {}
