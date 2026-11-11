@@ -707,7 +707,7 @@ export const bindingOf = (form: object): FormBinding => {
 
 /**
  * The binding of a form of `target` with `options`, submitting through
- * `client`: what `useGraspForm` (react/form.ts) holds, before its TanStack form is
+ * `client`: what `useForm` (react/form.ts) holds, before its TanStack form is
  * attached.
  */
 export const bindForm = (

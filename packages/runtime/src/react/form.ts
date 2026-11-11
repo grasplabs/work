@@ -2,11 +2,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { useForm as useTanStackForm } from "@tanstack/react-form";
 import { useEffect, useState } from "react";
 
-import type {
-  ActionReference,
-  GraspClient,
-  MutationReference,
-} from "../client-core.ts";
+import type { ActionReference, MutationReference } from "../client-core.ts";
 import { bindForm, graspFormOf } from "../form-binding.ts";
 import type {
   DecisionAnswer,
@@ -45,14 +41,33 @@ interface UseForm {
 }
 
 /**
- * The form hook, untyped: what `useForm` types by its three ways in.
- * `client` is the session client.
+ * A form, one hook with three ways in:
+ *
+ * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
+ *   public mutation or action, its input the fields, the argument
+ *   descriptor its reference carries the validator (core checks again
+ *   with its own). The form sends the fields its function requires, and
+ *   of its optional fields only those the person changed. To edit a
+ *   record, bind a mutation that takes its ID and its fields as optional
+ *   (`.optional()`), start `defaultValues` from the record, and patch what
+ *   the form sends: two people changing different fields both keep their
+ *   changes.
+ * - `useForm(schema, { defaultValues, onSubmit })`: a local form, checked
+ *   by a native schema, `onSubmit` given its normalized output.
+ * - `useForm(workflows.<wf>.decisions.<key>, { defaultValues, onSubmit })`:
+ *   the form of an answer to that decision, `{ approved, value }`, its
+ *   value checked by the decision's value schema; `onSubmit` passes it to
+ *   the run's `respond`.
+ *
+ * Render it with `Form`, `TextField`, `TextareaField`, `FormError` and
+ * `SubmitButton` from `@grasp-os/ui/form`, or custom controls through
+ * `form.Field`.
  */
-const useGraspForm = (
-  client: GraspClient,
+export const useForm: UseForm = (
   target: unknown,
   options: FormOptionsInput
-): GraspForm<Record<string, unknown>, unknown> => {
+) => {
+  const client = useClient();
   // One binding for the form's life, never replaced: no setter.
   // oxlint-disable-next-line react/hook-use-state -- see above
   const [binding] = useState(() => bindForm(client, target, options));
@@ -81,34 +96,8 @@ const useGraspForm = (
       binding.setMounted(false);
     };
   }, [binding]);
-  return graspForm;
+  // SAFETY: one implementation serves the three typed ways in above; it
+  // reads which one it was given at run time (form-target.ts, `targetOf`).
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return graspForm as never;
 };
-
-/**
- * A form, one hook with three ways in:
- *
- * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
- *   public mutation or action, its input the fields, the argument
- *   descriptor its reference carries the validator (core checks again
- *   with its own). The form sends the fields its function requires, and
- *   of its optional fields only those the person changed. To edit a
- *   record, bind a mutation that takes its ID and its fields as optional
- *   (`.optional()`), start `defaultValues` from the record, and patch what
- *   the form sends: two people changing different fields both keep their
- *   changes.
- * - `useForm(schema, { defaultValues, onSubmit })`: a local form, checked
- *   by a native schema, `onSubmit` given its normalized output.
- * - `useForm(workflows.<wf>.decisions.<key>, { defaultValues, onSubmit })`:
- *   the form of an answer to that decision, `{ approved, value }`, its
- *   value checked by the decision's value schema; `onSubmit` passes it to
- *   the run's `respond`.
- *
- * Render it with `Form`, `TextField`, `TextareaField`, `FormError` and
- * `SubmitButton` from `@grasp-os/ui/form`, or custom controls through
- * `form.Field`.
- */
-// SAFETY: one implementation serves the three typed ways in above; it
-// reads which one it was given at run time (form-target.ts, `targetOf`).
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-export const useForm = ((target: unknown, options: FormOptionsInput) =>
-  useGraspForm(useClient(), target, options)) as UseForm;
