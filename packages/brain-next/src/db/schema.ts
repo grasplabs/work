@@ -45,8 +45,9 @@ export const readerSetMembers = sqliteTable(
 );
 
 /**
- * A source, whole, with its set of readers. Its words are indexed in
- * `source_words`, an FTS5 table kept in step by triggers (migration 0001).
+ * A source, whole as given, with its set of readers. Its folded words are
+ * indexed in `source_words`, an FTS5 table the store writes with it
+ * (words.ts `indexWords`, migration 0001).
  */
 export const sources = sqliteTable(
   "sources",

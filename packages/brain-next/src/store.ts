@@ -18,6 +18,7 @@ import migrations from "./db/migrations/migrations.js";
 import { sources } from "./db/schema.ts";
 import { readerSetOf } from "./reader-sets.ts";
 import { recall } from "./recall.ts";
+import { indexWords } from "./words.ts";
 
 /**
  * `input` as `schema` reads it, or an error that says why not: its paths
@@ -50,16 +51,21 @@ export class BrainStore extends DurableObject<unknown> {
     });
   }
 
-  /** Adds a source and its readers, in one transaction: whole or not at all. */
+  /**
+   * Adds a source, its readers and its words, in one transaction: whole
+   * or not at all. The text is kept as given; its words are indexed folded.
+   */
   addSource(source: NewSource): { id: SourceId } {
     const { text, access } = checked(newSourceSchema, source);
     const id = sourceIdSchema.parse(crypto.randomUUID());
     this.ctx.storage.transactionSync(() => {
       const readerSet = readerSetOf(this.#db, access);
-      this.#db
+      const { row } = this.#db
         .insert(sources)
         .values({ id, readerSet, text, addedAt: new Date() })
-        .run();
+        .returning({ row: sources.row })
+        .get();
+      indexWords(this.ctx.storage.sql, row, text);
     });
     return { id };
   }

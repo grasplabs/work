@@ -1,20 +1,15 @@
--- The words of every source, for recall (recall.ts): whole words, case and
--- diacritics folded ("financiele" finds "financiële"), the tokenizer
--- today's Brain searches with. External content: the text is kept once, in
--- `sources`, and triggers keep the index in step with it.
+-- The words of every source, for recall (recall.ts): its text as search
+-- reads it (words.ts `foldForSearch`), written by the store in the same
+-- transaction as the source, while `sources` keeps the text whole as
+-- given. The tokenizer is today's Brain's; folding already removed case
+-- and accents, so it only cuts the text into words.
 CREATE VIRTUAL TABLE `source_words` USING fts5(
 	text,
-	content = 'sources',
-	content_rowid = 'row',
 	tokenize = 'unicode61 remove_diacritics 2'
 );
 --> statement-breakpoint
-CREATE TRIGGER `sources_words_insert` AFTER INSERT ON `sources` BEGIN
-	INSERT INTO `source_words` (rowid, text) VALUES (NEW.`row`, NEW.`text`);
-END;
---> statement-breakpoint
 CREATE TRIGGER `sources_words_delete` AFTER DELETE ON `sources` BEGIN
-	INSERT INTO `source_words` (`source_words`, rowid, text) VALUES ('delete', OLD.`row`, OLD.`text`);
+	DELETE FROM `source_words` WHERE rowid = OLD.`row`;
 END;
 --> statement-breakpoint
 -- A source is added, never changed: a new version is a new row.

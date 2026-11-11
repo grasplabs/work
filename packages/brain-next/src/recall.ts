@@ -1,5 +1,6 @@
 import { recallLimit, sourceIdSchema } from "./contract.ts";
 import type { Reader, Recalled } from "./contract.ts";
+import { termsOf } from "./words.ts";
 
 // Recall by words, in one statement that finds, checks and ranks.
 //
@@ -16,28 +17,16 @@ import type { Reader, Recalled } from "./contract.ts";
 // then newer, then by ID, so the order is the same whatever else is
 // stored.
 //
-// The question never reaches FTS5's query syntax: it is cut into words
-// here, and each is asked for as a quoted string (`termsOf`).
-
-/** Most words of a question that count; the rest are left out. */
-const maxTerms = 16;
-
-/** Whatever isn't a letter or a digit separates words. */
-const wordPattern = /[\p{L}\p{N}]+/gu;
-
-/**
- * A question's distinct words, lowercased, each as an FTS5 string: words
- * only, so quoting is all it needs.
- */
-export const termsOf = (question: string): string[] =>
-  [...new Set(question.normalize("NFKC").toLowerCase().match(wordPattern))]
-    .slice(0, maxTerms)
-    .map((term) => `"${term}"`);
+// The question never reaches FTS5's query syntax: it is folded and cut
+// into words, each asked for as a quoted string (words.ts `termsOf`).
 
 /**
  * `?1` the question's terms (JSON), `?2` the reader's person, `?3` their
  * groups (JSON), `?4` the limit. Each term is one lookup of the index, and
- * a source's score is how many of them found it.
+ * a source's score is how many of them found it. Only what the reader may
+ * read is grouped and scored: a hidden match is dropped as the index finds
+ * it, never grouped, counted or sorted. (The index's own lookup of a word
+ * still reads its whole posting list, as any word index does.)
  */
 const recallSql = `
 WITH readable AS (
@@ -46,16 +35,17 @@ WITH readable AS (
     OR (kind = 'group' AND principal IN (SELECT value FROM json_each(?3)))
 ),
 matched AS (
-  SELECT source_words.rowid AS row, count(*) AS score
+  SELECT sources.row AS row, count(*) AS score
   FROM json_each(?1) AS asked
   CROSS JOIN source_words
+  JOIN sources ON sources.row = source_words.rowid
   WHERE source_words MATCH asked.value
-  GROUP BY source_words.rowid
+    AND sources.reader_set IN (SELECT reader_set FROM readable)
+  GROUP BY sources.row
 )
 SELECT sources.id AS id, sources.text AS text
 FROM matched
 JOIN sources ON sources.row = matched.row
-WHERE sources.reader_set IN (SELECT reader_set FROM readable)
 ORDER BY matched.score DESC, length(sources.text), sources.added_at DESC, sources.id
 LIMIT ?4`;
 
