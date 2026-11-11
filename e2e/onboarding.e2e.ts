@@ -116,6 +116,36 @@ test("an admin whose company's flow is the AI step alone makes that one choice a
   }
 });
 
+test("a company that goes through no onboarding is open at once, and its admin is never sent to one", async ({
+  page,
+}) => {
+  const admin = await configuredAdmin();
+  await adminCommand({ type: "onboarding.gate.close", payload: {} });
+  await adminCommand({
+    type: "onboarding.flow",
+    payload: { flow: { ...flowWithOnly([]), on: false } },
+  });
+  try {
+    const opened = await adminSnapshot();
+    expect(opened.gate.open).toBe(true);
+    const member = `person.${crypto.randomUUID()}@acme.test`;
+    await expect(signInAs(member)).resolves.toBeTruthy();
+
+    // Signed in, the admin stays home; asked for by its address, the onboarding sends them there.
+    await signInTo(page.context(), admin);
+    await page.goto("/");
+    await expect(page).toHaveURL((url) => url.pathname === "/");
+    await page.goto("/setup");
+    await page.waitForURL((url) => url.pathname === "/");
+    await expect(
+      page.getByRole("heading", { name: "Which AI should I think with?" })
+    ).toHaveCount(0);
+  } finally {
+    await adminCommand({ type: "onboarding.flow", payload: { flow: null } });
+    await adminCommand({ type: "onboarding.gate.open", payload: {} });
+  }
+});
+
 test("staff put the agreements in place, and the links that waited go out", async ({
   cspViolations,
 }) => {
