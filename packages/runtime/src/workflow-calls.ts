@@ -1,8 +1,9 @@
+import { deepFreeze } from "@grasp-os/shared/json";
+
 import { clientInternals } from "./client-core.ts";
 import type { GraspClient } from "./client-core.ts";
 import { clientError } from "./client-error.ts";
 import type { QueryEntry } from "./client-query-entry.ts";
-import { deepFreeze } from "./declaration.ts";
 import { eventReferenceName } from "./workflow-events.ts";
 import type { ReadWorkflow } from "./workflow-reference-read.ts";
 import { respondToDecision } from "./workflow-respond.ts";
@@ -51,7 +52,7 @@ import { showsControl } from "./workflow-view.ts";
 export const applyingAtMostMs = 10_000;
 
 /** What one hook has under way itself. */
-export interface LocalCalls {
+interface LocalCalls {
   readonly starting: number;
   /** The run of its latest admitted start: what it shows without a run ID. */
   readonly startedRunId: string | undefined;

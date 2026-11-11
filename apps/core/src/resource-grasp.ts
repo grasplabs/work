@@ -88,10 +88,10 @@ const claim = async (env: Env, caller: BindingCaller): Promise<void> => {
 
 /**
  * `error`, a statistics refusal, in the function host's words: arguments
- * that don't fit (`resource.invalid_args`), a bound reached
- * (`resource.limit_reached`, which one, and for a minute's, when to try
- * again), an App the person may not see counted (`resource.item_not_found`)
- * or a person no longer a member (`resource.unavailable`). Anything else
+ * that don't fit (`permission.invalid_args`), a bound reached
+ * (`permission.limit_reached`, which one, and for a minute's, when to try
+ * again), an App the person may not see counted (`permission.item_not_found`)
+ * or a person no longer a member (`permission.unavailable`). Anything else
  * as it is: the function host allows only its own words through.
  */
 const inHostWords = (error: unknown): unknown => {
@@ -101,7 +101,7 @@ const inHostWords = (error: unknown): unknown => {
     statisticErrors.codeOf(error) ??
     (isExpectedError(error) ? error.code : undefined);
   if (code === "statistics.invalid") {
-    return functionErrors.create("resource.invalid_args");
+    return functionErrors.create("permission.invalid_args");
   }
   if (code === "statistics.rate_limited") {
     const details: unknown = isExpectedError(error) ? error.details : undefined;
@@ -111,17 +111,17 @@ const inHostWords = (error: unknown): unknown => {
       "limit" in details &&
       details.limit === "call";
     return functionErrors.create(
-      "resource.limit_reached",
+      "permission.limit_reached",
       call
         ? { limit: "call" }
         : { limit: "minute", retryAfterSeconds: untilNextMinute() }
     );
   }
   if (code === "app.not_found") {
-    return functionErrors.create("resource.item_not_found");
+    return functionErrors.create("permission.item_not_found");
   }
   if (code === "permission.person_inactive") {
-    return functionErrors.create("resource.unavailable");
+    return functionErrors.create("permission.unavailable");
   }
   return error;
 };

@@ -153,7 +153,7 @@ export const pageReferences = {
 export const pageFunctions = { path: ".grasp/functions.ts" } as const;
 
 /**
- * The types of an App's tables (`Doc`, `Id`, `TableName`), which its
+ * The types of an App's tables (`Doc`, `Id`, `TableNames`), which its
  * pages import with `import type`, as Convex's pages import theirs, and
  * which every build of them generates from the App's schema
  * (`buildFiles`): types alone, erased as each page compiles, so a page

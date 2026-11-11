@@ -15,7 +15,7 @@
 #
 # What a run proves is no more than its branch's copy of this file says:
 # anyone with write access can run their own, or make a release by hand.
-# What binds a pin to the glue is CI's `oxc-wasm` job, part of the
+# What binds a pin to the glue is CI's `wasm` job, part of the
 # required check: on a pull request that changes the glue, this workflow
 # or pin.json, it builds the glue read-only, publishes nothing, and fails
 # unless the release's digest, the pin and its build are one.

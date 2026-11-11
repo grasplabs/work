@@ -1,8 +1,9 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { namePattern, refuser } from "./declaration.ts";
 import { requiredChild, sealedChild } from "./sealed-descriptors.ts";
 import type { DescriptorDraft, Sealed } from "./sealed-descriptors.ts";
 import {
-  isPlainObject,
   isSemanticKind,
   unsafeKeys,
   ValueDefinitionError,

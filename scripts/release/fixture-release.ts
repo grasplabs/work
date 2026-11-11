@@ -3,6 +3,7 @@
  * fixture bundles, assets and migrations in place of a build. Shared by the
  * release tests.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -43,6 +44,25 @@ export const fixtureBuild = async (app: string): Promise<WorkerBuild> => {
   };
 };
 
+/** The embedder's tiny test model (packages/embed/test/fixtures), as its files are stored. */
+const modelFixtures = path.join(ROOT, "packages/embed/test/fixtures");
+
+/** The files of the fixture model a release names, as named, and where each is. */
+export const fixtureModelFiles = [
+  "tokenizer.bin",
+  "encoder-int8.bin",
+  "tokens-int8.bin",
+].map((name) => {
+  const file = path.join(modelFixtures, name);
+  const bytes = readFileSync(file);
+  return {
+    name: `fixture-int8/${name}`,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    size: bytes.byteLength,
+    file,
+  };
+});
+
 export const info: ReleaseInfo = {
   releaseId: "26.01.1",
   commit: "0".repeat(40),
@@ -50,6 +70,11 @@ export const info: ReleaseInfo = {
   notes: "feat(core): a fixture",
   wranglerVersion: "0.0.0-fixture",
   packages: { zod: "0.0.0-fixture" },
+  modelFiles: fixtureModelFiles.map(({ name, sha256, size }) => ({
+    name,
+    sha256,
+    size,
+  })),
 };
 
 export const builds = async (): Promise<WorkerBuild[]> =>

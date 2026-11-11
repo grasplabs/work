@@ -1,4 +1,4 @@
-import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineProject } from "vite-plus";
 
 import { coreStandInScript } from "./test/core-stand-in.ts";

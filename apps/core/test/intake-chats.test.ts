@@ -185,7 +185,7 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
     }).toStrictEqual({
       unanswered: "intake.empty_chat",
       unbound: { writable: true, chats: null },
-      invite: "resource.unavailable",
+      invite: "permission.unavailable",
     });
   });
 });

@@ -1,10 +1,10 @@
 import { errorCategories } from "@grasp-os/shared/error-categories";
+import { isPlainObject } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import { GraspError } from "./client-error.ts";
 import type { ErrorCategory } from "./client-error.ts";
 import { fencingCodes, nothingRanCodes } from "./refusals.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /** The category of each refusal of core's file channel that isn't operational. */
 const fileCategories: Readonly<Record<string, ErrorCategory>> = {

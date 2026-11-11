@@ -1,10 +1,8 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { isCron } from "./cron.ts";
 import { currencyCodes, timeZones } from "./value-catalog.ts";
-import {
-  isPlainObject,
-  valueIssueMessages,
-  valueLimits,
-} from "./value-descriptor.ts";
+import { valueIssueMessages, valueLimits } from "./value-descriptor.ts";
 import type {
   SemanticKind,
   ValueDescriptor,

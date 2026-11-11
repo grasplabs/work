@@ -118,7 +118,7 @@ const refusalOf = (error: unknown): unknown => {
     code === "model.unconfigured" ||
     code === "model.answer_too_long"
   ) {
-    return functionErrors.create("resource.unavailable");
+    return functionErrors.create("permission.unavailable");
   }
   const wait = isExpectedError(error)
     ? error.details?.retryAfterSeconds
@@ -128,10 +128,10 @@ const refusalOf = (error: unknown): unknown => {
   // The provider's rate: throttling, worth asking again after the wait
   // core computed.
   if (code === "model.rate_limited") {
-    return functionErrors.create("resource.rate_limited", after);
+    return functionErrors.create("permission.rate_limited", after);
   }
   if (code === "model.invalid_output") {
-    return functionErrors.create("contract.invalid_resource_result");
+    return functionErrors.create("contract.invalid_permission_result");
   }
   return error;
 };

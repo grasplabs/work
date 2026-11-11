@@ -10,7 +10,10 @@ import {
 } from "../src/db/schema.ts";
 import { placeAndProvisionFn } from "../src/hosting/functions.ts";
 import { notStartedWords } from "../src/hosting/words.ts";
-import { createClient } from "../src/provision/control.ts";
+import {
+  createClient,
+  provisionInputSchema,
+} from "../src/provision/control.ts";
 import type { ProvisionInput } from "../src/provision/control.ts";
 import { startClient } from "../src/provision/functions.ts";
 import { getProvisioning } from "../src/provision/queries.ts";
@@ -229,6 +232,24 @@ describe("adding a client", () => {
       },
       audited: ["client.create"],
     });
+  });
+
+  it("keeps the onboarding staff chose for it, and none for the whole onboarding", async () => {
+    const chosen = inputOf();
+    const whole = inputOf();
+    await createClient(env, staff, { ...chosen, onboarding: "none" });
+    await createClient(env, staff, whole);
+
+    const chosenRow = await clientRow(chosen.clientId);
+    const wholeRow = await clientRow(whole.clientId);
+    expect({
+      chosen: chosenRow?.startingFlow,
+      whole: wholeRow?.startingFlow,
+      unknown: provisionInputSchema.safeParse({
+        ...chosen,
+        onboarding: "everything",
+      }).success,
+    }).toStrictEqual({ chosen: "none", whole: null, unknown: false });
   });
 
   it("is placed and provisioned from there, in its stage's destination", async () => {

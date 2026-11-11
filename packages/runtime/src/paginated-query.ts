@@ -1,4 +1,4 @@
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isPlainObject } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import { clientError } from "./client-error.ts";
@@ -20,7 +20,6 @@ import {
   snapshotOf,
 } from "./pager.ts";
 import type { ListPage, Pager } from "./pager.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // A paginated list (`usePaginatedQuery`) follows each of its pages as a
 // live query of its own, as Convex does: a page is the query with its

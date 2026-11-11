@@ -56,7 +56,7 @@ import type { RunEventDelivery } from "./workflows/run-events.ts";
 // - An event the App doesn't send, or to a run that isn't one of the
 //   App's. The App must declare the workflow in its sealed permissions,
 //   and the event the function's generated reference names, by its alias,
-//   among that workflow's declared events (`resource.not_allowed`
+//   among that workflow's declared events (`permission.not_allowed`
 //   otherwise: an alias the release doesn't declare, another workflow's,
 //   or a key every object inherits, which an own-key lookup never finds);
 //   its data must be what that event's declared data takes
@@ -66,7 +66,7 @@ import type { RunEventDelivery } from "./workflows/run-events.ts";
 //   own `send` grant on the workflow, for the person the call acts for,
 //   with their role in the App and the release not revoked
 //   (`appSendHoldsSql`). Each is read as the sent event is staged
-//   (anything that doesn't hold is `resource.unavailable`, never saying
+//   (anything that doesn't hold is `permission.unavailable`, never saying
 //   which, and fails the mutation), and again as it is delivered, with
 //   the run's own binding authority (`admitRunEvent`): a commit's success
 //   is its local commit, never the run taking the event.
@@ -190,7 +190,7 @@ const restrictsRun = async (
 };
 
 /** A sent event the App may not make now: never saying why. */
-const unavailable = () => functionErrors.create("resource.unavailable");
+const unavailable = () => functionErrors.create("permission.unavailable");
 
 /**
  * How core stages the sent events of an invocation acting as
@@ -216,7 +216,7 @@ export const appWorkflowEventSends = (
         ? declared.events[event]
         : undefined;
     if (declared === undefined || resolved === undefined) {
-      throw functionErrors.create("resource.not_allowed");
+      throw functionErrors.create("permission.not_allowed");
     }
     const checked = schemaFromDescriptor(JSON.stringify(resolved.data))[
       "~standard"

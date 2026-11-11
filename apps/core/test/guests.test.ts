@@ -37,7 +37,7 @@ import { failure } from "./sealed-apps.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 
 // Guest chats (src/guests.ts) through an App's sealed functions: a guests
-// resource its actions declare (`resource.guests`), which reaches nothing
+// resource its actions declare (`permission.guests`), which reaches nothing
 // until an admin binds it to one of the App's permissions to invite
 // guests (resource-guests.ts). An App invites someone who isn't a member
 // to a chat with a model through a link. The ways it can fail, each tried
@@ -208,8 +208,8 @@ describe("guest chats", { timeout: 60_000 }, () => {
       tooLarge: { status: 400, code: "guest.invalid" },
       streamed: { status: 400, code: "guest.invalid" },
       get: 405,
-      otherApp: { error: "resource.item_not_found" },
-      otherRevoke: { error: "resource.item_not_found" },
+      otherApp: { error: "permission.item_not_found" },
+      otherRevoke: { error: "permission.item_not_found" },
     });
   });
 
@@ -316,7 +316,7 @@ describe("guest chats", { timeout: 60_000 }, () => {
       whileShared: 200,
       afterUnshared: { status: 404, code: "guest.link_invalid" },
       permissionGone: { status: 404, code: "guest.link_invalid" },
-      appAfter: { error: "resource.unavailable" },
+      appAfter: { error: "permission.unavailable" },
     });
   });
 
@@ -533,14 +533,14 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
       rebound,
       otherPermission,
     }).toStrictEqual({
-      unbound: { error: "resource.unavailable" },
-      othersGrant: "resource.target_invalid",
-      otherAction: "resource.target_invalid",
+      unbound: { error: "permission.unavailable" },
+      othersGrant: "permission.target_invalid",
+      otherAction: "permission.target_invalid",
       bound: { ok: [] },
-      widened: { error: "resource.unavailable" },
+      widened: { error: "permission.unavailable" },
       opened: 200,
       afterRevoke: {
-        app: { error: "resource.unavailable" },
+        app: { error: "permission.unavailable" },
         link: { status: 404, code: "guest.link_invalid" },
       },
       rebound: 200,

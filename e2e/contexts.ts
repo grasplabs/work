@@ -10,12 +10,17 @@ import { signInFile, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
 
 /**
+ * How long a file's people may take to sign in, apart from its test's own
+ * time: up to a few dozen sign-ins on a loaded stack.
+ */
+const castSignInMs = 120_000;
+
+/**
  * The people the running test's file looks up, signed in for its attempt
  * (`signInFile`), and the connections scene's connections written once
- * its people are. A file whose `beforeAll` looks people up calls it there,
- * as that runs before any fixture.
+ * its people are.
  */
-export const fileCast = async (): Promise<void> => {
+const signInCast = async (): Promise<void> => {
   await signInFile(async (scenes, attempt) => {
     if (scenes.connections !== undefined) {
       await seedConnections(scenes, attempt);
@@ -24,10 +29,17 @@ export const fileCast = async (): Promise<void> => {
 };
 
 /**
- * How long a file's people may take to sign in, apart from its test's own
- * time: up to a few dozen sign-ins on a loaded stack.
+ * `signInCast`, from a file's `beforeAll` that looks people up, as that
+ * runs before any fixture. A hook runs on a test's time, so the sign-ins
+ * get their own on top, as the `fileSignedIn` fixture's do: in CI, a file
+ * whose `beforeAll` signs in and releases three Apps (page-attacks.e2e.ts)
+ * started its first test up to 88 s after its worker did (November 2026).
  */
-const castSignInMs = 120_000;
+export const fileCast = async (): Promise<void> => {
+  const hook = base.info();
+  hook.setTimeout(hook.timeout + castSignInMs);
+  await signInCast();
+};
 
 /**
  * Playwright's `test`, with the browser contexts a test opens beyond its
@@ -51,7 +63,7 @@ export const test = base.extend<{
   fileSignedIn: [
     // oxlint-disable-next-line no-empty-pattern -- Playwright reads a fixture's dependencies from its first parameter's pattern, and this one has none
     async ({}, provide) => {
-      await fileCast();
+      await signInCast();
       // oxlint-disable-next-line unicorn/no-useless-undefined -- Playwright's `use` takes the fixture's value, and this fixture has none
       await provide(undefined);
     },

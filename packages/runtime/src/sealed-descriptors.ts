@@ -1,5 +1,7 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { refuser } from "./declaration.ts";
-import { isPlainObject, ValueDefinitionError } from "./value-descriptor.ts";
+import { ValueDefinitionError } from "./value-descriptor.ts";
 import type {
   ValueDefinitionCode,
   ValueDescriptor,

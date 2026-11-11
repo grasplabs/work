@@ -1,3 +1,4 @@
+import { isPlainObject } from "@grasp-os/shared/json";
 import { storeNamePattern } from "@grasp-os/shared/store-limits";
 
 import { hasExactly, isOverBytes, refuser } from "./declaration.ts";
@@ -14,7 +15,7 @@ import {
 } from "./schema-manifest.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
 import type { AnyTable, SchemaDefinition } from "./schema-types.ts";
-import { descriptorVersion, isPlainObject } from "./value-descriptor.ts";
+import { descriptorVersion } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";

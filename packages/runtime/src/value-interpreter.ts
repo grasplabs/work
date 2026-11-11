@@ -1,3 +1,5 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import {
   checkNumber,
   checkStrictObject,
@@ -8,7 +10,6 @@ import {
 } from "./value-checks.ts";
 import type { Checked, CheckState } from "./value-checks.ts";
 import {
-  isPlainObject,
   isSemanticKind,
   unsafeKeys,
   valueIssueMessages,

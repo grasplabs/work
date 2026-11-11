@@ -1,5 +1,6 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { categoryOf, isRetryableCode } from "@grasp-os/shared/functions";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { SealedTask } from "@grasp-os/workflow-schema/sealed";
 
 import type { StepError } from "./sealed-isolate.ts";
@@ -138,7 +139,12 @@ const typeOf = (error: StepError): StandardType => {
   if (code === "auth.unauthenticated") {
     return "authentication";
   }
-  if (code.startsWith("permission.") || categoryOf(code) === "authorization") {
+  // A permission's denial, never the failures of a call through one that
+  // share its namespace (a provider's rate limit, a busy budget).
+  if (
+    permissionErrors.codeOf(error) !== undefined ||
+    categoryOf(code) === "authorization"
+  ) {
     return "authorization";
   }
   if (code.startsWith("expression.")) {
@@ -220,10 +226,10 @@ const transientTypes: ReadonlySet<StandardType> = new Set([
  */
 const permanentCodes: ReadonlySet<string> = new Set([
   "data.conflict",
-  "resource.idempotency_conflict",
-  "resource.declined",
+  "permission.idempotency_conflict",
+  "permission.declined",
   "connect.declined",
-  "resource.limit_reached",
+  "permission.limit_reached",
   "workflow.model_call_limit",
   "workflow.too_many_steps",
   "workflow.too_many_attempts",

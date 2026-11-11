@@ -1322,6 +1322,11 @@ export interface PendingAction {
    */
   endsAt?: string;
   /**
+   * Asked for by a turn nobody was there for (an agent woken by a
+   * schedule or an event): what shows it says so. Absent otherwise.
+   */
+  unattended?: true;
+  /**
    * The App's approved resource binding it came through, as it served then
    * (`HeldBinding`); null for any other call; `unreadable` when what connect
    * stored no longer reads as one, which core never confirms.
