@@ -470,6 +470,10 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.no_map":
     "The team's lead hasn't agreed to anything to draw its map from yet.",
   "onboarding.no_failed_mail": "That person has no mail that failed.",
+  "onboarding.no_address":
+    "That person has no email address now to send it to.",
+  "onboarding.reminder_not_owed":
+    "That person's reminder failed, but they are owed none now: they finished, withdrew or deleted their interview.",
   "onboarding.no_difference":
     "Nothing about that piece of work needs settling.",
   "onboarding.nothing_to_draw":

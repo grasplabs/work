@@ -3172,30 +3172,86 @@ export class Onboarding extends DurableObject<Env> {
    * stopped it is put right, an address the admin corrected among it.
    * Their link with the reminder, when both failed: the link is what the
    * company's admin is told failed (`#linkMailFailed`), so it must go too.
-   * The audit log has that staff did, never for whom nor which mail: the
-   * admin reads it, and a reminder goes only to whoever hasn't finished.
-   * False when none failed, or they have no address now to send to.
+   * A reminder only while it is still owed (`#reminderOwed`): never to
+   * someone who finished, withdrew or deleted their interview since it
+   * failed. The audit log has that staff did, never for whom nor which
+   * mail: the admin reads it, and a reminder goes only to whoever hasn't
+   * finished. Says why when nothing goes: none failed, they have no
+   * address now, or what failed was a reminder no longer owed.
    */
-  sendAgain(person: string, by: AuditActor): boolean {
+  sendAgain(
+    person: string,
+    by: AuditActor
+  ): "sent" | "none_failed" | "no_address" | "not_owed" {
     const failed = mailAbout(this.ctx.storage.sql, person).filter(
       ({ state }) => state === "failed"
     );
+    if (failed.length === 0) {
+      return "none_failed";
+    }
     const to = this.#roster()?.people.find(({ id }) => id === person)?.email;
-    if (failed.length === 0 || to === undefined || to === "") {
-      return false;
+    if (to === undefined || to === "") {
+      return "no_address";
+    }
+    const owed = this.#reminderOwed(person);
+    const again = failed.filter(
+      ({ key }) => owed || !key.startsWith("reminder/")
+    );
+    if (again.length === 0) {
+      return "not_owed";
     }
     const now = new Date().toISOString();
     this.ctx.storage.transactionSync(() => {
-      for (const { key } of failed) {
+      for (const { key } of again) {
         const [kind = "mail"] = key.split("/");
-        queueAgain(this.ctx.storage.sql, key, to);
+        // All due at once, so they go in the order they were first queued.
+        queueAgain(this.ctx.storage.sql, key, to, Date.parse(now));
         this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
       }
       this.#changed(by, "onboarding.mail.resent", {});
     });
     this.#deliverAudit();
     this.#deliverMailSoon();
-    return true;
+    return "sent";
+  }
+
+  /**
+   * Whether someone is still owed their reminder, as `#remindable` holds
+   * it, now: taking part with an address, their link out and not deleted,
+   * their interview not finished, and they haven't withdrawn. Read when a
+   * failed reminder is sent again and again as it goes (`#mailWanted`):
+   * they may have finished in between.
+   */
+  #reminderOwed(person: string): boolean {
+    const roster = this.#roster();
+    const one = roster?.people.find(({ id }) => id === person);
+    if (
+      roster === null ||
+      one === undefined ||
+      !takingPart(roster, one) ||
+      one.email === ""
+    ) {
+      return false;
+    }
+    const [link] = this.#db
+      .select({ deletedAt: links.deletedAt })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    return (
+      link !== undefined &&
+      link.deletedAt === null &&
+      (this.#interviews().get(person)?.completedAt ?? null) === null &&
+      this.#withdrawnAt(person) === null
+    );
+  }
+
+  /** Whether a mail about to go still should: a reminder only while it is owed. */
+  #mailWanted({ key, about }: { key: string; about: string | null }): boolean {
+    return (
+      !key.startsWith("reminder/") ||
+      (about !== null && this.#reminderOwed(about))
+    );
   }
 
   /** People whose link went out, and when: for the links themselves (GRA-287) and the admin's list. */
@@ -4738,6 +4794,7 @@ export class Onboarding extends DurableObject<Env> {
       return await deliverMail(this.ctx.storage.sql, {
         send: async (mail) => await sendMail(this.env, mail),
         fill: async (person) => await this.#linkFill(person),
+        wanted: (mail) => this.#mailWanted(mail),
         settled: (state) => {
           this.#mailSettled(state, now);
         },

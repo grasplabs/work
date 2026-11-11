@@ -12,8 +12,10 @@ import {
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
+import { onLink, participate } from "./interview-link.ts";
 import { captureMail } from "./mail-capture.ts";
 import { onboardingLog } from "./onboarding-log.ts";
+import { openLink } from "./onboarding-team.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
@@ -394,21 +396,40 @@ describe("the interview link emails", () => {
     const staffSaw = snapshot.links
       .filter(({ failedMail }) => failedMail !== null)
       .map(({ person: id, failedMail }) => [id, failedMail?.kind]);
+    /** The roster with Ute at `email`, as the admin saves it. */
+    const uteAt = async (email: string) =>
+      await api.onboarding.saveRoster({
+        teams: [{ id: "fin", name: "Finance", lead: null }],
+        people: [
+          { id: "uli", name: "Uli", email: "uli@acme.test", team: "fin" },
+          { id: "uma", name: "Uma", email: "uma@acme.test", team: "fin" },
+          { id: "ute", name: "Ute", email, team: "fin" },
+        ],
+      });
+    // With no address, staff are told so, and nothing goes.
+    await uteAt("");
+    const noAddress = await outcome(adminCommands().sendMailAgain("ute"));
     // The admin corrects Ute's address; Grasp sends her link again.
-    await api.onboarding.saveRoster({
-      teams: [{ id: "fin", name: "Finance", lead: null }],
-      people: [
-        { id: "uli", name: "Uli", email: "uli@acme.test", team: "fin" },
-        { id: "uma", name: "Uma", email: "uma@acme.test", team: "fin" },
-        { id: "ute", name: "Ute", email: "ute@acme-mail.test", team: "fin" },
-      ],
-    });
+    await uteAt("ute@acme-mail.test");
     const sentBefore = mail.sent.length;
-    await adminCommands().sendMailAgain("ute");
-    await store.deliverMail(Date.parse(morning(start, 3)));
+    const audited = await auditedDuring(async () => {
+      await adminCommands().sendMailAgain("ute");
+      await store.deliverMail(Date.parse(morning(start, 3)));
+    });
+    const resent = audited.filter(
+      ({ action }) => action === "onboarding.mail.resent"
+    );
     const afterAgain = await told();
     const unfinished = { team: "Finance", fresh: true, out: true };
     expect({
+      noAddress,
+      // One event for both mails: no person, no kind, no count.
+      resent: resent.map(({ actor, target, detail }) => [
+        actor.type,
+        target ?? null,
+        detail,
+      ]),
+      names: JSON.stringify(resent).includes("ute"),
       reminded,
       tried: mail.tried.map(whichTo),
       again: mail.sent.slice(sentBefore).map(whichTo),
@@ -417,6 +438,9 @@ describe("the interview link emails", () => {
       staffSaw,
       afterAgain: afterAgain.ute,
     }).toStrictEqual({
+      noAddress: "onboarding.no_address",
+      resent: [["staff", { type: "onboarding", id: "onboarding" }, {}]],
+      names: false,
       reminded: ["uma", "ute"],
       tried: [
         ["uli@acme.test", "link"],
@@ -448,6 +472,106 @@ describe("the interview link emails", () => {
         ["ute", "reminder"],
       ],
       afterAgain: { ...unfinished, mailFailed: false },
+    });
+  });
+
+  it("send a failed reminder again only to whoever is still owed one, when it is sent and when it goes", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const store = onboardingStore(env);
+    // Running since yesterday, so their links open now.
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = addDays(today, -1);
+    // Every reminder fails. Then Pam finishes, Pat withdraws, Pia deletes
+    // her interview; Pol's link had failed too and he is still owed it;
+    // Peg is sent hers again and finishes before it goes. In the order
+    // their mails go: by the roster for links, by id for reminders.
+    const [pam, pat, pia, pol, peg] = ["pa", "pb", "pc", "pd", "pe"];
+    const people = [pam, pat, pia, pol, peg];
+    // Before anything goes: their links go out as the agreements are in.
+    const mail = await captureMail(
+      store,
+      "sent",
+      "sent",
+      "sent",
+      "E_RECIPIENT_SUPPRESSED",
+      "sent",
+      ...people.map(() => "E_RECIPIENT_SUPPRESSED"),
+      // Peg's, sent again: the service is busy, so it waits.
+      "E_RATE_LIMIT_EXCEEDED"
+    );
+    await api.onboarding.confirmRoster({
+      teams: [{ id: "rnd", name: "Research", lead: null }],
+      people: people.map((id) => ({
+        id,
+        name: id,
+        email: `${id}@acme.test`,
+        team: "rnd",
+      })),
+    });
+    await store.savePlan({ start: yesterday, days: 14 }, { type: "system" });
+    await adminCommands().setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    await store.releaseDue();
+    await store.deliverMail();
+    const patLink = await openLink(pat);
+    await participate(patLink);
+    const piaLink = await openLink(pia);
+    const remindOn = `${addDays(today, 5)}T08:00:00.000Z`;
+    const reminded = await store.remindDue(remindOn);
+    await store.deliverMail(Date.parse(remindOn));
+    const triedBefore = mail.tried.length;
+
+    const now = new Date().toISOString();
+    await store.noteInterview({
+      person: pam,
+      kind: "own",
+      startedAt: now,
+      completedAt: now,
+    });
+    await onLink({ action: "withdraw", ...patLink });
+    await onLink({ action: "delete", ...piaLink });
+    const notOwed = [
+      await outcome(adminCommands().sendMailAgain(pam)),
+      await outcome(adminCommands().sendMailAgain(pat)),
+      await outcome(adminCommands().sendMailAgain(pia)),
+    ];
+    // Peg's goes back in the outbox, is tried once, and waits.
+    const pegAgain = await outcome(adminCommands().sendMailAgain(peg));
+    await store.deliverMail();
+    await store.noteInterview({
+      person: peg,
+      kind: "own",
+      startedAt: now,
+      completedAt: now,
+    });
+    await store.deliverMail(Date.now() + 2 * dayMs);
+    const polAgain = await outcome(adminCommands().sendMailAgain(pol));
+    await store.deliverMail(Date.now() + 2 * dayMs);
+
+    expect({
+      reminded,
+      notOwed,
+      pegAgain,
+      polAgain,
+      after: mail.tried.slice(triedBefore).map(whichTo),
+    }).toStrictEqual({
+      reminded: people,
+      notOwed: [
+        "onboarding.reminder_not_owed",
+        "onboarding.reminder_not_owed",
+        "onboarding.reminder_not_owed",
+      ],
+      pegAgain: "ok",
+      polAgain: "ok",
+      after: [
+        // Tried once while she was owed it; never again once she finished.
+        [`${peg}@acme.test`, "reminder"],
+        [`${pol}@acme.test`, "link"],
+        [`${pol}@acme.test`, "reminder"],
+      ],
     });
   });
 });

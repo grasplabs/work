@@ -74,6 +74,8 @@ export type CommandRefusal =
   | "onboarding.no_team"
   | "onboarding.no_work"
   | "onboarding.no_failed_mail"
+  | "onboarding.no_address"
+  | "onboarding.reminder_not_owed"
   | "onboarding.nothing_to_draw"
   | "onboarding.invalid"
   | "onboarding.agreements_kept"
@@ -90,6 +92,8 @@ const onboardingCodes: ReadonlySet<string> = new Set([
   "onboarding.no_team",
   "onboarding.no_work",
   "onboarding.no_failed_mail",
+  "onboarding.no_address",
+  "onboarding.reminder_not_owed",
   "onboarding.nothing_to_draw",
   "onboarding.invalid",
   "onboarding.agreements_kept",

@@ -43,6 +43,10 @@ const refusals: Readonly<Record<CommandRefusal, string>> = {
   "onboarding.no_team": "That team isn’t on the company’s list any more.",
   "onboarding.no_work": "That workflow isn’t on its team’s map any more.",
   "onboarding.no_failed_mail": "No mail to them failed.",
+  "onboarding.no_address":
+    "They have no email address now: the company’s admin adds one first.",
+  "onboarding.reminder_not_owed":
+    "Their reminder failed, but they are owed none now: they finished, withdrew or deleted their interview.",
   "onboarding.nothing_to_draw":
     "Nobody who does that work has agreed to anything yet.",
   "onboarding.invalid": "That isn’t something the onboarding takes.",

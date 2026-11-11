@@ -113,10 +113,10 @@ const applyChange = async (
       return;
     }
     case "onboarding.send_mail_again": {
-      refuseUnless(
-        await store.sendAgain(command.payload.person, by),
-        "onboarding.no_failed_mail"
-      );
+      const sent = await store.sendAgain(command.payload.person, by);
+      refuseUnless(sent !== "none_failed", "onboarding.no_failed_mail");
+      refuseUnless(sent !== "no_address", "onboarding.no_address");
+      refuseUnless(sent !== "not_owed", "onboarding.reminder_not_owed");
       return;
     }
     case "onboarding.new_start": {

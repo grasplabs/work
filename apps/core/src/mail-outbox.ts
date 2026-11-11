@@ -90,6 +90,12 @@ export interface Delivery {
    * failed.
    */
   fill: (fill: string) => Promise<Record<string, string> | null>;
+  /**
+   * Whether a mail is still to go, read as it is about to: one that isn't
+   * (a reminder to someone who has finished since) is dropped from the
+   * outbox, never sent. Every mail goes when it isn't given.
+   */
+  wanted?: (mail: { key: string; about: string | null }) => boolean;
   /** Called once a mail is sent or ended failed, to log it. */
   settled: (mail: MailState) => void;
   now: number;
@@ -338,6 +344,11 @@ export const deliverMail = async (
       )
       .toArray();
     if (claimed === undefined) {
+      continue;
+    }
+    if (delivery.wanted?.(claimed) === false) {
+      storage.exec("DELETE FROM mail_outbox WHERE key = ?", claimed.key);
+      log.info("mail.dropped", { key: claimed.key });
       continue;
     }
     // One at a time: a burst would only run into the quota sooner.
