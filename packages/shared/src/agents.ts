@@ -58,6 +58,39 @@ export interface AgentSettings {
   classes: { toolClass: CompanyToolClass; audience: AppClassAudience }[];
 }
 
+/** Most characters a wake-up's opening line holds. */
+export const agentWakeOpeningMax = 2000;
+
+/** What an admin says of a wake-up as they make it. */
+export const agentWakeInputSchema = z.strictObject({
+  /** Five cron fields: minute, hour, day of month, month, day of week. */
+  cron: z.string().trim().min(1).max(256),
+  /** An IANA time zone; the company's own when not given. */
+  timeZone: z.string().min(1).max(64).optional(),
+  /** The person it works for: what it finds and wants to change goes to them. */
+  personId: z.string().min(1).max(128),
+  /** What the agent is asked each time it wakes. */
+  opening: z.string().trim().min(1).max(agentWakeOpeningMax),
+});
+export type AgentWakeInput = z.infer<typeof agentWakeInputSchema>;
+
+/** One of an agent's wake-ups, as core keeps it. */
+export interface AgentWake {
+  id: string;
+  agentId: string;
+  cron: string;
+  timeZone: string;
+  personId: string;
+  opening: string;
+  state: "on" | "paused";
+  /** When it next fires (ISO 8601); null while paused. */
+  nextAt: string | null;
+  /** When it last fired (ISO 8601), and how that went; null before its first. */
+  lastAt: string | null;
+  /** `started`, or the code of why its turn didn't start. */
+  lastOutcome: string | null;
+}
+
 /**
  * The agents over `/rpc`, on `connections`: the company's own admins
  * only, never Grasp staff; every change audited.
@@ -91,4 +124,16 @@ export interface AgentsApi {
     toolClass: CompanyToolClass,
     audience: AppClassAudience
   ) => Promise<void>;
+  /** An agent's wake-ups, the oldest first. */
+  agentWakes: (agentId: string) => Promise<AgentWake[]>;
+  /**
+   * Makes a wake-up: at the times its schedule names, the agent takes a
+   * turn nobody asked for, for the person named, which only reads. What it
+   * wants to change waits for that person.
+   */
+  makeAgentWake: (agentId: string, input: AgentWakeInput) => Promise<AgentWake>;
+  /** Pauses a wake-up, which then doesn't fire, or turns it back on. */
+  setAgentWakePaused: (wakeId: string, paused: boolean) => Promise<void>;
+  /** Deletes a wake-up. The chat its turns were in stays its person's. */
+  deleteAgentWake: (wakeId: string) => Promise<void>;
 }
