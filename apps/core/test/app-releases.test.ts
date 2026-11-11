@@ -37,7 +37,7 @@ import {
   refusedSeal,
   rewrite,
   tablelessFiles,
-  withOperation,
+  withFunction,
 } from "./app-releases-harness.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { commitDefined } from "./apps.ts";
@@ -999,7 +999,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       'declare module "@grasp-os/sdk" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
     ],
   ])("refuses %s", async (_case, source) => {
-    await expect(refusedSeal(withOperation(source))).resolves.toStrictEqual({
+    await expect(refusedSeal(withFunction(source))).resolves.toStrictEqual({
       code: "version.build_failed",
       files: ["server/extra.ts"],
     });
@@ -1011,7 +1011,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     await expect(
       refusedSeal(
         withFiles(
-          withOperation("export const greeting = (): string => shared;\n"),
+          withFunction("export const greeting = (): string => shared;\n"),
           {
             "server/extra-name.ts": 'const shared = "Hi";\n',
           }
@@ -1038,12 +1038,12 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
 
   it("checks no test that steers the check, so it gives the server code nothing", async () => {
     // A test that doesn't build (here, globals it declares) never joins
-    // the check: the operation's `document` stays an error. It is refused
+    // the check: the function's `document` stays an error. It is refused
     // where tests run, as a version is made current.
     await expect(
       refusedSeal(
         withFiles(
-          withOperation("export const title = (): string => document.title;\n"),
+          withFunction("export const title = (): string => document.title;\n"),
           {
             "tests/helper.ts":
               "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
@@ -1117,7 +1117,7 @@ export const run = async (principal: TestIdentity, refs: typeof api, flag: boole
     await expect(
       refusedSeal(
         withFiles(
-          withOperation("export const title = (): string => document.title;\n"),
+          withFunction("export const title = (): string => document.title;\n"),
           {
             "server/migrations/0001-globals.ts":
               "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
@@ -1136,7 +1136,7 @@ export const run = async (principal: TestIdentity, refs: typeof api, flag: boole
     await expect(
       refusedSeal(
         withFiles(
-          withOperation("export const title = (): string => document.title;\n"),
+          withFunction("export const title = (): string => document.title;\n"),
           {
             "server/migrations/0001-dom.ts":
               '/// <reference lib="dom" />\nexport const migration = 1;\n',
@@ -1152,7 +1152,7 @@ export const run = async (principal: TestIdentity, refs: typeof api, flag: boole
   it("seals what the worker's globals and the SDK type, with its generated modules", async () => {
     await expect(
       refusedSeal(
-        withOperation(
+        withFunction(
           '/// <summary>A comment, not a directive.</summary>\n// Do not use @ts-ignore here: a comment that mentions it.\nexport const later = async (): Promise<string> => {\n  await new Promise((resolve) => setTimeout(resolve, 1));\n  return crypto.randomUUID() + new TextEncoder().encode("x").length + new URL("https://acme.test").host;\n};\n'
         )
       )
@@ -1163,7 +1163,7 @@ export const run = async (principal: TestIdentity, refs: typeof api, flag: boole
     await expect(
       refusedSeal(
         withFiles(
-          withOperation(
+          withFunction(
             'import { v } from "@grasp-os/sdk";\n\nexport const later = (): number => {\n  const spare = 1;\n  return 2;\n};\n'
           ),
           {

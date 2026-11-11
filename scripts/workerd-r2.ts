@@ -39,23 +39,31 @@ export const writeR2Service = (out: string): void => {
   );
 };
 
+/** The disk service the R2 service keeps the objects' bodies in. */
+const r2FilesServiceName = "r2-files";
+
 /**
- * The R2 service's capnp entry. Its buckets live in the disk service
- * `storage`: workerd keeps a Durable Object's SQLite database only on disk.
+ * The R2 service's capnp entries: the service, and the directory `files`
+ * it keeps the objects' bodies in, a disk service of its own so the
+ * service can reach that directory and nothing else. Each bucket's index
+ * lives in the disk service `storage`, as its Durable Object's SQLite
+ * database: workerd keeps those only on disk.
  */
-export const r2Service = (
-  storage: string
-): string => `(name = "${r2ServiceName}", worker = (
+export const r2Services = (storage: string, files: string): string[] => [
+  `(name = "${r2ServiceName}", worker = (
     modules = [(name = "r2.js", esModule = embed "r2.js")],
     compatibilityDate = "2026-09-15",
     bindings = [
       (name = "BUCKETS", durableObjectNamespace = (className = "R2Store")),
+      (name = "DISK", service = "${r2FilesServiceName}"),
     ],
     durableObjectNamespaces = [
       (className = "R2Store", uniqueKey = "R2Store", enableSql = true),
     ],
     durableObjectStorage = (localDisk = "${storage}"),
-  ))`;
+  ))`,
+  `(name = "${r2FilesServiceName}", disk = (path = ${JSON.stringify(files)}, writable = true))`,
+];
 
 /**
  * Each bucket's binding: workerd's own R2 client, which sends its requests

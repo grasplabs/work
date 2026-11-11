@@ -5,7 +5,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { drizzle } from "drizzle-orm/d1";
 
-import { operationRoles } from "./app-access.ts";
+import { functionRoles } from "./app-access.ts";
 import type { Release } from "./app-releases.ts";
 import { outboxedWhere } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
@@ -70,9 +70,9 @@ export const appStartFiles = (
       }
       // Their roles in the App now: someone with none left reads nothing,
       // refused as any file that isn't theirs, never as the App.
-      let roles: Awaited<ReturnType<typeof operationRoles>>;
+      let roles: Awaited<ReturnType<typeof functionRoles>>;
       try {
-        roles = await operationRoles(env, { userId: principal, role }, app);
+        roles = await functionRoles(env, { userId: principal, role }, app);
       } catch (error) {
         if (
           appErrors.codeOf(error) !== undefined ||

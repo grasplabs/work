@@ -64,7 +64,7 @@ const maxNamedParams = 20;
  * The most a workflow's parameter values take, as canonical JSON in UTF-8,
  * saved or frozen into a start (512 KiB). A start's receipt is one D1 row,
  * which holds at most 2,000,000 bytes, and carries these values beside:
- * its input, at most `operationInputBytes` (128 KiB); its frozen bindings,
+ * its input, at most `functionArgsBytes` (128 KiB); its frozen bindings,
  * at most 64 (the profile's `maxBindings`) of about 3 KiB each at their
  * largest (a decision's 16 deciders of 134 characters, a 256-character
  * contract key, the alias, fingerprint and IDs), under 256 KiB; and its

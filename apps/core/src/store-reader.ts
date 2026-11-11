@@ -12,12 +12,12 @@ import type { QueryAnswer } from "./store-queries.ts";
 // here on the host where App code can't touch it, what the invocation
 // read.
 //
-// A query operation may read several times, each read its own call into
+// A query may read several times, each read its own call into
 // the store, and a commit may land between two of them; spec 6.3 asks
 // that such a query never be answered as though it saw one state. Every
 // read answers the generation of the table it read (`sdk_tables`, moved
 // on by each commit that changes the table's records, whether or not
-// they matched), so `readConsistently` runs the operation, then checks
+// they matched), so `readConsistently` runs the query, then checks
 // that no table it read has moved on since; it runs it again, up to
 // three more times, and then gives up with the retryable
 // `query.concurrent_change`. A read that matched nothing still depends on
@@ -25,7 +25,7 @@ import type { QueryAnswer } from "./store-queries.ts";
 //
 // A mutation's commit gets its read set (the generation of each table it
 // read, `readSet`), and is refused once any of those tables moved on
-// (operations.ts), so its writes are protected by its transaction. A mutation's
+// (function-host.ts), so its writes are protected by its transaction. A mutation's
 // reads see the writes it staged so far (`staged`), as its commit would
 // make them; the generations they answer are from before those writes.
 
@@ -166,7 +166,7 @@ export class StoreReader {
 }
 
 /**
- * Runs `operation` (a query operation's handler, its reads through the
+ * Runs `handler` (a query's handler, its reads through the
  * reader it is handed) until its reads were one state of the store: at
  * most once and `queryMaxReruns` times again, each run with a reader of
  * its own; then `query.concurrent_change`, retryable. What a run returns
@@ -177,7 +177,7 @@ export class StoreReader {
 export const readConsistently = async <Answer>(
   store: OpenStore,
   scope: ReadScope,
-  operation: (reader: StoreReader) => Promise<Answer>,
+  handler: (reader: StoreReader) => Promise<Answer>,
   observe?: (readSet: Record<string, number>) => void
 ): Promise<Answer> => {
   for (let run = 0; run <= queryMaxReruns; run += 1) {
@@ -187,7 +187,7 @@ export const readConsistently = async <Answer>(
       // One run after the other: a rerun exists only because the last
       // was stale.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      answer = { value: await operation(reader) };
+      answer = { value: await handler(reader) };
     } catch (error) {
       answer = { error };
     }

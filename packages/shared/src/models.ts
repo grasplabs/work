@@ -15,6 +15,8 @@ export const modelErrors = defineErrorFamily({
     "Your AI provider is limiting requests (a rate or spending limit at the provider), so this call wasn't answered. Try again after a while.",
   "model.answer_too_long":
     "That model can't give an answer as long as this call asks for, so it wasn't sent. Choose a model with a larger window, or ask for a shorter answer.",
+  "model.grasp_limit_reached":
+    "This month's limit for Grasp's AI is reached, so this call wasn't answered. An admin can switch to the organization's own AI provider key in Settings › AI providers; Grasp's AI is back next month.",
   "model.failed": "The model call failed. Try again later.",
   "model.invalid_output":
     "The model's answer didn't match the expected shape, also when asked again.",

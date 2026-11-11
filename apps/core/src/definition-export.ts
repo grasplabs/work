@@ -299,7 +299,7 @@ export const exportAppDefinition = async (
               alias: store.alias,
               schemaVersion: store.schemaVersion,
               schemaHash: store.schemaHash,
-              operationManifestHash: store.operationManifestHash,
+              functionManifestHash: store.functionManifestHash,
             },
       bindings,
       workflows,

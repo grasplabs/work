@@ -31,7 +31,7 @@ import {
 // The rules each status holds are enforced where an App is reached, not
 // here: only its builders and the admins have a role in a draft or an
 // archived App (app-access.ts); nobody uses an archived App, its builders
-// included (`usableApp`, apps.ts; `operationRoles`); only a published
+// included (`usableApp`, apps.ts; `functionRoles`); only a published
 // App's triggers fire (workflows/triggers.ts, connector-events.ts,
 // inbound-email.ts), and no run of an archived App starts (`startRun`).
 //

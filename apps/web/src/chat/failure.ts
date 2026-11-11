@@ -16,6 +16,7 @@ const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.not_allowed": msg`Your organization doesn't allow this model. Pick another one.`,
   "model.rate_limited": msg`Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while.`,
   "model.answer_too_long": msg`This model can't give an answer that long. Pick another model, or ask for less.`,
+  "model.grasp_limit_reached": msg`This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month.`,
   "model.failed": msg`The model couldn't answer. Try again.`,
   "model.invalid_output": msg`The model's answer came back in the wrong shape. Try again.`,
 };

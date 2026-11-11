@@ -12,13 +12,13 @@ import type { MigrationManifest } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { MigrationEvidence } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { jsonOf } from "@grasp-os/shared/functions";
 import {
   canonicalJson,
   canonicalText,
   definedFields,
   isRecord,
 } from "@grasp-os/shared/json";
-import { jsonOf } from "@grasp-os/shared/operations";
 import { documentMaxBytes, migrationErrors } from "@grasp-os/shared/stores";
 import type { StoreFields } from "@grasp-os/shared/stores";
 

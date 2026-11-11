@@ -4,15 +4,21 @@
  * each test's steps on its `FILES` and `OTHER` buckets and answers what R2
  * returned, or the error it threw: the calls core makes.
  */
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { r2Bindings, r2Service, writeR2Service } from "./workerd-r2.ts";
+import { r2Bindings, r2Services, writeR2Service } from "./workerd-r2.ts";
 import {
   cleanUp,
   serveOnWorkerd,
@@ -133,6 +139,20 @@ const run = async (env, step) => {
       const stored = new Uint8Array(await (await bucket.get(step.key)).arrayBuffer());
       return { won, storedFills: [...new Set(stored)], storedSize: stored.byteLength };
     }
+    case "putAborted": {
+      // Sends part of a body, then gives up: the put fails.
+      const body = new FixedLengthStream(step.sent * 2);
+      const put = bucket.put(step.key, body.readable);
+      const writer = body.writable.getWriter();
+      await writer.write(new Uint8Array(step.sent).fill(9));
+      await writer.abort(new Error("the uploader went away"));
+      try {
+        await put;
+        return "stored";
+      } catch {
+        return "failed";
+      }
+    }
     case "putStalled": {
       // Sends part of a body and never the rest: the put never ends.
       const body = new FixedLengthStream(step.sent * 2);
@@ -156,8 +176,11 @@ const run = async (env, step) => {
       for (const key of step.keys) await bucket.put(key, key);
       return step.keys.length;
     }
-    case "expected":
-      return { size: step.size, sha256: await sha256(generated(step.size)) };
+    case "expected": {
+      // The generated body of \`size\`, or the part of it from \`offset\`.
+      const bytes = generated(step.size).slice(step.offset ?? 0, step.length === undefined ? undefined : (step.offset ?? 0) + step.length);
+      return { size: bytes.byteLength, sha256: await sha256(bytes) };
+    }
   }
   throw new Error("unknown step");
 };
@@ -187,6 +210,7 @@ type Step = Record<string, unknown> & {
     | "expected"
     | "getWhileReplaced"
     | "racePuts"
+    | "putAborted"
     | "putStalled"
     | "pageAll"
     | "putMany";
@@ -199,9 +223,22 @@ const resultsSchema = z.array(
 
 type Results = z.infer<typeof resultsSchema>;
 
+/** Where a bucket keeps what it holds: its index, and its bodies' files. */
+interface Disk {
+  storage: string;
+  files: string;
+}
+
+/** New directories for what the R2 service keeps, outliving any one workerd. */
+const newDisk = (): Disk => {
+  const files = path.join(tempDir(), "files");
+  mkdirSync(files);
+  return { storage: storageDir(), files };
+};
+
 /** A workerd serving the R2 service and the test Worker. */
 const serve = async (
-  storage = storageDir()
+  { storage, files }: Disk = newDisk()
 ): Promise<{
   run: (steps: Step[]) => Promise<Results>;
   /** Sends steps without waiting for their answer. */
@@ -224,7 +261,7 @@ const config :Workerd.Config = (
       bindings = [${r2Bindings(["FILES", "OTHER"]).join(", ")}],
     )),
     (name = "storage", disk = (path = "${storage}", writable = true)),
-    ${r2Service("storage")},
+    ${r2Services("storage", files).join(",\n    ")},
   ],
   sockets = [(name = "http", address = "${address}", http = (), service = "test")],
 );
@@ -250,46 +287,55 @@ const config :Workerd.Config = (
 };
 
 /**
- * How long a read waits for workerd's write lock on a bucket's file. workerd
- * writes while the test reads, and without a wait SQLite answers "database is
- * locked" at once instead of retrying.
+ * The files under `dir` and their sizes, hidden ones too: the disk service
+ * writes a body to a hidden temporary file before it moves it into place.
  */
-const BUSY_TIMEOUT_MS = 2000;
+const filesIn = (dir: string): { name: string; dir: string; size: number }[] =>
+  existsSync(dir)
+    ? readdirSync(dir, { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => ({
+          name: entry.name,
+          dir: entry.parentPath,
+          size: statSync(path.join(entry.parentPath, entry.name)).size,
+        }))
+    : [];
 
-/** The chunks one SQLite file of the R2 service holds. */
-const chunksIn = (file: string): number => {
-  const db = new DatabaseSync(file, {
-    readOnly: true,
-    timeout: BUSY_TIMEOUT_MS,
-  });
-  try {
-    // Only a bucket's file has the table; workerd keeps others there.
-    const hasChunks =
-      db
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chunks'"
-        )
-        .get() !== undefined;
-    return hasChunks
-      ? z
-          .object({ n: z.number() })
-          .parse(db.prepare("SELECT count(*) AS n FROM chunks").get()).n
-      : 0;
-  } finally {
-    db.close();
+/**
+ * The directory a bucket keeps the one file of `size` bytes in: a
+ * version's own.
+ */
+const versionDirOf = (files: string, size: number): string => {
+  const [file, ...others] = filesIn(files).filter(
+    (found) => found.size === size
+  );
+  if (file === undefined || others.length > 0) {
+    throw new Error(`not one file of ${size} bytes`);
+  }
+  return file.dir;
+};
+
+/** The directories under `dir`, and itself. */
+const dirsIn = (dir: string): string[] => [
+  dir,
+  ...readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(entry.parentPath, entry.name)),
+];
+
+/** Makes `dirs` refuse writes, as a read-only disk would, or take them again. */
+const setWritable = (dirs: readonly string[], writable: boolean): void => {
+  for (const dir of dirs) {
+    chmodSync(dir, writable ? 0o755 : 0o555);
   }
 };
 
-/** The chunks the R2 service's buckets hold, read from their SQLite files. */
-const storedChunks = (storage: string): number => {
-  const dir = path.join(storage, "R2Store");
-  const files = existsSync(dir)
-    ? readdirSync(dir).filter((file) => file.endsWith(".sqlite"))
-    : [];
-  return files
-    .map((file) => chunksIn(path.join(dir, file)))
-    .reduce((total, n) => total + n, 0);
-};
+/** How many bytes the files under `dir` hold. */
+const bytesIn = (dir: string): number =>
+  filesIn(dir).reduce((total, { size }) => total + size, 0);
+
+/** The buckets' indexes: the R2 service's SQLite databases. */
+const indexesOf = (storage: string): string => path.join(storage, "R2Store");
 
 /** Waits until `holds` does, or fails after `attempts` tries. */
 const eventually = async (
@@ -330,37 +376,40 @@ const picked = (value: unknown, names: readonly string[]): unknown =>
       )
     : value;
 
-/** A body over three of the service's 1 MiB chunks. */
-const largeSize = 2.5 * 1024 * 1024;
-
 /**
- * A body larger than what workerd buffers between the service and its
- * client, so most of it is still unread after the first piece.
+ * A body larger than the 2 MB a SQLite row in a Durable Object may hold,
+ * and than what one read or write of a stream carries. Also far larger
+ * than what workerd buffers between the service and its client: when a
+ * reader has taken its first piece, the service has sent about 12 KiB of
+ * it (measured), so the rest is still unread when it's replaced.
  */
-const beyondBuffersSize = 40 * 1024 * 1024;
+const largeSize = 2.5 * 1024 * 1024;
 
 describe("the on-prem R2 service", () => {
   afterEach(cleanUp);
 
-  it("keeps what's put, as text or as a stream over several chunks, and its metadata", async () => {
+  it("keeps what's put, as text, empty or as a large stream, and its metadata", async () => {
     const { run } = await serve();
-    const [put, got, head, large, largeGot, expected, missing] = values(
-      await run([
-        {
-          op: "put",
-          bucket: "FILES",
-          key: "trees/a.json",
-          text: "{}",
-          options: { httpMetadata: { contentType: "application/json" } },
-        },
-        { op: "get", bucket: "FILES", key: "trees/a.json" },
-        { op: "head", bucket: "FILES", key: "trees/a.json" },
-        { op: "put", bucket: "FILES", key: "large", size: largeSize },
-        { op: "get", bucket: "FILES", key: "large" },
-        { op: "expected", size: largeSize },
-        { op: "get", bucket: "FILES", key: "missing" },
-      ])
-    );
+    const [put, got, head, large, largeGot, expected, missing, , empty] =
+      values(
+        await run([
+          {
+            op: "put",
+            bucket: "FILES",
+            key: "trees/a.json",
+            text: "{}",
+            options: { httpMetadata: { contentType: "application/json" } },
+          },
+          { op: "get", bucket: "FILES", key: "trees/a.json" },
+          { op: "head", bucket: "FILES", key: "trees/a.json" },
+          { op: "put", bucket: "FILES", key: "large", size: largeSize },
+          { op: "get", bucket: "FILES", key: "large" },
+          { op: "expected", size: largeSize },
+          { op: "get", bucket: "FILES", key: "missing" },
+          { op: "put", bucket: "FILES", key: "empty", text: "" },
+          { op: "get", bucket: "FILES", key: "empty" },
+        ])
+      );
     const object = {
       key: "trees/a.json",
       size: 2,
@@ -376,6 +425,7 @@ describe("the on-prem R2 service", () => {
       large: picked(large, ["key", "size"]),
       largeGot: picked(largeGot, ["body"]),
       missing,
+      empty: picked(empty, ["size", "body"]),
     }).toStrictEqual({
       put: object,
       got: { ...object, body: "{}" },
@@ -383,6 +433,7 @@ describe("the on-prem R2 service", () => {
       large: { key: "large", size: largeSize },
       largeGot: { body: expected },
       missing: null,
+      empty: { size: 0, body: "" },
     });
   });
 
@@ -496,9 +547,9 @@ describe("the on-prem R2 service", () => {
     const { run } = await serve();
     const [, read, expected] = values(
       await run([
-        { op: "put", bucket: "FILES", key: "k", size: beyondBuffersSize },
+        { op: "put", bucket: "FILES", key: "k", size: largeSize },
         { op: "getWhileReplaced", bucket: "FILES", key: "k" },
-        { op: "expected", size: beyondBuffersSize },
+        { op: "expected", size: largeSize },
       ])
     );
     expect(read).toStrictEqual({ body: expected, now: "replaced" });
@@ -535,30 +586,250 @@ describe("the on-prem R2 service", () => {
     });
   });
 
-  it("removes what a put cut off by a crash left behind, when it starts again", async () => {
-    const storage = storageDir();
-    const first = await serve(storage);
+  it("keeps the object a put cut off by a crash was replacing, and removes what the put left behind when it starts again", async () => {
+    const disk = newDisk();
+    const first = await serve(disk);
+    await first.run([
+      { op: "put", bucket: "FILES", key: "k", size: largeSize },
+    ]);
     first.send([
       { op: "putStalled", bucket: "FILES", key: "k", sent: 3 * 1024 * 1024 },
     ]);
-    // Its first chunks are on disk before workerd dies.
-    await eventually(() => storedChunks(storage) > 0);
+    // Part of its body is on disk, next to the object's, before workerd dies.
+    await eventually(() => bytesIn(disk.files) > largeSize);
     await first.kill();
-    const leftBehind = storedChunks(storage);
+    const leftBehind = filesIn(disk.files).length;
 
-    const second = await serve(storage);
-    const [head] = values(
-      await second.run([{ op: "head", bucket: "FILES", key: "k" }])
+    const second = await serve(disk);
+    const [kept, expected] = values(
+      await second.run([
+        { op: "get", bucket: "FILES", key: "k" },
+        { op: "expected", size: largeSize },
+      ])
     );
+    await eventually(() => filesIn(disk.files).length === 1);
     await second.stop();
     expect({
-      leftBehind: leftBehind > 0,
-      head,
-      after: storedChunks(storage),
+      leftBehind,
+      kept: picked(kept, ["size", "body"]),
+      after: bytesIn(disk.files),
     }).toStrictEqual({
-      leftBehind: true,
+      leftBehind: 2,
+      kept: { size: largeSize, body: expected },
+      after: largeSize,
+    });
+  });
+
+  it("answers a put or delete as done when the file it replaced or deleted can't be removed, and removes that file at the next start", async () => {
+    const disk = newDisk();
+    const first = await serve(disk);
+    await first.run([{ op: "put", bucket: "FILES", key: "k", text: "old" }]);
+    // The old version's directory refuses its file's removal.
+    const oldDir = versionDirOf(disk.files, 3);
+    setWritable([oldDir], false);
+    const [replaced, got] = values(
+      await first.run([
+        { op: "put", bucket: "FILES", key: "k", text: "newer" },
+        { op: "get", bucket: "FILES", key: "k" },
+      ])
+    );
+    const newDir = versionDirOf(disk.files, 5);
+    setWritable([newDir], false);
+    const [deleted, head] = values(
+      await first.run([
+        { op: "delete", bucket: "FILES", key: "k" },
+        { op: "head", bucket: "FILES", key: "k" },
+      ])
+    );
+    const leftBehind = filesIn(disk.files).length;
+    await first.stop();
+    setWritable([oldDir, newDir], true);
+
+    const second = await serve(disk);
+    await second.run([{ op: "head", bucket: "FILES", key: "k" }]);
+    await eventually(() => filesIn(disk.files).length === 0);
+    expect({
+      replaced: picked(replaced, ["size"]),
+      got: picked(got, ["body"]),
+      deleted,
+      head,
+      leftBehind,
+    }).toStrictEqual({
+      replaced: { size: 5 },
+      got: { body: "newer" },
+      deleted: "deleted",
       head: null,
-      after: 0,
+      leftBehind: 2,
+    });
+  });
+
+  it("refuses a put the disk can't take with a clear error, and keeps the object it would have replaced", async () => {
+    const disk = newDisk();
+    const { run } = await serve(disk);
+    await run([{ op: "put", bucket: "FILES", key: "k", size: largeSize }]);
+    const dirs = dirsIn(disk.files);
+    setWritable(dirs, false);
+    try {
+      const [refusedPut, kept, expected] = values(
+        await run([
+          { op: "put", bucket: "FILES", key: "k", size: largeSize },
+          { op: "get", bucket: "FILES", key: "k" },
+          { op: "expected", size: largeSize },
+        ])
+      );
+      expect({
+        refused: refused(
+          refusedPut,
+          "The disk failed to store the object's body"
+        ),
+        kept: picked(kept, ["body"]),
+      }).toStrictEqual({ refused: true, kept: { body: expected } });
+    } finally {
+      setWritable(dirs, true);
+    }
+  });
+
+  it("keeps the new object, and removes the old one's file at the next start, when workerd is killed after a put answered while the old file couldn't be removed", async () => {
+    const disk = newDisk();
+    const first = await serve(disk);
+    await first.run([
+      { op: "put", bucket: "FILES", key: "k", size: largeSize },
+    ]);
+    // The old file can't be removed, so it's still there when workerd dies.
+    const oldDir = versionDirOf(disk.files, largeSize);
+    setWritable([oldDir], false);
+    await first.run([
+      { op: "put", bucket: "FILES", key: "k", size: 2 * largeSize },
+    ]);
+    await first.kill();
+    setWritable([oldDir], true);
+
+    const second = await serve(disk);
+    const [got, expected] = values(
+      await second.run([
+        { op: "get", bucket: "FILES", key: "k" },
+        { op: "expected", size: 2 * largeSize },
+      ])
+    );
+    await eventually(() => filesIn(disk.files).length === 1);
+    expect({
+      got: picked(got, ["body"]),
+      bytes: bytesIn(disk.files),
+    }).toStrictEqual({ got: { body: expected }, bytes: 2 * largeSize });
+  });
+
+  it("keeps the object a put that fails midway, or doesn't match its checksum, was replacing", async () => {
+    const disk = newDisk();
+    const { run } = await serve(disk);
+    const results = values(
+      await run([
+        { op: "put", bucket: "FILES", key: "k", text: "original" },
+        { op: "putAborted", bucket: "FILES", key: "k", sent: largeSize },
+        {
+          op: "put",
+          bucket: "FILES",
+          key: "k",
+          size: largeSize,
+          options: { sha256: "0".repeat(64) },
+        },
+        { op: "get", bucket: "FILES", key: "k" },
+      ])
+    );
+    const [, aborted, damaged, got] = results;
+    // Nothing of either put is left on disk: only the original's file.
+    await eventually(() => filesIn(disk.files).length === 1);
+    expect({
+      aborted,
+      damaged: refused(damaged, "checksum you specified did not match"),
+      got: picked(got, ["size", "body"]),
+      bytes: bytesIn(disk.files),
+    }).toStrictEqual({
+      aborted: "failed",
+      damaged: true,
+      got: { size: 8, body: "original" },
+      bytes: 8,
+    });
+  });
+
+  it("keeps an original file as the Brain does: once under its hash, checked, read whole and in part, listed, and erased", async () => {
+    const disk = newDisk();
+    const { run } = await serve(disk);
+    const key = "sources/0f3a/original";
+    const keep = {
+      op: "put",
+      bucket: "FILES",
+      key,
+      size: largeSize,
+      options: {
+        sha256: "of-body",
+        onlyIf: { etagDoesNotMatch: "*" },
+        httpMetadata: { contentType: "application/pdf" },
+      },
+    } satisfies Step;
+    const part = { offset: 1024 * 1024 + 5, length: 1024 * 1024 };
+    const results = values(
+      await run([
+        keep,
+        keep,
+        { op: "head", bucket: "FILES", key },
+        { op: "get", bucket: "FILES", key },
+        { op: "get", bucket: "FILES", key, options: { range: part } },
+        { op: "list", bucket: "FILES", options: { prefix: "sources/" } },
+        { op: "delete", bucket: "FILES", key },
+        { op: "get", bucket: "FILES", key },
+        { op: "expected", size: largeSize },
+        { op: "expected", size: largeSize, ...part },
+      ])
+    );
+    const [kept, again, head, whole, partly, listed, , erased] = results;
+    const [expected, expectedPart] = results.slice(-2);
+    await eventually(() => filesIn(disk.files).length === 0);
+    expect({
+      kept: picked(kept, ["key", "size", "sha256", "httpMetadata"]),
+      again,
+      head: picked(head, ["size"]),
+      whole: picked(whole, ["body"]),
+      partly: picked(partly, ["body"]),
+      listed: picked(listed, ["keys"]),
+      erased,
+    }).toStrictEqual({
+      kept: {
+        key,
+        size: largeSize,
+        sha256: z.object({ sha256: z.string() }).parse(expected).sha256,
+        httpMetadata: { contentType: "application/pdf" },
+      },
+      again: null,
+      head: { size: largeSize },
+      whole: { body: expected },
+      partly: { body: expectedPart },
+      listed: { keys: [key] },
+      erased: null,
+    });
+  });
+
+  it("keeps the bodies as files outside the bucket's SQLite database, and removes a deleted object's file", async () => {
+    const disk = newDisk();
+    const { run } = await serve(disk);
+    const [, got, expected] = values(
+      await run([
+        { op: "put", bucket: "FILES", key: "big", size: largeSize },
+        { op: "get", bucket: "FILES", key: "big" },
+        { op: "expected", size: largeSize },
+      ])
+    );
+    const stored = {
+      body: picked(got, ["body"]),
+      files: bytesIn(disk.files),
+      // The index holds a row for the object, not its bytes.
+      indexUnder1MiB: bytesIn(indexesOf(disk.storage)) < 1024 * 1024,
+    };
+    await run([{ op: "delete", bucket: "FILES", key: "big" }]);
+    await eventually(() => filesIn(disk.files).length === 0);
+    expect(stored).toStrictEqual({
+      body: { body: expected },
+      files: largeSize,
+      indexUnder1MiB: true,
     });
   });
 
@@ -649,29 +920,46 @@ describe("the on-prem R2 service", () => {
     ]);
   });
 
-  it("deletes one key or many", async () => {
-    const { run } = await serve();
-    const results = values(
-      await run([
-        putItself("a"),
-        putItself("b"),
-        putItself("c"),
-        { op: "delete", bucket: "FILES", key: "a" },
-        { op: "delete", bucket: "FILES", keys: ["b", "c", "never-there"] },
-        { op: "list", bucket: "FILES", options: {} },
-      ])
-    );
-    expect(results.slice(3)).toStrictEqual([
-      "deleted",
-      "deleted",
-      {
-        keys: [],
-        uploaded: true,
-        truncated: false,
-        delimitedPrefixes: [],
-      },
-    ]);
-  });
+  /**
+   * Putting the 1,000 objects a delete then removes at once is the work
+   * itself, about 0.8 s here and 3.2 s on a loaded CI runner: past half of
+   * the default 5 s, so it gets room of its own.
+   */
+  const putThousandTimeoutMs = 20_000;
+
+  it(
+    "deletes one key or many, up to 1000 at once, and their files",
+    async () => {
+      const disk = newDisk();
+      const { run } = await serve(disk);
+      const most = Array.from({ length: 1000 }, (_, i) => `k${i}`);
+      const results = values(
+        await run([
+          putItself("a"),
+          putItself("b"),
+          putItself("c"),
+          { op: "putMany", bucket: "FILES", keys: most },
+          { op: "delete", bucket: "FILES", key: "a" },
+          { op: "delete", bucket: "FILES", keys: ["b", "c", "never-there"] },
+          { op: "delete", bucket: "FILES", manyKeys: most.length },
+          { op: "list", bucket: "FILES", options: {} },
+        ])
+      );
+      await eventually(() => filesIn(disk.files).length === 0);
+      expect(results.slice(4)).toStrictEqual([
+        "deleted",
+        "deleted",
+        "deleted",
+        {
+          keys: [],
+          uploaded: true,
+          truncated: false,
+          delimitedPrefixes: [],
+        },
+      ]);
+    },
+    putThousandTimeoutMs
+  );
 
   it("lists by prefix, a page at a time, and by delimiter", async () => {
     const { run } = await serve();
@@ -730,13 +1018,13 @@ describe("the on-prem R2 service", () => {
   });
 
   it("keeps each bucket apart, and what it holds across restarts", async () => {
-    const storage = storageDir();
-    const first = await serve(storage);
+    const disk = newDisk();
+    const first = await serve(disk);
     await first.run([
       { op: "put", bucket: "FILES", key: "k", size: largeSize },
     ]);
     await first.stop();
-    const { run } = await serve(storage);
+    const { run } = await serve(disk);
     const [kept, expected, other] = values(
       await run([
         { op: "get", bucket: "FILES", key: "k" },

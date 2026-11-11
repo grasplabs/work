@@ -18,6 +18,8 @@ import {
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
+import { functionErrors } from "@grasp-os/shared/functions";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import {
   appIdSchema,
   identifierSchema,
@@ -27,8 +29,6 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { loweredLimit } from "@grasp-os/shared/lowered-limit";
-import { operationErrors } from "@grasp-os/shared/operations";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
@@ -39,7 +39,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import {
-  publicOperationOf,
+  publicFunctionOf,
   readFunctionRequest,
   refusalOf,
 } from "./app-functions.ts";
@@ -50,8 +50,8 @@ import { releaseIdsOf } from "./apps.ts";
 import { discardFixtureStore, openFixtureStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { appTestFixtures } from "./db/core/schema.ts";
-import { callOperation } from "./operations.ts";
-import type { Invocation } from "./operations.ts";
+import { hostFunctionCall } from "./function-host.ts";
+import type { Invocation } from "./function-host.ts";
 import { buildAppTests } from "./pages.ts";
 import { platformPlaceWaitMs } from "./platform-sandbox.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
@@ -111,8 +111,8 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 //   through the host.
 // - A test's calls skip what a real call goes through: each is resolved
 //   against the App's release exactly as a page's is
-//   (`publicOperationOf`: public functions only, of this release and
-//   contract), then run through the operation host (`callOperation`) on
+//   (`publicFunctionOf`: public functions only, of this release and
+//   contract), then run through the function host (`hostFunctionCall`) on
 //   the release's own runner, isolate and store host. Only the principal
 //   and the store are the fixture's. A principal's live query
 //   (`subscribe`) is followed by the realtime manager a page's page
@@ -729,7 +729,7 @@ interface SessionContext {
 
 /** A call that waited for the test's calls before it past the test's time. */
 const waitedTooLong = (): Error =>
-  operationErrors.create("function.deadline_exceeded");
+  functionErrors.create("function.deadline_exceeded");
 
 /**
  * Runs a suite's calls one at a time, in the order they came: on-prem,
@@ -773,7 +773,7 @@ class OneAtATime {
 
 /**
  * What a function's call is refused with when the sandbox, not its code,
- * stopped it (operations.ts, `sandboxFailureOf`): its owner at its share,
+ * stopped it (function-host.ts, `sandboxFailureOf`): its owner at its share,
  * the sandbox down or lost, or the call it ran in over.
  */
 const sandboxRefusals: ReadonlySet<string> = new Set([
@@ -1015,18 +1015,18 @@ class FixtureSession extends TestTarget {
         readSet: Record<string, number>
       ) => void;
     }
-  ): Promise<OperationResult> {
+  ): Promise<FunctionResult> {
     const requestId = crypto.randomUUID();
     try {
       const call = readFunctionRequest(request);
       // A live query follows a query only, as a page's does.
       if (live !== undefined && call.reference.kind !== "query") {
-        throw operationErrors.create("contract.invalid_request");
+        throw functionErrors.create("contract.invalid_request");
       }
-      const path = publicOperationOf(this.#release, call.reference);
+      const path = publicFunctionOf(this.#release, call.reference);
       const store = await this.#storeOf();
       // On-prem, after the suite's calls before it: its time starts then.
-      const run = async (): Promise<OperationResult> => {
+      const run = async (): Promise<FunctionResult> => {
         const wallEnd = Date.now() + platformLimits.serverInvocationWallMs;
         const invocation: Invocation = {
           ...this.#invocationOf(identity, store, requestId),
@@ -1042,7 +1042,7 @@ class FixtureSession extends TestTarget {
         };
         // On-prem, in the suite's session's process: a child of it.
         const parentSession = this.#parent();
-        const result = await callOperation(
+        const result = await hostFunctionCall(
           hostedRelease(this.#env, this.#release),
           invocation,
           { path, kind: call.reference.kind },
@@ -1088,7 +1088,7 @@ class FixtureSession extends TestTarget {
     } catch {
       data = undefined;
     }
-    const given = operationErrors.parse(
+    const given = functionErrors.parse(
       "contract.invalid_args",
       startOptionsSchema,
       data
@@ -1105,7 +1105,7 @@ class FixtureSession extends TestTarget {
    * Starts, as identity `name`, the workflow `request` names (a call of
    * its reference's `start` mutation): the run, a real one of the workflow version the
    * release under test binds, with nothing of the organization's around it
-   * (fixture-runs.ts). Answers the JSON text of an `OperationResult`: the
+   * (fixture-runs.ts). Answers the JSON text of an `FunctionResult`: the
    * run's number in this session, or why it was refused.
    */
   async start(
@@ -1118,11 +1118,11 @@ class FixtureSession extends TestTarget {
     }
     const identity = this.#identityOf(name);
     const requestId = crypto.randomUUID();
-    let result: OperationResult;
+    let result: FunctionResult;
     try {
       // A test holds at most `maxRunsPerTest` runs: each is real work.
       if (this.#starts >= maxRunsPerTest) {
-        throw operationErrors.create("function.call_limit");
+        throw functionErrors.create("function.call_limit");
       }
       const given = this.#startOptionsOf(options);
       this.#starts += 1;
@@ -1242,7 +1242,7 @@ class FixtureSession extends TestTarget {
    * Answers, as principal `name`, the decision run `run` waits for, as
    * `request` names it (`{ task, approved, value? }`), once the run asks
    * it, waiting until the test's own time (fixture-decisions.ts). Answers
-   * the JSON text of an `OperationResult`: nothing, or why it was refused.
+   * the JSON text of an `FunctionResult`: nothing, or why it was refused.
    */
   async respond(
     name: unknown,
@@ -1254,7 +1254,7 @@ class FixtureSession extends TestTarget {
     }
     this.#identityOf(name);
     const requestId = crypto.randomUUID();
-    let result: OperationResult;
+    let result: FunctionResult;
     try {
       await answerFixtureDecision(
         this.#env,
@@ -1275,7 +1275,7 @@ class FixtureSession extends TestTarget {
    * or, for `null`, the test itself (`test-run`, which no identity's
    * principal is), with the App's access rules lifted
    * (test-transactions.ts). Answers the JSON text of an
-   * `OperationResult` holding its number (`{ transaction }`), or why it
+   * `FunctionResult` holding its number (`{ transaction }`), or why it
    * was refused.
    */
   async begin(name: unknown): Promise<string> {
@@ -1283,7 +1283,7 @@ class FixtureSession extends TestTarget {
       throw sessionEnded();
     }
     const requestId = crypto.randomUUID();
-    let result: OperationResult;
+    let result: FunctionResult;
     try {
       const identity: TestIdentity =
         name === null
@@ -1374,16 +1374,16 @@ class FixtureSession extends TestTarget {
    * Moves the clock of the test's runs `ms` on: those under way now, whose
    * sleeps, waits and retries come due by then run at once, and those it
    * starts later, which start at the time it moved to. Answers the JSON
-   * text of an `OperationResult` holding nothing.
+   * text of an `FunctionResult` holding nothing.
    */
   async advanceClock(ms: unknown): Promise<string> {
     if (this.#closed) {
       throw sessionEnded();
     }
     const requestId = crypto.randomUUID();
-    let result: OperationResult;
+    let result: FunctionResult;
     try {
-      const by = operationErrors.parse(
+      const by = functionErrors.parse(
         "contract.invalid_args",
         z.number().int().min(0).max(maxClockAdvanceMs),
         ms
@@ -1392,7 +1392,7 @@ class FixtureSession extends TestTarget {
       // after it, which start at the time it moved to.
       await this.#inClockTurn(async () => {
         if (this.#clockMs + by > maxClockAdvanceMs) {
-          throw operationErrors.create("contract.invalid_args");
+          throw functionErrors.create("contract.invalid_args");
         }
         await advanceFixtureClocks(
           this.#env,
@@ -1516,7 +1516,7 @@ class FixtureSession extends TestTarget {
       this.#following.add(subscription);
       return { subscription };
     } catch (error) {
-      const refused: OperationResult = {
+      const refused: FunctionResult = {
         ok: false,
         error: refusalOf(error, crypto.randomUUID()),
       };

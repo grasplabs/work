@@ -991,7 +991,7 @@ const compileAppCodeFile = (
   const { imports, directives } = sitesOf(transformed);
   // What would steer the type check (`checkAppCode`) rather than be
   // checked by it: a triple-slash directive reaches the whole program (a
-  // migration's `/// <reference lib="dom" />` would give every operation
+  // migration's `/// <reference lib="dom" />` would give every function
   // the DOM), and a suppression switches the check off. Server code holds
   // neither, migrations and tests included.
   const steering = directives.map((site) =>
@@ -1137,7 +1137,7 @@ const buildAppCodeNoting = (
 
 /**
  * Builds an App's server code of spec 8's layout: its schema, values,
- * registration and operations, with the modules the host generated for
+ * registration and functions, with the modules the host generated for
  * it (`.grasp/`), each held to what its kind may import. Types are
  * stripped, not checked.
  */

@@ -29,10 +29,10 @@ export const platformLimits = {
   authoringPathDepth: 8,
 
   // Wire budgets, each as UTF-8 JSON.
-  /** One public operation's input. */
-  operationInputBytes: 128 * kib,
-  /** One public operation's output: larger data is paginated. */
-  operationOutputBytes: 256 * kib,
+  /** One public function's arguments. */
+  functionArgsBytes: 128 * kib,
+  /** One public function's result: larger data is paginated. */
+  functionResultBytes: 256 * kib,
   /** One workflow step's input or result: larger data goes by file reference. */
   stepPayloadBytes: 1 * mib,
   /** One persisted row. */
@@ -118,7 +118,7 @@ export const platformLimits = {
   /** Host calls of one server invocation. */
   invocationHostCalls: 100,
 
-  // Browser operations, per person and App; subscriptions apart.
+  // Browser calls, per person and App; subscriptions apart.
   /** Requests a minute. */
   browserRequestsPerMinute: 120,
   /** Requests in a burst. */

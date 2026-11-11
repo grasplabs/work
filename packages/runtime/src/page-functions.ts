@@ -254,18 +254,18 @@ export const pageWorkflowsOf = (
  * only, for the page's build. Generated from its manifest, in name order.
  */
 export const pageFunctionsOf = (
-  operations: Readonly<Record<string, FunctionManifest>>
+  functions: Readonly<Record<string, FunctionManifest>>
 ): Record<string, PageFunction> =>
   Object.fromEntries(
-    Object.values(operations)
-      .filter((operation) => operation.visibility === "public")
+    Object.values(functions)
+      .filter((fn) => fn.visibility === "public")
       .toSorted((a, b) => (a.path < b.path ? -1 : 1))
-      .map((operation) => [
-        operation.path,
+      .map((fn) => [
+        fn.path,
         {
-          kind: operation.kind,
-          args: operation.args,
-          returns: operation.returns,
+          kind: fn.kind,
+          args: fn.args,
+          returns: fn.returns,
         },
       ])
   );

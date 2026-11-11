@@ -1,7 +1,7 @@
 import type { App, AppFiles, AppVersion } from "@grasp-os/shared/apps";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { operationErrors } from "@grasp-os/shared/operations";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
@@ -131,7 +131,7 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                   reference: { kind },
                 } = requestKindSchema.parse(JSON.parse(text)));
               } catch {
-                throw operationErrors.create("contract.invalid_request");
+                throw functionErrors.create("contract.invalid_request");
               }
               const action = actionFor(kind);
               // The `allowed` check above passed, so the App's ID is valid.

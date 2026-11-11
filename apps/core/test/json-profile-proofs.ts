@@ -42,7 +42,7 @@ import { testBinding } from "./test-env.ts";
 // a crash does, and what it recorded before stands. The same proofs run
 // on Cloudflare's runtime and on plain workerd (`profileProofs`, called
 // by json-profile.test.ts and on-prem/json-profile.test.ts). An App's
-// operation and a compute module are proved by their own suites
+// function and a compute module are proved by their own suites
 // (workflow-actions, workflow-compute, and their on-prem counterparts).
 
 interface Shape {

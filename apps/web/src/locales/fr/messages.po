@@ -7441,6 +7441,10 @@ msgstr "A généré un nouveau secret pour une source de webhook"
 msgid "Made by {person} on {date}."
 msgstr "Créée par {person} le {date}."
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Made by an earlier platform release: publish it again"
+msgstr "Créée par une version antérieure de la plateforme : publiez-la à nouveau"
+
 #: src/apps/app-settings.tsx
 msgid "Made for"
 msgstr "Faite pour"
@@ -13677,6 +13681,10 @@ msgstr "Ce mois-ci environ {ahead} des {of} de votre offre"
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
 msgstr "Ce mois-ci jusqu’à présent"
+
+#: src/chat/failure.ts
+msgid "This month's limit for Grasp's AI is reached. Your admin can switch to your organization's own key in Settings › AI providers, or Grasp's AI is back next month."
+msgstr "La limite de ce mois pour l’IA de Grasp est atteinte. Votre administrateur peut passer à la propre clé de votre organisation dans Paramètres › Fournisseurs d’IA, ou l’IA de Grasp revient le mois prochain."
 
 #: src/chat/cited-note.tsx
 msgid "This note can't be opened"

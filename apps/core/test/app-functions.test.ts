@@ -1,8 +1,8 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -34,8 +34,8 @@ import {
 import type { Fixture } from "./sealed-apps.ts";
 
 // An App's functions run from its sealed release, each invocation in an
-// isolate of its own, through core's operation host (spec 6, 8, 16,
-// 32.6): the complete Notes operations end to end against a real store,
+// isolate of its own, through core's function host (spec 6, 8, 16,
+// 32.6): the complete Notes functions end to end against a real store,
 // then the ways a caller, App code or storage could try to reach
 // another App's data, run another contract or keep something of one
 // caller's for another.
@@ -316,11 +316,11 @@ const sealedNotes = async (
 
 /** The reference to `path` of `release`, as the generated `api` has it. */
 const referenceTo = (release: Release, path: string) => {
-  const operation = release.app.operations[path];
-  if (operation === undefined) {
+  const fn = release.app.functions[path];
+  if (fn === undefined) {
     throw new Error(`No ${path}`);
   }
-  return { name: path, kind: operation.kind };
+  return { name: path, kind: fn.kind };
 };
 
 type Caller = Fixture["owner"];
@@ -360,7 +360,7 @@ const share = async (
 };
 
 /** The value of a call that succeeded; fails the test otherwise. */
-const valueOf = ({ result }: { result: OperationResult }): Json => {
+const valueOf = ({ result }: { result: FunctionResult }): Json => {
   if (!result.ok) {
     throw new Error(`The call failed: ${result.error.code}`);
   }
@@ -368,7 +368,7 @@ const valueOf = ({ result }: { result: OperationResult }): Json => {
 };
 
 /** The error code of a call that failed, or "ok". */
-const codeOf = ({ result }: { result: OperationResult }): string =>
+const codeOf = ({ result }: { result: FunctionResult }): string =>
   result.ok ? "ok" : result.error.code;
 
 /** A field of a JSON object. */
@@ -386,7 +386,7 @@ const titlesOn = (page: Json): (Json | undefined)[] => {
 };
 
 describe("an App's functions", { timeout: 120_000 }, () => {
-  it("run the complete Notes operations from the sealed release, in its sandbox", async () => {
+  it("run the complete Notes functions from the sealed release, in its sandbox", async () => {
     const notes = await sealedNotes();
     const id = valueOf(
       await call(notes, notes.owner, "notes.create", { title: "  Launch  " })
@@ -725,15 +725,15 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     // Version 2 gives `create` an argument with a default, which the
     // version normalizes the same input to.
     let files = notesFiles();
-    const operations = files.files["server/notes.ts"] ?? "";
+    const serverCode = files.files["server/notes.ts"] ?? "";
     const create = `export const create = mutation({
   args: { title: noteFields.title, body: noteFields.body },
   returns: v.id("notes"),
   handler: async (ctx, args) => await ctx.db.insert("notes", args),
 });`;
-    expect(operations).toContain(create);
+    expect(serverCode).toContain(create);
     files = withFiles(files, {
-      "server/notes.ts": operations.replace(
+      "server/notes.ts": serverCode.replace(
         create,
         `export const create = mutation({
   args: { title: noteFields.title, body: noteFields.body, tag: v.string().default("none") },
@@ -763,15 +763,15 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     };
     // Version 2 renames `get`'s argument and takes `bump` out of its API.
     let files = notesFiles("Notes, renamed");
-    const operations = files.files["server/notes.ts"] ?? "";
+    const serverCode = files.files["server/notes.ts"] ?? "";
     const get = `export const get = query({
   args: { id: v.id("notes") },
   returns: doc("notes").nullable(),
   handler: async (ctx, args) => await ctx.db.get("notes", args.id),
 });`;
-    expect(operations).toContain(get);
+    expect(serverCode).toContain(get);
     files = withFiles(files, {
-      "server/notes.ts": operations
+      "server/notes.ts": serverCode
         .replace(
           get,
           get
@@ -1410,7 +1410,7 @@ describe("a function that declares no return", { timeout: 120_000 }, () => {
 });
 
 describe("a record as deep as a store keeps", { timeout: 120_000 }, () => {
-  it("is written and read back through the operation channel, every level of it", async () => {
+  it("is written and read back through the function channel, every level of it", async () => {
     const deep = await sealedNotes(deepFiles);
     const put = await call(deep, deep.owner, "deep.put", {});
     const id = put.result.ok ? put.result.value : put.result.error.code;

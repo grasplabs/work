@@ -8,8 +8,8 @@ import type {
 } from "@grasp-os/shared/connect";
 import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type {
   Authority,
@@ -291,7 +291,7 @@ const confirmHeld = async (
   try {
     // A binding connect can no longer read is refused, never skipped.
     if (held.binding === "unreadable") {
-      throw operationErrors.create("resource.unavailable");
+      throw functionErrors.create("resource.unavailable");
     }
     // A run of an independent workflow's call: only while the run's own
     // authority for it holds, as its next call would need.
