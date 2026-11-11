@@ -1,8 +1,8 @@
 {
-  "id": "d5626305-f904-4f05-bbbf-3f3b2490a07e",
-  "prevId": "b3711813-369e-4315-bbc2-9d95d7493333",
   "version": "6",
   "dialect": "sqlite",
+  "id": "ae2f8dfe-f3f5-4204-81da-42c642cbbf79",
+  "prevId": "b3711813-369e-4315-bbc2-9d95d7493333",
   "tables": {
     "chunks": {
       "name": "chunks",
@@ -50,15 +50,15 @@
         "chunks_version_row_source_versions_row_fk": {
           "name": "chunks_version_row_source_versions_row_fk",
           "tableFrom": "chunks",
+          "tableTo": "source_versions",
           "columnsFrom": [
             "version_row"
           ],
-          "tableTo": "source_versions",
           "columnsTo": [
             "row"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -96,15 +96,15 @@
         "current_versions_version_row_source_versions_row_fk": {
           "name": "current_versions_version_row_source_versions_row_fk",
           "tableFrom": "current_versions",
+          "tableTo": "source_versions",
           "columnsFrom": [
             "version_row"
           ],
-          "tableTo": "source_versions",
           "columnsTo": [
             "row"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -203,15 +203,15 @@
         "reader_set_members_reader_set_reader_sets_id_fk": {
           "name": "reader_set_members_reader_set_reader_sets_id_fk",
           "tableFrom": "reader_set_members",
+          "tableTo": "reader_sets",
           "columnsFrom": [
             "reader_set"
           ],
-          "tableTo": "reader_sets",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -294,15 +294,15 @@
         "source_changes_version_row_source_versions_row_fk": {
           "name": "source_changes_version_row_source_versions_row_fk",
           "tableFrom": "source_changes",
+          "tableTo": "source_versions",
           "columnsFrom": [
             "version_row"
           ],
-          "tableTo": "source_versions",
           "columnsTo": [
             "row"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -391,28 +391,28 @@
         "source_versions_file_files_hash_fk": {
           "name": "source_versions_file_files_hash_fk",
           "tableFrom": "source_versions",
+          "tableTo": "files",
           "columnsFrom": [
             "file"
           ],
-          "tableTo": "files",
           "columnsTo": [
             "hash"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "source_versions_reader_set_reader_sets_id_fk": {
           "name": "source_versions_reader_set_reader_sets_id_fk",
           "tableFrom": "source_versions",
+          "tableTo": "reader_sets",
           "columnsFrom": [
             "reader_set"
           ],
-          "tableTo": "reader_sets",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -478,15 +478,15 @@
         "sources_reader_set_reader_sets_id_fk": {
           "name": "sources_reader_set_reader_sets_id_fk",
           "tableFrom": "sources",
+          "tableTo": "reader_sets",
           "columnsFrom": [
             "reader_set"
           ],
-          "tableTo": "reader_sets",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -546,28 +546,28 @@
         "vector_blocks_model_vector_models_id_fk": {
           "name": "vector_blocks_model_vector_models_id_fk",
           "tableFrom": "vector_blocks",
+          "tableTo": "vector_models",
           "columnsFrom": [
             "model"
           ],
-          "tableTo": "vector_models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "vector_blocks_reader_set_reader_sets_id_fk": {
           "name": "vector_blocks_reader_set_reader_sets_id_fk",
           "tableFrom": "vector_blocks",
+          "tableTo": "reader_sets",
           "columnsFrom": [
             "reader_set"
           ],
-          "tableTo": "reader_sets",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -657,54 +657,54 @@
         "vector_codes_chunk_chunks_row_fk": {
           "name": "vector_codes_chunk_chunks_row_fk",
           "tableFrom": "vector_codes",
+          "tableTo": "chunks",
           "columnsFrom": [
             "chunk"
           ],
-          "tableTo": "chunks",
           "columnsTo": [
             "row"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "vector_codes_model_vector_models_id_fk": {
           "name": "vector_codes_model_vector_models_id_fk",
           "tableFrom": "vector_codes",
+          "tableTo": "vector_models",
           "columnsFrom": [
             "model"
           ],
-          "tableTo": "vector_models",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "vector_codes_reader_set_reader_sets_id_fk": {
           "name": "vector_codes_reader_set_reader_sets_id_fk",
           "tableFrom": "vector_codes",
+          "tableTo": "reader_sets",
           "columnsFrom": [
             "reader_set"
           ],
-          "tableTo": "reader_sets",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "vector_codes_block_vector_blocks_id_fk": {
           "name": "vector_codes_block_vector_blocks_id_fk",
           "tableFrom": "vector_codes",
+          "tableTo": "vector_blocks",
           "columnsFrom": [
             "block"
           ],
-          "tableTo": "vector_blocks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -781,15 +781,15 @@
         "vector_removed_block_vector_blocks_id_fk": {
           "name": "vector_removed_block_vector_blocks_id_fk",
           "tableFrom": "vector_removed",
+          "tableTo": "vector_blocks",
           "columnsFrom": [
             "block"
           ],
-          "tableTo": "vector_blocks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -803,6 +803,49 @@
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "word_index": {
+      "name": "word_index",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target": {
+          "name": "target",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cursor": {
+          "name": "cursor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "word_index_one": {
+          "name": "word_index_one",
+          "value": "id = 1"
+        }
+      }
     },
     "work_items": {
       "name": "work_items",
@@ -917,8 +960,8 @@
             "kind",
             "key"
           ],
-          "where": "running = 0",
-          "isUnique": true
+          "isUnique": true,
+          "where": "running = 0"
         },
         "work_items_running_idx": {
           "name": "work_items_running_idx",
@@ -928,8 +971,8 @@
             "connection",
             "interrupted"
           ],
-          "where": "running = 1",
-          "isUnique": false
+          "isUnique": false,
+          "where": "running = 1"
         },
         "work_items_waiting_idx": {
           "name": "work_items_waiting_idx",
@@ -938,8 +981,8 @@
             "priority",
             "id"
           ],
-          "where": "running = 0 AND parked_at IS NULL AND interrupted = 0",
-          "isUnique": false
+          "isUnique": false,
+          "where": "running = 0 AND parked_at IS NULL AND interrupted = 0"
         },
         "work_items_interrupted_idx": {
           "name": "work_items_interrupted_idx",
@@ -947,8 +990,8 @@
             "priority",
             "id"
           ],
-          "where": "running = 0 AND parked_at IS NULL AND interrupted = 1",
-          "isUnique": false
+          "isUnique": false,
+          "where": "running = 0 AND parked_at IS NULL AND interrupted = 1"
         },
         "work_items_parked_idx": {
           "name": "work_items_parked_idx",
@@ -956,8 +999,8 @@
             "parked_at",
             "id"
           ],
-          "where": "parked_at IS NOT NULL",
-          "isUnique": false
+          "isUnique": false,
+          "where": "parked_at IS NOT NULL"
         }
       },
       "foreignKeys": {},
@@ -1031,9 +1074,9 @@
   "views": {},
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}

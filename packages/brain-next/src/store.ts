@@ -33,6 +33,7 @@ import { recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
+import { markWordsCurrentIfEmpty, reindexWords } from "./words.ts";
 import {
   newWorkState,
   releaseInterrupted,
@@ -85,6 +86,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   readonly #stepsFailed: WorkOverview["stepsFailed"] = {
     sweep: null,
     repack: null,
+    reindex: null,
   };
   #sweepAfter = 0;
 
@@ -113,6 +115,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     void ctx.blockConcurrencyWhile(async () => {
       await migrate(this.#db, migrations);
       releaseInterrupted(ctx.storage);
+      markWordsCurrentIfEmpty(ctx.storage.sql);
     });
   }
 
@@ -172,7 +175,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * One tick of the host's clock at `at`: one batch of the sweep, then up
-   * to `repackPerTick` blocks of vector codes repacked, then the queue,
+   * to `repackPerTick` blocks of vector codes repacked, then, while the
+   * word indexes are behind their rules, one batch of them rebuilt, then
+   * the queue,
    * asking `ask` for its model calls (work.ts). Each step is bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
@@ -184,6 +189,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     await this.#sweep(tickAt);
     this.#repack(tickAt);
+    this.#reindex(tickAt);
     await workTick(this.ctx.storage, this.#work, ask, tickAt);
   }
 
@@ -209,6 +215,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     } catch {
       // Nothing of the error is kept: the block stays marked.
       this.#stepsFailed.repack = { at, reason: "failed" };
+    }
+  }
+
+  /**
+   * One batch of the rebuild of the word indexes, while they are behind
+   * the rules words are indexed by (words.ts `reindexWords`: at most
+   * `reindexPerTick` chunks), in one transaction with the place it
+   * reached, so a failure or a stop leaves every chunk whole and the next
+   * tick goes on from there. A failure never reaches the queue: it is
+   * tried again next tick, and the overview shows when it last failed
+   * until a batch succeeds.
+   */
+  #reindex(at: Date): void {
+    try {
+      this.ctx.storage.transactionSync(() => {
+        reindexWords(this.ctx.storage.sql);
+      });
+      this.#stepsFailed.reindex = null;
+    } catch {
+      // Nothing of the error is kept: the batch stays to do.
+      this.#stepsFailed.reindex = { at, reason: "failed" };
     }
   }
 

@@ -3,7 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { addSource, recallAs } from "../src/brain-next.ts";
+import { addSource, recallAs, workBrain } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
@@ -329,3 +329,196 @@ describe("erasing words", { timeout: 60_000 }, () => {
     await expect(indexesFind(`xq${kept}`)).resolves.toStrictEqual([true, true]);
   });
 });
+
+/**
+ * Puts the store's word indexes back as a store from before stems holds
+ * them: for each chunk holding one of `marks`, no stems, and its words as
+ * the first rules folded them (the whole text, no primary letters, so
+ * "Straße" is "straße"); and the store's rules number at 1, no rebuild
+ * under way. As an older release left a store, written here because no
+ * code of this one writes it.
+ */
+const toFirstRules = async (marks: readonly string[]): Promise<void> => {
+  const accents =
+    /(?<letter>[\p{sc=Latin}\p{sc=Greek}\p{sc=Cyrillic}\p{sc=Hebrew}\p{sc=Arabic}])\p{M}+/gu;
+  const firstFold = (text: string): string =>
+    text
+      .normalize("NFKD")
+      .replace(accents, "$<letter>")
+      .normalize("NFC")
+      .toLowerCase();
+  await runInDurableObject(store(), (_instance, state) => {
+    const { sql } = state.storage;
+    for (const mark of marks) {
+      const rows = sql
+        .exec<{ row: number; text: string }>(
+          "SELECT row, text FROM chunks WHERE instr(text, ?) > 0",
+          mark
+        )
+        .toArray();
+      for (const { row, text } of rows) {
+        sql.exec("DELETE FROM chunk_stems WHERE rowid = ?", row);
+        sql.exec("DELETE FROM chunk_words WHERE rowid = ?", row);
+        sql.exec(
+          "INSERT INTO chunk_words (rowid, text) VALUES (?, ?)",
+          row,
+          firstFold(text)
+        );
+      }
+    }
+    sql.exec("UPDATE word_index SET version = 1, target = 1, cursor = 0");
+  });
+};
+
+/** The store's word index rules number, and the rebuild's place. */
+const wordIndexState = async () =>
+  await runInDurableObject(store(), (_instance, state) =>
+    state.storage.sql
+      .exec<{ version: number; target: number; cursor: number }>(
+        "SELECT version, target, cursor FROM word_index"
+      )
+      .one()
+  );
+
+/** The queue's clock across the file: only forward, as core's clock goes. */
+const clock = { at: Date.now() };
+
+/** One tick of core's clock, a minute after the last. */
+const tick = async (): Promise<void> => {
+  clock.at = Math.max(clock.at, Date.now()) + 60_000;
+  await workBrain(env, new Date(clock.at));
+};
+
+/** Ticks until the store's word indexes are current: how many it took. */
+const ticksUntilRebuilt = async (most = 100): Promise<number> => {
+  for (let ticks = 0; ticks < most; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+    const { version } = await wordIndexState();
+    if (version === 2) {
+      return ticks;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+    await tick();
+  }
+  return Number.POSITIVE_INFINITY;
+};
+
+/** Kills the store, as a crash or a restart would. */
+const killStore = async (): Promise<void> => {
+  try {
+    await runInDurableObject(store(), (_instance, state) => {
+      state.abort("Killed by the test");
+    });
+  } catch {
+    // The kill ends the call it was made in.
+  }
+};
+
+describe(
+  "rebuilding the word indexes when their rules change",
+  { timeout: 300_000 },
+  () => {
+    it("finds other forms and newly folded letters in an older store's passages once their turn in the rebuild came, and never another reader's", async () => {
+      const [reader, other] = await Promise.all([person(), person()]);
+      const mark = `w${unique()}`;
+      const invoices = await add(
+        `De facturen van maart ${mark}`,
+        ownedBy(reader)
+      );
+      const street = await add(
+        `Die Straße ist gesperrt ${mark}`,
+        ownedBy(reader)
+      );
+      await add(`De facturen van april ${mark}`, ownedBy(other));
+      await toFirstRules([mark]);
+
+      const before = {
+        invoice: await recalledAs(reader, "factuur"),
+        street: await recalledAs(reader, "strasse"),
+      };
+      const ticks = await ticksUntilRebuilt();
+
+      expect({
+        before,
+        rebuilt: ticks > 0 && Number.isFinite(ticks),
+        invoice: await recalledAs(reader, "factuur"),
+        street: await recalledAs(reader, "strasse"),
+        other: await recalledAs(other, "strasse"),
+      }).toStrictEqual({
+        before: { invoice: [], street: [] },
+        rebuilt: true,
+        invoice: [invoices],
+        street: [street],
+        other: [],
+      });
+    });
+
+    it("goes on after the store stops mid-rebuild, and indexes every passage exactly once", async () => {
+      const reader = await person();
+      const mark = `m${unique()}`;
+      // Paragraphs too long to share a passage, more than a tick rebuilds.
+      const count = 450;
+      const paragraphs = Array.from(
+        { length: count },
+        (_, index) => `${mark}x${index}ingen ${"woord ".repeat(110).trim()}`
+      );
+      await add(paragraphs.join("\n\n"), ownedBy(reader));
+      await toFirstRules([mark]);
+
+      await tick();
+      const midway = await wordIndexState();
+      await killStore();
+      const ticks = await ticksUntilRebuilt();
+      const indexed = await runInDurableObject(store(), (_instance, state) => {
+        const { sql } = state.storage;
+        return ["chunk_words", "chunk_stems"].map((index) => {
+          sql.exec(
+            `CREATE VIRTUAL TABLE held_instances USING fts5vocab(${index}, 'instance')`
+          );
+          const [counts] = sql
+            .exec<{ chunks: number; twice: number }>(
+              `SELECT
+              (SELECT count(DISTINCT doc) FROM held_instances WHERE substr(term, 1, length(?1)) = ?1) AS chunks,
+              (SELECT count(*) FROM (SELECT 1 FROM held_instances GROUP BY doc, term HAVING count(*) > 1)) AS twice`,
+              mark
+            )
+            .toArray();
+          sql.exec("DROP TABLE held_instances");
+          return counts;
+        });
+      });
+
+      const { chunks } = await recallAs(env, reader, `${mark}x7ing`);
+
+      expect({
+        midway:
+          midway.version === 1 && midway.target === 2 && midway.cursor > 0,
+        rebuilt: Number.isFinite(ticks),
+        indexed,
+        found: chunks.length,
+      }).toStrictEqual({
+        midway: true,
+        rebuilt: true,
+        indexed: [
+          { chunks: count, twice: 0 },
+          { chunks: count, twice: 0 },
+        ],
+        found: 1,
+      });
+    });
+
+    it("marks a store with no passages current as it starts, with nothing to rebuild", async () => {
+      const empty = env.BRAIN_STORE.getByName(`empty-${crypto.randomUUID()}`);
+
+      await expect(
+        runInDurableObject(empty, (_instance, state) =>
+          state.storage.sql
+            .exec<{ version: number; cursor: number }>(
+              "SELECT version, cursor FROM word_index"
+            )
+            .one()
+        )
+      ).resolves.toStrictEqual({ version: 2, cursor: 0 });
+    });
+  }
+);

@@ -343,10 +343,15 @@ export interface WorkOverview {
    * since the store started: the sweep of leftover files, cleared once a
    * later sweep reached R2 and had its answer (one with nothing due
    * clears nothing; sweeping waits a quarter of an hour after a failure),
-   * and the repack of vector codes, cleared once a later tick's repack
-   * finishes (tried again next tick).
+   * the repack of vector codes, cleared once a later tick's repack
+   * finishes (tried again next tick), and the rebuild of the word indexes
+   * after their rules changed, cleared once a later batch finishes.
    */
-  stepsFailed: { sweep: StepFailure | null; repack: StepFailure | null };
+  stepsFailed: {
+    sweep: StepFailure | null;
+    repack: StepFailure | null;
+    reindex: StepFailure | null;
+  };
 }
 
 /**

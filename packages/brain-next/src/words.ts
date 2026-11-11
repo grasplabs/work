@@ -337,3 +337,95 @@ export const indexWords = (
   sql.exec("INSERT INTO chunk_words (rowid, text) VALUES (?, ?)", row, words);
   sql.exec("INSERT INTO chunk_stems (rowid, stems) VALUES (?, ?)", row, stems);
 };
+
+/**
+ * The number of the rules by which words are indexed: bump it whenever
+ * folding, the word pattern, the stemmers (a Snowball upgrade) or what the
+ * indexes hold of a chunk change, and every store rebuilds its word
+ * indexes from its chunks' text (`reindexWords`). The stop words are read
+ * from the question alone, so changing them needs no bump. 1: words folded
+ * without the primary letters, no stems; 2: stems (GRA-1725).
+ */
+export const wordsVersion = 2;
+
+/**
+ * Most chunks a tick re-indexes while a store's word indexes are behind
+ * (`reindexWords`), in one transaction, before its queue: the store's
+ * `work`. Measured in workerd on this machine on full-size chunks (1,930
+ * characters, every word different, the most stemming a chunk asks): 171
+ * to 202 ms a tick for 200, about 1 ms a chunk; prose, whose words repeat,
+ * costs less. A store of 100,000 chunks rebuilds in 500 ticks, some eight
+ * hours at a tick a minute, while the queue runs every tick.
+ */
+export const reindexPerTick = 200;
+
+/**
+ * Marks the store's word indexes as built by the current rules when it
+ * holds no chunks: nothing to rebuild. Run as the store starts.
+ */
+export const markWordsCurrentIfEmpty = (sql: SqlStorage): void => {
+  sql.exec(
+    `UPDATE word_index SET version = ?1, target = ?1, cursor = 0
+    WHERE id = 1 AND version <> ?1 AND NOT EXISTS (SELECT 1 FROM chunks)`,
+    wordsVersion
+  );
+};
+
+/**
+ * Rebuilds the word indexes of the next `limit` chunks, in chunk order
+ * from where the last batch stopped, when the store's are behind the
+ * current rules: each chunk's rows in both indexes deleted and written
+ * again from its text, then the place reached saved. Run it in one
+ * transaction, so a stop at any point leaves each chunk's rows whole, by
+ * the old rules or the new, and the next batch starts after the last one
+ * written. Past the last chunk, the store is marked current. Answers
+ * whether more are left.
+ *
+ * Recall goes on meanwhile: a chunk not yet rebuilt answers by the rules
+ * it was indexed by, so a word folded or stemmed otherwise now may miss it
+ * until its turn. New and changed sources are indexed by the current rules
+ * as they are added; one added during a rebuild may be rewritten once more
+ * by it, the same.
+ */
+export const reindexWords = (
+  sql: SqlStorage,
+  limit: number = reindexPerTick
+): boolean => {
+  const state = sql
+    .exec<{ version: number; target: number; cursor: number }>(
+      "SELECT version, target, cursor FROM word_index WHERE id = 1"
+    )
+    .one();
+  if (state.version === wordsVersion) {
+    return false;
+  }
+  // A rebuild to other rules than these starts over.
+  const cursor = state.target === wordsVersion ? state.cursor : 0;
+  const batch = sql
+    .exec<{ row: number; text: string }>(
+      "SELECT row, text FROM chunks WHERE row > ? ORDER BY row LIMIT ?",
+      cursor,
+      limit
+    )
+    .toArray();
+  const memo: WordMemo = new Map();
+  for (const { row, text } of batch) {
+    sql.exec("DELETE FROM chunk_words WHERE rowid = ?", row);
+    sql.exec("DELETE FROM chunk_stems WHERE rowid = ?", row);
+    indexWords(sql, row, text, memo);
+  }
+  const last = batch.at(-1);
+  if (last === undefined || batch.length < limit) {
+    sql.exec(
+      "UPDATE word_index SET version = ?1, target = ?1, cursor = 0 WHERE id = 1",
+      wordsVersion
+    );
+    return false;
+  }
+  sql.exec(
+    "UPDATE word_index SET target = ?, cursor = ? WHERE id = 1",
+    wordsVersion,
+    last.row
+  );
+  return true;
+};
