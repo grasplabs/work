@@ -1064,13 +1064,13 @@ describe("an action's channel", () => {
       ),
       undeclared: await attempt(
         async (channel) =>
-          await channel.resource("calendar", "call", ["list", {}])
+          await channel.permission("calendar", "call", ["list", {}])
       ),
       // Declared, but bound to nothing: the App's permission alone reaches
       // nothing until an admin binds it.
       unbound: await attempt(
         async (channel) =>
-          await channel.resource("mail", "call", [
+          await channel.permission("mail", "call", [
             "send",
             mailTo("a@acme.test"),
           ])
@@ -1080,8 +1080,8 @@ describe("an action's channel", () => {
       write: "function.no_database",
       unregistered: "function.not_found",
       wrongKind: "function.kind_mismatch",
-      undeclared: "resource.not_allowed",
-      unbound: "resource.unavailable",
+      undeclared: "permission.not_allowed",
+      unbound: "permission.unavailable",
     });
   });
 });
@@ -1208,9 +1208,9 @@ describe("resources", () => {
         bindingsOf({ mail: bound("ai", null, messageSent) })
       ),
     }).toStrictEqual({
-      none: "resource.unavailable",
-      otherContract: "resource.unavailable",
-      otherKind: "resource.unavailable",
+      none: "permission.unavailable",
+      otherContract: "permission.unavailable",
+      otherKind: "permission.unavailable",
     });
   });
 
@@ -1257,7 +1257,7 @@ describe("resources", () => {
           run: misusing(
             "actions.listGuests",
             async (channel) =>
-              await channel.resource("guests", "invite", [
+              await channel.permission("guests", "invite", [
                 { name: "Anna", skill: "interview-a-stakeholder" },
               ])
           ),
@@ -1267,33 +1267,33 @@ describe("resources", () => {
     expect({
       undeclaredAction: await attempt(
         async (channel) =>
-          await channel.resource("mail", "call", ["delete", {}])
+          await channel.permission("mail", "call", ["delete", {}])
       ),
       undeclaredAlias: await attempt(
         async (channel) =>
-          await channel.resource("calendar", "call", ["list", {}])
+          await channel.permission("calendar", "call", ["list", {}])
       ),
       // The App's workflow is no resource: a start, never a call.
       workflowAsResource: await attempt(
         async (channel) =>
-          await channel.resource("followUp", "call", ["send", {}])
+          await channel.permission("followUp", "call", ["send", {}])
       ),
       // A platform function the declaration doesn't serve, past the
       // client, which has no member for it.
       undeclaredFunction: await attempt(
         async (channel) =>
-          await channel.resource("grasp", "call", ["statistics.write", {}])
+          await channel.permission("grasp", "call", ["statistics.write", {}])
       ),
       reached,
       invite,
       invited,
     }).toStrictEqual({
-      undeclaredAction: "resource.not_allowed",
-      undeclaredAlias: "resource.not_allowed",
-      workflowAsResource: "resource.not_allowed",
-      undeclaredFunction: "resource.not_allowed",
+      undeclaredAction: "permission.not_allowed",
+      undeclaredAlias: "permission.not_allowed",
+      workflowAsResource: "permission.not_allowed",
+      undeclaredFunction: "permission.not_allowed",
       reached: false,
-      invite: "resource.not_allowed",
+      invite: "permission.not_allowed",
       invited: false,
     });
   });
@@ -1375,9 +1375,9 @@ describe("resources", () => {
       ),
     }).toStrictEqual({
       summary: { summary: "Short" },
-      summaryWrong: "contract.invalid_resource_result",
+      summaryWrong: "contract.invalid_permission_result",
       hits: [{ title: "Leave", excerpt: "Days off" }],
-      hitsWithMore: "contract.invalid_resource_result",
+      hitsWithMore: "contract.invalid_permission_result",
     });
   });
 });
@@ -1403,7 +1403,7 @@ describe("what an action's invocation keeps", () => {
   const busy = bindingsOf({
     mail: bound("connections", "microsoft-365.mail@1", async () => {
       await Promise.resolve();
-      throw functionErrors.create("resource.budget_busy");
+      throw functionErrors.create("permission.budget_busy");
     }),
   });
 
@@ -1428,7 +1428,7 @@ describe("what an action's invocation keeps", () => {
       effects,
       kept: keepsReceipt(outcome),
     }).toStrictEqual({
-      code: "resource.budget_busy",
+      code: "permission.budget_busy",
       effects: 1,
       // Running it again would act on the note it saved.
       kept: true,
@@ -1455,7 +1455,7 @@ describe("what an action's invocation keeps", () => {
       effects,
       kept: keepsReceipt({ result, reached: true, effects }),
     }).toStrictEqual({
-      code: "resource.budget_busy",
+      code: "permission.budget_busy",
       effects: 0,
       kept: false,
     });
@@ -2018,7 +2018,7 @@ describe("failures across the host's boundary", () => {
     }).toStrictEqual({
       failed: "internal.unexpected",
       unknown: "effect.outcome_unknown",
-      revoked: "resource.unavailable",
+      revoked: "permission.unavailable",
     });
   });
 });
@@ -2184,8 +2184,8 @@ describe("an action's nested calls", () => {
         write: async (request) => await channel.write(request),
         call: async (kind, called, callArgs) =>
           await channel.call(kind, called, callArgs),
-        resource: async (alias, method, callArgs) =>
-          await channel.resource(alias, method, callArgs),
+        permission: async (alias, method, callArgs) =>
+          await channel.permission(alias, method, callArgs),
         emit: async (progress) => await channel.emit(progress),
         people: async (read, readArgs) => await channel.people(read, readArgs),
       };
@@ -2244,8 +2244,8 @@ describe("evidence of a refused use", () => {
     // Two aliases the App doesn't have: only the first is kept, as App
     // code's text it is named by no one.
     const loop = await kept(
-      async (channel) => await channel.resource("nope", "search", [{}]),
-      async (channel) => await channel.resource("other", "search", [{}])
+      async (channel) => await channel.permission("nope", "search", [{}]),
+      async (channel) => await channel.permission("other", "search", [{}])
     );
     // A function the App doesn't register.
     const noFunction = await kept(
@@ -2254,17 +2254,18 @@ describe("evidence of a refused use", () => {
     // The App's workflow, asked for what a start isn't.
     const workflow = await kept(
       async (channel) =>
-        await channel.resource("followUp", "call", ["send", {}])
+        await channel.permission("followUp", "call", ["send", {}])
     );
     // A declared resource asked for an action it doesn't declare.
     const request = await kept(
-      async (channel) => await channel.resource("mail", "call", ["delete", {}])
+      async (channel) =>
+        await channel.permission("mail", "call", ["delete", {}])
     );
     // The platform's functions, asked for one they don't serve: declared,
     // so refused as the request, never as a missing alias.
     const platform = await kept(
       async (channel) =>
-        await channel.resource("grasp", "call", ["statistics.write", {}])
+        await channel.permission("grasp", "call", ["statistics.write", {}])
     );
     expect({
       loop,
@@ -2278,9 +2279,9 @@ describe("evidence of a refused use", () => {
         heard: [
           {
             function: "actions.sendMail",
-            use: { kind: "resource", name: null },
+            use: { kind: "permission", name: null },
             reason: "use_undeclared",
-            errorCode: "resource.not_allowed",
+            errorCode: "permission.not_allowed",
           },
         ],
         // Kept before App code heard of the refusal.
@@ -2299,23 +2300,23 @@ describe("evidence of a refused use", () => {
           function: "actions.sendMail",
           use: { kind: "workflow", name: "followUp" },
           reason: "request_not_allowed",
-          errorCode: "resource.not_allowed",
+          errorCode: "permission.not_allowed",
         },
       ],
       request: [
         {
           function: "actions.sendMail",
-          use: { kind: "resource", name: "mail" },
+          use: { kind: "permission", name: "mail" },
           reason: "request_not_allowed",
-          errorCode: "resource.not_allowed",
+          errorCode: "permission.not_allowed",
         },
       ],
       platform: [
         {
           function: "actions.sendMail",
-          use: { kind: "resource", name: "grasp" },
+          use: { kind: "permission", name: "grasp" },
           reason: "request_not_allowed",
-          errorCode: "resource.not_allowed",
+          errorCode: "permission.not_allowed",
         },
       ],
     });
@@ -2337,7 +2338,7 @@ describe("evidence of a refused use", () => {
         run: misusing(
           "notes.create",
           async (channel) =>
-            await channel.resource("mail", "call", ["send", {}])
+            await channel.permission("mail", "call", ["send", {}])
         ),
       }
     );
@@ -2356,7 +2357,7 @@ describe("evidence of a refused use", () => {
         run: misusing(
           "notes.create",
           async (channel) =>
-            await channel.resource("archive", "start", [{ who: "Ada" }])
+            await channel.permission("archive", "start", [{ who: "Ada" }])
         ),
       }
     );
@@ -2378,7 +2379,7 @@ describe("evidence of a refused use", () => {
         },
         run: misusing("actions.sendMail", async (channel) => {
           try {
-            await channel.resource("nope", "search", [{}]);
+            await channel.permission("nope", "search", [{}]);
           } catch {
             // Swallowed.
           }
@@ -2401,7 +2402,7 @@ describe("evidence of a refused use", () => {
         run: misusing(
           "notes.create",
           async (channel) =>
-            await channel.resource("mail", "call", ["send", {}])
+            await channel.permission("mail", "call", ["send", {}])
         ),
       }
     );
@@ -2414,27 +2415,27 @@ describe("evidence of a refused use", () => {
       heldNoLonger: tookMs < useEvidenceWaitMs + 5000,
       failing: codeOf(failing),
     }).toStrictEqual({
-      asked: "function.no_resources",
+      asked: "function.no_permissions",
       heard: [
         {
           function: "notes.create",
-          use: { kind: "resource", name: "mail" },
+          use: { kind: "permission", name: "mail" },
           reason: "use_undeclared",
-          errorCode: "function.no_resources",
+          errorCode: "function.no_permissions",
         },
       ],
-      startsUnlisted: "function.no_resources",
+      startsUnlisted: "function.no_permissions",
       workflowHeard: [
         {
           function: "notes.create",
-          use: { kind: "resource", name: null },
+          use: { kind: "permission", name: null },
           reason: "use_undeclared",
-          errorCode: "function.no_resources",
+          errorCode: "function.no_permissions",
         },
       ],
       hung: "ok",
       heldNoLonger: true,
-      failing: "function.no_resources",
+      failing: "function.no_permissions",
     });
   });
 
@@ -2454,7 +2455,7 @@ describe("evidence of a refused use", () => {
         run: misusing(
           "notes.create",
           async (channel) =>
-            await channel.resource("mail", "sendEvent", [
+            await channel.permission("mail", "sendEvent", [
               "sent",
               "run-1",
               {},
@@ -2465,13 +2466,13 @@ describe("evidence of a refused use", () => {
       }
     );
     expect({ notified: codeOf(notified), heard }).toStrictEqual({
-      notified: "resource.not_allowed",
+      notified: "permission.not_allowed",
       heard: [
         {
           function: "notes.create",
-          use: { kind: "resource", name: "mail" },
+          use: { kind: "permission", name: "mail" },
           reason: "use_undeclared",
-          errorCode: "resource.not_allowed",
+          errorCode: "permission.not_allowed",
         },
       ],
     });

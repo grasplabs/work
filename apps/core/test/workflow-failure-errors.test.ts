@@ -148,6 +148,16 @@ describe("a step's failure, as a catch sees it", () => {
         task
       ),
       modelTimedOut: retries({ name: "TimeoutError" }, modelTask),
+      // Nothing was sent: a provider's rate limit, or room taken by runs
+      // under way.
+      modelRateLimited: retries(
+        { name: "Error", code: "permission.rate_limited" },
+        modelTask
+      ),
+      modelBudgetBusy: retries(
+        { name: "Error", code: "permission.budget_busy" },
+        modelTask
+      ),
     }).toStrictEqual({
       timeout: true,
       connector: true,
@@ -156,6 +166,8 @@ describe("a step's failure, as a catch sees it", () => {
       denied: false,
       invalid: false,
       modelTimedOut: false,
+      modelRateLimited: true,
+      modelBudgetBusy: true,
     });
   });
 });

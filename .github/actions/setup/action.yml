@@ -1,6 +1,6 @@
 # Vite+, Node.js and the workspace's installed dependencies: every job's
 # setup, the journeys' too. The installed node_modules are cached whole, by
-# the lockfile:
+# the lockfile and what else the install reads (the `keys` step):
 # restoring them skips the install, which with pnpm's store restored (still
 # restored, for the tests that install offline from it) linked 1,200
 # packages, checked the lockfile against the supply-chain
@@ -52,15 +52,30 @@ runs:
         node-version-file: .node-version
         cache: false
         run-install: false
+    # node_modules are keyed by what the install reads, not by whole
+    # package.json files: hashing those, a pull request that only edited a
+    # script missed the cache and installed again, 6 of 10 merge-queue runs
+    # on 11 November 2026, about 27 s a job (twice in the e2e chain).
+    # From each package.json only what pnpm links or installs by: its name,
+    # version and dependency fields (the lockfile records each importer's
+    # specifiers, but a workspace package's `bin` is linked into its
+    # dependents' node_modules/.bin from its package.json alone), the root's
+    # packageManager and devEngines, and the lifecycle scripts pnpm runs on
+    # install. Of those only the root's `prepare` exists, and it installs
+    # the git hooks (.vite-hooks/_, git config), outside node_modules; the
+    # dependencies' own build scripts are pnpm-workspace.yaml's allowBuilds.
+    # `exports` and `imports` are left out: workspace packages are linked as
+    # whole directories and resolved through them at runtime.
     - id: keys
       shell: bash
       run: |
         echo "store-path=$(vp pm cache dir)" >> "$GITHUB_OUTPUT"
         echo "store=pnpm-store-$RUNNER_OS-$RUNNER_ARCH-$LOCKFILE_HASH" >> "$GITHUB_OUTPUT"
-        echo "modules=node-modules-$RUNNER_OS-$RUNNER_ARCH-$MODULES_HASH" >> "$GITHUB_OUTPUT"
+        manifests=$(jq -S -c '{file: input_filename} + ({name, version, bin, directories, dependencies, devDependencies, peerDependencies, peerDependenciesMeta, optionalDependencies, bundleDependencies, bundledDependencies, dependenciesMeta, engines, packageManager, devEngines, pnpm, overrides, resolutions, workspaces} | with_entries(select(.value != null))) + {scripts: ((.scripts // {}) | with_entries(select(.key | test("^(pre|post)?(install|prepare)$"))))}' package.json apps/*/package.json packages/*/package.json packages/connectors/*/package.json)
+        modules_hash=$( (echo "$manifests"; cat .node-version pnpm-lock.yaml pnpm-workspace.yaml) | sha256sum | cut -d ' ' -f 1)
+        echo "modules=node-modules-$RUNNER_OS-$RUNNER_ARCH-$modules_hash" >> "$GITHUB_OUTPUT"
       env:
         LOCKFILE_HASH: ${{ hashFiles('pnpm-lock.yaml') }}
-        MODULES_HASH: ${{ hashFiles('.node-version', 'package.json', 'apps/*/package.json', 'packages/*/package.json', 'packages/connectors/*/package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
     # An older lockfile's store when this one's is missing: most of what the
     # install needs, and it fetches the rest. Before node_modules for a job
     # that reads the store: they are restored only beside this lockfile's

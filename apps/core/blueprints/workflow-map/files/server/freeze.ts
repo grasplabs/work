@@ -80,14 +80,16 @@ const kindOrder = [
 /**
  * The refusal of a statistics read, in the host's words, that leaves a
  * snapshot without what runs: the platform's functions no admin bound, or a
- * caller no longer a member (`resource.unavailable`). An App the caller may
+ * caller no longer a member (`permission.unavailable`). An App the caller may
  * not see, or that is gone, comes back in a read's `unavailable`, never as
  * a refusal of a read of several Apps. Anything else fails the snapshot: a
- * bound reached (`resource.limit_reached`), taken again later, counts what
+ * bound reached (`permission.limit_reached`), taken again later, counts what
  * runs rather than freeze it as unknown, and arguments refused
- * (`resource.invalid_args`) are the page's to fix.
+ * (`permission.invalid_args`) are the page's to fix.
  */
-const expectedRefusals: ReadonlySet<string> = new Set(["resource.unavailable"]);
+const expectedRefusals: ReadonlySet<string> = new Set([
+  "permission.unavailable",
+]);
 
 /** The code a refusal carries, if any. */
 const codeOf = (error: unknown): string | undefined =>

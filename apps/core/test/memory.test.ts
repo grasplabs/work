@@ -210,12 +210,12 @@ describe("memory for a context", setUpTime, () => {
       otherInChannel: markersIn(otherInChannel, markers),
     }).toStrictEqual({
       own: {
-        files: [...company, "user USER.md"],
-        markers: ["companyAgents", "companyMemory", "user"],
+        files: [...company, "agent AGENTS.md", "user USER.md"],
+        markers: ["companyAgents", "companyMemory", "agent", "user"],
       },
       ownOnApp: {
-        files: [...company, "app AGENTS.md", "user USER.md"],
-        markers: ["companyAgents", "companyMemory", "app", "user"],
+        files: [...company, "agent AGENTS.md", "app AGENTS.md", "user USER.md"],
+        markers: ["companyAgents", "companyMemory", "agent", "app", "user"],
       },
       direct: {
         files: [...company, "agent AGENTS.md", "user USER.md"],

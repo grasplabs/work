@@ -226,7 +226,7 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   fixtures (resource-calls.ts, `makeCall`, `calling.candidate`). A run
 //   an App's test started makes only the calls its test serves
 //   (fixture-calls.ts, `fixtureCalls`), refused otherwise before its
-//   arguments are matched or audited (`resource.unavailable`); its model
+//   arguments are matched or audited (`permission.unavailable`); its model
 //   calls are answered by its fixture (`fixtureCall`), tried once as a
 //   real call is; and `makeCall` refuses every call of it again.
 // - A catch taking what it mustn't (spec 13.7). The host keeps its own
@@ -2815,7 +2815,7 @@ class SealedRun implements SealedRunKind {
       // its sensitive values put in or it is audited, so nothing says a
       // call went out.
       if (calling.fixture === true && !fixtureCalls.has(template.call.name)) {
-        throw functionErrors.create("resource.unavailable");
+        throw functionErrors.create("permission.unavailable");
       }
       const sensitive: Json[] = [];
       let value: Json;

@@ -12,7 +12,7 @@ import schema from "../schema.ts";
 import type { DataModel } from "./dataModel.ts";
 
 export type { CallerCtx } from "@grasp-os/sdk/server";
-export type { Doc, Id, TableName } from "./dataModel.ts";
+export type { Doc, Id, TableNames } from "./dataModel.ts";
 
 const server = serverModule(schema, config);
 

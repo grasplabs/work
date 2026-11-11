@@ -1,4 +1,4 @@
-import { isPlainObject } from "./value-descriptor.ts";
+import { isPlainObject } from "@grasp-os/shared/json";
 
 // References: how code names one of an App's functions, without holding
 // it. A function's reference is its name, nothing more, as Convex's:

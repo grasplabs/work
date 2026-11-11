@@ -793,8 +793,11 @@ describe("AI providers", { timeout: 60_000 }, () => {
         spies.map((spy) => spy.mock.calls),
         await coreDatabaseText(),
       ]);
+      // The key, or its mask as written (`…` and its last four): four hex
+      // characters alone turn up in the database's own text by chance.
       expect(everywhere).not.toContain(marker);
-      expect(everywhere).not.toContain(key.slice(-4));
+      expect(everywhere).not.toContain(key);
+      expect(everywhere).not.toContain(`…${key.slice(-4)}`);
     });
 
     it("refuses Grasp staff the providers, and audits each ask, naming nothing they hold", async () => {
@@ -821,7 +824,8 @@ describe("AI providers", { timeout: 60_000 }, () => {
       expect(views.map(({ detail }) => detail.surface)).toStrictEqual(
         expect.arrayContaining(["aiProviders.list", "aiProviders.add"])
       );
-      expect(JSON.stringify(views)).not.toContain(key.slice(-4));
+      expect(JSON.stringify(views)).not.toContain(key);
+      expect(JSON.stringify(views)).not.toContain(`…${key.slice(-4)}`);
     });
   });
 

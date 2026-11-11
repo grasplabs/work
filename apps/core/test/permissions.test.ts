@@ -48,6 +48,12 @@ import { testBinding } from "./test-env.ts";
 
 const idp = mockIdp();
 
+/**
+ * A migration's statement that deletes rows: readD1Migrations keeps the
+ * comments before each statement.
+ */
+const deleteStatement = /^DELETE\b/mu;
+
 /** A signed-in person's permission API, on a connection of their own. */
 const permissionApi = async (role: Role) => await signedInApi(idp, role);
 
@@ -787,7 +793,7 @@ describe("permissions", () => {
       .parse(testBinding("CORE_MIGRATIONS"));
     const cleanup = migrations
       .find(({ name }) => name.includes("_drop_v1_exports"))
-      ?.queries.filter((query) => query.trimStart().startsWith("DELETE"));
+      ?.queries.filter((query) => deleteStatement.test(query));
     if (cleanup === undefined || cleanup.length === 0) {
       throw new Error("drop_v1_exports deletes no permissions");
     }

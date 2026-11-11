@@ -7,8 +7,8 @@ import { clientInternals } from "./client-core.ts";
 import type { GraspClient } from "./client-core.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 
-export { bindingOf } from "./form.ts";
-export type { FormBinding } from "./form.ts";
+export { bindingOf } from "./form-binding.ts";
+export type { FormBinding } from "./form-binding.ts";
 export type { ValueDescriptor } from "./value-descriptor.ts";
 
 /**

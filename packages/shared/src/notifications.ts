@@ -179,7 +179,7 @@ export const appNotificationMaxRecipients = 50;
 /**
  * The most notifications (one per person told) an App sends in an hour,
  * all its people's calls together: a send that would go past it is
- * refused whole (`resource.limit_reached`, `{ limit: "hour" }`).
+ * refused whole (`permission.limit_reached`, `{ limit: "hour" }`).
  */
 export const appNotificationsPerHour = 200;
 
@@ -209,8 +209,8 @@ export interface AppNotificationReceipt {
 }
 
 /**
- * The resource alias App code's channel names to tell people
- * (`channel.resource(peopleAlias, "notify", [to, notification])`): no
+ * The permission alias App code's channel names to tell people
+ * (`channel.permission(peopleAlias, "notify", [to, notification])`): no
  * alias an App declares is one, as each starts with a letter.
  */
 export const peopleAlias = "~people";

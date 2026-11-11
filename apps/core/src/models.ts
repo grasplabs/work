@@ -93,6 +93,7 @@ import type {
 } from "./model-transport.ts";
 import { recordResponse } from "./model-usage.ts";
 import type { ProviderNote, UsageRecord } from "./model-usage.ts";
+import { usualHostsOf } from "./platform-hosts.ts";
 import {
   charactersOf,
   hearingCostOf,
@@ -1694,7 +1695,7 @@ const graspRouting = async (
   // Grasp's AI: its one model, on Grasp's key, and nothing else. The
   // organization's own key is never used in its place, nor Grasp's for
   // any model but this one.
-  const platform = platformRouteOf(graspAi.provider);
+  const platform = platformRouteOf(graspAi.provider, usualHostsOf(env));
   if (ref === undefined || call.model !== graspAi.model) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
@@ -1743,7 +1744,7 @@ const routingOf = async (
         because: "platform",
       });
     }
-    const platform = platformRouteOf(provider);
+    const platform = platformRouteOf(provider, usualHostsOf(env));
     if (platform === undefined) {
       throw modelErrors.create("model.unconfigured");
     }
@@ -2669,7 +2670,7 @@ const platformTarget = async (
       because: "platform",
     });
   }
-  const platform = platformRouteOf(provider);
+  const platform = platformRouteOf(provider, usualHostsOf(env));
   if (platform === undefined) {
     throw modelErrors.create("model.unconfigured");
   }

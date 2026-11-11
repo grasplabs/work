@@ -26,7 +26,23 @@ interface __BaseEnv_Env {
    * `{by, what, release, at}`, set by the admin on every version it
    * deploys.
    */
+  /**
+   * For testing only, on a staging deployment: the providers whose
+   * platform features go to their usual host, not their EU data residency
+   * host, comma-separated (`usualHostProviders`, @grasp-os/shared/
+   * ai-providers). The admin sets it on core and connect alike; never on
+   * production.
+   */
+  PLATFORM_AI_USUAL_HOSTS?: unknown;
   PLATFORM_CHANGE?: unknown;
+  /**
+   * The flow the company's onboarding starts with (src/onboarding/store.ts):
+   * the name of one of the flows staff start from, read with
+   * `startingFlowOf` (the shared onboarding-flow module), as staff chose it
+   * in Grasp's admin when they added the company. Read once, as its
+   * onboarding is first kept; unset, it starts with all of it.
+   */
+  ONBOARDING_START?: unknown;
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
   /**
@@ -50,6 +66,14 @@ interface __BaseEnv_Env {
    * `SANDBOX_IN_PROCESS` says so; anywhere else it refuses.
    */
   SANDBOX_HOST?: Fetcher;
+  /**
+   * On-prem only: the install's release directory's model files
+   * (`blobs/models/<sha256>`), read-only, as workerd's disk service
+   * (scripts/workerd-model-files.ts). The clock copies the model's files
+   * from it into `MODEL_FILES` (src/embedder.ts). On Cloudflare the admin's
+   * deploy copies them, and this is unbound.
+   */
+  MODEL_SOURCE?: Fetcher;
   /**
    * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts),
    * and for an extraction, a page build and a package build on the

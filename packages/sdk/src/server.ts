@@ -2,7 +2,7 @@
 // `mutation`, `action`) and the `ctx` they run with. Re-exported by name
 // from @grasp-os/runtime, which implements them.
 
-export { QueryDefinitionError, serverModule } from "@grasp-os/runtime/server";
+export { serverModule } from "@grasp-os/runtime/server";
 export type {
   ActionCtx,
   ActionDefinition,

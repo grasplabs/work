@@ -45,7 +45,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, deepFreeze } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { pageErrors, surfaceKinds } from "@grasp-os/shared/pages";
 import type { SurfaceSummary } from "@grasp-os/shared/pages";
@@ -176,23 +176,6 @@ const artifactOf = async (path: string, text: string): Promise<Artifact> => {
     },
     bytes,
   };
-};
-
-/** `value` with every object and array in it frozen. */
-const deepFreeze = <Value>(
-  value: Value,
-  seen = new WeakSet<object>()
-): Value => {
-  // Into frozen objects too, whose own entries may not be (as the SDK's
-  // does); `seen` only so a shared or cyclic value is walked once.
-  if (typeof value === "object" && value !== null && !seen.has(value)) {
-    seen.add(value);
-    Object.freeze(value);
-    for (const entry of Object.values(value)) {
-      deepFreeze(entry, seen);
-    }
-  }
-  return value;
 };
 
 /** What the host that seals a release gives it. */

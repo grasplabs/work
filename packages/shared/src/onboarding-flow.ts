@@ -210,6 +210,21 @@ export const flowPresets = {
 } as const satisfies Record<string, OnboardingFlow>;
 export type FlowPreset = keyof typeof flowPresets;
 
+/** The flows staff start from, by name, in the order they are offered. */
+export const flowPresetNames = ["full", "short", "setup", "none"] as const;
+
+/**
+ * The flow a company's onboarding starts with, from what its deployment's
+ * config names (`ONBOARDING_START`, which Grasp's admin sets from what
+ * staff chose as they added the company): one of the flows staff start
+ * from. None for the whole onboarding, which a company goes through
+ * anyway, and for anything else the config says.
+ */
+export const startingFlowOf = (named: unknown): OnboardingFlow | null => {
+  const preset = flowPresetNames.find((name) => name === named);
+  return preset === undefined || preset === "full" ? null : flowPresets[preset];
+};
+
 /** `flow` with step `id` moved to place `to`, from 0, the others keeping their order. */
 export const withStepMoved = (
   flow: OnboardingFlow,

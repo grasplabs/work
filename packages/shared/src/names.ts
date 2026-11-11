@@ -24,7 +24,7 @@
  * | ---------------------------- | --------------------------------------- |
  * | core and connect Workers     | `grasp-{id}-core`, `grasp-{id}-connect` |
  * | core's databases (D1)        | `grasp-{id}-core-db`, `-core-knowledge` |
- * | core's buckets (R2)          | `grasp-{id}-core-files`, `-core-audit`, `-core-brain` |
+ * | core's buckets (R2)          | `grasp-{id}-core-files`, `-core-audit`, `-core-brain`, `-core-models` |
  * | connect's database (D1)      | `grasp-{id}-connect-db`                 |
  * | Durable Object classes       | `<its script>:<class>`                  |
  * Package scopes (`@grasp-os/*`) and code
@@ -221,6 +221,7 @@ export const clientRoleNames: Readonly<Record<string, string>> = {
   "r2:grasp-os-files": "core-files",
   "r2:grasp-os-audit-archive": "core-audit",
   "r2:grasp-os-brain-objects": "core-brain",
+  "r2:grasp-os-models": "core-models",
   "d1:grasp-os-connect": "connect-db",
 };
 

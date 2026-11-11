@@ -69,7 +69,7 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 // - A visitor, or a run, telling people: a visitor's call (a published
 //   App's guest, who is no member) and a call from a workflow's run have
 //   no `people` on their invocation (app-functions.ts), so their send is
-//   refused (`resource.unavailable`), never narrowed: the safer of the two,
+//   refused (`permission.unavailable`), never narrowed: the safer of the two,
 //   as nothing a visitor does reaches a member through the App.
 // - Flooding: a title and body within their limits (checked as it is
 //   made, or staged), at most `appNotificationMaxRecipients` people a send
@@ -78,7 +78,7 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 //   held by each row's own statement on the same count (the App's others
 //   that hour, and this send's), so a send's rows all go in or none do,
 //   and two sends at once can't both pass it. A send past it is refused
-//   whole (`resource.limit_reached`).
+//   whole (`permission.limit_reached`).
 // - A link out: a notification opens the App's own page, on its first
 //   route, and names nothing else. No URL is ever kept.
 // - Told twice: an action's send is keyed by its call's key and its place
@@ -148,7 +148,7 @@ const checkedOf = (
   const recipient = appNotificationRecipientSchema.safeParse(to);
   const message = appNotificationMessageSchema.safeParse(notification);
   if (!recipient.success || !message.success) {
-    throw functionErrors.create("resource.invalid_args");
+    throw functionErrors.create("permission.invalid_args");
   }
   return { to: recipient.data, notification: message.data };
 };
@@ -298,8 +298,8 @@ const sendEntry = (
 /**
  * Tells the people `send` names who can open its App (see the header):
  * how many were told, audited either way. Refuses a send past the App's
- * hourly limit whole (`resource.limit_reached`), and one of an App nobody
- * can open now (`resource.unavailable`).
+ * hourly limit whole (`permission.limit_reached`), and one of an App nobody
+ * can open now (`permission.unavailable`).
  */
 const deliver = async (
   env: Env,
@@ -317,7 +317,7 @@ const deliver = async (
     .where(eq(apps.id, send.app))
     .get();
   if (app === undefined || app.removedAt !== null) {
-    throw functionErrors.create("resource.unavailable");
+    throw functionErrors.create("permission.unavailable");
   }
   const named = await namedBy(env, send.to);
   const asked = named.slice(0, appNotificationMaxRecipients);
@@ -382,7 +382,7 @@ const deliver = async (
     outboxedWhere(
       db,
       sendEntry(send, "app.notification.refused", {
-        reason: "resource.limit_reached",
+        reason: "permission.limit_reached",
         named: named.length,
       }),
       sql`NOT ${anyOf(ids)} AND NOT (${limit})`
@@ -408,7 +408,7 @@ const deliver = async (
     .tuple([z.object({ stored: z.number(), within: z.number() })])
     .parse(results.at(-1));
   if (outcome.stored === 0 && outcome.within === 0) {
-    throw functionErrors.create("resource.limit_reached", { limit: "hour" });
+    throw functionErrors.create("permission.limit_reached", { limit: "hour" });
   }
   return { delivered: outcome.stored };
 };
@@ -460,8 +460,8 @@ export const appPeopleNotifications = (
 
 /** Refusals no later attempt would turn into a send. */
 const settledRefusals: ReadonlySet<string> = new Set([
-  "resource.unavailable",
-  "resource.limit_reached",
+  "permission.unavailable",
+  "permission.limit_reached",
   "workflow.start_denied",
   "app.not_found",
   "app.unreadable",
@@ -530,7 +530,7 @@ export const dispatchAppNotifyIntent = async (
     const db = drizzle(env.DB);
     if (code !== undefined && settledRefusals.has(code)) {
       // The limit's refusal is audited as it is made.
-      if (code !== "resource.limit_reached") {
+      if (code !== "permission.limit_reached") {
         requireLive(entry.signal);
         await auditedBatch(env, db, [
           outboxed(

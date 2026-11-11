@@ -3,8 +3,8 @@
 # their inputs (apps/core/test/prebuilt.ts). On a hit, global setup only
 # copies them, and it checks the key itself, so a wrong restore is built
 # again. A job that passes `save` builds and saves those it missed: CI's
-# test-caches job on a push to main, where every pull request can read
-# them, and a pull request's first test shard, for its own next run; the
+# test-caches job on a push to main, where every run can read them, and
+# the first test shard of a run by hand, for its branch's next run; the
 # other shards only restore, so no two jobs race to pack the same files.
 # After Set up.
 name: Core's test builds

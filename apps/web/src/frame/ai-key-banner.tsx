@@ -42,12 +42,15 @@ export interface FailingProvider {
 
 /**
  * The organization's providers whose calls fail: what they show and since
- * when, as long as none worked since and the key wasn't replaced.
+ * when, as long as none worked since and the key wasn't replaced. None
+ * while its AI runs on Grasp's AI: no call goes out on its own keys then,
+ * so one that failed before keeps nothing from answering.
  */
 export const failingProviders = (
   listing: AiProvidersListing
 ): FailingProvider[] =>
   listing.providers.flatMap(({ provider, label, status }) =>
+    listing.source === "grasp" ||
     status === null ||
     status.failingSince === null ||
     status.failingClass === null

@@ -1,0 +1,1 @@
+ALTER TABLE `clients` ADD `starting_flow` text;

@@ -1,3 +1,4 @@
+import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
@@ -23,6 +24,7 @@ import { useEffect, useState } from "react";
 
 import { PageLoading } from "../admin/failure.tsx";
 import { domainOfEmail, slugOf } from "../admin/new-organization.ts";
+import { OnboardingChoice } from "../admin/onboarding-choice.tsx";
 import { AdminPage } from "../admin/page.tsx";
 import { HostingChoice } from "../hosting/hosting-choice.tsx";
 import type { OrganizationHosting } from "../hosting/organization.ts";
@@ -267,8 +269,8 @@ const signInOf = (
  * Adding an organization: its name, its web address (made from the name
  * as it is typed, the platform's domain shown after it), its company's
  * email domains, whose first one tells how its people sign in, its first
- * admin, and where it is hosted. Everything else (its ring, its model
- * spend ceiling, Teams) has a default, put right later on its
+ * admin, where it is hosted, and the onboarding it starts with.
+ * Everything else (its ring, Teams) has a default, put right later on its
  * Setup. Creating it starts setting it up at once, and opens its Setup,
  * where its progress shows.
  */
@@ -285,6 +287,7 @@ const NewOrganization = () => {
     jurisdiction: "eu",
   });
   const [choice, setChoice] = useState<SignInChoice | null>(null);
+  const [onboarding, setOnboarding] = useState<FlowPreset>("full");
   const clientId = address ?? slugOf(name);
   const firstDomain = (domains[0] ?? "").trim().toLowerCase();
   const adminEmail = admin ?? (firstDomain === "" ? "" : `@${firstDomain}`);
@@ -311,6 +314,7 @@ const NewOrganization = () => {
           clientId,
           name: name.trim(),
           ...hosting,
+          ...(hosting.hosting === "grasp_cloud" ? { onboarding } : {}),
           signIn: signInOf(typed, adminEmail, detected, choice),
         },
       });
@@ -449,6 +453,10 @@ const NewOrganization = () => {
             </FieldDescription>
           </Field>
           <HostingChoice onChange={setHosting} value={hosting} />
+          {/* Grasp sets up only what it hosts: an organization on its own premises gets no flow from here. */}
+          {hosting.hosting === "grasp_cloud" ? (
+            <OnboardingChoice onChange={setOnboarding} value={onboarding} />
+          ) : null}
         </FieldGroup>
         {failure === null ? null : (
           <p className="text-destructive text-sm" role="alert">

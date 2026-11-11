@@ -6,6 +6,7 @@ import type {
   AiProviderModel,
   AiProvidersListing,
   AiProviderTest,
+  GraspAiListed,
   OrganizationProviderId,
 } from "@grasp-os/shared/ai-providers";
 import { Button } from "@grasp-os/ui/components/button";
@@ -20,6 +21,10 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@grasp-os/ui/components/radio-group";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { CheckIcon } from "lucide-react";
@@ -80,7 +85,8 @@ interface Given {
  */
 const connect = async (
   session: Session,
-  { provider, key, baseUrl, model }: Given
+  { provider, key, baseUrl, model }: Given,
+  onGrasp: boolean
 ): Promise<AiProviderTest> => {
   await (provider === "openai-compatible"
     ? session.aiProviders.add({ provider, key, baseUrl })
@@ -89,6 +95,10 @@ const connect = async (
   await (tested.ok
     ? session.aiProviders.setModels({ defaultModel: model })
     : session.aiProviders.remove(provider));
+  // Its own key answered: its AI runs on it from here on.
+  if (tested.ok && onGrasp) {
+    await session.aiProviders.setSource("own");
+  }
   return tested;
 };
 
@@ -104,13 +114,32 @@ const useWhy = () => {
 /** A model is ready for calls: who answers, and the way on. */
 const Connected = ({
   providers,
+  grasp,
   onDone,
 }: {
   providers: readonly string[];
+  /** Grasp's AI's model by name, where the organization's AI runs on it. */
+  grasp: string | null;
   onDone: () => void;
 }) => {
   const { t } = useLingui();
   const names = formatList([...providers]);
+  if (grasp !== null) {
+    return (
+      <>
+        <Onward>
+          <p className="text-muted-foreground flex items-center justify-center gap-2">
+            <CheckIcon
+              aria-hidden="true"
+              className="text-status-agreed size-4 flex-none"
+            />
+            <span>{t`On Grasp’s AI: ${grasp}`}</span>
+          </p>
+        </Onward>
+        <Primary onClick={onDone}>{t`Continue`}</Primary>
+      </>
+    );
+  }
   return (
     <>
       {providers.length === 0 ? null : (
@@ -132,10 +161,13 @@ const Connected = ({
 /** The provider, its key and the model, and the way on once the model answered. */
 const ConnectForm = ({
   offered,
+  onGrasp,
   onDone,
   onConnected,
 }: {
   offered: readonly Offered[];
+  /** The organization's AI is set to Grasp's AI: a key of its own that answers sets it to its own. */
+  onGrasp: boolean;
   /** The way on where there is nothing to connect. */
   onDone: () => void;
   /** The way on once the model answered. */
@@ -176,12 +208,16 @@ const ConnectForm = ({
     setRefused(undefined);
     const tested = await run(
       async (session) =>
-        await connect(session, {
-          provider: provider.provider,
-          key: key.trim(),
-          baseUrl: baseUrl.trim(),
-          model,
-        })
+        await connect(
+          session,
+          {
+            provider: provider.provider,
+            key: key.trim(),
+            baseUrl: baseUrl.trim(),
+            model,
+          },
+          onGrasp
+        )
     );
     if (tested === undefined) {
       return;
@@ -323,6 +359,124 @@ const ConnectForm = ({
  * ready for calls; then who answers, and the way on. Where core can't say
  * (`ai` null), nothing is asked and nothing holds the admin up.
  */
+/** Whose AI the organization runs on, as the step asks it. */
+type Whose = "grasp" | "own";
+
+/**
+ * Grasp's AI, chosen: what it runs on and where, that it is paid by use
+ * up to a month's limit, and the way on, which sets the organization's AI
+ * to it.
+ */
+const GraspChoice = ({
+  grasp,
+  onConnected,
+}: {
+  grasp: GraspAiListed;
+  onConnected: () => void;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const { busy, failure, run } = useCoreAction();
+  const { whereItRuns } = grasp;
+  const submit = async () => {
+    const set = await run(async (session) => {
+      await session.aiProviders.setSource("grasp");
+      return true;
+    });
+    if (set === true) {
+      await router.invalidate({ sync: true });
+      onConnected();
+    }
+  };
+  return (
+    <>
+      <Onward>
+        <p className="text-muted-foreground">{t`Runs at: ${whereItRuns}. A monthly limit applies: once it is reached, AI stops until the next month.`}</p>
+        <ErrorText>{failure}</ErrorText>
+      </Onward>
+      <Primary
+        busy={busy}
+        onClick={() => {
+          void submit();
+        }}
+      >
+        {t`Continue`}
+      </Primary>
+    </>
+  );
+};
+
+/**
+ * No model is ready: Grasp's AI or a key of the organization's own, where
+ * this deployment offers Grasp's AI; else its own key alone.
+ */
+const Asking = ({
+  listing,
+  onDone,
+  onConnected,
+}: {
+  listing: AiProvidersListing;
+  onDone: () => void;
+  onConnected: () => void;
+}) => {
+  const { t } = useLingui();
+  const ids = useId();
+  const [whose, setWhose] = useState<Whose>("grasp");
+  const { grasp } = listing;
+  const model = grasp.model.name;
+  const own = (
+    <ConnectForm
+      offered={listing.offered}
+      onConnected={onConnected}
+      onDone={onDone}
+      onGrasp={listing.source === "grasp"}
+    />
+  );
+  if (!grasp.available) {
+    return own;
+  }
+  return (
+    <>
+      <Onward>
+        <RadioGroup
+          aria-label={t`Which AI`}
+          className="w-full max-w-sm text-left"
+          onValueChange={(value: unknown) => {
+            if (value === "grasp" || value === "own") {
+              setWhose(value);
+            }
+          }}
+          value={whose}
+        >
+          <Field orientation="horizontal">
+            <RadioGroupItem id={`${ids}-grasp`} value="grasp" />
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <FieldLabel
+                htmlFor={`${ids}-grasp`}
+              >{t`Use Grasp’s AI`}</FieldLabel>
+              <FieldDescription>{t`Nothing to set up. It runs on ${model}, and you pay for what your company uses.`}</FieldDescription>
+            </div>
+          </Field>
+          <Field orientation="horizontal">
+            <RadioGroupItem id={`${ids}-own`} value="own" />
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <FieldLabel
+                htmlFor={`${ids}-own`}
+              >{t`Use your own key`}</FieldLabel>
+              <FieldDescription>{t`Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly.`}</FieldDescription>
+            </div>
+          </Field>
+        </RadioGroup>
+      </Onward>
+      {whose === "grasp" ? (
+        <GraspChoice grasp={grasp} onConnected={onConnected} />
+      ) : (
+        own
+      )}
+    </>
+  );
+};
+
 export const AiStep = ({
   ai,
   lines,
@@ -344,15 +498,14 @@ export const AiStep = ({
     />
     {ai === null || ai.ready ? (
       <Connected
+        grasp={
+          ai?.listing.source === "grasp" ? ai.listing.grasp.model.name : null
+        }
         onDone={onDone}
         providers={ai?.listing.providers.map(({ label }) => label) ?? []}
       />
     ) : (
-      <ConnectForm
-        offered={ai.listing.offered}
-        onConnected={onConnected}
-        onDone={onDone}
-      />
+      <Asking listing={ai.listing} onConnected={onConnected} onDone={onDone} />
     )}
   </>
 );

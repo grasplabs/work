@@ -21,6 +21,7 @@ const generated = [
   "**/.grasp/**",
   "apps/core/blueprints/*/files/grasp.config.ts",
   "apps/core/blueprints/*/files/server/schema.ts",
+  "apps/core/blueprints/*/files/server/_generated/**",
   "apps/core/test/fixtures/blueprints/*/files/grasp.config.ts",
   "apps/core/test/fixtures/blueprints/*/files/server/schema.ts",
   // The SDK's connector catalog, from the release's connectors
@@ -36,6 +37,38 @@ const generated = [
 const unboundedTarget =
   "Extend CoreRpcTarget (core) or a boundedRpcTarget (@grasp-os/shared/rpc-target), so every call's arguments are bounded.";
 
+/** Cap'n Web's and workerd's RpcTarget, which core and the frontend never extend. */
+const unboundedTargetPaths = [
+  { name: "capnweb", importNames: ["RpcTarget"], message: unboundedTarget },
+  {
+    name: "cloudflare:workers",
+    importNames: ["RpcTarget"],
+    allowTypeImports: true,
+    message: unboundedTarget,
+  },
+];
+
+/**
+ * The Brain's store and its files: reached only through its contract
+ * (`@grasp-os/brain-next/contract`). Core's entry point alone imports the
+ * store, to register its class.
+ */
+const brainStoreImports = {
+  group: ["@grasp-os/brain-next/store", "**/brain-next/src/**"],
+  message:
+    "Reach the Brain through @grasp-os/brain-next/contract (core's src/brain-next.ts), never its store.",
+};
+
+/**
+ * The Brain's contract, inside core: only src/brain-next.ts holds it, so
+ * the Brain's reader is made there alone, from core's own records.
+ */
+const brainContractImports = {
+  group: ["@grasp-os/brain-next", "@grasp-os/brain-next/contract"],
+  message:
+    "In core, only src/brain-next.ts reaches the Brain: add and recall through its addSource and recallAs.",
+};
+
 export default defineConfig({
   lint: {
     extends: [core, react, tanstack, vitest, shadcn],
@@ -48,18 +81,11 @@ export default defineConfig({
       // (the seal strips types without checking them), and
       // builtin-blueprints.test.ts covers what they do at runtime.
       "apps/core/test/fixtures/blueprints/*/files/**",
-      // The front end of a built-in of spec 8's layout, for the same reason:
-      // they import `@server/_generated/api`, generated from the App's manifest. The page
-      // build type-checks them and lints them against the kit, with the
-      // references the host generated (builtin-blueprints.test.ts builds
-      // them). Its server code and workflows are linted here
-      // (each built-in's own tsconfig.json).
-      "apps/core/blueprints/intake/files/src/**",
-      "apps/core/blueprints/workflow-map/files/src/**",
-      "apps/core/blueprints/kanban-board/files/src/**",
-      "apps/core/blueprints/crm/files/src/**",
-      "apps/core/blueprints/approvals/files/src/**",
-      "apps/core/blueprints/dashboard/files/src/**",
+      // A built-in's pages, which need the route tree and the kit a page
+      // build gives them: the build type-checks them as it does
+      // any App's (builtin-blueprints.test.ts). Its config and server code
+      // are checked here (each built-in's own tsconfig.json).
+      "apps/core/blueprints/*/files/src/**",
     ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
@@ -179,6 +205,15 @@ export default defineConfig({
         rules: { "grasp/no-old-product-name": "error" },
       },
       {
+        // Nothing outside the Brain reaches its store (GRA-1720); the
+        // overrides below that set their own restricted imports repeat it.
+        files: ["apps/**", "packages/**", "scripts/**", "e2e/**"],
+        excludeFiles: ["packages/brain-next/**"],
+        rules: {
+          "no-restricted-imports": ["error", { patterns: [brainStoreImports] }],
+        },
+      },
+      {
         // Workerflow is a generic engine: nothing of Grasp's domain (users,
         // Apps, connect, permissions) may reach it. Grasp imports it, never
         // the other way round.
@@ -209,22 +244,31 @@ export default defineConfig({
           "no-restricted-imports": [
             "error",
             {
-              paths: [
-                {
-                  name: "capnweb",
-                  importNames: ["RpcTarget"],
-                  message: unboundedTarget,
-                },
-                {
-                  name: "cloudflare:workers",
-                  importNames: ["RpcTarget"],
-                  allowTypeImports: true,
-                  message: unboundedTarget,
-                },
-              ],
+              paths: unboundedTargetPaths,
+              patterns: [brainStoreImports, brainContractImports],
             },
           ],
           "grasp/no-unbounded-rpc-target": "error",
+        },
+      },
+      {
+        // Core's entry point registers the Brain's store: its one import.
+        files: ["apps/core/src/index.ts"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            { paths: unboundedTargetPaths, patterns: [brainContractImports] },
+          ],
+        },
+      },
+      {
+        // Core's one way to the Brain: its contract, never its store.
+        files: ["apps/core/src/brain-next.ts"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            { paths: unboundedTargetPaths, patterns: [brainStoreImports] },
+          ],
         },
       },
       {
@@ -257,6 +301,7 @@ export default defineConfig({
                   message: unboundedTarget,
                 },
               ],
+              patterns: [brainStoreImports, brainContractImports],
             },
           ],
         },

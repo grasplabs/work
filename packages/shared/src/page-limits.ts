@@ -1,3 +1,4 @@
+import { isPlainObject } from "./json.ts";
 import { platformLimits } from "./platform-limits.ts";
 import { valueDepth } from "./value-depth.ts";
 
@@ -253,12 +254,6 @@ const unmeasured = Number.POSITIVE_INFINITY;
 /** The bytes of `text` as a JSON string, in UTF-8. */
 const textBytes = (text: string): number =>
   new TextEncoder().encode(JSON.stringify(text)).byteLength;
-
-/** Whether `value` is an object written with braces, and nothing more. */
-const isPlainObject = (value: object): boolean => {
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-};
 
 /** Whether `value` may hold others: an object, but a date or bytes. */
 const isHolder = (value: unknown): value is object =>

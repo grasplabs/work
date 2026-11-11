@@ -4,6 +4,7 @@
  * from its Setup (src/hosting/placement.ts), in its stage's one shared
  * destination. No account is adopted or created for a client.
  */
+import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
 import { newClientIdSchema } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -34,6 +35,12 @@ export const provisionInputSchema = z.object({
    * choose its own premises, and for Grasp Cloud, its data in the EU
    * unless staff untick it. Both fixed once it is provisioned.
    */
+  /**
+   * The onboarding its company starts with: one of the flows staff start
+   * from, all of it unless they choose another. In place before anyone
+   * signs in, and changed on its Flow page since.
+   */
+  onboarding: z.enum(flowPresetNames).default("full"),
   hosting: z.enum(hostingKinds).default("grasp_cloud"),
   jurisdiction: z.enum(jurisdictions).default("eu"),
 });
@@ -104,6 +111,7 @@ export const createClient = async (
         hosting: parsed.hosting,
         jurisdiction: parsed.jurisdiction,
         attioCompanyId: parsed.attioCompanyId ?? null,
+        startingFlow: parsed.onboarding === "full" ? null : parsed.onboarding,
         createdBy: staff.email,
         createdAt: now,
         updatedAt: now,
@@ -115,6 +123,7 @@ export const createClient = async (
       detail: {
         hosting: parsed.hosting,
         jurisdiction: parsed.jurisdiction,
+        onboarding: parsed.onboarding,
         ...(parsed.attioCompanyId === undefined
           ? {}
           : { attioCompany: parsed.attioCompanyId }),

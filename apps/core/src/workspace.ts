@@ -92,6 +92,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { isMessage } from "./agent-messages.ts";
+import { requireAgentReaches } from "./agent-reach.ts";
 import {
   auditAgentCall,
   chatAuthority,
@@ -1650,6 +1651,27 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * A turn of the chat's agent that nobody asked for there and then: what
+   * wakes an agent (a schedule, an event) asks through here, with its own
+   * opening line as the question. As `ask`, but the turn only reads: a
+   * change through a connection is held for the chat's person until they
+   * confirm it, ending with the company's day, and every other write or
+   * side effect of its code is refused (`AgentScope.unattended`). It takes
+   * its caller's word for the chat, as `ask` does; nothing over `/rpc`
+   * reaches it.
+   */
+  async askUnattended(chatId: unknown, question: Question): Promise<Answer> {
+    return await this.#turn(
+      this.#chat(chatId),
+      question,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+  }
+
+  /**
    * Refuses a turn its person may no longer take, or one for a chat that
    * holds all it may.
    */
@@ -1675,7 +1697,8 @@ export class Workspace extends DurableObject<Env> {
     question: Question,
     started?: () => void,
     onText?: (text: string) => unknown,
-    calls?: ToolCall[]
+    calls?: ToolCall[],
+    unattended?: boolean
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
@@ -1711,10 +1734,15 @@ export class Workspace extends DurableObject<Env> {
         throw agentErrors.create("agent.busy");
       }
       await this.#mayTakeTurn(chat.id, personId);
+      // Another of the company's agents answers only those an admin let
+      // it answer, and in a chat app only where it works (agent-reach.ts).
+      await requireAgentReaches(this.env, chat.agentId, personId, via);
       // Before anything is kept: a file it names that the chat hasn't, or
       // that another question carried, refuses the question.
       const files = this.#unsentFiles(chat.id, parsed.data.files ?? []);
-      const scope = this.#scopeOf(chat);
+      // A turn nobody was there for says so in its scope, which every API
+      // of its code reads: it only reads (agent-scope.ts, `unattended`).
+      const scope = this.#scopeOf(chat, unattended);
       // The organization's agent, acting for the chat's person, in this chat:
       // the audit log's actor, and the rules' context (its restricted mode).
       const authority = chatAuthority(scope);
@@ -1855,10 +1883,17 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /** The agent's scope in `chat`: where it is, whose agent, for whom. */
-  #scopeOf(chat: Chat): Omit<AgentScope, "runId"> {
+  #scopeOf(chat: Chat, unattended = false): Omit<AgentScope, "runId"> {
     const { personId, agentId, via } = chat;
     const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-    return { workspaceId, agentId, chatId: chat.id, personId, via };
+    return {
+      workspaceId,
+      agentId,
+      chatId: chat.id,
+      personId,
+      via,
+      ...(unattended ? { unattended: true } : {}),
+    };
   }
 
   /**

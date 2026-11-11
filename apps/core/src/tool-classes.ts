@@ -23,7 +23,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { organizationId } from "./auth/membership-sql.ts";
 import {
+  agentToolClasses,
   appPointers,
   appToolClasses,
   sharedMailboxPointers,
@@ -315,6 +317,43 @@ export const takesIn = async (
 };
 
 /**
+ * Refuses `toolClass` with `connect.class_off` for a person the acting
+ * agent doesn't have it for (agent-reach.ts). Asked after the company's
+ * setting and the app's, so an agent only narrows them. The
+ * organization's own agent has every class as the company has it; any
+ * other agent without a row for the class too, and one whose row can't
+ * be read has it for nobody.
+ */
+const requireAgentHasClass = async (
+  env: Env,
+  authority: Authority,
+  toolClass: CompanyToolClass
+): Promise<void> => {
+  if (
+    authority.subject.type !== "agent" ||
+    authority.subject.agentId === organizationId
+  ) {
+    return;
+  }
+  const row = await drizzle(env.DB)
+    .select({ who: agentToolClasses.who, teams: agentToolClasses.teams })
+    .from(agentToolClasses)
+    .where(
+      and(
+        eq(agentToolClasses.agentId, authority.subject.agentId),
+        eq(agentToolClasses.toolClass, toolClass)
+      )
+    )
+    .get();
+  if (row === undefined || row.who === "asClass") {
+    return;
+  }
+  if (!(await takesIn(env, audienceOf(row) ?? off, authority.onBehalfOf))) {
+    throw connectErrors.create("connect.class_off");
+  }
+};
+
+/**
  * What core signs into the capability of a call it let through: for a read
  * in a company app pointed at within some resources, those resources.
  */
@@ -356,6 +395,21 @@ export const appPointerFor = async (
 };
 
 /**
+ * Refuses a class a turn nobody was there for is never offered: reaching
+ * other people. Such a turn may read, and what it would change of its
+ * person's or the company's is held for its person; a message to someone
+ * else isn't even held, for nobody chose to send it.
+ */
+const requireOfferedUnattended = (
+  toolClass: ToolClass,
+  unattended: boolean
+): void => {
+  if (unattended && toolClass === "reach-others") {
+    throw connectErrors.create("connect.class_off");
+  }
+};
+
+/**
  * Refuses the chat's agent's call of a company app's tool (a Composio
  * one) whose class is off for its person: by the class connect takes the
  * tool to be (`ConnectionOwner.toolClasses`), `connect.class_unknown` for
@@ -368,7 +422,8 @@ const requireAppClassOn = async (
   env: Env,
   authority: Authority,
   owner: ConnectionOwner,
-  action: string
+  action: string,
+  unattended: boolean
 ): Promise<ClassedCall> => {
   const toolClass =
     owner.toolClasses !== undefined && Object.hasOwn(owner.toolClasses, action)
@@ -377,7 +432,9 @@ const requireAppClassOn = async (
   if (toolClass === undefined) {
     throw connectErrors.create("connect.class_unknown");
   }
+  requireOfferedUnattended(toolClass, unattended);
   if (toolClass === "read-company") {
+    await requireAgentHasClass(env, authority, toolClass);
     const pointer = await appPointerFor(env, owner.id, authority.onBehalfOf);
     if (pointer === undefined) {
       throw connectErrors.create("connect.app_not_pointed");
@@ -390,6 +447,7 @@ const requireAppClassOn = async (
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
+  await requireAgentHasClass(env, authority, toolClass);
   return {};
 };
 
@@ -443,7 +501,8 @@ export const requireToolClassOn = async (
   env: Env,
   authority: Authority,
   connection: ConnectionObject,
-  action: string
+  action: string,
+  unattended = false
 ): Promise<ClassedCall> => {
   if (authority.subject.type !== "agent") {
     return {};
@@ -453,7 +512,7 @@ export const requireToolClassOn = async (
     throw connectErrors.create("connect.connection_not_found");
   }
   if (owner.source === "composio") {
-    return await requireAppClassOn(env, authority, owner, action);
+    return await requireAppClassOn(env, authority, owner, action, unattended);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);
   if (toolClass === undefined) {
@@ -462,6 +521,7 @@ export const requireToolClassOn = async (
   if (toolClass === "never") {
     throw connectErrors.create("connect.class_off");
   }
+  requireOfferedUnattended(toolClass, unattended);
   const audience = await audienceNow(
     env,
     inMailbox(owner.provider, action, toolClass)
@@ -476,6 +536,14 @@ export const requireToolClassOn = async (
     !(await takesIn(env, narrowed, authority.onBehalfOf))
   ) {
     throw connectErrors.create("connect.class_off");
+  }
+  // An agent narrows both the class the company checked the call as (a
+  // mail tool in a mailbox is its person's own, `inMailbox`) and the
+  // tool's own class, which its app narrows: off for either is off.
+  const checked = inMailbox(owner.provider, action, toolClass);
+  await requireAgentHasClass(env, authority, checked);
+  if (checked !== toolClass) {
+    await requireAgentHasClass(env, authority, toolClass);
   }
   return {};
 };

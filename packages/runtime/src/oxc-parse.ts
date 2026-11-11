@@ -118,6 +118,116 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 /**
+ * The most syntax nodes an expression nests, one in another, as oxc's
+ * tree has them: the root and every node on the way down to its deepest
+ * leaf, parentheses and optional chains included (they are dropped from
+ * the tree after).
+ *
+ * Everything that reads an expression after the parse walks its tree by
+ * recursion (the check, the lowering and printing, a definition's
+ * evaluation, the compiler's type check), so how deep a tree is decides
+ * how much stack it takes, and the stack differs by where it runs:
+ * workerd's, plain workerd's on-prem, Node's. Without a limit of its own,
+ * an expression nested a few thousand deep was refused only by running
+ * out of stack, at a depth that moved with the runtime, or not refused at
+ * all (`1+1+…+1` parses without recursion, then overflowed the check).
+ * This limit is checked by a loop before any of them runs, so the same
+ * text gets the same answer everywhere.
+ *
+ * A value nested as deep as a value may be (`valueDepth`, 32) is at most
+ * 64 nodes written as object literals, and 7 a level as a definition's
+ * `v.object({ … }).optional().nullable()`: about 220 (each further
+ * modifier at every level is 2 more a level, refused past this). Measured
+ * with no limit, oxc's own parse runs out of stack past about 560 nodes
+ * in a test on workerd 1.20261023 and 1.20261104 (a template in a
+ * template, or parentheses), and past about 440 in Node; the check past
+ * about 2,500.
+ */
+export const expressionMaxDepth = 256;
+
+/** The type of an ESTree node, or undefined for what isn't one. */
+const nodeType = (value: Record<string, unknown>): unknown => value.type;
+
+/**
+ * `value` itself, or, for a node in parentheses or an optional chain,
+ * the expression inside, once every such wrapper is dropped: how many
+ * were, and whether a parenthesis was among them.
+ */
+const unwrapped = (
+  value: unknown
+): { inner: unknown; wrappers: number; inParentheses: boolean } => {
+  let inner = value;
+  let wrappers = 0;
+  let inParentheses = false;
+  while (
+    isObject(inner) &&
+    (nodeType(inner) === "ParenthesizedExpression" ||
+      nodeType(inner) === "ChainExpression") &&
+    isObject(inner.expression)
+  ) {
+    inParentheses ||= nodeType(inner) === "ParenthesizedExpression";
+    wrappers += 1;
+    inner = inner.expression;
+  }
+  return { inner, wrappers, inParentheses };
+};
+
+/** A node, array or plain field still to walk, and how deep it is. */
+interface Pending {
+  readonly holder: Record<string, unknown>;
+  readonly level: number;
+  /** Where it starts, wrappers and all: where a refusal points. */
+  readonly start: unknown;
+}
+
+/**
+ * The tree of `root` without its wrappers (`unwrapped`), each node that
+ * stood in parentheses added to `parenthesized`; or where the first node
+ * nested deeper than `expressionMaxDepth` starts, in the order the source
+ * reads. Walked by a loop, never by recursion, so a tree of any depth
+ * costs no stack.
+ */
+const unwrappedTree = (
+  root: unknown,
+  parenthesized: Set<object>
+): { node: unknown } | { tooDeep: number } => {
+  const pending: Pending[] = [];
+  /** `value` unwrapped, and queued to walk, under a holder `level` deep. */
+  const enter = (value: unknown, level: number): unknown => {
+    const { inner, wrappers, inParentheses } = unwrapped(value);
+    if (!isObject(inner)) {
+      return inner;
+    }
+    if (inParentheses) {
+      parenthesized.add(inner);
+    }
+    // Arrays and plain fields (a regular expression's parts) hold nodes;
+    // only a node is a level.
+    const isNode = typeof nodeType(inner) === "string" && !Array.isArray(inner);
+    pending.push({
+      holder: inner,
+      level: level + wrappers + (isNode ? 1 : 0),
+      start: isObject(value) ? value.start : undefined,
+    });
+    return inner;
+  };
+  const node = enter(root, 0);
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (next.level > expressionMaxDepth) {
+      return { tooDeep: typeof next.start === "number" ? next.start : 0 };
+    }
+    // Queued last to first, so the first is walked first.
+    for (const [key, value] of Object.entries(next.holder).toReversed()) {
+      const inner = enter(value, next.level);
+      if (inner !== value) {
+        Reflect.set(next.holder, key, inner);
+      }
+    }
+  }
+  return { node };
+};
+
+/**
  * `source` as one expression (oxc's `parse_expression`: the whole text,
  * comments around it allowed, `{` an object), or why it doesn't parse:
  * one that runs the parser out of memory or stack doesn't parse either.
@@ -134,37 +244,35 @@ export const parseExpression = (
       offset: source.search(loneSurrogate),
     };
   }
-  // The parse and the tree's decoding, which recurses as deep as the
-  // expression nests: either running out of memory or stack is a text
-  // that doesn't parse, as any parser's would be.
+  // oxc's parse recurses as deep as the expression nests: running it out
+  // of memory or stack, far past `expressionMaxDepth`, is a text that
+  // doesn't parse, as any parser's would be. Its answer is decoded with
+  // no reviver, which doesn't recurse either way.
+  let decoded: unknown;
   try {
     const text = answer("parse_expression", language, source);
     if (text.startsWith('{"error"')) {
       return { ok: false, ...errorOf(text) };
     }
-    const parenthesized = new Set<object>();
-    // Bottom up: each node's children are already unwrapped. A chain ends
-    // where its parentheses close, or where an operator takes it: in
-    // either case what reads it sees where it ends without its node.
-    const { node } = z.object({ node: z.custom<Expression>(isObject) }).parse(
-      JSON.parse(text, (_key, value: unknown) => {
-        if (!isObject(value)) {
-          return value;
-        }
-        if (
-          value.type === "ParenthesizedExpression" &&
-          isObject(value.expression)
-        ) {
-          parenthesized.add(value.expression);
-          return value.expression;
-        }
-        return value.type === "ChainExpression" ? value.expression : value;
-      })
-    );
-    return { ok: true, node, parenthesized };
+    decoded = z
+      .object({ node: z.custom<object>(isObject) })
+      .parse(JSON.parse(text)).node;
   } catch (error) {
     return { ok: false, message: messageOf(error), offset: 0 };
   }
+  const parenthesized = new Set<object>();
+  // A chain ends where its parentheses close, or where an operator takes
+  // it: in either case what reads it sees where it ends without its node.
+  const tree = unwrappedTree(decoded, parenthesized);
+  if ("tooDeep" in tree) {
+    return {
+      ok: false,
+      message: `It nests more than ${expressionMaxDepth} levels deep.`,
+      offset: tree.tooDeep,
+    };
+  }
+  const node = z.custom<Expression>(isObject).parse(tree.node);
+  return { ok: true, node, parenthesized };
 };
 
 /** A comment of a program: a line or a block, its text between its markers. */
