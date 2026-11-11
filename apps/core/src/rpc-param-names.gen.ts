@@ -122,11 +122,12 @@ export const rpcParamNames: ParamNames = {
     "unlink": ["id"],
   },
   "ChatsRpc": {
+    "agents": [],
     "attachFile": ["chatId","file"],
     "cancel": ["chatId"],
     "cited": ["chatId","messageId"],
     "connectionRequests": ["chatId"],
-    "create": ["title"],
+    "create": ["title","agentId"],
     "dataModel": ["chatId","app"],
     "defineDraft": ["chatId","app","operation","preview"],
     "denyConnection": ["chatId","id"],

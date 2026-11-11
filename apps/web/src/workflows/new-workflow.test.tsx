@@ -155,6 +155,7 @@ const fakeCore = () => {
         return {
           id: "new-chat",
           title,
+          agentId: "organization",
           createdAt: "2026-11-03T09:00:00.000Z",
           lastAt: "2026-11-03T09:00:00.000Z",
           running: false,

@@ -17,6 +17,7 @@ const daysBack = (days: number, hour = 9): string =>
 const chat = (title: string, lastAt: string): ChatSummary => ({
   id: title,
   title,
+  agentId: "organization",
   createdAt: daysBack(40),
   lastAt,
   running: false,

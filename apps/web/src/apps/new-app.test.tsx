@@ -50,6 +50,7 @@ const fakeCore = (failing = 0, makeFailing = 0) => {
         return {
           id: `chat-${made}`,
           title: name,
+          agentId: "organization",
           createdAt: "2026-10-22T08:00:00.000Z",
           lastAt: "2026-10-22T08:00:00.000Z",
           running: false,

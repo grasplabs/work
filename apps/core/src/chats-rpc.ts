@@ -19,6 +19,7 @@ import type {
   ChatQuestion,
   ChatSearchHit,
   ChatsApi,
+  ChatAgent,
   ChatSummary,
   ChatUpdate,
   PreviewAt,
@@ -57,7 +58,7 @@ import {
   saveDraftChanges,
 } from "./agent-builds.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
-import { firstAgentId } from "./agents.ts";
+import { firstAgentId, turnAgent } from "./agents.ts";
 import {
   dataModelOf,
   definitionPlan,
@@ -72,6 +73,7 @@ import {
   editableApp,
   hasPages,
 } from "./apps.ts";
+import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { personOf } from "./connections.ts";
@@ -286,22 +288,32 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
   }
 
-  async create(title: string): Promise<ChatSummary> {
+  async agents(): Promise<ChatAgent[]> {
+    return await withPerson(
+      this.#check,
+      async ({ userId }) => await chatAgentsFor(this.#env, userId)
+    );
+  }
+
+  async create(title: string, agentId?: string): Promise<ChatSummary> {
     return await withPerson(this.#check, async (person) => {
       const { userId } = person;
       const parsed = chatTitleSchema.safeParse(title);
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_title");
       }
+      // Only an agent the person may talk to, refused before a chat is made.
+      const agent = await chatAgentOf(this.#env, userId, agentId);
       const chat = await this.#chatsOf(userId).createChat(
         parsed.data,
         userId,
-        chatAgentId,
+        agent,
         actorOf(person)
       );
       return {
         id: chat.id,
         title: chat.title,
+        agentId: chat.agentId,
         createdAt: chat.createdAt.toISOString(),
         lastAt: chat.lastAt.toISOString(),
         running: false,
@@ -319,7 +331,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         person.userId,
         id
       );
-      return kept ?? (await this.#appChat(person, id, name));
+      if (kept !== null) {
+        return kept;
+      }
+      // No new chat with a paused agent: it couldn't answer in it.
+      await turnAgent(this.#env, chatAgentId);
+      return await this.#appChat(person, id, name);
     });
   }
 
@@ -329,6 +346,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }): Promise<ChatSummary & { appId: string }> {
     return await withPerson(this.#check, async (person) => {
       requireBuilder(person);
+      // No App with a chat its paused agent couldn't answer in.
+      await turnAgent(this.#env, chatAgentId);
       // No room for its chat: refused before an App is made, so asking
       // again doesn't leave one behind each time. A chat that fails after
       // all leaves its App, which stays as every App does (`forApp` gives
@@ -360,6 +379,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return {
       id: chat.id,
       title: chat.title,
+      agentId: chat.agentId,
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
       running: false,
@@ -552,10 +572,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         workspaceId: personalWorkspaceId(by.userId),
         chatId: await this.#ownChat(by.userId, chatId),
       };
-      const authority = chatAuthority({
-        agentId: chatAgentId,
-        personId: by.userId,
-      });
+      // The chat's own agent: its restricted mode is kept under it.
+      const { agentId } = await this.#chatsOf(by.userId).chatSummary(
+        scope.chatId,
+        by.userId
+      );
+      const authority = chatAuthority({ agentId, personId: by.userId });
       const unrestricted = async (): Promise<void> => {
         if (await isRestricted(this.#env, authority, chatContext(scope))) {
           throw permissionErrors.create("permission.restricted");

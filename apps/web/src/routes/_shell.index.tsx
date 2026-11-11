@@ -317,6 +317,8 @@ const Chat = () => {
         (page.data.beyond?.id === open ? page.data.beyond : undefined) ?? {
           id: open,
           title: t`Chat`,
+          // Not known until core says: no agent is named for it.
+          agentId: "",
           createdAt: "",
           lastAt: "",
           running: false,
