@@ -111,8 +111,10 @@ interface FunctionCaller {
   readonly refusalsKept?: Set<string>;
 }
 
-/** A visitor as the audit log names them: by their session once signed in. */
-type VisitorActor = Extract<AuditActor, { type: "visitor" }>;
+/** A signed-in visitor as the audit log names them: by their session. */
+type VisitorActor = Extract<AuditActor, { type: "visitor" }> & {
+  readonly sessionId: string;
+};
 
 /**
  * Whose call a refused use's evidence names (`keptUseRefusals`): a
@@ -158,8 +160,9 @@ const writeUseRefusal = async (
 /**
  * How a real call of App `app`'s version `version` keeps the evidence of a
  * use its code asked for that its sealed manifest doesn't allow
- * (function-host.ts, `Invocation.refusedUse`; GRA-279): `app.use.refused`, as
- * the App's server code acting for `principal`, every field core's own.
+ * (function-host.ts, `Invocation.refusedUse`; GRA-279): `app.use.refused`,
+ * naming whose call it was as `UseRefusalContext` says, every field core's
+ * own.
  * The write is the request's own work until it is kept: the host waits for
  * it only so long (`useEvidenceWaitMs`), and one it stopped waiting for
  * still finishes rather than ending with the call. One that can't be kept

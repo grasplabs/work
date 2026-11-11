@@ -569,7 +569,11 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         version,
         principal: "visitor:test",
         email: "test@example.test",
-        actor: { type: "visitor", appId: appIdSchema.parse(app) },
+        actor: {
+          type: "visitor",
+          appId: appIdSchema.parse(app),
+          sessionId: "test",
+        },
         stillAllowed: async () => {
           await Promise.resolve();
         },
@@ -756,8 +760,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       "portal.keep",
       "portal.peek",
     ]);
-    const address = `ana@${domain}`;
-    const ana = await visitor(mail, link, address);
+    const ana = await visitor(mail, link, `ana@${domain}`);
     const session = await env.DB.prepare(
       "SELECT id FROM app_visitor_sessions WHERE app_id = ?"
     )
@@ -806,11 +809,8 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
 
     expect({
       answers,
+      // Who they are by their session alone: no person, no address.
       refused: refused.map(({ actor, detail }) => ({ actor, detail })),
-      // Nothing of who the visitor is beyond their session: no address.
-      withAddress: refused.filter((event) =>
-        JSON.stringify(event).includes(address)
-      ).length,
     }).toStrictEqual({
       answers: {
         looped: [
@@ -830,7 +830,6 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
         tableRefusal("portal.peek", "data.access_denied"),
         tableRefusal("portal.keep", "data.write_denied"),
       ],
-      withAddress: 0,
     });
   });
 
