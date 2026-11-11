@@ -17,42 +17,63 @@ import { termsOf } from "./words.ts";
 // Never BM25: its weights count a word over every row of the index, rows
 // the reader can't read too, so the order of a reader's results would tell
 // them how often a word is in those. A chunk is scored on its own words
-// alone: how many of the question's words it holds; then shorter first,
-// then newer, then by source and place, so the order is the same whatever
-// else is stored.
+// alone: how many of the question's words it holds, as written or by
+// their stem in some language; then how many of those as written, so an
+// exact form ranks above an inflected one; then shorter first, then newer,
+// then by source and place, so the order is the same whatever else is
+// stored. Common words weigh nothing because they are left out of the
+// question (words.ts `termsOf`, a fixed public list), never by counting
+// how common they are in the store.
 //
 // The question never reaches FTS5's query syntax: it is folded and cut
-// into words, each asked for as a quoted string (words.ts `termsOf`).
+// into words, each asked for as a quoted string under our own column
+// names (words.ts `termsOf`).
 
 /**
- * `?1` the question's terms (JSON), `?2` the reader's person, `?3` their
- * groups (JSON), `?4` the limit. Each term is one lookup of the index, and
- * a chunk's score is how many of them found it. Only what the reader may
- * read of current versions is grouped and scored: any other match is
- * dropped as the index finds it, never grouped, counted or sorted. (The
- * index's own lookup of a word still reads its whole posting list, as any
- * word index does.)
+ * The chunks one index (`chunk_words` or `chunk_stems`) finds for each of
+ * the question's terms (its `query`), that the reader may read in a
+ * current version: one row per chunk and term. Any other match is dropped
+ * as the index finds it, never grouped, counted or sorted. (The index's
+ * own lookup of a word still reads its whole posting list, as any word
+ * index does.)
+ */
+const foundIn = (
+  index: "chunk_words" | "chunk_stems",
+  query: string,
+  exact: 0 | 1
+): string => `
+  SELECT chunks.row AS row, asked.key AS term, ${exact} AS exact
+  FROM json_each(?1) AS asked
+  CROSS JOIN ${index}
+  JOIN chunks ON chunks.row = ${index}.rowid
+  JOIN current_versions ON current_versions.version_row = chunks.version_row
+  JOIN source_versions ON source_versions.row = chunks.version_row
+  WHERE ${index} MATCH asked.value ->> '${query}'
+    AND source_versions.reader_set IN (SELECT reader_set FROM readable)`;
+
+/**
+ * `?1` the question's terms (JSON, words.ts `Term`), `?2` the reader's
+ * person, `?3` their groups (JSON), `?4` the limit. A term's stems find
+ * every chunk its exact form does, and more: so `words` counts the terms
+ * a chunk holds in any form, `exact` those it holds as written.
  */
 const recallSql = `
 WITH ${readableSql},
+found AS (${foundIn("chunk_stems", "$.stems", 0)}
+  UNION ALL${foundIn("chunk_words", "$.exact", 1)}
+),
 matched AS (
-  SELECT chunks.row AS row, count(*) AS score
-  FROM json_each(?1) AS asked
-  CROSS JOIN chunk_words
-  JOIN chunks ON chunks.row = chunk_words.rowid
-  JOIN current_versions ON current_versions.version_row = chunks.version_row
-  JOIN source_versions ON source_versions.row = chunks.version_row
-  WHERE chunk_words MATCH asked.value
-    AND source_versions.reader_set IN (SELECT reader_set FROM readable)
-  GROUP BY chunks.row
+  SELECT row, count(DISTINCT term) AS words, sum(exact) AS exact
+  FROM found
+  GROUP BY row
 )
 SELECT source_versions.source AS source, source_versions.version AS version,
   chunks.text AS text
 FROM matched
 JOIN chunks ON chunks.row = matched.row
 JOIN source_versions ON source_versions.row = chunks.version_row
-ORDER BY matched.score DESC, length(chunks.text), source_versions.added_at DESC,
-  source_versions.source, chunks.position
+ORDER BY matched.words DESC, matched.exact DESC, length(chunks.text),
+  source_versions.added_at DESC, source_versions.source, chunks.position
 LIMIT ?4`;
 
 /** What `reader` may read of the chunks holding `question`'s words, best first. */

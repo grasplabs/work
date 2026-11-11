@@ -458,8 +458,10 @@ export interface Brain {
   addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
   /**
    * The chunks of current versions the reader may read that hold the
-   * question's words, best first: those holding more of them, then
-   * shorter, then newer.
+   * question's words in any of their forms, best first: those holding
+   * more of them, then more of them as asked, then shorter, then newer.
+   * The commonest words of English, Dutch, German, French and Spanish
+   * count only in a question of nothing else.
    */
   recall: (request: RecallRequest) => Promise<Recalled>;
   /**
