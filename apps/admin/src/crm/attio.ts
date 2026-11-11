@@ -28,7 +28,11 @@
  * (`GET /notes`). A workspace that renamed or removed an attribute simply
  * shows it as not known.
  */
-import { ApiPathError, apiPath } from "@grasp-os/shared/api-path";
+import {
+  ApiPathError,
+  apiPath,
+  isApiPathSegment,
+} from "@grasp-os/shared/api-path";
 import type { ApiPath } from "@grasp-os/shared/api-path";
 import { z } from "zod";
 
@@ -366,19 +370,6 @@ const record = async <
   return parsed.data;
 };
 
-/** Whether `id` can be a record's: one `apiPath` refuses (`..`) is no record's. */
-const isRecordId = (id: string): boolean => {
-  try {
-    apiPath(id);
-    return true;
-  } catch (error) {
-    if (error instanceof ApiPathError) {
-      return false;
-    }
-    throw error;
-  }
-};
-
 /**
  * The distinct ids a reference attribute points at in `object`, at most
  * `limit`; ids no record can have are dropped first, so they take no place.
@@ -393,7 +384,7 @@ const targets = (
       references
         .filter((each) => each.target_object === object)
         .map((each) => each.target_record_id)
-        .filter(isRecordId)
+        .filter(isApiPathSegment)
     ),
   ].slice(0, limit);
 

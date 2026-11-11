@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ApiPathError, apiPath } from "../src/api-path.ts";
+import { ApiPathError, apiPath, isApiPathSegment } from "../src/api-path.ts";
 
 const base = "https://api.example/client/v4";
 const { host, pathname: basePath } = new URL(base);
@@ -87,9 +87,6 @@ describe(apiPath, () => {
     "a\\b",
     "a b",
     "a%00b",
-    "a\u0000b",
-    "a\tb",
-    "a\nb",
     "@evil.example",
     "user:pass@evil.example",
     ":8443",
@@ -125,6 +122,17 @@ describe(apiPath, () => {
     ["an encoded dot-dot piece before a slash", ["scripts", "%2e%2e/x"]],
     ["a half-encoded dot-dot piece before a backslash", ["scripts", ".%2E\\x"]],
     ["a half-encoded dot-dot piece in the middle", ["scripts", "a/.%2e/b"]],
+    ["dots around a tab", ["scripts", ".\t."]],
+    ["dots around a line feed", ["scripts", ".\n."]],
+    ["dots around a carriage return", ["scripts", ".\r."]],
+    ["an encoded dot-dot split by a tab", ["scripts", "%2\te%2e"]],
+    ["dots around a line feed in the middle", ["scripts", "a/.\n./b"]],
+    ["dot-dot and a trailing space", ["scripts", ".. "]],
+    ["a space and dot-dot", ["scripts", " .."]],
+    ["a tab", ["scripts", "a\tb"]],
+    ["a line feed", ["scripts", "a\nb"]],
+    ["a NUL", ["scripts", "a\u0000b"]],
+    ["a DEL", ["scripts", "a\u007Fb"]],
     ["empty", [""]],
     ["empty at the end", ["accounts", "0123abcd", "scripts", ""]],
     ["empty in the middle", ["accounts", "", "scripts"]],
@@ -157,4 +165,10 @@ describe(apiPath, () => {
       expect(refusalOf(["accounts", value])).not.toContain(value);
     }
   );
+
+  it("says whether a value can be one segment", () => {
+    expect(
+      ["0123abcd", "a/b", "..", ".\t.", ""].map(isApiPathSegment)
+    ).toStrictEqual([true, true, false, false, false]);
+  });
 });

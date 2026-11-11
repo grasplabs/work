@@ -563,7 +563,10 @@ describe("Google Workspace connector events", () => {
         gmailInvoice(2, Date.now())
       );
       const from = internet.sent.length;
+      const warned = vi.spyOn(console, "warn").mockReturnValue();
       await sync([listener(gmail)]);
+      const warnings = warned.mock.calls.flat();
+      warned.mockRestore();
       // Each message the batch asks for, as its path's segments, decoded.
       const asked = internet.sent
         .slice(from)
@@ -594,13 +597,33 @@ describe("Google Workspace connector events", () => {
         each,
       ];
 
-      // A dot piece can't be sent: that message is left out, the others read.
-      expect({ asked, kept: kept.map((event) => event.id) }).toStrictEqual(
+      const dropped = warnings.filter(
+        (warning: unknown) =>
+          z
+            .object({ event: z.literal("events.gmail_ids_dropped") })
+            .safeParse(warning).success
+      );
+
+      // A dot piece can't be sent: that message is left out, counted in a
+      // warning that names no ID, the others read.
+      expect({
+        asked,
+        kept: kept.map((event) => event.id),
+        dropped,
+        namesId: JSON.stringify(warnings).includes(JSON.stringify(id)),
+      }).toStrictEqual(
         refusedSegments.has(id)
-          ? { asked: [message(gmailId(2))], kept: [gmailId(2)] }
+          ? {
+              asked: [message(gmailId(2))],
+              kept: [gmailId(2)],
+              dropped: [{ event: "events.gmail_ids_dropped", count: 1 }],
+              namesId: false,
+            }
           : {
               asked: [message(id), message(gmailId(2))],
               kept: [id, gmailId(2)],
+              dropped: [],
+              namesId: false,
             }
       );
     }

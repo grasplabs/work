@@ -6,12 +6,18 @@
  * but `.` and `..`, so an empty segment, which would turn an item's path
  * into its collection's, is refused, as is a segment with a dot piece:
  * a piece between its `/` or `\` (or the whole segment) that is `.` or
- * `..`, plain or percent-encoded (`%2e`, `.%2E`). So neither a URL parser
- * nor an API or proxy that decodes a path once before routing (`%252e`
- * to `%2e`, `%2F` to `/`) moves up. What comes out is the path a request
- * will have, one segment per argument. An API that decodes a path twice
- * is not covered: a value's `%252e` would reach its router as `.`. The
- * threat model is on GRA-1779.
+ * `..`, plain or percent-encoded (`%2e`, `.%2E`), with or without spaces
+ * at its ends (`.. `). A segment with an ASCII control character
+ * (U+0000 to U+001F, U+007F) is refused too: a URL parser drops tabs and
+ * line breaks (`.\t.` reads as `..`) and trims controls and spaces at a
+ * URL's ends, and no id, name, key or version holds one. So neither a URL
+ * parser nor an API or proxy that decodes a path once before routing
+ * (`%252e` to `%2e`, `%2F` to `/`, `%09` to a tab) moves up. What comes
+ * out is the path a request will have, one segment per argument. Not
+ * covered: an API that decodes a path twice (a value's `%252e` would
+ * reach its router as `.`), a server that reads `;` parameters inside a
+ * segment (`..;x`), and one that folds Unicode lookalike dots (U+2025)
+ * into `..`. The threat model is on GRA-1779.
  */
 
 declare const brand: unique symbol;
@@ -27,8 +33,15 @@ export class ApiPathError extends Error {
 /** Where a segment splits once `%2F` or `%5C` in it is decoded. */
 const separator = /[/\\]/u;
 
-/** A dot piece: `.` or `..`, each dot plain or percent-encoded. */
-const dotPiece = /^(?:\.|%2e){1,2}$/iu;
+/**
+ * A dot piece: `.` or `..`, each dot plain or percent-encoded, with any
+ * spaces at its ends, which a URL parser trims at a URL's end.
+ */
+const dotPiece = /^ *(?:\.|%2e){1,2} *$/iu;
+
+/** An ASCII control character, which a URL parser drops or trims. */
+// oxlint-disable-next-line no-control-regex -- the controls are what it finds
+const control = /[\u0000-\u001F\u007F]/u;
 
 /** Whether a piece of `segment` would move up once it is decoded once. */
 const hasDotPiece = (segment: string): boolean =>
@@ -39,7 +52,7 @@ const origin = "https://api.invalid";
 
 const encoded = (segment: string, index: number): string => {
   try {
-    if (segment !== "" && !hasDotPiece(segment)) {
+    if (segment !== "" && !control.test(segment) && !hasDotPiece(segment)) {
       return encodeURIComponent(segment);
     }
   } catch {
@@ -71,4 +84,17 @@ export const apiPath = (...segments: readonly string[]): ApiPath => {
     throw new ApiPathError("An API path a URL would change is refused.");
   }
   return path;
+};
+
+/** Whether `value` can be one segment of a path `apiPath` makes. */
+export const isApiPathSegment = (value: string): boolean => {
+  try {
+    apiPath(value);
+    return true;
+  } catch (error) {
+    if (error instanceof ApiPathError) {
+      return false;
+    }
+    throw error;
+  }
 };

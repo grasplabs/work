@@ -89,8 +89,8 @@ export const modelsBucketOf = (
 /**
  * The API path of `bucket`'s objects, or of `...below` them, each value
  * one segment. One `apiPath` refuses, in the account id, the bucket's name
- * or below (`.` or `..`, an empty segment), stops the deploy, the value
- * not named.
+ * or below (`.` or `..`, an empty segment), stops the deploy with a
+ * message that names none of them, the bucket's name included.
  */
 const objectsPath = (bucket: ModelsBucket, ...below: string[]): ApiPath => {
   try {
@@ -107,7 +107,7 @@ const objectsPath = (bucket: ModelsBucket, ...below: string[]): ApiPath => {
     if (error instanceof ApiPathError) {
       throw new DeployError(
         "model_files_unreadable",
-        `A model file's path is refused in ${bucket.name}`
+        "A model file's path is refused"
       );
     }
     throw error;
