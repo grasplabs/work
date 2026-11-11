@@ -467,8 +467,10 @@ const scan = (
  * `?1` the model, `?2` the reader's person, `?3` their groups (JSON): the
  * blocks of the reader's groups, with the slots marked removed in each.
  * The reader's sets come first (`CROSS JOIN` keeps SQLite to that order),
- * each looked up in the blocks' index, so a block of another set is never
- * read, whatever SQLite's statistics say.
+ * each looked up in the blocks' index (`INDEXED BY`: SQLite refuses the
+ * statement rather than run it another way), so a block of another set
+ * is never read, whatever SQLite's statistics say: with them, and few
+ * blocks, it chose to scan every block for each set.
  */
 const blocksSql = `
 WITH ${readableSql}
@@ -476,15 +478,17 @@ SELECT vector_blocks.chunks AS chunks, vector_blocks.bits AS bits,
   (SELECT json_group_array(slot) FROM vector_removed
     WHERE vector_removed.block = vector_blocks.id) AS removed
 FROM readable
-CROSS JOIN vector_blocks ON vector_blocks.model = ?1
+CROSS JOIN vector_blocks INDEXED BY vector_blocks_group_idx
+  ON vector_blocks.model = ?1
   AND vector_blocks.reader_set = readable.reader_set`;
 
-/** As `blocksSql`: the tail codes of the reader's groups. */
+/** As `blocksSql`, through the codes' group index: the tail codes of the reader's groups. */
 const tailSql = `
 WITH ${readableSql}
 SELECT vector_codes.chunk AS chunk, vector_codes.bits AS bits
 FROM readable
-CROSS JOIN vector_codes ON vector_codes.model = ?1
+CROSS JOIN vector_codes INDEXED BY vector_codes_group_idx
+  ON vector_codes.model = ?1
   AND vector_codes.reader_set = readable.reader_set
   AND vector_codes.block IS NULL`;
 
