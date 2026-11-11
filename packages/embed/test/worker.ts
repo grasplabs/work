@@ -3,7 +3,7 @@
 // fixtures/ (scripts/make-fixture.py), in their float and int8 forms, and
 // with each integer kernel forced.
 import { Embedder } from "../src/embedder.ts";
-import type { Kernel } from "../src/engine.ts";
+import type { Kernel, RunningKernel } from "../src/engine.ts";
 import type { EmbedModel } from "../src/model-files.ts";
 import deepFiles from "./fixtures/deep/files.json";
 import files from "./fixtures/files.json";
@@ -48,6 +48,12 @@ export class Int8Embedder extends Embedder {
   async tokenize(text: string): Promise<number[]> {
     const { engine } = await this.loaded();
     return [...engine.tokenize(text)];
+  }
+
+  /** Test-only: which integer kernels run. */
+  async kernelInUse(): Promise<RunningKernel> {
+    const { engine } = await this.loaded();
+    return engine.kernel;
   }
 }
 

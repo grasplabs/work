@@ -136,7 +136,8 @@ const hex = (bytes: Uint8Array): string =>
  */
 const customEmbedder = async (
   name: string,
-  files: Record<Which, Uint8Array>
+  files: Record<Which, Uint8Array>,
+  kernel: Kernel = "auto"
 ): Promise<DurableObjectStub<CustomEmbedder>> => {
   const named = async (bytes: Uint8Array) => ({
     sha256: hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))),
@@ -150,8 +151,36 @@ const customEmbedder = async (
   };
   await upload(model, files);
   const stub = env.CUSTOM.getByName(name);
-  await stub.use(model);
+  await stub.use(model, kernel);
   return stub;
+};
+
+/**
+ * The int8 fixture's encoder with one group of 4 weights that feeds a
+ * 16-bit lane of the pair kernel (layer 0's qkv, first panel, output 0,
+ * k 0, 1, 4 and 5) set to 127 each: sum |w| = 508, past the 258 the pair
+ * kernel needs (`pairable`), so its matrices can't run it exactly.
+ */
+const unpairableEncoder = (): Uint8Array => {
+  const bytes = Uint8Array.from(new Uint8Array(encoderInt8));
+  const view = new DataView(bytes.buffer);
+  const word = (i: number): number => view.getUint32(i * 4, true);
+  const [hidden, layers, maxTokens, tables] = [
+    word(headerWord.hidden),
+    word(headerWord.layers),
+    word(headerWord.maxTokens),
+    word(headerWord.tables),
+  ];
+  const qkv =
+    pad16((modelWords + 4 * layers) * 4) +
+    2 * pad16(hidden * 4) +
+    2 * tables * tableBytes(maxTokens);
+  // Panel layout [k/4][2 halves][4 outputs][4 ks]: k 0 and 1 in the first
+  // 4 bytes' first two, k 4 and 5 one k4 step (32 bytes) on.
+  for (const at of [0, 1, 32, 33]) {
+    bytes[qkv + at] = 127;
+  }
+  return bytes;
 };
 
 /** The float fixture's encoder with header word `index` set to `value`. */
@@ -331,6 +360,45 @@ describe("embedder", () => {
       );
       expect(forced).toStrictEqual([auto, auto]);
     }
+  });
+
+  it("says which kernels run, mixed when a matrix can't run the pairs exactly, with the same bits", async () => {
+    const files = {
+      tokenizer: new Uint8Array(tokenizer),
+      tokens: new Uint8Array(tokensInt8),
+    };
+    const [pairs, dotOnly, mixed, mixedDot] = await Promise.all([
+      customEmbedder(
+        "kernel-pairs",
+        { ...files, encoder: new Uint8Array(encoderInt8) },
+        "pairs"
+      ),
+      customEmbedder(
+        "kernel-dot",
+        { ...files, encoder: new Uint8Array(encoderInt8) },
+        "dot"
+      ),
+      customEmbedder(
+        "kernel-mixed",
+        { ...files, encoder: unpairableEncoder() },
+        "pairs"
+      ),
+      customEmbedder(
+        "kernel-mixed-dot",
+        { ...files, encoder: unpairableEncoder() },
+        "dot"
+      ),
+    ]);
+    await expect(
+      Promise.all(
+        [pairs, dotOnly, mixed, mixedDot].map(
+          async (stub) => await stub.kernelInUse()
+        )
+      )
+    ).resolves.toStrictEqual(["pairs", "dot", "mixed", "dot"]);
+    const text = reference.embeddings.at(-1)?.text ?? "";
+    const [a, b] = await Promise.all([mixed.embed(text), mixedDot.embed(text)]);
+    expect(bitsOf(a.vector)).toBe(bitsOf(b.vector));
   });
 
   it("names the model and the build that made each vector", async () => {

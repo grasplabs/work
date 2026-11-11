@@ -35,6 +35,7 @@ from transformers import AutoConfig, ModernBertModel
 
 HD = 64  # the head width the runtime is written for
 EPS = 1e-5  # the runtime's norm epsilon (rust/src/encoder.rs)
+MLM_HEAD = ("head.", "decoder.")  # a masked-LM checkpoint's head, not part of the encoder
 LOCAL, NORM = 1, 2  # a layer's kind: local attention, an attention norm; bits 8 to 15 its rotary table
 SMOOTH = {"qkv": 0.6, "o": 0.0, "ff1": 0.6, "ff2": 0.8}  # per-channel rescaling strength at each linear input
 FLOAT_CHANNELS = 16  # feed-forward channels of the last layer kept in float
@@ -93,15 +94,21 @@ def rope_table(theta: float, max_tokens: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 def load_model(src: Path) -> ModernBertModel:
-    """The float32 model with eager attention, each layer's linear layers sized as the checkpoint's weights are: a
-    model pruned layer by layer (fewer heads or a narrower feed-forward in some layers) loads as it is, where
-    from_pretrained would size every layer by the config."""
-    model = ModernBertModel(AutoConfig.from_pretrained(src, attn_implementation="eager"))
-    # The encoder's weights only: a masked-LM checkpoint's head (head.*, decoder.*) is not part of it. Every encoder
-    # weight must be there (strict below).
-    names = set(model.state_dict())
+    """The float32 model with eager attention, built as the checkpoint is: each layer's linear layers sized as its
+    weights are, and an attention norm on exactly the layers whose weights have one. A model pruned layer by layer
+    (fewer heads or a narrower feed-forward in some layers, or layers cut so that the first kept one has a norm)
+    loads as it is and runs as the exported encoder does, where from_pretrained would size every layer by the config
+    and give only layer 0 no norm."""
+    cfg = AutoConfig.from_pretrained(src, attn_implementation="eager")
+    model = ModernBertModel(cfg)
     state = {k.removeprefix("model."): v.float() for k, v in load_file(src / "model.safetensors").items()}
-    state = {k: v for k, v in state.items() if k in names}
+    # A masked-LM checkpoint's head is not the encoder's; any other key the encoder lacks fails the strict load.
+    state = {k: v for k, v in state.items() if not k.startswith(MLM_HEAD)}
+    for l, layer in enumerate(model.layers):
+        if f"layers.{l}.attn_norm.weight" in state:
+            layer.attn_norm = torch.nn.LayerNorm(cfg.hidden_size, eps=cfg.norm_eps, bias=False)
+        else:
+            layer.attn_norm = torch.nn.Identity()
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear) and f"{name}.weight" in state:
             out, inp = state[f"{name}.weight"].shape
@@ -141,6 +148,11 @@ def check_model(src: Path, cfg) -> None:
     """Refuses a model the runtime would run wrongly without noticing: everything the encoder file doesn't say and
     the runtime assumes (rust/src/encoder.rs). Each layer's widths and norms are read from its weights."""
     assert cfg.model_type == "modernbert", cfg.model_type  # pre-norm layers, rotate-half rotary, GeGLU (value, gate)
+    # Which layers are local, and their rotary bases, come from the config's layer_types, one per kept layer in
+    # order. Without it transformers derives them from each layer's new index (global every n layers), which is
+    # wrong for a model whose layers were cut: so it must be written out, and match the layer count.
+    raw = json.loads((src / "config.json").read_text())
+    assert len(raw.get("layer_types", [])) == cfg.num_hidden_layers, "config.json must list layer_types, one per layer"
     # The head width: 64, which the kernels, the attention scale and the rotary tables are written for. A pruned
     # model drops whole heads, so the config's head width stays the model's.
     head = getattr(cfg, "head_dim", None) or cfg.hidden_size // cfg.num_attention_heads

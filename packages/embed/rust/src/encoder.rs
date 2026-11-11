@@ -242,6 +242,10 @@ impl Model {
     pub fn max_tokens(&self) -> usize {
         self.maxn
     }
+    /// Whether the matrices run the i16 pairs when they are chosen (`pairable` holds for all of them).
+    pub fn pairs_exact(&self) -> bool {
+        self.pairs_exact
+    }
     pub fn rows_buf(&self) -> *mut u8 {
         self.b.rows
     }
