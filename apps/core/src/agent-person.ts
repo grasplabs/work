@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Permission } from "@grasp-os/shared/permissions";
@@ -67,6 +68,12 @@ export const asPerson = async <T>(
           allowed === undefined
             ? []
             : await grantedPermissions(env, chatAuthority(scope));
+        // What an API declares a write is refused in a turn nobody was
+        // there for, here, whatever the write goes on to check: an offer on
+        // a card, a held start, a widget (`AgentScope.unattended`).
+        if (action === "write" && scope.unattended === true) {
+          throw agentErrors.create("agent.unattended");
+        }
         if (allowed !== undefined && !allowed(permissions)) {
           throw readDenied(action);
         }
