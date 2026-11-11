@@ -92,6 +92,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { isMessage } from "./agent-messages.ts";
+import { requireAgentReaches } from "./agent-reach.ts";
 import {
   auditAgentCall,
   chatAuthority,
@@ -1733,6 +1734,9 @@ export class Workspace extends DurableObject<Env> {
         throw agentErrors.create("agent.busy");
       }
       await this.#mayTakeTurn(chat.id, personId);
+      // Another of the company's agents answers only those an admin let
+      // it answer, and in a chat app only where it works (agent-reach.ts).
+      await requireAgentReaches(this.env, chat.agentId, personId, via);
       // Before anything is kept: a file it names that the chat hasn't, or
       // that another question carried, refuses the question.
       const files = this.#unsentFiles(chat.id, parsed.data.files ?? []);
