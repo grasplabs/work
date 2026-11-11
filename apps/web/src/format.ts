@@ -92,6 +92,13 @@ export const formatIsoDayMonth = (iso: string): string =>
   iso === "" ? iso : formatDayMonth(`${iso.slice(0, 10)}T12:00:00Z`);
 
 /** An amount in whole euros, as the page's language writes it, such as "€1,240". */
+/** An amount in US dollars, to the cent: what the model gateway counts spend in. */
+export const formatDollars = (value: number): string =>
+  new Intl.NumberFormat(i18n.locale, {
+    style: "currency",
+    currency: "USD",
+  }).format(value);
+
 export const formatEuro = (value: number): string =>
   new Intl.NumberFormat(i18n.locale, {
     style: "currency",
