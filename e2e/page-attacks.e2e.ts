@@ -552,7 +552,7 @@ test("a page another site opened keeps no handle on that site, so its pages can 
       window.open(url);
     }, address),
   ]);
-  await opened.waitForLoadState();
+  // Not its `load`, which waits for the attack's frame too (`open`).
   const appPage = opened.frameLocator('iframe[title="App"]');
   await expect(
     appPage.getByRole("status", { name: "Nested documents" })

@@ -15,7 +15,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { formatSince } from "../format.ts";
-import { AiKeyBanner } from "./ai-key-banner.tsx";
+import { AiKeyBanner, failingUpFront } from "./ai-key-banner.tsx";
 
 // The banner over every page while one of the organization's AI provider
 // providers fails its calls, from what core's listing says of each one:
@@ -104,6 +104,21 @@ const limiting = {
 const since = formatSince(failingSince);
 
 let root: Root | undefined;
+
+/** Someone of the organization with `role`, signed in. */
+const personWith = (role: Identity["role"]): Identity => ({
+  userId: "user-1",
+  email: "someone@example.com",
+  name: "Someone",
+  teams: [],
+  expiresAt: new Date(Date.now() + minute).toISOString(),
+  role,
+  staff: false,
+});
+
+/** Core not answering a read in time. */
+const unreachable = async (): Promise<AiProvidersListing> =>
+  await Promise.reject(new Error("Grasp can't be reached right now."));
 
 /** What the banner says for `identity`, core listing `listing`. */
 const bannerFor = async (
@@ -225,6 +240,53 @@ describe("the AI key banner", () => {
     );
 
     expect(replaced).toStrictEqual({ said: "", links: [] });
+  });
+
+  it("comes with the page when read before it showed, so nothing moves once the page is up", async () => {
+    const asAdmin = personWith("admin");
+    const failing = await failingUpFront(
+      asAdmin,
+      async () => await Promise.resolve(listingWith(refused))
+    );
+    const host = document.createElement("div");
+    document.body.append(host);
+    const rootRoute = createRootRoute({
+      component: () => (
+        <AiKeyBanner
+          failing={failing}
+          identity={asAdmin}
+          // Core never answers the banner's own read: what shows is what
+          // was read before the page showed.
+          providers={async () => await Promise.withResolvers<never>().promise}
+        />
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory(),
+    });
+    await act(async () => {
+      root = createRoot(host);
+      root.render(
+        <I18nProvider i18n={i18n}>
+          <RouterProvider router={router} />
+        </I18nProvider>
+      );
+      await router.load();
+    });
+
+    expect(host.textContent).toBe(
+      `OpenAI is refusing your key since ${since}.Check or replace it in Settings › AI providers.`
+    );
+  });
+
+  it("is read before the page only for the organization's own admins, and left to the banner when core doesn't answer", async () => {
+    const listing = async () => await Promise.resolve(listingWith(refused));
+
+    expect({
+      member: await failingUpFront(personWith("user"), listing),
+      adminOffline: await failingUpFront(personWith("admin"), unreachable),
+    }).toStrictEqual({ member: [], adminOffline: undefined });
   });
 
   it("says nothing of the organization's own key while its AI runs on Grasp's AI", async () => {

@@ -16,6 +16,8 @@ import { KeyRoundIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { readWithin } from "../core-connection.ts";
+import type { CoreConnection } from "../core-connection.ts";
 import { formatSince } from "../format.ts";
 
 // What the organization's own admins see over every page while one of its
@@ -120,6 +122,31 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
   );
 };
 
+/** The organization's providers as core lists them, read over `core`. */
+export const providersOf =
+  (core: Pick<CoreConnection, "withSession">) =>
+  async (): Promise<AiProvidersListing> =>
+    await readWithin(core, async (session) => await session.aiProviders.list());
+
+/**
+ * The failing providers `identity` is shown, read before the page shows:
+ * none for anyone but the organization's own admins, unread (undefined)
+ * when core doesn't answer in time, which leaves it to the banner.
+ */
+export const failingUpFront = async (
+  identity: Identity,
+  providers: () => Promise<AiProvidersListing>
+): Promise<FailingProvider[] | undefined> => {
+  if (!isMemberAdmin(identity)) {
+    return [];
+  }
+  try {
+    return failingProviders(await providers());
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * A banner over the page for each AI provider whose calls fail,
  * for the organization's own admins; nothing for anyone else, or while
@@ -128,13 +155,21 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
 export const AiKeyBanner = ({
   identity,
   providers,
+  failing: readBefore,
 }: {
   identity: Identity;
   /** The organization's providers as core lists them (`aiProviders.list`). */
   providers: () => Promise<AiProvidersListing>;
+  /**
+   * The failing providers, read before the page showed (`failingUpFront`):
+   * the banner then comes with the page, and never pushes it down under
+   * the person's pointer as it arrives. Without it, read once mounted.
+   */
+  failing?: FailingProvider[];
 }) => {
-  const [failing, setFailing] = useState<FailingProvider[]>([]);
+  const [failing, setFailing] = useState<FailingProvider[]>(readBefore ?? []);
   const shown = isMemberAdmin(identity);
+  const readAlready = readBefore !== undefined;
   useEffect(() => {
     let live = true;
     const read = async () => {
@@ -150,7 +185,9 @@ export const AiKeyBanner = ({
         // Not read just now: the banner stays as it was until the next read.
       }
     };
-    void read();
+    if (!readAlready) {
+      void read();
+    }
     const timer = shown
       ? setInterval(() => {
           void read();
@@ -160,7 +197,7 @@ export const AiKeyBanner = ({
       live = false;
       clearInterval(timer);
     };
-  }, [providers, shown]);
+  }, [providers, readAlready, shown]);
   if (!shown || failing.length === 0) {
     return null;
   }
