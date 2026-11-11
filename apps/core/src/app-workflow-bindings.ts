@@ -116,7 +116,7 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   carries over binds on the authority of whoever makes that one
 //   current, who must have a role in it too.
 // - A version made current before, made current again (a rollback): its
-//   author answered for what it records then, and a version never
+//   author was held then to whatever it changed, and a version never
 //   changes, so nothing was laundered into it since. It binds on the
 //   authority of whoever makes it current again alone, who must have a
 //   role in each workflow it binds, as at its first; its author may have
@@ -413,7 +413,7 @@ export const requireRecordableBindings = async (
 
 /**
  * That `by` may make each of `changes`, and `author` (none on a rollback,
- * whose author answered already), read now, each the version recorded of
+ * whose author was held to it the first time), read now, each the version recorded of
  * its own: a former member binds nothing, and Grasp staff none
  * (`role.forbidden`).
  */
@@ -476,7 +476,7 @@ export const versionBindingChanges = async (
     readonly author: string;
     /**
      * Whether the version was current before (a rollback): its author
-     * answered for what it records then.
+     * was held then to whatever it changed.
      */
     readonly currentBefore: boolean;
     /** What it records unlike its parent: what its author answers for. */
