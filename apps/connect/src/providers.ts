@@ -1,4 +1,5 @@
 import type { AccountLookup } from "@grasp-os/connector-kit/sign-in";
+import { apiPath } from "@grasp-os/shared/api-path";
 import {
   appProviderSchema,
   oauthProviderSchema,
@@ -256,9 +257,11 @@ const microsoft: OAuthProviderConfig = {
   server: "microsoft-365",
   pinned: true,
   isTenant: (tenant) => guidPattern.test(tenant),
+  // The tenant `isTenant` took, as one segment all the same.
   authorizationEndpoint: (tenant) =>
-    `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
-  tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
+    `${microsoftLogin}${apiPath(tenant, "oauth2", "v2.0", "authorize")}`,
+  tokenEndpoint: (tenant) =>
+    `${microsoftLogin}${apiPath(tenant, "oauth2", "v2.0", "token")}`,
   // Those of the classes on by default; a consent asks those of the classes
   // the company turned on (`rightsFor`, GRA-717).
   scopes: microsoftRights(classesOnByDefault),

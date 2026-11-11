@@ -223,6 +223,36 @@ describe("what it refuses", () => {
     expect(microsoft.tokenRequests).toStrictEqual([]);
   });
 
+  it.each(["..", "%2e%2e", "a%2fb", "a/b", "//evil.example/x", "x?y=1", "x#y"])(
+    "asks for the token of a bot whose tenant is set to %j only at that tenant, or nowhere",
+    async (tenant) => {
+      const connect = connectWith({
+        ...microsoft.bot(),
+        TEAMS_BOT_TENANT_ID: tenant,
+      });
+      const response = await connect.channelFetch(
+        "teams",
+        adapterRequest(activities())
+      );
+
+      // Entra knows no such tenant; a dot segment can't be sent at all.
+      expect({
+        answer: response.headers.get(channelHeader),
+        asked: microsoft.tokenPaths.map((path) =>
+          path
+            .split("/")
+            .slice(1)
+            .map((segment) => decodeURIComponent(segment))
+        ),
+        sent: toBotConnector(),
+      }).toStrictEqual({
+        answer: channelAnswer.failed,
+        asked: tenant === ".." ? [] : [[tenant, "oauth2", "v2.0", "token"]],
+        sent: [],
+      });
+    }
+  );
+
   it("refuses a platform it doesn't serve, and anything but a request", async () => {
     const connect = connectForBot();
     const unknown = await connect.channelFetch(

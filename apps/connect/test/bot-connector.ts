@@ -67,6 +67,7 @@ export const fakeBotConnector = () => {
   const issued = new Set<string>();
   const sent: SentRequest[] = [];
   const tokenRequests: URLSearchParams[] = [];
+  const tokenPaths: string[] = [];
   const removed = new Set<string>();
   let failures: Failure[] = [];
   // Entra answers the next token requests with an OK that holds no token.
@@ -81,6 +82,7 @@ export const fakeBotConnector = () => {
       new TextDecoder().decode(await request.arrayBuffer())
     );
     tokenRequests.push(form);
+    tokenPaths.push(url.pathname);
     const valid =
       request.method === "POST" &&
       url.pathname === `/${teamsBot.tenant}/oauth2/v2.0/token` &&
@@ -155,6 +157,7 @@ export const fakeBotConnector = () => {
     sent.length = 0;
     posted.length = 0;
     tokenRequests.length = 0;
+    tokenPaths.length = 0;
     removed.clear();
     failures = [];
     tokenlessAnswers = 0;
@@ -193,6 +196,8 @@ export const fakeBotConnector = () => {
     posted,
     /** The token requests Entra got, as their forms. */
     tokenRequests,
+    /** The paths Entra got them at, as sent. */
+    tokenPaths,
     /** The tokens Entra issued. */
     issued,
     /** A bot of its own, with a secret Entra knows: connect's env vars. */

@@ -367,9 +367,12 @@ export const npmRegistryFake = () => {
     if (request.method !== "GET") {
       return Response.json({ error: "Method not allowed" }, { status: 405 });
     }
+    // The path decoded, as the registry reads it: a scope's `@` and slash
+    // encoded or not, `%40scope%2Fname` and `@scope/name` alike.
+    const path = decodeURIComponent(url.pathname);
     const tarball =
       /^\/(?<name>(?:@[^/]+\/)?[^/]+)\/-\/(?<file>[^/]+)\.tgz$/u.exec(
-        url.pathname
+        path
       )?.groups;
     if (tarball !== undefined) {
       const { name = "", file = "" } = tarball;
@@ -384,7 +387,7 @@ export const npmRegistryFake = () => {
             headers: { "content-type": "application/octet-stream" },
           });
     }
-    const name = decodeURIComponent(url.pathname.slice(1));
+    const name = path.slice(1);
     const versions = packages.get(name);
     const abbreviated = (request.headers.get("accept") ?? "").includes(
       "application/vnd.npm.install-v1+json"

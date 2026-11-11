@@ -1,3 +1,4 @@
+import { apiPath } from "@grasp-os/shared/api-path";
 import {
   exactVersionSchema,
   npmRegistryOrigin,
@@ -29,7 +30,8 @@ import { z } from "zod";
 // integrity hash core asks for. What could go wrong, and what stops it:
 //
 // - Being sent elsewhere. Only https://registry.npmjs.org is asked, at a
-//   path built here from a checked name and version, never from a URL in
+//   path built here from a checked name and version, each segment
+//   encoded (`apiPath`), never from a URL in
 //   the metadata (`dist.tarball`) or anything core sends. Redirects aren't
 //   followed by fetch: one is followed here only to the registry's own
 //   origin, over HTTPS, without credentials in the URL, a few times at
@@ -86,14 +88,22 @@ const redirectStatuses: ReadonlySet<number> = new Set([
   301, 302, 303, 307, 308,
 ]);
 
-/** Where a package's metadata is: a scope's slash encoded, as npm asks. */
-const metadataUrl = (name: string): URL =>
-  new URL(`/${name.replace("/", "%2f")}`, registry);
+/**
+ * Where a package's metadata is: its name, one segment, a scope's `@` and
+ * slash encoded (`/%40scope%2Fname`), as the registry takes it.
+ */
+const metadataUrl = (name: string): URL => new URL(apiPath(name), registry);
 
-/** Where one version's tarball is, as the registry names its tarballs. */
+/**
+ * Where one version's tarball is, as the registry names its tarballs: a
+ * scope and its name each a segment (`/%40scope/name/-/name-1.0.0.tgz`).
+ */
 const tarballUrl = (name: string, version: string): URL => {
   const base = name.slice(name.indexOf("/") + 1);
-  return new URL(`/${name}/-/${base}-${version}.tgz`, registry);
+  return new URL(
+    apiPath(...name.split("/"), "-", `${base}-${version}.tgz`),
+    registry
+  );
 };
 
 /** Whether a redirect leads back to the registry itself, as it was asked. */

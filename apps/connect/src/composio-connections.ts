@@ -1,3 +1,4 @@
+import type { ApiPath } from "@grasp-os/shared/api-path";
 import {
   composioConsentText,
   composioToolName,
@@ -38,7 +39,12 @@ import { z } from "zod";
 
 import { recordEvents, recordEventsIf } from "./audit.ts";
 import { composioEntry, composioTools } from "./catalog.ts";
-import { ComposioError, composioKey, composioRequest } from "./composio.ts";
+import {
+  ComposioError,
+  composioKey,
+  composioPath,
+  composioRequest,
+} from "./composio.ts";
 import {
   auditRefusal,
   connectionEvent,
@@ -156,13 +162,21 @@ const namedSchema = z.object({ id: idSchema, name: z.string().nullish() });
 /** Most things of one kind a marker is looked up for: it names one flow's. */
 const markedMax = 50;
 
-/** The IDs of the items of the list at `path`, those `keep` keeps. */
+/**
+ * The IDs of the items of the list at `path`, asked with `filter`, those
+ * `keep` keeps.
+ */
 const listedIds = async (
   key: string,
-  path: string,
+  path: ApiPath,
+  filter: Readonly<Record<string, string>>,
   keep: (item: z.infer<typeof namedSchema>) => boolean = () => true
 ): Promise<string[]> => {
-  const { items } = await composioRequest(key, { path, schema: listSchema });
+  const { items } = await composioRequest(key, {
+    path,
+    query: { ...filter, limit: String(markedMax) },
+    schema: listSchema,
+  });
   return items.flatMap((item) => {
     const parsed = namedSchema.safeParse(item);
     return parsed.success && keep(parsed.data) ? [parsed.data.id] : [];
@@ -179,28 +193,27 @@ const findMarked = async (
   key: string,
   marker: string
 ): Promise<Target[] | undefined> => {
-  const query = (params: Record<string, string>) =>
-    new URLSearchParams({ ...params, limit: String(markedMax) }).toString();
   const named = ({ name }: z.infer<typeof namedSchema>) => name === marker;
   try {
     const authConfigs = await listedIds(
       key,
-      `/auth_configs?${query({ search: marker })}`,
+      composioPath("auth_configs"),
+      { search: marker },
       named
     );
     const servers = await listedIds(
       key,
-      `/mcp/servers?${query({ name: marker })}`,
+      composioPath("mcp", "servers"),
+      { name: marker },
       named
     );
     const accounts: string[] = [];
     for (const authConfig of authConfigs) {
       accounts.push(
         // oxlint-disable-next-line no-await-in-loop -- one flow has one auth config
-        ...(await listedIds(
-          key,
-          `/connected_accounts?${query({ auth_config_ids: authConfig })}`
-        ))
+        ...(await listedIds(key, composioPath("connected_accounts"), {
+          auth_config_ids: authConfig,
+        }))
       );
     }
     return [
@@ -238,7 +251,7 @@ const deleteAtComposio = async (
       // oxlint-disable-next-line no-await-in-loop -- the server before the account it serves
       await composioRequest(key, {
         method: "DELETE",
-        path: `/${area}/${encodeURIComponent(id)}`,
+        path: composioPath(area, id),
         schema: anyAnswer,
       });
     } catch (error) {
@@ -579,7 +592,7 @@ export const startToolkitConnection = async (
   try {
     const { auth_config: authConfig } = await composioRequest(key, {
       method: "POST",
-      path: "/auth_configs",
+      path: composioPath("auth_configs"),
       body: {
         toolkit: { slug: toolkit },
         auth_config: { type: "use_composio_managed_auth", name: marker },
@@ -593,7 +606,7 @@ export const startToolkitConnection = async (
       .where(thisCleanup);
     const link = await composioRequest(key, {
       method: "POST",
-      path: "/connected_accounts/link",
+      path: composioPath("connected_accounts", "link"),
       body: {
         auth_config_id: authConfig.id,
         user_id: composioUserOf(origin),
@@ -837,7 +850,7 @@ const finishToolkitConnection = async (
       throw connectionErrors.create("connection.provider_unavailable");
     }
     const account = await composioRequest(key, {
-      path: `/connected_accounts/${encodeURIComponent(flow.connectedAccountId)}`,
+      path: composioPath("connected_accounts", flow.connectedAccountId),
       schema: connectedAccountSchema,
     });
     const isThisFlows =
@@ -852,7 +865,7 @@ const finishToolkitConnection = async (
     const tools = composioToolsSchema.parse(JSON.parse(flow.tools));
     const server = await composioRequest(key, {
       method: "POST",
-      path: "/mcp/servers",
+      path: composioPath("mcp", "servers"),
       body: {
         // Its flow's marker: 4 to 30 letters, digits and hyphens.
         name: markerOf(flow.flowId),
@@ -868,7 +881,7 @@ const finishToolkitConnection = async (
       .where(eq(composioCleanups.id, flow.flowId));
     const { connected_account_urls: urls } = await composioRequest(key, {
       method: "POST",
-      path: "/mcp/servers/generate",
+      path: composioPath("mcp", "servers", "generate"),
       body: {
         mcp_server_id: server.id,
         connected_account_ids: [flow.connectedAccountId],
@@ -986,7 +999,7 @@ export const composioAccountStates = async (
       }
       try {
         const { status } = await composioRequest(key, {
-          path: `/connected_accounts/${encodeURIComponent(accountId)}`,
+          path: composioPath("connected_accounts", accountId),
           schema: accountStatusSchema,
         });
         states.set(id, status === "ACTIVE" ? "active" : "stopped");
@@ -1061,7 +1074,7 @@ const setServerTools = async (
 ): Promise<void> => {
   await composioRequest(key, {
     method: "PATCH",
-    path: `/mcp/${encodeURIComponent(serverId)}`,
+    path: composioPath("mcp", serverId),
     body: { allowed_tools: tools.map(composioToolName) },
     schema: z.unknown(),
   });

@@ -1,3 +1,5 @@
+import { apiPath } from "@grasp-os/shared/api-path";
+import type { ApiPath } from "@grasp-os/shared/api-path";
 import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import {
   placeErrors,
@@ -226,19 +228,44 @@ const isItem = (provider: PlacesProvider, id: string): boolean =>
     ? graphIdPattern.test(id)
     : googleIdPattern.test(id);
 
-/** A place's drive at Graph: the admin's OneDrive, or a site's documents. */
-const graphDrive = (place: string): string =>
-  place === oneDrive ? "/v1.0/me/drive" : `/v1.0/sites/${place}/drive`;
+/**
+ * A place's drive at Graph, as a path's segments: the admin's OneDrive, or
+ * a site's documents.
+ */
+const graphDrive = (place: string): readonly string[] =>
+  place === oneDrive
+    ? ["v1.0", "me", "drive"]
+    : ["v1.0", "sites", place, "drive"];
 
-const graphUrl = (path: string, params: Record<string, string>): URL => {
-  const url = new URL(`https://${graphHost}${path}`);
+/**
+ * Graph's search of a drive for `query`, as the path's last segment: in
+ * OData's own `(`, `=` and `'`, as they are sent, which `apiPath` would
+ * encode, with the query encoded inside the quotes (OData quotes a quote by
+ * doubling it). Starting `search(`, it is never a dot segment, and the
+ * encoded query adds no segment, query or fragment.
+ */
+const graphSearch = (query: string): string =>
+  `search(q='${encodeURIComponent(query.replaceAll("'", "''"))}')`;
+
+/**
+ * `path` at Graph with `params`, and `search` (`graphSearch`) after it,
+ * if any.
+ */
+const graphUrl = (
+  path: ApiPath,
+  params: Record<string, string>,
+  search?: string
+): URL => {
+  const url = new URL(
+    `https://${graphHost}${path}${search === undefined ? "" : `/${graphSearch(search)}`}`
+  );
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
   return url;
 };
 
-const googleUrl = (path: string, params: Record<string, string>): URL => {
+const googleUrl = (path: ApiPath, params: Record<string, string>): URL => {
   const url = new URL(`https://${googleHost}${path}`);
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
@@ -319,7 +346,7 @@ const graphPlaces = async (
   const { value } = graphSitesSchema.parse(
     await graph(
       access,
-      graphUrl("/v1.0/sites", {
+      graphUrl(apiPath("v1.0", "sites"), {
         search: "*",
         $select: "id,displayName,name",
         $top: String(placesLimits.placesPerRead),
@@ -347,7 +374,7 @@ const googlePlaces = async (
   const { drives } = googleDrivesSchema.parse(
     await drive(
       access,
-      googleUrl("/drive/v3/drives", {
+      googleUrl(apiPath("drive", "v3", "drives"), {
         pageSize: String(placesLimits.placesPerRead),
         fields: "drives(id,name)",
       }).href
@@ -380,17 +407,20 @@ const graphItems = async (
   { place, folder, query, cursor }: ItemsAsked
 ): Promise<{ items: PlaceItem[]; next: string | null; read: number }> => {
   const base = graphDrive(place);
-  let path = `${base}/root/children`;
+  let path = apiPath(...base, "root", "children");
   if (query !== null) {
-    // OData quotes a quote by doubling it.
-    path = `${base}/root/search(q='${encodeURIComponent(query.replaceAll("'", "''"))}')`;
+    path = apiPath(...base, "root");
   } else if (folder !== null) {
-    path = `${base}/items/${folder}/children`;
+    path = apiPath(...base, "items", folder, "children");
   }
-  const url = graphUrl(path, {
-    $select: "id,name,size,lastModifiedDateTime,file,folder",
-    $top: String(placesLimits.itemsPerRead),
-  });
+  const url = graphUrl(
+    path,
+    {
+      $select: "id,name,size,lastModifiedDateTime,file,folder",
+      $top: String(placesLimits.itemsPerRead),
+    },
+    query ?? undefined
+  );
   if (cursor !== null) {
     url.searchParams.set("$skiptoken", cursor);
   }
@@ -422,7 +452,7 @@ const googleItems = async (
     query === null
       ? `${quoted(folder ?? top)} in parents and trashed = false`
       : `fullText contains ${quoted(query)} and trashed = false`;
-  const url = googleUrl("/drive/v3/files", {
+  const url = googleUrl(apiPath("drive", "v3", "files"), {
     ...(place === myDrive
       ? { corpora: "user" }
       : {
@@ -493,7 +523,10 @@ const graphFile = async (
   id: string
 ): Promise<{ name: string; bytes: Uint8Array }> => {
   const item = graphFileSchema.parse(
-    await graph(access, graphUrl(`${graphDrive(place)}/items/${id}`, {}).href)
+    await graph(
+      access,
+      graphUrl(apiPath(...graphDrive(place), "items", id), {}).href
+    )
   );
   if (item.id !== id) {
     throw placeErrors.create("place.no_item");
@@ -514,7 +547,7 @@ const googleFile = async (
   place: string,
   id: string
 ): Promise<{ name: string; bytes: Uint8Array }> => {
-  const path = `/drive/v3/files/${id}`;
+  const path = apiPath("drive", "v3", "files", id);
   const file = googleFileSchema.parse(
     await drive(
       access,
@@ -538,7 +571,9 @@ const googleFile = async (
   const url =
     exported === undefined
       ? googleUrl(path, { alt: "media", supportsAllDrives: "true" })
-      : googleUrl(`${path}/export`, { mimeType: exported.mimeType });
+      : googleUrl(apiPath("drive", "v3", "files", id, "export"), {
+          mimeType: exported.mimeType,
+        });
   return {
     name: item.name,
     bytes: await driveBytes(access, url.href, uploadMaxBytes),

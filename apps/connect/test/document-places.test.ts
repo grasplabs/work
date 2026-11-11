@@ -522,6 +522,35 @@ describe("a read of a place", () => {
     });
   });
 
+  it.each(["microsoft-documents", "google-documents"] as const)(
+    "of %s sends nothing for a place, folder or file ID that would read as another path",
+    async (provider) => {
+      const connectionId = await connectPlaces(someone("admin"), provider);
+      const place = provider === "microsoft-documents" ? "me" : "my-drive";
+      const sentBefore = internet.sent.length;
+      const ids = [
+        "..",
+        "%2e%2e",
+        "a%2fb",
+        "a/b",
+        "//evil.example/x",
+        "x?y=1",
+        "x#y",
+      ];
+      const refused = await Promise.all(
+        ids.flatMap((id) => [
+          codeOf(items(connectionId, { place: id })),
+          codeOf(items(connectionId, { place, folder: id })),
+          codeOf(file(connectionId, place, id)),
+        ])
+      );
+      expect({
+        refused: [...new Set(refused)],
+        sent: internet.sent.length - sentBefore,
+      }).toStrictEqual({ refused: ["place.no_item"], sent: 0 });
+    }
+  );
+
   it("of a Google folder names Google's own formats as what they are fetched as, and leaves out what isn't in the place", async () => {
     const connectionId = await connectPlaces(
       someone("admin"),

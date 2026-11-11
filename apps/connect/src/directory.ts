@@ -1,3 +1,4 @@
+import { apiPath } from "@grasp-os/shared/api-path";
 import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import {
   directoryErrors,
@@ -55,9 +56,9 @@ import { accessTokenFor } from "./tokens.ts";
 //   must carry that same ID.
 
 const graphHost = "graph.microsoft.com";
-const graphUsersPath = "/v1.0/users";
+const graphUsersPath = apiPath("v1.0", "users");
 const googleHost = "admin.googleapis.com";
-const googleUsersPath = "/admin/directory/v1/users";
+const googleUsersPath = apiPath("admin", "directory", "v1", "users");
 
 /** Each provider's API, sent the token: only on its own host, over HTTPS. */
 const graph = readFromProvider({ name: "Microsoft Graph", hosts: [graphHost] });
@@ -270,7 +271,7 @@ const personUrlOf = (provider: DirectoryProvider, id: string): URL | null => {
       return null;
     }
     const url = new URL(
-      `https://${graphHost}${graphUsersPath}/${id.toLowerCase()}`
+      `https://${graphHost}${apiPath("v1.0", "users", id.toLowerCase())}`
     );
     url.searchParams.set(
       "$select",
@@ -282,7 +283,9 @@ const personUrlOf = (provider: DirectoryProvider, id: string): URL | null => {
   if (!googleIdPattern.test(id)) {
     return null;
   }
-  const url = new URL(`https://${googleHost}${googleUsersPath}/${id}`);
+  const url = new URL(
+    `https://${googleHost}${apiPath("admin", "directory", "v1", "users", id)}`
+  );
   url.searchParams.set("projection", "basic");
   url.searchParams.set("viewType", "admin_view");
   url.searchParams.set(

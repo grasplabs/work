@@ -731,22 +731,37 @@ describe("a directory lookup", () => {
     });
   });
 
-  it("sends nothing for an ID that isn't the provider's, so none names another endpoint", async () => {
-    const connectionId = await connectDirectory(someone("admin"));
-    const sentBefore = internet.sent.length;
-    const answers = await Promise.all(
-      ["../me/messages", "x') or true", `${guid()}/manager`, "me"].map(
-        async (id) => await lookUp(connectionId, id)
-      )
-    );
-    expect({
-      answers,
-      sent: internet.sent.length - sentBefore,
-    }).toStrictEqual({
-      answers: answers.map(() => ({ tenant: acmeTenant, person: null })),
-      sent: 0,
-    });
-  });
+  it.each(["microsoft-directory", "google-directory"] as const)(
+    "of %s sends nothing for an ID that isn't the provider's, so none names another endpoint",
+    async (provider) => {
+      const connectionId = await connectDirectory(someone("admin"), provider);
+      const sentBefore = internet.sent.length;
+      const ids = [
+        "../me/messages",
+        "x') or true",
+        `${guid()}/manager`,
+        "me",
+        "..",
+        "%2e%2e",
+        "a%2fb",
+        "a/b",
+        "//evil.example/x",
+        "x?y=1",
+        "x#y",
+        "1234/..",
+      ];
+      const answers = await Promise.all(
+        ids.map(async (id) => await lookUp(connectionId, id))
+      );
+      expect({
+        answers,
+        sent: internet.sent.length - sentBefore,
+      }).toStrictEqual({
+        answers: ids.map(() => ({ tenant: tenantOf(provider), person: null })),
+        sent: 0,
+      });
+    }
+  );
 
   it("never answers someone else for the ID asked", async () => {
     const connectionId = await connectDirectory(someone("admin"));

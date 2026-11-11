@@ -1,4 +1,5 @@
 import { segmentValuePattern } from "@grasp-os/connector-kit/manifest";
+import { apiPath } from "@grasp-os/shared/api-path";
 import { z } from "zod";
 
 import {
@@ -32,7 +33,7 @@ import type {
 
 const graphHost = "graph.microsoft.com";
 const hosts = [graphHost];
-const v1 = `https://${graphHost}/v1.0`;
+const graphOrigin = `https://${graphHost}`;
 
 /**
  * A mailbox, as the connector's mail tools take it: an address or user
@@ -48,12 +49,15 @@ const isMailbox = (resource: string): boolean =>
 const isDrive = (resource: string): boolean =>
   resource.length <= 256 && /^b![\w=!.-]+$/u.test(resource);
 
-/** The user a source of the account's own reaches: its Entra object ID. */
+/**
+ * The user a source of the account's own reaches: its Entra object ID, as
+ * connect stored it, a segment `apiPath` encodes.
+ */
 const ownUser = ({ connection }: SourceRead): string => {
   if (connection.accountId === null) {
     throw new SourceError("The connection names no account");
   }
-  return encodeURIComponent(connection.accountId);
+  return connection.accountId;
 };
 
 /**
@@ -147,17 +151,21 @@ const mailReceived: EventKind = {
   wholeConnection: true,
   read: async (read): Promise<ReadEvents> => {
     const { source } = read;
-    const mailbox =
-      source.resource === ""
-        ? ownUser(read)
-        : encodeURIComponent(source.resource);
+    const mailbox = source.resource === "" ? ownUser(read) : source.resource;
     const from = (source.readAt ?? source.createdAt).toISOString();
-    const start = `${v1}/users/${mailbox}/mailFolders/inbox/messages/delta?${queryOf(
-      {
-        $select: messageFields,
-        $filter: `receivedDateTime ge ${from}`,
-      }
-    )}`;
+    const path = apiPath(
+      "v1.0",
+      "users",
+      mailbox,
+      "mailFolders",
+      "inbox",
+      "messages",
+      "delta"
+    );
+    const start = `${graphOrigin}${path}?${queryOf({
+      $select: messageFields,
+      $filter: `receivedDateTime ge ${from}`,
+    })}`;
     const { items, cursor, more } = await read.pages(
       graphPage(message),
       source.cursor ?? start
@@ -247,11 +255,12 @@ const fileCreated: EventKind = {
     const { source } = read;
     const drive =
       source.resource === ""
-        ? `users/${ownUser(read)}/drive`
-        : `drives/${encodeURIComponent(source.resource)}`;
+        ? ["users", ownUser(read), "drive"]
+        : ["drives", source.resource];
+    const path = apiPath("v1.0", ...drive, "root", "delta");
     const now = await graphPage(driveItem)(
       read.access,
-      `${v1}/${drive}/root/delta?${queryOf({
+      `${graphOrigin}${path}?${queryOf({
         token: "latest",
         $select: driveItemFields,
       })}`

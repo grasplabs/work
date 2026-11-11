@@ -197,7 +197,7 @@ describe("a package's metadata", () => {
     await registry.publish({ ...leftPad, name: "@acme/pad" });
     await connect.npmMetadata("@acme/pad");
     expect(registry.asked.map(({ path }) => path)).toStrictEqual([
-      "/@acme%2fpad",
+      "/%40acme%2Fpad",
     ]);
     const headers = registry.asked[0]?.headers ?? {};
     // The full packument (npm's abbreviated one has no publication
@@ -232,6 +232,10 @@ describe("a package's metadata", () => {
       "left-pad?x=1",
       "left-pad#x",
       "%2e%2e",
+      "..",
+      "a%2fb",
+      "//evil.example/x",
+      "x#y",
       "Left-Pad",
       "",
       "a".repeat(215),
@@ -430,7 +434,7 @@ describe("redirects", () => {
   it("follows one within the registry", async () => {
     await registry.publish({ ...leftPad, name: "@acme/pad" });
     registry.override(
-      "/@acme%2fpad",
+      "/%40acme%2Fpad",
       () =>
         new Response(null, {
           status: 301,
@@ -448,7 +452,7 @@ describe("redirects", () => {
       ["1.3.0"],
     ]);
     expect(registry.asked.map(({ path }) => path)).toStrictEqual([
-      "/@acme%2fpad",
+      "/%40acme%2Fpad",
       "/@acme%2Fpad",
       "/@acme/pad",
     ]);
@@ -558,7 +562,7 @@ describe("a tarball", () => {
       integrity,
     });
     expect(registry.asked.map(({ path }) => path)).toStrictEqual([
-      "/@acme/pad/-/pad-1.3.0.tgz",
+      "/%40acme/pad/-/pad-1.3.0.tgz",
     ]);
   });
 
@@ -597,6 +601,18 @@ describe("a tarball", () => {
       { name: "left-pad", version: "^1.3.0", integrity },
       { name: "left-pad", version: "latest", integrity },
       { name: "../left-pad", version: "1.3.0", integrity },
+      ...[
+        "..",
+        "%2e%2e",
+        "a%2fb",
+        "a/b",
+        "//evil.example/x",
+        "x?y=1",
+        "x#y",
+      ].flatMap((value) => [
+        { name: value, version: "1.3.0", integrity },
+        { name: "left-pad", version: value, integrity },
+      ]),
       { name: "left-pad", version: "1.3.0", integrity, url: "https://x" },
     ];
     const outcomes = await Promise.all(

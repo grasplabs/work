@@ -1,5 +1,6 @@
 import { addressesOf } from "@grasp-os/connector-google-workspace/mime";
 import { stampHeader } from "@grasp-os/connector-kit/manifest";
+import { apiPath } from "@grasp-os/shared/api-path";
 import { z } from "zod";
 
 import {
@@ -81,8 +82,12 @@ const mailboxOf = ({ source, connection }: SourceRead): string => {
   return mailbox;
 };
 
-const gmail = (mailbox: string, path: string): string =>
-  `https://${gmailHost}/gmail/v1/users/${encodeURIComponent(mailbox)}${path}`;
+/** `segments` of `mailbox` at Gmail, each encoded. */
+const gmailPath = (mailbox: string, ...segments: readonly string[]) =>
+  apiPath("gmail", "v1", "users", mailbox, ...segments);
+
+const gmail = (mailbox: string, segment: string): string =>
+  `https://${gmailHost}${gmailPath(mailbox, segment)}`;
 
 const profileSchema = z.object({ historyId: z.string().min(1) });
 
@@ -221,7 +226,9 @@ const mailEventsOf = async (
       .slice(at, at + messagesPerBatch)
       .map(
         (id, index) =>
-          `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <m${index}>\r\n\r\nGET /gmail/v1/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=${stampHeader}\r\n\r\n`
+          // A path Gmail parses as a URL's: a message ID from its answer
+          // is one segment, or the batch is refused before it is sent.
+          `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <m${index}>\r\n\r\nGET ${gmailPath(mailbox, "messages", id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=${stampHeader}\r\n\r\n`
       )
       .join("")}--${boundary}--`;
     // oxlint-disable-next-line no-await-in-loop -- a batch at a time, each counted
@@ -249,7 +256,7 @@ const mailEventsOf = async (
 
 /** Gmail's history of messages added to `mailbox`'s inbox from `historyId`. */
 const historyFrom = (mailbox: string, historyId: string): string =>
-  `${gmail(mailbox, "/history")}?${queryOf({
+  `${gmail(mailbox, "history")}?${queryOf({
     startHistoryId: historyId,
     historyTypes: "messageAdded",
     labelId: "INBOX",
@@ -331,7 +338,7 @@ const mailReceived: EventKind = {
   prime: async (read): Promise<string> => {
     const mailbox = mailboxOf(read);
     const { historyId } = profileSchema.parse(
-      await google(read.access, gmail(mailbox, "/profile"))
+      await google(read.access, gmail(mailbox, "profile"))
     );
     return historyFrom(mailbox, historyId);
   },
