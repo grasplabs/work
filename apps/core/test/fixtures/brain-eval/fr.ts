@@ -8,7 +8,6 @@ export const frSources: readonly BrainEvalSource[] = [
   {
     key: "fr-conges",
     language: "fr",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Congés au bureau de Lyon
 
@@ -17,7 +16,6 @@ Les salariés du bureau de Lyon ont 25 jours ouvrés de congés payés et 10 jou
   {
     key: "fr-notes-de-frais",
     language: "fr",
-    kind: "handbook",
     readers: { team: "sales" },
     text: `Notes de frais des commerciaux
 
@@ -28,7 +26,6 @@ Les justificatifs sont à envoyer avant le 5 du mois suivant, sinon le rembourse
   {
     key: "fr-salon",
     language: "fr",
-    kind: "meeting",
     readers: { team: "sales" },
     text: `Compte rendu réunion commerciale du 21 octobre
 
@@ -39,7 +36,6 @@ Les justificatifs sont à envoyer avant le 5 du mois suivant, sinon le rembourse
   {
     key: "fr-reclamation",
     language: "fr",
-    kind: "ticket",
     readers: { team: "sales" },
     text: `Réclamation RC-8812 · Jardinerie Les Tilleuls · Clôturée
 
@@ -48,7 +44,6 @@ Le client a reçu 12 parasols au lieu des 20 commandés. Le complément de 8 par
   {
     key: "fr-teletravail",
     language: "fr",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Télétravail en France
 
@@ -57,7 +52,6 @@ Vous pouvez télétravailler jusqu'à deux jours par semaine, après avoir sign�
   {
     key: "fr-mutuelle",
     language: "fr",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Mutuelle d'entreprise
 
@@ -66,7 +60,6 @@ L'adhésion à la mutuelle d'entreprise est obligatoire. L'employeur paie 60 % d
   {
     key: "fr-voiture-camille",
     language: "fr",
-    kind: "email",
     readers: { owner: "camille" },
     text: `De : Service flotte
 À : Camille Laurent
@@ -76,12 +69,11 @@ Bonjour Camille,
 
 Votre nouvelle voiture de fonction sera livrée le 9 décembre au bureau de Lyon. Merci de rendre l'ancienne au garage de Villeurbanne la même semaine.
 
-Cordialement`,
+Bien cordialement`,
   },
   {
     key: "fr-tarifs-2027",
     language: "fr",
-    kind: "email",
     readers: { team: "sales" },
     text: `De : Camille Laurent
 À : équipe commerciale
@@ -96,11 +88,10 @@ Camille`,
   {
     key: "fr-commissions",
     language: "fr",
-    kind: "meeting",
     readers: { team: "hr" },
     text: `Confidentiel · Rémunération des commerciaux
 
-À partir d'avril, la commission variable des commerciaux passe de 5 % à 3,5 % du chiffre d'affaires, compensée en partie par une prime d'équipe. Annonce prévue en mars.`,
+À partir d'avril, la commission variable des commerciaux passe de 5 % à 3,5 % du chiffre d'affaires, compensée en partie par une prime d'équipe. Annonce aux équipes prévue en mars.`,
   },
 ];
 
@@ -151,7 +142,7 @@ export const frQuestions: readonly BrainEvalQuestion[] = [
     language: "fr",
     question: "Quelle indemnité reçoit-on pour une journée de télétravail ?",
     expects: answer(
-      "forms",
+      "words",
       "fr-teletravail",
       "indemnité forfaitaire de 2,50 €"
     ),

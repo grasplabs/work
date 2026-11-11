@@ -23,9 +23,12 @@ import type {
 import {
   askerOf,
   brainEvalSet,
-  mayRead,
+  grepRecall,
+  leaksOf,
+  rankOf,
   setProblems,
 } from "./fixtures/brain-eval/set.ts";
+import type { Returned } from "./fixtures/brain-eval/set.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -35,7 +38,8 @@ import { signedInWithRole } from "./sign-in.ts";
 // its teams, and each source through core's own `addSource` with who may
 // read it. Then it asks every question as its asker through core's
 // `recallAs`, timing each recall, and asks the same of plain text search
-// (`grepRecall`) over the same sources, with the same access. It prints
+// (`grepRecall` in fixtures/brain-eval/set.ts) over the same sources,
+// with the same access. It prints
 // what each returned, one JSON line per question (`BRAIN_EVAL_RESULT`),
 // for the script to score; it fails only when the set is broken or the
 // Brain returned something its asker may not read.
@@ -43,83 +47,6 @@ import { signedInWithRole } from "./sign-in.ts";
 const { sources, questions, version } = brainEvalSet;
 
 const idp = mockIdp();
-
-/** What a recall returned, best first: source keys and their text. */
-interface Returned {
-  keys: (string | undefined)[];
-  texts: string[];
-}
-
-/** A question's words, as `grep -i` would look for them: lowercased, no more. */
-const grepWords = (question: string): string[] => [
-  ...new Set(question.toLowerCase().match(/[\p{L}\p{N}]+/gu)),
-];
-
-/**
- * Plain text search, the baseline: each source `asker` may read, scored by
- * how many of the question's words its raw text holds anywhere, as a
- * case-blind substring; then shorter first, then newer first, as the
- * Brain breaks ties. No folding, no stemming, no index.
- */
-const grepRecall = (asker: BrainEvalPerson, question: string): Returned => {
-  const words = grepWords(question);
-  const ranked = sources
-    .map((source, order) => {
-      const text = source.text.toLowerCase();
-      const score = words.filter((word) => text.includes(word)).length;
-      return { source, order, score };
-    })
-    .filter(({ source, score }) => score > 0 && mayRead(asker, source))
-    .toSorted(
-      (a, b) =>
-        b.score - a.score ||
-        a.source.text.length - b.source.text.length ||
-        b.order - a.order
-    )
-    .slice(0, recallLimit);
-  return {
-    keys: ranked.map(({ source }) => source.key),
-    texts: ranked.map(({ source }) => source.text),
-  };
-};
-
-/** 1-based rank of the question's source among what was returned. */
-const rankOf = (question: BrainEvalQuestion, returned: Returned) => {
-  const { expects } = question;
-  if (expects.kind !== "answer") {
-    return null;
-  }
-  const index = returned.keys.findIndex(
-    (key, at) =>
-      key === expects.source &&
-      (returned.texts[at] ?? "").includes(expects.quote)
-  );
-  return index === -1 ? null : index + 1;
-};
-
-/**
- * What was returned that the asker may not read, or that tells them a
- * hidden answer: each as `unreadable:<key>`, `unknown` or
- * `secret:<text>`.
- */
-const leaksOf = (question: BrainEvalQuestion, returned: Returned) => {
-  const asker = askerOf(question);
-  const byKey = new Map(sources.map((source) => [source.key, source]));
-  const { expects } = question;
-  const secrets = expects.kind === "hidden" ? expects.secrets : [];
-  return [
-    ...returned.keys.flatMap((key) => {
-      const source = key === undefined ? undefined : byKey.get(key);
-      if (source === undefined) {
-        return ["unknown"];
-      }
-      return mayRead(asker, source) ? [] : [`unreadable:${source.key}`];
-    }),
-    ...secrets
-      .filter((secret) => returned.texts.some((text) => text.includes(secret)))
-      .map((secret) => `secret:${secret}`),
-  ];
-};
 
 const sourceOf = (key: string): BrainEvalSource | undefined =>
   sources.find((source) => source.key === key);
@@ -244,8 +171,8 @@ describe("the Brain evaluation", () => {
         keys: recalled.sources.map(({ id }) => keyOfId.get(id)),
         texts: recalled.sources.map(({ text }) => text),
       };
-      const grep = grepRecall(asker, question.question);
-      const brainLeaks = leaksOf(question, brain);
+      const grep = grepRecall(sources, asker, question.question, recallLimit);
+      const brainLeaks = leaksOf(sources, question, brain);
       if (brainLeaks.length > 0) {
         leaking.push(`${question.id}: ${brainLeaks.join(", ")}`);
       }
@@ -265,11 +192,7 @@ describe("the Brain evaluation", () => {
             leaks: brainLeaks,
             ms,
           },
-          grep: {
-            rank: rankOf(question, grep),
-            returned: grep.keys.length,
-            leaks: leaksOf(question, grep),
-          },
+          grep: { rank: rankOf(question, grep), returned: grep.keys.length },
         })}`
       );
     }

@@ -8,7 +8,6 @@ export const esSources: readonly BrainEvalSource[] = [
   {
     key: "es-turnos",
     language: "es",
-    kind: "handbook",
     readers: { team: "planning" },
     text: `Turnos del centro de Valencia
 
@@ -17,7 +16,6 @@ El turno de mañana va de 6:00 a 14:00 y el turno de tarde de 14:00 a 22:00. Los
   {
     key: "es-vacaciones",
     language: "es",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Vacaciones en España
 
@@ -28,7 +26,6 @@ En agosto el almacén de Valencia funciona a medio gas: solo trabaja el turno de
   {
     key: "es-prevencion",
     language: "es",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Prevención de riesgos laborales
 
@@ -37,16 +34,14 @@ En el muelle es obligatorio llevar chaleco reflectante. Las carretillas elevador
   {
     key: "es-impresora",
     language: "es",
-    kind: "ticket",
     readers: { team: "planning" },
     text: `Incidencia VLC-0934 · Muelle 2 · Abierta
 
-La impresora de etiquetas del muelle 2 imprime códigos de barras ilegibles que los lectores no reconocen. Se ha pedido un cabezal nuevo. Mientras tanto, imprimid las etiquetas en la impresora del muelle 1.`,
+La impresora de etiquetas del muelle 2 imprime códigos de barras ilegibles que los lectores de mano no reconocen. Se ha pedido un cabezal nuevo. Mientras tanto, imprimid las etiquetas en la impresora del muelle 1.`,
   },
   {
     key: "es-reunion-murcia",
     language: "es",
-    kind: "meeting",
     readers: { team: "planning" },
     text: `Acta de la reunión del 5 de noviembre
 
@@ -57,7 +52,6 @@ La impresora de etiquetas del muelle 2 imprime códigos de barras ilegibles que 
   {
     key: "es-curso-javier",
     language: "es",
-    kind: "email",
     readers: { owner: "javier" },
     text: `De: Recursos Humanos
 Para: Javier Moreno
@@ -72,7 +66,6 @@ Un saludo`,
   {
     key: "es-recogida-portugal",
     language: "es",
-    kind: "email",
     readers: { team: "planning" },
     text: `De: Javier Moreno
 Para: equipo de planificación
@@ -87,7 +80,6 @@ Javier`,
   {
     key: "es-dietas",
     language: "es",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Dietas y kilometraje
 
@@ -96,11 +88,10 @@ Si usas tu propio vehículo para un viaje de trabajo, se pagan 0,26 € por kil�
   {
     key: "es-turno-tarde",
     language: "es",
-    kind: "meeting",
     readers: { team: "hr" },
     text: `Confidencial · Recursos Humanos, 7 de noviembre
 
-Se estudia cerrar el turno de tarde en Valencia durante el verano. Afectaría a 9 trabajadores temporales, cuyos contratos no se renovarían en junio.`,
+Se está estudiando cerrar el turno de tarde en Valencia durante el verano. Afectaría a 9 trabajadores temporales, cuyos contratos no se renovarían en junio.`,
   },
 ];
 
@@ -163,7 +154,7 @@ export const esQuestions: readonly BrainEvalQuestion[] = [
     id: "es-accidentes",
     language: "es",
     question: "¿A quién comunico un accidente?",
-    expects: answer("words", "es-prevencion", "al responsable de prevención"),
+    expects: answer("forms", "es-prevencion", "al responsable de prevención"),
   },
   {
     id: "es-vlc-0934",
@@ -183,7 +174,7 @@ export const esQuestions: readonly BrainEvalQuestion[] = [
     language: "es",
     question: "¿Se trabaja por la tarde en el almacén durante agosto?",
     expects: answer(
-      "paraphrase",
+      "words",
       "es-vacaciones",
       "solo trabaja el turno de mañana"
     ),

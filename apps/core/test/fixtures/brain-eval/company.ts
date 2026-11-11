@@ -28,7 +28,7 @@
  */
 
 /** Bumped with any change to the company, its sources or its questions. */
-export const brainEvalSetVersion = "2026-11-11.1";
+export const brainEvalSetVersion = "2026-11-11.2";
 
 export const brainEvalLanguages = ["en", "nl", "de", "fr", "es"] as const;
 export type BrainEvalLanguage = (typeof brainEvalLanguages)[number];
@@ -77,13 +77,10 @@ export type BrainEvalReaders =
   | { owner: BrainEvalPerson }
   | "nobody";
 
-export type BrainEvalSourceKind = "handbook" | "email" | "ticket" | "meeting";
-
 export interface BrainEvalSource {
   /** Unique in the set: how questions name the source. */
   key: string;
   language: BrainEvalLanguage;
-  kind: BrainEvalSourceKind;
   readers: BrainEvalReaders;
   text: string;
 }

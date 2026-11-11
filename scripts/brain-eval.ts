@@ -143,13 +143,20 @@ writeFileSync(file, `${JSON.stringify({ ...run, summary }, null, 2)}\n`);
 
 const head = [
   `Brain evaluation · set ${info.set} · ${info.questions} questions over ${info.sources} sources · ${run.identity.target} · ${sha.slice(0, 8)}${run.identity.dirty ? " (uncommitted changes)" : ""}`,
-  `Recall@${resultBudget}: the question's source among the first ${resultBudget} of at most ${info.recallLimit} results; ±: the 95% bootstrap margin over questions. Latency targets (${latencyTargetsMs.p50} ms / ${latencyTargetsMs.p95} ms) are for production; this is not.`,
+  `R@${resultBudget}: the question's source among the first ${resultBudget} of at most ${info.recallLimit} results. Latency targets (${latencyTargetsMs.p50} ms / ${latencyTargetsMs.p95} ms) are for production; this is not.`,
   before === undefined
     ? "No earlier run to compare with."
     : `Compared with ${againstPath} (set ${before.identity.run.set}, ${before.identity.sha.slice(0, 8)}).`,
   "",
 ];
 process.stdout.write(
-  `${head.join("\n")}${report(summary, before === undefined ? null : compareRuns(results, before.results))}\n\nResult: ${file}\n`
+  `${head.join("\n")}${report(
+    summary,
+    before === undefined
+      ? null
+      : compareRuns(results, before.results, {
+          setChanged: before.identity.run.setDigest !== info.setDigest,
+        })
+  )}\n\nResult: ${file}\n`
 );
 process.exit(ok && summary.leaks.length === 0 ? 0 : 1);

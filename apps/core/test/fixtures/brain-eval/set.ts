@@ -63,11 +63,112 @@ export const mayRead = (
 };
 
 /**
- * What is wrong with the set, if anything: keys and IDs unique; every
- * question's source exists; an answer's quote is in its source and in no
- * other, and its asker may read it; a hidden answer's source is one its
- * asker may not read, and its secrets are in it and in nothing else the
- * asker may read.
+ * What a recall returned, best first: each result's source, as the set's
+ * key (`undefined` for a source the set doesn't hold), and its text.
+ */
+export interface Returned {
+  keys: readonly (string | undefined)[];
+  texts: readonly string[];
+}
+
+/**
+ * 1-based rank of the question's source among `returned`, a result that
+ * holds its quote; `null` when it isn't there or the question expects no
+ * source.
+ */
+export const rankOf = (
+  question: BrainEvalQuestion,
+  returned: Returned
+): number | null => {
+  const { expects } = question;
+  if (expects.kind !== "answer") {
+    return null;
+  }
+  const index = returned.keys.findIndex(
+    (key, at) =>
+      key === expects.source &&
+      (returned.texts[at] ?? "").includes(expects.quote)
+  );
+  return index === -1 ? null : index + 1;
+};
+
+/**
+ * What `returned` holds that the asker may not see: a source they may not
+ * read (`unreadable:<key>`), one the set doesn't hold (`unknown`), or a
+ * hidden answer's secret in any text (`secret:<text>`). Any is a leak.
+ */
+export const leaksOf = (
+  sources: readonly BrainEvalSource[],
+  question: BrainEvalQuestion,
+  returned: Returned
+): string[] => {
+  const asker = askerOf(question);
+  const byKey = new Map(sources.map((source) => [source.key, source]));
+  const { expects } = question;
+  const secrets = expects.kind === "hidden" ? expects.secrets : [];
+  return [
+    ...returned.keys.flatMap((key) => {
+      const source = key === undefined ? undefined : byKey.get(key);
+      if (source === undefined) {
+        return ["unknown"];
+      }
+      return mayRead(asker, source) ? [] : [`unreadable:${source.key}`];
+    }),
+    ...secrets
+      .filter((secret) => returned.texts.some((text) => text.includes(secret)))
+      .map((secret) => `secret:${secret}`),
+  ];
+};
+
+/** The words grep looks for: the question's, lowercased, nothing more. */
+const wordPattern = /[\p{L}\p{N}]+/gu;
+
+/**
+ * Plain text search, the baseline, as `grep -i` per word: each source the
+ * asker may read, scored by how many of the question's words its raw
+ * text holds anywhere, as a case-blind substring. So it finds a
+ * question's word inside a longer word of the text for free, a singular
+ * in its plural or a word in a compound ("tankpas" in "tankpassen",
+ * "zuschlag" in "samstagszuschlag"), though not the other way round: on
+ * the `forms` way it already does part of what stemming will. It doesn't
+ * ignore accents ("financiele" is not "financiële"). Ties: shorter first,
+ * then the later in the set, as the Brain breaks them (shorter, then
+ * newer). At most `limit` results.
+ */
+export const grepRecall = (
+  sources: readonly BrainEvalSource[],
+  asker: BrainEvalPerson,
+  question: string,
+  limit: number
+): Returned => {
+  const words = [...new Set(question.toLowerCase().match(wordPattern))];
+  const ranked = sources
+    .map((source, order) => {
+      const text = source.text.toLowerCase();
+      const score = words.filter((word) => text.includes(word)).length;
+      return { source, order, score };
+    })
+    .filter(({ source, score }) => score > 0 && mayRead(asker, source))
+    .toSorted(
+      (a, b) =>
+        b.score - a.score ||
+        a.source.text.length - b.source.text.length ||
+        b.order - a.order
+    )
+    .slice(0, limit);
+  return {
+    keys: ranked.map(({ source }) => source.key),
+    texts: ranked.map(({ source }) => source.text),
+  };
+};
+
+/**
+ * What is wrong with the set, if anything: keys and IDs unique; no two
+ * sources the same length, so a tie on score is broken by length, never
+ * by the Brain's random IDs; every question's source exists; an answer's
+ * quote is in its source and in no other, and its asker may read it; a
+ * hidden answer's source is one its asker may not read, and its secrets
+ * are in it and in nothing else the asker may read.
  */
 export const setProblems = (
   sources: readonly BrainEvalSource[],
@@ -77,6 +178,14 @@ export const setProblems = (
   const byKey = new Map(sources.map((source) => [source.key, source]));
   if (byKey.size !== sources.length) {
     problems.push("Source keys are not unique");
+  }
+  const byLength = Map.groupBy(sources, ({ text }) => text.length);
+  for (const [length, same] of byLength) {
+    if (same.length > 1) {
+      problems.push(
+        `${same.map(({ key }) => key).join(", ")}: all ${length} characters long`
+      );
+    }
   }
   if (new Set(questions.map(({ id }) => id)).size !== questions.length) {
     problems.push("Question IDs are not unique");

@@ -8,18 +8,16 @@ export const deSources: readonly BrainEvalSource[] = [
   {
     key: "de-schichten",
     language: "de",
-    kind: "handbook",
     readers: { team: "planning" },
     text: `Schichtplan Lager Duisburg
 
 Frühschicht von 6:00 bis 14:00 Uhr, Spätschicht von 14:00 bis 22:00 Uhr. Ein Schichttausch ist nur mit Zustimmung des Schichtleiters möglich und muss spätestens 48 Stunden vorher beantragt werden.
 
-Für Arbeit am Samstag gibt es einen Zuschlag von 25 Prozent.`,
+Für Arbeit am Samstag gibt es zusätzlich einen Zuschlag von 25 Prozent.`,
   },
   {
     key: "de-arbeitsschutz",
     language: "de",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Arbeitsschutz im Lager Duisburg
 
@@ -30,18 +28,16 @@ Unfälle meldest du sofort dem Schichtleiter und trägst sie noch in derselben S
   {
     key: "de-wareneingang",
     language: "de",
-    kind: "handbook",
     readers: { team: "planning" },
     text: `Wareneingang Duisburg
 
-Lieferungen nehmen wir werktags zwischen 7:00 und 12:00 Uhr an. Spediteure buchen ihr Zeitfenster vorher im Rampenportal.
+Lieferungen nehmen wir werktags zwischen 7:00 und 12:00 Uhr an. Spediteure buchen ihr Zeitfenster vorher online im Rampenportal.
 
 Beschädigte Paletten werden fotografiert und der Schaden auf dem Lieferschein vermerkt, bevor der Fahrer unterschreibt.`,
   },
   {
     key: "de-rolltor",
     language: "de",
-    kind: "ticket",
     readers: { team: "planning" },
     text: `Störung TK-5531 · Rampe 4 · Offen
 
@@ -50,7 +46,6 @@ Das Rolltor an Rampe 4 schließt nicht mehr vollständig, bei Wind schlägt es g
   {
     key: "de-lagerbesprechung",
     language: "de",
-    kind: "meeting",
     readers: { team: "planning" },
     text: `Protokoll Lagerbesprechung 30. Oktober
 
@@ -61,7 +56,6 @@ Das Rolltor an Rampe 4 schließt nicht mehr vollständig, bei Wind schlägt es g
   {
     key: "de-staplerschein",
     language: "de",
-    kind: "email",
     readers: { owner: "lukas" },
     text: `Von: Personalabteilung
 An: Lukas Becker
@@ -71,12 +65,11 @@ Hallo Lukas,
 
 Ihr Fahrausweis für Gabelstapler läuft am 15. Februar ab. Für die Auffrischung sind Sie am 22. Januar zum Kurs in Oberhausen angemeldet.
 
-Viele Grüße`,
+Mit freundlichen Grüßen`,
   },
   {
     key: "de-betriebsrat",
     language: "de",
-    kind: "meeting",
     readers: { team: "hr" },
     text: `Vertraulich · Gespräch mit dem Betriebsrat, 5. November
 
@@ -85,7 +78,6 @@ Wir prüfen die Einführung von Kurzarbeit im Januar für den Versand in Duisbur
   {
     key: "de-urlaub",
     language: "de",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Urlaub am Standort Duisburg
 
@@ -96,7 +88,6 @@ Vom 1. bis zum 23. Dezember gilt im Lager eine Urlaubssperre, weil dann das Weih
   {
     key: "de-parken",
     language: "de",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Parken und Anfahrt Duisburg
 
@@ -170,7 +161,7 @@ export const deQuestions: readonly BrainEvalQuestion[] = [
   {
     id: "de-dienste-tauschen",
     language: "de",
-    question: "Darf ich mit einem Kollegen die Arbeitszeiten tauschen?",
+    question: "Darf ich mit einem Kollegen die Arbeitszeiten wechseln?",
     expects: answer(
       "paraphrase",
       "de-schichten",
@@ -198,11 +189,7 @@ export const deQuestions: readonly BrainEvalQuestion[] = [
     language: "de",
     asker: "lukas",
     question: "Wann muss ich meinen Staplerführerschein auffrischen?",
-    expects: answer(
-      "paraphrase",
-      "de-staplerschein",
-      "läuft am 15. Februar ab"
-    ),
+    expects: answer("forms", "de-staplerschein", "läuft am 15. Februar ab"),
   },
   {
     id: "de-kantine",

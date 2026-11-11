@@ -8,7 +8,6 @@ export const enSources: readonly BrainEvalSource[] = [
   {
     key: "en-expenses",
     language: "en",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Expense policy
 
@@ -19,7 +18,6 @@ Meals while travelling abroad are reimbursed up to EUR 45 per day. Your cost-cen
   {
     key: "en-laptops",
     language: "en",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Laptops and software
 
@@ -32,29 +30,26 @@ Do not install software yourself; ask for anything that isn't on the approved so
   {
     key: "en-security",
     language: "en",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Information security basics
 
 Report a suspicious email with the Report Phishing button in your mail; never forward it. Never share a one-time code, not even with IT.
 
-Visitors sign in at reception and are accompanied at all times. Lock your screen when you leave your desk and keep a clean desk at the end of the day.`,
+Visitors sign in at reception and are accompanied at all times. Lock your screen each time you leave your desk and keep a clean desk at the end of the day.`,
   },
   {
     key: "en-travel",
     language: "en",
-    kind: "handbook",
     readers: { team: "everyone" },
     text: `Business travel
 
 Book flights through the travel desk at least 14 days before departure. Fly economy class on flights under six hours.
 
-Hotels: up to EUR 150 per night in Europe, and up to EUR 220 per night in London and Paris. Book trains instead of flights for trips under four hours.`,
+Hotels: up to EUR 150 per night in Europe, and up to EUR 220 per night in London and Paris. Take the train instead of flying for trips under four hours.`,
   },
   {
     key: "en-month-end",
     language: "en",
-    kind: "meeting",
     readers: { team: "finance" },
     text: `Finance team meeting, 3 November
 
@@ -65,7 +60,6 @@ Hotels: up to EUR 150 per night in Europe, and up to EUR 220 per night in London
   {
     key: "en-erp-import",
     language: "en",
-    kind: "ticket",
     readers: { team: "planning" },
     text: `INC-40417 · ERP order import · In progress
 
@@ -74,7 +68,6 @@ Orders with more than 250 lines fail to import into the ERP and stay in the erro
   {
     key: "en-credit-facility",
     language: "en",
-    kind: "email",
     readers: { owner: "sophie" },
     text: `From: relationship manager, corporate banking
 To: Sophie Turner
@@ -89,7 +82,6 @@ Kind regards`,
   {
     key: "en-suppliers",
     language: "en",
-    kind: "handbook",
     readers: { team: "finance" },
     text: `New suppliers
 
@@ -98,7 +90,6 @@ Every new supplier is set up with supplier form SUP-01. Bank details are verifie
   {
     key: "en-price-increase",
     language: "en",
-    kind: "meeting",
     readers: { team: "sales" },
     text: `Sales meeting, 28 October
 
@@ -107,7 +98,6 @@ Decided: a price increase of 4.5% on all garden furniture from 1 February. Custo
   {
     key: "en-budget-2027",
     language: "en",
-    kind: "email",
     readers: { team: "finance" },
     text: `From: Sophie Turner
 To: Finance
@@ -234,10 +224,14 @@ export const enQuestions: readonly BrainEvalQuestion[] = [
     ),
   },
   {
-    id: "en-dinner-abroad",
+    id: "en-large-claim-approval",
     language: "en",
-    question: "How much can I spend on dinner on a trip to Spain?",
-    expects: answer("paraphrase", "en-expenses", "up to EUR 45 per day"),
+    question: "Who has to OK it when I spend a lot on a work trip?",
+    expects: answer(
+      "paraphrase",
+      "en-expenses",
+      "also needs the finance director's approval"
+    ),
   },
   {
     id: "en-gym",
