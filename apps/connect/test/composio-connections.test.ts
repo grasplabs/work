@@ -1545,12 +1545,19 @@ const pathAttacks = [
   "x#y",
 ] as const;
 
-/** Dot pieces, plain or encoded, that a parser or a decoding API reads as moves up, so none can be sent. */
+/**
+ * What a parser or a decoding API reads as a move up (dot pieces, plain
+ * or encoded), an empty segment (`//`) or the path's end (`?`, `#`), so
+ * none can be sent.
+ */
 const refusedIds: ReadonlySet<string> = new Set([
   "..",
   "../x",
   "%2e%2e",
   "%2e%2e/x",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
 ]);
 
 /** The areas of Composio's API connect asks. */

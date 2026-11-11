@@ -3,24 +3,26 @@
  * unencoded into a path is read again by the URL parser: `/` adds
  * segments, `?` and `#` end the path, `\` reads as `/`, and `.` and `..`
  * (also as `%2e%2e`) move up. `encodeURIComponent` closes all of these
- * but `.` and `..`, so an empty segment, which would turn an item's path
- * into its collection's, is refused, as is a segment with a dot piece:
- * a piece between its `/`, `\`, `?` or `#` (or the whole segment) that is
- * `.` or `..`, plain or percent-encoded (`%2e`, `.%2E`), with or without
- * spaces at its ends (`.. `). Once decoded, `/` and `\` split a segment
- * and `?` and `#` end the path, so `..?x` reads as `..`. A segment with
- * an ASCII control character (U+0000 to U+001F, U+007F) is refused too:
- * a URL parser drops tabs and line breaks (`.\t.` reads as `..`) and
- * trims controls and spaces at a URL's ends, and no id, name, key or
- * version holds one. So neither a URL parser nor an API or proxy that
- * decodes a path once before routing (`%252e` to `%2e`, `%2F` to `/`,
- * `%3F` to `?`, `%09` to a tab) moves up; the tests hold every value of
- * up to four dots, separators, spaces and tabs to it. What comes
- * out is the path a request will have, one segment per argument. Not
- * covered: an API that decodes a path twice (a value's `%252e` would
- * reach its router as `.`), a server that reads `;` parameters inside a
- * segment (`..;x`), and one that folds Unicode lookalike dots (U+2025)
- * into `..`. The threat model is on GRA-1779.
+ * but `.` and `..`, and an API or proxy that decodes a path once before
+ * routing (`%2F` to `/`, `%3F` to `?`, `%252e` to `%2e`, `%09` to a tab)
+ * opens them again. So a segment is refused when it holds `?` or `#`
+ * (no id, name, key or version does), an ASCII control character
+ * (U+0000 to U+001F, U+007F: a URL parser drops tabs and line breaks, so
+ * `.\t.` reads as `..`, and trims controls and spaces at a URL's end), or
+ * a piece, between its `/` and `\` or the whole segment, that is empty
+ * or `.` or `..`, plain or percent-encoded (`%2e`, `.%2E`), with or
+ * without spaces at its ends (`.. `, ` `): once decoded, an empty piece
+ * turns an item's path into its collection's, and a dot piece moves up.
+ * What comes out is the path a request will have: a URL parser reads
+ * each value back as exactly the one segment it was given, at its place.
+ * Decoded once first, a value with `/` or `\` is several segments (on
+ * purpose for an npm `@scope/name`), but none is empty, `.` or `..`: the
+ * value never moves above its own place and never drops the segments
+ * after it. The tests hold every value of up to four dots, separators,
+ * spaces and tabs to it. Not covered: an API that decodes a path twice
+ * (a value's `%252e` would reach its router as `.`), a server that reads
+ * `;` parameters inside a segment (`..;x`), and one that folds Unicode
+ * lookalike dots (U+2025) into `..`. The threat model is on GRA-1779.
  */
 
 declare const brand: unique symbol;
@@ -33,32 +35,34 @@ export class ApiPathError extends Error {
   override name = "ApiPathError";
 }
 
-/**
- * Where a piece of a segment ends once `%2F`, `%5C`, `%3F` or `%23` in it
- * is decoded: a new segment, or the end of the path.
- */
-const separator = /[/\\?#]/u;
+/** Where a piece of a segment ends once `%2F` or `%5C` in it is decoded. */
+const separator = /[/\\]/u;
 
 /**
- * A dot piece: `.` or `..`, each dot plain or percent-encoded, with any
- * spaces at its ends, which a URL parser trims at a URL's end.
+ * A piece that is empty or `.` or `..` once decoded: each dot plain or
+ * percent-encoded, with any spaces at its ends, which a URL parser trims
+ * at a URL's end.
  */
-const dotPiece = /^ *(?:\.|%2e){1,2} *$/iu;
+const emptyOrDots = /^ *(?:\.|%2e){0,2} *$/iu;
 
-/** An ASCII control character, which a URL parser drops or trims. */
+/**
+ * An ASCII control character, which a URL parser drops or trims, or `?`
+ * or `#`, which end the path once decoded.
+ */
 // oxlint-disable-next-line no-control-regex -- the controls are what it finds
-const control = /[\u0000-\u001F\u007F]/u;
+const refusedCharacter = /[\u0000-\u001F\u007F?#]/u;
 
-/** Whether a piece of `segment` would move up once it is decoded once. */
-const hasDotPiece = (segment: string): boolean =>
-  segment.split(separator).some((piece) => dotPiece.test(piece));
+/** Whether `segment`, decoded once, stays segments that name something. */
+const isSegment = (segment: string): boolean =>
+  !refusedCharacter.test(segment) &&
+  segment.split(separator).every((piece) => !emptyOrDots.test(piece));
 
 /** Any fixed origin: only the path it parses back to is compared. */
 const origin = "https://api.invalid";
 
 const encoded = (segment: string, index: number): string => {
   try {
-    if (segment !== "" && !control.test(segment) && !hasDotPiece(segment)) {
+    if (isSegment(segment)) {
       return encodeURIComponent(segment);
     }
   } catch {
@@ -69,8 +73,8 @@ const encoded = (segment: string, index: number): string => {
 
 /**
  * Whether a URL parser reads `path` back as exactly that path: a backstop
- * for the encoding and the dot-piece rule above, after which no parser
- * should change it.
+ * for the encoding and the rule above, after which no parser should
+ * change it.
  */
 const isApiPath = (path: string): path is ApiPath => {
   const url = new URL(`${origin}${path}`);

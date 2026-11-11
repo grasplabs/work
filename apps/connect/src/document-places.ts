@@ -1,4 +1,4 @@
-import { apiPath, isApiPathSegment } from "@grasp-os/shared/api-path";
+import { apiPath } from "@grasp-os/shared/api-path";
 import type { ApiPath } from "@grasp-os/shared/api-path";
 import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import {
@@ -243,11 +243,29 @@ const graphDrive = (place: string): readonly string[] =>
  * encode `=` (as `%3D`), with the query encoded inside the quotes (OData
  * quotes a quote by doubling it). Starting `search(`, it is never a dot
  * segment, and to a URL parser the encoded query adds no segment, query
- * or fragment. A gateway that decodes a path once would read its `/`
- * again, so only a query `isApiPathSegment` keeps is sent (`graphItems`).
+ * or fragment. A gateway that decodes a path once would read its `/`, `\`,
+ * `?` and `#` again, so the query is first `searchWords`.
  */
 const graphSearch = (query: string): `search(q='${string}')` =>
   `search(q='${encodeURIComponent(query.replaceAll("'", "''"))}')`;
+
+/**
+ * What a URL parser drops, or a gateway that decodes a path once reads as
+ * a new segment or the path's end.
+ */
+// oxlint-disable-next-line no-control-regex -- the controls are what it finds
+const pathMarks = /[/\\?#\u0000-\u001F\u007F]/gu;
+
+/**
+ * What a gateway that decodes a path once can't read as another path:
+ * `query` with `/`, `\`, `?`, `#` and ASCII controls as spaces, which
+ * Graph's full-text search splits words on anyway (`/../x` is a search
+ * for ` .. x`), or `null` when nothing but spaces is left to search for.
+ */
+const searchWords = (query: string): string | null => {
+  const words = query.replaceAll(pathMarks, " ");
+  return words.trim() === "" ? null : words;
+};
 
 /** A drive's root at Graph, searched: its path, then `graphSearch`. */
 type GraphSearchPath = `${ApiPath}/search(q='${string}')`;
@@ -407,13 +425,12 @@ const graphItems = async (
 ): Promise<{ items: PlaceItem[]; next: string | null; read: number }> => {
   const base = graphDrive(place);
   let path: ApiPath | GraphSearchPath = apiPath(...base, "root", "children");
-  if (query !== null && !isApiPathSegment(query)) {
-    // A search that would read as another path once decoded (`/../x`)
-    // finds nothing, and Graph isn't asked.
-    return { items: [], next: null, read: 0 };
-  }
   if (query !== null) {
-    path = `${apiPath(...base, "root")}/${graphSearch(query)}`;
+    const words = searchWords(query);
+    if (words === null) {
+      return { items: [], next: null, read: 0 };
+    }
+    path = `${apiPath(...base, "root")}/${graphSearch(words)}`;
   } else if (folder !== null) {
     path = apiPath(...base, "items", folder, "children");
   }

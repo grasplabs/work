@@ -66,9 +66,12 @@ describe("provisioning a placed client", () => {
       400
     );
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
-    await attemptEnded(attempts.started[0], "errored");
-    errors.mockRestore();
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await attemptEnded(attempts.started[0], "errored");
+    } finally {
+      errors.mockRestore();
+    }
     await expect(operationOf(clientId)).resolves.toMatchObject({
       status: "failed",
       step: "migrations",
@@ -90,19 +93,22 @@ describe("provisioning a placed client", () => {
     const { clientId } = await placedClient(destinationId);
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    // The first attempt asks for a database and is refused; the second
-    // finds it by its name, answered with `..` for its id.
-    cloudflare.failNext(isD1Create, 400);
-    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
-    await attemptEnded(attempts.started[0], "errored");
-    const asked = cloudflare.calls.find(isD1Create);
-    const { name } = z.object({ name: z.string() }).parse(asked?.body);
-    account.d1.push({ uuid: "..", name, jurisdiction: "eu" });
+    try {
+      // The first attempt asks for a database and is refused; the second
+      // finds it by its name, answered with `..` for its id.
+      cloudflare.failNext(isD1Create, 400);
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await attemptEnded(attempts.started[0], "errored");
+      const asked = cloudflare.calls.find(isD1Create);
+      const { name } = z.object({ name: z.string() }).parse(asked?.body);
+      account.d1.push({ uuid: "..", name, jurisdiction: "eu" });
 
-    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await attemptEnded(attempts.started[1], "errored");
+    } finally {
+      errors.mockRestore();
+    }
     const [, attempt] = attempts.started;
-    await attemptEnded(attempt, "errored");
-    errors.mockRestore();
     const journal = await journalOf(
       adminWorkflows.provisionPlacedClient,
       attempt ?? ""
@@ -132,9 +138,12 @@ describe("provisioning a placed client", () => {
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     await emptyStoreSecret(env.DEPLOYER_API_TOKEN, "DEPLOYER_API_TOKEN");
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
-    await attemptEnded(attempts.started[0], "errored");
-    errors.mockRestore();
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      await attemptEnded(attempts.started[0], "errored");
+    } finally {
+      errors.mockRestore();
+    }
 
     const code = "store_secret_missing: DEPLOYER_API_TOKEN";
     const view = await getProvisioning(env, clientId);

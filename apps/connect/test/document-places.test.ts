@@ -502,19 +502,20 @@ describe("a read of a place", () => {
     // A search that climbs out of the drive at a gateway that decodes a
     // path once before routing.
     await items(connectionId, { query: "/../../../users/x" });
-    const outsideDrive = asked()
+    // An ordinary search with a mark a path would end at.
+    await items(connectionId, { query: "Q3 report?" });
+    const graphSearches = asked()
       .filter(({ host }) => host === "graph.microsoft.com")
-      .map(
-        ({ pathname }) =>
-          new URL(`https://graph.invalid${decodeURIComponent(pathname)}`)
-            .pathname
-      )
+      .map(({ pathname }) => decodeURIComponent(pathname));
+    const outsideDrive = graphSearches
+      .map((pathname) => new URL(`https://graph.invalid${pathname}`).pathname)
       .filter((pathname) => !pathname.startsWith("/v1.0/me/drive/"));
     expect({
       refused,
       sentRefused,
       outsideDrive,
       graph: decodeURIComponent(graphSearch?.pathname ?? ""),
+      graphSearches,
       google: googleSearch?.searchParams.get("q"),
       corpora: googleSearch?.searchParams.get("corpora"),
       driveId: googleSearch?.searchParams.get("driveId"),
@@ -528,7 +529,12 @@ describe("a read of a place", () => {
       },
       sentRefused: 0,
       outsideDrive: [],
-      graph: "/v1.0/me/drive/root/search(q='it''s #1/2')",
+      graph: "/v1.0/me/drive/root/search(q='it''s  1 2')",
+      graphSearches: [
+        "/v1.0/me/drive/root/search(q='it''s  1 2')",
+        "/v1.0/me/drive/root/search(q=' .. .. .. users x')",
+        "/v1.0/me/drive/root/search(q='Q3 report ')",
+      ],
       google: "fullText contains 'it\\'s \\\\ here' and trashed = false",
       corpora: "drive",
       driveId: "0AFinance",

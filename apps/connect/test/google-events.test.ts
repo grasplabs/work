@@ -62,12 +62,18 @@ const pathAttacks = [
   "x#y",
 ] as const;
 
-/** Of those, dot pieces, plain or encoded, which no path segment can be. */
+/**
+ * Of those, which no path segment can be: dot pieces, plain or encoded,
+ * empty pieces (`//`), and `?` or `#`.
+ */
 const refusedSegments: ReadonlySet<string> = new Set([
   "..",
   "../x",
   "%2e%2e",
   "%2e%2e/x",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
 ]);
 
 /** Finance's shared drive. */
@@ -564,9 +570,13 @@ describe("Google Workspace connector events", () => {
       );
       const from = internet.sent.length;
       const warned = vi.spyOn(console, "warn").mockReturnValue();
-      await sync([listener(gmail)]);
-      const warnings = warned.mock.calls.flat();
-      warned.mockRestore();
+      let warnings: unknown[];
+      try {
+        await sync([listener(gmail)]);
+        warnings = warned.mock.calls.flat();
+      } finally {
+        warned.mockRestore();
+      }
       // Each message the batch asks for, as its path's segments, decoded.
       const asked = internet.sent
         .slice(from)
@@ -604,8 +614,8 @@ describe("Google Workspace connector events", () => {
             .safeParse(warning).success
       );
 
-      // A dot piece can't be sent: that message is left out, counted in a
-      // warning that names no ID, the others read.
+      // An ID no segment can be isn't sent: that message is left out,
+      // counted in a warning that names no ID, the others read.
       expect({
         asked,
         kept: kept.map((event) => event.id),

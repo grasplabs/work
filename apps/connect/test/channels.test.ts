@@ -87,12 +87,18 @@ const connectForBot = () => connectWith(microsoft.bot());
 const withLogin = new URL(activities());
 withLogin.username = "someone";
 
-/** Tenants no path segment can be: dot pieces, plain or percent-encoded. */
+/**
+ * Tenants no path segment can be: dot pieces, plain or percent-encoded,
+ * empty pieces (`//`), and `?` or `#`.
+ */
 const refusedTenants: ReadonlySet<string> = new Set([
   "..",
   "../x",
   "%2e%2e",
   "%2e%2e/x",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
 ]);
 
 /** Whatever left for the Bot Connector. */
@@ -253,8 +259,8 @@ describe("what it refuses", () => {
         adapterRequest(activities())
       );
 
-      // Entra knows no such tenant; a dot piece, plain or encoded, can't
-      // be sent at all.
+      // Entra knows no such tenant; one no segment can be can't be sent
+      // at all.
       expect({
         answer: response.headers.get(channelHeader),
         asked: microsoft.tokenPaths.map((path) =>

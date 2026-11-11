@@ -49,10 +49,10 @@ export const stop = (code: string, detail?: string): NonRetryableError =>
  * every deploy failure but the few a retry can fix, a secret missing from
  * Secrets Store, a path `apiPath` refused (an answer's value no segment
  * can be, the same every time), and any API refusal but a timeout or a
- * rate limit (`isRefused`). Anything else is retried, as an `Error` saying what it
- * was: a deploy code, `cloudflare_<status>_<codes>`, our own message, or
- * only the name of an error we didn't throw (a parse error can quote what
- * it parsed).
+ * rate limit (`isRefused`). Anything else is retried, as an `Error`
+ * saying what it was: a deploy code, `cloudflare_<status>_<codes>`, our
+ * own message, or only the name of an error we didn't throw (a parse
+ * error can quote what it parsed).
  */
 export const asStepError = (error: unknown): Error => {
   if (error instanceof NonRetryableError) {

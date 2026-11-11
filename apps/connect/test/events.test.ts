@@ -164,12 +164,18 @@ const pathAttacks = [
   "x#y",
 ] as const;
 
-/** Of those, dot pieces, plain or encoded, which no path segment can be. */
+/**
+ * Of those, which no path segment can be: dot pieces, plain or encoded,
+ * empty pieces (`//`), and `?` or `#`.
+ */
 const refusedSegments: ReadonlySet<string> = new Set([
   "..",
   "../x",
   "%2e%2e",
   "%2e%2e/x",
+  "//evil.example/x",
+  "x?y=1",
+  "x#y",
 ]);
 
 /** The audit events of listening and reading, in the order recorded. */
@@ -489,7 +495,8 @@ describe("connector events", () => {
             .map((segment) => decodeURIComponent(segment))
         );
 
-      // A dot piece can't be sent: each source's read fails instead.
+      // A value no segment can be isn't sent: each source's read fails
+      // instead.
       expect(sent).toStrictEqual(
         refusedSegments.has(account)
           ? []

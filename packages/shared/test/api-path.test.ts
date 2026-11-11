@@ -55,11 +55,6 @@ const keptValues = [
   "a%2fb",
   "a/b",
   "@scope/name",
-  "/abs",
-  "//evil.example/x",
-  "https://evil.example/x",
-  "x?y=1",
-  "x#frag",
   "a\\b",
   "a b",
   "a%00b",
@@ -103,6 +98,17 @@ const refusals = [
   ["a line feed", ["scripts", "a\nb"]],
   ["a NUL", ["scripts", "a\u0000b"]],
   ["a DEL", ["scripts", "a\u007Fb"]],
+  ["a query mark", ["scripts", "x?y=1"]],
+  ["a fragment mark", ["scripts", "x#frag"]],
+  ["an empty piece before a slash", ["scripts", "/abs"]],
+  ["empty pieces before a host", ["scripts", "//evil.example/x"]],
+  ["an empty piece in a URL", ["scripts", "https://evil.example/x"]],
+  ["an empty piece at the end", ["scripts", "x/"]],
+  ["an empty piece before a backslash", ["scripts", "\\x"]],
+  ["a piece of spaces at the end", ["scripts", "x/ "]],
+  ["a slash", ["scripts", "/"]],
+  ["a lone query mark", ["accounts", "?", "workers"]],
+  ["a lone fragment mark", ["connected_accounts", "#"]],
   ["empty", [""]],
   ["empty at the end", ["accounts", "0123abcd", "scripts", ""]],
   ["empty in the middle", ["accounts", "", "scripts"]],
@@ -138,6 +144,12 @@ const movingUp = [
   "..%00",
   "..%20",
   "%252e%252e",
+  "?",
+  "#",
+  "x?",
+  "x#",
+  "?x",
+  "a?b",
 ];
 
 /** What a value is built from, for every value of up to four of them. */
@@ -151,6 +163,15 @@ const combined = (length: number): string[] =>
       );
 
 const longest = 4;
+
+/**
+ * How many of `everyCombination` (11,110 values) `apiPath` must accept for
+ * the property test not to pass by refusing everything: 730 are accepted,
+ * those of `.`, `%2e`, `%2E`, `/`, `\`, space and `x` with no `?`, `#` or
+ * tab and no piece empty or of one or two dots; a little below, so a
+ * narrower rule shows here first.
+ */
+const acceptedFloor = 700;
 
 /** Every value up to `longest` pieces long. */
 const everyCombination = Array.from({ length: longest }, (_, index) =>
@@ -172,26 +193,52 @@ const readings = {
     ),
 } as const;
 
+const parent = `${basePath}/parent/`;
+
+/**
+ * Whether `pathname`, read from `apiPath("parent", value, "child")`, keeps
+ * the value at its place: below `parent`, at least one non-empty segment,
+ * then `child` last.
+ */
+const keepsChild = (pathname: string): boolean =>
+  pathname.startsWith(parent) &&
+  pathname.endsWith("/child") &&
+  pathname
+    .slice(parent.length, -"/child".length)
+    .split("/")
+    .some((segment) => segment !== "");
+
+/**
+ * Whether `pathname`, read from `apiPath("parent", value)`, keeps the value
+ * at its place: below `parent`, with a non-empty last segment.
+ */
+const keepsLast = (pathname: string): boolean =>
+  pathname.startsWith(parent) &&
+  pathname.length > parent.length &&
+  !pathname.endsWith("/");
+
 /**
  * How `value` between a parent and a child, or after a parent, reaches a
- * router that reads its path above the parent, if any: `[]` when refused.
+ * router somewhere else than its place (above it, as the parent itself, or
+ * without the child), if it does: `[]` when it stays, or is refused.
  */
 const escapesOf = (value: string): string[] => {
-  const paths: string[] = [];
+  let paths: [string, (pathname: string) => boolean][];
   try {
-    paths.push(apiPath("parent", value, "child"), apiPath("parent", value));
+    paths = [
+      [apiPath("parent", value, "child"), keepsChild],
+      [apiPath("parent", value), keepsLast],
+    ];
   } catch (error) {
     if (error instanceof ApiPathError) {
       return [];
     }
     throw error;
   }
-  return paths.flatMap((path) =>
+  return paths.flatMap(([path, keeps]) =>
     Object.entries(readings).flatMap(([reading, read]) => {
       const { pathname } = new URL(`${base}${read(path)}`);
-      return pathname.startsWith(`${basePath}/parent/`)
-        ? []
-        : [`${reading}: ${path} -> ${pathname}`];
+      return keeps(pathname) ? [] : [`${reading}: ${path} -> ${pathname}`];
     })
   );
 };
@@ -270,9 +317,21 @@ describe(apiPath, () => {
     expect(values.flatMap(escapesOf)).toStrictEqual([]);
   });
 
+  it("accepts enough of the generated values for the property above to hold anything", () => {
+    expect(
+      everyCombination.filter(isApiPathSegment).length
+    ).toBeGreaterThanOrEqual(acceptedFloor);
+    expect(["x", "...", "a b", "x/y"].map(isApiPathSegment)).toStrictEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+  });
+
   it("says whether a value can be one segment", () => {
     expect(
-      ["0123abcd", "a/b", "..", ".\t.", ""].map(isApiPathSegment)
-    ).toStrictEqual([true, true, false, false, false]);
+      ["0123abcd", "a/b", "..", ".\t.", "", "x?"].map(isApiPathSegment)
+    ).toStrictEqual([true, true, false, false, false, false]);
   });
 });

@@ -52,19 +52,26 @@ export const refusedForItsPath = async (
   return false;
 };
 
-/** The values above no segment can be: dot pieces, plain or percent-encoded. */
+/**
+ * The values above no segment can be: dot pieces, plain or
+ * percent-encoded, empty pieces (`//`), and `?` or `#`.
+ */
 const refusedSegments: ReadonlySet<string> = new Set([
   "..",
   "../../other",
   "%2e%2e",
   "%2e%2e/x",
+  "//evil.example/x",
+  "https://evil.example/x",
+  "x?y=1",
+  "x#y",
 ]);
 
 /**
  * What a call with `value` in its path must come to: refused unsent when
- * no segment can be it (`..`, `%2e%2e`, or such pieces an API decoding
- * `%2F` or the path once would climb by), or else sent with `value` as its
- * one segment, decoding back to itself.
+ * no segment can be it (`..`, `%2e%2e`, an empty piece, `?` or `#`, or
+ * what an API decoding `%2F` or the path once would read as such), or
+ * else sent with `value` as its one segment, decoding back to itself.
  */
 export const keptOrRefused = (
   value: string
