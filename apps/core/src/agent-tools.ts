@@ -777,9 +777,9 @@ const definitions = (known: Set<string>) => [
   }),
   tool({
     name: "bindWorkflow",
-    label: "Declare a workflow version's events",
+    label: "Bind a workflow version",
     api: "build",
-    description: `Declares, for the App's workflow permission \`alias\` (added first with \`addPermission\`), the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, exactly as published version \`version\` of workflow \`workflow\` has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them. Use it before binding a version whose events, decisions or listen tasks differ from what the App's current version declares: binding such a version is refused until a version of the App that declares them is current. Then propose the App, and once it is current, bind the version with \`env.workflowBuild.bind\`. ${definitionAnswer}`,
+    description: `Binds published version \`version\` of workflow \`workflow\` under the App's workflow permission \`alias\` (added first with \`addPermission\`), with this draft: declares the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, exactly as that version has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them, and binds the version once the App version this draft becomes is made current, in the same step. Use it for a version whose events, decisions or listen tasks differ from what the App's current version declares, which can't be bound directly. ${definitionAnswer}`,
     parameters: Type.Object(
       {
         app: appParameter,

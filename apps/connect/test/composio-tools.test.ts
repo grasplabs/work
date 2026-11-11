@@ -131,7 +131,11 @@ const owner = "owner-7";
 /** Where a run's call comes from, as core signs it. */
 const runOrigin = {
   permissionId: "permission-hubspot",
-  context: { type: "run" as const, appId: "app-crm", runId: "run-1" },
+  context: {
+    type: "workflowRun" as const,
+    workflowId: "workflow-crm",
+    runId: "run-1",
+  },
 };
 
 /** An answer's output, as the JSON value it holds. */

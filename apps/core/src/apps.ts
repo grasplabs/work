@@ -1,5 +1,6 @@
 import { isPageFile } from "@grasp-os/compiler";
 import {
+  definitionSources,
   definitionText,
   emptyDefinition,
   readDefinition,
@@ -8,6 +9,11 @@ import {
   withExportedFunctions,
 } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
+import {
+  isGeneratedServerFile,
+  isUnderGeneratedServerFolder,
+  ownFiles,
+} from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -57,7 +63,7 @@ import {
   generatedPaths,
   functionIdsOf,
   schemaIdsOf,
-  withDefinitionCode,
+  withGeneratedCode,
 } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { Release } from "./app-releases.ts";
@@ -110,8 +116,9 @@ import { liveStoreSql } from "./store-deletion.ts";
 //
 // - The definition and the code generated from it drift apart: every
 //   version is written through `storedVersion`, which generates its
-//   `grasp.config.ts` and `server/schema.ts` from the definition it is
-//   committed with, whatever the files held, before the tree is hashed;
+//   `grasp.config.ts`, `server/schema.ts` and `server/_generated/` from
+//   the definition it is committed with (and the last from its server
+//   modules too), whatever the files held, before the tree is hashed;
 //   nothing else writes those paths (the agent's `write` refuses them,
 //   app-definition.ts). Generation goes one way: nothing reads a
 //   definition back from code. Applying a version's schema to its store
@@ -372,12 +379,21 @@ interface Size {
   length: number;
 }
 
+/**
+ * `files`' size against an App's limits: what Grasp generates under
+ * `server/_generated/` (app-definition.ts) apart, so an App at its limits
+ * can still be written, whatever its references take.
+ */
 const sizeOf = (files: ReadonlyMap<string, string>): Size => {
+  let count = 0;
   let length = 0;
-  for (const content of files.values()) {
-    length += content.length;
+  for (const [path, content] of files) {
+    if (!isUnderGeneratedServerFolder(path)) {
+      count += 1;
+      length += content.length;
+    }
   }
-  return { files: files.size, length };
+  return { files: count, length };
 };
 
 /** An App's latest version, if it has one, and its files. */
@@ -667,7 +683,10 @@ const exportedPaths = async (
     // commit gives what this one couldn't.
     const build = await withinBuildWait(
       env,
-      async () => await buildAppCode(env, Object.fromEntries(files), app)
+      // Without their copy of `server/_generated/`, as a seal builds
+      // them (app-releases.ts, `sealedSource`): the same build, cached.
+      async () =>
+        await buildAppCode(env, ownFiles(Object.fromEntries(files)), app)
     );
     if (build === "late" || build.functions === undefined) {
       return undefined;
@@ -744,8 +763,9 @@ const exportedFunctionsOf = async (
 
 /**
  * `files` and `definition` as a version stores them, `files` changed in
- * place to hold the config and schema `definition` generates, whatever
- * they held: every version is written through here, so its code is
+ * place to hold what is generated among them (`withGeneratedCode`: the
+ * config, the schema and `server/_generated/`), whatever they held,
+ * before the tree is hashed: every version is written through here, so its code is
  * always its definition's (see the header). `app.too_large` if they are
  * over an App's limits.
  */
@@ -757,7 +777,7 @@ export const storedVersion = async (
   /** The definitions it carries function IDs from (`carriedDefinitions`). */
   previous: readonly AppDefinition[] = []
 ): Promise<StoredVersion> => {
-  withDefinitionCode(files, definition);
+  withGeneratedCode(files, definition);
   const defined = await exportedFunctionsOf(
     env,
     app,
@@ -1028,15 +1048,21 @@ export const applyChanges = (
       files.set(path, content);
     }
   }
-  // The config and schema as the definition generates them, whatever the
-  // changes held of them, before the App's limits are checked on them.
+  // What is generated (the config, the schema and `server/_generated/`)
+  // as the definition and the changed code generate it, whatever the
+  // changes held of it, before the App's limits are checked.
   // Answered as changes too, so a draft saves the files it was checked
   // with.
   const submitted = new Map(
     [...generatedPaths].map((path) => [path, files.get(path)])
   );
-  withDefinitionCode(files, definition);
+  // The App's limits first, which `server/_generated/` doesn't count
+  // toward: nothing past them is read for what it declares.
+  for (const [path, source] of Object.entries(definitionSources(definition))) {
+    files.set(path, source);
+  }
   checkLimits(files, before);
+  withGeneratedCode(files, definition);
   checkPaths(files.keys(), added);
   checkMemory(agentsBefore, files.get(appMemoryPath));
   const generated = [...generatedPaths].flatMap((path): [string, string][] => {
@@ -1077,6 +1103,10 @@ export const commitFiles = async (
     definitionInput === undefined
       ? (previous[0] ?? emptyDefinition(name))
       : givenDefinition(definitionInput);
+  // Imported here, not at the top: bindings reach back into this module.
+  const { requireRecordableBindings } =
+    await import("./app-workflow-bindings.ts");
+  await requireRecordableBindings(env, by, definition, previous[0] ?? null);
   applyChanges(files, input, definition);
   const stored = await storedVersion(env, appId, files, definition, previous);
   if (sameVersion(stored, latest)) {
@@ -1267,7 +1297,10 @@ export const draftOverLatest = async (
       baseRow === undefined
         ? new Map<string, string>()
         : await readTree(env, app, baseRow.tree);
+    // What Grasp generates is generated again as the draft is committed
+    // (`storedVersion`): never a clash of its own.
     const clashes = Object.entries(changes).flatMap(([path, content]) =>
+      !isGeneratedServerFile(path) &&
       before.get(path) !== files.get(path) &&
       (content ?? undefined) !== files.get(path)
         ? [changedSince(path)]
@@ -1333,13 +1366,13 @@ export const proposeDraft = async (
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const latest =
     parent === null ? undefined : await findVersion(env, appId, parent);
-  const stored = await storedVersion(
-    env,
-    appId,
-    files,
-    definition ?? emptyDefinition(name),
-    await carriedDefinitions(env, appId, latest)
-  );
+  const carried = await carriedDefinitions(env, appId, latest);
+  const proposed = definition ?? emptyDefinition(name);
+  // Imported here, not at the top: bindings reach back into this module.
+  const { requireRecordableBindings } =
+    await import("./app-workflow-bindings.ts");
+  await requireRecordableBindings(env, by, proposed, carried[0] ?? null);
+  const stored = await storedVersion(env, appId, files, proposed, carried);
   if (sameVersion(stored, latest)) {
     throw appErrors.create("app.nothing_to_commit");
   }
@@ -1653,7 +1686,8 @@ export const makeCurrent = async (
 ): Promise<App> => {
   const found = await appFor(env, by, app, "builder");
   const appId = found.id;
-  const { version: number, approved } = await findVersion(env, appId, version);
+  const row = await findVersion(env, appId, version);
+  const { version: number, approved } = row;
   if (found.currentVersion === number) {
     return found;
   }
@@ -1675,6 +1709,13 @@ export const makeCurrent = async (
     await import("./app-schema.ts");
   const { boundFunctionsServedSql, requireBoundFunctionsServed } =
     await import("./app-function-bindings.ts");
+  const {
+    bindableSql,
+    bindingChangeStatements,
+    ownWorkflowBindings,
+    tellBindingChanged,
+    versionBindingChanges,
+  } = await import("./app-workflow-bindings.ts");
   const release = await readBackRelease(env, appId, number);
   const previous = found.currentVersion;
   // No workflow bound to one of the App's functions loses it, or finds it
@@ -1686,6 +1727,40 @@ export const makeCurrent = async (
     previous,
     release
   );
+  // What the version binds of its workflows, as its release sealed it,
+  // checked now and bound in the same batch (app-workflow-bindings.ts).
+  // The bindings the version records of its own, which its author
+  // answers for: never those it carries over from its parent.
+  const { definition: defined } = await readStored(row);
+  const parentDefinition =
+    row.parent === null
+      ? null
+      : await readStored(await findVersion(env, appId, row.parent));
+  const recorded = ownWorkflowBindings(
+    defined,
+    parentDefinition?.definition ?? null
+  );
+  // What it binds unlike the version current now, as its seal took them
+  // (bound-workflows.ts, `sealedWorkflowPins`): bound, never kept over.
+  const currentDefinition =
+    previous === null
+      ? null
+      : await readStored(await findVersion(env, appId, previous));
+  const chosen = ownWorkflowBindings(
+    defined,
+    currentDefinition?.definition ?? null
+  );
+  const bindingsOf = async () =>
+    await versionBindingChanges(
+      env,
+      by,
+      appId,
+      { author: row.authorId, recorded, chosen },
+      release
+    );
+  // Refused here before the store changes; checked again once it has
+  // (below), as roles may have changed while its schema applied.
+  await bindingsOf();
   // Last before the batch, after every gate above, so no refused gate
   // leaves the store changed: the version's schema applied to its store,
   // its migrations with it, all or nothing (app-schema.ts). The store and
@@ -1696,6 +1771,15 @@ export const makeCurrent = async (
   // that doesn't make it current puts the current version's schema back,
   // or, where it can't, says so (`unfinishedPublish`).
   const applied = await applyVersionSchema(env, by, release, previous);
+  let rebinding: Awaited<ReturnType<typeof bindingsOf>>;
+  try {
+    rebinding = await bindingsOf();
+  } catch (error) {
+    if (applied !== null) {
+      await unfinishedPublish(env, by, appId, number, applied.appliedAt);
+    }
+    throw error;
+  }
   const event = createAuditEvent(
     changeEntry(by, "app.version.current", appId, {
       version: number,
@@ -1741,11 +1825,22 @@ export const makeCurrent = async (
                 runnableReleaseSql(appId, number),
                 publishedSql(appId, number),
                 // A workflow granted a function since it was checked.
-                boundFunctionsServedSql(appId, served)
+                boundFunctionsServedSql(appId, served),
+                // A workflow it binds deleted, or an alias rebound, since
+                // it was checked.
+                bindableSql(appId, rebinding)
               )
             )
             .returning(),
           outboxedEventWhere(db, event, sql`changes() > 0`),
+          // Its workflows bound with it, or not at all.
+          ...bindingChangeStatements(
+            env,
+            by,
+            { app: appId, appVersion: number, switchId: event.id },
+            rebinding.changes,
+            storedEvent(event.id)
+          ),
           ...madeCurrent(env, by, {
             app: appId,
             version: number,
@@ -1788,6 +1883,9 @@ export const makeCurrent = async (
       .get();
     if (ours !== undefined) {
       // The try whose answer was lost may have told no page either.
+      if (rebinding.changes.length > 0) {
+        waitUntil(tellBindingChanged(env, appId));
+      }
       waitUntil(versionMadeCurrent(env, appId));
       return await editableApp(env, by, appId);
     }
@@ -1803,8 +1901,13 @@ export const makeCurrent = async (
     }
     // A workflow bound since to a function it doesn't serve: named.
     await requireBoundFunctionsServed(env, appId, previous, release);
+    // A workflow it binds deleted, or no longer the person's to bind.
+    await bindingsOf();
     // What is left is a conflict: the base moved.
     throw appErrors.create("app.conflict");
+  }
+  if (rebinding.changes.length > 0) {
+    waitUntil(tellBindingChanged(env, appId));
   }
   // The pages open on the App hear of it (spec 11.5): their pages show
   // a new version ready, and switch to it (pages-rpc.ts, `watchVersion`).

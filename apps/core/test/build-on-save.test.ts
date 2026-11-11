@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { publishVersion } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
 import { versionFiles } from "../src/apps.ts";
+import { versionPageCodes } from "../src/page-references.ts";
 import { buildPages, versionPages } from "../src/pages.ts";
 import { buildOnSave, draftLintBuild } from "../src/save-builds.ts";
 import { commitApp, withFiles } from "./app-definitions.ts";
@@ -83,6 +84,37 @@ describe("building on save", { timeout: 60_000 }, () => {
         ok: true,
       }
     );
+  });
+
+  it("builds a saved version's pages that call its functions, so it opens without building them", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder);
+    // Files no other test builds, so nothing is in the cache before.
+    const unique = crypto.randomUUID();
+    const notesPage = notesFiles.files["src/routes/index.tsx"] ?? "";
+    const { version, builds } = await commitApp(
+      builder.api.apps.files,
+      app,
+      withFiles(notesFiles, {
+        "src/routes/index.tsx": `${notesPage}\n// ${unique}\n`,
+      }),
+      "Notes"
+    );
+    const appId = appIdSchema.parse(app);
+    const files = await versionFiles(env, appId, version);
+    const unbuilt = { ...env, LOADER: noBuilds };
+
+    expect({
+      pages: builds.pages,
+      references: notesPage.includes("@server/_generated/api"),
+    }).toStrictEqual({
+      pages: { status: "ok", diagnostics: [] },
+      references: true,
+    });
+    // Opening it loads what the save built.
+    await expect(
+      versionPageCodes(unbuilt, appId, version, files, { unsealed: "build" })
+    ).resolves.toHaveProperty("artifact");
   });
 
   it("builds a page with an unused import: an unused name is the lint's, never the build's", async () => {

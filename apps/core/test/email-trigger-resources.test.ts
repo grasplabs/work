@@ -215,20 +215,19 @@ const connection = async (account: string): Promise<string> => {
 };
 
 /**
- * The stamp run `run` (an independent workflow's, or an App's) puts on its
+ * The stamp run `run` puts on its
  * mail from `mailbox`, through `connectionId`, to `to`, as its step's call
  * records it (mail-stamps.ts).
  */
 const stampOf = async (
   run: string,
-  kind: "app" | "resource",
   connectionId: string,
   mailbox: string,
   to: string
 ): Promise<string> => {
   const { stamp } = await stampedMail(
     env,
-    { run, stepKey: `step-${unique()}`, kind },
+    { run, stepKey: `step-${unique()}` },
     {
       connectionId,
       action: "mail.send",
@@ -531,13 +530,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
         }
         mailed = runs.length;
         // oxlint-disable-next-line no-await-in-loop -- one hop after another
-        const stamp = await stampOf(
-          last.id,
-          "resource",
-          shared,
-          mailbox,
-          address
-        );
+        const stamp = await stampOf(last.id, shared, mailbox, address);
         // oxlint-disable-next-line no-await-in-loop -- one hop after another
         await post(
           address,
@@ -577,13 +570,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     const shared = await connection(mailbox);
     await post(address, invoiceMail({ to: address }));
     const [first] = await runsOf(trigger.id);
-    const stamp = await stampOf(
-      first?.id ?? "",
-      "resource",
-      shared,
-      mailbox,
-      address
-    );
+    const stamp = await stampOf(first?.id ?? "", shared, mailbox, address);
     const stamped = (to: string) =>
       invoiceMail({
         to,
@@ -605,45 +592,6 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
       depths: runs.map(({ depth }) => depth),
       others: others.map(({ depth }) => depth),
     }).toStrictEqual({ depths: [0, 0], others: [0] });
-  });
-
-  it("refuse an App run's own mail, audited, rather than start it as a new root", async () => {
-    const { builder, trigger, address } = await emailTrigger();
-    const mailbox = `ops-${unique()}@acme.test`;
-    const shared = await connection(mailbox);
-    const app = `app-${unique()}`;
-    const appRun = crypto.randomUUID();
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Echo', '', ?, ?)"
-      ).bind(app, builder.userId, Date.now()),
-      env.DB.prepare(
-        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'echo', 1, NULL, 'running', ?, NULL)"
-      ).bind(appRun, app, Date.now()),
-    ]);
-    const stamp = await stampOf(appRun, "app", shared, mailbox, address);
-
-    const response = await post(
-      address,
-      invoiceMail({
-        to: address,
-        from: mailbox,
-        headers: [`X-Grasp-Stamp: ${stamp}`],
-      }),
-      { envelopeFrom: mailbox }
-    );
-
-    const refused = await auditedOf(trigger.id, "workflow.email.refused");
-
-    expect({
-      status: response.status,
-      runs: await runCount(trigger.id),
-      refused: refused.map(({ code, emittingRun }) => ({ code, emittingRun })),
-    }).toStrictEqual({
-      status: 202,
-      runs: 0,
-      refused: [{ code: "lineage.unjoinable", emittingRun: appRun }],
-    });
   });
 
   it("hold mail past the trigger's hourly limit, refusals and loop drops included, and drop it after a day, audited once", async () => {
@@ -697,13 +645,7 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     const shared = await connection(mailbox);
     await post(address, invoiceMail({ to: address }));
     const [first] = await runsOf(trigger.id);
-    const stamp = await stampOf(
-      first?.id ?? "",
-      "resource",
-      shared,
-      mailbox,
-      address
-    );
+    const stamp = await stampOf(first?.id ?? "", shared, mailbox, address);
 
     for (let copy = 0; copy < 6; copy += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one copy after another

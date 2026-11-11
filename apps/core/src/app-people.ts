@@ -29,7 +29,7 @@ import { inList } from "./db/d1.ts";
 
 // Who calls an App, and the organization's people (GRA-1474): what App
 // code reads as `ctx.auth.getUser()` and `ctx.people`, and a page as
-// `useUser()` and `usePeople()` (the SDK's people.ts). Core answers both
+// `useUser()` and `usePeople()` (runtime/src/people.ts). Core answers both
 // itself. Threat model, and how each is closed:
 //
 // - A page or App code makes up who calls: the user is read here from

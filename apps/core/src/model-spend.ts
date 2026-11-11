@@ -12,6 +12,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  or,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -22,7 +23,6 @@ import {
   modelUsage,
   workflowResourceRuns,
   workflowResources,
-  workflowRuns,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
@@ -41,8 +41,8 @@ import { inList } from "./db/d1.ts";
 export interface SpendInput {
   trigger: AuditActor;
   /**
-   * For an independent workflow's run, whose trigger names no App's run:
-   * its lineage's root, and its workflow (models.ts, `lineage`).
+   * For a workflow's run: its lineage's root, and its workflow (models.ts,
+   * `lineage`).
    */
   lineage?: { rootRunId: string; workflowId: string };
   work?:
@@ -113,35 +113,17 @@ export interface SpendKeys {
 
 /**
  * What a call's usage counts by, from its trigger, work and lineage, which
- * core's host sets, never App code: an App run's workflow and lineage by
- * its trigger (its account's run where it has one, workflows/quotas.ts
- * `accountClaimed`); an independent workflow's run by its `lineage`.
+ * core's host sets, never App code: a workflow's run by its `lineage`.
  */
 export const spendKeysOf = (input: SpendInput): SpendKeys => {
   const { trigger, lineage, binding } = input;
-  let workflow: Pick<SpendKeys, "workflowAppId" | "workflowId" | "runId"> = {
-    workflowAppId: null,
-    workflowId: null,
-    runId: null,
-  };
-  if (trigger.type === "workflow") {
-    workflow = {
-      workflowAppId: trigger.appId,
-      workflowId: trigger.workflowId,
-      runId: trigger.accountRunId ?? trigger.rootRunId ?? trigger.runId,
-    };
-  } else if (lineage !== undefined) {
-    workflow = {
-      workflowAppId: null,
-      workflowId: lineage.workflowId,
-      runId: lineage.rootRunId,
-    };
-  }
   return {
     personId: spendPersonOf(input) ?? null,
     triggerType: trigger.type,
     agentId: trigger.type === "agent" ? trigger.agentId : null,
-    ...workflow,
+    workflowAppId: null,
+    workflowId: lineage?.workflowId ?? null,
+    runId: lineage?.rootRunId ?? null,
     bindingAppId: binding?.app ?? null,
     bindingAlias: binding?.alias ?? null,
   };
@@ -150,9 +132,18 @@ export const spendKeysOf = (input: SpendInput): SpendKeys => {
 /** Micros in a US dollar: what the platform's spend is reported in. */
 const microsPerDollar = 1_000_000;
 
-/** The organization's own spend: never Grasp's features on Grasp's key. */
+/**
+ * The organization's own spend: its calls on its own key, and on Grasp's
+ * AI, which it pays Grasp for. Never Grasp's features on Grasp's key.
+ */
 const organizationIn = (month: string) =>
-  and(eq(modelUsage.period, month), eq(modelUsage.credential, "organization"));
+  and(
+    eq(modelUsage.period, month),
+    or(
+      eq(modelUsage.credential, "organization"),
+      eq(modelUsage.feature, "organization")
+    )
+  );
 
 /** A workflow whose spend is counted: an App's, in its App; or an independent one (`appId` null). */
 interface SpendWorkflow {
@@ -242,7 +233,7 @@ const monthBounds = (month: string): { from: Date; until: Date } => {
 
 /**
  * The runs of `workflows` started in `month`, of any version, by each
- * one's key: an App's workflow's runs, and an independent workflow's.
+ * one's key.
  */
 const monthRunsOf = async (
   db: DrizzleD1Database,
@@ -250,28 +241,11 @@ const monthRunsOf = async (
   month: string
 ): Promise<Map<string, number>> => {
   const { from, until } = monthBounds(month);
-  const { appIds, workflowIds } = idsOf(workflows);
-  const [appRuns, independentRuns] = await Promise.all([
-    appIds.length === 0
-      ? []
-      : db
-          .select({
-            appId: workflowRuns.appId,
-            workflowId: workflowRuns.workflowId,
-            runs: count(),
-          })
-          .from(workflowRuns)
-          .where(
-            and(
-              inArray(workflowRuns.appId, appIds),
-              gte(workflowRuns.createdAt, from),
-              lt(workflowRuns.createdAt, until)
-            )
-          )
-          .groupBy(workflowRuns.appId, workflowRuns.workflowId),
+  const { workflowIds } = idsOf(workflows);
+  const independentRuns =
     workflowIds.length === 0
       ? []
-      : db
+      : await db
           .select({
             workflowId: workflowResourceRuns.workflowResourceId,
             runs: count(),
@@ -284,17 +258,13 @@ const monthRunsOf = async (
               lt(workflowResourceRuns.createdAt, until)
             )
           )
-          .groupBy(workflowResourceRuns.workflowResourceId),
-  ]);
-  return new Map([
-    ...appRuns.map(
-      ({ runs, ...workflow }) => [workflowKey(workflow), runs] as const
-    ),
-    ...independentRuns.map(
+          .groupBy(workflowResourceRuns.workflowResourceId);
+  return new Map(
+    independentRuns.map(
       ({ runs, workflowId }) =>
         [workflowKey({ appId: null, workflowId }), runs] as const
-    ),
-  ]);
+    )
+  );
 };
 
 /**

@@ -59,10 +59,13 @@ const files = ({
   operations = '["upload", "read", "delete"]',
   doc = "v.file()",
   workflows = [],
+  bound,
 }: {
   operations?: string;
   doc?: string;
   workflows?: readonly string[];
+  /** The workflow version it records binding as `review` (`bindWorkflow`). */
+  bound?: { readonly workflowId: string; readonly version: number };
 } = {}): TestApp =>
   testApp(
     {
@@ -78,6 +81,14 @@ const files = ({
         `permission.workflow("review", { args: v.object({ doc: ${doc} }), returns: v.object({ status: v.string() }) })`,
         ...workflows,
       ],
+      ...(bound === undefined
+        ? {}
+        : {
+            contracts: {
+              review: { events: {}, listens: {}, decisions: {} },
+            },
+            bound: { review: bound },
+          }),
     },
     {
       "server/review.ts": `import { v } from "@grasp-os/sdk";
@@ -887,6 +898,52 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
     expect(review.handsFilesToWorkflows).toBeTruthy();
   });
 
+  it("tells the reviewer it may hand files when the version binds, once current, a workflow version taking a file that the App doesn't bind yet", async () => {
+    const fixture = await reviewsApp();
+    // `review` bound directly to a workflow taking no file instead.
+    const plain = await createWorkflowResource(
+      env,
+      fixture.builder.acting,
+      `plain-${unique()}`
+    );
+    await publishWorkflowVersion(env, fixture.builder.acting, plain.id, {
+      definition: JSON.stringify({
+        ...JSON.parse(definition),
+        args: {
+          kind: "object",
+          fields: {
+            doc: {
+              kind: "object",
+              fields: { id: { kind: "string" } },
+            },
+          },
+        },
+      }),
+      basedOn: null,
+    });
+    await fixture.builder.api.workflowResources.bindToApp(plain.id, {
+      app: fixture.app,
+      alias: "review",
+      version: 1,
+    });
+    // A version recording the workflow taking a file again.
+    const { version } = await commitApp(
+      fixture.builder.api.apps.files,
+      fixture.app,
+      files({
+        doc: "v.object({ id: v.string() })",
+        bound: { workflowId: fixture.workflow, version: 1 },
+      }),
+      "Bind the file-taking workflow again"
+    );
+    const review = await fixture.builder.api.apps.versions.review(
+      fixture.app,
+      version
+    );
+
+    expect(review.handsFilesToWorkflows).toBeTruthy();
+  });
+
   it("tells the reviewer so for an App that names more workflows than one query takes parameters", async () => {
     const fixture = await reviewsApp();
     // 120 more workflows, none of them taking a file, beside `review`,
@@ -909,8 +966,15 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       fixture.app,
       version
     );
+    // Made current, each alias it declares held to what it binds.
+    const current = await outcome(
+      fixture.builder.api.apps.versions.setCurrent(fixture.app, version)
+    );
 
-    expect(review.handsFilesToWorkflows).toBeTruthy();
+    expect({
+      handsFiles: review.handsFilesToWorkflows,
+      current,
+    }).toStrictEqual({ handsFiles: true, current: "ok" });
   });
 
   it("refuses a commit's start once the person it acts for left the App before its dispatch, their file read as missing, never as the App", async () => {

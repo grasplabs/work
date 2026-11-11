@@ -1,6 +1,7 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { OnboardingView, Roster } from "@grasp-os/shared/onboarding";
 import { noContext } from "@grasp-os/shared/onboarding-context";
+import { defaultFlow } from "@grasp-os/shared/onboarding-flow";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -222,6 +223,65 @@ describe("Grasp's go", () => {
       ],
       lastDay: [false, false],
       over: [true, true],
+    });
+  });
+
+  it("counts what Grasp knows against what the company's flow asks it for, so a step that is off can't hold it down", async () => {
+    const now = new Date().toISOString();
+    const roster: Roster = {
+      teams: [{ id: "ops", name: "Ops", lead: "oli", does: "", off: false }],
+      people: [],
+    };
+    const view: OnboardingView = {
+      roster,
+      plan: { start: day(-3), days: 14 },
+      agreed: true,
+      paused: false,
+      sponsor: null,
+      context: noContext,
+      waiting: 0,
+      mailSends: true,
+      mailDomain: null,
+      progress: {
+        teams: [],
+        leadsTalked: 1,
+        leads: 1,
+        talked: 5,
+        asked: 10,
+        asOf: day(0),
+      },
+    };
+    const whole = await gateView(env, view, now);
+    // No kickoff, no documents and no tools asked of this company.
+    await adminCommands().setFlow({
+      ...defaultFlow,
+      steps: defaultFlow.steps.map((step) =>
+        step.id === "documents" || step.id === "pulse"
+          ? { ...step, on: false }
+          : step
+      ),
+      grasp: { ...defaultFlow.grasp, kickoff: false },
+    });
+    const asked = await gateView(env, view, now);
+    // Nothing asked at all: nothing is left to know.
+    await adminCommands().setFlow({ ...defaultFlow, on: false });
+    const none = await gateView(env, view, now);
+    await adminCommands().setFlow(null);
+    const back = await gateView(env, view, now);
+    expect({
+      // The people (15), every team led (10) and three quarters of the conversations (22.5), of 100.
+      whole: whole.known,
+      // The same 47.5, of the 70 its flow asks for.
+      asked: asked.known,
+      sources: asked.parts.map(({ source }) => source),
+      none: [none.known, none.parts],
+      back: back.known,
+    }).toStrictEqual({
+      whole: 48,
+      asked: 68,
+      sources: ["people", "sources", "leads", "conversations", "review"],
+      none: [100, []],
+      back: 48,
     });
   });
 

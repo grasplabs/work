@@ -416,7 +416,7 @@ const kitModulesFor = (
   preview
     ? closureOf(
         // The preview runtime loads the page runtime by name, once
-        // React Fast Refresh is in (sdk/src/preview-runtime.ts).
+        // React Fast Refresh is in (runtime/src/preview-runtime.ts).
         [
           ...imported,
           kitModuleName(previewRuntime),

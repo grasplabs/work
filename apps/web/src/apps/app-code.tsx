@@ -1,3 +1,4 @@
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import type { AppFiles, FileDiff, ViewedApp } from "@grasp-os/shared/apps";
 import type { ChatDraft } from "@grasp-os/shared/chat";
 import {
@@ -49,10 +50,9 @@ import { useCoreRead } from "./use-core-read.ts";
 // builders (`chats.draftFiles`, `apps.files.read`, `apps.versions.diff`),
 // which refuse anyone else.
 //
-// What the host generates for an App (`server/_generated/`, `.grasp/`) is
-// never one of its files: core refuses those paths in an App's files and
-// generates them afresh for each build, so they aren't here to show, as
-// Convex's dashboard leaves out `convex/_generated/`.
+// What Grasp generates among an App's files (`server/_generated/`), which
+// no one edits and every save writes again, isn't shown, as Convex's
+// dashboard leaves out `convex/_generated/`: the builder's editor reads it.
 
 /** Which version's files are shown. */
 type Source = "current" | "draft";
@@ -208,7 +208,9 @@ interface OpenFile {
 /** The files of one version: their tree, and the open one's text. */
 const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
   const { t } = useLingui();
-  const paths = Object.keys(files);
+  const paths = Object.keys(files).filter(
+    (path) => !isGeneratedServerFile(path)
+  );
   const tree = treeOf(paths);
   // The one asked for while this version has it, else its config, else
   // the tree's first.
@@ -440,7 +442,11 @@ const DraftChanges = ({
         : await session.apps.versions.diff(app, current, draft)
   );
   return changes?.state === "ready" ? (
-    <ChangesView diffs={changes.data} layout={layout} onOpen={onOpen} />
+    <ChangesView
+      diffs={changes.data.filter(({ path }) => !isGeneratedServerFile(path))}
+      layout={layout}
+      onOpen={onOpen}
+    />
   ) : (
     <ReadState loaded={changes} />
   );

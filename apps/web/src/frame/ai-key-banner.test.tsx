@@ -30,6 +30,12 @@ const listingWith = (
   openai: NonNullable<AiProvidersListing["providers"][number]["status"]>,
   provider: "openai" | "openai-compatible" = "openai"
 ): AiProvidersListing => ({
+  source: "own",
+  grasp: {
+    available: false,
+    model: { model: "anthropic/claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+    whereItRuns: "Anthropic, United States",
+  },
   providers: [
     {
       provider,

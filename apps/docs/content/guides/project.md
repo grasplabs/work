@@ -98,7 +98,7 @@ export const complete = mutation({
 });
 ```
 
-A function's name is its module and export: these are `tasks.list`, `tasks.add` and `tasks.complete`. `@server/_generated/server` gives you the constructors, typed by your schema.
+A function's name is its module and export: these are `tasks.list`, `tasks.add` and `tasks.complete`. Declare each as `export const name = query({ … })`, the constructor called by name: that's how Grasp finds it. `@server/_generated/server` gives you the constructors, typed by your schema.
 
 ## A Page
 
@@ -152,7 +152,7 @@ The App's Pages aren't listed anywhere: the files in `src/routes/` are its route
 
 ## What Grasp generates
 
-`server/_generated/` holds what Grasp generates from your App each time it builds it:
+`server/_generated/` is part of your App's files, as `convex/_generated/` is in Convex. Grasp generates it again from your code and definition on every save:
 
 - `server`: the constructors (`query`, `mutation`, `action`, `doc`) and the types of `ctx`.
 - `api`: a reference to each public function, for Pages and tests.
@@ -161,4 +161,4 @@ The App's Pages aren't listed anywhere: the files in `src/routes/` are its route
 
 A reference holds only the function's name (`{ name: "tasks.list" }`). Its types come from the function's own code, as in Convex, so renaming an argument shows up in every Page that passes it.
 
-Never edit them: Grasp writes them again on every build.
+Never edit them: Grasp refuses changes to `server/_generated/` and writes it again on every save. Publishing generates it again from the version's code and definition, so a release always holds what Grasp generates.

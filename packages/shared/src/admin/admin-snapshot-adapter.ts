@@ -3,6 +3,7 @@ import type {
   AdminLink,
   AdminSnapshot,
 } from "../admin-snapshot.ts";
+import { setupSteps } from "../onboarding-flow.ts";
 import type { Role } from "../roles.ts";
 import { stateWith } from "./admin-state.ts";
 import type { Agreed, Member, Org, OrgState } from "./onboarding-admin.ts";
@@ -17,6 +18,24 @@ import type {
   StaffSnapshot,
 } from "./org-record.ts";
 import { present } from "./present.ts";
+
+/**
+ * Where the company's own admin is in their onboarding, from the screens
+ * core says they finished: the first one they haven't, and that they
+ * started. As new where core keeps no place yet, or they finished none.
+ */
+const clientOf = (snapshot: AdminSnapshot): typeof NEW_CLIENT => {
+  const done = snapshot.place?.done ?? [];
+  if (done.length === 0) {
+    return NEW_CLIENT;
+  }
+  const next = setupSteps.find((step) => !done.includes(step));
+  return {
+    ...NEW_CLIENT,
+    status: next === undefined ? "done" : "active",
+    step: next ?? "open",
+  };
+};
 
 /**
  * What Grasp OS's core answers for Grasp's admin (`AdminSnapshot`, ../admin-snapshot.ts), as the
@@ -255,7 +274,7 @@ export const staffSnapshotOf = (
       test: false,
     },
     clientCode: "",
-    client: NEW_CLIENT,
+    client: clientOf(snapshot),
     roster:
       snapshot.roster === null
         ? null

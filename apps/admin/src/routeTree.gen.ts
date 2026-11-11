@@ -23,6 +23,7 @@ import { Route as OrganizationsClientIdBrainRouteImport } from './routes/organiz
 import { Route as OrganizationsClientIdContractRouteImport } from './routes/organizations/$clientId/contract'
 import { Route as OrganizationsClientIdDataRouteImport } from './routes/organizations/$clientId/data'
 import { Route as OrganizationsClientIdDetailsRouteImport } from './routes/organizations/$clientId/details'
+import { Route as OrganizationsClientIdFlowRouteImport } from './routes/organizations/$clientId/flow'
 import { Route as OrganizationsClientIdHoursRouteImport } from './routes/organizations/$clientId/hours'
 import { Route as OrganizationsClientIdIntegrationsRouteImport } from './routes/organizations/$clientId/integrations'
 import { Route as OrganizationsClientIdInterviewsRouteImport } from './routes/organizations/$clientId/interviews'
@@ -111,6 +112,12 @@ const OrganizationsClientIdDetailsRoute =
     path: '/details',
     getParentRoute: () => OrganizationsClientIdRoute,
   } as any)
+const OrganizationsClientIdFlowRoute =
+  OrganizationsClientIdFlowRouteImport.update({
+    id: '/flow',
+    path: '/flow',
+    getParentRoute: () => OrganizationsClientIdRoute,
+  } as any)
 const OrganizationsClientIdHoursRoute =
   OrganizationsClientIdHoursRouteImport.update({
     id: '/hours',
@@ -191,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/organizations/$clientId/contract': typeof OrganizationsClientIdContractRoute
   '/organizations/$clientId/data': typeof OrganizationsClientIdDataRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
+  '/organizations/$clientId/flow': typeof OrganizationsClientIdFlowRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
   '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
@@ -217,6 +225,7 @@ export interface FileRoutesByTo {
   '/organizations/$clientId/contract': typeof OrganizationsClientIdContractRoute
   '/organizations/$clientId/data': typeof OrganizationsClientIdDataRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
+  '/organizations/$clientId/flow': typeof OrganizationsClientIdFlowRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
   '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
@@ -245,6 +254,7 @@ export interface FileRoutesById {
   '/organizations/$clientId/contract': typeof OrganizationsClientIdContractRoute
   '/organizations/$clientId/data': typeof OrganizationsClientIdDataRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
+  '/organizations/$clientId/flow': typeof OrganizationsClientIdFlowRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
   '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
@@ -274,6 +284,7 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/contract'
     | '/organizations/$clientId/data'
     | '/organizations/$clientId/details'
+    | '/organizations/$clientId/flow'
     | '/organizations/$clientId/hours'
     | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
@@ -300,6 +311,7 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/contract'
     | '/organizations/$clientId/data'
     | '/organizations/$clientId/details'
+    | '/organizations/$clientId/flow'
     | '/organizations/$clientId/hours'
     | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
@@ -327,6 +339,7 @@ export interface FileRouteTypes {
     | '/organizations/$clientId/contract'
     | '/organizations/$clientId/data'
     | '/organizations/$clientId/details'
+    | '/organizations/$clientId/flow'
     | '/organizations/$clientId/hours'
     | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
@@ -454,6 +467,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationsClientIdDetailsRouteImport
       parentRoute: typeof OrganizationsClientIdRoute
     }
+    '/organizations/$clientId/flow': {
+      id: '/organizations/$clientId/flow'
+      path: '/flow'
+      fullPath: '/organizations/$clientId/flow'
+      preLoaderRoute: typeof OrganizationsClientIdFlowRouteImport
+      parentRoute: typeof OrganizationsClientIdRoute
+    }
     '/organizations/$clientId/hours': {
       id: '/organizations/$clientId/hours'
       path: '/hours'
@@ -540,6 +560,7 @@ interface OrganizationsClientIdRouteChildren {
   OrganizationsClientIdContractRoute: typeof OrganizationsClientIdContractRoute
   OrganizationsClientIdDataRoute: typeof OrganizationsClientIdDataRoute
   OrganizationsClientIdDetailsRoute: typeof OrganizationsClientIdDetailsRoute
+  OrganizationsClientIdFlowRoute: typeof OrganizationsClientIdFlowRoute
   OrganizationsClientIdHoursRoute: typeof OrganizationsClientIdHoursRoute
   OrganizationsClientIdIntegrationsRoute: typeof OrganizationsClientIdIntegrationsRoute
   OrganizationsClientIdInterviewsRoute: typeof OrganizationsClientIdInterviewsRoute
@@ -558,6 +579,7 @@ const OrganizationsClientIdRouteChildren: OrganizationsClientIdRouteChildren = {
   OrganizationsClientIdContractRoute: OrganizationsClientIdContractRoute,
   OrganizationsClientIdDataRoute: OrganizationsClientIdDataRoute,
   OrganizationsClientIdDetailsRoute: OrganizationsClientIdDetailsRoute,
+  OrganizationsClientIdFlowRoute: OrganizationsClientIdFlowRoute,
   OrganizationsClientIdHoursRoute: OrganizationsClientIdHoursRoute,
   OrganizationsClientIdIntegrationsRoute:
     OrganizationsClientIdIntegrationsRoute,

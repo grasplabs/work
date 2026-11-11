@@ -196,11 +196,7 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                   <dt className="text-muted-foreground">
                     <Trans context="where a decision comes from">From</Trans>
                   </dt>
-                  <dd className="truncate">
-                    {current.app === undefined
-                      ? current.workflow
-                      : `${current.app.name} · ${current.workflow}`}
-                  </dd>
+                  <dd className="truncate">{current.workflow}</dd>
                   <dt className="text-muted-foreground">
                     <Trans context="the run of a workflow a decision is for">
                       Run

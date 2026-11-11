@@ -324,7 +324,7 @@ export const resetAppStore = async (
   env: Env,
   by: Acting,
   app: AppId,
-  reset: Pick<StoreReset, "everything" | "apply">
+  reset: Pick<StoreReset, "apply">
 ): Promise<StoreId | null> => {
   const store = await liveStoreOf(env, app);
   if (store === null) {

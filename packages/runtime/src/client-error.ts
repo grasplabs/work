@@ -1,3 +1,4 @@
+import type { ErrorCategory } from "@grasp-os/shared/error-categories";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
@@ -8,15 +9,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 // the session client refused or stopped before it had an answer. Never a
 // transport envelope, a cause or a stack.
 
-/** A failure's category, as the host classifies it. */
-export type ErrorCategory =
-  | "source"
-  | "contract"
-  | "domain"
-  | "authorization"
-  | "operational"
-  | "uncertain"
-  | "safety";
+export type { ErrorCategory } from "@grasp-os/shared/error-categories";
 
 /** What a structured SDK error carries. */
 interface ErrorFields {

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 import { identifierMaxLength } from "./identifier.ts";
+import { onboardingFlowSchema } from "./onboarding-flow.ts";
 import { gateThresholds } from "./onboarding-gate.ts";
 import { orgRulesSchema, stephenSetupSchema } from "./onboarding-staff.ts";
 import {
@@ -105,6 +106,10 @@ const commandPayloads = {
   "onboarding.stephen": z.strictObject({
     setup: stephenSetupSchema.nullable(),
   }),
+  /** How much onboarding the company goes through; null takes all of it back. */
+  "onboarding.flow": z.strictObject({
+    flow: onboardingFlowSchema.nullable(),
+  }),
 } as const;
 
 type CommandPayloads = typeof commandPayloads;
@@ -132,6 +137,7 @@ export const adminCommandSchema = z.discriminatedUnion("type", [
   commandOf("onboarding.count_as_known"),
   commandOf("onboarding.draw_again"),
   commandOf("onboarding.stephen"),
+  commandOf("onboarding.flow"),
 ]);
 /** What the admin asks: a type and what it carries. */
 export type AdminCommand = z.input<typeof adminCommandSchema>;
@@ -169,6 +175,7 @@ export const adminCommandEnvelopeSchema = z.discriminatedUnion("type", [
   envelopeOf("onboarding.count_as_known"),
   envelopeOf("onboarding.draw_again"),
   envelopeOf("onboarding.stephen"),
+  envelopeOf("onboarding.flow"),
 ]);
 export type AdminCommandEnvelope = z.output<typeof adminCommandEnvelopeSchema>;
 export type AdminCommandEnvelopeInput = z.input<
